@@ -1,0 +1,245 @@
+# DhanRadar — Docker Compose stack
+# NO host port bindings on any service. cloudflared reaches web/api over the docker network.
+# All services read secrets from the single .env file at project root.
+
+networks:
+  dhanradar:
+    driver: bridge
+
+volumes:
+  dhanradar_pgdata:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres (TimescaleDB HA pg16)
+  # NOTE: timescaledb-ha already preloads timescaledb, but pg_cron must be added
+  # explicitly via shared_preload_libraries. Verify extension availability on KVM4
+  # before first deploy (run: SELECT * FROM pg_available_extensions WHERE name IN
+  # ('pg_cron','pg_partman');).
+  # ---------------------------------------------------------------------------
+  dhanradar-postgres:
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: dhanradar
+      POSTGRES_DB: dhanradar
+      # POSTGRES_PASSWORD comes from .env
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=timescaledb,pg_cron"
+      - "-c"
+      - "cron.database_name=dhanradar"
+    volumes:
+      - dhanradar_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - dhanradar
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dhanradar -d dhanradar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — noeviction + AOF persistence
+  # ---------------------------------------------------------------------------
+  dhanradar-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      redis-server
+      --maxmemory-policy noeviction
+      --appendonly yes
+    networks:
+      - dhanradar
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # FastAPI backend
+  # ---------------------------------------------------------------------------
+  dhanradar-fastapi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-postgres:
+        condition: service_healthy
+      dhanradar-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+          cpus: "1.0"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health').status==200 else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Next.js frontend
+  # ---------------------------------------------------------------------------
+  dhanradar-nextjs:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - dhanradar
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          wget -qO- http://localhost:3000/ > /dev/null 2>&1 && echo ok || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Celery workers — all built from the same backend image
+  # ---------------------------------------------------------------------------
+  dhanradar-celery-batch:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "batch", "--loglevel=info"]
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-postgres:
+        condition: service_healthy
+      dhanradar-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+          cpus: "0.50"
+
+  dhanradar-celery-mood:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "mood", "--loglevel=info"]
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-postgres:
+        condition: service_healthy
+      dhanradar-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  dhanradar-celery-misc:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "misc", "--loglevel=info"]
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-postgres:
+        condition: service_healthy
+      dhanradar-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  dhanradar-celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    command: ["celery", "-A", "dhanradar.celery_app", "beat", "--loglevel=info"]
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-postgres:
+        condition: service_healthy
+      dhanradar-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.10"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflared tunnel
+  # Image pinned to 2026.5.0 — do NOT upgrade without checking KVM4 shared infra.
+  #
+  # Bind-mounts (read-only):
+  #   config.yml  : committed to repo at ./infra/cloudflared/config.yml
+  #   dhanradar.json : lives ONLY on KVM4 at /etc/cloudflared-dhanradar/dhanradar.json
+  #                    (credentials file is NEVER committed — see infra-notes.md)
+  # ---------------------------------------------------------------------------
+  dhanradar-cloudflared:
+    image: cloudflare/cloudflared:2026.5.0
+    restart: unless-stopped
+    env_file: .env
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "--no-autoupdate", "run"]
+    volumes:
+      - ./infra/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      # KVM4 host path — credentials file; never committed to repo
+      - /etc/cloudflared-dhanradar/dhanradar.json:/etc/cloudflared/dhanradar.json:ro
+    networks:
+      - dhanradar
+    depends_on:
+      dhanradar-fastapi:
+        condition: service_healthy
+      dhanradar-nextjs:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.10"

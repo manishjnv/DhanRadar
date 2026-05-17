@@ -1,0 +1,2 @@
+# Keeps frontend/public/ in the repo so the Dockerfile COPY of ./public is
+# always valid even before any static assets exist (Phase-1 skeleton).

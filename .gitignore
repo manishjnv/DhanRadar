@@ -1,0 +1,52 @@
+# ── Secrets / credentials — NEVER commit ──────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*.json
+dhanradar*.json
+secrets/
+*.secret
+
+# ── Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Node / Next.js ────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ── Docker / runtime ──────────────────────────────────────────────────
+*.log
+*.pid
+data/
+postgres-data/
+redis-data/
+
+# ── OS / editor ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

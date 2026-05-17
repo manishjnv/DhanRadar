@@ -1,0 +1,10 @@
+tunnel: df2c5ae4-4d21-4052-83d4-12cbabbcd551
+credentials-file: /etc/cloudflared/dhanradar.json
+no-autoupdate: true
+ingress:
+  - hostname: dhanradar.com
+    path: ^/api/.*
+    service: http://dhanradar-fastapi:8000
+  - hostname: dhanradar.com
+    service: http://dhanradar-nextjs:3000
+  - service: http_status:404
