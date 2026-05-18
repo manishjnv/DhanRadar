@@ -173,13 +173,13 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 
 ## PHASE 6 — Notification (Telegram) + Email substitution (architecture Global §5)
 
-**⛔ Pre-Phase-6 gate — do not start until both pass:** (a) the Resend dashboard shows domain `dhanradar.com` status = **Verified** (not Pending); (b) a real test send via `resend.Emails.send(...)` returns 200/202. The DNS (DKIM/SPF/MX/DMARC) was added DNS-only and verified resolving on 2026-05-18, but Resend's own domain status must read Verified before any email code is built — otherwise notification email fails silently at runtime. This is a user-checkable action; record the confirmation in `docs/infra-notes.md`.
+**✅ Pre-Phase-6 gate — CLEARED 2026-05-19:** (a) Resend dashboard shows `dhanradar.com` = **Verified**; (b) a live test send returned **HTTP 200** (Resend id `149a367b-d4a6-45d0-8327-032ac674be0f`, from `noreply@dhanradar.com` to the founder inbox). **Gotcha for the email module:** `api.resend.com` is behind Cloudflare and **rejects the default `Python-urllib` User-Agent with HTTP 403 / Cloudflare error 1010** — the email client must send a real `User-Agent` header, or use the official `resend` SDK (which sets one).
 
 **What to implement:**
 
 1. `notification_preferences`/`notification_log`; Redis `notifications:queue:{telegram,email}` lists; `celery-misc` BLPOP consumer with quiet-hours + per-channel rate caps.
 2. Telegram: `sendMessage`/`sendPhoto` (Phase 0 Telegram block); public-channel daily Mood card path (bot = channel admin).
-3. **Email = Resend** (`pip install resend`, Phase 0 §0.1#1) — NOT SendGrid; `resend.Emails.send({from,to,subject,html})`; cap 100/day.
+3. **Email = Resend** (`pip install resend`, Phase 0 §0.1#1) — NOT SendGrid; `resend.Emails.send({from,to,subject,html})`; cap 100/day. Use the `resend` SDK (or set a real `User-Agent`) — raw `urllib` calls to `api.resend.com` are Cloudflare-blocked (403 / error 1010). Verified-working sender domain: any `@dhanradar.com` (e.g. `noreply@dhanradar.com`).
 4. Pillow share-card service (1200×630 PNG → R2, signed URL for private/portfolio cards).
 
 **Doc refs:** architecture Global §5; Phase 0 Telegram/R2 blocks; §0.1#1 correction.

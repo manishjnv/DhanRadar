@@ -45,7 +45,8 @@ Last verified: **2026-05-18**. No secrets in this file (names/IDs/paths only).
 
 - `dhanradar.com` added in Resend (Tokyo / ap-northeast-1). DNS in CF as **DNS-only (never proxy MX/SPF/DKIM/DMARC)**, verified resolving. `RESEND_API_KEY` = an `re_…` *sending* key (Resend → API Keys), in GitHub prod env secrets.
 - **Domain status = Verified** in the Resend dashboard, confirmed **2026-05-19**.
-- **Phase-6 gate:** Verified half ✓ (2026-05-19); the **test-send** half is still pending before Phase 6 may start.
+- **Phase-6 gate: FULLY CLEARED 2026-05-19** — Verified ✓ and a live test send returned HTTP 200 (Resend id `149a367b-d4a6-45d0-8327-032ac674be0f`, from `noreply@dhanradar.com`).
+- **Gotcha for the Phase-6 email module:** `api.resend.com` is behind Cloudflare and rejects the default `Python-urllib` User-Agent with HTTP 403 / Cloudflare error 1010. The email client must send a real `User-Agent` header or use the official `resend` SDK (which sets one).
 
 ## GitHub
 
