@@ -12,9 +12,11 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from dhanradar.auth.router import router as auth_router
 from dhanradar.db import engine
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
+from dhanradar.subscriptions.router import router as subscriptions_router
 
 
 @asynccontextmanager
@@ -50,3 +52,5 @@ app = FastAPI(
 # Routers
 # ---------------------------------------------------------------------------
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(subscriptions_router, prefix="/api/v1")

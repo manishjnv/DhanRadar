@@ -51,6 +51,28 @@ class Settings(BaseSettings):
     SENTRY_DSN: Optional[str] = None
 
     # ------------------------------------------------------------------
+    # JWT (RS256 asymmetric)
+    # Generate dev keys with: python backend/scripts/gen_jwt_keys.py
+    # ------------------------------------------------------------------
+    JWT_PRIVATE_KEY: str = ""      # PEM-encoded RSA private key (from env)
+    JWT_PUBLIC_KEY: str = ""       # PEM-encoded RSA public key (from env)
+    JWT_ALGORITHM: str = "RS256"   # Hard-coded to RS256; env override is informational only
+    ACCESS_TTL_MIN: int = 15       # Access token TTL in minutes
+    REFRESH_TTL_DAYS: int = 7      # Refresh token TTL in days
+
+    # ------------------------------------------------------------------
+    # Cookie
+    # ------------------------------------------------------------------
+    COOKIE_SECURE: bool = True     # Set False only in dev without HTTPS
+
+    # ------------------------------------------------------------------
+    # Razorpay
+    # ------------------------------------------------------------------
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+
+    # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------
     ENV: str = "development"
