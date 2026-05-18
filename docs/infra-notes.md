@@ -2,6 +2,12 @@
 
 Last verified: **2026-05-18**. No secrets in this file (names/IDs/paths only).
 
+## 📋 Standing documentation rules (apply to EVERY phase and fix)
+- **RCA on every bug fix.** A fix is not done until an entry is appended to `docs/rca/README.md` (symptom, root cause, fix with file:line, prevention, date). Read the existing log before debugging — known traps are recorded there.
+- **Feature doc per module.** Every module has `docs/features/<module>.md`, created when the module is built and updated whenever it changes, following the template in `docs/features/README.md`. A phase is not complete until the affected module's feature doc reflects the as-built reality and its changelog is updated.
+- **UI follows the branding guide.** Any UI work must use the design tokens (`frontend/tailwind.config.js`, `frontend/app/tokens.css`, `frontend/styles/tokens.json`) and match the design system in `docs/brand/` (README + `docs/brand/mockups/`). No ad-hoc colours, spacing, typography, or off-system components.
+- Treat all three as part of "done" in every phase's verification, not optional.
+
 ## Deployment target — KVM4 (shared-infra reuse model)
 - **SSH:** alias `intelwatch` (Cloudflare-tunnel `ProxyCommand`; **no public :22**). Host `srv1536443`, user `root`. Ubuntu 24.04.4, 4 vCPU, 16 GB (~9.9 GB free), Docker 29.3.1, Python 3.12, Node 22. Shared box (~32 containers: `etip_*`/intelwatch, dev-tunnel, trendsmap, etc.).
 - **Model:** DhanRadar runs ~8 *own* containers (own TimescaleDB Postgres, own Redis `noeviction`, fastapi, nextjs, celery-batch/mood/misc, celery-beat) + **reuses** the box, the Cloudflare tunnel daemon, and `etip_prometheus`/`etip_grafana`. ~3 GB capped, ~6 GB headroom.
