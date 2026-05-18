@@ -15,9 +15,11 @@ Wealth, scanned. Spot better investments before the crowd.
 | `favicon.svg` | 32×32 mark. Smaller, simpler — drop into `<link rel="icon" type="image/svg+xml" href="favicon.svg">`. |
 
 ### Clear space
+
 Minimum clear space around the lockup = the height of the **D** glyph on all sides.
 
 ### Minimum size
+
 - Lockup: 80px wide on screen, 0.75" in print.
 - Icon-only: 16px on screen.
 
@@ -87,6 +89,7 @@ Minimum clear space around the lockup = the height of the **D** glyph on all sid
 | Respectful of beginners | Condescending |
 
 **Microcopy examples:**
+
 - ✅ "DhanRadar Score combines valuation, growth, quality, momentum and risk."
 - ❌ "🚀 Our AI-powered moonshot algorithm crushes the market 💯"
 - ✅ "Spot better investments before the crowd."

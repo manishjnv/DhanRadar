@@ -63,6 +63,7 @@ Consolidated from official-doc discovery (sources cited). **Do not call any API 
 ## PHASE 1 — Infra & Project Skeleton — SHARED-INFRA on KVM4 (architecture §A6, §B5, §B6, Global §6; Reality Layer §4.2)
 
 > **Deployment target decided: KVM4, shared-infra model.** Verified facts (read-only SSH inventory, 2026-05-17) driving this phase:
+>
 > - **Box = `intelwatch` SSH alias → `srv1536443`**, Ubuntu 24.04.4, 4 vCPU, **16 GB RAM, ~9.94 GB free**, 193 GB disk (57 GB free), Docker 29.3.1, ~32 containers (the `etip_`/intelwatch product).
 > - **No public :22/:80/:443.** Box is fully behind a **Cloudflare Tunnel (`cloudflared`)** — SSH itself is via `cloudflared access ssh` ProxyCommand. This is the exposure model: Cloudflare Tunnel ingress → internal container ports. **No origin IP is exposed; no host 80/443; no shared Caddy here** (KVM2's `ti-platform-caddy-1` is a *different box* and irrelevant now).
 > - Shared services present: `etip_prometheus` (Prometheus v2.53.0), `etip_grafana` (Grafana 11.1.0), `etip_postgres` (**plain `postgres:16-alpine` — NO TimescaleDB**), `etip_redis` (`redis:7-alpine`, NOAUTH-gated, another product's), `etip_nginx` (intelwatch's own, not the public edge).
@@ -110,6 +111,7 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 **Must precede any user-data or AI module** (DPDP is live; audit must exist before first AI output).
 
 **What to implement:**
+
 1. **Auth & Tiering** (Global §2): `users`/`subscriptions` tables (exact columns incl. `dpdp_consent_version`, `dpdp_consents JSONB`, `deletion_requested_at`), RS256 JWT in `__Host-` HttpOnly cookies, `RequireTier` **class** (`__init__`/`__call__`) + `current_user_or_anonymous`, Nginx `anon:10m rate=30r/m` zone, Razorpay webhook (`verify_webhook_signature` on raw body — Phase 0 Razorpay block), TOTP via `pyotp`.
 2. **Consent/DPDP** (Global §3): `consent_audit_log` (append-only), `data_principal_requests`, `RequireConsent` class dependency, `/api/v1/consent/*` + `/data-rights/*`, `process_erasure` Celery task (30-day SLA monitor), 72 h breach task, NIC NTP (`time.nplindia.org`) on host.
 3. **Compliance Audit** (Global §4): `disclaimers` (versioned), `ai_recommendation_audit` (**`pg_partman` monthly** — Phase 0 block), `rating_engine_changelog`, `get_active_disclaimer()`, `log_ai_recommendation()` fire-and-forget, `check_label_churn_gate()` (>5% → `pending_publish`, fail-closed), nightly R2 archival (boto3 `region_name="auto"`).
@@ -124,6 +126,7 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 ## PHASE 3 — Market Data Adapter + AI/LLM Gateway (architecture §B3, §B4)
 
 **What to implement:**
+
 1. **Market Data Adapter** (§B4): provider-agnostic, YAML config-driven routing, circuit breaker, ordered fallback ladders; emits normalized events (`mfcentral.holdings.received`, `aa.holdings.received` [AA = **stub** until partner], NAV/price refreshed). Domain modules never call a vendor directly.
 2. **AI/LLM Gateway** (§B3): `OpenRouterGateway` using OpenAI-compat client (Phase 0 OpenRouter block) — free-pool round-robin with **startup model-id verification** (Phase 0 §0.1#2), on `openai.RateLimitError`(429) rotate model, on `APIStatusError`(402) → alert "credit", on schema-validation fail → Sonnet spillover (`anthropic/claude-sonnet-4.6`) for high-stakes task types within premium budget else 3-strike skip. `QualityValidator` = Pydantic schema extending `AIOutputBase` (≥2 contributing signals; `confidence>0.7 ⇒ ≥3`; `pattern=`). `budget_guard()` enforces `ai:budget:*` inside gateway (free 1,000/day, premium soft $0.50, hard $9.50). `TASK_MODEL_PREFERENCES` read from Admin `prompt_templates` (no hardcoded prompts).
 
@@ -138,6 +141,7 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 **The IP core. Standalone service; strict interface coupling.**
 
 **What to implement (copy §S exactly):**
+
 1. Deterministic factor model (MF inputs first: rolling returns, Sharpe/Sortino, drawdown, expense, AUM stability, category-rank percentile) → versioned weights from `ranking_configs`.
 2. Deterministic verb-label rule table (🟢 In-form / 🟡 On-track / 🟠 Off-track / 🔴 Out-of-form) per §S2.2 — label derived from rules, **not** from the number.
 3. Collapse function → `{unified_score, confidence_band, verb_label, valid_until, eval_seq}`; confidence < 0.30 ⇒ refuse ("Insufficient data").
@@ -155,6 +159,7 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 **Launch-critical. MF-first.**
 
 **What to implement (copy the appendix + Phase 0 casparser/AMFI blocks):**
+
 1. Schema: `mf_funds`, `mf_nav_history` (**TimescaleDB hypertable**, 1-month chunks, continuous aggregate `mf_nav_monthly_agg` — Phase 0 Postgres block), `mf_user_holdings`, `mf_portfolio_snapshots`, `mf_cas_jobs`, `user_fund_scores`. Redis keys/TTLs per appendix incl. `mf:isin_users:{isin}` reverse index.
 2. **AMFI NAV pipeline** — Celery beat `mf.nav.daily_fetch` 23:30 IST (= 18:00 UTC; `timezone` set): fetch `portal.amfiindia.com/spages/NAVAll.txt`, semicolon-split, skip non-6-field lines, bulk-upsert hypertable, refresh Redis, emit `mf.nav.refreshed`, targeted invalidation via `mf:isin_users`.
 3. **CAS → 60s report** — `POST /api/v1/mf/upload/cas`: SHA-256 dedup (`mf:cas:dedup`), enqueue `mf.cas.parse`, return `{job_id, estimated_seconds:60}` <200ms; worker `casparser.read_cas_pdf(path, password)` → walk `folios[].schemes[]` (isin/amfi/units/valuation) → upsert holdings → materialize snapshot (current value, XIRR via numpy_financial+scipy.brentq, category allocation, overlap) → cache report 2h → emit `mf.holdings.updated` → Rating Engine → `scoring.result.published` → `user_fund_scores`. Round trip ≤ 60s.
@@ -168,7 +173,10 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 
 ## PHASE 6 — Notification (Telegram) + Email substitution (architecture Global §5)
 
+**⛔ Pre-Phase-6 gate — do not start until both pass:** (a) the Resend dashboard shows domain `dhanradar.com` status = **Verified** (not Pending); (b) a real test send via `resend.Emails.send(...)` returns 200/202. The DNS (DKIM/SPF/MX/DMARC) was added DNS-only and verified resolving on 2026-05-18, but Resend's own domain status must read Verified before any email code is built — otherwise notification email fails silently at runtime. This is a user-checkable action; record the confirmation in `docs/infra-notes.md`.
+
 **What to implement:**
+
 1. `notification_preferences`/`notification_log`; Redis `notifications:queue:{telegram,email}` lists; `celery-misc` BLPOP consumer with quiet-hours + per-channel rate caps.
 2. Telegram: `sendMessage`/`sendPhoto` (Phase 0 Telegram block); public-channel daily Mood card path (bot = channel admin).
 3. **Email = Resend** (`pip install resend`, Phase 0 §0.1#1) — NOT SendGrid; `resend.Emails.send({from,to,subject,html})`; cap 100/day.
@@ -216,3 +224,38 @@ All are **additive and decoupled** (extend an existing module via its interface;
 - Run phases in order; each is a fresh-context session that opens by reading **Phase 0** + its own phase + the cited architecture sections.
 - Phase 2 and Phase 4/Phase 5 touch security/auth/AI-classifier logic → carry the Phase 7 §5 adversarial gate before any deploy of those.
 - Discovery is cached in Phase 0; re-run a targeted discovery subagent only if a library/API not listed there is needed.
+
+---
+
+## Standard Phase Kickoff Prompt (use verbatim for every phase)
+
+Paste this into the fresh session, replacing `<N>` with the phase number. The four standing rules are embedded here so each session is reminded in the prompt itself, not only via infra-notes.
+
+```
+Execute Phase <N> of docs/DhanRadar_Implementation_Plan.md. First read in full:
+docs/infra-notes.md (verified facts + the ❌ NEVER-TOUCH list + standing rules),
+this plan's Phase 0 and Phase <N> sections, and the architecture sections Phase <N>
+cites in docs/DhanRadar_Architecture_Final.md. Target = KVM4 via SSH alias
+`intelwatch`, shared-infra reuse model, dedicated `dhanradar` cloudflared tunnel
+df2c5ae4-4d21-4052-83d4-12cbabbcd551 run as a container. Honor every NEVER-TOUCH
+rule and the three cloudflared gotchas. Scaffold/changes locally first for my
+review BEFORE any KVM4 deploy or GitHub push; first commit uses the noreply
+git-email pattern.
+
+Standing rules — apply to this phase, not optional:
+1. RCA: every bug fixed gets an entry appended to docs/rca/README.md (symptom,
+   root cause, fix with file:line, prevention, date); read the log before debugging.
+2. Feature docs: every module built or changed has docs/features/<module>.md per
+   the template in docs/features/README.md, kept in sync; the phase is not done
+   until it is updated.
+3. UI branding: any UI work uses the design tokens (frontend/tailwind.config.js,
+   frontend/app/tokens.css, frontend/styles/tokens.json) and matches docs/brand/
+   and its mockups; no ad-hoc colours, spacing, typography, or off-system components.
+4. Reply/summary format: answer and summarize in simple-sentence pointers under
+   these sections — Implemented, Pending, Not implemented, Action for you,
+   Dependencies, Issues, Deviations, Agent/model usage & % contribution,
+   Improvement suggestions. No dense tables.
+
+Phase 6 only: do not start until Resend shows dhanradar.com = Verified and a test
+send succeeds (see the Pre-Phase-6 gate).
+```

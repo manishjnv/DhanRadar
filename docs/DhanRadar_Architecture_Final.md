@@ -231,7 +231,7 @@ REST endpoints (all under `/api/v1/mf/`):
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/mf/upload/cas` | Accept CAS PDF/XML upload; enqueue `mf.cas.parse` Celery task; return `{ job_id, estimated_seconds: 60 }` |
-| `GET` | `/api/v1/mf/upload/cas/{job_id}/status` | Poll parse status; returns `{ status: queued|processing|done|failed, progress_pct }` |
+| `GET` | `/api/v1/mf/upload/cas/{job_id}/status` | Poll parse status; returns `{ status: queued\|processing\|done\|failed, progress_pct }` |
 | `GET` | `/api/v1/mf/portfolio/{user_id}` | Return normalized holdings snapshot (latest NAV-adjusted) with XIRR, allocation breakdown, overlap matrix |
 | `GET` | `/api/v1/mf/portfolio/{user_id}/report` | Return full 60-second report payload (summary + per-scheme analytics + score labels) once job is `done` |
 | `GET` | `/api/v1/mf/fund/{isin}` | Return fund metadata, category, AMC, AUM, expense ratio, rolling returns |
@@ -574,9 +574,11 @@ Events consumed: `aa.holdings.received`, `mfcentral.holdings.received` (→ norm
 | v2.3 §10.1–10.13 | Infra/cost→§A6/§B5/§B6; OpenRouter→§B3 + Observability §6; containers→§A6; day-one→§A5 P0; doc structure→this file |
 
 ## V2. Uniqueness check
+
 Each appendix's **Provenance** block explicitly flags content UNIQUE to one source (e.g. v2.3's 60-s SLA + `mf:cas:dedup` + reverse-index; v2.2 Rec 4 schema; Reality Layer §3.4 nudge rules + §1.2 DPDP SQL; v2.2 Rec 2 mood weights). No doc's distinctive contribution is dropped during dedup.
 
 ## V3. Consistency check (ledger applied uniformly)
+
 - Cost/infra: only v2.3 numbers appear (₹1,090/mo, 12 containers, OpenRouter). ✔
 - Pricing: only v2.2 (₹1,999 / ₹3,999 / ₹4,999 lifetime). ✔
 - Mood cadence: 09:00 & 16:00 IST everywhere (ledger #6); v2.3 "2× daily" noted as consistent-but-unspecified. ✔
@@ -585,12 +587,15 @@ Each appendix's **Provenance** block explicitly flags content UNIQUE to one sour
 - "Why X Moved Today": Stock module owns; AI Enrichment references (ledger #9). ✔
 
 ## V4. Modularity check
+
 Dependency DAG (§A4) is acyclic; every edge is a REST contract or named event; no shared mutable Postgres table across modules (separate schemas, new tables only); Redis namespaced per module; each module independently testable with upstream stubbed. Build order is a topological sort where no later module forces edits to an earlier one. ✔
 
 ## V5. Audience check
+
 Tier A (§A1–A6) is standalone and reads in <10 min (vision, ledger, layers, DAG, phases, NFRs). Tier C appendices are each independently buildable (fixed template: interface, schema, pipeline, failure modes). ✔
 
 ## V6. Open items / assumptions
+
 - No `[ASSUMPTION]` blocks were required: v2.2/v2.3 additivity left no material reconstruction gap (confirms ledger #10).
 - Output file: `e:\code\DhanRadar\DhanRadar_Architecture_Final.md` (this file).
 - Numeric factor weights for the *stock* 5-axis aggregate live in `ranking_configs` (versioned, human-approved) — values are an operational tuning decision, not an architectural one, intentionally left to the Admin/Compliance governance flow.

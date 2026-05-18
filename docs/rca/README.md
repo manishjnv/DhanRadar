@@ -15,7 +15,16 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-05-19 — Malformed table row in architecture doc (data being dropped)
+
+- **Symptom:** markdownlint `MD056/table-column-count` at `docs/DhanRadar_Architecture_Final.md:234` — header had 3 columns, the row produced 6; "extra data will be missing" (the cell was being mis-rendered/truncated).
+- **Root cause:** the cell contained literal `|` pipes inside an inline code span (`{ status: queued|processing|done|failed }`); markdown's table parser treats `|` as a column separator even inside backticks.
+- **Fix:** escaped the pipes as `\|` in that cell — `docs/DhanRadar_Architecture_Final.md:234`.
+- **Prevention:** repo `.markdownlint.json` keeps `MD056` enabled (only opinionated/cosmetic rules disabled), so genuinely broken tables keep failing the lint; pipes inside table cells must always be `\|`.
+- **Phase/area:** Docs / markdown-lint pass.
+
 ### 2026-05-18 — Cloudflare tunnel CNAME mis-targeted to etip-ssh
+
 - **Symptom:** after `cloudflared tunnel route dns dhanradar dhanradar.com`, the `dhanradar.com` DNS record pointed at tunnel `6e263591` (etip-ssh) instead of the new `dhanradar` tunnel `df2c5ae4`.
 - **Root cause:** `cloudflared tunnel route dns <NAME> …` resolves the tunnel using the default `/etc/cloudflared/config.yml` (which is etip-ssh's), ignoring the name argument.
 - **Fix:** corrected the DNS record to `df2c5ae4-….cfargotunnel.com` (Cloudflare DNS UI); verified HTTP/2 200 end-to-end.
@@ -23,6 +32,7 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 - **Phase/area:** Phase 1 / Cloudflare tunnel setup.
 
 ### 2026-05-18 — pkill self-terminated the SSH session
+
 - **Symptom:** a verification SSH command exited 255 with truncated output during cleanup.
 - **Root cause:** `pkill -f "cloudflared-dhanradar/config.yml"` matched the SSH shell's own command line (the pattern appeared in the script text), killing the session.
 - **Fix:** re-verified state with a self-safe method.

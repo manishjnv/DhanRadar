@@ -15,6 +15,7 @@ Architecture and implementation plan: see `docs/`.
 ## Local Development
 
 ### Prerequisites
+
 - Docker Desktop (or Docker Engine + Compose plugin)
 - A `.env` file at the project root (copy `.env.example` and fill in real values)
 
@@ -59,9 +60,11 @@ docker compose logs -f dhanradar-celery-batch
 ## KVM4 Deploy Notes
 
 ### Shared-infra reuse
+
 DhanRadar runs on the same KVM4 host as the existing `etip` stack. The host's cloudflared binary (version 2026.3.0) and the `etip-ssh` tunnel are **shared infrastructure** — do not touch them. DhanRadar uses its **own dedicated tunnel** provisioned separately.
 
 ### Dedicated tunnel
+
 - Tunnel ID: `df2c5ae4-4d21-4052-83d4-12cbabbcd551`
 - Credentials file: `/etc/cloudflared-dhanradar/dhanradar.json` (KVM4 only, never committed)
 - Config: `./infra/cloudflared/config.yml` (committed, read-only bind-mount)
@@ -72,15 +75,18 @@ DhanRadar runs on the same KVM4 host as the existing `etip` stack. The host's cl
 The host's `/etc/cloudflared/config.yml` points at the `etip-ssh` tunnel. Running
 `cloudflared tunnel route dns <name> <hostname>` without an explicit config path will
 route DNS for the *wrong* tunnel. Always use:
+
 ```bash
 cloudflared tunnel --config /etc/cloudflared-dhanradar/config.yml \
   route dns df2c5ae4-4d21-4052-83d4-12cbabbcd551 dhanradar.com \
   --overwrite-dns
 ```
+
 Or pass the UUID directly with `--overwrite-dns`.
 
 **Gotcha 2 — `ingress validate` global flag order matters.**
 The `--config` flag is a *global* flag and must come **before** the subcommand:
+
 ```bash
 # CORRECT
 cloudflared --config /etc/cloudflared-dhanradar/config.yml ingress validate
@@ -92,6 +98,7 @@ cloudflared ingress validate --config /etc/cloudflared-dhanradar/config.yml
 **Gotcha 3 — never `pkill -f` a pattern that matches your own shell.**
 `pkill -f cloudflared` will also kill any shell whose command line contains "cloudflared"
 (e.g., the SSH session running the command). Instead:
+
 ```bash
 # Enumerate PIDs safely
 pgrep -x cloudflared
