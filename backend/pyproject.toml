@@ -19,4 +19,15 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Lock the fixture loop scope to function (matches db_engine/db_tables scope)
+# and silence pytest-asyncio's "unset loop scope" deprecation warning.
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "integration: requires a live Postgres database and fakeredis (deselect with -m 'not integration')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:fakeredis",
+    "ignore::DeprecationWarning:asyncio",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]

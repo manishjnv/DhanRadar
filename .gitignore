@@ -10,6 +10,10 @@ secrets/
 *.secret
 backend/.keys/
 
+# Local-only compose override (publishes ports, COOKIE_SECURE=False) —
+# never deploy this; the committed compose has no host ports by design.
+docker-compose.override.yml
+
 # ── Python ────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

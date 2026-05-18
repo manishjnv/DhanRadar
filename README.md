@@ -47,6 +47,36 @@ docker compose logs -f dhanradar-celery-batch
 
 ---
 
+## Testing
+
+The committed compose publishes no host ports and runs cookies as `Secure`.
+Create the local-only `docker-compose.override.yml` (gitignored — template in
+the repo history / ask the team) which publishes the API, sets
+`COOKIE_SECURE=False`, and mounts the dev RSA keypair.
+
+```bash
+python backend/scripts/gen_jwt_keys.py            # writes backend/.keys/*.pem (gitignored)
+
+# Bring up only what auth testing needs (skips cloudflared + nextjs):
+docker compose up -d dhanradar-postgres dhanradar-redis dhanradar-fastapi
+docker compose exec dhanradar-fastapi alembic upgrade head   # migration 0001 (auth schema)
+
+# Run the test suite (Redis = fakeredis; Postgres = the compose service):
+docker compose run --rm dhanradar-fastapi pytest -q                 # all
+docker compose run --rm dhanradar-fastapi pytest -q -m "not integration"   # unit only (no DB)
+docker compose run --rm dhanradar-fastapi pytest -q -m integration         # integration only
+```
+
+Coverage: JWT alg/typ-confusion + expiry, password hashing, tier derivation,
+budget guard (unit); full signup→login→refresh-rotation→reuse→logout-revocation
++ rate-limit, and the Razorpay webhook (signature, tier change, idempotency)
+(integration). **Status:** suite written + statically compiled; not yet
+executed — gated by the Phase-1 §2c check that `timescale/timescaledb-ha:pg16`
+ships `pg_cron`/`pg_partman` (the Postgres container's `01_init.sql` must
+succeed for the test DB to come up). Owed before any deploy (Phase 7 §5).
+
+---
+
 ## Documentation
 
 | File | Purpose |

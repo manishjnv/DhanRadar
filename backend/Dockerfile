@@ -10,8 +10,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source
+# Copy application source + migration tooling.
+# alembic.ini + alembic/ are required for `alembic upgrade head` to work
+# inside the container (script_location=alembic is resolved from /app).
 COPY dhanradar/ ./dhanradar/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 # Switch to non-root user
 USER appuser

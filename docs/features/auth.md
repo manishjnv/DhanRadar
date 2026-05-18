@@ -40,7 +40,7 @@ Migration: `alembic/versions/0001_auth_init.py` (async env, `include_schemas=Tru
 4. Tier: `current_user_or_anonymous` resolves tier via `auth:tier:{uid}` cache (15m) → DB fallback. Razorpay webhook (verify-before-parse, event-id dedup) upserts the subscription, recomputes `users.tier`, flushes the cache.
 
 ## Config & flags
-Env (see `.env.example`): `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` (RS256 PEM via `backend/scripts/gen_jwt_keys.py`), `JWT_ALGORITHM=RS256`, `ACCESS_TTL_MIN=15`, `REFRESH_TTL_DAYS=7`, `COOKIE_SECURE=True`, `RAZORPAY_KEY_ID/SECRET/WEBHOOK_SECRET`. No flags.
+Env (see `.env.example`): RS256 PEM supplied either inline as `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` (literal `\n` accepted for single-line `.env`) **or** as a mounted file path `JWT_PRIVATE_KEY_FILE`/`JWT_PUBLIC_KEY_FILE` (production-preferred — keys never transit env; resolved by `config.jwt_private_key`/`jwt_public_key`, file wins, empty → fails closed). Generate dev keys: `backend/scripts/gen_jwt_keys.py`. Also `JWT_ALGORITHM=RS256`, `ACCESS_TTL_MIN=15`, `REFRESH_TTL_DAYS=7`, `COOKIE_SECURE=True`, `RAZORPAY_KEY_ID/SECRET/WEBHOOK_SECRET`. No feature flags.
 
 ## Failure modes & fallbacks
 Tier cache miss → DB; deleted user → tier `anonymous` (≤15m stale on cache hit); webhook bad signature → 400 (fails closed); duplicate webhook → 200 not reprocessed; invalid/expired JWT → anonymous (client calls `/refresh`); refresh reuse/owner-mismatch → 401; ≥5 bad TOTP → 429 for 900s; rate-limit exceeded → 429 `Retry-After`.
@@ -49,7 +49,7 @@ Tier cache miss → DB; deleted user → tier `anonymous` (≤15m stale on cache
 Postgres (`auth` schema, from Phase-1 init SQL), Redis, `current_user_or_anonymous`/`RequireTier` (this module owns them). Build-vs-partner: auth=build; payments=Razorpay (partner); KYC=partner (Y2).
 
 ## Verification
-`python -m py_compile` clean across the backend package. Adversarial gate (Opus takeover, 2026-05-19): verdict **REVISE → fixes applied**. Runtime e2e (signup→login→refresh-rotation→logout-revocation→tier-gate→webhook idempotency) is **pending a live DB/Redis** and is owed before any deploy (carry into Phase 7 §5 with Consent/Compliance).
+`python -m py_compile` clean across the backend package and the test suite. Adversarial gate (Opus takeover, 2026-05-19): verdict **REVISE → fixes applied**; config key-loading change Opus mini-gate: **ACCEPT**. A pytest suite exists under `backend/tests/` — unit (JWT alg/typ-confusion, expiry, password hashing, tier derivation, budget) + integration (signup→login→refresh-rotation→reuse→logout-revocation→rate-limit; Razorpay webhook signature/tier/idempotency). Run: `docker compose run --rm dhanradar-fastapi pytest -q` (see README → Testing). **Status: written + statically compiled, NOT yet executed** — execution is gated by the Phase-1 §2c image check (`01_init.sql` must succeed for the Postgres test DB) and is owed before any deploy (Phase 7 §5).
 
 ## Known limitations / deferred (carry to handoff)
 - `RequireConsent` is a stub; `deletion_requested_at` not enforced at auth — the Consent module must enforce it **and** flush `auth:tier:{uid}` on erasure.
@@ -60,3 +60,4 @@ Postgres (`auth` schema, from Phase-1 init SQL), Redis, `current_user_or_anonymo
 
 ## Changelog
 - 2026-05-19 — Module built (Phase 2 slice 1). Security review + Opus-takeover adversarial gate; fixes: rate-limit wiring, atomic refresh `GETDEL`, `CF-Connecting-IP` keying, signup-race 409, access-token revocation on logout, webhook event-id idempotency, exact-plan map w/ fallback warning, password `max_length`. See RCA 2026-05-19.
+- 2026-05-19 — Test enablement: Dockerfile now `COPY`s `alembic/`+`alembic.ini` (in-container `alembic upgrade head` was broken); config resolves PEM via `JWT_*_KEY_FILE` path or `\n`-unescaped inline; gitignored `docker-compose.override.yml` (ports + `COOKIE_SECURE=False` + key mount); pytest suite added (`backend/tests/`); pytest-asyncio fixture loop-scope landmine fixed (db_engine/db_tables → function scope). Mini-gate on key-loading: ACCEPT.

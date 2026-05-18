@@ -83,7 +83,7 @@ def create_access_token(user_id: str) -> tuple[str, str]:
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TTL_MIN),
     }
-    token = jwt.encode(payload, settings.JWT_PRIVATE_KEY, algorithm=_ALGORITHM)
+    token = jwt.encode(payload, settings.jwt_private_key, algorithm=_ALGORITHM)
     return token, jti
 
 
@@ -103,7 +103,7 @@ def create_refresh_token(user_id: str) -> tuple[str, str]:
         "iat": now,
         "exp": now + timedelta(days=settings.REFRESH_TTL_DAYS),
     }
-    token = jwt.encode(payload, settings.JWT_PRIVATE_KEY, algorithm=_ALGORITHM)
+    token = jwt.encode(payload, settings.jwt_private_key, algorithm=_ALGORITHM)
     return token, jti
 
 
@@ -121,7 +121,7 @@ def decode_token(token: str, expected_typ: Literal["access", "refresh"]) -> dict
     """
     payload = jwt.decode(
         token,
-        settings.JWT_PUBLIC_KEY,
+        settings.jwt_public_key,
         algorithms=_ALLOWED_ALGORITHMS,
         options={"require": ["sub", "jti", "typ", "iat", "exp"]},
     )
