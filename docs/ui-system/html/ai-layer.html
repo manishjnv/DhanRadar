@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DhanRadar — AI Layer · UX Patterns</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%230B1F3A'/><stop offset='100%25' stop-color='%232563EB'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><circle cx='16' cy='16' r='8' fill='none' stroke='white' stroke-width='1.6' opacity='0.5'/><line x1='16' y1='16' x2='23' y2='12.5' stroke='white' stroke-width='1.6' stroke-linecap='round'/><circle cx='23' cy='12.5' r='1.8' fill='%2310B981'/></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--dr-navy:#0B1F3A;--dr-blue:#2563EB;--dr-emerald:#10B981;--dr-cyan:#06B6D4;--dr-amber:#F59E0B;--dr-red:#EF4444;
+  --font-display:'Manrope',sans-serif;--font-body:'Inter',sans-serif;--font-mono:'JetBrains Mono',monospace;
+  --r-md:8px;--r-lg:12px;--r-xl:16px;}
+.theme-light{--bg:#FFFFFF;--bg-alt:#F8FAFC;--surface:#FFFFFF;--surface-2:#F1F5F9;--surface-3:#E2E8F0;--border:#E5E7EB;--border-strong:#CBD5E1;
+  --text:#0F172A;--text-2:#334155;--text-muted:#64748B;--text-faint:#94A3B8;--positive:#10B981;--negative:#EF4444;--warn:#F59E0B;
+  --blue-soft:rgba(37,99,235,0.10);--emerald-soft:rgba(16,185,129,0.10);--amber-soft:rgba(245,158,11,0.14);--red-soft:rgba(239,68,68,0.10);--cyan-soft:rgba(6,182,212,0.12);
+  --shadow-sm:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04);--shadow-md:0 4px 12px rgba(15,23,42,0.06),0 2px 4px rgba(15,23,42,0.04);--shadow-lg:0 16px 40px -12px rgba(15,23,42,0.12);
+  --ring-bg:rgba(15,23,42,0.08);}
+.theme-dark{--bg:#020617;--bg-alt:#0F172A;--surface:#0F172A;--surface-2:#1E293B;--surface-3:#293548;--border:rgba(255,255,255,0.08);--border-strong:rgba(255,255,255,0.16);
+  --text:#F1F5F9;--text-2:#CBD5E1;--text-muted:#94A3B8;--text-faint:#64748B;--positive:#22D3A6;--negative:#F87171;--warn:#FBBF24;
+  --blue-soft:rgba(37,99,235,0.18);--emerald-soft:rgba(34,211,166,0.16);--amber-soft:rgba(251,191,36,0.18);--red-soft:rgba(248,113,113,0.16);--cyan-soft:rgba(6,182,212,0.2);
+  --shadow-sm:0 1px 3px rgba(0,0,0,0.5);--shadow-md:0 8px 24px rgba(0,0,0,0.45);--shadow-lg:0 24px 60px -18px rgba(0,0,0,0.6);
+  --ring-bg:rgba(255,255,255,0.08);}
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:var(--font-body);background:var(--bg-alt);color:var(--text);-webkit-font-smoothing:antialiased;}
+.disp{font-family:var(--font-display);letter-spacing:-0.02em;}.mono{font-family:var(--font-mono);font-feature-settings:'tnum';}
+.pos{color:var(--positive);}.neg{color:var(--negative);}.muted{color:var(--text-muted);}.sec{color:var(--text-2);}
+button{font-family:inherit;cursor:pointer;border:0;background:none;color:inherit;}
+:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,0.32);border-radius:var(--r-md);}
+
+.app{display:grid;grid-template-columns:256px 1fr;min-height:100vh;}
+.side{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--bg);border-right:1px solid var(--border);padding:18px 12px;}
+.side::-webkit-scrollbar{width:6px;}.side::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px;}
+.brand{display:flex;align-items:center;gap:11px;padding:4px 8px 14px;}
+.bm{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--dr-navy),var(--dr-blue));display:grid;place-items:center;flex-shrink:0;}
+.bn{font-family:var(--font-display);font-weight:700;font-size:15px;}
+.bs{font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;}
+.nl{font-size:10px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.1em;padding:14px 10px 5px;}
+.ni{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--text-2);font-weight:500;width:100%;text-align:left;}
+.ni:hover{background:var(--surface-2);color:var(--text);}
+.ni.on{background:var(--blue-soft);color:var(--dr-blue);font-weight:600;}
+.ni .ic{width:18px;text-align:center;font-size:13px;}
+.foot{margin-top:14px;padding:12px 10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-faint);line-height:1.5;}
+.tgl{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);cursor:pointer;margin-top:10px;}
+.tgl .tk{width:30px;height:18px;border-radius:9px;background:var(--border-strong);position:relative;}
+.tgl .tk::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text);transition:.2s;}
+.theme-dark .tgl .tk::after{transform:translateX(12px);}
+
+.main{min-width:0;}
+.sec-screen{display:none;padding:40px 48px 80px;max-width:1080px;}
+.sec-screen.on{display:block;}
+.eyebrow{font-family:var(--font-mono);font-size:11px;color:var(--dr-blue);text-transform:uppercase;letter-spacing:0.14em;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+h1.ttl{font-family:var(--font-display);font-size:36px;font-weight:700;letter-spacing:-0.03em;margin:0 0 12px;line-height:1.05;}
+.lede{font-size:16px;line-height:1.6;color:var(--text-2);max-width:680px;margin:0 0 6px;}
+h2.h2{font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:-0.015em;margin:40px 0 6px;}
+.h2s{color:var(--text-muted);font-size:13.5px;margin-bottom:18px;}
+.usage{background:var(--cyan-soft);border-radius:12px;padding:12px 16px;font-size:12.5px;color:var(--text-2);line-height:1.55;margin:14px 0 22px;display:flex;gap:10px;}
+.usage b{color:var(--text);}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);}
+.card-h{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;}
+.card-h h3{margin:0;font-size:14px;font-weight:600;}
+.pad{padding:18px;}
+.row{display:flex;align-items:center;}.col{display:flex;flex-direction:column;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.gap-2{gap:8px;}.gap-3{gap:12px;}.gap-4{gap:16px;}.between{justify-content:space-between;}.center{align-items:center;}.wrap{flex-wrap:wrap;}.grow{flex:1;min-width:0;}.right{text-align:right;}
+.mt-2{margin-top:8px;}.mt-3{margin-top:12px;}.mt-4{margin-top:16px;}.mb-2{margin-bottom:8px;}.mb-3{margin-bottom:12px;}
+.t10{font-size:10px;}.t11{font-size:11px;}.t12{font-size:12px;}.t13{font-size:13px;}.t14{font-size:14px;}.t15{font-size:15px;}.t16{font-size:16px;}.t18{font-size:18px;}.t22{font-size:22px;}.t26{font-size:26px;}
+.w-500{font-weight:500;}.w-600{font-weight:600;}.w-700{font-weight:700;}.upper{text-transform:uppercase;letter-spacing:0.06em;}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;font-family:var(--font-mono);}
+.b-pos{background:var(--emerald-soft);color:var(--positive);}.b-neg{background:var(--red-soft);color:var(--negative);}.b-info{background:var(--blue-soft);color:var(--dr-blue);}.b-warn{background:var(--amber-soft);color:var(--warn);}.b-neutral{background:var(--surface-2);color:var(--text-2);}.b-ai{background:var(--cyan-soft);color:var(--dr-cyan);}
+.sb-buy{background:rgba(16,185,129,0.18);color:var(--positive);}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 11px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);font-size:12px;color:var(--text-2);font-weight:500;}
+.chip.on{background:var(--text);color:var(--bg);border-color:var(--text);}
+.tk-logo{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex-shrink:0;}
+.ring{position:relative;display:inline-grid;place-items:center;}.ring svg{transform:rotate(-90deg);}.ring-n{position:absolute;font-family:var(--font-mono);font-weight:600;letter-spacing:-0.02em;}
+.bar{height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;}.bar>div{height:100%;border-radius:3px;}
+.btn{font-size:13px;font-weight:600;padding:8px 14px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;}
+.btn-primary{background:var(--dr-blue);color:#fff;}.btn-ghost{background:var(--surface-2);border:1px solid var(--border);}
+.btn-sm{padding:6px 11px;font-size:12px;}
+.divider{height:1px;background:var(--border);}
+.ai-glow{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;}
+.ai-glow::before{content:'';position:absolute;inset:0;border-radius:16px;padding:1px;background:linear-gradient(135deg,var(--dr-cyan),var(--dr-blue),var(--dr-emerald));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0.5;pointer-events:none;}
+.dot-load span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-muted);margin:0 2px;animation:db 1.2s infinite;}
+.dot-load span:nth-child(2){animation-delay:.2s;}.dot-load span:nth-child(3){animation-delay:.4s;}
+@keyframes db{0%,60%,100%{opacity:.3;transform:translateY(0);}30%{opacity:1;transform:translateY(-3px);}}
+.src{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;color:var(--text-2);font-weight:500;}
+.src .v{color:var(--positive);}
+.conf-seg{display:flex;height:8px;border-radius:4px;overflow:hidden;}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><div class="bm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/><path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.3" fill="#10B981" stroke="none"/></svg></div><div><div class="bn">DhanRadar</div><div class="bs">AI Layer · UX</div></div></div>
+    <nav id="nav"></nav>
+    <div class="foot">Every AI surface follows the same contract: <b style="color:var(--text-2);">answer → reasoning → confidence → sources</b>. Never a number without a why.
+      <label class="tgl" id="themeT"><span>Dark mode</span><span class="tk"></span></label>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<script>
+const $=(s,r=document)=>r.querySelector(s);const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+function setTheme(t){document.documentElement.classList.toggle('theme-light',t==='light');document.documentElement.classList.toggle('theme-dark',t==='dark');try{localStorage.setItem('dr-ai-theme',t);}catch(e){}}
+setTheme((()=>{try{return localStorage.getItem('dr-ai-theme')||'light';}catch(e){return 'light';}})());
+$('#themeT').onclick=()=>setTheme(document.documentElement.classList.contains('theme-dark')?'light':'dark');
+function ring(score,size,stroke,col){const r=(size-stroke)/2;const c=2*Math.PI*r;const off=c*(1-score/100);col=col||(score>=85?'var(--positive)':score>=70?'var(--dr-blue)':score>=55?'var(--warn)':'var(--negative)');return `<div class="ring" style="width:${size}px;height:${size}px;"><svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--ring-bg)" stroke-width="${stroke}"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${col}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/></svg><div class="ring-n" style="font-size:${Math.round(size*0.32)}px;">${score}</div></div>`;}
+window.AI={$,$$,ring};
+</script>
+<script>
+/* DhanRadar — AI Layer UX patterns. Approved DS. */
+(function(){
+const {ring}=window.AI;
+function head(eyebrow,title,lede,usage){return `<div class="eyebrow"><span class="badge b-ai">✦ AI</span> ${eyebrow}</div><h1 class="ttl">${title}</h1><p class="lede">${lede}</p><div class="usage">💡 <div><b>When to use.</b> ${usage}</div></div>`;}
+function confBar(v){const col=v>=75?'var(--positive)':v>=50?'var(--warn)':'var(--negative)';const lbl=v>=75?'High confidence':v>=50?'Moderate confidence':'Low confidence';return `<div><div class="row between mb-2"><span class="t11 upper w-600 muted">Confidence</span><span class="mono t12 w-600" style="color:${col};">${v}% · ${lbl}</span></div><div class="conf-seg">${[0,1,2,3,4].map(i=>`<div style="flex:1;margin-right:${i<4?'2px':'0'};background:${(i+1)*20<=v+10?col:'var(--surface-2)'};"></div>`).join('')}</div></div>`;}
+function src(name,fresh){return `<span class="src"><span class="v">●</span> ${name}${fresh?` · <span class="muted">${fresh}</span>`:''}</span>`;}
+
+/* 1 AI SEARCH */
+const aisearch={id:'aisearch',name:'AI Search',icon:'🔍',group:'AI Surfaces',render:()=>head(
+  'Discovery','AI Search','A natural-language entry point that returns a direct, grounded answer above ranked instruments — not just a filtered list. Accepts questions, comparisons, and pasted holdings.',
+  'Top-of-funnel discovery and re-finding. Invoked by ⌘K from anywhere. The AI answer is always cited and never blocks the raw results beneath it.'
+)+`
+  <div class="ai-glow pad" style="max-width:680px;"><div class="row gap-3 center"><span class="muted">🔍</span><input style="flex:1;border:0;background:none;font:inherit;font-size:16px;color:var(--text);outline:none;" value="best large-cap funds under 1% expense with low risk"/><span class="mono t10 muted" style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:2px 6px;">⌘K</span></div></div>
+  <div class="card pad mt-3" style="max-width:680px;border-left:3px solid var(--dr-cyan);">
+    <div class="row between mb-2"><span class="badge b-ai">✦ AI answer</span><span class="t11 muted">grounded · 4 sources</span></div>
+    <div class="t14 sec" style="line-height:1.6;">Three large-cap funds score ≥80 with expense under 1% and Moderate-or-lower risk: <b style="color:var(--text);">Mirae Asset Large Cap</b> (0.54%, score 84, lowest downside capture), <b style="color:var(--text);">ICICI Pru Bluechip</b> (0.85%, score 81), and <b style="color:var(--text);">Axis Bluechip</b> (0.49%, score 76). Mirae leads on 3-yr risk-adjusted return.</div>
+    ${confBar(82)}
+    <div class="row gap-2 mt-3 wrap">${src('Fund factsheets','today')}${src('NAV history','1d')}${src('Score model v2.4')}</div>
+  </div>
+  <div class="t12 muted upper w-600 mt-4 mb-2" style="max-width:680px;">Matching instruments · raw results</div>
+  <div style="max-width:680px;">${[['Mirae Asset Large Cap','#0277BD','M',84],['ICICI Pru Bluechip','#B62034','I',81],['Axis Bluechip','#1F4E9E','A',76]].map(f=>`<div class="card pad row between center mb-2"><div class="row gap-3"><div class="tk-logo" style="background:${f[1]};">${f[2]}</div><div class="t13 w-600">${f[0]}</div></div>${ring(f[3],38,4)}</div>`).join('')}</div>
+`};
+
+/* 2 AI ASSISTANT */
+const assistant={id:'assistant',name:'AI Assistant',icon:'✦',render:()=>head(
+  'Conversation','AI Assistant','A chat surface grounded in DhanRadar data. Answers carry inline actions, a confidence read, cited sources, and thumbs feedback that trains the model. Suggested follow-ups keep the user moving.',
+  'Deep, multi-turn research and explanation. Reachable from nav, ⌘K, or any "explain" affordance. Refuses to give advice — it explains and surfaces, never instructs.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="pad" style="display:flex;flex-direction:column;gap:14px;">
+    <div class="row" style="justify-content:flex-end;"><div style="background:var(--blue-soft);border-radius:16px 16px 4px 16px;padding:10px 14px;max-width:70%;font-size:13.5px;">Is Reliance a better buy than ONGC right now?</div></div>
+    <div class="row"><div class="ai-glow" style="max-width:88%;"><div class="pad"><div class="t14 sec" style="line-height:1.6;"><b style="color:var(--text);">Reliance (86)</b> scores meaningfully higher than <b style="color:var(--text);">ONGC (71)</b>. Reliance leads on Quality (91 vs 64) and Momentum (88 vs 52); ONGC is cheaper on Valuation (PE 8.2 vs 24.2). For a quality-and-momentum tilt, Reliance ranks better — but ONGC suits a deep-value, dividend-led approach.</div>
+      <div class="mt-3">${confBar(78)}</div>
+      <div class="row gap-2 mt-3 wrap"><span class="chip">⇄ Compare in full</span><span class="chip">↗ Open RELIANCE</span><span class="chip">👍</span><span class="chip">👎</span></div>
+      <div class="row gap-2 mt-3 wrap">${src('Q2 FY26 filings','today')}${src('Price data','14:32')}${src('Score model v2.4')}</div>
+      <div class="t10 muted mt-2" style="font-style:italic;">Not investment advice. Markets carry risk.</div>
+    </div></div></div>
+  </div>
+  <div class="divider"></div>
+  <div class="row gap-2 wrap"><span class="badge b-neutral">Suggested:</span><span class="chip">Why is ONGC cheaper?</span><span class="chip">Show 5-yr returns</span></div>
+  </div>
+  <div class="pad" style="border-top:1px solid var(--border);"><div class="row gap-2 center"><div class="grow" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text-muted);">Ask about any stock, fund, or your portfolio…</div><button class="btn btn-primary">Ask ▸</button></div></div></div>
+`};
+
+/* 3 RECOMMENDATION EXPLAINABILITY */
+const explain={id:'explain',name:'Recommendation Explainability',icon:'◉',group:'Explainability',render:()=>head(
+  'Transparency','Recommendation Explainability','Decomposes a signal into the exact factors that drove it, each with its contribution, direction, and a one-line rationale. The bridge between a Score and a decision.',
+  'Wherever a Buy/Hold/Avoid signal appears. Tapping a signal expands this. Every factor is itself tappable for a deeper AI explanation.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="card-h"><div class="tk-logo" style="background:#0A1F4A;">R</div><div><h3>Reliance Industries · why Strong Buy</h3></div><span class="badge sb-buy" style="margin-left:auto;">● Strong Buy · 86</span></div>
+  <div class="pad">
+    <div class="t13 sec mb-3" style="line-height:1.55;">The 86 is driven mostly by <b style="color:var(--text);">Quality</b> and <b style="color:var(--text);">Momentum</b>. Risk is the only drag. Here’s the full decomposition:</div>
+    ${[['Quality',91,'+24','var(--positive)','ROE 9.4%, expanding margins, ₹62K Cr free cash flow'],['Momentum',88,'+21','var(--positive)','50-DMA crossed above 200-DMA; earnings revisions up'],['Growth',82,'+16','var(--positive)','Revenue CAGR 14.2%, Jio ARPU expansion'],['Valuation',78,'+12','var(--positive)','Slightly above sector median but justified by quality'],['Risk',71,'-7','var(--warn)','Rising capex intensity; petrochem cyclicality']].map(f=>`
+      <div style="padding:11px 0;border-bottom:1px solid var(--border);">
+        <div class="row between center mb-2"><div class="row gap-2 center"><span class="t13 w-600">${f[0]}</span><span class="mono t12 w-600" style="color:${f[3]};">contrib ${f[2]}</span></div><span class="mono t13 w-600">${f[1]}</span></div>
+        <div class="bar mb-2"><div style="width:${f[1]}%;background:${f[3]};"></div></div>
+        <div class="t12 muted" style="line-height:1.4;">${f[4]} <span style="color:var(--dr-blue);cursor:pointer;">· explain ✦</span></div>
+      </div>`).join('')}
+    <div class="row gap-2 mt-3 wrap">${src('Q2 FY26 filing')}${src('5-yr financials')}${src('Score model v2.4')}</div>
+  </div></div>
+`};
+
+/* 4 CONFIDENCE SCORE VISUALIZATION */
+const confidence={id:'confidence',name:'Confidence Score Visualization',icon:'◍',render:()=>head(
+  'Calibration','Confidence Score Visualization','A consistent visual language for how sure the AI is — separate from the Score itself. Honest uncertainty builds trust. Three tiers (High / Moderate / Low) with reasons for any downgrade.',
+  'Attached to every AI-generated answer, recommendation, and fair-value estimate. Low confidence is shown prominently, never hidden.'
+)+`
+  <div class="g3" style="max-width:760px;">
+    <div class="card pad" style="text-align:center;">${ring(88,90,9,'var(--positive)')}<div class="badge b-pos mt-3">High confidence</div><div class="t12 muted mt-2" style="line-height:1.4;">Fresh data, strong factor agreement, deep coverage.</div></div>
+    <div class="card pad" style="text-align:center;">${ring(58,90,9,'var(--warn)')}<div class="badge b-warn mt-3">Moderate</div><div class="t12 muted mt-2" style="line-height:1.4;">Mixed factor signals or partial data.</div></div>
+    <div class="card pad" style="text-align:center;">${ring(34,90,9,'var(--negative)')}<div class="badge b-neg mt-3">Low confidence</div><div class="t12 muted mt-2" style="line-height:1.4;">Thin coverage or stale inputs — shown with a caveat.</div></div>
+  </div>
+  <h2 class="h2">Inline forms</h2>
+  <div class="h2s">The same calibration, sized for context.</div>
+  <div class="card pad" style="max-width:760px;">
+    <div class="mb-3">${confBar(82)}</div>
+    <div class="divider mb-3"></div>
+    <div class="row between center mb-3"><span class="t13">Compact (in a list row)</span><span class="row gap-2 center"><span style="display:inline-flex;gap:2px;">${[1,1,1,0].map(f=>`<span style="width:5px;height:12px;border-radius:1px;background:${f?'var(--positive)':'var(--surface-3)'};"></span>`).join('')}</span><span class="mono t12 muted">78%</span></span></div>
+    <div class="row between center"><span class="t13">Why moderate? (expandable reason)</span><span class="b-warn badge">News feed delayed 8m · 1 factor stale</span></div>
+  </div>
+`};
+
+/* 5 BULL CASE */
+const bull={id:'bull',name:'Bull Case',icon:'▲',group:'Thesis',render:()=>head(
+  'Balanced thesis','Bull Case','The strongest evidence-backed argument FOR the instrument, generated from fundamentals and momentum. Always paired with the Bear Case so the user sees both sides.',
+  'On instrument detail pages and recommendation cards. Never shown alone — Bull and Bear render side by side to avoid one-sided framing.'
+)+`
+  <div class="card" style="max-width:720px;border-top:3px solid var(--positive);"><div class="card-h"><span style="color:var(--positive);font-size:16px;">▲</span><h3>Bull case · Reliance Industries</h3><span class="badge b-pos" style="margin-left:auto;">Conviction: Strong</span></div>
+  <div class="pad">
+    <div class="t14 sec mb-3" style="line-height:1.6;">If quality and momentum persist, Reliance has a clear path to its ₹3,120 fair value (+9.8%).</div>
+    ${[['Jio ARPU expansion','Tariff hikes + 5G monetization lifting telecom margins toward 52%.'],['Retail scale','Fastest-growing organized retailer; Tier 2/3 penetration accelerating.'],['Deleveraging','Net debt down ₹38,000 Cr over 4 quarters — balance sheet de-risking.'],['Green energy optionality','Giga-complex capex could unlock a new growth S-curve by FY28.']].map((p,i)=>`<div class="row gap-3" style="padding:10px 0;${i<3?'border-bottom:1px solid var(--border);':''}"><span style="color:var(--positive);font-weight:700;flex-shrink:0;">✓</span><div><div class="t13 w-600">${p[0]}</div><div class="t12 muted mt-1" style="line-height:1.45;">${p[1]}</div></div></div>`).join('')}
+    <div class="mt-3">${confBar(76)}</div>
+    <div class="row gap-2 mt-3 wrap">${src('Q2 FY26 filing')}${src('Brokerage consensus')}${src('Sector data')}</div>
+  </div></div>
+`};
+
+/* 6 BEAR CASE */
+const bear={id:'bear',name:'Bear Case',icon:'▼',render:()=>head(
+  'Balanced thesis','Bear Case','The strongest evidence-backed argument AGAINST — the risks, the things that have to go right, and what would break the thesis. Equal visual weight to the Bull Case.',
+  'Always paired with Bull Case. Critical for the "honest, no-hype" brand promise — we show the downside as clearly as the upside.'
+)+`
+  <div class="card" style="max-width:720px;border-top:3px solid var(--negative);"><div class="card-h"><span style="color:var(--negative);font-size:16px;">▼</span><h3>Bear case · Reliance Industries</h3><span class="badge b-warn" style="margin-left:auto;">Conviction: Moderate</span></div>
+  <div class="pad">
+    <div class="t14 sec mb-3" style="line-height:1.6;">What would have to go wrong for this to underperform:</div>
+    ${[['Valuation reset','PE 24.2 is above the 5-yr median; a de-rating to 20x implies ~17% downside.'],['Capex drag','Heavy green-energy spend pressures free cash flow before it pays off.'],['Petrochem cyclicality','O2C margins remain exposed to crude swings and global demand.'],['Regulatory risk','Telecom tariff caps or spectrum costs could compress Jio economics.']].map((p,i)=>`<div class="row gap-3" style="padding:10px 0;${i<3?'border-bottom:1px solid var(--border);':''}"><span style="color:var(--negative);font-weight:700;flex-shrink:0;">×</span><div><div class="t13 w-600">${p[0]}</div><div class="t12 muted mt-1" style="line-height:1.45;">${p[1]}</div></div></div>`).join('')}
+    <div class="card pad mt-3" style="background:var(--red-soft);border:none;"><div class="t12 w-600" style="color:var(--negative);">Thesis breaks if:</div><div class="t12 sec mt-1" style="line-height:1.45;">Quality score drops below 80 OR net debt rises 2 consecutive quarters.</div></div>
+    <div class="row gap-2 mt-3 wrap">${src('Q2 FY26 filing')}${src('Valuation models')}</div>
+  </div></div>
+`};
+
+/* 7 RISK ANALYSIS */
+const risk={id:'risk',name:'Risk Analysis',icon:'🛡',render:()=>head(
+  'Risk','Risk Analysis','A plain-English risk profile — volatility, drawdown, debt, concentration, liquidity — each scored and explained. Turns "Risk: 71" into something a beginner can act on.',
+  'On instrument and portfolio surfaces. The Risk factor of any Score links here. Pairs every metric with a "what this means for you" line.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="card-h"><h3>Risk analysis · Reliance Industries</h3><span class="badge b-warn" style="margin-left:auto;">Risk score 71 · Moderate</span></div>
+  <div class="pad">
+    ${[['Volatility','Low','30',72,'var(--positive)','Beta 1.04 — moves roughly with the market.'],['Max drawdown','Moderate','-22%',60,'var(--warn)','Fell 22% in the last correction; recovered in 7 months.'],['Debt','Healthy','D/E 0.42',78,'var(--positive)','Comfortable leverage; improving.'],['Concentration','Watch','O2C 58%',54,'var(--warn)','Over half of EBIT from one segment — single-point risk.'],['Liquidity','Excellent','8.4M/day',92,'var(--positive)','Highly liquid; easy to enter and exit.']].map((r,i)=>`<div style="padding:11px 0;${i<4?'border-bottom:1px solid var(--border);':''}">
+      <div class="row between center mb-2"><div class="row gap-2 center"><span class="t13 w-600">${r[0]}</span><span class="badge ${r[4]==='var(--positive)'?'b-pos':'b-warn'}">${r[1]}</span></div><span class="mono t12 muted">${r[2]}</span></div>
+      <div class="bar mb-2"><div style="width:${r[3]}%;background:${r[4]};"></div></div>
+      <div class="t12 muted" style="line-height:1.4;">${r[5]}</div></div>`).join('')}
+    <div class="mt-3">${confBar(80)}</div>
+  </div></div>
+`};
+
+/* 8 PORTFOLIO INSIGHTS */
+const insights={id:'insights',name:'Portfolio Insights',icon:'▢',group:'Insight',render:()=>head(
+  'Portfolio','Portfolio Insights','AI-generated observations about the user’s actual holdings — concentration, drift, score changes, and watch-items — prioritized by impact, each with a clear, non-prescriptive note.',
+  'On the Portfolio surface and in the monthly health email. Insights describe and flag; they never instruct the user to buy or sell.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="card-h"><span class="badge b-ai">✦ AI</span><h3>Insights · your portfolio</h3><span class="t11 muted" style="margin-left:auto;">5 observations · updated today</span></div>
+  <div class="pad">
+    ${[['var(--negative)','High','Concentration risk','Top 3 holdings are 58% of your portfolio. A single shock to RELIANCE, TCS or HDFCBANK would move your total meaningfully.','Review concentration'],['var(--warn)','Medium','Score slipped','TITAN dropped 70 → 64 (Hold → Caution) on demand softness. It’s 9.7% of your portfolio.','Open TITAN'],['var(--positive)','Info','Momentum building','INFY improved 78 → 82; quality + momentum now aligned.','Open INFY'],['var(--dr-blue)','Info','Sector tilt','You’re 62% Banking + IT. Adding a defensive sector would lower correlation.','See allocation']].map((n,i)=>`<div class="row gap-3" style="padding:12px 0;${i<3?'border-bottom:1px solid var(--border);':''}">
+      <div style="width:8px;height:8px;border-radius:50%;background:${n[0]};margin-top:6px;flex-shrink:0;"></div>
+      <div class="grow"><div class="row gap-2 center mb-2"><span class="t13 w-600">${n[2]}</span><span class="badge ${n[1]==='High'?'b-neg':n[1]==='Medium'?'b-warn':'b-neutral'}">${n[1]} impact</span></div><div class="t12 sec" style="line-height:1.5;">${n[3]}</div><div class="t12 mt-2" style="color:var(--dr-blue);cursor:pointer;">${n[4]} →</div></div>
+    </div>`).join('')}
+    <div class="t10 muted mt-3" style="font-style:italic;">Observations, not advice. You decide what to do with them.</div>
+  </div></div>
+`};
+
+/* 9 WHY THIS STOCK */
+const why={id:'why',name:'Why This Stock',icon:'❓',render:()=>head(
+  'In-context','Why This Stock','A one-tap, glanceable summary that answers "why is this here?" wherever a stock appears — in a recommendation, a screener result, or the dashboard. The fastest path from curiosity to understanding.',
+  'Attached to every stock surfaced by the system. Expands inline (popover) without leaving the current screen. The lightest-weight explainability primitive.'
+)+`
+  <div style="max-width:560px;">
+    <div class="card pad row between center mb-3"><div class="row gap-3"><div class="tk-logo" style="background:#0A1F4A;">R</div><div><div class="t14 w-600">Reliance Industries</div><div class="t11 muted">in "Top-scored this week"</div></div></div><button class="btn btn-ghost btn-sm">Why this? ✦</button></div>
+    <div class="ai-glow pad">
+      <div class="row between center mb-3"><div class="row gap-2 center"><span class="badge b-ai">✦ Why this stock</span></div><span class="badge sb-buy">86 · Strong Buy</span></div>
+      <div class="t14 sec" style="line-height:1.6;">It’s here because it ranks <b style="color:var(--text);">top 8% in Energy</b>. Three things stand out: <b style="color:var(--text);">Quality 91</b> (strong cash flow), <b style="color:var(--text);">Momentum 88</b> (50-DMA crossed above 200-DMA), and a <b style="color:var(--text);">Q2 earnings beat</b>. The one watch-item is rising capex (Risk 71).</div>
+      <div class="row gap-2 mt-3"><span class="chip">Full breakdown →</span><span class="chip">Bull vs Bear →</span></div>
+      <div class="row gap-2 mt-3 wrap">${src('Q2 filing','today')}${src('Score model v2.4')}</div>
+    </div>
+  </div>
+`};
+
+/* 10 RECOMMENDATION HISTORY */
+const history={id:'history',name:'Recommendation History',icon:'⟲',render:()=>head(
+  'Track record','Recommendation History','A transparent log of how a Score and signal evolved over time — and how past signals actually played out. Accountability is a feature, not a liability.',
+  'On instrument pages ("Score history" tab) and in a global "track record" view. Shows hits and misses honestly to build long-term trust.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="card-h"><h3>Score & signal history · Reliance</h3><div class="row gap-1" style="margin-left:auto;"><span class="chip">6M</span><span class="chip on">1Y</span><span class="chip">All</span></div></div>
+  <div class="pad">
+    ${[['12 May 26','85 → 86','Strong Buy','Quality + momentum up','var(--positive)','held'],['08 Feb 26','81 → 85','Buy → Strong Buy','Q3 earnings beat','var(--positive)','+8.2% since'],['14 Nov 25','77 → 81','Buy','Debt reduction','var(--dr-blue)','+5.1% since'],['09 Aug 25','83 → 77','Strong Buy → Buy','Margin compression','var(--warn)','flagged risk early'],['12 May 25','80 → 83','Buy → Strong Buy','Jio ARPU hike','var(--positive)','+14% since']].map((h,i)=>`<div class="row gap-3" style="padding:12px 0;${i<4?'border-bottom:1px solid var(--border);':''}">
+      <div class="mono t11 muted" style="width:70px;flex-shrink:0;">${h[0]}</div>
+      <div style="width:10px;height:10px;border-radius:50%;background:${h[4]};flex-shrink:0;margin-top:3px;"></div>
+      <div class="grow"><div class="row gap-2 center mb-1"><span class="mono t13 w-600">${h[1]}</span><span class="badge b-neutral">${h[2]}</span></div><div class="t12 muted">${h[3]}</div></div>
+      <span class="badge ${h[5].includes('+')||h[5].includes('early')?'b-pos':'b-neutral'}" style="flex-shrink:0;">${h[5]}</span>
+    </div>`).join('')}
+    <div class="card pad mt-3" style="background:var(--bg-alt);border:none;"><div class="row between"><span class="t12 muted">Signal accuracy (12 mo, this stock)</span><span class="mono t13 w-600 pos">4 of 5 directionally correct</span></div></div>
+  </div></div>
+`};
+
+/* 11 SOURCE ATTRIBUTION */
+const sources={id:'sources',name:'Source Attribution',icon:'🔗',group:'Trust',render:()=>head(
+  'Provenance','Source Attribution','Every AI claim names its sources, their freshness, and lets the user inspect them. No black box — the user can always trace a statement back to the data behind it.',
+  'On every AI answer, recommendation, and explanation. Sources are tappable to view the underlying filing, datapoint, or model version.'
+)+`
+  <div class="card" style="max-width:720px;"><div class="card-h"><span class="badge b-ai">✦</span><h3>Sources behind this recommendation</h3></div>
+  <div class="pad">
+    <div class="t13 sec mb-3" style="line-height:1.55;">The "Strong Buy · 86" for Reliance draws on:</div>
+    ${[['Q2 FY26 financial filing','Earnings, debt, cash flow','Today','var(--positive)','primary'],['NSE live price feed','Price, volume, momentum','14:32 IST','var(--positive)','primary'],['5-year financial history','Growth & quality trends','1 day','var(--positive)','primary'],['Sector peer set (142)','Normalization baseline','1 day','var(--positive)','derived'],['News & filings feed','Recent signals','8 min','var(--warn)','context'],['DhanRadar Score model','v2.4 · weights & logic','Versioned','var(--dr-blue)','model']].map((s,i)=>`<div class="row gap-3 center" style="padding:11px 0;${i<5?'border-bottom:1px solid var(--border);':''}">
+      <span style="font-size:13px;color:${s[3]};">●</span>
+      <div class="grow"><div class="t13 w-600">${s[0]}</div><div class="t11 muted">${s[1]}</div></div>
+      <span class="badge b-neutral">${s[4]}</span>
+      <span class="mono t11" style="color:${s[3]};width:64px;text-align:right;">${s[2]}</span>
+      <span class="t12" style="color:var(--dr-blue);cursor:pointer;">view →</span>
+    </div>`).join('')}
+    <div class="t11 muted mt-3" style="line-height:1.45;">⚠ One source (news feed) is 8 min stale — confidence adjusted to 78% accordingly.</div>
+  </div></div>
+`};
+
+/* 12 AI TRANSPARENCY */
+const transparency={id:'transparency',name:'AI Transparency',icon:'⚖',render:()=>head(
+  'Governance','AI Transparency','A standing disclosure surface — what the AI does, what it never does, how the model is versioned, and the user’s controls. The trust contract, made explicit.',
+  'A dedicated page linked from every AI surface and the footer. Also drives the inline "not advice" disclaimers throughout the product.'
+)+`
+  <div class="g2" style="max-width:760px;align-items:start;">
+    <div class="card pad"><div class="t14 w-700 mb-3" style="color:var(--positive);">✓ What the AI does</div>
+      ${['Explains scores and metrics in plain English','Summarizes filings and surfaces signals','Compares instruments on data','Flags risks and observations on your portfolio','Always cites its sources and confidence'].map(t=>`<div class="row gap-2" style="padding:7px 0;"><span class="pos w-700">✓</span><span class="t13 sec">${t}</span></div>`).join('')}
+    </div>
+    <div class="card pad"><div class="t14 w-700 mb-3" style="color:var(--negative);">✗ What it never does</div>
+      ${['Tell you to buy or sell','Promise or predict returns','Touch a Score for monetization','Hide low confidence or stale data','Train on your data without consent'].map(t=>`<div class="row gap-2" style="padding:7px 0;"><span class="neg w-700">×</span><span class="t13 sec">${t}</span></div>`).join('')}
+    </div>
+  </div>
+  <h2 class="h2">Model & data</h2>
+  <div class="card" style="max-width:760px;"><div class="pad">
+    ${[['Score model version','v2.4 · published 12 May 2026','Versioned & logged'],['Recompute cadence','Daily, after market close',''],['Grounding','Retrieval over DhanRadar data only — no open web',''],['Eval','Groundedness 0.94 · checked every release',''],['Human oversight','AI Ops reviews flagged outputs & feedback','']].map((r,i)=>`<div class="row between center" style="padding:11px 0;${i<4?'border-bottom:1px solid var(--border);':''}"><div><div class="t13 w-600">${r[0]}</div>${r[2]?`<div class="t11 muted">${r[2]}</div>`:''}</div><div class="mono t12 sec right">${r[1]}</div></div>`).join('')}
+  </div></div>
+  <h2 class="h2">Your controls</h2>
+  <div class="card pad" style="max-width:760px;">
+    ${[['Use my portfolio for insights',true],['Allow anonymized feedback to improve AI',true],['Show confidence on every answer',true]].map(c=>`<div class="row between center" style="padding:10px 0;border-bottom:1px solid var(--border);"><span class="t13">${c[0]}</span><span style="width:40px;height:22px;border-radius:11px;background:${c[1]?'var(--dr-blue)':'var(--border-strong)'};position:relative;"><span style="position:absolute;${c[1]?'right':'left'}:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;"></span></span></div>`).join('')}
+    <button class="btn btn-ghost btn-sm mt-3">Download my AI interaction history</button>
+  </div>
+  <div class="card pad mt-4" style="max-width:760px;background:var(--bg-alt);border:none;"><div class="t12 muted" style="line-height:1.55;">DhanRadar is a research analytics platform, not an investment advisor. AI outputs are informational, may be incomplete, and must not be taken as advice. Markets carry risk; past performance doesn’t predict future results.</div></div>
+`};
+
+window.AI_PATTERNS=[aisearch,assistant,why,explain,confidence,bull,bear,risk,insights,history,sources,transparency];
+})();
+
+</script>
+<script>
+const P=window.AI_PATTERNS;
+$('#nav').innerHTML=P.map((p,i)=>(p.group?`<div class="nl">${p.group}</div>`:'')+`<button class="ni${i===0?' on':''}" data-t="${p.id}"><span class="ic">${p.icon}</span>${p.name}</button>`).join('');
+$('#main').innerHTML=P.map((p,i)=>`<section class="sec-screen${i===0?' on':''}" id="ai-${p.id}">${p.render()}</section>`).join('');
+function go(t){$$('.ni').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('.sec-screen').forEach(s=>s.classList.toggle('on',s.id==='ai-'+t));window.scrollTo({top:0});try{history.replaceState(null,'','#'+t);}catch(e){}}
+$$('.ni').forEach(b=>b.onclick=()=>go(b.dataset.t));
+const h=(location.hash||'').slice(1);if(P.find(p=>p.id===h))go(h);
+</script>
+</body>
+</html>

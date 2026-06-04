@@ -1,0 +1,135 @@
+openapi: 3.1.0
+info:
+  title: DhanRadar API
+  version: "1.0.0"
+  description: Research analytics platform. Not investment advice.
+servers:
+  - url: https://api.dhanradar.com/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Problem:
+      type: object
+      properties: { type: {type: string}, title: {type: string}, status: {type: integer}, detail: {type: string} }
+    Signal:
+      type: string
+      enum: [strong_buy, buy, hold, caution, avoid]
+    Factors:
+      type: object
+      properties:
+        valuation: {type: integer}
+        growth: {type: integer}
+        quality: {type: integer}
+        momentum: {type: integer}
+        risk: {type: integer}
+    Score:
+      type: object
+      required: [score, signal, factors, model_version, as_of]
+      properties:
+        score: {type: integer, minimum: 0, maximum: 100}
+        signal: {$ref: '#/components/schemas/Signal'}
+        factors: {$ref: '#/components/schemas/Factors'}
+        fair_value: {type: number, nullable: true}
+        confidence: {type: integer}
+        model_version: {type: string}
+        as_of: {type: string, format: date}
+    Instrument:
+      type: object
+      required: [id, symbol, type, name]
+      properties:
+        id: {type: string, format: uuid}
+        symbol: {type: string}
+        exchange: {type: string}
+        type: {type: string, enum: [stock, fund, etf]}
+        name: {type: string}
+        sector: {type: string}
+        price: {type: number}
+        change_pct: {type: number}
+        score: {$ref: '#/components/schemas/Score'}
+    Holding:
+      type: object
+      properties:
+        instrument: {$ref: '#/components/schemas/Instrument'}
+        qty: {type: number}
+        avg_price: {type: number}
+        value: {type: number}
+        pnl_pct: {type: number}
+    AlertRule:
+      type: object
+      required: [instrument_id, type, operator, threshold]
+      properties:
+        id: {type: string}
+        instrument_id: {type: string}
+        type: {type: string, enum: [price, score, risk, earnings]}
+        operator: {type: string, enum: [gt, lt, eq, crosses]}
+        threshold: {type: number}
+        active: {type: boolean}
+    AIAnswer:
+      type: object
+      properties:
+        answer: {type: string}
+        confidence: {type: integer}
+        sources: {type: array, items: {type: object, properties: {name: {type: string}, freshness: {type: string}}}}
+        model_version: {type: string}
+paths:
+  /auth/signup:
+    post:
+      security: []
+      summary: Create account (sends OTP)
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email,phone,password], properties: {email: {type: string}, phone: {type: string}, password: {type: string}, full_name: {type: string}, marketing_opt_in: {type: boolean, default: false}}}}}}
+      responses: {'202': {description: OTP sent}, '409': {description: exists, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}}
+  /auth/otp/verify:
+    post: {security: [], summary: Verify OTP, responses: {'200': {description: tokens}}}
+  /auth/login:
+    post: {security: [], summary: Login, responses: {'200': {description: tokens}, '401': {description: invalid}}}
+  /auth/token/refresh:
+    post: {summary: Rotate refresh token, responses: {'200': {description: tokens}}}
+  /instruments/search:
+    get:
+      security: []
+      summary: Autosuggest
+      parameters: [{name: q, in: query, required: true, schema: {type: string}}, {name: scope, in: query, schema: {type: string, enum: [all, stocks, funds, etfs]}}]
+      responses: {'200': {description: results, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Instrument'}}}}}}
+  /stocks/{symbol}:
+    get:
+      security: []
+      summary: Stock detail (score ungated; fair_value gated to Pro)
+      parameters: [{name: symbol, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Instrument'}}}}, '404': {description: not found}}
+  /funds/{symbol}: {get: {security: [], summary: Fund detail, responses: {'200': {description: ok}}}}
+  /etfs/{symbol}: {get: {security: [], summary: ETF detail, responses: {'200': {description: ok}}}}
+  /instruments/{symbol}/score: {get: {security: [], summary: Score + factors, responses: {'200': {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/Score'}}}}}}}
+  /instruments/{symbol}/score/history: {get: {summary: Score track record, responses: {'200': {description: ok}}}}
+  /instruments/{symbol}/fair-value: {get: {summary: Multi-model fair value (Pro), responses: {'200': {description: ok}, '402': {description: upgrade required}}}}
+  /recommendations:
+    get:
+      summary: Scored recommendations
+      parameters: [{name: signal, in: query, schema: {$ref: '#/components/schemas/Signal'}}, {name: sector, in: query, schema: {type: string}}, {name: cursor, in: query, schema: {type: string}}]
+      responses: {'200': {description: ok}}
+  /screener/stocks:
+    get: {summary: Screener (ES-backed), responses: {'200': {description: ok}}}
+  /portfolio: {get: {summary: Portfolio overview + score, responses: {'200': {description: ok}}}}
+  /portfolio/holdings:
+    get: {summary: Holdings, responses: {'200': {description: ok, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Holding'}}}}}}}
+    post: {summary: Add holding (Idempotency-Key), responses: {'201': {description: created}}}
+  /portfolio/analytics: {get: {summary: Risk/attribution (Pro), responses: {'200': {description: ok}, '402': {description: upgrade}}}}
+  /watchlists:
+    get: {summary: Lists, responses: {'200': {description: ok}}}
+    post: {summary: Create list, responses: {'201': {description: created}}}
+  /alerts:
+    get: {summary: Alert rules + events, responses: {'200': {description: ok}}}
+    post: {summary: Create alert (Idempotency-Key), requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/AlertRule'}}}}, responses: {'201': {description: created}}}
+  /ai/search:
+    post: {summary: Grounded AI answer (quota-gated), responses: {'200': {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AIAnswer'}}}}, '429': {description: quota}}}
+  /ai/assistant:
+    post: {summary: Assistant (SSE stream), responses: {'200': {description: text/event-stream}}}
+  /ai/explain/{symbol}:
+    get: {summary: Explainability for a score, responses: {'200': {description: ok, content: {application/json: {schema: {$ref: '#/components/schemas/AIAnswer'}}}}}}
+  /news:
+    get: {summary: News feed, parameters: [{name: tag, in: query, schema: {type: string}}, {name: scope, in: query, schema: {type: string}}], responses: {'200': {description: ok}}}
+  /billing/plans: {get: {security: [], summary: Plans, responses: {'200': {description: ok}}}}
+  /billing/checkout: {post: {summary: Create Razorpay order (Idempotency-Key), responses: {'200': {description: order}}}}
+  /billing/webhook: {post: {security: [], summary: Razorpay webhook (HMAC verified), responses: {'200': {description: ok}}}}
