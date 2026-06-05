@@ -15,6 +15,31 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-05 — DPDP gates fail-open: RequireConsent was a pass-through stub; deletion_requested_at unenforced (B3/B4)
+
+- **Symptom:** `RequireConsent` (the per-purpose DPDP consent gate) always returned
+  `None` — so the first data-processing route to adopt `Depends(RequireConsent("…"))`
+  would have silently processed data for users who never consented (non-negotiable #10).
+  Separately, `auth.users.deletion_requested_at` existed but nothing checked it, so a
+  user who requested erasure could still log in.
+- **Root cause:** both were deferred to "the later Consent module" and left as no-ops
+  rather than fail-closed primitives — the same fail-open-by-default trap as the ESLint
+  matrix (B10): a gate that defaults to *allow* is worse than no gate, because it reads
+  as enforced.
+- **Fix:** `RequireConsent` now validates the purpose against the canonical taxonomy
+  (`mf_analytics|ai_insights|marketing|portfolio_sync|behavioral_nudges`) at construction
+  and, on call, reads the grant FRESH from `users.dpdp_consents` (no cache, so a revoke is
+  honoured immediately) — missing/false/anonymous → 403 `consent_required`
+  (`backend/dhanradar/deps.py`). `authenticate_user` denies login for a deletion-pending
+  account (403 `account_deletion_pending`, checked after password verify so it is not an
+  enumeration oracle; `backend/dhanradar/auth/service.py`).
+- **Prevention:** added `backend/tests/unit/test_consent.py` (11-row `_consent_granted`
+  truth table + anonymous/granted/denied gate cases + the two login cases) — a future
+  regression to fail-open trips the suite. Default-deny is the rule for every new gate.
+- **Phase/area:** Phase 2 / Auth + DPDP enforcement primitives (B3/B4). The full Consent
+  module (audit log, grant/revoke endpoints, CMP, erasure, cache+flush) remains a later
+  slice; only the gate primitives were hardened here.
+
 ### 2026-06-05 — Feature import-isolation silently fail-open for new features; apiClient base-path strippable; ScoreRing triple a11y announce (B10)
 
 - **Symptom:** post-merge Architect/UI review of the Stage-2 frontend found (a) `.eslintrc.json`

@@ -46,6 +46,14 @@ lives in the linked docs.
 
 ## In flight (this session)
 
+- **Blocker sweep on branch `hardening/b13-b10-ci-fe`** (this session): B13, B10, B9, B3, B4.
+  - **B9** (`c3b601c`) — `Retry-After: 60` on the lock-held checkout 409; 502-gateway no-double-charge
+    test + valid-event test through the re-mounted `/billing/webhook`. Plans-seed Compliance pass is
+    data-only (no seed yet). Tier-B (payments) — adversarial sign-off owed before merge.
+  - **B3/B4** — `RequireConsent` made fail-closed (purpose-validated; fresh `users.dpdp_consents`
+    read; 403 `consent_required`); `authenticate_user` denies login for a `deletion_requested_at`
+    account (403 `account_deletion_pending`). Unit-tested (`tests/unit/test_consent.py`, 17 cases).
+    Tier-B (DPDP/auth) — adversarial sign-off owed before merge. Full Consent/erasure module deferred.
 - **B13 + B10 hardening: DONE on branch `hardening/b13-b10-ci-fe`** (this session). B13 — ci_guards
   advisory scan now walks all non-code label assets (not 3 hardcoded files), skip-list tightened,
   scoring skip narrowed to `ranking_configs*`, self-test added (`backend/tests/unit/test_ci_guards.py`).
@@ -59,16 +67,21 @@ lives in the linked docs.
 ## Next action
 
 - **Run the pre-merge governance fan-out** on `hardening/b13-b10-ci-fe` (Architect + UI for B10;
-  Compliance for the B13 compliance-net change), then open the PR with explicit push approval (PC5).
+  Security + Compliance for B9 payments and B3/B4 DPDP; Compliance for the B13 compliance-net
+  change), then open the PR with explicit push approval (PC5). This branch now carries B13, B10, B9,
+  B3, B4 — all Tier-B/compliance-adjacent, so the adversarial sign-off is owed before merge.
 - **Pre-billing** remains code-ADDRESSED — only **data-only seeding** (real Razorpay plan ids +
-  `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists.
-- Remaining follow-ups: **B9** (billing 502/webhook tests), **B11** (scoring §2.5/§6.1 reconciliation).
+  `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists. B9 plans-seed copy Compliance pass
+  is also data-only (no seed exists yet).
+- Remaining follow-ups: **B11** (scoring §2.5/§6.1 reconciliation — architecture-owner decision),
+  **B6** (non-blocking until prod activation).
 - Then **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open: B3, B4, B6 (non-blocking), B9, B11, B14. Resolved: B5 (CI), **B10**, **B13**.
-Addressed (code; data-only/CI remains): B1, B2, B7, B8, B12.
+See `BLOCKERS.md`. Open: B6 (non-blocking), B11, B14. Resolved: B5 (CI), **B10**, **B13**.
+Addressed (code/tests; data-only or later-module work remains): B1, **B2**, **B3**, **B4**, B7, B8,
+**B9**, B12.
 
 ## Agent-utilization & routing-telemetry footer
 
@@ -81,4 +94,7 @@ Addressed (code; data-only/CI remains): B1, B2, B7, B8, B12.
   still owed before PR to `main`.
 - Per-delegation (telemetry): B13 ci_guards hardening · Opus · reworked N | B10 eslint-boundaries ·
   Opus · reworked Y (v6 object-selector schema rejected → reverted to working array selector + static
-  message) | B10 apiClient/ScoreRing · Opus · reworked N.
+  message) | B10 apiClient/ScoreRing · Opus · reworked N | B9 billing Retry-After + tests · Opus ·
+  reworked N | B3/B4 DPDP gate primitives · Opus · reworked N.
+- Verification note: unit tests run locally (66 backend unit incl. 17 new B3/B4 + 3 ci_guards);
+  billing/auth INTEGRATION tests compile+collect only — no local Postgres/Docker (B1), they run in CI.

@@ -167,41 +167,91 @@ require_tier = RequireTier
 
 
 # ---------------------------------------------------------------------------
-# RequireConsent  — STUB (Consent module is a later session)
+# RequireConsent  — fail-closed per-purpose DPDP consent gate (B3)
 # ---------------------------------------------------------------------------
+
+# Canonical DPDP purpose taxonomy (DhanRadar_Architecture_Final.md §Compliance).
+# A purpose outside this set is a programming error, caught at construction time.
+_CONSENT_PURPOSES: frozenset[str] = frozenset(
+    {"mf_analytics", "ai_insights", "marketing", "portfolio_sync", "behavioral_nudges"}
+)
+
+
+def _consent_granted(consents: object, purpose: str) -> bool:
+    """Fail-closed read of the user's `dpdp_consents` JSONB for one purpose.
+
+    Granted ONLY if the stored value is exactly ``True`` or a mapping with
+    ``granted is True``. Anything else (missing, false, malformed, null) →
+    NOT granted. The Consent module owns the write format; this reader stays
+    forward-compatible with both `{purpose: true}` and
+    `{purpose: {"granted": true, ...}}` while never failing open.
+    """
+    if not isinstance(consents, dict):
+        return False
+    value = consents.get(purpose)
+    if value is True:
+        return True
+    return isinstance(value, dict) and value.get("granted") is True
+
 
 class RequireConsent:
     """
-    Dependency class that enforces the user has given consent for a purpose.
+    Dependency class enforcing the user has granted consent for a purpose.
 
-    STUB — the Consent module is implemented in a later phase.
-    When implemented, this will check user.consented_purposes against
-    self.purpose and raise HTTP 403 with code CONSENT_REQUIRED if consent
-    has not been recorded.
+    Fail-closed (B3): no recorded grant → HTTP 403 ``consent_required``. The
+    grant state is read FRESH from ``auth.users.dpdp_consents`` on every call
+    (no cache) so a revoke is honoured immediately — a cache may be added later
+    only together with its flush-on-revoke writer in the Consent module, never
+    before (a stale cache here would fail OPEN).
+
+    The full Consent module (append-only ``consent_audit_log``, grant/revoke
+    endpoints, CMP banner, erasure) is a later slice; THIS is only the gate
+    primitive, hardened so the first route that adopts it cannot fail open.
 
     Usage::
 
         @router.post("/ai-analysis")
         async def analyse(
-            _: None = Depends(RequireConsent("ai_processing")),
+            _: None = Depends(RequireConsent("ai_insights")),
         ): ...
     """
 
     def __init__(self, purpose: str) -> None:
+        if purpose not in _CONSENT_PURPOSES:
+            raise ValueError(
+                f"Unknown consent purpose '{purpose}'. "
+                f"Valid values: {sorted(_CONSENT_PURPOSES)}"
+            )
         self.purpose = purpose
 
     async def __call__(
         self,
         user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+        db: Annotated[AsyncSession, Depends(get_db)],
     ) -> None:
-        """
-        Phase stub: always passes through.
-        Future implementation: check consent schema and raise HTTP 403
-        with code CONSENT_REQUIRED if consent has not been recorded for
-        self.purpose (architecture §3 — consent failure is 403 CONSENT_REQUIRED).
-        """
-        # TODO Phase: implement consent check → HTTP 403 CONSENT_REQUIRED.
-        return None
+        # Anonymous principals cannot hold consent — deny (fail-closed). A route
+        # that also needs auth should additionally gate with RequireTier so the
+        # client gets a 401 first; on its own this still refuses.
+        if user.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "consent_required", "purpose": self.purpose},
+            )
+
+        from uuid import UUID as _UUID
+
+        from sqlalchemy import select as _select
+
+        from dhanradar.models.auth import User
+
+        consents = await db.scalar(
+            _select(User.dpdp_consents).where(User.id == _UUID(user.user_id))
+        )
+        if not _consent_granted(consents, self.purpose):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "consent_required", "purpose": self.purpose},
+            )
 
 
 # Convenience alias matching the contract name in the spec
