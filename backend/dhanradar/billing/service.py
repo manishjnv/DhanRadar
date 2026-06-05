@@ -124,9 +124,15 @@ async def create_checkout(
     # 3. Concurrency guard — only one in-flight creation per idem key.
     acquired = await redis.set(lock_key, "1", nx=True, ex=_LOCK_TTL)
     if not acquired:
+        # A lock is held: either a genuinely concurrent request, or a prior
+        # attempt that failed at the gateway (the lock is held for _LOCK_TTL so a
+        # transient failure isn't immediately retried into a double-charge, B9).
+        # This is self-resolving, so advertise Retry-After = the lock TTL — the
+        # RFC7807 handler forwards exc.headers verbatim.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="checkout_in_progress",
+            headers={"Retry-After": str(_LOCK_TTL)},
         )
 
     # 4. Create the Razorpay subscription. user_id is pinned in notes from the
