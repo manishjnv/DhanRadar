@@ -15,6 +15,7 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dhanradar.auth.router import router as auth_router
+from dhanradar.billing.router import router as billing_router
 from dhanradar.db import engine
 from dhanradar.errors import (
     http_exception_handler,
@@ -71,4 +72,5 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 # ---------------------------------------------------------------------------
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(subscriptions_router, prefix="/api/v1")
+app.include_router(subscriptions_router, prefix="/api/v1")  # legacy /subscriptions/webhook alias
+app.include_router(billing_router, prefix="/api/v1")
