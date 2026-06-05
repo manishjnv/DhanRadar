@@ -1,0 +1,582 @@
+openapi: 3.1.0
+
+# =============================================================================
+# DhanRadar — Canonical API contract (Stage 2, Step 1)
+#
+# Authority: docs/project-state/CANONICAL_OPENAPI_ALIGNMENT.md
+# Source of truth for: base path, auth transport, error shape, label vocabulary.
+#
+# Status convention (x-status on each operation):
+#   LIVE — implemented in the current backend; success schema mirrors real code.
+#   SPEC — architecture-defined contract; built in its architecture phase.
+#
+# Reconciliation notes:
+#   - Success schemas for LIVE endpoints match the running FastAPI exactly so
+#     `npm run gen:api` produces a correct client TODAY.
+#   - The ERROR shape (Problem, §components) is the CANONICAL TARGET. The live
+#     runtime currently returns FastAPI `{"detail": ...}` for auth and
+#     `{"error","upgrade_url"}` for the tier gate; Stage 2 Step 5 (RFC7807
+#     handler) makes the runtime conform to this Problem shape. Documented as
+#     target, not as current-runtime fiction.
+#   - Numeric score / factor weights are NEVER returned on public/ungated
+#     responses (architecture "no numeric in DOM"); see Score / ScorePublic.
+#   - Labels are non-advisory only (Label enum). Advisory verbs are rejected.
+# =============================================================================
+
+info:
+  title: DhanRadar API
+  version: "1.0.0"
+  description: >
+    Educational financial-intelligence platform for Indian retail investors.
+    Research-oriented and signal-driven; NOT advisory, NOT a buy/sell platform.
+    Every score surfaces a non-advisory label + confidence band; numeric internals
+    are gated. All errors are RFC7807 problem+json.
+  contact:
+    name: DhanRadar
+    url: https://dhanradar.com
+
+servers:
+  - url: https://dhanradar.com/api/v1
+    description: Production (via Cloudflare Tunnel; ingress routes ^/api/.*)
+  - url: http://localhost:8000/api/v1
+    description: Local dev (docker-compose.override)
+
+# Cookie auth is the default for the whole API. Public endpoints opt out with
+# `security: []`. There is NO bearer/Authorization-header scheme (non-neg #4).
+security:
+  - cookieAuth: []
+
+tags:
+  - name: auth
+  - name: health
+  - name: billing
+  - name: instruments
+  - name: scores
+  - name: portfolio
+  - name: watchlist
+  - name: alerts
+  - name: ai
+  - name: news
+  - name: market
+  - name: track-record
+  - name: consent
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-access
+      description: >
+        RS256 JWT access token (15 min) in an HttpOnly+Secure __Host- cookie.
+        Refresh is a separate HttpOnly cookie (__Host-refresh, 7 d) rotated via
+        POST /auth/refresh. JS never reads token values. Clients send
+        credentials: 'include'; no Authorization header.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: Required on all mutating + payment endpoints; server dedupes by key.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+
+  schemas:
+
+    # ---- RFC7807 canonical error (target shape) ----------------------------
+    Problem:
+      type: object
+      required: [type, title, status, request_id]
+      properties:
+        type:    { type: string, format: uri, example: "https://dhanradar.com/errors/upgrade_required" }
+        title:   { type: string, example: "Upgrade required" }
+        status:  { type: integer, example: 402 }
+        detail:  { type: string, example: "This feature requires the Pro tier." }
+        instance: { type: string, example: "/api/v1/instruments/INFY/fair-value" }
+        request_id: { type: string, format: uuid }
+      description: >
+        Canonical error type slugs:
+        validation_error(400) · unauthorized(401) · invalid_credentials(401) ·
+        upgrade_required(402) · consent_required(403) · forbidden(403) ·
+        not_found(404) · conflict(409) · unprocessable(422) · rate_limited(429) ·
+        invalid_signature(400) · internal(500) · upstream_unavailable(502/503).
+
+    # ---- Canonical enums ---------------------------------------------------
+    Label:
+      type: string
+      description: Non-advisory educational label (architecture §S2.2). No buy/sell verbs.
+      enum: [in_form, on_track, off_track, out_of_form, insufficient_data]
+    ConfidenceBand:
+      type: string
+      description: Confidence band only (numeric % suppressed until calibration gate).
+      enum: [high, medium, low]
+    InstrumentType:
+      type: string
+      enum: [stock, fund, etf]
+    Tier:
+      type: string
+      enum: [anonymous, free, pro, pro_plus, founder_lifetime]
+    FactorAxis:
+      type: string
+      description: Five-axis DhanRadar Score (FINAL_SCORING_SPEC). Trend holds Growth sub-factors.
+      enum: [quality, valuation, momentum, risk, trend]
+    AlertType:
+      type: string
+      enum: [price, score, risk, earnings]
+    AlertOperator:
+      type: string
+      enum: [gt, lt, eq, crosses]
+
+    # ---- Auth (LIVE — mirrors backend/dhanradar/auth/schemas.py) -----------
+    SignupRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 10, maxLength: 128 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 1, maxLength: 128 }
+    TOTPVerifyRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 8, pattern: '^\d{6,8}$' }
+    UserResponse:
+      type: object
+      required: [id, email, tier, totp_verified]
+      properties:
+        id:    { type: string, format: uuid }
+        email: { type: string }
+        tier:  { $ref: '#/components/schemas/Tier' }
+        totp_verified: { type: boolean }
+        risk_profile:  { type: [string, "null"], enum: [conservative, moderate, aggressive, null] }
+        dpdp_consent_version: { type: [string, "null"] }
+    MessageUser:
+      type: object
+      required: [message, user]
+      properties:
+        message: { type: string }
+        user:    { $ref: '#/components/schemas/UserResponse' }
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    TOTPSetupResponse:
+      type: object
+      required: [provisioning_uri, secret]
+      properties:
+        provisioning_uri: { type: string }
+        secret: { type: string }
+
+    # ---- Health (LIVE) -----------------------------------------------------
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        db:     { type: string, example: ok }
+        redis:  { type: string, example: ok }
+
+    # ---- Instruments & scores ---------------------------------------------
+    Instrument:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        symbol:     { type: string }
+        exchange:   { type: string }
+        type:       { $ref: '#/components/schemas/InstrumentType' }
+        name:       { type: string }
+        sector:     { type: string }
+        price:      { type: [number, "null"] }
+        change_pct: { type: [number, "null"] }
+        label:      { $ref: '#/components/schemas/Label' }
+        confidence_band: { $ref: '#/components/schemas/ConfidenceBand' }
+    ScorePublic:
+      type: object
+      description: Ungated score view. NO numeric score / factors / fair_value.
+      required: [label, confidence_band, model_version, as_of]
+      properties:
+        label:           { $ref: '#/components/schemas/Label' }
+        confidence_band: { $ref: '#/components/schemas/ConfidenceBand' }
+        valid_until:     { type: [string, "null"], format: date-time }
+        model_version:   { type: string }
+        as_of:           { type: string, format: date }
+        contributing_signals: { type: array, items: { type: string } }
+        contradicting_signals: { type: array, items: { type: string } }
+    Score:
+      type: object
+      description: >
+        Gated score view (numeric internals). Served only to authorized tiers;
+        factor WEIGHTS are never exposed even here.
+      allOf:
+        - $ref: '#/components/schemas/ScorePublic'
+        - type: object
+          properties:
+            score:   { type: integer, minimum: 0, maximum: 100 }
+            factors:
+              type: object
+              properties:
+                quality:   { type: integer, minimum: 0, maximum: 100 }
+                valuation: { type: integer, minimum: 0, maximum: 100 }
+                momentum:  { type: integer, minimum: 0, maximum: 100 }
+                risk:      { type: integer, minimum: 0, maximum: 100 }
+                trend:     { type: integer, minimum: 0, maximum: 100 }
+            fair_value: { type: [number, "null"] }
+            confidence: { type: [integer, "null"], minimum: 0, maximum: 100,
+                          description: "Numeric % — null until calibration gate opens." }
+
+    # ---- Billing -----------------------------------------------------------
+    Plan:
+      type: object
+      properties:
+        id:        { type: string }
+        name:      { type: string }
+        price_inr: { type: integer }
+        interval:  { type: string, enum: [month, year, lifetime] }
+        features:  { type: array, items: { type: string } }
+    CheckoutRequest:
+      type: object
+      required: [plan_id]
+      properties:
+        plan_id: { type: string }
+    CheckoutResponse:
+      type: object
+      properties:
+        order_id: { type: string }
+        amount_inr: { type: integer }
+        razorpay_key_id: { type: string }
+
+    # ---- Portfolio / watchlist / alerts -----------------------------------
+    Holding:
+      type: object
+      properties:
+        instrument: { $ref: '#/components/schemas/Instrument' }
+        qty:        { type: number }
+        avg_price:  { type: number }
+        value:      { type: number }
+        pnl_pct:    { type: number }
+    AlertRule:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        instrument_id: { type: string, format: uuid }
+        type:          { $ref: '#/components/schemas/AlertType' }
+        operator:      { $ref: '#/components/schemas/AlertOperator' }
+        threshold:     { type: number }
+        active:        { type: boolean }
+    AlertCreateRequest:
+      type: object
+      required: [instrument_id, type, operator, threshold]
+      properties:
+        instrument_id: { type: string, format: uuid }
+        type:          { $ref: '#/components/schemas/AlertType' }
+        operator:      { $ref: '#/components/schemas/AlertOperator' }
+        threshold:     { type: number }
+
+    # ---- AI ----------------------------------------------------------------
+    AISearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string }
+    AIAnswer:
+      type: object
+      description: Every AI output carries reasoning, confidence band, sources, NOT_ADVICE.
+      properties:
+        answer:     { type: string }
+        reasoning:  { type: string }
+        confidence_band: { $ref: '#/components/schemas/ConfidenceBand' }
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              name:      { type: string }
+              freshness: { type: string }
+        model_version: { type: string }
+        disclaimer:    { type: string, example: "NOT_ADVICE: educational information only." }
+
+  responses:
+    Problem400: { description: Bad request, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem401: { description: Not authenticated, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem402: { description: Upgrade required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem403: { description: Forbidden / consent required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem404: { description: Not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem409: { description: Conflict, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Problem429: { description: Rate limited, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+# =============================================================================
+# PATHS
+# =============================================================================
+paths:
+
+  # ---- Health (LIVE) -----------------------------------------------------
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      x-status: LIVE
+      security: []
+      summary: Liveness + readiness probe
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/HealthResponse' } } } }
+        "503": { description: Degraded, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  # ---- Auth (LIVE) -------------------------------------------------------
+  /auth/signup:
+    post:
+      tags: [auth]
+      operationId: authSignup
+      x-status: LIVE
+      security: []
+      summary: Register a free-tier account (password; sets cookies). OTP-first rejected (D2).
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SignupRequest' } } } }
+      responses:
+        "201": { description: Account created (Set-Cookie __Host-access/__Host-refresh), content: { application/json: { schema: { $ref: '#/components/schemas/MessageUser' } } } }
+        "409": { $ref: '#/components/responses/Problem409' }
+        "429": { $ref: '#/components/responses/Problem429' }
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: authLogin
+      x-status: LIVE
+      security: []
+      summary: Authenticate (generic 401 on any failure; no enumeration)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } } }
+      responses:
+        "200": { description: Logged in (Set-Cookie), content: { application/json: { schema: { $ref: '#/components/schemas/MessageUser' } } } }
+        "401": { $ref: '#/components/responses/Problem401' }
+        "429": { $ref: '#/components/responses/Problem429' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      x-status: LIVE
+      summary: Clear cookies, revoke refresh + access jti
+      responses:
+        "200": { description: Logged out, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: authRefresh
+      x-status: LIVE
+      security: []
+      summary: Silent refresh — reads __Host-refresh cookie, rotates (reuse detection). No body.
+      responses:
+        "200": { description: Tokens rotated (Set-Cookie), content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+        "401": { $ref: '#/components/responses/Problem401' }
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: authMe
+      x-status: LIVE
+      summary: Current authenticated user
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, required: [user], properties: { user: { $ref: '#/components/schemas/UserResponse' } } } } } }
+        "401": { $ref: '#/components/responses/Problem401' }
+  /auth/totp/setup:
+    post:
+      tags: [auth]
+      operationId: authTotpSetup
+      x-status: LIVE
+      summary: Generate TOTP secret + provisioning URI
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TOTPSetupResponse' } } } }
+        "401": { $ref: '#/components/responses/Problem401' }
+  /auth/totp/verify:
+    post:
+      tags: [auth]
+      operationId: authTotpVerify
+      x-status: LIVE
+      summary: Verify TOTP code and activate 2FA
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TOTPVerifyRequest' } } } }
+      responses:
+        "200": { description: Verified, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+        "401": { $ref: '#/components/responses/Problem401' }
+
+  # ---- Billing -----------------------------------------------------------
+  /billing/plans:
+    get:
+      tags: [billing]
+      operationId: billingPlans
+      x-status: SPEC
+      security: []
+      summary: List subscription plans (from plans catalog, D4)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Plan' } } } } }
+  /billing/checkout:
+    post:
+      tags: [billing]
+      operationId: billingCheckout
+      x-status: SPEC
+      summary: Create a Razorpay order
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutRequest' } } } }
+      responses:
+        "200": { description: Order created, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutResponse' } } } }
+        "402": { $ref: '#/components/responses/Problem402' }
+  /billing/webhook:
+    post:
+      tags: [billing]
+      operationId: billingWebhook
+      x-status: LIVE
+      security: []
+      summary: >
+        Razorpay webhook. LIVE handler currently mounted at
+        /subscriptions/webhook; Step 7 re-mounts here (verify-before-parse +
+        event dedup preserved). X-Razorpay-Signature verified on raw bytes.
+      responses:
+        "200": { description: Acknowledged (also for deduped replays) }
+        "400": { $ref: '#/components/responses/Problem400' }
+
+  # ---- Instruments & scores (SPEC; public reads, numerics gated) ---------
+  /instruments/search:
+    get:
+      tags: [instruments]
+      operationId: instrumentsSearch
+      x-status: SPEC
+      security: []
+      summary: Autosuggest (Postgres FTS + pg_trgm; NOT Elasticsearch, non-neg #3)
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [all, stocks, funds, etfs] } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Instrument' } } } } }
+  /stocks/{symbol}:
+    get: { tags: [instruments], operationId: getStock, x-status: SPEC, security: [], summary: Stock detail (label+band public; numerics gated), parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Instrument' } } } }, "404": { $ref: '#/components/responses/Problem404' } } }
+  /funds/{isin}:
+    get: { tags: [instruments], operationId: getFund, x-status: SPEC, security: [], summary: Fund detail, parameters: [ { name: isin, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Instrument' } } } }, "404": { $ref: '#/components/responses/Problem404' } } }
+  /etfs/{isin}:
+    get: { tags: [instruments], operationId: getEtf, x-status: SPEC, security: [], summary: ETF detail, parameters: [ { name: isin, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Instrument' } } } }, "404": { $ref: '#/components/responses/Problem404' } } }
+  /instruments/{symbol}/score:
+    get:
+      tags: [scores]
+      operationId: getScore
+      x-status: SPEC
+      security: []
+      summary: Score — returns ScorePublic (label+band) when ungated; Score (numerics) when tier-gated
+      parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { oneOf: [ { $ref: '#/components/schemas/ScorePublic' }, { $ref: '#/components/schemas/Score' } ] } } } }
+        "404": { $ref: '#/components/responses/Problem404' }
+  /instruments/{symbol}/fair-value:
+    get:
+      tags: [scores]
+      operationId: getFairValue
+      x-status: SPEC
+      summary: Multi-model fair value (Pro; numeric — gated)
+      parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200": { description: OK }
+        "402": { $ref: '#/components/responses/Problem402' }
+  /explain/{entity_type}/{id}:
+    get:
+      tags: [scores]
+      operationId: explainRanking
+      x-status: SPEC
+      summary: 'Why this ranking drawer (deterministic factor decomposition; no weights)'
+      parameters:
+        - { name: entity_type, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { "200": { description: OK } }
+  /recommendations:
+    get:
+      tags: [scores]
+      operationId: listRecommendations
+      x-status: SPEC
+      summary: Scored picks (educational). `label` filter — advisory `signal` enum REJECTED.
+      parameters:
+        - { name: label, in: query, schema: { $ref: '#/components/schemas/Label' } }
+        - { name: sector, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses: { "200": { description: OK }, "402": { $ref: '#/components/responses/Problem402' } }
+
+  # ---- Portfolio / watchlist / alerts (SPEC) -----------------------------
+  /portfolio:
+    get: { tags: [portfolio], operationId: getPortfolio, x-status: SPEC, summary: Portfolio overview, responses: { "200": { description: OK } } }
+  /portfolio/holdings:
+    get:  { tags: [portfolio], operationId: getHoldings, x-status: SPEC, summary: Holdings, responses: { "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Holding' } } } } } } }
+    post:
+      tags: [portfolio]
+      operationId: addHolding
+      x-status: SPEC
+      summary: Add holding
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      responses: { "201": { description: Created } }
+  /portfolio/analytics:
+    get: { tags: [portfolio], operationId: getPortfolioAnalytics, x-status: SPEC, summary: Risk/attribution (Pro), responses: { "200": { description: OK }, "402": { $ref: '#/components/responses/Problem402' } } }
+  /watchlists:
+    get:  { tags: [watchlist], operationId: getWatchlists, x-status: SPEC, summary: Lists, responses: { "200": { description: OK } } }
+    post: { tags: [watchlist], operationId: createWatchlist, x-status: SPEC, summary: Create list, parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ], responses: { "201": { description: Created } } }
+  /alerts:
+    get:  { tags: [alerts], operationId: getAlerts, x-status: SPEC, summary: Alert rules + events, responses: { "200": { description: OK } } }
+    post:
+      tags: [alerts]
+      operationId: createAlert
+      x-status: SPEC
+      summary: Create alert rule
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AlertCreateRequest' } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/AlertRule' } } } } }
+
+  # ---- AI (SPEC; governed OpenRouter, non-neg #5) ------------------------
+  /ai/search:
+    post:
+      tags: [ai]
+      operationId: aiSearch
+      x-status: SPEC
+      summary: Grounded AI answer (quota-gated)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AISearchRequest' } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIAnswer' } } } }
+        "429": { $ref: '#/components/responses/Problem429' }
+  /ai/assistant:
+    post:
+      tags: [ai]
+      operationId: aiAssistant
+      x-status: SPEC
+      summary: Assistant (SSE stream of AIAnswer deltas)
+      responses: { "200": { description: text/event-stream, content: { text/event-stream: {} } } }
+  /ai/explain/{symbol}:
+    get:
+      tags: [ai]
+      operationId: aiExplain
+      x-status: SPEC
+      summary: Explainability for a score
+      parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIAnswer' } } } } }
+
+  # ---- News / market / track-record (SPEC) -------------------------------
+  /news:
+    get: { tags: [news], operationId: getNews, x-status: SPEC, summary: News feed, parameters: [ { name: ticker, in: query, schema: { type: string } }, { name: sector, in: query, schema: { type: string } } ], responses: { "200": { description: OK } } }
+  /market/mood:
+    get: { tags: [market], operationId: getMood, x-status: SPEC, security: [], summary: Mood Compass (09:00 & 16:00 IST), responses: { "200": { description: OK } } }
+  /market/why-today:
+    get: { tags: [market], operationId: getWhyToday, x-status: SPEC, security: [], summary: Why the market moved today, responses: { "200": { description: OK } } }
+  /track-record:
+    get: { tags: [track-record], operationId: getTrackRecord, x-status: SPEC, security: [], summary: Public track record (ISR), responses: { "200": { description: OK } } }
+
+  # ---- Consent / DPDP (SPEC) ---------------------------------------------
+  /consent/status:
+    get: { tags: [consent], operationId: getConsentStatus, x-status: SPEC, summary: Consent status, responses: { "200": { description: OK } } }
+  /data-rights/request:
+    post:
+      tags: [consent]
+      operationId: dataRightsRequest
+      x-status: SPEC
+      summary: File a DPDP data-rights request (access/correction/erasure/portability)
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      responses: { "202": { description: Accepted } }

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80">
+  <g transform="translate(8, 14)">
+    <rect width="52" height="52" rx="14" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.16)" stroke-width="1"></rect>
+    <g transform="translate(8, 8)" fill="none" stroke="#ECEEF5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="15" opacity="0.4"></circle>
+      <circle cx="18" cy="18" r="9" opacity="0.7"></circle>
+      <line x1="18" y1="18" x2="30.5" y2="11.5"></line>
+    </g>
+    <circle cx="38.5" cy="19.5" r="2.4" fill="#1FD79A"></circle>
+  </g>
+  <text x="76" y="50" font-family="Geist, ui-sans-serif, system-ui, sans-serif" font-weight="600" font-size="32" letter-spacing="-0.6" fill="#ECEEF5">DhanRadar</text>
+</svg>
