@@ -273,10 +273,12 @@ async def db_tables(db_engine):
     from sqlalchemy import text
 
     from dhanradar.models.auth import Base  # noqa: F401 — registers all models
+    import dhanradar.models.billing  # noqa: F401 — registers billing.plans
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS auth"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS billing"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )
@@ -314,7 +316,10 @@ async def db_session(db_engine, db_tables):
     # Teardown: truncate tables so each test starts clean
     async with db_engine.begin() as conn:
         await conn.execute(
-            text("TRUNCATE TABLE auth.subscriptions, auth.users RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE TABLE auth.subscriptions, auth.users, billing.plans "
+                "RESTART IDENTITY CASCADE"
+            )
         )
 
 

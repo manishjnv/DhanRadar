@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Deterministic non-negotiable guards + secret scan (no external services).
+  # ---------------------------------------------------------------------------
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Non-negotiable guards + secret scan
+        run: python scripts/ci_guards.py
+
+  # ---------------------------------------------------------------------------
+  # Backend tests (pytest, incl. integration) against a Postgres service.
+  # Redis is faked in tests (fakeredis), so no redis service is needed.
+  # ---------------------------------------------------------------------------
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dhanradar
+          POSTGRES_PASSWORD: dhanradar
+          POSTGRES_DB: dhanradar_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U dhanradar -d dhanradar_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: dhanradar
+      POSTGRES_PASSWORD: dhanradar
+      POSTGRES_DB: dhanradar_test
+      # Deterministic test creds (conftest also sets these pre-import).
+      RAZORPAY_KEY_ID: rzp_test_ci
+      RAZORPAY_KEY_SECRET: ci_secret
+      RAZORPAY_WEBHOOK_SECRET: ci_webhook_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: pytest
+        working-directory: backend
+        run: python -m pytest -q
+
+  # ---------------------------------------------------------------------------
+  # Frontend — runs fully only once the foundation (frontend/src) is present
+  # (it lands via the frontend-foundation PR). On the bare skeleton it skips
+  # gracefully so this workflow is green on whichever branch merges first.
+  # ---------------------------------------------------------------------------
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build + checks (guarded on frontend/src)
+        working-directory: frontend
+        run: |
+          if [ ! -d src ]; then
+            echo "frontend/src not present yet — skipping frontend job."
+            exit 0
+          fi
+          npm install
+          npm run gen:tokens --if-present
+          npm run gen:api --if-present
+          npm run typecheck --if-present
+          npm run lint --if-present
+          npm run test --if-present
+          npm run build
