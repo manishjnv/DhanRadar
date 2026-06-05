@@ -20,6 +20,7 @@
  */
 import type { Metadata } from 'next';
 import { Providers } from './providers';
+import './globals.css';
 import '@/styles/tokens.css';
 
 export const metadata: Metadata = {

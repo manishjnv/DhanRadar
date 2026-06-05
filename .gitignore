@@ -60,3 +60,4 @@ Thumbs.db
 docs/infra-notes.md
 _redact.py
 *.tsbuildinfo
+next-env.d.ts
