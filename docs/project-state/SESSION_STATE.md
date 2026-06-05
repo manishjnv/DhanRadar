@@ -37,19 +37,25 @@ lives in the linked docs.
 - **Fixed this session:** UI BLOCKER — removed the advisory-verb `signal` block from
   `frontend/styles/tokens.json` + regenerated tokens (RCA 2026-06-05); added `_concentration_note`
   to `ranking_configs_v1.json`. **B5 (CI) → RESOLVED**; new blockers **B7–B12** filed.
+- **Pre-billing hardening + B12 guard: DONE + reviewed.** B12 (`ci_guards.py` broadened + now scans
+  the token files — closes the scope+pattern gaps), B7/B8 (`billing.plans.razorpay_plan_id` /
+  `total_count` + migration 0003 + checkout fail-safe), B2 (substring tier foot-gun removed). Tier-B
+  review (Architect+Security+Compliance) ACCEPT-WITH-CONDITIONS → 2 MINORs fixed, residuals
+  **B13/B14**. Code reached `main` via #6; the governance trail + 2 fixes are on
+  `hardening/prebilling-fail-safes`. Trail: `reviews/prebilling-hardening.md`.
 
 ## Next action
 
-- Clear **pre-billing** blockers before enabling charges: B7 (Razorpay plan-id mapping),
-  B8 (`Plan.total_count`), B2 (`EXACT_PLAN_TIERS`), B9 (billing test gaps).
-- **Broaden `ci_guards.py`** advisory detection (B12) — the gate that should have caught the tokens
-  BLOCKER.
-- Then proceed to **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
+- **Pre-billing is now code-ADDRESSED** (B7/B8/B2 fail-safes merged) — only **data-only seeding**
+  remains (real Razorpay plan ids + `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists.
+- Follow-ups: **B13** (ci_guards coverage hardening), **B9** (billing 502/webhook tests),
+  **B10** (frontend ESLint isolation), **B11** (scoring §2.5/§6.1 reconciliation).
+- Then **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open: B2, B3, B4, B6 (non-blocking), B7–B12. Resolved: B5 (CI).
-Addressed: B1 (CI runs pytest). Pre-billing: B2, B7, B8, B9.
+See `BLOCKERS.md`. Open: B3, B4, B6 (non-blocking), B9, B10, B11, B13, B14. Resolved: B5 (CI).
+Addressed (code; data-only/CI remains): B1, B2, B7, B8, B12.
 
 ## Agent-utilization & routing-telemetry footer
 
@@ -57,4 +63,4 @@ Addressed: B1 (CI runs pytest). Pre-billing: B2, B7, B8, B9.
 - Sonnet: independent Architect / Security / Product / UI reviewers (post-merge Tier-A/B/C fan-out).
 - Haiku: n/a — no bulk sweep.
 - codex:rescue: n/a — substituted by independent Sonnet adversarial review (fallback ladder); formal codex pass on payments still available (B9).
-- Per-delegation: stage2-steps5-7-backend · Tier B · ACCEPT-WITH-CONDITIONS · reworked N (tracked) | stage2-step8 · Tier C · ACCEPT-WITH-CONDITIONS · N | stage2-steps2-4-frontend · Tier A · ACCEPT-WITH-CONDITIONS · reworked Y (UI BLOCKER fixed).
+- Per-delegation: stage2-steps5-7-backend · Tier B · ACCEPT-WITH-CONDITIONS · reworked N (tracked) | stage2-step8 · Tier C · ACCEPT-WITH-CONDITIONS · N | stage2-steps2-4-frontend · Tier A · ACCEPT-WITH-CONDITIONS · reworked Y (UI BLOCKER fixed) | prebilling-hardening · Tier B · ACCEPT-WITH-CONDITIONS · reworked Y (2 MINORs fixed; 1 BLOCKER + 1 MAJOR adjudicated down).

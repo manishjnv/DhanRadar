@@ -53,8 +53,19 @@ def patch_razorpay(monkeypatch):
 
 
 async def _seed_plan(db_session, plan_id="pro_monthly", price=39900) -> None:
+    # B7/B8: a billing-ready plan carries the REAL Razorpay plan id + per-plan
+    # total_count. Without them, create_checkout fails safe (503) — so the
+    # success-path tests must seed them (mirrors production catalog seeding).
     db_session.add(
-        Plan(id=plan_id, name="Pro Monthly", price_inr=price, interval="month", features=["a"])
+        Plan(
+            id=plan_id,
+            name="Pro Monthly",
+            price_inr=price,
+            interval="month",
+            features=["a"],
+            razorpay_plan_id=f"plan_{plan_id}",
+            total_count=12,
+        )
     )
     await db_session.commit()
 

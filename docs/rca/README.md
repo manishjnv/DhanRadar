@@ -15,25 +15,29 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
-### 2026-06-05 — Advisory verbs in design tokens passed CI (guard regex too narrow)
+### 2026-06-05 — Advisory verbs in design tokens passed CI (guard never scanned token files + regex too narrow)
 
 - **Symptom:** post-merge UI governance review found `frontend/styles/tokens.json` shipped a
   `signal` block with advisory labels `Strong Buy / Buy / Hold / Avoid` (+ numeric score-band
   cutoffs) and an `amber.role: "Warning, hold"` comment — on `main`, having passed CI. Violates
   non-negotiable #1 (no advisory vocabulary anywhere) and ties labels to numeric bands (vs
   `FINAL_SCORING_SPEC` §4.2 rule-table derivation).
-- **Root cause:** `scripts/ci_guards.py` advisory-verb check is `\b(strong_buy|caution)\b` —
-  **snake_case only**. It did not match the camelCase key `strongBuy` nor the display strings
-  `"Strong Buy"/"Buy"/"Hold"/"Avoid"`, so the deterministic gate that exists to block exactly this
-  let it through.
+- **Root cause (two compounding gaps):** (a) **Scope** — `scripts/ci_guards.py`'s advisory scan
+  only covered `backend/dhanradar` + `frontend/src` with code extensions, so it **never scanned
+  `frontend/styles/tokens.json`** at all (`frontend/styles` is outside `frontend/src`; `.json` is
+  outside `CODE_EXT`). (b) **Pattern** — even where it scanned, the regex `\b(strong_buy|caution)\b`
+  was **snake_case only**, missing the camelCase key `strongBuy` and the strings
+  `"Strong Buy"/"Buy"/"Hold"/"Avoid"`. Either gap alone would have let the block through.
 - **Fix:** removed the `signal` block from `tokens.json`; changed the amber role to
   "Warning / attention state"; re-ran `gen:tokens` (regenerated `src/styles/tokens.css` +
   `tailwind.tokens.cjs`); verified zero advisory verbs remain in tokens/generated files. The
   `ScoreRing` "NEVER: strong_buy|buy|hold|caution|avoid" string is a guardrail comment, not usage.
-- **Prevention:** broaden `ci_guards.py` advisory detection to catch camelCase + spaced + Title-Case
-  advisory verbs and a `signal`/score-band-keyed config pattern, while avoiding false positives on
-  the English words `buy/hold/avoid` in prose (tracked, `BLOCKERS.md` B12). Until then the
-  multi-agent UI/Compliance review is the backstop that caught it.
+- **Prevention (DONE, B12):** `ci_guards.py` advisory detection broadened to camelCase / Title /
+  spaced / quoted-label / object-key forms, **and the scan now includes the design-token files**
+  (`frontend/styles/tokens.json` + generated `tokens.css`/`tailwind.tokens.cjs`) — closing both the
+  scope and pattern gaps. Verified: the broadened guard catches all four old `signal` lines; prose /
+  guardrail comments stay clean. Residual coverage gaps (scan all non-code assets, not 3 hardcoded;
+  tighten the skip-list) tracked as **B13**.
 - **Phase/area:** Stage 2 Steps 2-4 (frontend tokens) / post-merge governance review.
 
 ### 2026-05-19 — Auth slice: rate limiter built but unwired; refresh rotation non-atomic
