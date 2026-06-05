@@ -76,15 +76,16 @@ lives in the linked docs.
 - **Pre-billing** remains code-ADDRESSED — only **data-only seeding** (real Razorpay plan ids +
   `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists. B9 plans-seed copy Compliance pass
   is also data-only (no seed exists yet).
-- Remaining follow-ups: **B11** (scoring §2.5/§6.1 reconciliation — architecture-owner decision),
-  **B6** (non-blocking until prod activation).
+- **B11 RESOLVED** (ADR-0020, operator chose option C): concentration reconciled as a
+  catalogued-but-unweighted v1 risk sub-factor (doc-only; §2.5/§6.1 cross-pointers + `_concentration_note`).
+- Remaining follow-ups: **B6** (non-blocking until prod activation), residuals **B15/B16/B17**.
 - Then **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open: B6 (non-blocking), B11, B14. Resolved: B5 (CI), **B10**, **B13**.
-Addressed (code/tests; data-only or later-module work remains): B1, **B2**, **B3**, **B4**, B7, B8,
-**B9**, B12.
+See `BLOCKERS.md`. Open: B6 (non-blocking), B14, B15, B16, B17 (all low/residual). Resolved: B5 (CI),
+**B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or later-module work remains):
+B1, **B2**, **B3**, **B4**, B7, B8, **B9**, B12.
 
 ## Agent-utilization & routing-telemetry footer
 

@@ -31,6 +31,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0017 | Infra: KVM4 shared-infra + dedicated cloudflared tunnel; 8 containers; no host ports | Accepted |
 | ADR-0018 | Operating model: multi-agent tiered governance (A/B/C) | Accepted |
 | ADR-0019 | Scoring Engine Authority: FINAL_SCORING_SPEC.md is the sole source of truth | Accepted |
+| ADR-0020 | Concentration: catalogued-but-unweighted risk sub-factor in scoring v1 (B11) | Accepted |
 
 ---
 
@@ -242,3 +243,23 @@ FINAL element; sibling docs carry a "superseded" pointer; Tier-C reviews cite th
 weights stay PROPOSED v1 pending backtest pass-gates + the two-person methodology gate (B6,
 non-blocking until production activation). This clears `STAGE2_EXECUTION_PLAN` pre-condition **PC6**.
 **Source:** `FINAL_SCORING_SPEC.md` §0, `AI_GOVERNANCE_MODEL.md` (Tier C), `STAGE2_EXECUTION_PLAN.md`.
+
+## ADR-0020 — Concentration is a catalogued-but-unweighted risk sub-factor in scoring v1 (B11)
+
+**Date:** 2026-06-05 · **Status:** Accepted
+**Context:** `FINAL_SCORING_SPEC` §2.5 lists 7 RISK sub-factors including Concentration
+(segment/customer), but the §6.1 v1 formula weights only 6 (the six already sum to 1.0), leaving
+concentration orphaned — an internal inconsistency flagged as BLOCKERS B11. Concentration data
+(segment-revenue / customer-concentration disclosures) is hard to source reliably across the MF-first
+launch wedge and the broad Indian retail universe.
+**Decision:** Reconcile by treating §2.5 `axes.risk` as the **factor catalog** and the §6.1 weight
+map as the **activated subset**. Concentration stays catalogued but **unweighted in v1** — an
+intentional deferral, not a contradiction. It is a **v2 candidate**: a weight is assigned only once a
+reliable data source + its sector normalization exist, and is then set at the backtest pass-gate under
+the two-person methodology gate (B6). No v1 weight changes; the engine's behaviour is unchanged (it
+already treats concentration as unweighted). The config validator already permits a catalogued-but-
+unweighted sub-factor.
+**Consequences:** B11 is resolved as documentation (no weight re-derivation, no backtest re-run now);
+§2.5/§6.1 carry cross-pointers; `ranking_configs_v1.json._concentration_note` records the resolution.
+Adding concentration in v2 is a FINAL-element change → new ADR + Tier-C review + B6 gate at that time.
+**Source:** `FINAL_SCORING_SPEC.md` §2.5/§6.1, `BLOCKERS.md` B11, ADR-0019.

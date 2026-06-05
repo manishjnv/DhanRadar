@@ -119,6 +119,14 @@ Five axes. Each sub-factor lives in **exactly one** axis (no double-counting). `
 | Earnings predictability | ↑ |
 | Concentration (segment/customer) | ↓ |
 
+> **Concentration is catalogued here but UNWEIGHTED in the v1 risk formula (§6.1)** — an
+> intentional deferral, not a contradiction (B11, **ADR-0020**). It is a **v2 candidate**: a v1
+> weight is withheld until a reliable concentration data source (segment-revenue / customer-
+> concentration disclosures) and its sector normalization exist, and any weight is then set at the
+> backtest pass-gate under the two-person methodology gate (B6). The config validator treats
+> `axes.risk` as the factor catalog and the weight map as the activated subset, so a catalogued-but-
+> unweighted sub-factor is valid.
+
 ### 2.6 Fund / ETF mapping (same five axes)
 
 - Quality → manager tenure, consistency, downside capture.
@@ -262,6 +270,10 @@ risk = normalize_within_sector(
 ```
 
 Contributes **0.12** to the composite (§3). Each term sector-normalized; `inv` = inverse-direction. Also surfaced standalone in the Risk Analysis UX.
+
+> The six weighted terms sum to 1.0. **Concentration** (listed in §2.5) is intentionally **not**
+> weighted in v1 — see the §2.5 note and **ADR-0020** (B11 resolution): it is a v2 candidate pending
+> a data source + the backtest/two-person gate (B6).
 
 ### 6.2 User risk-profiling (REC-D3 — suitability/education ONLY)
 
