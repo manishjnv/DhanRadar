@@ -79,10 +79,14 @@ for p in TOKEN_FILES:
 # original code-only scan missed an advisory `signal` block shipped in
 # tokens.json (see docs/rca/README.md 2026-06-05).
 _ADV_HARD = re.compile(r"strong[\s_-]?(?:buy|sell)", re.I)  # never innocent
-_ADV_WORD = r"(?:strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|avoid|caution)"
+# Covers the architecture's full enumerated recommendation set (buy/sell/hold/
+# switch) + the scoring label verbs. The RUNTIME advisory screen
+# (ai_gateway/quality.py) carries a broader, domain-owned set; this static net
+# guards SOURCE/label assets.
+_ADV_WORD = r"(?:strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)"
 _ADV_QUOTED = re.compile(rf"""["']{_ADV_WORD}["']""", re.I)  # quoted label value
 _ADV_KEY = re.compile(
-    r"""(?:^|[{,])\s*["']?(?:strongBuy|strongSell|buy|sell|hold|avoid|caution)["']?\s*:""",
+    r"""(?:^|[{,])\s*["']?(?:strongBuy|strongSell|buy|sell|hold|switch|avoid|caution)["']?\s*:""",
     re.I,
 )  # advisory word as an object key
 # _ADV_SKIP: lines that legitimately *name* an advisory verb in order to reject
