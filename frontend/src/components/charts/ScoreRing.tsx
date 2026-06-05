@@ -95,16 +95,18 @@ export function ScoreRing({
     ariaLabel ?? `${config.display} — ${BAND_DISPLAY[confidenceBand]}`;
 
   return (
-    <figure
-      className={cn('inline-flex flex-col items-center gap-2', className)}
-      aria-label={accessibleLabel}
-    >
+    <figure className={cn('inline-flex flex-col items-center gap-2', className)}>
+      {/*
+        Single accessible name model (B10): the SVG is decorative (aria-hidden)
+        and the figure's name comes from one <figcaption>, avoiding the previous
+        triple announcement (figure aria-label + role="img" + sr-only span).
+      */}
       <svg
         width={SIZE}
         height={SIZE}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        role="img"
         aria-hidden="true"
+        focusable="false"
       >
         {/* Background track */}
         <circle
@@ -154,8 +156,8 @@ export function ScoreRing({
         </text>
       </svg>
 
-      {/* Screen-reader accessible text (not visually rendered) */}
-      <span className="sr-only">{accessibleLabel}</span>
+      {/* Accessible caption — the figure's single accessible name. */}
+      <figcaption className="sr-only">{accessibleLabel}</figcaption>
     </figure>
   );
 }

@@ -15,6 +15,52 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-05 — Feature import-isolation silently fail-open for new features; apiClient base-path strippable; ScoreRing triple a11y announce (B10)
+
+- **Symptom:** post-merge Architect/UI review of the Stage-2 frontend found (a) `.eslintrc.json`
+  enforced module isolation via a hand-enumerated N×N `import/no-restricted-paths` matrix listing
+  only **7** features — but the repo had **9** feature folders, so `dashboard` and `mf` (the launch
+  wedge) had **zero** cross-feature import enforcement; (b) `apiClient` derived `API_BASE` from
+  `NEXT_PUBLIC_API_URL` with no check, so a misset value without `/api/v1` silently made every
+  request miss the versioned base path (and the `(cond && val) ?? '/api/v1'` form returned the
+  boolean `false` when `process` was undefined); (c) `ScoreRing` announced its name three times
+  (`<figure aria-label>` + `role="img"` SVG + `sr-only` span).
+- **Root cause:** the isolation rule was **enumerated, not generic** — adding a feature required
+  hand-editing the matrix, which nobody did, so it failed open by construction. The apiClient
+  trusted env input for a non-negotiable contract. The ScoreRing a11y model layered three naming
+  mechanisms instead of one.
+- **Fix:** (a) replaced the 42-zone matrix with a single generic `eslint-plugin-boundaries`
+  `boundaries/dependencies` rule that classifies every `src/features/*` folder and forbids importing
+  another feature's internals — auto-covers current and future features (`frontend/.eslintrc.json`);
+  verified clean tree passes AND a planted `dashboard → mf/api` import is flagged. (b) `apiClient.ts`
+  now throws at module load if `NEXT_PUBLIC_API_URL` is set but does not end with `/api/v1`, strips a
+  trailing slash, and uses `||` (fixes the `false` fallback). (c) `ScoreRing.tsx` made the SVG
+  decorative (`aria-hidden` + `focusable="false"`) and gives the figure a single accessible name via
+  one sr-only `<figcaption>`.
+- **Prevention:** isolation is now enforced by element-type, not by an enumerated list, so a new
+  feature cannot quietly escape it. Base-path is fail-closed at startup. Boundaries rule has a
+  positive-control verification recorded in the review trail.
+- **Phase/area:** Stage 2 / frontend foundation (B10).
+
+### 2026-06-05 — ci_guards advisory scan had residual coverage gaps after B12 (B13)
+
+- **Symptom:** the B12 fix (above) hardcoded only **3** token files for the non-code advisory scan
+  and skipped the **whole** `scoring/` dir; other `.json/.yaml/.css/.html` label assets were
+  unscanned, and `_ADV_SKIP` matched bare `not`/`guard` substrings that could mask a real advisory
+  verb sharing a line.
+- **Root cause:** B12 closed the *known* leak (tokens.json) by enumerating the known files rather
+  than scanning the asset *class*; the skip-list used over-broad tokens; the scoring skip was
+  dir-wide, exempting any future engine code there.
+- **Fix:** `scripts/ci_guards.py` now walks **all** `.json/.yaml/.yml/.css/.html` (+ config
+  `.cjs/.js`) under `frontend/` and `backend/dhanradar/` (minus `node_modules/.next/__pycache__`);
+  `_ADV_SKIP` dropped the bare `guard`/`not` tokens for anchored phrases (`must not|do not|cannot`,
+  `guardrail`); the scoring skip narrowed from `"scoring" in p.parts` to `ranking_configs*` files
+  only.
+- **Prevention:** added `backend/tests/unit/test_ci_guards.py` — runs the real guard as a subprocess
+  against planted advisory fixtures (camelCase key in a `.json`, quoted verb in a `.css`) and asserts
+  it fails; plus a clean-tree baseline. The guard's own coverage is now regression-tested.
+- **Phase/area:** CI tooling / compliance net for non-negotiable #1 (B13).
+
 ### 2026-06-05 — Advisory verbs in design tokens passed CI (guard never scanned token files + regex too narrow)
 
 - **Symptom:** post-merge UI governance review found `frontend/styles/tokens.json` shipped a

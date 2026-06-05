@@ -41,6 +41,7 @@
     "autoprefixer": "^10",
     "eslint": "^8",
     "eslint-config-next": "14.2.29",
+    "eslint-plugin-boundaries": "^6.0.2",
     "eslint-plugin-import": "^2",
     "eslint-plugin-jsx-a11y": "^6",
     "jsdom": "^24",

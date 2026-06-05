@@ -44,23 +44,41 @@ lives in the linked docs.
   **B13/B14**. Code reached `main` via #6; the governance trail + 2 fixes are on
   `hardening/prebilling-fail-safes`. Trail: `reviews/prebilling-hardening.md`.
 
+## In flight (this session)
+
+- **B13 + B10 hardening: DONE on branch `hardening/b13-b10-ci-fe`** (this session). B13 — ci_guards
+  advisory scan now walks all non-code label assets (not 3 hardcoded files), skip-list tightened,
+  scoring skip narrowed to `ranking_configs*`, self-test added (`backend/tests/unit/test_ci_guards.py`).
+  B10 — ESLint isolation matrix replaced by a generic `eslint-plugin-boundaries` rule (closes the
+  fail-open that left `dashboard`/`mf` uncovered; clean-pass + planted-violation both verified);
+  `apiClient` fails closed on a bad `NEXT_PUBLIC_API_URL`; `ScoreRing` aria collapsed to one
+  `<figcaption>`. Gates green: ci_guards 0, tsc 0, next lint 0, pytest (ci_guards self-test) 3 passed.
+  RCA logged (2× 2026-06-05). **Not pushed** (PC5). Pre-merge governance review (Architect + UI +
+  Compliance-on-B13) still owed before PR to `main`.
+
 ## Next action
 
-- **Pre-billing is now code-ADDRESSED** (B7/B8/B2 fail-safes merged) — only **data-only seeding**
-  remains (real Razorpay plan ids + `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists.
-- Follow-ups: **B13** (ci_guards coverage hardening), **B9** (billing 502/webhook tests),
-  **B10** (frontend ESLint isolation), **B11** (scoring §2.5/§6.1 reconciliation).
+- **Run the pre-merge governance fan-out** on `hardening/b13-b10-ci-fe` (Architect + UI for B10;
+  Compliance for the B13 compliance-net change), then open the PR with explicit push approval (PC5).
+- **Pre-billing** remains code-ADDRESSED — only **data-only seeding** (real Razorpay plan ids +
+  `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists.
+- Remaining follow-ups: **B9** (billing 502/webhook tests), **B11** (scoring §2.5/§6.1 reconciliation).
 - Then **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open: B3, B4, B6 (non-blocking), B9, B10, B11, B13, B14. Resolved: B5 (CI).
+See `BLOCKERS.md`. Open: B3, B4, B6 (non-blocking), B9, B11, B14. Resolved: B5 (CI), **B10**, **B13**.
 Addressed (code; data-only/CI remains): B1, B2, B7, B8, B12.
 
 ## Agent-utilization & routing-telemetry footer
 
-- Opus: orchestration + Builder (openapi fixes, tokens BLOCKER fix) + Compliance reviews + adjudication — Tier-0.
-- Sonnet: independent Architect / Security / Product / UI reviewers (post-merge Tier-A/B/C fan-out).
+- Opus: 100% — Builder + Architect on all of B13/B10; self-executed (small hot-cache edits + the
+  judgment-heavy compliance-net regex and module-isolation rule). Per global carve-out: ≤ a few
+  files, in hot cache, two needing Opus judgment → cheaper than cold subagent starts.
+- Sonnet: n/a — no parallel mechanical fan-out this session.
 - Haiku: n/a — no bulk sweep.
-- codex:rescue: n/a — substituted by independent Sonnet adversarial review (fallback ladder); formal codex pass on payments still available (B9).
-- Per-delegation: stage2-steps5-7-backend · Tier B · ACCEPT-WITH-CONDITIONS · reworked N (tracked) | stage2-step8 · Tier C · ACCEPT-WITH-CONDITIONS · N | stage2-steps2-4-frontend · Tier A · ACCEPT-WITH-CONDITIONS · reworked Y (UI BLOCKER fixed) | prebilling-hardening · Tier B · ACCEPT-WITH-CONDITIONS · reworked Y (2 MINORs fixed; 1 BLOCKER + 1 MAJOR adjudicated down).
+- codex:rescue: n/a — implementation only; pre-merge Tier-B adversarial sign-off (B13 compliance net)
+  still owed before PR to `main`.
+- Per-delegation (telemetry): B13 ci_guards hardening · Opus · reworked N | B10 eslint-boundaries ·
+  Opus · reworked Y (v6 object-selector schema rejected → reverted to working array selector + static
+  message) | B10 apiClient/ScoreRing · Opus · reworked N.
