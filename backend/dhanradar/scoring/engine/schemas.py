@@ -120,6 +120,9 @@ class PublicScore:
     model_version: str
     disclosure: str
     not_advice: str
+    disclaimer_version: str  # in-force disclaimer version (audit linkage, non-neg #9)
+    prior_label: Optional[VerbLabel] = None  # label before this eval; lets a surface say
+    #                                          "previously <x>, now insufficient data" (label, not numeric)
 
 
 @dataclass(frozen=True)
@@ -138,8 +141,10 @@ class ScoringResult:
     model_version: str = MODEL_VERSION
     contributing_signals: list[str] = field(default_factory=list)
     contradicting_signals: list[str] = field(default_factory=list)
-    flags: list[str] = field(default_factory=list)  # partial_coverage / stale / low_liquidity / ...
+    flags: list[str] = field(default_factory=list)  # partial_coverage / stale / low_liquidity / provisional_model / ...
     band_disagreement: bool = False  # rule label vs score-band leaning disagreed (rule wins)
+    prior_label: Optional[VerbLabel] = None  # label published before this eval
+    disclaimer_version: str = DISCLAIMER_VERSION
     disclosure: str = DISCLOSURE_BUNDLE
     not_advice: str = NOT_ADVICE
 
@@ -158,4 +163,6 @@ class ScoringResult:
             model_version=self.model_version,
             disclosure=self.disclosure,
             not_advice=self.not_advice,
+            disclaimer_version=self.disclaimer_version,
+            prior_label=self.prior_label,
         )

@@ -109,6 +109,11 @@ class RatingEngine:
 
         valid_until = (self._now() + datetime.timedelta(seconds=self._valid_for)).isoformat()
         flags: list[str] = []
+        # The numeric is computed with PROPOSED v1 weights that have not cleared
+        # the backtest/calibration/two-person activation gates (B6) — tag every
+        # result so no downstream consumer mistakes a draft numeric for authoritative.
+        if not cfg.activated:
+            flags.append("provisional_model")
         if partial:
             flags.append("partial_coverage")
         if inputs.stale:
@@ -137,6 +142,7 @@ class RatingEngine:
                 contributing_signals=contributing,
                 contradicting_signals=contradicting,
                 flags=flags + ["insufficient_data"],
+                prior_label=outcome.prior_label,
             )
             await self._publish(result)
             return result
@@ -164,6 +170,7 @@ class RatingEngine:
             contradicting_signals=contradicting,
             flags=flags,
             band_disagreement=disagreement,
+            prior_label=outcome.prior_label,
         )
         await self._publish(result)
         return result
@@ -213,6 +220,8 @@ def _result_to_dict(r: ScoringResult) -> dict:
         "contradicting_signals": r.contradicting_signals,
         "flags": r.flags,
         "band_disagreement": r.band_disagreement,
+        "prior_label": r.prior_label.value if r.prior_label else None,
+        "disclaimer_version": r.disclaimer_version,
         "disclosure": r.disclosure,
         "not_advice": r.not_advice,
     }

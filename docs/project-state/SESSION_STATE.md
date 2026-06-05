@@ -28,11 +28,14 @@ lives in the linked docs.
   clears `STAGE2_EXECUTION_PLAN` **PC6**.
 - **Post-Stage-2 hardening (B13/B10/B9/B3/B4/B11): DONE & merged** via PR #9 (squash `76f7525`),
   CI green. ADR-0020 (concentration). Residuals B15/B16/B17.
-- **Phase 3 (Market Data Adapter §B4 + AI/LLM Gateway §B3): BUILT on branch
-  `phase3/market-data-ai-gateway`** (not pushed). 3A Market Data (Sonnet, Opus-reviewed; `917e5ef`)
-  with 3B AI Gateway (Opus, Tier-B; `3cd2fef`) and governance fan-out fixes. Providers are stubs (no
-  vendor keys / AA partner); models/prompts injected (Admin source + live verify deferred). 112
-  unit tests; ci_guards green.
+- **Phase 3 (Market Data Adapter §B4 + AI/LLM Gateway §B3): DONE & merged** via PR #10 (squash
+  `5908a73`), CI green. Providers are stubs; models/prompts injected. Residuals B18–B23.
+- **Phase 4 (Rating/Scoring Engine v1 §S): BUILT on branch `phase4/rating-scoring-engine`** (Opus,
+  Tier-C; engine `69756e1` + governance fixes). Deterministic collapse, rule-table labels (NOT the
+  score), confidence + floor→refuse, 2-eval hysteresis, governance (churn/distribution/two-person),
+  internal token-guarded read API. Weights stay PROPOSED v1 (`activated:false` → results tagged
+  `provisional_model`). 133 unit tests; ci_guards green. Tier-C fan-out done (no BLOCKER); residuals
+  B24–B28.
 
 ## In flight
 
@@ -53,49 +56,48 @@ lives in the linked docs.
 
 ## In flight (this session)
 
-- **Phase 3 BUILT on branch `phase3/market-data-ai-gateway`** (2 commits + governance fixes; not pushed).
-  - **3A Market Data Adapter** (`917e5ef`, Tier-A) — Sonnet-built against a fixed contract, Opus
-    diff-reviewed. Provider-agnostic, YAML ladders, per-provider circuit breaker, normalized events,
-    8 stub providers (no vendor keys; AA explicit stub), pluggable event sink. 24 unit tests.
-  - **3B AI/LLM Gateway** (`3cd2fef`, Tier-B) — Opus-built. OpenRouterGateway (round-robin, 429-rotate
-    no-sleep, 402-credit no-retry, Sonnet spillover, 3-strike skip), AIOutputBase + QualityValidator
-    (schema + advisory screen), budget governor increment (BudgetMeter). Models/prompts injected.
-  - **Governance fan-out DONE** (Architect/Security Sonnet + Compliance Opus, independent). Security
-    REVISE + 1 Compliance BLOCKER → **all fixed this turn**: advisory list expanded (core set),
-    high-stakes premium loop bounded by 3-strike, free counter debits every served call, atomic budget
-    init, soft-cap warning, model_copy disclaimer guard, empty-choices guard, adapter `skipped`
-    diagnostics. Residuals **B18–B23**. Ledger: `reviews/phase3-market-data-ai-gateway.md`.
-  - Gates: 112 unit tests pass; ci_guards 0; py_compile clean. **Not pushed (PC5).**
+- **Phase 4 Rating/Scoring Engine v1 BUILT on branch `phase4/rating-scoring-engine`** (Opus, Tier-C;
+  engine `69756e1` + governance fixes; not pushed). Deterministic collapse pipeline (normalize →
+  composite → confidence → floor → rule-table label → 2-eval hysteresis → publish), governance
+  (churn>5% hold, distribution bound, two-person gate, changelog), internal token-guarded read API.
+  Compliance invariants test-enforced: label≠score, no-numeric-public, risk-profile excluded,
+  floor→refuse, disclosure/NOT_ADVICE.
+- **Tier-C governance fan-out DONE** (Architect/Product Sonnet + Compliance Opus, independent) —
+  all ACCEPT-WITH-CONDITIONS, **no BLOCKER**. Fixed in-branch: config completeness validation,
+  `provisional_model` tag (activated:false), `disclaimer_version` + `prior_label`, fail-closed
+  `X-Internal-Token` guard, neutral factor-agreement on sparse inputs. Residuals **B24–B28**.
+  Ledger: `reviews/phase4-rating-scoring-engine.md`. Gates: 133 unit tests; ci_guards 0; compile 0.
 
 ## Next action
 
-- **Push `phase3/market-data-ai-gateway` + open the PR** (needs operator PC5 approval). CI runs the
-  integration tests this box can't; squash-merge after green.
-- Wire-up work for the consuming modules (MF/Stock/Mood) must, before any user-specific payload reaches
-  the gateway, land the **B20** cross-border + `RequireConsent` call-site gate and **B21** audit/model_used.
-- Remaining follow-ups: residuals **B15–B23**; **B6** (non-blocking until prod activation).
-- Then **Implementation-Plan Phase 4** (Rating/Scoring Engine + MF module: CAS→60s report).
+- **Push `phase4/rating-scoring-engine` + open the PR + merge after CI green** (operator granted
+  full permission this turn).
+- Then **Implementation-Plan Phase 5** — Mutual Fund module (CAS → ≤60s labelled report) which
+  consumes the Market Data Adapter + Rating Engine; must land the **B20** cross-border/consent gate
+  and **B26** `ai_recommendation_audit` write at the serve seam.
+- Residuals open: B14–B28 (low/residual/deploy-gated); **B6/B28** scoring activation (non-blocking
+  until prod activation).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open (low/residual/non-blocking): B6, B14, B15, B16, B17, B18, B19, B20, B21, B22,
-B23. Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
-later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12.
+See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14–B28. Resolved: B5 (CI),
+**B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or later-module work remains):
+B1, B2, B3, B4, B7, B8, B9, B12, **B25**.
 
 ## Agent-utilization & routing-telemetry footer
 
-- Opus: 100% — Builder + Architect on all of B13/B10; self-executed (small hot-cache edits + the
-  judgment-heavy compliance-net regex and module-isolation rule). Per global carve-out: ≤ a few
-  files, in hot cache, two needing Opus judgment → cheaper than cold subagent starts.
-- (Earlier this session) hardening branch B13/B10/B9/B3/B4/B11: Opus builder + 5 Sonnet/Opus reviewers;
-  merged via #9. Phase-3 footer below supersedes for the current work.
-- **Phase 3 footer:** Opus — orchestration + Builder (3B AI Gateway, Tier-B) + Compliance reviewer +
-  all adjudication/condition-fixes. Sonnet — 3A Market Data Adapter (builder, fixed contract) + 2
-  independent reviewers (Architect, Security-adversarial). Haiku — n/a. codex:rescue — n/a (Tier-B
-  Security gate run as independent Sonnet adversarial, fallback ladder).
-- Per-delegation (telemetry): 3A market-data · Sonnet · reworked N (Opus review clean, MAJORs tracked)
-  | 3B ai-gateway · Opus · reworked Y (Security REVISE + Compliance BLOCKER → fixed in-branch:
-  advisory list, premium-loop bound, free-counter debit, atomic init, model_copy guard) | governance
-  reviewers · Sonnet×2 + Opus×1 · independent.
-- Verification note: 112 backend unit tests run locally + ci_guards green; the integration tests
-  (billing/auth) run in CI only — no local Postgres/Docker (B1).
+Prior phases this session (merged): hardening B13/B10/B9/B3/B4/B11 (#9); Phase 3 Market Data + AI
+Gateway (#10). Footer below is the current Phase-4 work.
+
+- **Phase 4 footer:** Opus — orchestration + Builder (the entire Rating/Scoring Engine, Tier-C IP
+  core — never delegated) + Compliance adjudication + all condition-fixes. Sonnet — 2 independent
+  reviewers (Architect, Product). Opus — independent Compliance reviewer (separate instance from
+  builder). Haiku — n/a. codex:rescue — n/a (Tier-C uses Compliance+Product, not Security-adversarial;
+  the engine touches no auth/payment surface).
+- Per-delegation (telemetry): phase4-engine · Opus · reworked Y (Architect 2 MAJOR, Product 3 MAJOR,
+  Compliance conditions → fixed in-branch: config validation, provisional tag, disclaimer_version,
+  prior_label, internal-token guard, neutral agreement) | governance reviewers · Sonnet×2 + Opus×1 ·
+  independent · no BLOCKER.
+- Verification note: 133 backend unit tests run locally + ci_guards 0 + py_compile 0 + markdownlint 0;
+  integration tests run in CI (no local Postgres/Docker — B1). Engine is fully unit-testable (Redis
+  fakes injected); weights remain PROPOSED/`activated:false` (results tagged `provisional_model`).

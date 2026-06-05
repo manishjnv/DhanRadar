@@ -40,13 +40,25 @@ Redis (hysteresis eval state + internal result cache). Reads `ranking_configs_v1
 
 `backend/tests/unit/test_scoring_engine.py` — 17 tests: golden-set score+label; **label ≠ pure score function** (same 60 score → in_form vs out_of_form); confidence floor → insufficient_data + no numeric; 2-eval hysteresis flip suppression; partial-coverage→medium cap; churn>5%→hold + distribution-collapse→hold; `risk_profile`/`user` absent from inputs; PublicScore has no numeric; two-person gate; config weight-sum + double-count validators; publish emits PublicScore + caches the full internal result. Full unit suite 129 pass; ci_guards green.
 
-## Known limitations / deferred
+## Known limitations / deferred (tracked in BLOCKERS)
 
-- Numeric axis weights are **PROPOSED v1** — not activated until backtest pass-gates + two-person gate (B6); `activated:false` in config.
+- **B28/B6** — weights are **PROPOSED v1** (`activated:false`); every result is tagged
+  `provisional_model`. Full activation (backtest pass-gates + calibration + two-person gate) before
+  any numeric is treated as authoritative.
+- **B24** — label precedence: `manager_change`/`structural_concern` veto `in_form` even over
+  1Y+3Y outperformance (fail-safe caution veto, documented); a recency window is a spec/architecture-
+  owner decision.
+- **B25** — `/internal/v1/score` numeric endpoint: fail-closed `X-Internal-Token` guard + network
+  topology; full network/mTLS policy is a deploy gate.
+- **B26** — `disclaimer_version` carried on results; persisting `ai_recommendation_audit`
+  `(label, model_used, disclaimer_version)` at serve time is the caller's job.
+- **B27** — `contributing/contradicting` are free-text; a canonical signal-name taxonomy is owed for
+  consistent UI.
 - Band-edge ±2 buffer (smoothing) is documented but the eval-count hysteresis is the active flip gate; band-edge dead-zone is a v1.1 refinement.
 - Upstream normalization (winsorize/z-score against the sector peer set) helpers are provided, but the peer-set data pipeline lands with the consuming modules (Phase 5+).
 - The internal read endpoint returns the cached published result; persistence to a `scores`/`user_fund_scores` table is the caller's job (Phase 5).
 
 ## Changelog
 
-- 2026-06-06 — Engine v1 built (Phase 4 §S): deterministic collapse, rule-table labels (not score), confidence model + floor, 2-eval hysteresis, governance (churn/distribution/two-person/changelog), internal read API. 17 unit tests. Built on Opus (Tier-C). Governance fan-out pending.
+- 2026-06-06 — Engine v1 built (Phase 4 §S): deterministic collapse, rule-table labels (not score), confidence model + floor, 2-eval hysteresis, governance (churn/distribution/two-person/changelog), internal read API. Built on Opus (Tier-C).
+- 2026-06-06 — Tier-C governance fan-out (Architect/Compliance/Product, no BLOCKER): config completeness validation; `provisional_model` tag when not activated; `disclaimer_version` + `prior_label` on results; fail-closed `X-Internal-Token` on the internal endpoint; neutral factor-agreement on sparse inputs. Residuals B24–B28. 21 unit tests (133 suite). Ledger: `reviews/phase4-rating-scoring-engine.md`.

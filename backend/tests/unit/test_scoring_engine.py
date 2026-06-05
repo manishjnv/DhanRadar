@@ -245,6 +245,53 @@ def test_canonical_config_is_valid():
 
 
 # --- publish: event carries public projection; cache carries full result -----
+async def test_provisional_model_flag_when_not_activated():
+    # ranking_configs_v1 is activated:false → every result is tagged provisional.
+    res = await _engine().score(_inputs())
+    assert "provisional_model" in res.flags
+
+
+async def test_prior_label_surfaced_on_refusal():
+    eng = _engine(hyst=_FakeHystStore())
+    r1 = await eng.score(_inputs(signals=_IN_FORM, identifier="P"))
+    assert r1.verb_label == VerbLabel.in_form and r1.prior_label is None
+    # Data drops out → refuse, but prior_label tells the consumer what it WAS.
+    r2 = await eng.score(
+        _inputs(axes={Axis.quality: [SubFactor("q", 60.0, 1.0)]}, identifier="P",
+                freshness=0.0, retrieval_relevance=0.0, model_signal=0.0)
+    )
+    assert r2.verb_label == VerbLabel.insufficient_data
+    assert r2.prior_label == VerbLabel.in_form
+
+
+async def test_disclaimer_version_carried_public_and_internal():
+    res = await _engine().score(_inputs())
+    assert res.disclaimer_version
+    assert res.to_public().disclaimer_version == res.disclaimer_version
+
+
+def test_internal_token_guard(monkeypatch):
+    from fastapi import HTTPException
+
+    from dhanradar.config import settings
+    from dhanradar.scoring.engine.router import _require_internal_token
+
+    # Unset token → endpoint DISABLED (fail-closed 503).
+    monkeypatch.setattr(settings, "INTERNAL_API_TOKEN", "")
+    with pytest.raises(HTTPException) as ei:
+        _require_internal_token("anything")
+    assert ei.value.status_code == 503
+
+    # Token set → wrong/missing header → 403; correct header → passes.
+    monkeypatch.setattr(settings, "INTERNAL_API_TOKEN", "s3cret")
+    with pytest.raises(HTTPException) as ei2:
+        _require_internal_token(None)
+    assert ei2.value.status_code == 403
+    with pytest.raises(HTTPException):
+        _require_internal_token("wrong")
+    assert _require_internal_token("s3cret") is None  # OK
+
+
 async def test_publish_emits_public_and_caches_full():
     sink_calls = []
 

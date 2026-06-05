@@ -20,7 +20,18 @@ from dhanradar.scoring.engine.schemas import LabelSignals, VerbLabel
 
 
 def derive_label(signals: LabelSignals) -> VerbLabel:
-    """Label from the rule table — independent of the numeric score."""
+    """Label from the rule table — independent of the numeric score.
+
+    PRECEDENCE NOTE (interpretation of spec §4.1, tracked B24): a `manager_change`
+    or `structural_concern` is treated as a CAUTION VETO — it yields `off_track`
+    even when 1Y+3Y outperformance signals are present. For a SEBI-EDUCATIONAL
+    product this is the fail-safe choice: we must not paint 🟢 over a known
+    structural risk. The contributing/contradicting lists still surface BOTH the
+    outperformance and the concern, so the user sees the full picture. Whether a
+    *recency window* should let an old manager-change be superseded by sustained
+    outperformance is an architecture-owner/spec decision (a methodology change →
+    two-person gate), not a builder call — tracked, not changed here.
+    """
     if signals.sustained_underperformance and signals.structural_concern:
         return VerbLabel.out_of_form
     if signals.underperform_12m or signals.manager_change or signals.structural_concern:

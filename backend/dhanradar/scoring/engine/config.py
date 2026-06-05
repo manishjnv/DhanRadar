@@ -40,11 +40,23 @@ class EngineConfig:
     confidence_floor: float
 
     def validate(self) -> None:
+        # Every axis must carry a weight, else the engine KeyErrors under traffic
+        # when that axis is present. Catch it at load, not at first score().
+        missing_axes = set(Axis) - set(self.axis_weights)
+        if missing_axes:
+            raise ConfigError(f"axis_weights missing axes: {sorted(a.value for a in missing_axes)}")
         total = sum(self.axis_weights.values())
         if abs(total - 1.0) > self.weight_sum_tolerance:
             raise ConfigError(
                 f"composite axis weights must sum to 1.0 ± {self.weight_sum_tolerance}; got {total}"
             )
+        # Confidence formula reads these keys by name — fail at load on a typo.
+        expected_conf = {
+            "freshness", "coverage", "factor_agreement", "retrieval_relevance", "model_signal",
+        }
+        missing_conf = expected_conf - set(self.confidence_weights)
+        if missing_conf:
+            raise ConfigError(f"confidence_weights missing keys: {sorted(missing_conf)}")
         # Double-counting guard: a sub-factor may live in exactly one axis.
         seen: dict[str, Axis] = {}
         for axis, subs in self.axis_subfactors.items():

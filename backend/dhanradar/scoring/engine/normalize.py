@@ -106,5 +106,5 @@ def composite(
     if w_present <= 0:
         return None, True, []
     raw = sum(present[a] * axis_weights[a] for a in present) / w_present
-    partial = len(present) < len([a for a in axis_scores])
+    partial = len(present) < len(axis_scores)
     return round(raw), partial, list(present.keys())

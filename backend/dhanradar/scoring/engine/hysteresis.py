@@ -53,6 +53,7 @@ class HysteresisOutcome:
     published_label: VerbLabel
     eval_seq: int
     flip_pending: bool  # a divergent label is accumulating but has not yet flipped
+    prior_label: Optional[VerbLabel] = None  # label published BEFORE this eval (None on first-ever)
 
 
 def _key(instrument_type: str, identifier: str) -> str:
@@ -74,8 +75,11 @@ async def apply_hysteresis(
     state = await store.get(key) or {}
     eval_seq = int(state.get("eval_seq", 0)) + 1
     published = state.get("published")
+    prior = VerbLabel(published) if published else None  # label published before THIS eval
 
-    # Refusals and first-ever evals publish immediately.
+    # Refusals and first-ever evals publish immediately. ``prior`` lets a
+    # consumer distinguish "never evaluated" (prior None) from "previously
+    # labelled, now refused" (prior is a real label) — useful for the CAS report.
     if candidate == VerbLabel.insufficient_data or published is None:
         new_state = {
             "published": candidate.value,
@@ -84,7 +88,7 @@ async def apply_hysteresis(
             "eval_seq": eval_seq,
         }
         await store.set(key, new_state)
-        return HysteresisOutcome(candidate, eval_seq, flip_pending=False)
+        return HysteresisOutcome(candidate, eval_seq, flip_pending=False, prior_label=prior)
 
     published_label = VerbLabel(published)
     if candidate == published_label:
@@ -93,7 +97,7 @@ async def apply_hysteresis(
             key,
             {"published": published, "pending": None, "pending_count": 0, "eval_seq": eval_seq},
         )
-        return HysteresisOutcome(published_label, eval_seq, flip_pending=False)
+        return HysteresisOutcome(published_label, eval_seq, flip_pending=False, prior_label=prior)
 
     # Divergent candidate — accumulate consecutive count.
     pending = state.get("pending")
@@ -109,11 +113,11 @@ async def apply_hysteresis(
             key,
             {"published": candidate.value, "pending": None, "pending_count": 0, "eval_seq": eval_seq},
         )
-        return HysteresisOutcome(candidate, eval_seq, flip_pending=False)
+        return HysteresisOutcome(candidate, eval_seq, flip_pending=False, prior_label=prior)
 
     # Suppress the flip — hold the previously published label.
     await store.set(
         key,
         {"published": published, "pending": pending, "pending_count": pending_count, "eval_seq": eval_seq},
     )
-    return HysteresisOutcome(published_label, eval_seq, flip_pending=True)
+    return HysteresisOutcome(published_label, eval_seq, flip_pending=True, prior_label=prior)

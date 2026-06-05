@@ -29,7 +29,10 @@ def factor_agreement(axis_scores: dict[Axis, Optional[float]]) -> float:
     """1 − normalized dispersion of the present axis scores (spec §5)."""
     present = [s for s in axis_scores.values() if s is not None]
     if len(present) < 2:
-        return 1.0  # single axis cannot disagree with itself
+        # A single axis cannot agree OR disagree — return NEUTRAL (0.5), not 1.0,
+        # so a sparse input does not get an inflated agreement contribution (the
+        # coverage term + partial_coverage cap then carry the penalty).
+        return 0.5
     dispersion = statistics.pstdev(present) / 50.0  # 0–100 scale, 50 = median
     return max(0.0, 1.0 - min(dispersion, 1.0))
 
