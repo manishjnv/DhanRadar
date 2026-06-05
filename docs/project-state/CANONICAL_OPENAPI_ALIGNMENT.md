@@ -17,7 +17,7 @@ This document defines the **canonical API contract** the repo will converge on. 
 | Auth status codes | **401** not authenticated · **402** `{upgrade_url}` tier-gate · **403** consent/role/ownership denied | — (existing + architecture already agree) |
 | Error body | **RFC7807 Problem+JSON** with stable `type` taxonomy + `request_id` (see §4) | existing FastAPI `{"detail": "..."}` |
 | Idempotency | **`Idempotency-Key` header required** on all mutating + payment endpoints; consumers dedupe by key | — (both agree) |
-| Tier dependency | `Depends(require_tier("free"|"pro"|"pro_plus"))` (class, not closure) + `Depends(current_user_or_anonymous)` | — |
+| Tier dependency | `Depends(require_tier("free"\|"pro"\|"pro_plus"))` (class, not closure) + `Depends(current_user_or_anonymous)` | — |
 | Signal vocabulary | **Non-advisory only** — `in_form` / `on_track` / `off_track` / `out_of_form` (see §5) | UI package `strong_buy/buy/hold/caution/avoid` (**rejected, non-negotiable #2**) |
 | Score numerics | Numeric score + factor **weights never in the DOM**; public payload = label + confidence **band**; numeric score/factors/fair-value behind tier gate | UI package returning raw `score`, `factors`, `fair_value` to all clients |
 | Confidence | **Band only** (`high`/`medium`/`low`) until calibration reliability-curve is within ±10%; numeric % suppressed | UI package exposing integer `confidence` |
@@ -51,6 +51,7 @@ Frontend api-client implication (documented, not implemented): requests use `cre
 Reconciles three sources. Status legend: **LIVE** (implemented now) · **SPEC** (architecture-defined, to build in phase) · **ADAPT** (UI-package endpoint kept but renamed/repathed to canonical) · **REJECT** (UI-package endpoint dropped).
 
 ### 3.1 Auth & account
+
 | Canonical path | Method | Status | Notes |
 |---|---|---|---|
 | `/api/v1/auth/signup` | POST | LIVE | UI package's 202+OTP REJECTED; password-immediate kept |
@@ -61,6 +62,7 @@ Reconciles three sources. Status legend: **LIVE** (implemented now) · **SPEC** 
 | `/api/v1/auth/totp/setup` · `/verify` | POST | LIVE | |
 
 ### 3.2 Billing & subscription
+
 | Canonical path | Method | Status | Notes |
 |---|---|---|---|
 | `/api/v1/billing/plans` | GET | SPEC/ADAPT | from UI package `/billing/plans`; public; backed by new `plans` catalog (D4) |
@@ -71,6 +73,7 @@ Reconciles three sources. Status legend: **LIVE** (implemented now) · **SPEC** 
 Decision: standardise the public surface on `billing/*`; preserve the existing webhook's security logic verbatim.
 
 ### 3.3 Instruments / scores (public read, numerics gated)
+
 | Canonical path | Method | Status | Notes |
 |---|---|---|---|
 | `/api/v1/instruments/search` | GET | SPEC/ADAPT | UI `/instruments/search`; architecture `/api/search` family — unify here; Postgres FTS + pg_trgm (no ES) |
@@ -85,27 +88,33 @@ Decision: standardise the public surface on `billing/*`; preserve the existing w
 | `/api/v1/explain/{entity_type}/{id}` | GET | SPEC | architecture "Why this ranking" drawer (`RankingExplainer`) |
 
 ### 3.4 Mutual fund (architecture Phase-1 launch surface — MF-first)
+
 `/api/v1/mf/upload/cas` (POST), `/mf/upload/cas/{job_id}/status` (GET), `/mf/portfolio/{user_id}` (GET), `/mf/portfolio/{user_id}/report` (GET), `/mf/fund/{isin}` (GET), `/mf/fund/{isin}/nav/history` (GET), `/mf/portfolio/{user_id}/overlap` (GET), `/mf/portfolio/{user_id}/refresh` (POST, 1/h). **Status: SPEC.** The UI package has **no CAS-upload screen** — that screen must be created in-system (UI package `agent.md` permits it).
 
 ### 3.5 ETF · Stock · Recommendations
+
 - ETF: `/api/v1/etf/*` mirrors MF (SPEC).
 - Stock: `/api/v1/stocks/{ticker}/{analysis,score,swot,history}`, `/api/v1/market/movers/{date}[/{ticker}]`, `/api/v1/stocks/picks` (anon top-5 no thesis / authed full-10). **Note:** architecture uses `/api/stocks/*` and `/market/*` unversioned — canonicalise to `/api/v1/stocks/*`, `/api/v1/market/*`.
 - `/api/v1/recommendations` (GET, bearer) — UI package param `signal` enum **REJECTED**; replace with `label` ∈ canonical 4-label set; `sector`, `cursor` kept.
 
 ### 3.6 Portfolio · Watchlist · Alerts
+
 - Portfolio: `/api/v1/portfolio` (POST/GET), `/portfolio/{id}/{sync,analytics,overlap,report-card}` (analytics = Pro, 402). UI package `/portfolio/holdings` ADAPT under this family.
 - Watchlists: `/api/v1/watchlists` (GET/POST), `/watchlists/{id}/items` (from UI package; SPEC).
 - Alerts: `/api/v1/alerts` (GET/POST, `Idempotency-Key`); `alert_rules.type` ∈ price/score/risk/earnings, `operator` ∈ gt/lt/eq/crosses (UI package enums kept — non-advisory, fine).
 
 ### 3.7 AI layer (governed OpenRouter — non-negotiable #5)
+
 `/api/v1/ai/search` (POST, quota-gated, 429 on quota), `/api/v1/ai/assistant` (POST, SSE), `/api/v1/ai/explain/{symbol}` (GET). Every `AIAnswer` carries `answer → reasoning → confidence band → sources` + `NOT_ADVICE`. UI package's generic LLM assumption REJECTED in favour of the budget-governed gateway.
 
 ### 3.8 News · Mood · Track-record
+
 - News: `/api/v1/news`, `/news/{article_id}`, `/news/ticker/{ticker}`, `/news/sector/{sector}`, `/news/today-summary` (canonicalised to `/api/v1`).
 - Mood Compass: `/api/v1/market/mood`, `/market/mood/history`, `/market/why-today`, `/market/mood/embed`.
 - Track-record: `/api/v1/track-record`, `/track-record/band/{band}`, `/track-record/sector/{sector}`, `/track-record/picks`, `/track-record/og-image`, `POST /api/v1/backtest/run` (Pro+), `GET /api/v1/backtest/{job_id}` (Pro+).
 
 ### 3.9 Consent / DPDP / Admin (architecture Global §3/§4/§9)
+
 - Consent: `GET /api/v1/consent/status`, `POST /consent/{grant,revoke}`, `POST /data-rights/request`, `GET /data-rights/requests`.
 - Compliance: `GET /api/v1/disclaimers/{type}`, admin disclaimer + label-churn endpoints.
 - Onboarding: `/api/v1/onboarding/*`, `POST /onboarding/risk-quiz`, `/risk-profile/{history,retake}`.
@@ -113,6 +122,7 @@ Decision: standardise the public surface on `billing/*`; preserve the existing w
 - Internal: `GET /internal/v1/score/{instrument_type}/{identifier}` (engine; not public).
 
 ### 3.10 Rejected from UI package
+
 - `/v1/*` base path (all) → repath `/api/v1/*`.
 - `bearerAuth` security scheme → cookie auth.
 - `/auth/otp/verify`, 202-OTP signup → preserved-not-activated.
@@ -124,6 +134,7 @@ Decision: standardise the public surface on `billing/*`; preserve the existing w
 ## 4. RFC7807 error mapping (canonical, D3 approved)
 
 **Media type:** `application/problem+json`. **Every** error body:
+
 ```json
 {
   "type": "https://dhanradar.com/errors/<slug>",
@@ -184,5 +195,5 @@ Confidence band enum: `high` / `medium` / `low` (UI package "Moderate" → `medi
 5. **No bearer tokens, no OTP activation, no Elasticsearch** — enforced by grep guard in CI (Stage 6).
 6. Endpoints marked SPEC are built in their architecture phase; this doc only fixes their **shape**, not their schedule.
 
-**Open item carried to RECOMMENDATION_ENGINE doc:** the `factors` object key set (architecture **Trend** vs UI package **Growth**) is unresolved and needs an architecture-owner decision before the score contract is frozen.
+**~~Open item~~ RESOLVED (ADR-0011 / REC-D1):** the `factors` key set is **frozen** as `quality / valuation / momentum / risk / trend` (5-axis "Trend"; Growth nested as sub-factors within Trend). See `FINAL_SCORING_SPEC.md` §2.4/§3 and `ARCHITECTURE_DECISIONS.md` ADR-0011. The `openapi.yaml` `FactorAxis` enum reflects this and is correct.
 </content>

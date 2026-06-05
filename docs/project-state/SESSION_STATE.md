@@ -27,14 +27,18 @@ lives in the linked docs.
 
 ## In flight
 
-- (none active)
+- **Stage 2 Step 1 (canonical `openapi.yaml`): DONE & reviewed.** Existing spec (`5c02d7a`)
+  validated against live code + given its Tier-B governance review (Architect + Security +
+  Compliance, all ACCEPT-WITH-CONDITIONS → resolved). Fixes: webhook path (`/subscriptions/webhook`
+  LIVE, `/billing/webhook` SPEC); no-numeric-in-DOM made contract-enforceable (public score =
+  `ScorePublic` only; numerics moved to gated `/score/detail`); disclosure-version tie-in;
+  `razorpay_key_id` annotated; `Problem.detail` bounded. Trail: `reviews/stage2-step1-openapi.md`.
 
 ## Next action
 
-- **Stage 2 Step 1** — regenerate canonical `openapi.yaml` from `CANONICAL_OPENAPI_ALIGNMENT.md`
-  (base `/api/v1`, cookie security scheme, RFC7807, 4-label non-advisory enum, gated numerics).
-  Tier-B change → Architect + Security + Compliance reviews; validate generated types against the
-  live auth/health/webhook endpoints. Awaiting operator "go" to start building.
+- **Stage 2 Step 2** — canonical token freeze + single token-generation pipeline (`tokens.json` +
+  `tokens.css` + `tailwind.config.js` from one source, Geist/warm brand naming). Tier-A
+  (Builder + Architect + UI). Step 1 is done (above).
 
 ## Open blockers
 
