@@ -108,7 +108,9 @@ async def create_checkout(
     #     or an unset cycle count. Until the catalog row is seeded with the REAL
     #     dashboard plan id + total_count, checkout is refused — it is impossible
     #     to create a charge with wrong config. (Data-only fix at billing go-live.)
-    if not plan.razorpay_plan_id or not plan.total_count:
+    # `is None` (not falsy): only an UNSET field is "not configured". Razorpay
+    # rejects total_count < 1 itself, so we don't second-guess a real value here.
+    if plan.razorpay_plan_id is None or plan.total_count is None:
         logger.error(
             "Plan %r not configured for billing (razorpay_plan_id/total_count "
             "missing) — refusing checkout (pre-billing fail-safe).",
@@ -130,8 +132,8 @@ async def create_checkout(
     # 4. Create the Razorpay subscription. user_id is pinned in notes from the
     #    SESSION. Run in a thread with a hard timeout < _LOCK_TTL so the call
     #    cannot block the event loop or outlive the lock (double-charge guard).
-    #    (Assumes billing.plans.id == the Razorpay plan id — documented
-    #    PRE-BILLING assumption; populate the catalog to match the dashboard.)
+    #    Uses plan.razorpay_plan_id (the REAL dashboard id, B7) + plan.total_count
+    #    (per-plan, B8) — gated by the §2b fail-safe above.
     try:
         sub = await asyncio.wait_for(
             asyncio.to_thread(
