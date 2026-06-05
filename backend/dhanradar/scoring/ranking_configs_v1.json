@@ -73,7 +73,7 @@
       "earnings_predictability": 0.10
     },
     "composite_contribution": 0.12,
-    "_concentration_note": "axes.risk lists 7 sub-factors incl. concentration (FINAL_SCORING_SPEC §2.5), but this v1 formula weights only 6 (§6.1 omits concentration). concentration is intentionally UNWEIGHTED in v1 pending a weight assigned at the backtest gate. The §2.5/§6.1 spec inconsistency is flagged to the architecture owner (BLOCKERS B11)."
+    "_concentration_note": "axes.risk lists 7 sub-factors incl. concentration (FINAL_SCORING_SPEC §2.5), but this v1 formula weights only 6 (§6.1). concentration is INTENTIONALLY UNWEIGHTED in v1 — RESOLVED as a documented deferral, not a contradiction (B11 / ADR-0020). It is a v2 candidate: a weight is set only once a reliable data source + sector normalization exist, at the backtest pass-gate under the two-person methodology gate (B6). axes.risk = factor catalog; this weight map = activated subset; a catalogued-unweighted sub-factor is valid."
   },
 
   "fair_value": {

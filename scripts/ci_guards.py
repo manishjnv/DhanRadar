@@ -85,29 +85,49 @@ _ADV_KEY = re.compile(
     r"""(?:^|[{,])\s*["']?(?:strongBuy|strongSell|buy|sell|hold|avoid|caution)["']?\s*:""",
     re.I,
 )  # advisory word as an object key
+# _ADV_SKIP: lines that legitimately *name* an advisory verb in order to reject
+# it (guardrail comments, prohibition copy). Kept deliberately narrow — the bare
+# tokens `guard` and `not ` were removed because they co-occur with real advisory
+# verbs on innocent-looking lines and would mask a true positive (B13). Negation
+# is now matched only as anchored phrases, not any substring of "not".
 _ADV_SKIP = re.compile(
-    r"reject|never|banned|forbid|advisory|educational|non-advisory|guard|no[\s-]?buy|not ",
+    r"reject|never|banned|forbid|prohibit|disallow|advisory|non-advisory|"
+    r"educational|guardrail|must not|do not|cannot|may not|no[\s-]?buy",
     re.I,
 )
 
+# Advisory scan covers application code PLUS all non-code label assets (B13):
+# any .json/.yaml/.css/.html (and config .cjs/.js) under frontend/ and
+# backend/dhanradar/ — not just the 3 hardcoded token files, which missed the
+# class that shipped the advisory `signal` block in tokens.json.
+ASSET_DIRS = [ROOT / "frontend", ROOT / "backend" / "dhanradar"]
+ASSET_EXT = CODE_EXT | {".json", ".yaml", ".yml", ".css", ".html"}
+ASSET_SKIP_DIRS = {"node_modules", ".next", "__pycache__", ".git", ".venv"}
+
 
 def _advisory_scan_files():
-    seen = set()
+    seen: set[Path] = set()
     for fp in code_files():
         seen.add(fp)
         yield fp
-    for rel in (
-        "frontend/styles/tokens.json",
-        "frontend/src/styles/tokens.css",
-        "frontend/tailwind.tokens.cjs",
-    ):
-        fp = ROOT / rel
-        if fp.is_file() and fp not in seen:
-            yield fp
+    for d in ASSET_DIRS:
+        if not d.exists():
+            continue
+        for p in d.rglob("*"):
+            if not (p.is_file() and p.suffix in ASSET_EXT):
+                continue
+            if set(p.relative_to(ROOT).parts) & ASSET_SKIP_DIRS:
+                continue
+            if p in seen:
+                continue
+            seen.add(p)
+            yield p
 
 
 for p in _advisory_scan_files():
-    if "scoring" in p.parts:  # ranking_configs lists the rejected verbs verbatim
+    # ranking_configs files list the rejected verbs verbatim as the banned set;
+    # narrowed from a whole-`scoring`-dir skip so engine code is still scanned (B13).
+    if p.name.startswith("ranking_configs"):
         continue
     for i, line in enumerate(read(p).splitlines(), 1):
         if _ADV_SKIP.search(line):

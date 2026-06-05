@@ -158,6 +158,17 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
     if not ok:
         _raise_invalid_credentials()
 
+    # B4 (DPDP): a user who has requested erasure must not be able to start a new
+    # session. Checked AFTER password verify (so it is not an enumeration oracle —
+    # the caller already proved the credentials) and fail-closed. Tearing down
+    # EXISTING sessions (revoke refresh jtis + flush auth:tier cache) is the
+    # erasure module's responsibility at the point it SETS deletion_requested_at.
+    if user.deletion_requested_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_deletion_pending",
+        )
+
     return user  # type: ignore[return-value]
 
 
