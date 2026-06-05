@@ -6,12 +6,10 @@ Handles Razorpay webhook processing after signature verification:
   2. Recompute users.tier from active subscription state.
   3. Flush auth:tier:{user_id} Redis cache.
 
-Tier mapping from Razorpay plan names (adjust plan_id constants to match
-your Razorpay dashboard plan IDs once they are created):
-  - Any plan with "pro_plus" or "founder" in the plan id/name → pro_plus
-  - Any plan with "pro" in the plan id/name → pro
-  - Active subscription → at least free (default)
-  - No active subscription → free (users start at free on signup)
+Tier mapping (B2 fail-safe): tier is taken ONLY from the exact
+EXACT_PLAN_TIERS map (populate with the real Razorpay dashboard plan_ids
+before launch). An unmapped active plan grants NO paid tier (free + error);
+inactive / cancelled / expired → free. No substring guessing.
 
 All SQL via parameterized ORM — no f-string interpolation.
 """
@@ -58,9 +56,10 @@ def _derive_tier(plan: str, status: str) -> UserTierEnum:
     Active states that upgrade the tier: "active", "authenticated".
     Anything else (cancelled, completed, expired, halted) → free.
 
-    Resolution order: exact plan_id map first; substring heuristic only as a
-    pre-billing fallback (logs a warning so it can never silently grant a
-    paid tier in production).
+    FAIL-SAFE (B2): tier comes ONLY from the exact EXACT_PLAN_TIERS map. An
+    unmapped plan_id grants NO paid tier (returns free) and logs an error — it
+    never guesses. The previous substring heuristic was a privilege foot-gun
+    (a plan id like "promo_2026" contains "pro").
     """
     if status.lower() not in _ACTIVE_STATUSES:
         return UserTierEnum.free
@@ -69,19 +68,12 @@ def _derive_tier(plan: str, status: str) -> UserTierEnum:
     if exact is not None:
         return exact
 
-    plan_lower = plan.lower()
-    logger.warning(
-        "Razorpay plan_id %r not in EXACT_PLAN_TIERS — using substring "
-        "fallback (PRE-BILLING ONLY; populate EXACT_PLAN_TIERS before launch)",
+    logger.error(
+        "Razorpay plan_id %r not in EXACT_PLAN_TIERS — granting NO paid tier "
+        "(fail-safe). Populate EXACT_PLAN_TIERS with the real dashboard "
+        "plan_ids before billing go-live (B2).",
         plan,
     )
-    if "founder" in plan_lower or "lifetime" in plan_lower:
-        return UserTierEnum.founder_lifetime
-    if "pro_plus" in plan_lower or "pro+" in plan_lower:
-        return UserTierEnum.pro_plus
-    if "pro" in plan_lower:
-        return UserTierEnum.pro
-
     return UserTierEnum.free
 
 

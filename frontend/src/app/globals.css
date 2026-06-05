@@ -1,0 +1,17 @@
+/* Tailwind layers. Token CSS variables live in src/styles/tokens.css (imported
+   alongside this in the root layout); utilities here consume them via the
+   tailwind.tokens.cjs preset (bg-bg, text-ink, bg-surface, etc.). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--dr-font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+}

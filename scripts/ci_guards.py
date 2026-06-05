@@ -72,16 +72,49 @@ for p in TOKEN_FILES:
         if "Manrope" in t or re.search(r"['\"]Inter['\"]", t):
             fails.append(f"{p}: Manrope/Inter font token (D1: Geist/warm only)")
 
-# 4. Advisory verbs as usage (exclude scoring config + rejection comments) ---
-ADV = re.compile(r"\b(strong_buy|caution)\b")
-for p in code_files():
-    if "scoring" in p.parts:  # ranking_configs lists the rejected verbs
+# 4. Advisory verbs as usage (non-neg #2) — educational labels only.
+# Catches snake_case, camelCase, Title Case, spaced, quoted-label, and
+# object-key forms. Also scans the design-token files (source + generated):
+# they live outside frontend/src and are .json/.css (outside CODE_EXT), so the
+# original code-only scan missed an advisory `signal` block shipped in
+# tokens.json (see docs/rca/README.md 2026-06-05).
+_ADV_HARD = re.compile(r"strong[\s_-]?(?:buy|sell)", re.I)  # never innocent
+_ADV_WORD = r"(?:strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|avoid|caution)"
+_ADV_QUOTED = re.compile(rf"""["']{_ADV_WORD}["']""", re.I)  # quoted label value
+_ADV_KEY = re.compile(
+    r"""(?:^|[{,])\s*["']?(?:strongBuy|strongSell|buy|sell|hold|avoid|caution)["']?\s*:""",
+    re.I,
+)  # advisory word as an object key
+_ADV_SKIP = re.compile(
+    r"reject|never|banned|forbid|advisory|educational|non-advisory|guard|no[\s-]?buy|not ",
+    re.I,
+)
+
+
+def _advisory_scan_files():
+    seen = set()
+    for fp in code_files():
+        seen.add(fp)
+        yield fp
+    for rel in (
+        "frontend/styles/tokens.json",
+        "frontend/src/styles/tokens.css",
+        "frontend/tailwind.tokens.cjs",
+    ):
+        fp = ROOT / rel
+        if fp.is_file() and fp not in seen:
+            yield fp
+
+
+for p in _advisory_scan_files():
+    if "scoring" in p.parts:  # ranking_configs lists the rejected verbs verbatim
         continue
     for i, line in enumerate(read(p).splitlines(), 1):
-        if ADV.search(line) and not re.search(
-            r"reject|never|banned|not |advisory|forbid|no buy", line, re.I
-        ):
-            fails.append(f"{p}:{i}: advisory verb usage (non-neg #2: educational labels only)")
+        if _ADV_SKIP.search(line):
+            continue
+        if _ADV_HARD.search(line) or _ADV_QUOTED.search(line) or _ADV_KEY.search(line):
+            rel = p.relative_to(ROOT)
+            fails.append(f"{rel}:{i}: advisory verb usage (non-neg #2: educational labels only)")
 
 # 5. Secret scan (scoped) ---------------------------------------------------
 SECRET_RES = [

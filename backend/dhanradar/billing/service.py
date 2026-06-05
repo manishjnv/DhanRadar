@@ -38,22 +38,25 @@ _LOCK_TTL = 60               # s — in-flight guard; MUST exceed _CALL_TIMEOUT 
                              # slow gateway call cannot outlive the lock (else a
                              # concurrent retry could create a 2nd subscription).
 _CALL_TIMEOUT = 25           # s — hard cap on the Razorpay call (< _LOCK_TTL).
-# Razorpay subscription billing cycles to authorise. 12 = one year of monthly
-# (Razorpay requires total_count; the real value is plan-dependent — revisit
-# when the Razorpay dashboard plans are created, PRE-BILLING).
-_TOTAL_COUNT = 12
+# Billing cycles (Razorpay `total_count`) are per-plan (billing.plans.total_count),
+# not a hardcoded constant (B8).
 
 
-def _create_razorpay_subscription(plan_id: str, user_id: str) -> dict[str, Any]:
+def _create_razorpay_subscription(
+    razorpay_plan_id: str, total_count: int, user_id: str
+) -> dict[str, Any]:
     """Synchronous Razorpay call — run via asyncio.to_thread so it neither
-    blocks the event loop nor can exceed the idempotency lock TTL."""
+    blocks the event loop nor can exceed the idempotency lock TTL.
+
+    `razorpay_plan_id` is the REAL dashboard plan id (not the internal catalog
+    id, B7); `total_count` is the plan's own cycle count (not a constant, B8)."""
     client = razorpay.Client(
         auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
     )
     return client.subscription.create(
         {
-            "plan_id": plan_id,
-            "total_count": _TOTAL_COUNT,
+            "plan_id": razorpay_plan_id,
+            "total_count": total_count,
             "customer_notify": 1,
             "notes": {"user_id": user_id},
         }
@@ -101,6 +104,21 @@ async def create_checkout(
             detail="plan_not_found",
         )
 
+    # 2b. FAIL-SAFE (B7/B8): never call Razorpay with a missing/internal plan id
+    #     or an unset cycle count. Until the catalog row is seeded with the REAL
+    #     dashboard plan id + total_count, checkout is refused — it is impossible
+    #     to create a charge with wrong config. (Data-only fix at billing go-live.)
+    if not plan.razorpay_plan_id or not plan.total_count:
+        logger.error(
+            "Plan %r not configured for billing (razorpay_plan_id/total_count "
+            "missing) — refusing checkout (pre-billing fail-safe).",
+            plan_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="plan_not_configured_for_billing",
+        )
+
     # 3. Concurrency guard — only one in-flight creation per idem key.
     acquired = await redis.set(lock_key, "1", nx=True, ex=_LOCK_TTL)
     if not acquired:
@@ -116,7 +134,12 @@ async def create_checkout(
     #    PRE-BILLING assumption; populate the catalog to match the dashboard.)
     try:
         sub = await asyncio.wait_for(
-            asyncio.to_thread(_create_razorpay_subscription, plan.id, user_id),
+            asyncio.to_thread(
+                _create_razorpay_subscription,
+                plan.razorpay_plan_id,
+                plan.total_count,
+                user_id,
+            ),
             timeout=_CALL_TIMEOUT,
         )
     except (Exception, asyncio.TimeoutError) as exc:  # gateway error or timeout
