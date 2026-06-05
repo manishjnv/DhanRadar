@@ -25,22 +25,29 @@ class ProviderError(Exception):
 
 class AllProvidersFailedError(Exception):
     """
-    Every rung in the ladder for a given DataKind failed.
+    Every rung in the ladder for a given DataKind failed OR was skipped.
 
     ``errors`` is a list of (provider_name, ProviderError) pairs in ladder
-    order so callers can audit which providers were tried.
+    order for rungs that were TRIED and failed. ``skipped`` lists rungs that
+    were not tried because their circuit breaker was OPEN — without it, a
+    ladder where every breaker is open would raise with an empty ``errors``
+    and no diagnostic (the caller couldn't tell "all tried & failed" from
+    "none tried — all breakers open").
     """
 
     def __init__(
         self,
         kind: DataKind,
         errors: list[tuple[str, ProviderError]],
+        skipped: list[str] | None = None,
     ) -> None:
         self.kind = kind
         self.errors = errors
+        self.skipped = skipped or []
         providers = [name for name, _ in errors]
         super().__init__(
             f"All providers failed for kind={kind!r}. "
             f"Tried: {providers}. "
+            f"Skipped (circuit open): {self.skipped}. "
             f"Errors: {[(n, str(e)) for n, e in errors]}"
         )

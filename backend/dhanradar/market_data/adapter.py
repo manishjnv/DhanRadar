@@ -75,12 +75,15 @@ class MarketDataAdapter:
         """
         ladder = self._ladders[request.kind]
         errors: list[tuple[str, ProviderError]] = []
+        skipped: list[str] = []
 
         for name in ladder:
             breaker = self._get_breaker(name)
 
             if not breaker.allow():
                 # Circuit is OPEN — skip entirely, do not call the provider.
+                # Record it so an all-open ladder still reports a diagnostic.
+                skipped.append(name)
                 continue
 
             provider = self._providers.get(name)
@@ -105,7 +108,7 @@ class MarketDataAdapter:
                 await self._event_sink(result)
             return result
 
-        raise AllProvidersFailedError(request.kind, errors)
+        raise AllProvidersFailedError(request.kind, errors, skipped=skipped)
 
     def get_breaker(self, provider_name: str) -> CircuitBreaker:
         """Expose breaker for inspection (e.g., health-check endpoints)."""

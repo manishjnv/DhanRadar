@@ -61,3 +61,12 @@ class AIOutputBase(BaseModel):
         # never strip or alter the SEBI label.
         object.__setattr__(self, "disclaimer", AI_DISCLAIMER)
         return self
+
+    def model_copy(self, *, update: dict | None = None, deep: bool = False) -> "AIOutputBase":
+        """``model_copy`` does NOT re-run validators in Pydantic v2, so a caller
+        could otherwise ``model_copy(update={"disclaimer": "..."})`` and strip the
+        SEBI label. Force it back on every copy — the disclaimer is non-strippable
+        through copies too."""
+        obj = super().model_copy(update=update, deep=deep)
+        object.__setattr__(obj, "disclaimer", AI_DISCLAIMER)
+        return obj

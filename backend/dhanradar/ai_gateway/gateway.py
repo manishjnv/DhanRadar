@@ -113,7 +113,7 @@ class OpenRouterGateway:
                 try:
                     res = await self._call(model, messages)
                 except RateLimitError:
-                    continue  # 429 → rotate, NO sleep
+                    continue  # 429 → rotate, NO sleep, no call billed
                 except APIStatusError as exc:
                     if getattr(exc, "status_code", None) == 402:
                         raise CreditExhaustedError(
@@ -121,21 +121,35 @@ class OpenRouterGateway:
                         ) from exc
                     continue  # other upstream error → try next model
                 except json.JSONDecodeError:
+                    # The model returned (and billed) a non-JSON / empty body —
+                    # it still consumes a free-quota unit.
+                    meter.units += 1
                     last_quality_error = QualityValidationError("model returned non-JSON")
                     continue
 
+                # A response was served → it consumes one free-quota unit whether
+                # or not it passes validation (the free cap counts API calls, not
+                # only usable ones — closes the under-count abuse vector).
+                meter.units += 1
                 got_any_response = True
                 try:
                     result = validator.validate(res.data)
                 except QualityValidationError as qe:
                     last_quality_error = qe
                     continue  # quality fail → try the next free model
-                meter.units = 1  # one usable free generation consumed
                 return result
 
         # --- Escalation: free pool produced no valid output ---------------
         if last_quality_error is not None and task_type in self._high_stakes:
-            return await self._spillover_to_sonnet(messages, validator)
+            # Premium Sonnet spillover — but bound it with the SAME 3-strike skip
+            # so a persistently-bad high-stakes ticker cannot loop premium spend.
+            try:
+                return await self._spillover_to_sonnet(messages, validator)
+            except QualityValidationError:
+                strikes = await self._record_strike(task_type, ticker)
+                if strikes >= _STRIKE_LIMIT:
+                    raise ThreeStrikeSkipError(ticker or task_type, strikes)
+                raise
 
         if last_quality_error is not None:
             # Non-high-stakes quality failure → 3-strike-per-(ticker, day) skip.
@@ -176,6 +190,10 @@ class OpenRouterGateway:
             messages=messages,
             response_format={"type": "json_object"},
         )
+        # Empty choices (e.g. content-filtered) → treat as a malformed response,
+        # not an unhandled IndexError that would bypass the gateway taxonomy.
+        if not getattr(resp, "choices", None):
+            raise json.JSONDecodeError("empty choices from model", "", 0)
         content = resp.choices[0].message.content or "{}"
         data = json.loads(content)  # may raise JSONDecodeError
         usage = getattr(resp, "usage", None)

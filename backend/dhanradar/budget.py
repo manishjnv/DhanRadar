@@ -13,12 +13,15 @@ IMPORTANT — OpenRouter error semantics:
 from __future__ import annotations
 
 import datetime
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Literal
 
 import redis.asyncio as aioredis
 
 from dhanradar.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Budget kinds and caps
@@ -86,11 +89,13 @@ def _next_utc_midnight_ts() -> int:
 
 
 async def _init_key_if_missing(redis: aioredis.Redis, key: str, initial: str = "0") -> None:
-    """SET key initial EX (seconds until next midnight) only if the key does not exist."""
-    exists = await redis.exists(key)
-    if not exists:
-        await redis.set(key, initial)
-        await redis.expireat(key, _next_utc_midnight_ts())
+    """Atomically create the key=initial with an EXPIREAT at next UTC midnight,
+    only if it does not exist (SET ... EXAT NX in one round-trip).
+
+    The previous EXISTS-then-SET-then-EXPIREAT sequence had a crash window that
+    could leave the key with no TTL (then it would accumulate across days and the
+    daily cap would never reset). A single NX+EXAT set closes that window."""
+    await redis.set(key, initial, exat=_next_utc_midnight_ts(), nx=True)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +146,16 @@ async def budget_guard(kind: BudgetKind) -> AsyncGenerator[BudgetMeter, None]:
         hard_cap = _CAPS["premium_hard"]
         if current >= hard_cap:
             raise BudgetExhaustedError(kind, current, hard_cap)
+        # Soft cap is a WARN threshold (observability), not a stop.
+        soft_cap = float(_CAPS["premium_soft"])
+        if current >= soft_cap:
+            logger.warning(
+                "AI premium budget soft cap crossed: current=$%.4f >= soft=$%.2f "
+                "(hard=$%.2f). Resets at next UTC midnight.",
+                current,
+                soft_cap,
+                hard_cap,
+            )
 
     meter = BudgetMeter()
     yield meter

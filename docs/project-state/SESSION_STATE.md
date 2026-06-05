@@ -1,6 +1,6 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-06
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -26,6 +26,13 @@ lives in the linked docs.
   are **FINAL**; numeric axis weights remain **PROPOSED v1** pending backtest pass-gates + the
   two-person methodology gate (`BLOCKERS.md` B6, non-blocking until production activation). This
   clears `STAGE2_EXECUTION_PLAN` **PC6**.
+- **Post-Stage-2 hardening (B13/B10/B9/B3/B4/B11): DONE & merged** via PR #9 (squash `76f7525`),
+  CI green. ADR-0020 (concentration). Residuals B15/B16/B17.
+- **Phase 3 (Market Data Adapter §B4 + AI/LLM Gateway §B3): BUILT on branch
+  `phase3/market-data-ai-gateway`** (not pushed). 3A Market Data (Sonnet, Opus-reviewed; `917e5ef`)
+  with 3B AI Gateway (Opus, Tier-B; `3cd2fef`) and governance fan-out fixes. Providers are stubs (no
+  vendor keys / AA partner); models/prompts injected (Admin source + live verify deferred). 112
+  unit tests; ci_guards green.
 
 ## In flight
 
@@ -46,60 +53,49 @@ lives in the linked docs.
 
 ## In flight (this session)
 
-- **Blocker sweep on branch `hardening/b13-b10-ci-fe`** (this session): B13, B10, B9, B3, B4.
-  - **B9** (`c3b601c`) — `Retry-After: 60` on the lock-held checkout 409; 502-gateway no-double-charge
-    test + valid-event test through the re-mounted `/billing/webhook`. Plans-seed Compliance pass is
-    data-only (no seed yet). Tier-B (payments) — adversarial sign-off owed before merge.
-  - **B3/B4** — `RequireConsent` made fail-closed (purpose-validated; fresh `users.dpdp_consents`
-    read; 403 `consent_required`); `authenticate_user` denies login for a `deletion_requested_at`
-    account (403 `account_deletion_pending`). Unit-tested (`tests/unit/test_consent.py`, 17 cases).
-    Tier-B (DPDP/auth) — adversarial sign-off owed before merge. Full Consent/erasure module deferred.
-- **B13 + B10 hardening: DONE on branch `hardening/b13-b10-ci-fe`** (this session). B13 — ci_guards
-  advisory scan now walks all non-code label assets (not 3 hardcoded files), skip-list tightened,
-  scoring skip narrowed to `ranking_configs*`, self-test added (`backend/tests/unit/test_ci_guards.py`).
-  B10 — ESLint isolation matrix replaced by a generic `eslint-plugin-boundaries` rule (closes the
-  fail-open that left `dashboard`/`mf` uncovered; clean-pass + planted-violation both verified);
-  `apiClient` fails closed on a bad `NEXT_PUBLIC_API_URL`; `ScoreRing` aria collapsed to one
-  `<figcaption>`. Gates green: ci_guards 0, tsc 0, next lint 0, pytest (ci_guards self-test) 3 passed.
-  RCA logged (2× 2026-06-05). **Not pushed** (PC5). Pre-merge governance review (Architect + UI +
-  Compliance-on-B13) still owed before PR to `main`.
+- **Phase 3 BUILT on branch `phase3/market-data-ai-gateway`** (2 commits + governance fixes; not pushed).
+  - **3A Market Data Adapter** (`917e5ef`, Tier-A) — Sonnet-built against a fixed contract, Opus
+    diff-reviewed. Provider-agnostic, YAML ladders, per-provider circuit breaker, normalized events,
+    8 stub providers (no vendor keys; AA explicit stub), pluggable event sink. 24 unit tests.
+  - **3B AI/LLM Gateway** (`3cd2fef`, Tier-B) — Opus-built. OpenRouterGateway (round-robin, 429-rotate
+    no-sleep, 402-credit no-retry, Sonnet spillover, 3-strike skip), AIOutputBase + QualityValidator
+    (schema + advisory screen), budget governor increment (BudgetMeter). Models/prompts injected.
+  - **Governance fan-out DONE** (Architect/Security Sonnet + Compliance Opus, independent). Security
+    REVISE + 1 Compliance BLOCKER → **all fixed this turn**: advisory list expanded (core set),
+    high-stakes premium loop bounded by 3-strike, free counter debits every served call, atomic budget
+    init, soft-cap warning, model_copy disclaimer guard, empty-choices guard, adapter `skipped`
+    diagnostics. Residuals **B18–B23**. Ledger: `reviews/phase3-market-data-ai-gateway.md`.
+  - Gates: 112 unit tests pass; ci_guards 0; py_compile clean. **Not pushed (PC5).**
 
 ## Next action
 
-- **Pre-merge governance fan-out: DONE** (5 independent reviewers — Architect/Security/UI/Product
-  Sonnet + Compliance Opus). All **ACCEPT-WITH-CONDITIONS, no BLOCKER**. 3 conditions fixed this turn
-  (RequireConsent malformed-uuid → fail-closed 403; apiClient `[apiClient]` log prefix; ScoreRing
-  aria comment). Residuals filed B15/B16/B17. Ledger: `reviews/hardening-b13-b10-b9-b3-b4.md`.
-- **PR is prepped, NOT pushed (PC5).** Branch `hardening/b13-b10-ci-fe` is merge-eligible pending
-  the operator's explicit push approval; PR body drafted. Push the branch + `gh pr create`, then
-  squash-merge after CI green (CI runs the integration tests this box can't).
-- **Pre-billing** remains code-ADDRESSED — only **data-only seeding** (real Razorpay plan ids +
-  `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists. B9 plans-seed copy Compliance pass
-  is also data-only (no seed exists yet).
-- **B11 RESOLVED** (ADR-0020, operator chose option C): concentration reconciled as a
-  catalogued-but-unweighted v1 risk sub-factor (doc-only; §2.5/§6.1 cross-pointers + `_concentration_note`).
-- Remaining follow-ups: **B6** (non-blocking until prod activation), residuals **B15/B16/B17**.
-- Then **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
+- **Push `phase3/market-data-ai-gateway` + open the PR** (needs operator PC5 approval). CI runs the
+  integration tests this box can't; squash-merge after green.
+- Wire-up work for the consuming modules (MF/Stock/Mood) must, before any user-specific payload reaches
+  the gateway, land the **B20** cross-border + `RequireConsent` call-site gate and **B21** audit/model_used.
+- Remaining follow-ups: residuals **B15–B23**; **B6** (non-blocking until prod activation).
+- Then **Implementation-Plan Phase 4** (Rating/Scoring Engine + MF module: CAS→60s report).
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open: B6 (non-blocking), B14, B15, B16, B17 (all low/residual). Resolved: B5 (CI),
-**B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or later-module work remains):
-B1, **B2**, **B3**, **B4**, B7, B8, **B9**, B12.
+See `BLOCKERS.md`. Open (low/residual/non-blocking): B6, B14, B15, B16, B17, B18, B19, B20, B21, B22,
+B23. Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
+later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12.
 
 ## Agent-utilization & routing-telemetry footer
 
 - Opus: 100% — Builder + Architect on all of B13/B10; self-executed (small hot-cache edits + the
   judgment-heavy compliance-net regex and module-isolation rule). Per global carve-out: ≤ a few
   files, in hot cache, two needing Opus judgment → cheaper than cold subagent starts.
-- Sonnet: 4 independent reviewers (Architect / Security-adversarial / UI / Product) for the pre-merge
-  governance fan-out on the branch — all ACCEPT-WITH-CONDITIONS.
-- Haiku: n/a — no bulk sweep.
-- codex:rescue: n/a — Tier-B Security gate run as an independent Sonnet adversarial review (fallback
-  ladder, per prior-session precedent); a formal codex pass remains available.
-- Per-delegation (telemetry): B13 ci_guards hardening · Opus · reworked N | B10 eslint-boundaries ·
-  Opus · reworked Y (v6 object-selector schema rejected → reverted to working array selector + static
-  message) | B10 apiClient/ScoreRing · Opus · reworked N | B9 billing Retry-After + tests · Opus ·
-  reworked N | B3/B4 DPDP gate primitives · Opus · reworked N.
-- Verification note: unit tests run locally (66 backend unit incl. 17 new B3/B4 + 3 ci_guards);
-  billing/auth INTEGRATION tests compile+collect only — no local Postgres/Docker (B1), they run in CI.
+- (Earlier this session) hardening branch B13/B10/B9/B3/B4/B11: Opus builder + 5 Sonnet/Opus reviewers;
+  merged via #9. Phase-3 footer below supersedes for the current work.
+- **Phase 3 footer:** Opus — orchestration + Builder (3B AI Gateway, Tier-B) + Compliance reviewer +
+  all adjudication/condition-fixes. Sonnet — 3A Market Data Adapter (builder, fixed contract) + 2
+  independent reviewers (Architect, Security-adversarial). Haiku — n/a. codex:rescue — n/a (Tier-B
+  Security gate run as independent Sonnet adversarial, fallback ladder).
+- Per-delegation (telemetry): 3A market-data · Sonnet · reworked N (Opus review clean, MAJORs tracked)
+  | 3B ai-gateway · Opus · reworked Y (Security REVISE + Compliance BLOCKER → fixed in-branch:
+  advisory list, premium-loop bound, free-counter debit, atomic init, model_copy guard) | governance
+  reviewers · Sonnet×2 + Opus×1 · independent.
+- Verification note: 112 backend unit tests run locally + ci_guards green; the integration tests
+  (billing/auth) run in CI only — no local Postgres/Docker (B1).

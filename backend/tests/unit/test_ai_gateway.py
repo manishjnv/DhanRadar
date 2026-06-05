@@ -181,3 +181,55 @@ async def test_descriptive_holding_is_not_a_false_positive(patch_redis):
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
     out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
     assert out.thesis.startswith("largest holding")
+
+
+@pytest.mark.parametrize(
+    "thesis",
+    [
+        "accumulate on every dip",
+        "time to book profits here",
+        "take profit near resistance",
+        "square off before expiry",
+        "go long with a tight stop",
+        "we are overweight this name",
+        "stay underweight the sector",
+        "our top pick for the quarter",
+    ],
+)
+async def test_expanded_advisory_terms_are_rejected(patch_redis, thesis):
+    client = _Client({"free_a": _Resp(_valid(thesis=thesis))})
+    gw = OpenRouterGateway(client=client, free_models=["free_a"])
+    with pytest.raises(QualityValidationError):
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="Z")
+
+
+async def test_all_free_models_rate_limited_raises_all_free_models_failed(patch_redis):
+    from dhanradar.ai_gateway.errors import AllFreeModelsFailedError
+
+    client = _Client({"free_a": _rate_limit(), "free_b": _rate_limit()})
+    gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
+    with pytest.raises(AllFreeModelsFailedError):
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+
+
+async def test_high_stakes_failed_spillover_hits_three_strike(patch_redis):
+    # free AND sonnet both fail validation on a high-stakes task → after 3
+    # attempts for the same ticker/day the gateway skips (bounds premium spend).
+    client = _Client({"free_a": _Resp(_schema_invalid()), "sonnet": _Resp(_schema_invalid())})
+    gw = OpenRouterGateway(client=client, free_models=["free_a"], sonnet_model="sonnet")
+    for _ in range(2):
+        with pytest.raises(QualityValidationError):
+            await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS")
+    with pytest.raises(ThreeStrikeSkipError):
+        await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS")
+
+
+def test_disclaimer_cannot_be_stripped_via_model_copy():
+    from dhanradar.ai_gateway.schemas import AI_DISCLAIMER
+
+    m = _StockOut(
+        confidence=0.5, confidence_band="medium", contributing_signals=["a", "b"], thesis="ok"
+    )
+    tampered = m.model_copy(update={"disclaimer": "no disclaimer"})
+    assert tampered.disclaimer == AI_DISCLAIMER
+

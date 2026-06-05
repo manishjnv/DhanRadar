@@ -13,8 +13,12 @@ Two gates on every LLM response, both fail-closed:
      gateway then spills over (high-stakes) or applies the 3-strike skip.
 
 The advisory screen uses word-boundary matching so descriptive use inside other
-words is not a false positive (e.g. "holding", "buyer", "household" do not trip
-"hold" / "buy"). This is the runtime twin of the static ci_guards advisory net.
+words is never a false positive (e.g. "holding"/"buyer"/"household" do not trip
+"hold"/"buy" — advisory net intentionally word-bounded). It complements the
+static ci_guards advisory net (ci_guards screens SOURCE/label assets; this
+screens RUNTIME model output). The term list is the CORE advisory set — a
+domain-expert-owned, versioned asset tracked for expansion, not a claim of
+exhaustive coverage.
 """
 
 from __future__ import annotations
@@ -27,15 +31,31 @@ from pydantic import ValidationError
 from dhanradar.ai_gateway.errors import QualityValidationError
 from dhanradar.ai_gateway.schemas import AIOutputBase
 
-# Advisory verbs that may never appear as a recommendation in AI output — this is
-# the REJECT-LIST (guardrail), never usage. Each entry is a banned recommendation
-# term (non-neg #1). The per-line "banned" marker keeps the static ci_guards
-# advisory net from flagging this guardrail definition (same convention as the
-# ScoreRing guardrail comment).
+# REJECT-LIST (guardrail) of advisory recommendation terms that may never appear
+# in AI output (non-neg #1) — these are banned terms, never usage. This is the
+# CORE advisory verb set, NOT an exhaustive taxonomy: it is a high-sensitivity,
+# domain-expert-owned, versioned asset and is tracked for expansion + sign-off
+# (BLOCKERS B-advisory-taxonomy). Deliberately EXCLUDED to avoid wrecking
+# legitimate descriptive/educational output: ultra-broad or genuinely neutral
+# words — "invest", "add", "enter", "reduce", "trim", "exit" ("exit load" is a
+# core MF term), "redeem"/"subscribe" (neutral MF actions), "outperform"/
+# "underperform" (descriptive analytics). Over-rejection here only triggers
+# spillover/skip (fail-safe), but those words appear constantly in valid copy.
+# Longer phrases first so they report as a unit. Per-line "banned" marker keeps
+# the static ci_guards net from flagging this guardrail (same convention as
+# the ScoreRing guardrail comment).
 _ADVISORY_TERMS = (
-    "strong buy", "strong sell",   # banned
-    "buy", "sell", "hold",         # banned
-    "switch", "avoid", "caution",  # banned
+    "strong buy", "strong sell",          # banned
+    "buy the dip",                        # banned
+    "book profits", "book profit",        # banned
+    "book gains", "book gain",            # banned
+    "take profits", "take profit",        # banned
+    "square off", "go long",              # banned
+    "top pick",                           # banned
+    "accumulate",                         # banned
+    "overweight", "underweight",          # banned
+    "buy", "sell", "hold",                # banned
+    "switch", "avoid", "caution",         # banned
 )
 # One word-boundary regex over the whole set, case-insensitive. \b means
 # "holding"/"buyer"/"household" do not match.
