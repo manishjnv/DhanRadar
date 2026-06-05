@@ -59,3 +59,4 @@ Thumbs.db
 # private ops runbook — never in the public repo
 docs/infra-notes.md
 _redact.py
+*.tsbuildinfo
