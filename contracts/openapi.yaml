@@ -462,7 +462,7 @@ paths:
       operationId: instrumentsSearch
       x-status: SPEC
       security: []
-      summary: Autosuggest (Postgres FTS + pg_trgm; NOT Elasticsearch, non-neg #3)
+      summary: Autosuggest (Postgres full-text search + pg_trgm only; non-neg #3)
       parameters:
         - { name: q, in: query, required: true, schema: { type: string } }
         - { name: scope, in: query, schema: { type: string, enum: [all, stocks, funds, etfs] } }
