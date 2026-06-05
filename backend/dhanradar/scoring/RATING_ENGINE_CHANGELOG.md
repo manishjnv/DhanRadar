@@ -16,7 +16,7 @@ an entry here until the table exists. Source of truth for the spec:
 - **date:** 2026-06-05
 - **factors_before:** _none_ (first version)
 - **factors_after:** quality 0.24 · valuation 0.22 · momentum 0.20 · **trend 0.22** · risk 0.12 (Σ = 1.00 ± 0.001)
-- **methodology_url:** https://dhanradar.com/methodology
+- **methodology_url:** <https://dhanradar.com/methodology>
 - **config:** `ranking_configs_v1.json`
 
 **Gating before activation (all required):**
@@ -30,3 +30,15 @@ an entry here until the table exists. Source of truth for the spec:
 - REC-D1 applied: 5-axis kept with **Trend** (Growth nested as Trend sub-factors); `earnings_revision` + `relative_strength` moved Momentum→Trend (single-axis, no double-count).
 - Numeric weights are **PROPOSED** — canonical as a starting point, not frozen until the gates above pass.
 - This step (Stage 2 Step 8) stages configuration only. No engine code, no DB migration, no scoring execution.
+
+---
+
+## v1 engine implementation (Phase 4) — 2026-06-06
+
+- The deterministic engine that CONSUMES `ranking_configs_v1.json` is now built
+  (`backend/dhanradar/scoring/engine/`). **No methodology/weight change** — weights
+  remain the PROPOSED v1 above; `activated:false` stands. Label is rule-table-derived
+  (not the score); confidence floor → `insufficient_data`; 2-eval hysteresis; churn>5%
+  → Compliance hold; `make_changelog_entry(enforce_two_person=True)` enforces the B6 gate
+  at activation. Feature doc: `docs/features/rating-scoring-engine.md`.
+- Activation still gated by the three pass-gates above (backtest, calibration, two-person).
