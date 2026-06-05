@@ -142,7 +142,13 @@ class Subscription(Base):
         Text, nullable=True, unique=True
     )
 
+    # Raw Razorpay plan id (retained for backward-compat).
     plan: Mapped[str] = mapped_column(Text, nullable=False)
+    # Transitional FK into the billing.plans catalog (D4). Nullable while the
+    # catalog is populated; `plan` stays the source of truth until cutover.
+    plan_id: Mapped[Optional[str]] = mapped_column(
+        Text, ForeignKey("billing.plans.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False)
 
     current_period_start: Mapped[Optional[datetime]] = mapped_column(
