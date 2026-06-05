@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
     # ------------------------------------------------------------------
+    # Internal service auth (server-to-server)
+    # ------------------------------------------------------------------
+    # Shared secret for the internal numeric endpoints (e.g. /internal/v1/score).
+    # Defense-in-depth on top of network topology (those paths are not on the
+    # public ^/api/.* ingress). EMPTY ⇒ the internal endpoints are DISABLED
+    # (fail-closed) — set this in any environment that needs them.
+    INTERNAL_API_TOKEN: str = ""
+
+    # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------
     ENV: str = "development"
