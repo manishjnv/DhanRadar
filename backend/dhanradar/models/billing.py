@@ -39,6 +39,15 @@ class Plan(Base):
         Boolean, nullable=False, server_default="true"
     )
 
+    # --- Billing-readiness (B7/B8): decouple from the internal `id` ---
+    # The REAL Razorpay plan id ("plan_XXXX") from the dashboard, distinct from
+    # `id` (internal code). Checkout refuses while this is null (fail-safe).
+    razorpay_plan_id: Mapped[str | None] = mapped_column(
+        Text, nullable=True, unique=True
+    )
+    # Razorpay subscription billing cycles for THIS plan (was hardcoded 12).
+    total_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
