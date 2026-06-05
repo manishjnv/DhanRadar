@@ -13,9 +13,11 @@ lives in the linked docs.
   executed** (see `BLOCKERS.md` B1).
 - **Stage 1** (contract reconciliation, docs-only): **done** — 6 alignment docs in
   `docs/project-state/`.
-- **Stage 2** (first code): **APPROVED & UNBLOCKED 2026-06-05** — PC6 cleared by ADR-0019, PC7
-  approved by operator. Execution begins at Step 1 (regenerate canonical `openapi.yaml`) on the
-  `stage2/contract-reconciliation` branch. PC4/PC5 still bind (no push/deploy without approval).
+- **Stage 2 (Steps 1–9): DONE & merged to `main`** (PRs #2 Steps 2-4, #3 Steps 5-9; baseline
+  `05440b1` squashed/scrubbed the history for public release). All steps given a **post-merge
+  governance review** 2026-06-05 (`reviews/`): all ACCEPT-WITH-CONDITIONS; one UI **BLOCKER fixed**
+  (advisory verbs in `tokens.json`); conditions tracked B7–B12. PC4/PC5 still bind (no KVM4 deploy
+  without separate approval).
 - **Governance**: project `CLAUDE.md` overlay, `AI_GOVERNANCE_MODEL.md` (3-tier review model),
   `ARCHITECTURE_DECISIONS.md`, `SESSION_STATE.md`, `BLOCKERS.md`, and the rewritten `agent.md`
   landed 2026-06-05.
@@ -27,27 +29,32 @@ lives in the linked docs.
 
 ## In flight
 
-- **Stage 2 Step 1 (canonical `openapi.yaml`): DONE & reviewed.** Existing spec (`5c02d7a`)
-  validated against live code + given its Tier-B governance review (Architect + Security +
-  Compliance, all ACCEPT-WITH-CONDITIONS → resolved). Fixes: webhook path (`/subscriptions/webhook`
-  LIVE, `/billing/webhook` SPEC); no-numeric-in-DOM made contract-enforceable (public score =
-  `ScorePublic` only; numerics moved to gated `/score/detail`); disclosure-version tie-in;
-  `razorpay_key_id` annotated; `Problem.detail` bounded. Trail: `reviews/stage2-step1-openapi.md`.
+- **Post-merge governance review of Stage 2 Steps 1–9: DONE** (this session). 6 independent
+  reviewer agents across Tier-B (Steps 5-7: RFC7807/migration/billing), Tier-C (Step 8
+  ranking_configs), Tier-A (Steps 2-4 frontend) + the earlier Step-1 review. Code found sound — no
+  security/compliance leak in code. Trail: `reviews/stage2-step1-openapi.md`,
+  `stage2-steps5-7-backend.md`, `stage2-step8-ranking-configs.md`, `stage2-steps2-4-frontend.md`.
+- **Fixed this session:** UI BLOCKER — removed the advisory-verb `signal` block from
+  `frontend/styles/tokens.json` + regenerated tokens (RCA 2026-06-05); added `_concentration_note`
+  to `ranking_configs_v1.json`. **B5 (CI) → RESOLVED**; new blockers **B7–B12** filed.
 
 ## Next action
 
-- **Stage 2 Step 2** — canonical token freeze + single token-generation pipeline (`tokens.json` +
-  `tokens.css` + `tailwind.config.js` from one source, Geist/warm brand naming). Tier-A
-  (Builder + Architect + UI). Step 1 is done (above).
+- Clear **pre-billing** blockers before enabling charges: B7 (Razorpay plan-id mapping),
+  B8 (`Plan.total_count`), B2 (`EXACT_PLAN_TIERS`), B9 (billing test gaps).
+- **Broaden `ci_guards.py`** advisory detection (B12) — the gate that should have caught the tokens
+  BLOCKER.
+- Then proceed to **Implementation-Plan Phase 3+** (Market Data Adapter + AI/LLM Gateway).
 
 ## Open blockers
 
-See `BLOCKERS.md` (B1–B6 open).
+See `BLOCKERS.md`. Open: B2, B3, B4, B6 (non-blocking), B7–B12. Resolved: B5 (CI).
+Addressed: B1 (CI runs pytest). Pre-billing: B2, B7, B8, B9.
 
 ## Agent-utilization & routing-telemetry footer
 
-- Opus: governance authorship (overlay, governance model rev. 2, ADR log, agent.md) — Tier-0.
-- Sonnet: n/a — no contract-bound implementation this session.
-- Haiku: n/a — no bulk sweep this session.
-- codex:rescue: n/a — no security-adjacent code change this session.
-- Per-delegation: n/a — governance docs authored directly (interdependent, judgment-bearing).
+- Opus: orchestration + Builder (openapi fixes, tokens BLOCKER fix) + Compliance reviews + adjudication — Tier-0.
+- Sonnet: independent Architect / Security / Product / UI reviewers (post-merge Tier-A/B/C fan-out).
+- Haiku: n/a — no bulk sweep.
+- codex:rescue: n/a — substituted by independent Sonnet adversarial review (fallback ladder); formal codex pass on payments still available (B9).
+- Per-delegation: stage2-steps5-7-backend · Tier B · ACCEPT-WITH-CONDITIONS · reworked N (tracked) | stage2-step8 · Tier C · ACCEPT-WITH-CONDITIONS · N | stage2-steps2-4-frontend · Tier A · ACCEPT-WITH-CONDITIONS · reworked Y (UI BLOCKER fixed).

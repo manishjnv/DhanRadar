@@ -15,6 +15,27 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-05 — Advisory verbs in design tokens passed CI (guard regex too narrow)
+
+- **Symptom:** post-merge UI governance review found `frontend/styles/tokens.json` shipped a
+  `signal` block with advisory labels `Strong Buy / Buy / Hold / Avoid` (+ numeric score-band
+  cutoffs) and an `amber.role: "Warning, hold"` comment — on `main`, having passed CI. Violates
+  non-negotiable #1 (no advisory vocabulary anywhere) and ties labels to numeric bands (vs
+  `FINAL_SCORING_SPEC` §4.2 rule-table derivation).
+- **Root cause:** `scripts/ci_guards.py` advisory-verb check is `\b(strong_buy|caution)\b` —
+  **snake_case only**. It did not match the camelCase key `strongBuy` nor the display strings
+  `"Strong Buy"/"Buy"/"Hold"/"Avoid"`, so the deterministic gate that exists to block exactly this
+  let it through.
+- **Fix:** removed the `signal` block from `tokens.json`; changed the amber role to
+  "Warning / attention state"; re-ran `gen:tokens` (regenerated `src/styles/tokens.css` +
+  `tailwind.tokens.cjs`); verified zero advisory verbs remain in tokens/generated files. The
+  `ScoreRing` "NEVER: strong_buy|buy|hold|caution|avoid" string is a guardrail comment, not usage.
+- **Prevention:** broaden `ci_guards.py` advisory detection to catch camelCase + spaced + Title-Case
+  advisory verbs and a `signal`/score-band-keyed config pattern, while avoiding false positives on
+  the English words `buy/hold/avoid` in prose (tracked, `BLOCKERS.md` B12). Until then the
+  multi-agent UI/Compliance review is the backstop that caught it.
+- **Phase/area:** Stage 2 Steps 2-4 (frontend tokens) / post-merge governance review.
+
 ### 2026-05-19 — Auth slice: rate limiter built but unwired; refresh rotation non-atomic
 
 - **Symptom:** found in pre-merge security review of the Phase-2 Auth slice (not a field incident). (a) `RateLimit` dependency existed in `ratelimit.py` but was attached to no route → `/auth/login` had no brute-force throttle. (b) `rotate_refresh_token` did `redis.get` then `redis.delete` → two concurrent uses of one refresh token could both succeed, defeating reuse detection.
