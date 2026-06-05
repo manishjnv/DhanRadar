@@ -244,8 +244,20 @@ class RequireConsent:
 
         from dhanradar.models.auth import User
 
+        # Parse the subject defensively: a malformed user_id must fail CLOSED
+        # (403), never propagate a ValueError as an unhandled 500. The anonymous
+        # guard above already covers the `"anonymous"` default, but we do not rely
+        # on guard ordering for a load-bearing DPDP gate.
+        try:
+            uid = _UUID(user.user_id)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "consent_required", "purpose": self.purpose},
+            )
+
         consents = await db.scalar(
-            _select(User.dpdp_consents).where(User.id == _UUID(user.user_id))
+            _select(User.dpdp_consents).where(User.id == uid)
         )
         if not _consent_granted(consents, self.purpose):
             raise HTTPException(

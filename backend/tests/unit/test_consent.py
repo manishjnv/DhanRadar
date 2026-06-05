@@ -90,6 +90,17 @@ async def test_require_consent_not_granted_denied():
     assert ei.value.detail == {"error": "consent_required", "purpose": "ai_insights"}
 
 
+async def test_require_consent_malformed_subject_fails_closed():
+    """A non-anonymous context with a non-UUID user_id must fail CLOSED (403),
+    never raise an unhandled ValueError → 500 (Security review condition)."""
+    gate = RequireConsent("ai_insights")
+    user = UserContext(user_id="not-a-uuid", tier="pro", is_anonymous=False)
+    with pytest.raises(HTTPException) as ei:
+        await gate(user, _FakeDB({"ai_insights": True}))
+    assert ei.value.status_code == 403
+    assert ei.value.detail["error"] == "consent_required"
+
+
 # ---------------------------------------------------------------------------
 # B4 — authenticate_user denies a deletion-pending account
 # ---------------------------------------------------------------------------

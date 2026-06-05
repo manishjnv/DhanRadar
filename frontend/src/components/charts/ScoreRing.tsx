@@ -98,8 +98,10 @@ export function ScoreRing({
     <figure className={cn('inline-flex flex-col items-center gap-2', className)}>
       {/*
         Single accessible name model (B10): the SVG is decorative (aria-hidden)
-        and the figure's name comes from one <figcaption>, avoiding the previous
-        triple announcement (figure aria-label + role="img" + sr-only span).
+        and the figure's name comes from one <figcaption> via the figure→figcaption
+        naming algorithm (ARIA 1.2; verified on NVDA+Chrome and VoiceOver). This
+        avoids the previous triple announcement (figure aria-label + role="img" +
+        sr-only span). Do NOT re-add aria-label here — it would double-announce.
       */}
       <svg
         width={SIZE}

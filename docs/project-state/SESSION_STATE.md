@@ -66,10 +66,13 @@ lives in the linked docs.
 
 ## Next action
 
-- **Run the pre-merge governance fan-out** on `hardening/b13-b10-ci-fe` (Architect + UI for B10;
-  Security + Compliance for B9 payments and B3/B4 DPDP; Compliance for the B13 compliance-net
-  change), then open the PR with explicit push approval (PC5). This branch now carries B13, B10, B9,
-  B3, B4 — all Tier-B/compliance-adjacent, so the adversarial sign-off is owed before merge.
+- **Pre-merge governance fan-out: DONE** (5 independent reviewers — Architect/Security/UI/Product
+  Sonnet + Compliance Opus). All **ACCEPT-WITH-CONDITIONS, no BLOCKER**. 3 conditions fixed this turn
+  (RequireConsent malformed-uuid → fail-closed 403; apiClient `[apiClient]` log prefix; ScoreRing
+  aria comment). Residuals filed B15/B16/B17. Ledger: `reviews/hardening-b13-b10-b9-b3-b4.md`.
+- **PR is prepped, NOT pushed (PC5).** Branch `hardening/b13-b10-ci-fe` is merge-eligible pending
+  the operator's explicit push approval; PR body drafted. Push the branch + `gh pr create`, then
+  squash-merge after CI green (CI runs the integration tests this box can't).
 - **Pre-billing** remains code-ADDRESSED — only **data-only seeding** (real Razorpay plan ids +
   `total_count` + `EXACT_PLAN_TIERS`) once the dashboard exists. B9 plans-seed copy Compliance pass
   is also data-only (no seed exists yet).
@@ -88,10 +91,11 @@ Addressed (code/tests; data-only or later-module work remains): B1, **B2**, **B3
 - Opus: 100% — Builder + Architect on all of B13/B10; self-executed (small hot-cache edits + the
   judgment-heavy compliance-net regex and module-isolation rule). Per global carve-out: ≤ a few
   files, in hot cache, two needing Opus judgment → cheaper than cold subagent starts.
-- Sonnet: n/a — no parallel mechanical fan-out this session.
+- Sonnet: 4 independent reviewers (Architect / Security-adversarial / UI / Product) for the pre-merge
+  governance fan-out on the branch — all ACCEPT-WITH-CONDITIONS.
 - Haiku: n/a — no bulk sweep.
-- codex:rescue: n/a — implementation only; pre-merge Tier-B adversarial sign-off (B13 compliance net)
-  still owed before PR to `main`.
+- codex:rescue: n/a — Tier-B Security gate run as an independent Sonnet adversarial review (fallback
+  ladder, per prior-session precedent); a formal codex pass remains available.
 - Per-delegation (telemetry): B13 ci_guards hardening · Opus · reworked N | B10 eslint-boundaries ·
   Opus · reworked Y (v6 object-selector schema rejected → reverted to working array selector + static
   message) | B10 apiClient/ScoreRing · Opus · reworked N | B9 billing Retry-After + tests · Opus ·

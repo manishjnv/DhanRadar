@@ -20,7 +20,7 @@ const RAW_API_URL =
 
 if (RAW_API_URL && !/\/api\/v1\/?$/.test(RAW_API_URL)) {
   throw new Error(
-    `NEXT_PUBLIC_API_URL must end with the "/api/v1" base path (got "${RAW_API_URL}"). ` +
+    `[apiClient] NEXT_PUBLIC_API_URL must end with the "/api/v1" base path (got "${RAW_API_URL}"). ` +
       'The /api/v1 prefix is an architecture non-negotiable.',
   );
 }
