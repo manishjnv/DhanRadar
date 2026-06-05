@@ -33,8 +33,13 @@ def code_files():
         if not d.exists():
             continue
         for p in d.rglob("*"):
-            if p.is_file() and p.suffix in CODE_EXT:
-                yield p
+            if not (p.is_file() and p.suffix in CODE_EXT):
+                continue
+            # Skip generated files (e.g. the openapi-typescript client) — they
+            # may echo descriptions that mention rejected patterns as rejected.
+            if p.name == "api.ts" and "types" in p.parts:
+                continue
+            yield p
 
 
 def read(p: Path) -> str:

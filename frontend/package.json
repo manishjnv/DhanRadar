@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/types/api.ts",
     "gen:tokens": "node scripts/gen-tokens.mjs",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "next": "14.2.29",

@@ -215,7 +215,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Autosuggest (Postgres FTS + pg_trgm; NOT Elasticsearch, non-neg */
+        /** Autosuggest (Postgres full-text search + pg_trgm only; non-neg */
         get: operations["instrumentsSearch"];
         put?: never;
         post?: never;

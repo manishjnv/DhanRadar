@@ -22,9 +22,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from typing import Annotated
 
 import razorpay
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.config import settings
 from dhanradar.db import get_db
@@ -48,7 +50,10 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
     status_code=status.HTTP_200_OK,
     summary="Razorpay subscription webhook receiver",
 )
-async def razorpay_webhook(request: Request) -> dict:
+async def razorpay_webhook(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
     """
     Receive and process Razorpay subscription lifecycle events.
 
@@ -110,8 +115,8 @@ async def razorpay_webhook(request: Request) -> dict:
         logger.info("Razorpay webhook: duplicate event %s ignored", event_id)
         return {"status": "duplicate_ignored"}
 
-    # Delegate to service with a fresh DB session
-    async for db in get_db():
-        await sub_svc.handle_subscription_event(event_data, db)
+    # Delegate to service using the request-scoped session (Depends(get_db)),
+    # so the test override applies and the session stays on the request's loop.
+    await sub_svc.handle_subscription_event(event_data, db)
 
     return {"status": "ok"}

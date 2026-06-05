@@ -37,6 +37,8 @@ export function CardTitle({
   ...props
 }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
+    // Generic title wrapper — content is supplied by the caller via children.
+    // eslint-disable-next-line jsx-a11y/heading-has-content
     <h3
       className={cn('text-h3 font-medium text-ink leading-snug', className)}
       {...props}

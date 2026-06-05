@@ -17,8 +17,12 @@ import datetime
 
 import pytest
 
-# All tests in this module need fakeredis wired.
-pytestmark = pytest.mark.usefixtures("patch_redis")
+# NOTE: do NOT apply `patch_redis` module-wide. The pure-sync tests below
+# (_next_utc_midnight_ts / error-message) must not pull the async fakeredis
+# fixture — a sync test driving an async fixture binds FakeRedis to a transient
+# event loop and corrupts it for the later async tests (writes become invisible
+# even though it is the same object). The async tests request `patch_redis`
+# explicitly via their parameter list, which is the correct wiring.
 
 
 # ---------------------------------------------------------------------------
