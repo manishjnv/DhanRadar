@@ -100,7 +100,7 @@ components:
         type:    { type: string, format: uri, example: "https://dhanradar.com/errors/upgrade_required" }
         title:   { type: string, example: "Upgrade required" }
         status:  { type: integer, example: 402 }
-        detail:  { type: string, example: "This feature requires the Pro tier." }
+        detail:  { type: string, maxLength: 500, description: "Instance message; no stack-trace/PII.", example: "This feature requires the Pro tier." }
         instance: { type: string, example: "/api/v1/instruments/INFY/fair-value" }
         request_id: { type: string, format: uuid }
       description: >
@@ -216,6 +216,7 @@ components:
         as_of:           { type: string, format: date }
         contributing_signals: { type: array, items: { type: string } }
         contradicting_signals: { type: array, items: { type: string } }
+        disclaimer_version: { type: [string, "null"], description: "In-force disclaimer version this label was served under (ai_recommendation_audit tie-in, non-neg #9)." }
     Score:
       type: object
       description: >
@@ -257,7 +258,7 @@ components:
       properties:
         order_id: { type: string }
         amount_inr: { type: integer }
-        razorpay_key_id: { type: string }
+        razorpay_key_id: { type: string, description: "Razorpay publishable key id (NOT a secret); safe for client use." }
 
     # ---- Portfolio / watchlist / alerts -----------------------------------
     Holding:
@@ -428,16 +429,28 @@ paths:
       responses:
         "200": { description: Order created, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutResponse' } } } }
         "402": { $ref: '#/components/responses/Problem402' }
+  /subscriptions/webhook:
+    post:
+      tags: [billing]
+      operationId: subscriptionsWebhook
+      x-status: LIVE
+      security: []
+      summary: >
+        Razorpay webhook (CURRENT live path). Verify-before-parse on raw bytes
+        (X-Razorpay-Signature) + 7-day event-id dedup. Server-to-server.
+      responses:
+        "200": { description: Acknowledged (also for deduped replays) }
+        "400": { $ref: '#/components/responses/Problem400' }
   /billing/webhook:
     post:
       tags: [billing]
       operationId: billingWebhook
-      x-status: LIVE
+      x-status: SPEC
       security: []
       summary: >
-        Razorpay webhook. LIVE handler currently mounted at
-        /subscriptions/webhook; Step 7 re-mounts here (verify-before-parse +
-        event dedup preserved). X-Razorpay-Signature verified on raw bytes.
+        Razorpay webhook (TARGET path). Step 7 re-mounts the live handler here
+        (verify-before-parse + event dedup preserved); /subscriptions/webhook
+        kept as an alias for one release. SPEC until Step 7 lands.
       responses:
         "200": { description: Acknowledged (also for deduped replays) }
         "400": { $ref: '#/components/responses/Problem400' }
@@ -467,10 +480,27 @@ paths:
       operationId: getScore
       x-status: SPEC
       security: []
-      summary: Score — returns ScorePublic (label+band) when ungated; Score (numerics) when tier-gated
+      summary: >
+        Public score — returns ScorePublic (label + confidence band) ONLY.
+        Numeric internals are NEVER on this ungated surface (no-numeric-in-DOM,
+        non-neg #2); they are served exclusively by the tier-gated /score/detail.
       parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ]
       responses:
-        "200": { description: OK, content: { application/json: { schema: { oneOf: [ { $ref: '#/components/schemas/ScorePublic' }, { $ref: '#/components/schemas/Score' } ] } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ScorePublic' } } } }
+        "404": { $ref: '#/components/responses/Problem404' }
+  /instruments/{symbol}/score/detail:
+    get:
+      tags: [scores]
+      operationId: getScoreDetail
+      x-status: SPEC
+      summary: >
+        Tier-gated numeric score view (Score): unified_score + per-axis values +
+        fair_value. Factor WEIGHTS are never exposed even here. Requires auth;
+        402 for free/anonymous.
+      parameters: [ { name: symbol, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Score' } } } }
+        "402": { $ref: '#/components/responses/Problem402' }
         "404": { $ref: '#/components/responses/Problem404' }
   /instruments/{symbol}/fair-value:
     get:
@@ -502,7 +532,9 @@ paths:
         - { name: label, in: query, schema: { $ref: '#/components/schemas/Label' } }
         - { name: sector, in: query, schema: { type: string } }
         - { $ref: '#/components/parameters/Cursor' }
-      responses: { "200": { description: OK }, "402": { $ref: '#/components/responses/Problem402' } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ScorePublic' } } } } }
+        "402": { $ref: '#/components/responses/Problem402' }
 
   # ---- Portfolio / watchlist / alerts (SPEC) -----------------------------
   /portfolio:
