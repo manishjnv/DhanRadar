@@ -39,6 +39,7 @@ if config.config_file_name is not None:
 # ---------------------------------------------------------------------------
 from dhanradar.models.base import Base  # noqa: E402
 import dhanradar.models.auth  # noqa: E402, F401  — registers auth.users + auth.subscriptions
+import dhanradar.models.billing  # noqa: E402, F401  — registers billing.plans
 
 target_metadata = Base.metadata
 
