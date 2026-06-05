@@ -169,6 +169,23 @@ async def test_webhook_body_tampered_after_signing_400(async_client):
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _map_test_plans(monkeypatch):
+    """B2: tier is now derived ONLY from EXACT_PLAN_TIERS (the substring
+    heuristic was removed as a privilege foot-gun). Populate the map with the
+    test plan_ids, mirroring how production is seeded with real dashboard ids."""
+    import dhanradar.subscriptions.service as sub_svc
+
+    monkeypatch.setattr(
+        sub_svc,
+        "EXACT_PLAN_TIERS",
+        {
+            "plan_pro_monthly": UserTierEnum.pro,
+            "dhanradar_pro_plus_annual": UserTierEnum.pro_plus,
+        },
+    )
+
+
 async def test_webhook_activated_upgrades_tier_to_pro(async_client, db_session):
     """
     A valid subscription.activated event with plan_id containing 'pro' must:
