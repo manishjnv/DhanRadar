@@ -91,19 +91,34 @@ def test_hs256_alg_confusion_rejected(rsa_keypair):
     sec = _import_security()
     _, public_pem = rsa_keypair
 
-    # Craft a forged token: signed with HS256 using the public PEM as the
-    # HMAC secret.  decode_token only allows ["RS256"] so this must raise.
-    jti = "forged-jti"
+    # Craft a forged HS256 token MANUALLY. Modern PyJWT refuses to *encode*
+    # with a PEM as the HMAC secret, so we hand-build the token to simulate the
+    # attacker. decode_token only allows ["RS256"], so verification must reject
+    # it (InvalidAlgorithmError is a PyJWTError) regardless of the signature.
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    def _b64url(raw: bytes) -> bytes:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
     now = datetime.now(UTC)
+    header = {"alg": "HS256", "typ": "JWT"}
     forged_payload = {
         "sub": "attacker",
-        "jti": jti,
+        "jti": "forged-jti",
         "typ": "access",
-        "iat": now,
-        "exp": now + timedelta(minutes=15),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=15)).timestamp()),
     }
-    # jwt.encode accepts str for HS256; use the public PEM bytes as secret.
-    forged_token = jwt.encode(forged_payload, public_pem, algorithm="HS256")
+    signing_input = (
+        _b64url(json.dumps(header, separators=(",", ":")).encode())
+        + b"."
+        + _b64url(json.dumps(forged_payload, separators=(",", ":")).encode())
+    )
+    sig = hmac.new(public_pem.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    forged_token = (signing_input + b"." + _b64url(sig)).decode("ascii")
 
     with pytest.raises(jwt.PyJWTError):
         sec.decode_token(forged_token, expected_typ="access")
