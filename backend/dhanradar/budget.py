@@ -13,12 +13,15 @@ IMPORTANT — OpenRouter error semantics:
 from __future__ import annotations
 
 import datetime
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Literal
 
 import redis.asyncio as aioredis
 
 from dhanradar.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Budget kinds and caps
@@ -53,6 +56,26 @@ class BudgetExhaustedError(Exception):
         )
 
 
+class BudgetMeter:
+    """Records the spend of one guarded AI operation.
+
+    The caller sets the actuals ONLY on success; on failure it leaves them at
+    zero so a rate-limited / errored attempt does not consume the daily budget.
+
+      - free:    ``units``    — integer call count (default 0; gateway sets 1).
+      - premium: ``cost_usd`` — float USD cost   (default 0.0; gateway sets it).
+
+    Defaulting to zero keeps ``budget_guard`` backward-compatible: a caller that
+    records nothing increments nothing.
+    """
+
+    __slots__ = ("units", "cost_usd")
+
+    def __init__(self) -> None:
+        self.units: int = 0
+        self.cost_usd: float = 0.0
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -66,34 +89,43 @@ def _next_utc_midnight_ts() -> int:
 
 
 async def _init_key_if_missing(redis: aioredis.Redis, key: str, initial: str = "0") -> None:
-    """SET key initial EX (seconds until next midnight) only if the key does not exist."""
-    exists = await redis.exists(key)
-    if not exists:
-        await redis.set(key, initial)
-        await redis.expireat(key, _next_utc_midnight_ts())
+    """Atomically create the key=initial with an EXPIREAT at next UTC midnight,
+    only if it does not exist (SET ... EXAT NX in one round-trip).
+
+    The previous EXISTS-then-SET-then-EXPIREAT sequence had a crash window that
+    could leave the key with no TTL (then it would accumulate across days and the
+    daily cap would never reset). A single NX+EXAT set closes that window."""
+    await redis.set(key, initial, exat=_next_utc_midnight_ts(), nx=True)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 @asynccontextmanager
-async def budget_guard(kind: BudgetKind) -> AsyncGenerator[None, None]:
+async def budget_guard(kind: BudgetKind) -> AsyncGenerator[BudgetMeter, None]:
     """
-    Async context manager that enforces per-day AI budget caps.
+    Async context manager that enforces per-day AI budget caps and records spend.
 
     Usage::
 
-        async with budget_guard("free"):
+        async with budget_guard("free") as meter:
             response = await call_openrouter_free_model(...)
-            # TODO Phase 3: increment the counter by tokens used after yield
+            meter.units = 1            # one successful free call
 
-    Raises BudgetExhaustedError before yielding if the cap is already exceeded.
-    On first call of the day the Redis key is initialised to 0 with EXPIREAT
-    set to the next UTC midnight.
+        async with budget_guard("premium") as meter:
+            response = await call_sonnet(...)
+            meter.cost_usd = 0.0031    # actual USD cost
 
-    Increment logic is a TODO for Phase 3 once we have token-counting middleware.
-    For now this stub guarantees the key structure, EXPIREAT behaviour, cap
-    constants, and exception class are correct so Phase 3 can build on them.
+    Behaviour:
+      - Raises BudgetExhaustedError BEFORE yielding if the cap is already met
+        (free: call-count cap; premium: USD hard cap). The premium SOFT cap is a
+        warn threshold, not a stop (logged by callers/metrics).
+      - On first call of the day the Redis key is initialised to 0 with EXPIREAT
+        at the next UTC midnight (daily reset).
+      - On CLEAN exit, increments the counter by what the caller recorded on the
+        meter (free → INCRBY units; premium → INCRBYFLOAT cost_usd). Defaults are
+        zero, so an attempt that raised (e.g. 429/402) consumes nothing — the
+        increment only runs on the no-exception path.
     """
     redis = get_redis()
     key = _REDIS_KEYS[kind]
@@ -114,11 +146,24 @@ async def budget_guard(kind: BudgetKind) -> AsyncGenerator[None, None]:
         hard_cap = _CAPS["premium_hard"]
         if current >= hard_cap:
             raise BudgetExhaustedError(kind, current, hard_cap)
+        # Soft cap is a WARN threshold (observability), not a stop.
+        soft_cap = float(_CAPS["premium_soft"])
+        if current >= soft_cap:
+            logger.warning(
+                "AI premium budget soft cap crossed: current=$%.4f >= soft=$%.2f "
+                "(hard=$%.2f). Resets at next UTC midnight.",
+                current,
+                soft_cap,
+                hard_cap,
+            )
 
-    yield
+    meter = BudgetMeter()
+    yield meter
 
-    # TODO Phase 3: after the AI call completes, INCRBYFLOAT / INCRBY the key
-    # by the actual tokens/cost consumed. Example for free:
-    #   await redis.incr(key)
-    # Example for premium:
-    #   await redis.incrbyfloat(key, cost_usd)
+    # Reached only when the guarded block did NOT raise — record actual spend.
+    if kind == "free":
+        if meter.units:
+            await redis.incrby(key, int(meter.units))
+    else:
+        if meter.cost_usd:
+            await redis.incrbyfloat(key, float(meter.cost_usd))

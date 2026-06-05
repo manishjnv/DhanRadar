@@ -19,3 +19,5 @@ pyotp>=2.9.0
 razorpay>=1.4.0
 email-validator>=2.1.0
 python-multipart>=0.0.9
+# --- Phase 3: Market Data Adapter + AI/LLM Gateway ---
+pyyaml>=6.0.1

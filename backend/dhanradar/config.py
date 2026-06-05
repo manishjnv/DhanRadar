@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
 
     # ------------------------------------------------------------------
+    # AI / LLM Gateway (Phase 3, architecture §B3)
+    # ------------------------------------------------------------------
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    # Free-model pool, comma-separated, OPERATOR-SET and verified live at
+    # openrouter.ai/models before use (startup verify_models()). Kept out of code
+    # so no unverified ':free' id is hardcoded. Empty = no free pool configured.
+    AI_FREE_MODELS: str = ""
+    # High-stakes schema-failure spillover (premium budget). A real, paid id.
+    AI_SONNET_MODEL: str = "anthropic/claude-sonnet-4.6"
+
+    # ------------------------------------------------------------------
     # Observability
     # ------------------------------------------------------------------
     SENTRY_DSN: Optional[str] = None

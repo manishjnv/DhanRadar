@@ -206,3 +206,39 @@ def test_budget_exhausted_error_message():
     assert "free" in msg
     assert "1000" in msg
     assert "UTC midnight" in msg
+
+
+# ---------------------------------------------------------------------------
+# budget_guard: meter-based increment (Phase 3)
+# ---------------------------------------------------------------------------
+
+async def test_budget_guard_free_increments_by_meter_units(patch_redis):
+    """Setting meter.units increments the free counter by that amount on clean exit."""
+    from dhanradar.budget import budget_guard, _REDIS_KEYS
+
+    key = _REDIS_KEYS["free"]
+    async with budget_guard("free") as meter:
+        meter.units = 1
+    assert int(await patch_redis.get(key)) == 1
+
+
+async def test_budget_guard_premium_increments_by_meter_cost(patch_redis):
+    """Setting meter.cost_usd increments the premium counter by that USD amount."""
+    from dhanradar.budget import budget_guard, _REDIS_KEYS
+
+    key = _REDIS_KEYS["premium"]
+    async with budget_guard("premium") as meter:
+        meter.cost_usd = 0.0031
+    assert abs(float(await patch_redis.get(key)) - 0.0031) < 1e-9
+
+
+async def test_budget_guard_does_not_increment_on_exception(patch_redis):
+    """A guarded block that raises consumes NO budget (increment only on clean exit)."""
+    from dhanradar.budget import budget_guard, _REDIS_KEYS
+
+    key = _REDIS_KEYS["free"]
+    with pytest.raises(RuntimeError):
+        async with budget_guard("free") as meter:
+            meter.units = 1
+            raise RuntimeError("boom")
+    assert int(await patch_redis.get(key)) == 0

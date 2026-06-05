@@ -1,0 +1,40 @@
+# DhanRadar — Market Data Provider Ladders
+#
+# This file is the config-driven source of truth for provider fallback order
+# (Architecture §B4 + ledger #5).  A provider swap is config-only — edit this
+# file and restart; no code change required.
+#
+# Keys   : DataKind values (fund_nav, fund_holdings, equity_price, equity_holdings)
+# Values : Ordered list of provider names — tried left-to-right; first success wins.
+#
+# STUBS: all providers are stubs pending vendor keys / partnerships.
+# mf_central       — pending SEBI/AMFI agreement
+# account_aggregator — explicit STUB; AA partner not yet signed (see BLOCKERS.md)
+# cas_parser        — in-process parser, pending full implementation
+# amfi_nav          — public feed, canned data in stub (happy-path demonstrable)
+# upstox            — pending API key + broker integration
+# kite              — pending API key + broker integration
+# twelvedata        — pending API key
+# nse_dump          — public bhavcopy, canned data in stub (happy-path demonstrable)
+
+fund_nav:
+  - mf_central
+  - amfi_nav
+
+fund_holdings:
+  - mf_central
+  - account_aggregator
+  - cas_parser
+  - amfi_nav
+
+equity_price:
+  - upstox
+  - kite
+  - twelvedata
+  - nse_dump
+
+equity_holdings:
+  - upstox
+  - kite
+  - twelvedata
+  - nse_dump
