@@ -1,0 +1,126 @@
+{
+  "$source": "docs/project-state/FINAL_SCORING_SPEC.md",
+  "model_version": "v1",
+  "status": "draft",
+  "activated": false,
+  "created_by": "architecture-review",
+  "approved_by": null,
+  "methodology_url": "https://dhanradar.com/methodology",
+  "_note": "PROPOSED v1. Numeric weights are NOT frozen until they clear the backtest pass-gates (FINAL_SCORING_SPEC §8) and the two-person methodology gate (approved_by != created_by, BLOCKERS B6). The engine that consumes this is Phase 4.",
+
+  "composite": {
+    "score_range": [0, 100],
+    "weight_sum_tolerance": 0.001,
+    "weights": {
+      "quality": 0.24,
+      "valuation": 0.22,
+      "momentum": 0.20,
+      "trend": 0.22,
+      "risk": 0.12
+    }
+  },
+
+  "axes": {
+    "quality": ["roe_roce", "operating_net_margin", "fcf_margin_cash_conversion", "debt_equity", "interest_coverage", "earnings_stability", "accruals", "promoter_pledge"],
+    "valuation": ["pe_vs_sector", "pb", "ev_ebitda", "p_fcf", "dividend_yield", "peg"],
+    "momentum": ["price_return_3m_6m_12m", "dma_50_200_cross", "rsi_regime_aware", "news_sentiment_modifier"],
+    "trend": ["revenue_cagr", "eps_growth", "sales_momentum_qoq", "forward_growth_estimate", "margin_expansion_trend", "earnings_revision_trend", "relative_strength_vs_sector"],
+    "risk": ["beta", "volatility_30_90d", "max_drawdown_1y", "leverage", "liquidity", "earnings_predictability", "concentration"]
+  },
+  "_double_counting_guard": "earnings_revision_trend and relative_strength_vs_sector live ONLY in trend (never momentum). A sub-factor in two axes must fail the config validator.",
+
+  "normalization": {
+    "winsorize_percentiles": [1, 99],
+    "method": "zscore_within_sector_peer_set",
+    "clamp_z": [-3, 3],
+    "map_to_0_100": "50 + (z * 50/3) * dir",
+    "sector_relative": true,
+    "cyclicals": "cycle_adjusted_earnings"
+  },
+
+  "missing_data": {
+    "drop_and_renormalize_subfactor": true,
+    "axis_low_coverage_threshold_pct": 40,
+    "whole_axis_uncomputable": "reweight_remaining_axes; flag partial_coverage; confidence capped at medium",
+    "stale_past_sla": "used; confidence reduced"
+  },
+
+  "confidence": {
+    "scale": [0, 1],
+    "display": "x100 percentage only when calibration gate open; launch = band only",
+    "weights": {
+      "freshness": 0.30,
+      "coverage": 0.25,
+      "factor_agreement": 0.20,
+      "retrieval_relevance": 0.15,
+      "model_signal": 0.10
+    },
+    "bands": { "high": ">=0.70", "medium": "0.50-0.69", "low": "0.30-0.49" },
+    "floor": { "below": 0.30, "action": "refuse -> insufficient_data" },
+    "high_confidence_guard": "confidence > 0.70 requires >= 3 contributing signals AND high-reliability sources",
+    "partial_coverage_cap": "medium",
+    "exposure_gate": "numeric % suppressed until backtest calibration reliability-curve within +/-10%"
+  },
+
+  "risk_factor_formula": {
+    "note": "higher axis score = LOWER risk; each term sector-normalized; inv = inverse-direction",
+    "weights": {
+      "inv_beta": 0.25,
+      "inv_volatility": 0.20,
+      "inv_max_drawdown": 0.15,
+      "inv_leverage": 0.15,
+      "liquidity": 0.15,
+      "earnings_predictability": 0.10
+    },
+    "composite_contribution": 0.12
+  },
+
+  "fair_value": {
+    "blend": { "dcf": 0.5, "relative_pe": 0.3, "epv": 0.2 },
+    "upside": "(fair_value - price) / price",
+    "exposure": "Pro-gated; numeric never on public DOM"
+  },
+
+  "labels": {
+    "enum": ["in_form", "on_track", "off_track", "out_of_form", "insufficient_data"],
+    "primary": "deterministic rule table on category-relative performance (NOT a pure function of the score)",
+    "rule_table": {
+      "in_form": "outperforming category 1Y AND 3Y, controlled drawdown",
+      "on_track": "matching category, no red flags",
+      "off_track": "underperforming category 12m+ OR fund-manager change / emerging structural concern",
+      "out_of_form": "sustained underperformance + structural concern",
+      "insufficient_data": "confidence < 0.30"
+    },
+    "secondary_band_crosscheck": { "in_form_leaning": ">=70", "on_track_leaning": "55-69", "off_track_leaning": "40-54", "out_of_form_leaning": "<40" },
+    "advisory_verbs_rejected": ["strong_buy", "buy", "hold", "caution", "avoid"]
+  },
+
+  "hysteresis": {
+    "eval_count": 2,
+    "band_edge_buffer_points": 2,
+    "expose": "eval_seq"
+  },
+
+  "governance": {
+    "label_distribution_sanity": true,
+    "churn_human_review_gate_pct": 5,
+    "fail_closed": true,
+    "methodology_changelog": "rating_engine_changelog",
+    "two_person_gate": "approved_by != created_by",
+    "no_numeric_in_dom": true,
+    "risk_profile_excluded_from_score": true
+  },
+
+  "benchmarks": {
+    "large_cap": "NIFTY 50 / SENSEX TRI",
+    "broad": "NIFTY 500 TRI",
+    "mid_small": "NIFTY Midcap 150 / Smallcap 250 TRI",
+    "sectoral": "respective sector index",
+    "mutual_fund": "scheme stated benchmark TRI",
+    "etf": "underlying index (tracking error)",
+    "always_tri": true,
+    "portfolio": "XIRR vs NIFTY 50"
+  },
+
+  "recompute_cadence_ist": "18:30 trading days; intraday carried-forward (dated)"
+}
