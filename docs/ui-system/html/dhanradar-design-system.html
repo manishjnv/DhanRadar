@@ -1,0 +1,2779 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DhanRadar — Design System</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%230B1F3A'/><stop offset='100%25' stop-color='%231E5EFF'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><circle cx='16' cy='16' r='8' fill='none' stroke='white' stroke-width='1.6' opacity='0.5'/><circle cx='16' cy='16' r='4.5' fill='none' stroke='white' stroke-width='1.6' opacity='0.8'/><line x1='16' y1='16' x2='23' y2='12.5' stroke='white' stroke-width='1.6' stroke-linecap='round'/><circle cx='23' cy='12.5' r='1.8' fill='%231FD79A'/></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet"/>
+
+<style>
+/* ─── Design tokens ─────────────────────────────────────────────── */
+:root {
+  --dr-navy: #0B1F3A; --dr-blue: #1E5EFF; --dr-emerald: #00B386;
+  --dr-cyan: #00C2FF; --dr-amber: #F5A623; --dr-red: #E5484D;
+  --dr-font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --dr-font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --dr-font-serif: 'Instrument Serif', Georgia, serif;
+  --dr-r-sm: 4px; --dr-r-md: 8px; --dr-r-lg: 12px; --dr-r-xl: 14px; --dr-r-2xl: 18px;
+}
+.theme-light {
+  --bg: #F7F6F2; --bg-elev: #FFFFFF; --surface: #FFFFFF; --surface-2: #F1EFE9;
+  --surface-3: #E8E6DF; --border: #E4E1D9; --border-strong: #D4D0C4;
+  --text: #0B0F1A; --text-secondary: #3B414E; --text-muted: #6B7280; --text-faint: #9CA0AA;
+  --positive: #00B386; --negative: #E5484D; --warn: #C57F00;
+  --blue-soft: rgba(30,94,255,0.10); --emerald-soft: rgba(0,179,134,0.12);
+  --red-soft: rgba(229,72,77,0.10); --amber-soft: rgba(245,166,35,0.14);
+  --shadow-sm: 0 1px 2px rgba(15,20,35,0.04);
+  --shadow-md: 0 4px 16px rgba(15,20,35,0.06);
+  --shadow-lg: 0 24px 60px -20px rgba(15,20,35,0.18);
+  --score-ring-bg: rgba(11,31,58,0.08);
+  --chart-grid: rgba(0,0,0,0.06);
+}
+.theme-dark {
+  --bg: #07090F; --bg-elev: #0B0F1A; --surface: #0E121E; --surface-2: #141928;
+  --surface-3: #1B2133; --border: rgba(255,255,255,0.07); --border-strong: rgba(255,255,255,0.14);
+  --text: #ECEEF5; --text-secondary: #B9BFCF; --text-muted: #7E8699; --text-faint: #525868;
+  --positive: #1FD79A; --negative: #FF6166; --warn: #FFB347;
+  --blue-soft: rgba(77,128,255,0.16); --emerald-soft: rgba(31,215,154,0.16);
+  --red-soft: rgba(255,97,102,0.14); --amber-soft: rgba(255,179,71,0.16);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 32px 80px -20px rgba(0,0,0,0.7);
+  --score-ring-bg: rgba(255,255,255,0.08);
+  --chart-grid: rgba(255,255,255,0.06);
+}
+
+/* ─── Reset & base ───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--dr-font-sans);
+  background: var(--bg); color: var(--text);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+  font-feature-settings: 'cv11','ss01','ss03';
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.mono { font-family: var(--dr-font-mono); font-feature-settings: 'tnum','zero','ss02'; letter-spacing: -0.01em; }
+.serif { font-family: var(--dr-font-serif); }
+.pos { color: var(--positive); } .neg { color: var(--negative); }
+.muted { color: var(--text-muted); } .faint { color: var(--text-faint); } .sec { color: var(--text-secondary); }
+a { color: var(--dr-blue); }
+
+/* ─── App shell ───────────────────────────────────────────────── */
+.app { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+
+.side {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: var(--bg); border-right: 1px solid var(--border);
+  padding: 20px 14px; display: flex; flex-direction: column; gap: 2px;
+}
+.side::-webkit-scrollbar { width: 6px; } .side::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.brand-row { display: flex; align-items: center; gap: 11px; padding: 4px 10px 16px; }
+.brand-mark {
+  width: 32px; height: 32px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--dr-navy), var(--dr-blue));
+  display: grid; place-items: center; position: relative; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.brand-name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+.brand-ver { font-family: var(--dr-font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 1px; }
+
+.side-search {
+  position: relative; margin: 4px 4px 12px;
+}
+.side-search input {
+  width: 100%; height: 34px; border-radius: 8px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 0 32px 0 32px; font: inherit; font-size: 13px; color: var(--text); outline: none;
+  font-family: var(--dr-font-sans);
+}
+.side-search input::placeholder { color: var(--text-faint); }
+.side-search .si { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.side-search .sk {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-family: var(--dr-font-mono); font-size: 10px; color: var(--text-muted);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+}
+
+.nav-label {
+  font-size: 10px; font-weight: 500; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.08em; padding: 14px 12px 6px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 8px;
+  font-size: 13.5px; color: var(--text-secondary); cursor: pointer;
+  font-weight: 450; transition: background 0.12s ease, color 0.12s ease;
+  border: none; background: transparent; font-family: inherit; text-align: left; width: 100%;
+}
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--surface-2); color: var(--text); font-weight: 500; }
+.nav-item .ni { width: 16px; height: 16px; flex: 0 0 auto; opacity: 0.85; }
+.nav-item.active .ni { color: var(--dr-blue); opacity: 1; }
+.nav-item .pill { margin-left: auto; font-family: var(--dr-font-mono); font-size: 10px; color: var(--text-muted); }
+
+.side-foot {
+  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.theme-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px; border-radius: 8px; background: var(--surface-2);
+  border: 1px solid var(--border); cursor: pointer; font-size: 12.5px;
+  color: var(--text-secondary); font-family: inherit;
+}
+.theme-toggle:hover { background: var(--surface-3); }
+.theme-toggle .tt-track { width: 28px; height: 16px; border-radius: 8px; background: var(--border-strong); position: relative; }
+.theme-toggle .tt-knob {
+  position: absolute; left: 2px; top: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--text); transition: transform 0.2s ease;
+}
+.theme-dark .theme-toggle .tt-knob { transform: translateX(12px); }
+
+/* ─── Main content ────────────────────────────────────────────── */
+.main { padding: 0; }
+.section { display: none; padding: 56px 64px 80px; max-width: 1200px; }
+.section.active { display: block; }
+.section-head { margin-bottom: 32px; max-width: 760px; }
+.eyebrow {
+  font-family: var(--dr-font-mono); font-size: 11px; color: var(--dr-blue);
+  text-transform: uppercase; letter-spacing: 0.12em; font-weight: 500; margin-bottom: 12px;
+}
+h1.title { font-size: 48px; font-weight: 500; letter-spacing: -0.03em; margin: 0 0 16px; line-height: 1.05; }
+h1.title .it { font-family: var(--dr-font-serif); font-style: italic; font-weight: 400; color: var(--dr-blue); }
+.lede { font-size: 16px; line-height: 1.6; color: var(--text-secondary); max-width: 640px; }
+
+h2.h2 { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; margin: 56px 0 4px; }
+.h2-sub { color: var(--text-muted); font-size: 14px; line-height: 1.55; margin-bottom: 24px; max-width: 640px; }
+h3.h3 {
+  font-size: 11px; font-family: var(--dr-font-mono); font-weight: 500;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 28px 0 14px;
+}
+
+/* ─── Surfaces ────────────────────────────────────────────────── */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--dr-r-xl); overflow: hidden;
+}
+.card-pad { padding: 20px 22px; }
+
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.gap-1 { gap: 4px; } .gap-2 { gap: 8px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; } .gap-6 { gap: 24px; }
+.grow { flex: 1 1 0; min-width: 0; }
+.between { justify-content: space-between; } .center { align-items: center; } .wrap { flex-wrap: wrap; }
+.mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; } .mt-4 { margin-top: 16px; } .mt-6 { margin-top: 24px; } .mt-8 { margin-top: 32px; }
+.mb-2 { margin-bottom: 8px; } .mb-3 { margin-bottom: 12px; } .mb-4 { margin-bottom: 16px; }
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+.right { text-align: right; }
+
+/* ─── Type helpers ────────────────────────────────────────────── */
+.t10 { font-size: 10px; } .t11 { font-size: 11px; } .t12 { font-size: 12px; }
+.t13 { font-size: 13px; } .t14 { font-size: 14px; } .t15 { font-size: 15px; }
+.t16 { font-size: 16px; } .t18 { font-size: 18px; } .t24 { font-size: 24px; } .t32 { font-size: 32px; }
+.w-450 { font-weight: 450; } .w-500 { font-weight: 500; } .w-600 { font-weight: 600; }
+.upper { text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* ─── Buttons ────────────────────────────────────────────────── */
+.btn {
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  padding: 8px 14px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--text); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: all 0.12s ease; letter-spacing: -0.005em; white-space: nowrap;
+}
+.btn-primary { background: var(--text); color: var(--bg); }
+.theme-dark .btn-primary { color: #07090F; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-accent { background: var(--dr-blue); color: white; }
+.btn-accent:hover { filter: brightness(1.05); }
+.btn-ghost { background: var(--surface-2); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--surface-3); }
+.btn-outline { border: 1px solid var(--border-strong); }
+.btn-outline:hover { background: var(--surface-2); }
+.btn-danger { background: var(--negative); color: white; }
+.btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+.btn-lg { padding: 11px 20px; font-size: 14px; border-radius: 10px; }
+
+/* ─── Badges ─────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px;
+  font-family: var(--dr-font-mono); letter-spacing: -0.01em;
+}
+.badge-pos { background: var(--emerald-soft); color: var(--positive); }
+.badge-neg { background: var(--red-soft); color: var(--negative); }
+.badge-info { background: var(--blue-soft); color: var(--dr-blue); }
+.badge-warn { background: var(--amber-soft); color: var(--warn); }
+.badge-neutral { background: var(--surface-2); color: var(--text-secondary); }
+.signal-strong-buy { background: rgba(0,179,134,0.16); color: var(--positive); }
+
+/* ─── Chips ──────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px; background: var(--surface-2);
+  border: 1px solid var(--border); font-size: 11.5px; color: var(--text-secondary);
+  cursor: pointer; font-family: inherit; font-weight: 450;
+}
+.chip:hover { background: var(--surface-3); }
+.chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+/* ─── Swatches ───────────────────────────────────────────────── */
+.swatch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.swatch {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.swatch:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.swatch-color { height: 96px; position: relative; }
+.swatch-meta { padding: 12px 14px; }
+.swatch-name { font-size: 13px; font-weight: 500; letter-spacing: -0.005em; }
+.swatch-hex { font-family: var(--dr-font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+.swatch-hex.copied { color: var(--positive); }
+.swatch-role { font-family: var(--dr-font-mono); font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 5px; }
+
+/* ─── Type specimens ─────────────────────────────────────────── */
+.type-row {
+  display: grid; grid-template-columns: 100px 1fr 220px;
+  padding: 22px 0; border-bottom: 1px solid var(--border); align-items: baseline; gap: 24px;
+}
+.type-label { font-family: var(--dr-font-mono); font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+.type-spec { font-family: var(--dr-font-mono); font-size: 11px; color: var(--text-muted); text-align: right; }
+
+/* ─── Tokens table ───────────────────────────────────────────── */
+.token-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.token-table th, .token-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+.token-table th {
+  font-family: var(--dr-font-mono); font-size: 10.5px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+}
+.token-table td.mono { font-family: var(--dr-font-mono); font-size: 12.5px; }
+.copy-btn {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px;
+  font-family: var(--dr-font-mono); font-size: 10.5px; padding: 2px 7px;
+  color: var(--text-secondary); cursor: pointer;
+}
+.copy-btn:hover { background: var(--surface-3); color: var(--text); }
+.copy-btn.copied { color: var(--positive); }
+
+/* ─── Component examples ─────────────────────────────────────── */
+.comp-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px 22px 22px; margin-bottom: 16px;
+}
+.comp-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+.comp-head h4 { margin: 0; font-size: 14px; font-weight: 500; letter-spacing: -0.005em; }
+.comp-head .ch-sub { font-family: var(--dr-font-mono); font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.comp-stage {
+  padding: 24px; border-radius: 10px; background: var(--bg);
+  border: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-bottom: 10px;
+}
+.code {
+  font-family: var(--dr-font-mono); font-size: 11.5px; line-height: 1.55;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; color: var(--text-secondary); overflow-x: auto;
+  white-space: pre;
+}
+.code .k { color: var(--dr-blue); }
+.code .s { color: var(--positive); }
+.code .c { color: var(--text-faint); }
+.code .v { color: var(--warn); }
+
+/* ─── Inputs (live demo) ─────────────────────────────────────── */
+.input-demo {
+  width: 100%; height: 38px; padding: 0 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  font-family: inherit; font-size: 13px; color: var(--text); outline: none;
+}
+.input-demo:focus { border-color: var(--dr-blue); background: var(--surface); box-shadow: 0 0 0 3px var(--blue-soft); }
+
+input[type="range"].slider {
+  -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: var(--surface-3); outline: none; width: 100%;
+}
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text); cursor: pointer; border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+/* ─── Tables ─────────────────────────────────────────────────── */
+.dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dt th {
+  text-align: left; font-weight: 500; color: var(--text-muted);
+  padding: 10px 14px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.06em; border-bottom: 1px solid var(--border);
+  font-family: var(--dr-font-mono);
+}
+.dt th.right, .dt td.right { text-align: right; }
+.dt td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.dt tr:last-child td { border-bottom: none; }
+.dt tr.hov:hover td { background: var(--surface-2); cursor: pointer; }
+
+.ticker-logo {
+  width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center;
+  color: white; font-size: 11px; font-weight: 600; flex: 0 0 auto;
+}
+
+/* ─── Score ring ─────────────────────────────────────────────── */
+.ring-wrap { position: relative; display: inline-grid; place-items: center; }
+.ring-wrap svg { transform: rotate(-90deg); display: block; }
+.ring-wrap .ring-n {
+  position: absolute; font-family: var(--dr-font-mono); font-weight: 500; letter-spacing: -0.04em;
+}
+
+/* ─── Mobile preview frame ───────────────────────────────────── */
+.mobile-stage {
+  display: grid; grid-template-columns: 240px 1fr 320px; gap: 32px;
+  align-items: flex-start;
+}
+.screen-list { display: flex; flex-direction: column; gap: 4px; max-height: 70vh; overflow-y: auto; }
+.screen-list-item {
+  text-align: left; background: transparent; border: 1px solid transparent;
+  border-radius: 8px; padding: 9px 12px; font-family: inherit;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+}
+.screen-list-item:hover { background: var(--surface-2); color: var(--text); }
+.screen-list-item.active { background: var(--surface-2); color: var(--text); font-weight: 500; }
+.screen-list-item .sn { font-family: var(--dr-font-mono); font-size: 10.5px; color: var(--text-muted); width: 18px; }
+
+.device {
+  width: 380px; height: 800px; margin: 0 auto;
+  border-radius: 50px; background: #0a0d16; padding: 12px;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.1);
+  position: relative; flex: 0 0 auto;
+}
+.theme-dark .device { box-shadow: 0 40px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08); }
+.device::before {
+  content: ''; position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+  width: 110px; height: 32px; border-radius: 22px; background: #000; z-index: 5;
+}
+.device-screen {
+  width: 100%; height: 100%; border-radius: 40px; overflow: hidden;
+  background: var(--bg); position: relative; display: flex; flex-direction: column;
+}
+.dev-status {
+  height: 48px; padding: 12px 28px 0; display: flex; justify-content: space-between;
+  align-items: center; font-family: var(--dr-font-mono); font-size: 14px; font-weight: 500;
+  flex: 0 0 auto;
+}
+.dev-status .right { display: flex; gap: 5px; align-items: center; }
+
+.screen-body { flex: 1; overflow-y: auto; padding-bottom: 80px; }
+.screen-body::-webkit-scrollbar { width: 0; }
+
+.mob-tabbar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 76px; border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(20px);
+  display: flex; justify-content: space-around; align-items: flex-start;
+  padding: 10px 0 0; z-index: 4;
+}
+.mob-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--text-muted); background: none; border: none;
+  font-family: inherit; cursor: pointer; padding: 4px 12px;
+}
+.mob-tab.active { color: var(--dr-blue); }
+
+/* Mobile screen-internal styles */
+.mh { padding: 8px 18px 0; display: flex; align-items: center; justify-content: space-between; }
+.mh-greet { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.mh-name { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+.mb-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px;
+}
+.mb-search {
+  background: var(--surface-2); border-radius: 10px; padding: 9px 12px;
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Sample data tickers */
+.tk-logo { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: white; font-size: 11px; font-weight: 600; }
+
+/* ─── Email preview ──────────────────────────────────────────── */
+.email-stage {
+  display: grid; grid-template-columns: 240px 1fr; gap: 32px; align-items: flex-start;
+}
+.email-pane { display: flex; flex-direction: column; gap: 14px; }
+.email-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.email-frame {
+  background: #d8d4cc; border-radius: 14px; padding: 20px;
+  display: flex; justify-content: center; min-height: 600px;
+}
+.theme-dark .email-frame { background: #1a1d28; }
+.email-frame.mob { padding: 24px; }
+.email-frame iframe {
+  border: 0; background: white; box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  border-radius: 8px;
+}
+.email-meta {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 18px; font-size: 13px;
+}
+.email-meta .k { color: var(--text-muted); font-family: var(--dr-font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; align-self: center; }
+.email-meta .v { color: var(--text); }
+
+/* ─── Print ──────────────────────────────────────────────────── */
+@media print {
+  .side { display: none; }
+  .app { grid-template-columns: 1fr; }
+  .section { display: block !important; page-break-before: always; }
+  .section:first-of-type { page-break-before: avoid; }
+}
+
+/* ─── Skeleton loader ────────────────────────────────────────── */
+.skel {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%; animation: shimmer 1.5s linear infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ─── Toast ──────────────────────────────────────────────────── */
+.toast {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow-md); font-size: 13px;
+}
+
+/* ─── Accordion ─────────────────────────────────────────────── */
+.acc-item { border-top: 1px solid var(--border); }
+.acc-item:last-child { border-bottom: 1px solid var(--border); }
+.acc-q {
+  padding: 16px 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+  font-size: 14px; font-weight: 450;
+}
+.acc-a { padding: 0 4px 16px; color: var(--text-muted); font-size: 13.5px; line-height: 1.55; max-width: 720px; display: none; }
+.acc-item.open .acc-a { display: block; }
+.acc-item.open .acc-chev { transform: rotate(90deg); }
+.acc-chev { transition: transform 0.18s ease; }
+
+/* ─── Empty state ───────────────────────────────────────────── */
+.empty {
+  padding: 48px 24px; text-align: center; border: 1px dashed var(--border);
+  border-radius: 12px; background: var(--bg);
+}
+.empty .e-icon {
+  width: 48px; height: 48px; border-radius: 12px; background: var(--surface-2);
+  display: grid; place-items: center; margin: 0 auto 14px; color: var(--text-muted);
+}
+
+/* ─── KPI widget ────────────────────────────────────────────── */
+.kpi { padding: 16px 18px; }
+.kpi .label { font-family: var(--dr-font-mono); font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; margin-bottom: 4px; }
+.kpi .val { font-family: var(--dr-font-mono); font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.05; }
+.kpi .delta { font-family: var(--dr-font-mono); font-size: 12px; margin-top: 4px; }
+
+/* ─── Tabs ───────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
+.tabs .tab {
+  padding: 9px 14px; font-size: 13px; color: var(--text-muted); cursor: pointer;
+  border-bottom: 1.5px solid transparent; margin-bottom: -1px; font-weight: 450;
+  background: transparent; border-top: none; border-left: none; border-right: none; font-family: inherit;
+}
+.tabs .tab:hover { color: var(--text); }
+.tabs .tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
+
+/* ─── Pricing ────────────────────────────────────────────────── */
+.plan {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  padding: 26px; display: flex; flex-direction: column; gap: 14px;
+}
+.plan.featured { border-color: var(--text); position: relative; }
+.plan-name { font-family: var(--dr-font-mono); font-size: 12px; color: var(--dr-blue); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+.plan-price { font-family: var(--dr-font-mono); font-size: 36px; font-weight: 500; letter-spacing: -0.025em; }
+.plan-price .per { font-size: 13px; color: var(--text-muted); font-family: var(--dr-font-sans); }
+.plan ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 9px; }
+.plan ul li { font-size: 13px; color: var(--text-secondary); display: flex; gap: 8px; }
+.plan ul li::before { content: '✓'; color: var(--positive); font-weight: 600; }
+
+/* Sparkline */
+.spark-bg { background: var(--surface-2); border-radius: 4px; }
+
+/* Search highlight when not matching */
+.section.hidden-by-search { display: none !important; }
+.nav-item.hidden-by-search { display: none; }
+
+/* Footer */
+.section-foot {
+  margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ─── SIDEBAR ──────────────────────────────────────────── -->
+  <aside class="side">
+    <div class="brand-row">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" opacity="0.4"/>
+          <circle cx="12" cy="12" r="5" opacity="0.7"/>
+          <path d="M12 12 L19 8"/>
+          <circle cx="17.5" cy="9" r="1.2" fill="#1FD79A" stroke="none"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">DhanRadar</div>
+        <div class="brand-ver">Design System · v1.0</div>
+      </div>
+    </div>
+
+    <div class="side-search">
+      <svg class="si" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 L21 21"/></svg>
+      <input id="search" placeholder="Search…" autocomplete="off"/>
+      <span class="sk">⌘K</span>
+    </div>
+
+    <nav id="nav">
+      <div class="nav-label">Foundations</div>
+      <button class="nav-item active" data-target="overview"><span class="ni">▦</span> Overview</button>
+      <button class="nav-item" data-target="brand"><span class="ni">◎</span> Brand Guidelines</button>
+      <button class="nav-item" data-target="colors"><span class="ni">●</span> Color Palette</button>
+      <button class="nav-item" data-target="type"><span class="ni">Aa</span> Typography</button>
+      <button class="nav-item" data-target="logo"><span class="ni">⌂</span> Logo Usage</button>
+      <button class="nav-item" data-target="tokens"><span class="ni">≡</span> Design Tokens</button>
+
+      <div class="nav-label">Library</div>
+      <button class="nav-item" data-target="components"><span class="ni">◧</span> Components <span class="pill">28</span></button>
+      <button class="nav-item" data-target="mobile"><span class="ni">▢</span> Mobile Screens <span class="pill">15</span></button>
+      <button class="nav-item" data-target="emails"><span class="ni">✉</span> Email Templates <span class="pill">16</span></button>
+
+      <div class="nav-label">Resources</div>
+      <button class="nav-item" data-target="assets"><span class="ni">⌗</span> Assets</button>
+      <button class="nav-item" data-target="handoff"><span class="ni">⇄</span> Handoff Notes</button>
+      <button class="nav-item" data-target="readme"><span class="ni">𝒾</span> README</button>
+    </nav>
+
+    <div class="side-foot">
+      <button class="theme-toggle" id="themeToggle">
+        <span>Dark mode</span>
+        <span class="tt-track"><span class="tt-knob"></span></span>
+      </button>
+      <div style="font-family:var(--dr-font-mono); font-size:10px; color:var(--text-faint); padding: 4px 4px 0; text-align: center;">v1.0 · May 2026</div>
+    </div>
+  </aside>
+
+  <!-- ─── MAIN ──────────────────────────────────────────────── -->
+  <main class="main" id="main">
+
+<!-- ════════════════ OVERVIEW ════════════════ -->
+<section class="section active" id="sec-overview">
+  <div class="section-head">
+    <div class="eyebrow">// DhanRadar · v1.0 · May 2026</div>
+    <h1 class="title">The investor console <span class="it">design system.</span></h1>
+    <p class="lede">A premium-fintech kit for India's retail investors. Built around the DhanRadar Score — a 0-100 composite that distils valuation, growth, quality, momentum and risk into a single, glanceable signal. Calm. Confident. Data-first.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px;">
+    <div class="card kpi"><div class="label">Components</div><div class="val">28</div><div class="delta muted">across the library</div></div>
+    <div class="card kpi"><div class="label">Mobile Screens</div><div class="val">15</div><div class="delta muted">end-to-end flows</div></div>
+    <div class="card kpi"><div class="label">Email Templates</div><div class="val">16</div><div class="delta muted">transactional + engagement</div></div>
+    <div class="card kpi"><div class="label">Design Tokens</div><div class="val">82</div><div class="delta muted">in <span class="mono">tokens.json</span></div></div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+    <button class="card" style="text-align:left; cursor: pointer; padding: 22px; font-family: inherit; color: inherit; border: 1px solid var(--border);" onclick="DR.navigate('colors')">
+      <div style="display:flex; gap: 6px; margin-bottom: 12px;">
+        <span style="width:22px; height:22px; border-radius: 6px; background:#0B1F3A;"></span>
+        <span style="width:22px; height:22px; border-radius: 6px; background:#1E5EFF;"></span>
+        <span style="width:22px; height:22px; border-radius: 6px; background:#00B386;"></span>
+        <span style="width:22px; height:22px; border-radius: 6px; background:#F5A623;"></span>
+      </div>
+      <div style="font-size: 14px; font-weight: 500;">Color palette</div>
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Brand, semantic & full neutral scales</div>
+    </button>
+    <button class="card" style="text-align:left; cursor: pointer; padding: 22px; font-family: inherit; color: inherit; border: 1px solid var(--border);" onclick="DR.navigate('type')">
+      <div style="font-size: 32px; font-weight: 500; letter-spacing: -0.03em; margin-bottom: 4px;">Aa <span class="serif" style="font-style: italic; color: var(--dr-blue);">Aa</span> <span class="mono">9.42</span></div>
+      <div style="font-size: 14px; font-weight: 500;">Typography</div>
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Geist Sans · Geist Mono · Instrument Serif</div>
+    </button>
+    <button class="card" style="text-align:left; cursor: pointer; padding: 22px; font-family: inherit; color: inherit; border: 1px solid var(--border);" onclick="DR.navigate('components')">
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <span class="btn btn-primary btn-sm">Primary</span>
+        <span class="badge signal-strong-buy">● Buy</span>
+      </div>
+      <div style="font-size: 14px; font-weight: 500;">Components</div>
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">28 reusable UI elements</div>
+    </button>
+  </div>
+
+  <h2 class="h2">Principles</h2>
+  <div class="h2-sub">The five rules every screen must honour.</div>
+  <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">
+    <div class="card card-pad"><div class="mono t11 upper muted">01</div><div class="w-500 mt-2">Calm over loud</div><div class="t12 muted mt-2" style="line-height:1.5;">No hype, no rocket emoji. The data is the drama.</div></div>
+    <div class="card card-pad"><div class="mono t11 upper muted">02</div><div class="w-500 mt-2">Data-first</div><div class="t12 muted mt-2" style="line-height:1.5;">Chrome serves data. Never the other way around.</div></div>
+    <div class="card card-pad"><div class="mono t11 upper muted">03</div><div class="w-500 mt-2">Plain English</div><div class="t12 muted mt-2" style="line-height:1.5;">"P/E ratio" is jargon. Explain every metric.</div></div>
+    <div class="card card-pad"><div class="mono t11 upper muted">04</div><div class="w-500 mt-2">Honest signals</div><div class="t12 muted mt-2" style="line-height:1.5;">No fake urgency. No dark patterns.</div></div>
+    <div class="card card-pad"><div class="mono t11 upper muted">05</div><div class="w-500 mt-2">Glanceable</div><div class="t12 muted mt-2" style="line-height:1.5;">One score should answer one question.</div></div>
+  </div>
+
+  <h2 class="h2">Quick links</h2>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+    <button class="card card-pad" style="text-align:left; cursor: pointer; font-family: inherit; color: inherit;" onclick="DR.navigate('mobile')">
+      <div class="t14 w-500">→ 15 mobile screens</div>
+      <div class="t12 muted mt-2">From Splash to Settings, every screen in a phone frame.</div>
+    </button>
+    <button class="card card-pad" style="text-align:left; cursor: pointer; font-family: inherit; color: inherit;" onclick="DR.navigate('emails')">
+      <div class="t14 w-500">→ 16 email templates</div>
+      <div class="t12 muted mt-2">Transactional, engagement and alert flows.</div>
+    </button>
+    <button class="card card-pad" style="text-align:left; cursor: pointer; font-family: inherit; color: inherit;" onclick="DR.navigate('tokens')">
+      <div class="t14 w-500">→ Design tokens</div>
+      <div class="t12 muted mt-2">CSS vars, Tailwind preset, JSON — pick your stack.</div>
+    </button>
+  </div>
+
+  <div class="section-foot">
+    <span>DhanRadar Design System · v1.0</span>
+    <span>Press <span class="mono" style="background:var(--surface-2);padding:1px 6px;border-radius:4px;">⌘K</span> to search</span>
+  </div>
+</section>
+
+<!-- ════════════════ BRAND ════════════════ -->
+<section class="section" id="sec-brand">
+  <div class="section-head">
+    <div class="eyebrow">// 02 · Foundations</div>
+    <h1 class="title">Brand <span class="it">guidelines.</span></h1>
+    <p class="lede">DhanRadar is the calm, confident voice that turns financial complexity into actionable signal. Wealth, scanned.</p>
+  </div>
+
+  <h2 class="h2">Story</h2>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <div class="card card-pad">
+      <h3 class="h3">Name</h3>
+      <div class="t14 w-500" style="font-size: 22px; letter-spacing: -0.02em;">DhanRadar</div>
+      <div class="t13 muted mt-3" style="line-height:1.6;"><strong style="color:var(--text);">"Dhan"</strong> means wealth in Sanskrit and Hindi. <strong style="color:var(--text);">"Radar"</strong> represents scanning, detecting and signalling. Together: a system that scans the market for wealth-building opportunities you'd otherwise miss.</div>
+    </div>
+    <div class="card card-pad">
+      <h3 class="h3">Tagline</h3>
+      <div class="t14 w-500" style="font-size: 22px; letter-spacing: -0.02em;">Spot better investments <span class="serif" style="font-style:italic; color:var(--dr-blue);">before</span> the crowd.</div>
+      <div class="t13 muted mt-3" style="line-height:1.6;">Promises an edge without overpromising returns. Use the full line in hero contexts; the shorthand <strong style="color:var(--text);">"Wealth, scanned."</strong> works on small surfaces.</div>
+    </div>
+  </div>
+
+  <h2 class="h2">Personality</h2>
+  <div class="h2-sub">We are five things and we are not five things.</div>
+  <div class="card">
+    <table class="dt">
+      <thead><tr><th>We are</th><th>We are not</th></tr></thead>
+      <tbody>
+        <tr><td>Intelligent — we earn trust with depth</td><td>Pretentious — we never talk down</td></tr>
+        <tr><td>Calm — composed under volatility</td><td>Hype-y — no rocket emojis, no all-caps</td></tr>
+        <tr><td>Plain-English — jargon translated</td><td>Jargon-heavy — "alpha generation" is banned copy</td></tr>
+        <tr><td>Honest — risk shown alongside reward</td><td>Salesy — no fake urgency, no countdown timers</td></tr>
+        <tr><td>Respectful of beginners</td><td>Condescending — "even your dad can use it" is wrong</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="h2">Voice in microcopy</h2>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+    <div class="card card-pad">
+      <div class="t11 upper muted mb-3" style="color: var(--positive); font-family: var(--dr-font-mono); font-weight: 500;">✓ Yes</div>
+      <ul style="margin:0; padding-left: 18px; font-size: 13.5px; color: var(--text-secondary); line-height: 1.7;">
+        <li>"DhanRadar Score combines valuation, growth, quality, momentum and risk."</li>
+        <li>"Spot better investments before the crowd."</li>
+        <li>"You're up ₹4,824 today. Mostly Reliance and Bharti."</li>
+        <li>"Markets carry risk. Past returns aren't future returns."</li>
+      </ul>
+    </div>
+    <div class="card card-pad">
+      <div class="t11 upper muted mb-3" style="color: var(--negative); font-family: var(--dr-font-mono); font-weight: 500;">✗ No</div>
+      <ul style="margin:0; padding-left: 18px; font-size: 13.5px; color: var(--text-secondary); line-height: 1.7;">
+        <li>"🚀 Our AI-powered algo crushes the market 💯"</li>
+        <li>"Beat Wall Street at its own game."</li>
+        <li>"Welcome back, valued investor!"</li>
+        <li>"Guaranteed returns — try free!"</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="h2">Things to avoid</h2>
+  <ul style="list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">01</span>Bull/bear cartoons or stock-photo handshakes</li>
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">02</span>Hindi-only headlines on English surfaces (or vice versa)</li>
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">03</span>Saturated greens & reds (use our calm tokens)</li>
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">04</span>Promising returns, percentages or wealth outcomes</li>
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">05</span>Sans-serifs other than Geist in product surfaces</li>
+    <li class="card card-pad t13 sec" style="line-height:1.6;"><span class="mono muted" style="margin-right:8px;">06</span>Decorative SVG illustrations of buildings, charts, money</li>
+  </ul>
+</section>
+
+<!-- ════════════════ COLOR PALETTE ════════════════ -->
+<section class="section" id="sec-colors">
+  <div class="section-head">
+    <div class="eyebrow">// 03 · Color</div>
+    <h1 class="title">Palette.</h1>
+    <p class="lede">Click any swatch to copy its hex. Every UI element should be expressible in seven brand colors plus one neutral scale per theme — no exceptions.</p>
+  </div>
+
+  <h3 class="h3">Primary brand</h3>
+  <div class="swatch-grid">
+    <button class="swatch" onclick="DR.copyText('#0B1F3A', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#0B1F3A;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Deep Navy</div><div class="swatch-hex">#0B1F3A</div><div class="swatch-role">Primary · Trust anchor</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#1E5EFF', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#1E5EFF;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Royal Blue</div><div class="swatch-hex">#1E5EFF</div><div class="swatch-role">Action · CTAs · Links</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#00B386', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#00B386;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Emerald</div><div class="swatch-hex">#00B386</div><div class="swatch-role">Positive · Light mode</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#1FD79A', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#1FD79A;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Emerald Dark</div><div class="swatch-hex">#1FD79A</div><div class="swatch-role">Positive · Dark mode</div></div>
+    </button>
+  </div>
+
+  <h3 class="h3">Semantic accents</h3>
+  <div class="swatch-grid">
+    <button class="swatch" onclick="DR.copyText('#00C2FF', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#00C2FF;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Cyan</div><div class="swatch-hex">#00C2FF</div><div class="swatch-role">Info · Highlight</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#F5A623', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#F5A623;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Amber</div><div class="swatch-hex">#F5A623</div><div class="swatch-role">Warning · Hold</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#E5484D', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#E5484D;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Red</div><div class="swatch-hex">#E5484D</div><div class="swatch-role">Negative · Loss</div></div>
+    </button>
+    <button class="swatch" onclick="DR.copyText('#FF6166', this.querySelector('.swatch-hex'))">
+      <div class="swatch-color" style="background:#FF6166;"></div>
+      <div class="swatch-meta"><div class="swatch-name">Red Dark</div><div class="swatch-hex">#FF6166</div><div class="swatch-role">Negative · Dark</div></div>
+    </button>
+  </div>
+
+  <h3 class="h3">Light theme — neutrals</h3>
+  <div class="swatch-grid">
+    <button class="swatch" onclick="DR.copyText('#F7F6F2', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#F7F6F2;border-bottom:1px solid var(--border);"></div><div class="swatch-meta"><div class="swatch-name">Background</div><div class="swatch-hex">#F7F6F2</div><div class="swatch-role">--bg · warm white</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#FFFFFF', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#FFFFFF;border-bottom:1px solid var(--border);"></div><div class="swatch-meta"><div class="swatch-name">Surface</div><div class="swatch-hex">#FFFFFF</div><div class="swatch-role">--surface · cards</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#F1EFE9', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#F1EFE9;border-bottom:1px solid var(--border);"></div><div class="swatch-meta"><div class="swatch-name">Surface 2</div><div class="swatch-hex">#F1EFE9</div><div class="swatch-role">--surface-2 · chips</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#E4E1D9', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#E4E1D9;"></div><div class="swatch-meta"><div class="swatch-name">Border</div><div class="swatch-hex">#E4E1D9</div><div class="swatch-role">--border · hairline</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#0B0F1A', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#0B0F1A;"></div><div class="swatch-meta"><div class="swatch-name">Text</div><div class="swatch-hex">#0B0F1A</div><div class="swatch-role">--text · primary</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#3B414E', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#3B414E;"></div><div class="swatch-meta"><div class="swatch-name">Text Secondary</div><div class="swatch-hex">#3B414E</div><div class="swatch-role">--text-secondary</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#6B7280', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#6B7280;"></div><div class="swatch-meta"><div class="swatch-name">Text Muted</div><div class="swatch-hex">#6B7280</div><div class="swatch-role">--text-muted · labels</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#9CA0AA', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#9CA0AA;"></div><div class="swatch-meta"><div class="swatch-name">Text Faint</div><div class="swatch-hex">#9CA0AA</div><div class="swatch-role">--text-faint · captions</div></div></button>
+  </div>
+
+  <h3 class="h3">Dark theme — neutrals</h3>
+  <div class="swatch-grid">
+    <button class="swatch" onclick="DR.copyText('#07090F', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#07090F;"></div><div class="swatch-meta"><div class="swatch-name">Background</div><div class="swatch-hex">#07090F</div><div class="swatch-role">--bg · blue-black</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#0E121E', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#0E121E;"></div><div class="swatch-meta"><div class="swatch-name">Surface</div><div class="swatch-hex">#0E121E</div><div class="swatch-role">--surface · cards</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#141928', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#141928;"></div><div class="swatch-meta"><div class="swatch-name">Surface 2</div><div class="swatch-hex">#141928</div><div class="swatch-role">--surface-2 · inputs</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#1B2133', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#1B2133;"></div><div class="swatch-meta"><div class="swatch-name">Surface 3</div><div class="swatch-hex">#1B2133</div><div class="swatch-role">--surface-3 · hover</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#ECEEF5', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#ECEEF5;"></div><div class="swatch-meta"><div class="swatch-name">Text</div><div class="swatch-hex">#ECEEF5</div><div class="swatch-role">--text · primary</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#B9BFCF', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#B9BFCF;"></div><div class="swatch-meta"><div class="swatch-name">Text Secondary</div><div class="swatch-hex">#B9BFCF</div><div class="swatch-role">--text-secondary</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#7E8699', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#7E8699;"></div><div class="swatch-meta"><div class="swatch-name">Text Muted</div><div class="swatch-hex">#7E8699</div><div class="swatch-role">--text-muted</div></div></button>
+    <button class="swatch" onclick="DR.copyText('#525868', this.querySelector('.swatch-hex'))"><div class="swatch-color" style="background:#525868;"></div><div class="swatch-meta"><div class="swatch-name">Text Faint</div><div class="swatch-hex">#525868</div><div class="swatch-role">--text-faint</div></div></button>
+  </div>
+
+  <h3 class="h3">Signal scale — DhanRadar Score</h3>
+  <div class="card" style="padding: 22px;">
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+      <div style="text-align:center; padding: 14px; border-radius: 10px; background: var(--emerald-soft); border: 1px solid var(--emerald-soft);">
+        <div class="mono" style="font-size:24px; font-weight: 500;">≥ 80</div>
+        <div class="t12 mt-2" style="color: var(--positive); font-weight: 500;">Strong Buy</div>
+        <div class="t11 muted mt-2">Top decile · Conviction position</div>
+      </div>
+      <div style="text-align:center; padding: 14px; border-radius: 10px; background: var(--blue-soft);">
+        <div class="mono" style="font-size:24px; font-weight: 500;">65 – 79</div>
+        <div class="t12 mt-2" style="color: var(--dr-blue); font-weight: 500;">Buy</div>
+        <div class="t11 muted mt-2">Solid pick · Worth watching</div>
+      </div>
+      <div style="text-align:center; padding: 14px; border-radius: 10px; background: var(--amber-soft);">
+        <div class="mono" style="font-size:24px; font-weight: 500;">50 – 64</div>
+        <div class="t12 mt-2" style="color: var(--warn); font-weight: 500;">Hold</div>
+        <div class="t11 muted mt-2">Mixed signals · Wait</div>
+      </div>
+      <div style="text-align:center; padding: 14px; border-radius: 10px; background: var(--red-soft);">
+        <div class="mono" style="font-size:24px; font-weight: 500;">&lt; 50</div>
+        <div class="t12 mt-2" style="color: var(--negative); font-weight: 500;">Avoid</div>
+        <div class="t11 muted mt-2">Red flag · Researched poorly</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ TYPOGRAPHY ════════════════ -->
+<section class="section" id="sec-type">
+  <div class="section-head">
+    <div class="eyebrow">// 04 · Foundations</div>
+    <h1 class="title">Typography.</h1>
+    <p class="lede">Geist Sans for everything. Geist Mono for every numeric value. Instrument Serif italic for one or two display accents per surface — sparingly.</p>
+  </div>
+
+  <h3 class="h3">Families</h3>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+    <div class="card card-pad">
+      <div class="t11 upper muted mono">Primary · Sans</div>
+      <div style="font-size: 32px; margin-top: 6px; letter-spacing: -0.02em; font-weight: 500;">Geist</div>
+      <div class="t12 muted mt-2">UI, headlines, body. 300–700 weights.</div>
+    </div>
+    <div class="card card-pad">
+      <div class="t11 upper muted mono">Numeric · Mono</div>
+      <div class="mono" style="font-size: 32px; margin-top: 6px; letter-spacing: -0.02em; font-weight: 500;">Geist Mono</div>
+      <div class="t12 muted mt-2">Tabular nums. Always for ₹, %, scores, tickers.</div>
+    </div>
+    <div class="card card-pad">
+      <div class="t11 upper muted mono">Display accent</div>
+      <div class="serif" style="font-size: 36px; margin-top: 6px; letter-spacing: -0.02em; font-style: italic;">Instrument Serif</div>
+      <div class="t12 muted mt-2">One or two words per headline. Italic only.</div>
+    </div>
+  </div>
+
+  <h3 class="h3">Scale</h3>
+  <div class="card" style="padding: 0 22px;">
+    <div class="type-row">
+      <div class="type-label">Display</div>
+      <div style="font-size: 64px; font-weight: 500; letter-spacing: -0.035em; line-height: 1.02;">Spot better <span class="serif" style="font-style:italic; color: var(--dr-blue); font-weight: 400;">investments</span></div>
+      <div class="type-spec">64 / 1.02 / -3.5%</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">H1</div>
+      <div style="font-size: 40px; font-weight: 500; letter-spacing: -0.025em;">Markets at a glance</div>
+      <div class="type-spec">40 / 1.05 / -2.5%</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">H2</div>
+      <div style="font-size: 28px; font-weight: 500; letter-spacing: -0.02em;">Reliance Industries Ltd.</div>
+      <div class="type-spec">28 / 1.15 / -2%</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">H3</div>
+      <div style="font-size: 18px; font-weight: 500;">Sector allocation</div>
+      <div class="type-spec">18 / 1.3 / -1%</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Body</div>
+      <div style="font-size: 15px; line-height: 1.55; max-width: 520px;">DhanRadar scans 4,200+ stocks and 2,800 funds, distilling everything into a single 0–100 score.</div>
+      <div class="type-spec">15 / 1.55 / 400</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Small</div>
+      <div style="font-size: 13px; color: var(--text-secondary);">Click any row to analyze · 240,000 active investors</div>
+      <div class="type-spec">13 / 1.45 / 400</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Numeric</div>
+      <div class="mono" style="font-size: 32px; font-weight: 500; letter-spacing: -0.025em;">₹ 2,841.30 <span style="font-size: 14px; color: var(--positive);">+1.84%</span></div>
+      <div class="type-spec">Geist Mono / tnum</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">Eyebrow</div>
+      <div class="mono" style="font-size: 11px; color: var(--dr-blue); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 500;">// One platform · Every signal</div>
+      <div class="type-spec">11 / mono / +12%</div>
+    </div>
+    <div class="type-row" style="border-bottom: none;">
+      <div class="type-label">Caption</div>
+      <div class="t11 upper muted mono">DhanRadar Score</div>
+      <div class="type-spec">11 / +8% / mono</div>
+    </div>
+  </div>
+
+  <h3 class="h3">Usage rules</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+    <div class="card card-pad t13 sec" style="line-height: 1.65;">
+      <strong style="color:var(--text);">Mono is non-negotiable for numbers.</strong> Every monetary, percentage and ratio value uses <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">font-family: var(--dr-font-mono)</span> with <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">font-feature-settings: 'tnum'</span>. This is what stops your columns from jittering.
+    </div>
+    <div class="card card-pad t13 sec" style="line-height: 1.65;">
+      <strong style="color:var(--text);">Use Instrument Serif sparingly.</strong> One or two words per surface — usually the verb in a hero headline. Never for body, never for nav, never for labels.
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ LOGO USAGE ════════════════ -->
+<section class="section" id="sec-logo">
+  <div class="section-head">
+    <div class="eyebrow">// 05 · Foundations</div>
+    <h1 class="title">Logo <span class="it">usage.</span></h1>
+    <p class="lede">The mark fuses a radar sweep with an emerald signal-ping. Always rotates clockwise. Always sits on its own clear space.</p>
+  </div>
+
+  <h3 class="h3">Lockups</h3>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+    <div class="card" style="background: linear-gradient(135deg, #0B1F3A, #1E5EFF); color: white; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 14px; border: none;">
+      <div style="width: 72px; height: 72px; border-radius: 18px; background: rgba(255,255,255,0.1); display: grid; place-items: center;">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/>
+          <path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="#1FD79A" stroke="none"/>
+        </svg>
+      </div>
+      <div style="font-weight: 600; font-size: 26px; letter-spacing: -0.02em;">DhanRadar</div>
+      <div class="mono t11 upper" style="opacity: 0.7;">Primary · Full color</div>
+    </div>
+    <div class="card" style="padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 14px;">
+      <div style="width: 72px; height: 72px; border-radius: 18px; background: #0B0F1A; display: grid; place-items: center;">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" opacity="0.5"/><circle cx="12" cy="12" r="5" opacity="0.8"/>
+          <path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="white" stroke="none"/>
+        </svg>
+      </div>
+      <div style="font-weight: 600; font-size: 26px; letter-spacing: -0.02em; color: #0B0F1A;">DhanRadar</div>
+      <div class="mono t11 upper muted">Mono · On light</div>
+    </div>
+    <div class="card" style="background: #07090F; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 14px; border-color: rgba(255,255,255,0.08);">
+      <div style="width: 72px; height: 72px; border-radius: 18px; background: rgba(255,255,255,0.06); display: grid; place-items: center; border: 1px solid rgba(255,255,255,0.1);">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#ECEEF5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/>
+          <path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="#1FD79A" stroke="none"/>
+        </svg>
+      </div>
+      <div style="font-weight: 600; font-size: 26px; letter-spacing: -0.02em; color: #ECEEF5;">DhanRadar</div>
+      <div class="mono t11 upper" style="color: #7E8699;">Mono · On dark</div>
+    </div>
+  </div>
+
+  <h3 class="h3">Clear space & minimum size</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Clear space</div>
+      <div class="t13 muted" style="line-height:1.6;">Reserve a margin equal to the height of the <strong style="color:var(--text);font-family:var(--dr-font-mono);">D</strong> glyph around all four sides of the lockup. Never crowd it.</div>
+      <div style="margin-top:18px; padding: 24px; border: 1px dashed var(--border-strong); border-radius: 10px; display: grid; place-items: center;">
+        <svg width="180" height="32" viewBox="0 0 180 32">
+          <rect width="32" height="32" rx="7" fill="url(#bMark)"/>
+          <defs><linearGradient id="bMark"><stop offset="0%" stop-color="#0B1F3A"/><stop offset="100%" stop-color="#1E5EFF"/></linearGradient></defs>
+          <circle cx="16" cy="16" r="8" fill="none" stroke="white" stroke-width="1.4" opacity="0.5"/>
+          <circle cx="16" cy="16" r="4.5" fill="none" stroke="white" stroke-width="1.4" opacity="0.8"/>
+          <line x1="16" y1="16" x2="23" y2="12.5" stroke="white" stroke-width="1.4"/>
+          <circle cx="23" cy="12.5" r="1.6" fill="#1FD79A"/>
+          <text x="42" y="22" font-family="Geist" font-weight="600" font-size="20" fill="var(--text)">DhanRadar</text>
+        </svg>
+      </div>
+    </div>
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Minimum size</div>
+      <div class="t13 muted" style="line-height:1.6;">Full lockup: <strong style="color:var(--text);">80px wide</strong> on screen, <strong style="color:var(--text);">0.75″</strong> in print. Icon alone: <strong style="color:var(--text);">16px</strong>.</div>
+      <div style="margin-top:18px; padding: 16px; border: 1px dashed var(--border-strong); border-radius: 10px; display: flex; gap: 18px; align-items: center; justify-content: center;">
+        <div style="width: 16px; height: 16px; border-radius: 4px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF);"></div>
+        <div style="width: 32px; height: 32px; border-radius: 7px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF);"></div>
+        <div style="width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF);"></div>
+        <div style="width: 80px; height: 80px; border-radius: 18px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF);"></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="h3">Do not</h3>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+    <div class="card card-pad" style="text-align:center;">
+      <div style="height: 80px; display:grid; place-items:center;">
+        <div style="width: 60px; height: 60px; border-radius: 14px; background: #FF6166; opacity: 0.9;"></div>
+      </div>
+      <div class="t12 muted mt-3">Don't recolor the mark</div>
+    </div>
+    <div class="card card-pad" style="text-align:center;">
+      <div style="height: 80px; display:grid; place-items:center;">
+        <div style="width: 80px; height: 40px; border-radius: 14px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF);"></div>
+      </div>
+      <div class="t12 muted mt-3">Don't stretch</div>
+    </div>
+    <div class="card card-pad" style="text-align:center;">
+      <div style="height: 80px; display:grid; place-items:center;">
+        <div style="width: 60px; height: 60px; border-radius: 14px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF); transform: rotate(20deg);"></div>
+      </div>
+      <div class="t12 muted mt-3">Don't rotate</div>
+    </div>
+    <div class="card card-pad" style="text-align:center;">
+      <div style="height: 80px; display:grid; place-items:center;">
+        <div style="width: 60px; height: 60px; border-radius: 14px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF); box-shadow: 0 0 30px #1FD79A;"></div>
+      </div>
+      <div class="t12 muted mt-3">Don't add effects</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ DESIGN TOKENS ════════════════ -->
+<section class="section" id="sec-tokens">
+  <div class="section-head">
+    <div class="eyebrow">// 06 · Foundations</div>
+    <h1 class="title">Design tokens.</h1>
+    <p class="lede">Every spacing, radius, shadow and motion value. Click the chip to copy.</p>
+  </div>
+
+  <h3 class="h3">Spacing</h3>
+  <div class="card" style="padding: 0;">
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Value</th><th>Pixel</th><th>Visual</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="mono">--dr-space-1</td><td class="mono">4px</td><td class="mono">4</td><td><div style="width:4px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-1)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-2</td><td class="mono">8px</td><td class="mono">8</td><td><div style="width:8px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-2)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-3</td><td class="mono">12px</td><td class="mono">12</td><td><div style="width:12px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-3)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-4</td><td class="mono">16px</td><td class="mono">16</td><td><div style="width:16px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-4)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-6</td><td class="mono">24px</td><td class="mono">24</td><td><div style="width:24px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-6)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-8</td><td class="mono">32px</td><td class="mono">32</td><td><div style="width:32px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-8)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-12</td><td class="mono">48px</td><td class="mono">48</td><td><div style="width:48px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-12)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-space-16</td><td class="mono">64px</td><td class="mono">64</td><td><div style="width:64px;height:18px;background:var(--dr-blue);border-radius:2px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-space-16)', this)">copy</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h3">Radius</h3>
+  <div class="card" style="padding: 0;">
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Value</th><th>Use for</th><th>Visual</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="mono">--dr-r-sm</td><td class="mono">4px</td><td>Inline tags, kbd shortcuts</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-sm)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-r-md</td><td class="mono">8px</td><td>Inputs, small buttons</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-md)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-r-lg</td><td class="mono">12px</td><td>Modals, large buttons</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-lg)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-r-xl</td><td class="mono">14px</td><td>Cards · default</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:14px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-xl)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-r-2xl</td><td class="mono">18px</td><td>Hero / feature cards</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:18px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-2xl)', this)">copy</button></td></tr>
+        <tr><td class="mono">--dr-r-full</td><td class="mono">9999px</td><td>Pills, badges, avatars</td><td><div style="width:48px;height:24px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;"></div></td><td class="right"><button class="copy-btn" onclick="DR.copyText('var(--dr-r-full)', this)">copy</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h3">Elevation (shadow)</h3>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+    <div class="card card-pad" style="text-align: center;">
+      <div style="height: 80px; display: grid; place-items: center;"><div style="width:60px;height:40px;background:var(--surface);border-radius:10px;box-shadow:var(--shadow-sm);"></div></div>
+      <div class="mono t11 upper muted mt-3">shadow-sm</div>
+      <div class="t11 muted mt-2" style="line-height:1.5;">Hairline lift. Use on inputs, hover states.</div>
+    </div>
+    <div class="card card-pad" style="text-align: center;">
+      <div style="height: 80px; display: grid; place-items: center;"><div style="width:60px;height:40px;background:var(--surface);border-radius:10px;box-shadow:var(--shadow-md);"></div></div>
+      <div class="mono t11 upper muted mt-3">shadow-md</div>
+      <div class="t11 muted mt-2" style="line-height:1.5;">Dropdowns, tooltips, floating elements.</div>
+    </div>
+    <div class="card card-pad" style="text-align: center;">
+      <div style="height: 80px; display: grid; place-items: center;"><div style="width:60px;height:40px;background:var(--surface);border-radius:10px;box-shadow:var(--shadow-lg);"></div></div>
+      <div class="mono t11 upper muted mt-3">shadow-lg</div>
+      <div class="t11 muted mt-2" style="line-height:1.5;">Modals, hero showcases, premium surfaces.</div>
+    </div>
+  </div>
+
+  <h3 class="h3">Motion</h3>
+  <div class="card" style="padding: 0;">
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Duration</th><th>Easing</th><th>Use for</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="mono">motion-fast</td><td class="mono">120ms</td><td class="mono">ease-out</td><td>Hover, focus rings</td><td class="right"><button class="copy-btn" onclick="DR.copyText('120ms ease-out', this)">copy</button></td></tr>
+        <tr><td class="mono">motion-base</td><td class="mono">180ms</td><td class="mono">ease</td><td>Theme switch, accordion</td><td class="right"><button class="copy-btn" onclick="DR.copyText('180ms ease', this)">copy</button></td></tr>
+        <tr><td class="mono">motion-slow</td><td class="mono">320ms</td><td class="mono">cubic-bezier(.2,.7,.2,1)</td><td>Modal, drawer, score ring fill</td><td class="right"><button class="copy-btn" onclick="DR.copyText('320ms cubic-bezier(.2,.7,.2,1)', this)">copy</button></td></tr>
+        <tr><td class="mono">motion-stage</td><td class="mono">560ms</td><td class="mono">cubic-bezier(.16,1,.3,1)</td><td>Page transitions, large reveals</td><td class="right"><button class="copy-btn" onclick="DR.copyText('560ms cubic-bezier(.16,1,.3,1)', this)">copy</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+  </main></div>
+
+<!-- Sections continue below — appended to main via script -->
+<script>
+/* ─── Inject the rest of the sections into main ───────────────── */
+// Define helpers here (used by both injection and renderers below)
+if (!window.$) { window.$ = (s, r = document) => r.querySelector(s); }
+if (!window.$$) { window.$$ = (s, r = document) => Array.from(r.querySelectorAll(s)); }
+var $ = window.$, $$ = window.$$;
+
+/* ─── Theme ─────────────────────────────────────────────────── */
+function setTheme(theme) {
+  document.documentElement.classList.toggle('theme-light', theme === 'light');
+  document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+  try { localStorage.setItem('dr-theme', theme); } catch(e){}
+}
+function getTheme() {
+  try { return localStorage.getItem('dr-theme') || 'light'; } catch(e) { return 'light'; }
+}
+setTheme(getTheme());
+$('#themeToggle').addEventListener('click', () => {
+  setTheme(document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark');
+});
+
+/* ─── Navigation ────────────────────────────────────────────── */
+function navigate(target) {
+  $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.target === target));
+  $$('.section').forEach(s => s.classList.toggle('active', s.id === 'sec-' + target));
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  try { history.replaceState(null, '', '#' + target); } catch(e){}
+}
+$$('.nav-item').forEach(b => b.addEventListener('click', () => navigate(b.dataset.target)));
+window.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); $('#search').focus(); }
+});
+
+/* ─── Search ────────────────────────────────────────────────── */
+$('#search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) {
+    $$('.nav-item').forEach(b => b.classList.remove('hidden-by-search'));
+    $$('.section').forEach(s => s.classList.remove('hidden-by-search'));
+    return;
+  }
+  $$('.nav-item').forEach(b => {
+    const text = (b.textContent + ' ' + b.dataset.target).toLowerCase();
+    b.classList.toggle('hidden-by-search', !text.includes(q));
+  });
+  $$('.section').forEach(s => {
+    s.classList.toggle('hidden-by-search', !s.textContent.toLowerCase().includes(q));
+  });
+});
+
+/* ─── Copy to clipboard ─────────────────────────────────────── */
+function copyText(txt, el) {
+  try {
+    navigator.clipboard.writeText(txt);
+    if (el) {
+      const orig = el.textContent;
+      el.textContent = '✓ Copied';
+      el.classList.add('copied');
+      setTimeout(() => { el.textContent = orig; el.classList.remove('copied'); }, 900);
+    }
+  } catch(e) {}
+}
+
+window.DR = { navigate, copyText };
+window.navigate = navigate;
+const SECTIONS_HTML = `
+
+<!-- ════════════════ COMPONENTS ════════════════ -->
+<section class="section" id="sec-components">
+  <div class="section-head">
+    <div class="eyebrow">// 07 · Library</div>
+    <h1 class="title">Components.</h1>
+    <p class="lede">Every reusable element. Each card has a live example and the code (or class) to drop in. Built on the tokens — change a token, every component follows.</p>
+  </div>
+
+  <!-- Buttons -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Buttons</h4><span class="ch-sub">.btn variants</span></div>
+    <div class="comp-stage">
+      <button class="btn btn-primary">Analyze now</button>
+      <button class="btn btn-accent">Get started</button>
+      <button class="btn btn-ghost">Compare</button>
+      <button class="btn btn-outline">Cancel</button>
+      <button class="btn btn-danger">Delete</button>
+      <button class="btn btn-primary btn-sm">Small</button>
+      <button class="btn btn-primary btn-lg">Large</button>
+    </div>
+    <pre class="code"><span class="k">&lt;button</span> <span class="s">class=&quot;btn btn-primary&quot;</span><span class="k">&gt;</span>Analyze now<span class="k">&lt;/button&gt;</span>
+<span class="c">// .btn-primary | .btn-accent | .btn-ghost | .btn-outline | .btn-danger
+// modifiers: .btn-sm | .btn-lg</span></pre>
+  </div>
+
+  <!-- Badges & signals -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Badges & signals</h4><span class="ch-sub">Score signal scale + status pills</span></div>
+    <div class="comp-stage">
+      <span class="badge signal-strong-buy">● Strong Buy</span>
+      <span class="badge badge-pos">+1.84%</span>
+      <span class="badge badge-info">Buy</span>
+      <span class="badge badge-warn">Hold</span>
+      <span class="badge badge-neg">−2.14%</span>
+      <span class="badge badge-neutral">N/A</span>
+    </div>
+    <pre class="code"><span class="k">&lt;span</span> <span class="s">class=&quot;badge signal-strong-buy&quot;</span><span class="k">&gt;</span>● Strong Buy<span class="k">&lt;/span&gt;</span></pre>
+  </div>
+
+  <!-- Inputs -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Inputs</h4><span class="ch-sub">Text, search, slider, chips</span></div>
+    <div class="comp-stage" style="flex-direction: column; align-items: stretch;">
+      <input class="input-demo" placeholder="Email address" type="email"/>
+      <div style="position: relative;">
+        <input class="input-demo" placeholder='Search "Reliance"…' style="padding-left:34px;"/>
+        <svg style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-muted);" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 L21 21"/></svg>
+      </div>
+      <div>
+        <div class="row between mb-2 t12 sec"><span>DhanRadar Score</span><span class="mono">≥ 75</span></div>
+        <input type="range" class="slider" min="0" max="100" value="75"/>
+      </div>
+      <div class="row gap-2 wrap">
+        <button class="chip active">Banking</button>
+        <button class="chip active">IT Services</button>
+        <button class="chip">FMCG</button>
+        <button class="chip">Auto</button>
+        <button class="chip">+ Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stat / KPI -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>KPI widget</h4><span class="ch-sub">Single-stat tile</span></div>
+    <div class="comp-stage" style="display:grid; grid-template-columns: repeat(4,1fr); gap: 12px;">
+      <div class="card kpi"><div class="label">Portfolio</div><div class="val">₹4.83L</div><div class="delta pos">+₹16,321 (3.49%)</div></div>
+      <div class="card kpi"><div class="label">XIRR</div><div class="val">18.42%</div><div class="delta pos">+0.18% MoM</div></div>
+      <div class="card kpi"><div class="label">vs NIFTY</div><div class="val">+4.6%</div><div class="delta muted">12-month</div></div>
+      <div class="card kpi"><div class="label">Score</div><div class="val">82</div><div class="delta muted">Above average</div></div>
+    </div>
+  </div>
+
+  <!-- Score / gauges -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Score ring & circular gauge</h4><span class="ch-sub">Signature DhanRadar ring</span></div>
+    <div class="comp-stage" style="gap: 36px; justify-content: center;">
+      ${[[42, 'var(--negative)'], [62, 'var(--warn)'], [78, 'var(--dr-blue)'], [86, 'var(--positive)']].map(([v, c]) => {
+        const r = 36, c2 = 2 * Math.PI * r, off = c2 * (1 - v/100);
+        return `<div class="ring-wrap" style="width:84px; height:84px;">
+          <svg width="84" height="84"><circle cx="42" cy="42" r="${r}" fill="none" stroke="var(--score-ring-bg)" stroke-width="6"/>
+          <circle cx="42" cy="42" r="${r}" fill="none" stroke="${c}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c2}" stroke-dashoffset="${off}"/></svg>
+          <div class="ring-n" style="font-size:24px;">${v}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="row gap-6 center" style="justify-content: center; padding: 0 16px 8px;">
+      <span class="t11 upper muted mono">Avoid</span>
+      <span class="t11 upper muted mono">Hold</span>
+      <span class="t11 upper muted mono">Buy</span>
+      <span class="t11 upper muted mono">Strong Buy</span>
+    </div>
+  </div>
+
+  <!-- Cards -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Stock card</h4><span class="ch-sub">Compact data row</span></div>
+    <div class="comp-stage" style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      <div class="card card-pad row gap-3 center">
+        <div class="tk-logo" style="background:#0A1F4A;">R</div>
+        <div class="col grow"><div class="t13 w-500">Reliance Industries</div><div class="t11 muted mono">RELIANCE · NSE</div></div>
+        <div class="col" style="align-items:flex-end;"><div class="mono t13 w-500">₹2,841</div><div class="t11 mono pos">+1.84%</div></div>
+        <div class="ring-wrap" style="width:44px; height:44px;">
+          <svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--score-ring-bg)" stroke-width="4"/>
+          <circle cx="22" cy="22" r="18" fill="none" stroke="var(--positive)" stroke-width="4" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="15.83"/></svg>
+          <div class="ring-n" style="font-size:14px;">86</div>
+        </div>
+      </div>
+      <div class="card card-pad row gap-3 center">
+        <div class="tk-logo" style="background:#1F4E9E;">T</div>
+        <div class="col grow"><div class="t13 w-500">TCS</div><div class="t11 muted mono">TCS · NSE</div></div>
+        <div class="col" style="align-items:flex-end;"><div class="mono t13 w-500">₹4,102</div><div class="t11 mono pos">+0.62%</div></div>
+        <div class="ring-wrap" style="width:44px; height:44px;">
+          <svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--score-ring-bg)" stroke-width="4"/>
+          <circle cx="22" cy="22" r="18" fill="none" stroke="var(--positive)" stroke-width="4" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="10.18"/></svg>
+          <div class="ring-n" style="font-size:14px;">91</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Tabs</h4><span class="ch-sub">Underline style</span></div>
+    <div class="comp-stage" style="flex-direction: column; align-items: stretch;">
+      <div class="tabs">
+        <button class="tab active">Overview</button>
+        <button class="tab">Financials</button>
+        <button class="tab">Peers</button>
+        <button class="tab">SWOT</button>
+        <button class="tab">Valuation</button>
+      </div>
+      <div class="t12 muted" style="padding: 14px 4px 0;">Active panel content goes here.</div>
+    </div>
+  </div>
+
+  <!-- Tables -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Data table</h4><span class="ch-sub">Sortable rows</span></div>
+    <div class="comp-stage" style="padding: 0; background: var(--surface);">
+      <table class="dt" style="width:100%;">
+        <thead><tr><th>Stock</th><th>Sector</th><th class="right">Price</th><th class="right">1D</th><th class="right">Score</th><th class="right">Signal</th></tr></thead>
+        <tbody>
+          <tr class="hov"><td class="w-500">RELIANCE</td><td>Energy</td><td class="right mono">2,841.30</td><td class="right mono pos">+1.84%</td><td class="right mono">86</td><td class="right"><span class="badge signal-strong-buy">Strong Buy</span></td></tr>
+          <tr class="hov"><td class="w-500">TCS</td><td>IT Services</td><td class="right mono">4,102.10</td><td class="right mono pos">+0.62%</td><td class="right mono">91</td><td class="right"><span class="badge signal-strong-buy">Strong Buy</span></td></tr>
+          <tr class="hov"><td class="w-500">HDFCBANK</td><td>Banking</td><td class="right mono">1,672.55</td><td class="right mono neg">−0.42%</td><td class="right mono">84</td><td class="right"><span class="badge badge-pos">Buy</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Accordion -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Accordion</h4><span class="ch-sub">FAQ pattern</span></div>
+    <div class="comp-stage" style="flex-direction: column; align-items: stretch; padding: 0 24px;">
+      <div class="acc-item open" onclick="this.classList.toggle('open')">
+        <div class="acc-q">What is the DhanRadar Score? <span class="acc-chev">›</span></div>
+        <div class="acc-a">A composite 0–100 score blending valuation, growth, quality, momentum and risk — each factor normalised against sector peers.</div>
+      </div>
+      <div class="acc-item" onclick="this.classList.toggle('open')">
+        <div class="acc-q">Is DhanRadar SEBI registered? <span class="acc-chev">›</span></div>
+        <div class="acc-a">DhanRadar is a research analytics product. We do not provide tailored advice.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Toasts</h4><span class="ch-sub">Notifications</span></div>
+    <div class="comp-stage" style="flex-direction: column; align-items: flex-start;">
+      <div class="toast"><span style="color: var(--positive);">●</span> Watchlist updated · Reliance added</div>
+      <div class="toast" style="border-color: var(--positive);"><span style="color: var(--positive);">✓</span> Alert created · TCS &gt; ₹4,100</div>
+      <div class="toast" style="border-color: var(--negative);"><span style="color: var(--negative);">!</span> Score dropped: ITC 78 → 72</div>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Empty state</h4><span class="ch-sub">No-data fallback</span></div>
+    <div class="comp-stage" style="display: block;">
+      <div class="empty">
+        <div class="e-icon">◎</div>
+        <div class="t14 w-500">No watchlists yet</div>
+        <div class="t12 muted mt-2" style="max-width: 380px; margin: 0 auto;">Create your first watchlist to track stocks and get notified when scores or prices move.</div>
+        <button class="btn btn-primary btn-sm mt-4">+ New watchlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skeleton -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Skeleton loader</h4><span class="ch-sub">Use while data loads</span></div>
+    <div class="comp-stage" style="flex-direction: column; align-items: stretch; gap: 10px;">
+      <div class="row gap-3 center">
+        <div class="skel" style="width:40px; height:40px; border-radius:8px;"></div>
+        <div class="col grow gap-1"><div class="skel" style="width:60%; height:13px;"></div><div class="skel" style="width:35%; height:11px;"></div></div>
+        <div class="skel" style="width:70px; height:32px; border-radius:6px;"></div>
+      </div>
+      <div class="skel" style="width:100%; height:160px; border-radius:12px;"></div>
+    </div>
+  </div>
+
+  <!-- Pricing -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Pricing cards</h4><span class="ch-sub">Three tiers</span></div>
+    <div class="comp-stage" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px;">
+      <div class="plan">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">₹0<span class="per"> /forever</span></div>
+        <ul><li>20 lookups / month</li><li>Basic score</li><li>1 watchlist · 10 stocks</li></ul>
+        <button class="btn btn-ghost btn-sm">Start free</button>
+      </div>
+      <div class="plan featured">
+        <div class="row between center"><div class="plan-name" style="color:var(--text);">Pro</div><span class="badge badge-info">Popular</span></div>
+        <div class="plan-price">₹399<span class="per"> /mo</span></div>
+        <ul><li>Unlimited stocks & funds</li><li>Fair value estimate</li><li>50+ screener filters</li><li>Portfolio analytics</li></ul>
+        <button class="btn btn-primary btn-sm">14-day trial</button>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Premium</div>
+        <div class="plan-price">₹899<span class="per"> /mo</span></div>
+        <ul><li>Everything in Pro</li><li>Tax optimisation</li><li>API access</li><li>Priority support</li></ul>
+        <button class="btn btn-outline btn-sm">Contact us</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom nav (preview) -->
+  <div class="comp-card">
+    <div class="comp-head"><h4>Bottom navigation</h4><span class="ch-sub">Mobile · 4-tab pattern</span></div>
+    <div class="comp-stage" style="display: block; padding: 16px;">
+      <div style="max-width: 360px; margin: 0 auto; background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 10px 0; display: flex; justify-content: space-around;">
+        <button class="mob-tab active"><span style="font-size:18px;">◎</span><span>Markets</span></button>
+        <button class="mob-tab"><span style="font-size:18px;">▼</span><span>Discover</span></button>
+        <button class="mob-tab"><span style="font-size:18px;">▢</span><span>Portfolio</span></button>
+        <button class="mob-tab"><span style="font-size:18px;">⚙</span><span>Profile</span></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ MOBILE SCREENS ════════════════ -->
+<section class="section" id="sec-mobile">
+  <div class="section-head">
+    <div class="eyebrow">// 08 · Library</div>
+    <h1 class="title">Mobile <span class="it">screens.</span></h1>
+    <p class="lede">15 screens covering onboarding, auth, the core product surfaces and settings. Pick a screen from the list — preview re-renders in the phone frame.</p>
+  </div>
+
+  <div class="mobile-stage">
+    <!-- Screen list -->
+    <div id="screenList" class="screen-list"></div>
+
+    <!-- Device -->
+    <div class="device">
+      <div class="device-screen" id="phoneScreen"><!-- injected --></div>
+    </div>
+
+    <!-- Spec panel -->
+    <div class="card card-pad" id="screenSpec">
+      <h3 class="h3" style="margin-top: 0;">Screen spec</h3>
+      <div id="screenSpecBody"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ EMAIL TEMPLATES ════════════════ -->
+<section class="section" id="sec-emails">
+  <div class="section-head">
+    <div class="eyebrow">// 09 · Library</div>
+    <h1 class="title">Email <span class="it">templates.</span></h1>
+    <p class="lede">16 templates spanning transactional, engagement and alert flows. Pick a template, switch desktop/mobile preview, copy subject lines and preheaders.</p>
+  </div>
+
+  <div class="email-stage">
+    <div id="emailList" class="screen-list"></div>
+
+    <div class="email-pane">
+      <div class="email-toolbar">
+        <button class="chip active" id="emailDesk">Desktop</button>
+        <button class="chip" id="emailMob">Mobile</button>
+        <button class="btn btn-ghost btn-sm" id="emailCopyHtml" style="margin-left:auto;">Copy HTML</button>
+      </div>
+
+      <div class="email-meta" id="emailMeta"></div>
+
+      <div class="email-frame" id="emailFrame">
+        <iframe id="emailIframe" width="600" height="800"></iframe>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ ASSETS ════════════════ -->
+<section class="section" id="sec-assets">
+  <div class="section-head">
+    <div class="eyebrow">// 10 · Resources</div>
+    <h1 class="title">Assets.</h1>
+    <p class="lede">Every brand artefact ready for export. SVG previews here; PNG variants ship in the brand kit.</p>
+  </div>
+
+  <h3 class="h3">Favicon & app icons</h3>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+    <div class="card card-pad" style="text-align:center;"><div style="width:16px; height:16px; border-radius:4px; background:linear-gradient(135deg,#0B1F3A,#1E5EFF); margin: 12px auto;"></div><div class="t12 w-500 mt-2">favicon</div><div class="mono t10 muted mt-2">16 × 16</div></div>
+    <div class="card card-pad" style="text-align:center;"><div style="width:32px; height:32px; border-radius:7px; background:linear-gradient(135deg,#0B1F3A,#1E5EFF); margin: 4px auto 12px;"></div><div class="t12 w-500 mt-2">favicon</div><div class="mono t10 muted mt-2">32 × 32</div></div>
+    <div class="card card-pad" style="text-align:center;"><div style="width:48px; height:48px; border-radius:11px; background:linear-gradient(135deg,#0B1F3A,#1E5EFF); margin: 0 auto 12px;"></div><div class="t12 w-500 mt-2">favicon</div><div class="mono t10 muted mt-2">48 × 48</div></div>
+    <div class="card card-pad" style="text-align:center;"><div style="width:64px; height:64px; border-radius:14px; background:linear-gradient(135deg,#0B1F3A,#1E5EFF); margin: 0 auto 12px;"></div><div class="t12 w-500 mt-2">apple-touch</div><div class="mono t10 muted mt-2">180 × 180</div></div>
+  </div>
+
+  <h3 class="h3">Social / OG</h3>
+  <div class="card" style="padding: 18px;">
+    <div style="background: linear-gradient(135deg, #0B1F3A 0%, #1E3A8A 100%); border-radius: 12px; padding: 32px 40px; color: white; height: 280px; position: relative; overflow: hidden;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="width:42px;height:42px;border-radius:10px;background:rgba(255,255,255,0.1);display:grid;place-items:center;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/><path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="#1FD79A" stroke="none"/></svg>
+        </div>
+        <div style="font-weight:600;font-size:22px;">DhanRadar</div>
+      </div>
+      <div style="opacity:0.7; margin-top: 16px; font-size: 14px;">Investment intelligence for India</div>
+      <div style="font-size: 44px; line-height: 1.05; letter-spacing: -0.025em; font-weight: 500; margin-top: 24px;">Spot better<br/><span class="serif" style="font-style:italic; color: #4D80FF; font-weight: 400;">investments.</span></div>
+      <div class="mono" style="position: absolute; bottom: 24px; left: 40px; font-size: 13px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.08em;">DHANRADAR.COM</div>
+    </div>
+    <div class="mono t11 muted mt-3 right">og-image.png · 1200 × 630</div>
+  </div>
+
+  <h3 class="h3">Files in this kit</h3>
+  <div class="card" style="padding: 0;">
+    <table class="token-table">
+      <thead><tr><th>File</th><th>Format</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">dhanradar-design-system.html</td><td>HTML</td><td>This file — interactive design system</td></tr>
+        <tr><td class="mono">tokens.json</td><td>JSON</td><td>Framework-agnostic design tokens</td></tr>
+        <tr><td class="mono">css-variables.css</td><td>CSS</td><td>Drop-in CSS custom properties</td></tr>
+        <tr><td class="mono">tailwind.config.js</td><td>JS</td><td>Tailwind preset</td></tr>
+        <tr><td class="mono">logo.svg</td><td>SVG</td><td>Primary lockup</td></tr>
+        <tr><td class="mono">README.md</td><td>Markdown</td><td>Usage and handoff documentation</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════ HANDOFF ════════════════ -->
+<section class="section" id="sec-handoff">
+  <div class="section-head">
+    <div class="eyebrow">// 11 · Resources</div>
+    <h1 class="title">Developer <span class="it">handoff.</span></h1>
+    <p class="lede">Everything a frontend engineer needs to translate these screens into a real Next.js + Tailwind app. No surprises.</p>
+  </div>
+
+  <h2 class="h2">Stack assumptions</h2>
+  <div class="card" style="padding: 0;">
+    <table class="token-table">
+      <thead><tr><th>Concern</th><th>Recommendation</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Framework</td><td class="mono">Next.js 14 (App Router)</td><td>SSR for SEO, file-based routing</td></tr>
+        <tr><td>Styling</td><td class="mono">Tailwind + tailwind.config.js</td><td>Tokens already wired</td></tr>
+        <tr><td>Components</td><td class="mono">shadcn/ui + custom</td><td>Headless primitives, easy to restyle</td></tr>
+        <tr><td>Charts</td><td class="mono">Recharts (or visx)</td><td>Tree-shakeable; TradingView for live widgets</td></tr>
+        <tr><td>Forms</td><td class="mono">react-hook-form + zod</td><td>Type-safe validation</td></tr>
+        <tr><td>State</td><td class="mono">Zustand + React Query</td><td>Server state cached; UI state global where needed</td></tr>
+        <tr><td>Auth</td><td class="mono">Clerk or NextAuth</td><td>OTP via SMS, social, magic link</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="h2">Implementation rules</h2>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Numbers</div>
+      <div class="t13 muted" style="line-height:1.65;">Every monetary, percentage, ratio, count, or ticker symbol uses <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">font-family: var(--dr-font-mono)</span> with <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">font-feature-settings: 'tnum'</span>. No exceptions.</div>
+    </div>
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Theme switching</div>
+      <div class="t13 muted" style="line-height:1.65;">Toggle <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">.theme-light</span> / <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">.theme-dark</span> on <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">&lt;html&gt;</span>. Tokens cascade automatically. Persist to localStorage and honour <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">prefers-color-scheme</span>.</div>
+    </div>
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Score signals</div>
+      <div class="t13 muted" style="line-height:1.65;">Map score → signal in code, not in copy. <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">≥80</span> Strong Buy · <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">≥65</span> Buy · <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">≥50</span> Hold · <span class="mono" style="background:var(--surface-2);padding:1px 5px;border-radius:4px;">&lt;50</span> Avoid. Pair color with icon — never color alone.</div>
+    </div>
+    <div class="card card-pad">
+      <div class="t14 w-500 mb-3">Accessibility floor</div>
+      <div class="t13 muted" style="line-height:1.65;">Min tap target 44×44 (mobile). Body ≥ 14px. AA contrast on all text. Color is never the only signal — pair with icon, label, or weight.</div>
+    </div>
+  </div>
+
+  <h2 class="h2">Wiring tokens to Tailwind</h2>
+  <pre class="code">// tailwind.config.js
+module.exports = {
+  presets: [<span class="s">'./brand/tailwind.config.js'</span>],
+  content: [<span class="s">'./app/**/*.{ts,tsx}'</span>],
+  // ... your overrides
+}
+
+// app/globals.css
+<span class="k">@import</span> <span class="s">'./brand/css-variables.css'</span>;
+
+<span class="k">@layer</span> base {
+  html { font-family: <span class="k">var</span>(--dr-font-sans); }
+}</pre>
+
+  <h2 class="h2">Things to negotiate with PM</h2>
+  <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px;">
+    <li class="card card-pad t13 sec" style="line-height:1.55;"><span class="mono muted" style="margin-right:8px;">→</span>Live market data SLA — websocket vs polling, max acceptable lag</li>
+    <li class="card card-pad t13 sec" style="line-height:1.55;"><span class="mono muted" style="margin-right:8px;">→</span>Score recomputation cadence (we suggest daily after market close)</li>
+    <li class="card card-pad t13 sec" style="line-height:1.55;"><span class="mono muted" style="margin-right:8px;">→</span>Broker integration partners (Zerodha, Groww, Upstox, Angel One)</li>
+    <li class="card card-pad t13 sec" style="line-height:1.55;"><span class="mono muted" style="margin-right:8px;">→</span>Payment gateway for Pro/Premium (Razorpay vs Stripe India)</li>
+    <li class="card card-pad t13 sec" style="line-height:1.55;"><span class="mono muted" style="margin-right:8px;">→</span>Email service provider (SES, Postmark, Resend) — affects template HTML</li>
+  </ul>
+</section>
+
+<!-- ════════════════ README ════════════════ -->
+<section class="section" id="sec-readme">
+  <div class="section-head">
+    <div class="eyebrow">// 12 · Resources</div>
+    <h1 class="title">README.</h1>
+    <p class="lede">The text version of this section ships as <span class="mono" style="background:var(--surface-2);padding:1px 6px;border-radius:4px;">README.md</span> in the kit.</p>
+  </div>
+
+  <h2 class="h2">Quick start</h2>
+  <pre class="code">$ cd your-nextjs-app
+$ cp /path/to/dhanradar-design-system/tailwind.config.js  ./tailwind.config.js
+$ cp /path/to/dhanradar-design-system/css-variables.css   ./app/brand.css
+$ cp /path/to/dhanradar-design-system/logo.svg            ./public/logo.svg
+
+<span class="c"># In app/layout.tsx</span>
+<span class="k">import</span> <span class="s">'./brand.css'</span>;
+
+<span class="k">&lt;html className=</span><span class="s">&quot;theme-light&quot;</span><span class="k">&gt;</span></pre>
+
+  <h2 class="h2">File map</h2>
+  <pre class="code">dhanradar-design-system/
+├── dhanradar-design-system.html   <span class="c">← this file</span>
+├── tokens.json                    <span class="c">← all tokens, JSON</span>
+├── css-variables.css              <span class="c">← CSS custom properties</span>
+├── tailwind.config.js             <span class="c">← Tailwind preset</span>
+├── logo.svg                       <span class="c">← primary lockup</span>
+└── README.md                      <span class="c">← usage notes</span></pre>
+
+  <h2 class="h2">License & attribution</h2>
+  <div class="card card-pad t13 sec" style="line-height: 1.65;">
+    © 2026 DhanRadar Tech Pvt. Ltd. Design system, components, and brand assets are proprietary to DhanRadar and licensed for internal product use only. Fonts (Geist, Geist Mono, Instrument Serif) ship under OFL — see the respective vendor pages for distribution terms. Markets carry risk. DhanRadar is a research analytics product — not an investment advisor.
+  </div>
+</section>
+`;
+
+document.getElementById('main').insertAdjacentHTML('beforeend', SECTIONS_HTML);
+// Re-bind nav clicks for newly inserted sections
+$$('.nav-item').forEach(b => b.addEventListener('click', () => DR.navigate(b.dataset.target)));
+
+/* ─── Mobile screens: data + render ─────────────────────────── */
+const MOBILE_SCREENS = [
+  { id: 'splash',     name: 'Splash',         desc: 'Boot screen. Logo with animated radar sweep. 1.2s before auth check.' },
+  { id: 'onboarding', name: 'Onboarding',     desc: '3-step value-prop carousel. Skippable. Dots indicator at bottom.' },
+  { id: 'login',      name: 'Login',          desc: 'Email + password. Social options. "Forgot password" inline.' },
+  { id: 'signup',     name: 'Signup',         desc: 'Email · phone · name. Marketing opt-in default off (GDPR).' },
+  { id: 'otp',        name: 'OTP Verification', desc: '6-digit code, auto-advance fields. Resend after 30s.' },
+  { id: 'home',       name: 'Home Dashboard', desc: 'Indices strip · top-scored · news · sector heatmap.' },
+  { id: 'discover',   name: 'Discover',       desc: 'Screener presets, trending stocks, top funds.' },
+  { id: 'stock',      name: 'Stock Detail',   desc: 'Price chart, DhanRadar score with radar, fair value gauge.' },
+  { id: 'fund',       name: 'Mutual Fund',    desc: 'NAV chart, rolling returns, expense, manager, portfolio holdings.' },
+  { id: 'portfolio',  name: 'Portfolio',      desc: 'Total value with chart, allocation donut, holdings list.' },
+  { id: 'alerts',     name: 'Alerts',         desc: 'Active + triggered alerts. Filter by type. Add new.' },
+  { id: 'learn',      name: 'Learn',          desc: 'Education hub. 6 topic cards. Continue last lesson.' },
+  { id: 'profile',    name: 'Profile',        desc: 'Account header, broker connections, achievements.' },
+  { id: 'settings',   name: 'Settings',       desc: 'Sections: account, notifications, appearance, security, support.' },
+  { id: 'pricing',    name: 'Pricing',        desc: 'Plan comparison, current tier highlighted, upgrade CTA.' },
+];
+
+function statusBar() {
+  return `<div class="dev-status"><span>9:41</span><span class="right">
+    <svg width="16" height="10" viewBox="0 0 19 12"><rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7" fill="currentColor"/><rect x="4.8" y="5" width="3.2" height="7" rx="0.7" fill="currentColor"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7" fill="currentColor"/><rect x="14.4" y="0" width="3.2" height="12" rx="0.7" fill="currentColor"/></svg>
+    <svg width="14" height="10" viewBox="0 0 17 12"><path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill="currentColor"/><circle cx="8.5" cy="10.5" r="1.5" fill="currentColor"/></svg>
+    <svg width="22" height="11" viewBox="0 0 27 13"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity="0.5" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="currentColor"/></svg>
+  </span></div>`;
+}
+
+function tabbar(active) {
+  const tabs = [['home','Markets','◎'], ['discover','Discover','▼'], ['portfolio','Portfolio','▢'], ['profile','Profile','⚙']];
+  return `<div class="mob-tabbar">${tabs.map(([id, lbl, ic]) => `
+    <button class="mob-tab ${active === id ? 'active' : ''}" onclick="renderScreen('${id}')">
+      <span style="font-size:18px;line-height:1;">${ic}</span><span>${lbl}</span>
+    </button>`).join('')}</div>`;
+}
+
+function ringSvg(score, size = 56, stroke = 5) {
+  const r = (size - stroke) / 2; const c = 2 * Math.PI * r; const off = c * (1 - score/100);
+  const col = score >= 80 ? 'var(--positive)' : score >= 65 ? 'var(--dr-blue)' : score >= 50 ? 'var(--warn)' : 'var(--negative)';
+  return `<div class="ring-wrap" style="width:${size}px;height:${size}px;flex:0 0 auto;">
+    <svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--score-ring-bg)" stroke-width="${stroke}"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${col}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}"/></svg>
+    <div class="ring-n" style="font-size:${Math.round(size * 0.32)}px;">${score}</div>
+  </div>`;
+}
+
+function spark(seed, w = 80, h = 24, up = true) {
+  let s = seed; const N = 30; const data = []; let v = 50;
+  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  for (let i = 0; i < N; i++) { v += (rand() - 0.5) * 4 + (up ? 0.3 : -0.25); data.push(v); }
+  const lo = Math.min(...data), hi = Math.max(...data);
+  const range = hi - lo || 1;
+  const stepX = w / (N - 1);
+  const pts = data.map((v, i) => [i * stepX, h - ((v - lo) / range) * (h - 2) - 1]);
+  const d = 'M' + pts.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const col = up ? 'var(--positive)' : 'var(--negative)';
+  return `<svg width="${w}" height="${h}"><path d="${d} L ${w},${h} L 0,${h} Z" fill="${col}" opacity="0.12"/><path d="${d}" fill="none" stroke="${col}" stroke-width="1.4" stroke-linecap="round"/></svg>`;
+}
+
+function areaChart(seed, w, h, up = true) {
+  let s = seed; const N = 60; const data = []; let v = 100;
+  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  for (let i = 0; i < N; i++) { v *= (1 + (rand() - 0.5) * 0.03 + (up ? 0.006 : -0.005)); data.push(v); }
+  const lo = Math.min(...data) * 0.99, hi = Math.max(...data) * 1.01;
+  const range = hi - lo;
+  const stepX = w / (N - 1);
+  const pts = data.map((v, i) => [i * stepX, h - ((v - lo) / range) * (h - 8) - 4]);
+  const d = 'M' + pts.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const col = up ? 'var(--positive)' : 'var(--negative)';
+  const gid = 'g' + seed;
+  return `<svg width="${w}" height="${h}" style="display:block;">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${col}" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="${col}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${d} L ${w},${h} L 0,${h} Z" fill="url(#${gid})"/>
+    <path d="${d}" fill="none" stroke="${col}" stroke-width="1.6"/>
+    <circle cx="${pts[pts.length-1][0]}" cy="${pts[pts.length-1][1]}" r="3.5" fill="${col}"/>
+  </svg>`;
+}
+
+function radarMini(values, size = 130) {
+  const cx = size/2, cy = size/2, maxR = size * 0.36;
+  const labels = ['valuation','growth','quality','momentum','risk'];
+  const angle = i => -Math.PI/2 + (i * 2 * Math.PI) / labels.length;
+  const ringPath = (ratio) => 'M' + labels.map((_, i) => {
+    const a = angle(i);
+    return `${(cx + Math.cos(a)*maxR*ratio).toFixed(1)},${(cy + Math.sin(a)*maxR*ratio).toFixed(1)}`;
+  }).join(' L') + ' Z';
+  const valPts = labels.map((l, i) => {
+    const v = values[l] / 100; const a = angle(i);
+    return [cx + Math.cos(a)*maxR*v, cy + Math.sin(a)*maxR*v];
+  });
+  const valPath = 'M' + valPts.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L') + ' Z';
+  return `<svg width="${size}" height="${size}">
+    ${[0.4, 0.7, 1].map(r => `<path d="${ringPath(r)}" fill="none" stroke="var(--chart-grid)" stroke-width="0.8"/>`).join('')}
+    ${labels.map((_, i) => { const a = angle(i); return `<line x1="${cx}" y1="${cy}" x2="${(cx + Math.cos(a)*maxR).toFixed(1)}" y2="${(cy + Math.sin(a)*maxR).toFixed(1)}" stroke="var(--chart-grid)" stroke-width="0.6"/>`; }).join('')}
+    <path d="${valPath}" fill="var(--dr-blue)" fill-opacity="0.18" stroke="var(--dr-blue)" stroke-width="1.5" stroke-linejoin="round"/>
+    ${valPts.map(([x,y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--bg)" stroke="var(--dr-blue)" stroke-width="1.4"/>`).join('')}
+  </svg>`;
+}
+
+/* ─── Mobile screen renderers ─────────────────────────────── */
+const SCREENS = {
+  splash: () => `
+    <div style="height:100%; display:flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; background: linear-gradient(180deg, var(--bg) 0%, var(--surface-2) 100%);">
+      <div style="width: 110px; height: 110px; border-radius: 28px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF); display: grid; place-items: center; position: relative; overflow: hidden; box-shadow: 0 24px 60px rgba(11,31,58,0.3);">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/>
+          <path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.6" fill="#1FD79A" stroke="none"/>
+        </svg>
+      </div>
+      <div style="text-align: center;">
+        <div style="font-weight: 600; font-size: 32px; letter-spacing: -0.025em;">DhanRadar</div>
+        <div class="serif t14 muted" style="font-style: italic; margin-top: 4px;">Wealth, scanned.</div>
+      </div>
+      <div class="skel" style="width: 120px; height: 3px; margin-top: 40px;"></div>
+    </div>`,
+
+  onboarding: () => `
+    <div style="display:flex; flex-direction: column; height: 100%;">
+      ${statusBar()}
+      <div style="flex:1; padding: 60px 32px 0; text-align: center;">
+        <div style="width:200px; height:200px; margin: 20px auto 40px; border-radius: 32px; background: linear-gradient(135deg, var(--blue-soft), var(--emerald-soft)); display:grid; place-items:center; position: relative;">
+          <div style="font-family: var(--dr-font-mono); font-size: 64px; font-weight: 500; letter-spacing: -0.05em; color: var(--dr-blue);">86</div>
+          <div class="t11 upper muted" style="position:absolute; bottom:24px; left:0; right:0;">DhanRadar Score</div>
+        </div>
+        <h2 style="font-size: 28px; font-weight: 500; letter-spacing: -0.025em; margin: 0 0 16px; line-height: 1.15;">One score.<br/><span class="serif" style="font-style:italic; color: var(--dr-blue); font-weight: 400;">Every</span> answer.</h2>
+        <div class="t14 muted" style="line-height: 1.5; max-width: 280px; margin: 0 auto;">Valuation, growth, quality, momentum and risk — distilled into a single 0–100 signal.</div>
+      </div>
+      <div style="padding: 24px 32px 36px;">
+        <div class="row gap-2 mb-4" style="justify-content: center;">
+          <span style="width: 24px; height: 4px; background: var(--text); border-radius: 2px;"></span>
+          <span style="width: 8px; height: 4px; background: var(--border-strong); border-radius: 2px;"></span>
+          <span style="width: 8px; height: 4px; background: var(--border-strong); border-radius: 2px;"></span>
+        </div>
+        <button class="btn btn-primary" style="width: 100%; height: 48px; justify-content: center;" onclick="renderScreen('login')">Continue</button>
+        <button class="btn t13 muted" style="width: 100%; margin-top: 8px; justify-content: center;" onclick="renderScreen('home')">Skip</button>
+      </div>
+    </div>`,
+
+  login: () => `
+    <div style="display:flex; flex-direction: column; height:100%;">
+      ${statusBar()}
+      <div style="padding: 40px 28px 0; flex:1;">
+        <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#0B1F3A,#1E5EFF);display:grid;place-items:center;margin-bottom:32px;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/><path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="#1FD79A" stroke="none"/></svg>
+        </div>
+        <h1 style="font-size:32px;font-weight:500;letter-spacing:-0.025em;margin:0 0 6px;line-height:1.1;">Welcome back.</h1>
+        <div class="t14 muted" style="margin-bottom: 32px;">Pick up where you left off.</div>
+
+        <label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Email</label>
+        <input class="input-demo" value="aarav.s@example.com" style="height:46px;margin-bottom:14px;"/>
+
+        <label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Password</label>
+        <input class="input-demo" type="password" value="••••••••••" style="height:46px;margin-bottom:8px;"/>
+
+        <div class="row between" style="margin-bottom: 24px;">
+          <label class="t12 sec row gap-2 center"><input type="checkbox" checked/> Stay signed in</label>
+          <a class="t12">Forgot?</a>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;height:48px;justify-content:center;" onclick="renderScreen('otp')">Sign in</button>
+
+        <div class="row gap-3 center" style="margin: 28px 0;">
+          <div class="grow" style="height:1px;background:var(--border);"></div>
+          <span class="t11 muted upper mono">or</span>
+          <div class="grow" style="height:1px;background:var(--border);"></div>
+        </div>
+
+        <button class="btn btn-ghost" style="width:100%; height:46px; justify-content:center;">Continue with Google</button>
+        <button class="btn btn-ghost" style="width:100%; height:46px; justify-content:center; margin-top: 8px;">Continue with Apple</button>
+      </div>
+      <div style="padding: 16px 28px 28px; text-align: center;">
+        <span class="t13 muted">New here? </span><a class="t13" onclick="renderScreen('signup')" style="cursor:pointer;">Create account</a>
+      </div>
+    </div>`,
+
+  signup: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div style="padding: 32px 28px 0; flex:1;">
+        <button class="btn btn-ghost btn-sm" style="margin-bottom: 24px;" onclick="renderScreen('login')">← Back</button>
+        <h1 style="font-size:28px;font-weight:500;letter-spacing:-0.025em;margin:0 0 6px;line-height:1.1;">Get started, free.</h1>
+        <div class="t14 muted" style="margin-bottom: 28px;">14-day Pro trial. No card needed.</div>
+
+        <div class="col gap-3">
+          <div><label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Full name</label><input class="input-demo" placeholder="Aarav Sharma" style="height:46px;"/></div>
+          <div><label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Email</label><input class="input-demo" placeholder="you@example.com" style="height:46px;"/></div>
+          <div><label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Phone</label>
+            <div class="row gap-2"><div class="input-demo" style="width:70px; height:46px; display:flex; align-items:center; justify-content:center;">+91</div>
+            <input class="input-demo" placeholder="98765 43210" style="height:46px;flex:1;"/></div>
+          </div>
+          <div><label class="t11 upper muted mono" style="display:block;margin-bottom:6px;">Password</label><input type="password" class="input-demo" placeholder="Min 8 characters" style="height:46px;"/></div>
+        </div>
+
+        <label class="t12 sec row gap-2 mt-4" style="line-height:1.5;"><input type="checkbox" checked style="margin-top:2px;"/> I agree to the <a>Terms</a> & <a>Privacy</a></label>
+        <label class="t12 sec row gap-2 mt-2" style="line-height:1.5;"><input type="checkbox" style="margin-top:2px;"/> Send me market updates (you can opt out)</label>
+      </div>
+      <div style="padding: 16px 28px 28px;">
+        <button class="btn btn-primary" style="width:100%;height:48px;justify-content:center;" onclick="renderScreen('otp')">Create account</button>
+      </div>
+    </div>`,
+
+  otp: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div style="padding: 60px 28px 0; flex:1; text-align: center;">
+        <div style="width:64px;height:64px;border-radius:16px;background:var(--blue-soft);display:grid;place-items:center;margin: 0 auto 24px; color: var(--dr-blue); font-size: 28px;">✉</div>
+        <h1 style="font-size:24px;font-weight:500;letter-spacing:-0.02em;margin:0 0 8px;">Check your phone</h1>
+        <div class="t14 muted" style="line-height:1.55;max-width:300px;margin: 0 auto 36px;">We sent a 6-digit code to <strong style="color:var(--text);" class="mono">+91 98765 43210</strong></div>
+
+        <div class="row gap-2" style="justify-content: center; margin-bottom: 24px;">
+          ${['9','3','2','4','',''].map((v, i) => `<div style="width:44px;height:54px;border:1.5px solid ${v ? 'var(--text)' : 'var(--border)'};border-radius:10px;display:grid;place-items:center;font-family:var(--dr-font-mono);font-size:22px;font-weight:500;${i === 4 ? 'box-shadow: 0 0 0 3px var(--blue-soft);' : ''}">${v}</div>`).join('')}
+        </div>
+
+        <div class="t13 muted">Didn't get it? <a class="t13">Resend in 23s</a></div>
+      </div>
+      <div style="padding: 16px 28px 28px;">
+        <button class="btn btn-primary" style="width:100%;height:48px;justify-content:center;" onclick="renderScreen('home')">Verify & continue</button>
+      </div>
+    </div>`,
+
+  home: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh">
+        <div><div class="mh-greet">Good evening</div><div class="mh-name">Aarav</div></div>
+        <div class="row gap-2"><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;">🔔</div><div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1E5EFF,#00B386);display:grid;place-items:center;color:white;font-size:12px;font-weight:600;">AS</div></div>
+      </div>
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div class="mb-search">🔍 Search stocks, funds, news…</div>
+
+        <div class="t14 w-500 mt-4 mb-3">Today's markets</div>
+        <div style="display:grid;grid-template-columns: 1fr 1fr;gap:8px;">
+          <div class="mb-card">
+            <div class="t10 upper muted mono">NIFTY 50</div>
+            <div class="mono t16 w-500 mt-2">24,812.45</div>
+            <div class="t11 mono pos">+142.6 (+0.58%)</div>
+            <div class="mt-2">${spark(11, 130, 24, true)}</div>
+          </div>
+          <div class="mb-card">
+            <div class="t10 upper muted mono">SENSEX</div>
+            <div class="mono t16 w-500 mt-2">81,468.12</div>
+            <div class="t11 mono pos">+412.8 (+0.51%)</div>
+            <div class="mt-2">${spark(22, 130, 24, true)}</div>
+          </div>
+        </div>
+
+        <div class="row between mt-6 mb-3"><div class="t14 w-500">Top-scored today</div><a class="t12">See all →</a></div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['RELIANCE','Reliance Industries','#0A1F4A','R',2841,1.84,86],['TCS','Tata Consultancy','#1F4E9E','T',4102,0.62,91],['HDFCBANK','HDFC Bank','#003E80','H',1672,-0.42,84],['INFY','Infosys','#0E3F7C','I',1842,1.21,82]].map(([sym, name, c, l, p, ch, sc], i, arr) => `
+            <div class="row gap-3 center" style="padding: 12px 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}" onclick="renderScreen('stock')">
+              <div class="tk-logo" style="background:${c};">${l}</div>
+              <div class="col grow"><div class="t13 w-500">${name}</div><div class="t11 muted mono">${sym}</div></div>
+              <div class="col" style="align-items:flex-end;"><div class="mono t13">₹${p}</div><div class="t11 mono ${ch >= 0 ? 'pos' : 'neg'}">${ch >= 0 ? '+' : ''}${ch}%</div></div>
+              ${ringSvg(sc, 38, 4)}
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="t14 w-500 mt-6 mb-3">Sectors today</div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+          ${[['Banks',1.42],['IT',0.82],['Auto',2.14],['FMCG',-0.84],['Energy',1.84],['Metals',2.62]].map(([n, v]) => {
+            const pos = v >= 0; const intensity = Math.min(1, Math.abs(v)/4);
+            const bg = pos ? `color-mix(in srgb, var(--positive) ${15 + intensity*60}%, var(--surface-2))` : `color-mix(in srgb, var(--negative) ${15 + intensity*60}%, var(--surface-2))`;
+            return `<div style="background:${bg};border-radius:8px;padding:10px 12px;color:white;min-height:54px;">
+              <div class="t11 w-500">${n}</div><div class="mono t13 w-500 mt-2">${pos?'+':''}${v.toFixed(2)}%</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+      ${tabbar('home')}
+    </div>`,
+
+  discover: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><div><div class="mh-greet">Discover</div><div class="mh-name">Find opportunities</div></div><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;">⚙</div></div>
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div class="mb-search">🔍 Search or paste a ticker</div>
+        <div class="t14 w-500 mt-4 mb-3">Screener presets</div>
+        <div class="row gap-2 wrap mb-4">
+          <button class="chip active">High Quality</button>
+          <button class="chip">Value</button>
+          <button class="chip">Momentum</button>
+          <button class="chip">Dividend</button>
+          <button class="chip">Small Caps</button>
+        </div>
+
+        <div class="mb-card" style="padding: 0;">
+          ${[['TCS','Tata Consultancy','#1F4E9E','T',4102,0.62,91,'IT'],['RELIANCE','Reliance Industries','#0A1F4A','R',2841,1.84,86,'Energy'],['ICICIBANK','ICICI Bank','#B62034','I',1192,0.71,87,'Banking'],['LT','Larsen & Toubro','#1A237E','L',3618,1.42,81,'Construction']].map(([sym, name, c, l, p, ch, sc, sec], i, arr) => `
+            <div class="row gap-3 center" style="padding: 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}" onclick="renderScreen('stock')">
+              <div class="tk-logo" style="background:${c};width:36px;height:36px;">${l}</div>
+              <div class="col grow"><div class="t13 w-500">${name}</div><div class="t11 muted mono">${sym} · ${sec}</div></div>
+              <div class="col" style="align-items:flex-end;"><div class="mono t13">₹${p}</div><div class="t11 mono pos">+${ch}%</div></div>
+              ${ringSvg(sc, 42, 5)}
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="t14 w-500 mt-6 mb-3">Top-rated mutual funds</div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['Parag Parikh Flexi Cap','Flexi Cap',22.4,92],['Quant Small Cap','Small Cap',38.6,88]].map(([n, cat, ret, sc], i) => `
+            <div class="row gap-3 center" style="padding: 14px; ${i === 0 ? 'border-bottom:1px solid var(--border);' : ''}" onclick="renderScreen('fund')">
+              <div class="tk-logo" style="background:#0277BD;">F</div>
+              <div class="col grow"><div class="t13 w-500">${n}</div><div class="t11 muted">${cat} · 3Y ${ret}%</div></div>
+              ${ringSvg(sc, 38, 4)}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ${tabbar('discover')}
+    </div>`,
+
+  stock: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh" style="padding-bottom: 4px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderScreen('home')">←</button>
+        <div class="t13 w-500">Stock Analysis</div>
+        <button class="btn btn-ghost btn-sm">☆</button>
+      </div>
+      <div class="screen-body" style="padding: 12px 18px;">
+        <div class="row gap-3 center mb-3">
+          <div class="tk-logo" style="background:#0A1F4A;width:40px;height:40px;">R</div>
+          <div class="col grow"><div class="t14 w-500">Reliance Industries</div><div class="t11 muted mono">NSE: RELIANCE · Energy</div></div>
+        </div>
+        <div class="row gap-3 center">
+          <div class="mono" style="font-size: 28px; font-weight: 500; letter-spacing: -0.025em;">₹2,841.30</div>
+          <span class="pos mono t13">+51.40 (+1.84%)</span>
+        </div>
+        <div class="mt-3" style="margin: 0 -18px;">${areaChart(91, 344, 160, true)}</div>
+        <div class="row gap-1 mt-2">
+          ${['1D','1W','1M','6M','1Y','5Y'].map((p, i) => `<button class="chip${i === 4 ? ' active' : ''}" style="flex:1;justify-content:center;">${p}</button>`).join('')}
+        </div>
+
+        <div class="mb-card mt-4">
+          <div class="row between center mb-3">
+            <div>
+              <div class="t11 upper muted mono">DhanRadar Score</div>
+              <div class="row gap-2 center mt-2">
+                <div class="mono" style="font-size: 36px; font-weight: 500; letter-spacing: -0.03em; line-height: 1;">86</div>
+                <span class="badge signal-strong-buy">Strong Buy</span>
+              </div>
+            </div>
+            ${radarMini({valuation:78, growth:82, quality:91, momentum:88, risk:71}, 120)}
+          </div>
+          <div class="col gap-2 mt-3">
+            ${[['Valuation',78,'var(--positive)'],['Growth',82,'var(--positive)'],['Quality',91,'var(--positive)'],['Momentum',88,'var(--positive)'],['Risk',71,'var(--warn)']].map(([n,v,c]) => `
+              <div class="row gap-3 t12 center">
+                <span style="width:64px;color:var(--text-secondary);">${n}</span>
+                <div style="flex:1;height:4px;background:var(--surface-2);border-radius:3px;overflow:hidden;"><div style="width:${v}%;height:100%;background:${c};border-radius:3px;"></div></div>
+                <span class="mono" style="width:22px;text-align:right;">${v}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="mb-card mt-3">
+          <div class="t11 upper muted mono mb-2">Fair value · 1y</div>
+          <div class="row between center">
+            <div class="mono" style="font-size: 24px; font-weight: 500;">₹3,120</div>
+            <span class="badge badge-pos">+9.8% upside</span>
+          </div>
+          <div class="mt-3" style="height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--negative), var(--warn), var(--positive)); opacity: 0.4; position: relative;">
+            <div style="position:absolute; left:55%; top:-3px; width: 2px; height: 12px; background: var(--text);"></div>
+            <div style="position:absolute; left:78%; top:-2px; width: 10px; height: 10px; border-radius: 50%; background: var(--positive); border: 2px solid var(--bg);"></div>
+          </div>
+          <div class="row between mt-2"><span class="t11 mono muted">Current ₹2,841</span><span class="t11 mono pos">Target ₹3,120</span></div>
+        </div>
+
+        <button class="btn btn-primary mt-4" style="width: 100%; height: 46px; justify-content: center;">Buy on connected broker</button>
+      </div>
+      ${tabbar('home')}
+    </div>`,
+
+  fund: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh" style="padding-bottom: 4px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderScreen('discover')">←</button>
+        <div class="t13 w-500">Mutual Fund</div>
+        <button class="btn btn-ghost btn-sm">☆</button>
+      </div>
+      <div class="screen-body" style="padding: 12px 18px;">
+        <div class="row gap-3 center mb-3">
+          <div class="tk-logo" style="background:#0277BD;width:40px;height:40px;">F</div>
+          <div class="col grow"><div class="t14 w-500">Parag Parikh Flexi Cap</div><div class="t11 muted">Direct · Growth</div></div>
+        </div>
+        <div class="row gap-3 center">
+          <div class="mono" style="font-size: 26px; font-weight: 500; letter-spacing: -0.025em;">₹ 84.21</div>
+          <span class="pos mono t12">+0.42 (+0.51%)</span>
+          <span class="t11 muted">NAV</span>
+        </div>
+        <div class="mt-3" style="margin: 0 -18px;">${areaChart(53, 344, 140, true)}</div>
+
+        <div class="mb-card mt-4">
+          <div class="row between center">
+            <div>
+              <div class="t11 upper muted mono">DhanRadar Score</div>
+              <div class="mono mt-2" style="font-size: 36px; font-weight: 500; letter-spacing: -0.03em; line-height: 1;">92</div>
+              <span class="badge signal-strong-buy mt-2">Strong Buy</span>
+            </div>
+            ${ringSvg(92, 86, 7)}
+          </div>
+        </div>
+
+        <div class="t14 w-500 mt-4 mb-3">Rolling returns · CAGR</div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['1Y',18.4],['3Y',22.4],['5Y',19.8],['10Y',17.2]].map(([p, v], i, arr) => `
+            <div class="row between center" style="padding: 12px 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <span class="t13">${p}</span>
+              <div class="row gap-3 center">
+                <div style="width: 60px; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden;"><div style="width: ${v*3}%; height: 100%; background: var(--positive); border-radius: 2px;"></div></div>
+                <span class="mono pos w-500 t13">+${v}%</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="t14 w-500 mt-4 mb-3">Fund details</div>
+        <div class="mb-card">
+          ${[['Expense ratio','0.62%'],['AUM','₹78,420 Cr'],['Min SIP','₹500'],['Risk','Moderate'],['Manager','Rajeev Thakkar · 14yr']].map(([k,v]) => `
+            <div class="row between" style="padding: 7px 0;"><span class="t12 muted">${k}</span><span class="mono t13 w-500">${v}</span></div>
+          `).join('')}
+        </div>
+
+        <button class="btn btn-primary mt-4" style="width: 100%; height: 46px; justify-content: center;">Start SIP — ₹500/mo</button>
+      </div>
+      ${tabbar('discover')}
+    </div>`,
+
+  portfolio: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><div><div class="mh-greet">Portfolio</div><div class="mh-name">Overview</div></div><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;">+</div></div>
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div class="mb-card">
+          <div class="t11 upper muted mono">Total value</div>
+          <div class="mono mt-2" style="font-size: 30px; font-weight: 500; letter-spacing: -0.025em;">₹4,82,886</div>
+          <div class="row gap-3 mt-2"><span class="pos mono t13 w-500">+₹65,118</span><span class="pos mono t13">+15.59%</span></div>
+          <div class="mt-3" style="margin: 0 -14px -8px;">${areaChart(73, 320, 100, true)}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+          <div class="mb-card" style="padding: 14px;"><div class="t10 upper muted mono">XIRR</div><div class="mono t18 w-500 pos">18.42%</div></div>
+          <div class="mb-card" style="padding: 14px;"><div class="t10 upper muted mono">vs NIFTY</div><div class="mono t18 w-500 pos">+4.6%</div></div>
+        </div>
+
+        <div class="mb-card mt-4">
+          <div class="row between center mb-3"><div class="t14 w-500">Sector allocation</div><a class="t11">Detail →</a></div>
+          <div class="row gap-4 center">
+            <svg width="100" height="100" viewBox="0 0 100 100">
+              ${(() => {
+                const data = [['Banking',31.5,'#1E5EFF'],['IT',30.9,'#00C2FF'],['Energy',22.4,'#00B386'],['Consumer',9.7,'#F5A623'],['Telecom',5.5,'#A855F7']];
+                const total = data.reduce((s,d) => s + d[1], 0);
+                let acc = 0; const r = 40, cx = 50, cy = 50;
+                return data.map(([n,p,c]) => {
+                  const start = (acc/total)*2*Math.PI - Math.PI/2; acc += p;
+                  const end = (acc/total)*2*Math.PI - Math.PI/2;
+                  const large = end - start > Math.PI ? 1 : 0;
+                  const x1 = cx + Math.cos(start)*r, y1 = cy + Math.sin(start)*r;
+                  const x2 = cx + Math.cos(end)*r, y2 = cy + Math.sin(end)*r;
+                  return `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${c}" stroke-width="14"/>`;
+                }).join('');
+              })()}
+            </svg>
+            <div style="flex:1;">
+              ${[['Banking',31.5,'#1E5EFF'],['IT Services',30.9,'#00C2FF'],['Energy',22.4,'#00B386'],['Consumer',9.7,'#F5A623']].map(([n,p,c]) => `
+                <div class="row gap-2 center" style="padding: 4px 0;"><div style="width:8px;height:8px;border-radius:2px;background:${c};"></div><span class="t12" style="flex:1;">${n}</span><span class="mono t12 muted">${p}%</span></div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="row between mt-4 mb-3"><div class="t14 w-500">Holdings · 8</div><span class="t11 muted">By value ↓</span></div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['RELIANCE','#0A1F4A','R',38,2412,1.08],['TCS','#1F4E9E','T',22,3680,0.90],['HDFCBANK','#003E80','H',48,1542,0.80],['INFY','#0E3F7C','I',32,1462,0.59]].map(([sym, c, l, qty, avg, val], i, arr) => `
+            <div class="row gap-3 center" style="padding: 12px 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <div class="tk-logo" style="background:${c};">${l}</div>
+              <div class="col grow"><div class="t13 w-500">${sym}</div><div class="t11 muted">${qty} · avg ₹${avg}</div></div>
+              <div class="col" style="align-items:flex-end;"><div class="mono t13 w-500">₹${val}L</div><div class="t11 mono pos">+${(8 + (i*3)).toFixed(1)}%</div></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ${tabbar('portfolio')}
+    </div>`,
+
+  alerts: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><div><div class="mh-greet">Notifications</div><div class="mh-name">Alerts</div></div><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;">+</div></div>
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div class="row gap-2 mb-4 wrap"><button class="chip active">All · 8</button><button class="chip">Triggered · 3</button><button class="chip">Active · 5</button></div>
+
+        <div class="t11 upper muted mono mb-2">Today</div>
+        <div class="mb-card" style="padding: 0; margin-bottom: 12px;">
+          ${[
+            ['Price crossed', 'TCS · ₹4,102 > ₹4,100', '2h ago', 'var(--positive)', '↑'],
+            ['Score change', 'RELIANCE · 85 → 86', '4h ago', 'var(--positive)', '◎'],
+            ['Risk alert', 'ADANIENT · Volatility +28%', '6h ago', 'var(--negative)', '!']
+          ].map(([t, d, when, c, ic], i, arr) => `
+            <div class="row gap-3 center" style="padding: 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <div style="width:36px;height:36px;border-radius:9px;background:color-mix(in srgb, ${c} 18%, var(--surface-2));color:${c};display:grid;place-items:center;font-size:16px;">${ic}</div>
+              <div class="col grow"><div class="t13 w-500">${t}</div><div class="t11 muted">${d}</div></div>
+              <div class="t11 muted">${when}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="t11 upper muted mono mb-2 mt-4">Active rules</div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['HDFCBANK','Earnings · 22 Oct','active'],['INFY','PE < 28','active'],['SIP reminder','TCS · 1st of month','active'],['Score below 70','Portfolio-wide','active'],['Daily digest','7:30 AM IST','active']].map(([t, d, st], i, arr) => `
+            <div class="row gap-3 center" style="padding: 12px 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <span style="width:8px;height:8px;border-radius:50%;background:var(--positive);"></span>
+              <div class="col grow"><div class="t13 w-500">${t}</div><div class="t11 muted">${d}</div></div>
+              <span style="font-size: 18px; color: var(--text-muted);">⋯</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ${tabbar('home')}
+    </div>`,
+
+  learn: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><div><div class="mh-greet">Education hub</div><div class="mh-name">Learn investing</div></div><div style="width:30px;height:30px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;">🔍</div></div>
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div class="mb-card" style="background: linear-gradient(135deg, var(--blue-soft), var(--emerald-soft)); border: 1px solid var(--border);">
+          <div class="t11 upper muted mono">Continue learning</div>
+          <div class="t14 w-500 mt-2">Reading financial statements · Lesson 3</div>
+          <div class="t11 muted mt-2">P&L: Why the bottom line lies</div>
+          <div class="row between center mt-3">
+            <div style="flex:1;height:4px;background:rgba(255,255,255,0.4);border-radius:2px;overflow:hidden;"><div style="width:38%;height:100%;background:var(--dr-blue);"></div></div>
+            <span class="t11 mono muted" style="margin-left:12px;">3 of 8</span>
+          </div>
+          <button class="btn btn-primary btn-sm mt-3" style="width: 100%; justify-content: center;">Resume →</button>
+        </div>
+
+        <div class="t14 w-500 mt-4 mb-3">All topics</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${[['📊','Investing 101','12 lessons'],['📈','Financial statements','8 lessons'],['🛡','Risk & diversification','9 lessons'],['💰','Valuation models','11 lessons'],['🥧','Fund selection','7 lessons'],['🧠','Behavioral finance','6 lessons']].map(([ic, t, l]) => `
+            <div class="mb-card">
+              <div style="font-size: 22px; margin-bottom: 8px;">${ic}</div>
+              <div class="t13 w-500">${t}</div>
+              <div class="t11 muted mt-2">${l}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ${tabbar('home')}
+    </div>`,
+
+  profile: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="screen-body" style="padding: 16px 18px;">
+        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding: 24px 0;">
+          <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#1E5EFF,#00B386);display:grid;place-items:center;color:white;font-size:28px;font-weight:600;letter-spacing:-0.02em;">AS</div>
+          <div class="t18 w-500 mt-3">Aarav Sharma</div>
+          <div class="t12 muted mt-1 mono">aarav.s@example.com</div>
+          <span class="badge badge-info mt-3">Pro · since Mar 2025</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          <div class="mb-card" style="text-align:center;padding:14px;"><div class="mono t18 w-500">₹4.83L</div><div class="t10 upper muted mono mt-2">Portfolio</div></div>
+          <div class="mb-card" style="text-align:center;padding:14px;"><div class="mono t18 w-500">82</div><div class="t10 upper muted mono mt-2">Avg score</div></div>
+          <div class="mb-card" style="text-align:center;padding:14px;"><div class="mono t18 w-500">14</div><div class="t10 upper muted mono mt-2">Watchlists</div></div>
+        </div>
+
+        <div class="t14 w-500 mt-4 mb-3">Connected brokers</div>
+        <div class="mb-card" style="padding: 0;">
+          ${[['Zerodha','Active · synced 2m ago','var(--positive)'],['Groww','Active · synced 1h ago','var(--positive)'],['Upstox','Not connected','var(--text-muted)']].map(([n, st, c], i, arr) => `
+            <div class="row gap-3 center" style="padding: 12px 14px; ${i < arr.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <div style="width:34px;height:34px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center;font-weight:600;font-size:13px;">${n[0]}</div>
+              <div class="col grow"><div class="t13 w-500">${n}</div><div class="t11 muted">${st}</div></div>
+              <span class="mono t11" style="color:${c};">●</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="t14 w-500 mt-4 mb-3">Achievements</div>
+        <div class="row gap-2 wrap">
+          <div class="badge badge-info">🎯 5 stocks researched</div>
+          <div class="badge badge-pos">📚 First lesson</div>
+          <div class="badge badge-warn">⚡ 7-day streak</div>
+          <div class="badge badge-neutral">🔒 8 more to unlock</div>
+        </div>
+
+        <button class="btn btn-ghost mt-4" style="width:100%; height: 44px; justify-content: center;" onclick="renderScreen('settings')">⚙ Settings</button>
+        <button class="btn t13 muted mt-2" style="width:100%; justify-content: center;">Sign out</button>
+      </div>
+      ${tabbar('profile')}
+    </div>`,
+
+  settings: () => {
+    const section = (title, items) => `
+      <div class="t11 upper muted mono mb-2 mt-4">${title}</div>
+      <div class="mb-card" style="padding: 0;">
+        ${items.map((it, i) => `
+          <div class="row gap-3 center" style="padding: 12px 14px; ${i < items.length-1 ? 'border-bottom:1px solid var(--border);' : ''}">
+            <div class="col grow"><div class="t13">${it[0]}</div>${it[2] ? `<div class="t11 muted">${it[2]}</div>` : ''}</div>
+            ${it[1] === 'toggle' ? `<span style="width:34px;height:20px;background:var(--text);border-radius:10px;position:relative;"><span style="position:absolute;right:2px;top:2px;width:16px;height:16px;background:var(--bg);border-radius:50%;"></span></span>` :
+              it[1] === 'toggleOff' ? `<span style="width:34px;height:20px;background:var(--border-strong);border-radius:10px;position:relative;"><span style="position:absolute;left:2px;top:2px;width:16px;height:16px;background:var(--bg);border-radius:50%;"></span></span>` :
+              it[1] === 'value' ? `<span class="t12 muted mono">${it[3]}</span>` : ''}
+            <span class="t12 muted" style="margin-left:6px;">›</span>
+          </div>
+        `).join('')}
+      </div>`;
+    return `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><button class="btn btn-ghost btn-sm" onclick="renderScreen('profile')">←</button><div class="t13 w-500">Settings</div><span style="width:30px;"></span></div>
+      <div class="screen-body" style="padding: 8px 18px;">
+        ${section('Account', [['Edit profile', 'arrow', 'Name, email, phone'],['Change password', 'arrow'],['Linked brokers', 'value', '3 connected']])}
+        ${section('Notifications', [['Push notifications', 'toggle'],['Email digest', 'toggle'],['Daily market summary', 'toggle'],['SIP reminders', 'toggle'],['Score change alerts', 'toggleOff']])}
+        ${section('Appearance', [['Theme', 'value', '', 'Auto'],['App icon', 'value', '', 'Default'],['Reduce motion', 'toggleOff']])}
+        ${section('Security', [['Face ID', 'toggle'],['Two-factor', 'value', '', 'On'],['Trusted devices', 'value', '', '2']])}
+        ${section('Subscription', [['Plan', 'value', 'Renews Jul 15, 2026', 'Pro'],['Payment method', 'value', '', '•• 4242'],['Billing history', 'arrow']])}
+        ${section('Support', [['Help center', 'arrow'],['Contact us', 'arrow'],['Privacy policy', 'arrow'],['Terms of service', 'arrow']])}
+        <div class="t10 muted mono" style="text-align:center; padding: 24px 0;">DhanRadar · v1.0.0 · build 2026.05.20</div>
+      </div>
+    </div>`;
+  },
+
+  pricing: () => `
+    <div style="display:flex;flex-direction:column;height:100%;">
+      ${statusBar()}
+      <div class="mh"><button class="btn btn-ghost btn-sm" onclick="renderScreen('profile')">←</button><div class="t13 w-500">Plans</div><span style="width:30px;"></span></div>
+      <div class="screen-body" style="padding: 8px 18px;">
+        <h1 style="font-size: 28px; font-weight: 500; letter-spacing: -0.025em; margin: 16px 0 8px; line-height:1.15;">Unlock the <span class="serif" style="font-style:italic; color: var(--dr-blue); font-weight: 400;">full</span> radar.</h1>
+        <div class="t14 muted" style="margin-bottom: 20px;">Cancel anytime. 14-day Pro trial included.</div>
+
+        <div class="row gap-2 mb-4" style="background: var(--surface-2); border-radius: 10px; padding: 4px;">
+          <button class="chip active" style="flex:1; justify-content:center;">Monthly</button>
+          <button class="chip" style="flex:1; justify-content:center;">Yearly · save 20%</button>
+        </div>
+
+        <div class="mb-card" style="border-color: var(--text); position: relative;">
+          <div class="row between center mb-3"><div class="mono t11 upper" style="color: var(--text); font-weight: 500; letter-spacing: 0.08em;">Pro · Current</div><span class="badge badge-info">Recommended</span></div>
+          <div class="mono mt-2" style="font-size: 36px; font-weight: 500; letter-spacing: -0.025em;">₹399<span class="t13 muted" style="font-family:var(--dr-font-sans);"> /mo</span></div>
+          <ul style="list-style:none;padding:0;margin: 16px 0 0; display: flex; flex-direction: column; gap: 8px;">
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Unlimited stocks & funds</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Fair value estimate (DCF + multiples)</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> 50+ screener filters</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Unlimited watchlists & alerts</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Portfolio analytics & risk reports</li>
+          </ul>
+        </div>
+
+        <div class="mb-card mt-3">
+          <div class="row between center mb-3"><div class="mono t11 upper muted" style="font-weight: 500; letter-spacing: 0.08em;">Premium</div></div>
+          <div class="mono" style="font-size: 28px; font-weight: 500; letter-spacing: -0.025em;">₹899<span class="t13 muted" style="font-family:var(--dr-font-sans);"> /mo</span></div>
+          <ul style="list-style:none;padding:0;margin: 14px 0 0; display: flex; flex-direction: column; gap: 8px;">
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Everything in Pro</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Analyst-curated portfolios</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Tax & capital gains optimisation</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> API access · CSV export</li>
+            <li class="t12 sec row gap-2"><span class="pos">✓</span> Priority human support</li>
+          </ul>
+          <button class="btn btn-outline mt-3" style="width:100%; justify-content:center;">Upgrade to Premium</button>
+        </div>
+
+        <div class="t11 muted" style="text-align: center; padding: 20px 0;">No card required for trial · Cancel anytime</div>
+      </div>
+    </div>`,
+};
+
+const SCREEN_SPECS = {
+  splash: ['Logo lockup · 110×110', 'Tagline · Instrument Serif italic', '1.2s fade then auth check'],
+  onboarding: ['3 swipeable cards', 'Dot indicator · 3px tall', 'Skip → Home, Continue → next card or Login'],
+  login: ['Email + password', 'Social: Google, Apple', 'Forgot password inline link'],
+  signup: ['Name · Email · Phone · Password', 'Marketing opt-in OFF by default', '14-day Pro trial badge'],
+  otp: ['6-digit auto-advance', 'Resend disabled 30s', 'Auto-submit on full code'],
+  home: ['Indices strip · spark each', 'Top-scored 4 stocks', 'Sector heatmap · 6 cells'],
+  discover: ['Preset chips · saved screens', 'Stock + fund lists', 'Tap row → detail'],
+  stock: ['Price + chart + period switcher', 'DhanRadar score + mini radar', 'Fair value gauge'],
+  fund: ['NAV + chart', 'Rolling returns table', 'SIP CTA at bottom'],
+  portfolio: ['Total value + sparkline', 'XIRR + benchmark KPI', 'Allocation donut + holdings'],
+  alerts: ['Today · Triggered · Active tabs', 'Active rules list', 'Tap + to create new'],
+  learn: ['Continue card · gradient bg', '6 topic cards · 2-col grid', 'Lesson count per topic'],
+  profile: ['Avatar + plan badge', 'Stats: portfolio, score, lists', 'Brokers + achievements'],
+  settings: ['6 grouped sections', 'Toggles, values, navigations', 'App version footer'],
+  pricing: ['Monthly/Yearly toggle', 'Current plan highlighted', 'Premium upgrade CTA'],
+};
+
+function renderScreen(id) {
+  $('#phoneScreen').innerHTML = SCREENS[id]();
+  $$('.screen-list-item').forEach((b, i) => b.classList.toggle('active', MOBILE_SCREENS[i].id === id));
+  const screen = MOBILE_SCREENS.find(s => s.id === id);
+  const specs = SCREEN_SPECS[id] || [];
+  $('#screenSpecBody').innerHTML = `
+    <div class="t14 w-500">${screen.name}</div>
+    <div class="t12 muted mt-2" style="line-height: 1.55;">${screen.desc}</div>
+    <h3 class="h3">Specs</h3>
+    <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px;">
+      ${specs.map(s => `<li class="t12 sec" style="line-height:1.5;"><span class="mono muted" style="margin-right:6px;">→</span>${s}</li>`).join('')}
+    </ul>
+    <h3 class="h3">Touch targets</h3>
+    <div class="t12 muted" style="line-height:1.55;">All interactive elements ≥ 44×44pt. Bottom tab bar height 76pt incl. home indicator margin.</div>
+  `;
+}
+
+// Populate screen list
+$('#screenList').innerHTML = MOBILE_SCREENS.map((s, i) => `
+  <button class="screen-list-item ${i === 0 ? 'active' : ''}" onclick="renderScreen('${s.id}')">
+    <span class="sn">${String(i+1).padStart(2,'0')}</span>
+    <span>${s.name}</span>
+  </button>
+`).join('');
+
+renderScreen('splash');
+window.renderScreen = renderScreen;
+
+/* ─── Email templates ────────────────────────────────────────── */
+const EMAIL_TEMPLATES = [
+  // ── Transactional ──
+  { id: 'account_created', cat: 'Transactional', name: 'Account creation', subj: 'Welcome to DhanRadar — verify your email', pre: 'Click the button below to verify your email and start scanning the market.', from: 'no-reply@dhanradar.com' },
+  { id: 'welcome',         cat: 'Transactional', name: 'Welcome',          subj: 'Welcome to DhanRadar 👋', pre: 'Here are 3 things to try first.', from: 'team@dhanradar.com' },
+  { id: 'otp',             cat: 'Transactional', name: 'OTP verification', subj: 'Your DhanRadar code: 932417', pre: 'This code expires in 10 minutes.', from: 'security@dhanradar.com' },
+  { id: 'password_reset',  cat: 'Transactional', name: 'Password reset',   subj: 'Reset your DhanRadar password', pre: 'You requested a password reset. Link expires in 1 hour.', from: 'security@dhanradar.com' },
+  { id: 'payment',         cat: 'Transactional', name: 'Payment confirmation', subj: 'Payment received · ₹399 · DhanRadar Pro', pre: 'Thanks. Receipt attached. Pro is live on your account.', from: 'billing@dhanradar.com' },
+  { id: 'renewal',         cat: 'Transactional', name: 'Subscription renewal', subj: 'DhanRadar Pro renews in 3 days', pre: 'Your card ending 4242 will be charged ₹399. Manage anytime.', from: 'billing@dhanradar.com' },
+  { id: 'trial_end',       cat: 'Transactional', name: 'Trial ending reminder', subj: 'Your Pro trial ends tomorrow', pre: 'Keep Fair Value, screeners and alerts — or downgrade, no hassle.', from: 'team@dhanradar.com' },
+  // ── Engagement ──
+  { id: 'daily',           cat: 'Engagement', name: 'Daily market update', subj: 'NIFTY +0.58% · 4 movers on your watchlist', pre: 'Reliance hit 86 score. Bharti broke out. Quick read inside.', from: 'pulse@dhanradar.com' },
+  { id: 'weekly',          cat: 'Engagement', name: 'Weekly newsletter',   subj: 'The DhanRadar Weekly · 17 May edition', pre: 'Why Q4 earnings are about banks and nothing else.', from: 'weekly@dhanradar.com' },
+  { id: 'portfolio_health', cat: 'Engagement', name: 'Portfolio health report', subj: 'Your portfolio scored 82 this month', pre: 'Up 3.4% vs NIFTY. Sector exposure looks balanced. Two stocks to watch.', from: 'reports@dhanradar.com' },
+  { id: 'edu',             cat: 'Engagement', name: 'Educational digest',  subj: 'Learn: What "PE ratio" actually means', pre: '3-minute read · You\'re on a 7-day learning streak.', from: 'learn@dhanradar.com' },
+  { id: 'feature',         cat: 'Engagement', name: 'Feature announcement', subj: 'New: Multi-model Fair Value is live', pre: 'DCF, multiples, EPV — weighted into one number. See it on any stock.', from: 'team@dhanradar.com' },
+  // ── Alerts ──
+  { id: 'price_alert',     cat: 'Alerts', name: 'Price alert',         subj: 'TCS crossed ₹4,100', pre: 'Your alert triggered at 14:32 IST. Score now 91 (Strong Buy).', from: 'alerts@dhanradar.com' },
+  { id: 'score_alert',     cat: 'Alerts', name: 'Score change alert',  subj: 'RELIANCE score moved: 85 → 86', pre: 'Quality and momentum factors improved this quarter.', from: 'alerts@dhanradar.com' },
+  { id: 'risk_alert',      cat: 'Alerts', name: 'Risk alert',          subj: 'High volatility detected: ADANIENT', pre: '30-day vol up 28%. Consider a stop-loss or position trim.', from: 'alerts@dhanradar.com' },
+  { id: 'sip_reminder',    cat: 'Alerts', name: 'SIP reminder',        subj: 'Your SIP runs tomorrow · ₹5,000', pre: '3 SIPs total · ₹15,000 will be auto-debited tomorrow.', from: 'alerts@dhanradar.com' },
+];
+
+const EMAIL_CSS = `
+  body { margin:0; padding:0; font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif; background: #F7F6F2; color: #0B0F1A; -webkit-font-smoothing: antialiased; }
+  .wrap { width: 100%; padding: 40px 16px; }
+  .mob .wrap { padding: 20px 0; }
+  .container { max-width: 560px; margin: 0 auto; background: #FFFFFF; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .mob .container { border-radius: 0; max-width: none; }
+  .hdr { padding: 26px 32px; border-bottom: 1px solid #E4E1D9; display: flex; align-items: center; gap: 12px; }
+  .logo-mark { width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg, #0B1F3A, #1E5EFF); display: inline-grid; place-items: center; vertical-align: middle; }
+  .logo-name { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; vertical-align: middle; margin-left: 10px; }
+  .body { padding: 32px; }
+  .mob .body { padding: 24px 20px; }
+  h1 { font-size: 24px; font-weight: 500; letter-spacing: -0.025em; margin: 0 0 12px; line-height: 1.2; }
+  h1 .accent { font-family: 'Instrument Serif', Georgia, serif; font-style: italic; color: #1E5EFF; font-weight: 400; }
+  p { font-size: 15px; line-height: 1.6; color: #3B414E; margin: 0 0 16px; }
+  .lede { color: #3B414E; font-size: 15px; line-height: 1.6; }
+  .cta {
+    display: inline-block; padding: 12px 22px; background: #0B0F1A; color: white !important;
+    text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 500;
+    letter-spacing: -0.005em; margin: 8px 0;
+  }
+  .cta-accent { background: #1E5EFF; }
+  .ghost { display: inline-block; padding: 12px 22px; background: #F1EFE9; color: #0B0F1A !important; text-decoration: none; border-radius: 8px; font-size: 14px; font-weight: 500; }
+  .otp-box { font-family: 'Geist Mono', 'Courier New', monospace; font-size: 36px; font-weight: 500; letter-spacing: 8px; padding: 20px 0; background: #F1EFE9; border-radius: 12px; text-align: center; margin: 18px 0; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: #E4E1D9; border-radius: 10px; overflow: hidden; margin: 18px 0; border: 1px solid #E4E1D9; }
+  .stat { background: white; padding: 14px 16px; }
+  .stat .l { font-family: 'Geist Mono', monospace; font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  .stat .v { font-family: 'Geist Mono', monospace; font-size: 22px; font-weight: 500; letter-spacing: -0.025em; margin-top: 4px; }
+  .row-card { padding: 14px 16px; border: 1px solid #E4E1D9; border-radius: 10px; margin: 10px 0; }
+  .row-card.alert { background: #FEF2F2; border-color: #FCA5A5; }
+  .row-card.success { background: #F0FDF4; border-color: #86EFAC; }
+  .row-card.info { background: #EFF6FF; border-color: #93C5FD; }
+  .ticker { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #E4E1D9; }
+  .ticker:last-child { border-bottom: none; }
+  .tk-logo { width: 32px; height: 32px; border-radius: 7px; color: white; display: grid; place-items: center; font-weight: 600; font-size: 12px; flex: 0 0 auto; }
+  .tk-name { font-weight: 500; font-size: 13.5px; }
+  .tk-sub { font-family: 'Geist Mono', monospace; font-size: 11.5px; color: #6B7280; }
+  .pos { color: #00B386; } .neg { color: #E5484D; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-family: 'Geist Mono', monospace; font-size: 11px; font-weight: 500; }
+  .badge-pos { background: rgba(0,179,134,0.14); color: #00B386; }
+  .badge-warn { background: rgba(245,166,35,0.16); color: #C57F00; }
+  .badge-info { background: rgba(30,94,255,0.10); color: #1E5EFF; }
+  .footer { padding: 24px 32px; background: #F7F6F2; font-size: 12px; color: #6B7280; line-height: 1.6; border-top: 1px solid #E4E1D9; }
+  .footer a { color: #6B7280; text-decoration: underline; }
+  .footer .meta { font-family: 'Geist Mono', monospace; font-size: 10.5px; margin-top: 14px; }
+  hr { border: 0; border-top: 1px solid #E4E1D9; margin: 24px 0; }
+  .preview-text { display: none; }
+  ul.checklist { list-style: none; padding: 0; margin: 18px 0; }
+  ul.checklist li { padding: 8px 0; padding-left: 28px; position: relative; font-size: 14px; color: #3B414E; line-height: 1.55; }
+  ul.checklist li::before { content: '✓'; position: absolute; left: 6px; color: #00B386; font-weight: 700; }
+  .score-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; }
+  .score-bar { flex: 1; height: 5px; background: #F1EFE9; border-radius: 3px; overflow: hidden; }
+  .score-bar > div { height: 100%; border-radius: 3px; }
+  .ring-num { font-family: 'Geist Mono', monospace; font-size: 38px; font-weight: 500; letter-spacing: -0.03em; }
+`;
+
+const SVG_LOGO = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/><path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.4" fill="#1FD79A" stroke="none"/></svg>`;
+
+function emailWrapper(bodyHtml, mob = false) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet"/><style>${EMAIL_CSS}</style></head>
+<body class="${mob ? 'mob' : ''}">
+  <div class="wrap">
+    <div class="container">
+      <div class="hdr"><span class="logo-mark">${SVG_LOGO}</span><span class="logo-name">DhanRadar</span></div>
+      <div class="body">${bodyHtml}</div>
+      <div class="footer">
+        You're receiving this because you have a DhanRadar account. <a href="#">Notification settings</a> · <a href="#">Unsubscribe</a><br/>
+        DhanRadar Tech Pvt. Ltd. · 7th Floor, Cyber Hub, Sector 26, Gurugram 122002 · India<br/>
+        <div class="meta">© 2026 · Markets carry risk · This is not investment advice.</div>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+}
+
+const EMAIL_BODIES = {
+  account_created: `
+    <h1>Welcome to <span class="accent">DhanRadar.</span></h1>
+    <p class="lede">One last step — verify your email to start scanning the market with confidence.</p>
+    <p style="text-align: center; margin: 24px 0;"><a class="cta" href="#">Verify email</a></p>
+    <p style="font-size: 12.5px; color: #6B7280;">If the button doesn't work, paste this link into your browser:<br/><code style="font-size: 11.5px; word-break: break-all; color: #1E5EFF;">https://dhanradar.com/verify?token=a8f3...c2b1</code></p>
+    <hr/>
+    <p style="font-size: 13px; color: #6B7280;">Didn't sign up? You can safely ignore this email.</p>
+  `,
+
+  welcome: `
+    <h1>You're in. <span class="accent">Welcome.</span></h1>
+    <p class="lede">Your 14-day Pro trial is live. Here are three things investors love most — try them now.</p>
+    <ul class="checklist">
+      <li><strong>Search any stock</strong> — get the 0-100 DhanRadar Score in 1 click</li>
+      <li><strong>Run a screener preset</strong> — "High Quality Compounders" is a great place to start</li>
+      <li><strong>Add a watchlist</strong> — get price + score alerts the moment things move</li>
+    </ul>
+    <p style="text-align: center; margin: 28px 0 16px;"><a class="cta cta-accent" href="#">Open DhanRadar</a></p>
+    <p style="font-size: 13px; color: #6B7280; text-align: center;">Need help? Reply to this email — we're real humans.</p>
+  `,
+
+  otp: `
+    <h1>Your security code</h1>
+    <p class="lede">Use this code to sign in. It expires in <strong>10 minutes</strong> and can only be used once.</p>
+    <div class="otp-box">932 417</div>
+    <p style="font-size: 13px; color: #6B7280;">Didn't request this? Your account is safe — but please <a href="#" style="color: #1E5EFF;">let us know</a>.</p>
+  `,
+
+  password_reset: `
+    <h1>Reset your <span class="accent">password.</span></h1>
+    <p class="lede">Someone (hopefully you) asked to reset your DhanRadar password. Click below to choose a new one.</p>
+    <p style="text-align: center; margin: 24px 0;"><a class="cta" href="#">Reset password</a></p>
+    <div class="row-card info"><strong style="font-size: 13px;">⚠ This link expires in 1 hour.</strong><br/><span style="font-size: 13px; color: #3B414E;">After that you'll need to request a new one.</span></div>
+    <p style="font-size: 13px; color: #6B7280;">If you didn't ask for this, no action is needed — your password is unchanged.</p>
+  `,
+
+  payment: `
+    <div class="row-card success" style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size: 24px;">✓</span>
+      <div><strong style="font-size: 15px;">Payment received</strong><div style="font-size: 13px; color: #3B414E;">Pro is live on your account.</div></div>
+    </div>
+    <h1 style="margin-top: 24px;">Receipt</h1>
+    <div class="stat-grid">
+      <div class="stat"><div class="l">Amount</div><div class="v">₹399</div></div>
+      <div class="stat"><div class="l">Plan</div><div class="v" style="font-size: 16px;">Pro · Monthly</div></div>
+      <div class="stat"><div class="l">Date</div><div class="v" style="font-size: 16px;">15 May 26</div></div>
+    </div>
+    <table style="width: 100%; font-size: 13px; margin: 16px 0; border-collapse: collapse;">
+      <tr><td style="padding: 6px 0; color: #6B7280;">Payment ID</td><td style="padding: 6px 0; text-align: right;" class="mono">pay_NwQ9k4f2Lz81vS</td></tr>
+      <tr><td style="padding: 6px 0; color: #6B7280;">Card</td><td style="padding: 6px 0; text-align: right;" class="mono">Visa ending in 4242</td></tr>
+      <tr><td style="padding: 6px 0; color: #6B7280;">Next billing</td><td style="padding: 6px 0; text-align: right;" class="mono">15 Jun 2026</td></tr>
+      <tr><td style="padding: 6px 0; color: #6B7280;">GST (18%)</td><td style="padding: 6px 0; text-align: right;" class="mono">₹60.86</td></tr>
+    </table>
+    <p style="text-align: center; margin: 20px 0;"><a class="ghost" href="#">Download PDF receipt</a></p>
+  `,
+
+  renewal: `
+    <h1>Your Pro plan <span class="accent">renews</span> Friday.</h1>
+    <p class="lede">Heads up — your DhanRadar Pro subscription renews on <strong>15 June 2026</strong>. Your card ending 4242 will be charged ₹399.</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="l">Plan</div><div class="v" style="font-size: 16px;">Pro</div></div>
+      <div class="stat"><div class="l">Amount</div><div class="v">₹399</div></div>
+      <div class="stat"><div class="l">In</div><div class="v">3 days</div></div>
+    </div>
+    <p style="text-align: center; margin: 24px 0;"><a class="ghost" href="#">Manage subscription</a></p>
+    <hr/>
+    <p style="font-size: 13px; color: #6B7280;">Want to switch to yearly and save 20%? <a href="#" style="color: #1E5EFF;">Switch plans →</a></p>
+  `,
+
+  trial_end: `
+    <h1>Your trial ends <span class="accent">tomorrow.</span></h1>
+    <p class="lede">Quick recap of what you'll lose if Pro lapses:</p>
+    <ul class="checklist">
+      <li>Fair Value estimates (DCF + multiples + EPV)</li>
+      <li>50+ screener filters and saved screens</li>
+      <li>Unlimited watchlists and score-change alerts</li>
+      <li>Full portfolio analytics and risk reports</li>
+    </ul>
+    <div class="stat-grid">
+      <div class="stat"><div class="l">Stocks researched</div><div class="v">24</div></div>
+      <div class="stat"><div class="l">Screens saved</div><div class="v">7</div></div>
+      <div class="stat"><div class="l">Alerts created</div><div class="v">12</div></div>
+    </div>
+    <p style="text-align: center; margin: 24px 0;"><a class="cta cta-accent" href="#">Keep Pro · ₹399/mo</a></p>
+    <p style="text-align: center; margin: 8px 0 0;"><a href="#" style="font-size: 13px; color: #6B7280;">Downgrade to Free (no hard feelings)</a></p>
+  `,
+
+  daily: `
+    <p class="lede" style="color: #6B7280; font-size: 13px; margin-bottom: 4px;">Tuesday · 7:30 AM IST</p>
+    <h1>NIFTY +0.58% · 4 movers on your <span class="accent">watchlist.</span></h1>
+
+    <div class="stat-grid">
+      <div class="stat"><div class="l">NIFTY 50</div><div class="v">24,812</div><div style="font-size: 11.5px; color: #00B386; font-family: 'Geist Mono';">+142.6 (+0.58%)</div></div>
+      <div class="stat"><div class="l">SENSEX</div><div class="v">81,468</div><div style="font-size: 11.5px; color: #00B386; font-family: 'Geist Mono';">+412.8 (+0.51%)</div></div>
+      <div class="stat"><div class="l">USD/INR</div><div class="v">84.21</div><div style="font-size: 11.5px; color: #6B7280; font-family: 'Geist Mono';">+0.04</div></div>
+    </div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 8px;">Your watchlist · top moves</h2>
+    <div class="ticker"><div class="tk-logo" style="background: #E53935;">B</div><div style="flex:1;"><div class="tk-name">Bharti Airtel</div><div class="tk-sub">BHARTIARTL · Score 78</div></div><div style="text-align: right;"><div class="mono" style="font-size: 13.5px; font-weight: 500;">₹1,612</div><div class="pos mono" style="font-size: 12px;">+4.21%</div></div></div>
+    <div class="ticker"><div class="tk-logo" style="background: #1F4E9E;">T</div><div style="flex:1;"><div class="tk-name">TCS</div><div class="tk-sub">TCS · Score 91 ↑1</div></div><div style="text-align: right;"><div class="mono" style="font-size: 13.5px; font-weight: 500;">₹4,102</div><div class="pos mono" style="font-size: 12px;">+2.84%</div></div></div>
+    <div class="ticker"><div class="tk-logo" style="background: #0277BD;">M</div><div style="flex:1;"><div class="tk-name">Maruti Suzuki</div><div class="tk-sub">MARUTI · Score 80</div></div><div style="text-align: right;"><div class="mono" style="font-size: 13.5px; font-weight: 500;">₹12,284</div><div class="pos mono" style="font-size: 12px;">+1.62%</div></div></div>
+    <div class="ticker"><div class="tk-logo" style="background: #6A1B9A;">T</div><div style="flex:1;"><div class="tk-name">Titan Company</div><div class="tk-sub">TITAN · Score 70</div></div><div style="text-align: right;"><div class="mono" style="font-size: 13.5px; font-weight: 500;">₹3,344</div><div class="neg mono" style="font-size: 12px;">−2.14%</div></div></div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 8px;">Worth a look</h2>
+    <p style="font-size: 14px; line-height: 1.6;"><strong>Reliance crossed 86 on its DhanRadar Score</strong> — top 8% in Energy. Q2 PAT beat estimates, Jio ARPU expanded, and the 50-DMA crossed above the 200-DMA. <a href="#" style="color: #1E5EFF;">Read the breakdown →</a></p>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="ghost" href="#">Open DhanRadar →</a></p>
+  `,
+
+  weekly: `
+    <p class="lede" style="color: #6B7280; font-size: 13px; margin-bottom: 4px;">Issue #34 · 17 May 2026</p>
+    <h1>The DhanRadar <span class="accent">Weekly.</span></h1>
+    <p class="lede">Why Q4 earnings are about banks and nothing else.</p>
+
+    <div class="row-card info">
+      <strong style="font-size: 14px;">↑ Up this week</strong>
+      <div style="font-size: 13px; color: #3B414E; margin-top: 4px; line-height: 1.55;">Private banks (+3.2% sector avg), Autos on festive demand, IT large caps</div>
+    </div>
+    <div class="row-card" style="background: #FEF2F2; border-color: #FCA5A5;">
+      <strong style="font-size: 14px;">↓ Down this week</strong>
+      <div style="font-size: 13px; color: #3B414E; margin-top: 4px; line-height: 1.55;">FMCG on rural slowdown, Realty on rate hold, select Adani names</div>
+    </div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 28px 0 10px;">The story</h2>
+    <p>The market this week was a one-note song: banks. ICICI's Q4 print was the cleanest in three quarters — NIM held, slippages flat, deposits growing faster than advances. HDFC Bank quietly added 28bps to ROA. Even SBI, the boring lifer of the index, surprised on credit costs.</p>
+    <p>Meanwhile, the rest of the market is waiting for a catalyst. IT is range-bound until US enterprise spend perks up. Consumer is still dealing with the K-shaped recovery. Pharma is its own micro-cycle.</p>
+    <p>Our take: if you've been overweight banks since January, congratulations. If you haven't, the easy move is gone — but the structural one isn't. <a href="#" style="color: #1E5EFF;">Read the full piece →</a></p>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 28px 0 10px;">From the team</h2>
+    <ul class="checklist">
+      <li>New: Multi-model Fair Value is live on every stock</li>
+      <li>Updated: Sector heatmap now shows 1-week deltas</li>
+      <li>Coming: SIP calculator with tax-adjusted XIRR</li>
+    </ul>
+  `,
+
+  portfolio_health: `
+    <h1>Your portfolio scored <span class="accent">82</span> this month.</h1>
+    <p class="lede">Above average. Up 3.4% vs NIFTY. Two stocks to keep an eye on.</p>
+
+    <div class="row-card info" style="text-align: center; padding: 24px;">
+      <div class="ring-num">82</div>
+      <div style="margin-top: 6px; font-family: 'Geist Mono'; font-size: 10.5px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.08em;">Portfolio Score</div>
+      <div style="font-size: 13px; margin-top: 6px; color: #1E5EFF;">Top 22% of DhanRadar portfolios</div>
+    </div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 10px;">By the numbers</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="l">Value</div><div class="v">₹4.83L</div></div>
+      <div class="stat"><div class="l">P&L</div><div class="v" style="color: #00B386;">+15.59%</div></div>
+      <div class="stat"><div class="l">XIRR</div><div class="v" style="color: #00B386;">18.42%</div></div>
+    </div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 10px;">Score breakdown</h2>
+    ${['Diversification — Banking + IT well-balanced;83', 'Quality — All holdings rated B+ or above;88', 'Concentration — Top 3 = 58% (high);62', 'Risk — Beta 1.04 vs market 1.0;79'].map(s => {
+      const [label, val] = s.split(';'); const v = parseInt(val);
+      const col = v >= 80 ? '#00B386' : v >= 65 ? '#1E5EFF' : v >= 50 ? '#F5A623' : '#E5484D';
+      return `<div class="score-row"><span style="width: 38%; font-size: 13px; color: #3B414E;">${label}</span><div class="score-bar"><div style="width: ${v}%; background: ${col};"></div></div><span class="mono" style="width: 26px; text-align: right; font-weight: 500; font-size: 13px;">${v}</span></div>`;
+    }).join('')}
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 10px;">Two to watch</h2>
+    <div class="row-card" style="background: #FEF7E6; border-color: #FCD34D;"><strong style="font-size: 13.5px;">⚠ TITAN — Score 70, down 12 pts</strong><div style="font-size: 12.5px; color: #3B414E; margin-top: 4px; line-height: 1.55;">Demand softness and PE compression. Consider trimming if conviction has changed.</div></div>
+    <div class="row-card success"><strong style="font-size: 13.5px;">↑ INFY — Score 82, momentum building</strong><div style="font-size: 12.5px; color: #3B414E; margin-top: 4px; line-height: 1.55;">Q1 beat, large deal wins, and the 50-DMA cross. Quality + momentum aligned.</div></div>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="cta cta-accent" href="#">Open full report</a></p>
+  `,
+
+  edu: `
+    <p class="lede" style="color: #6B7280; font-size: 13px; margin-bottom: 4px;">Learn · 3-minute read</p>
+    <h1>What does <span class="accent">"PE ratio"</span> actually mean?</h1>
+    <p class="lede">In one line: how many rupees you're paying for one rupee of annual profit.</p>
+
+    <p>If Reliance trades at ₹2,841 and earns ₹121.7 per share over the last year, its <strong>trailing PE = 2841 ÷ 121.7 = 23.3x</strong>. You're paying 23.30 for every rupee of profit. Whether that's expensive depends on:</p>
+
+    <ul class="checklist">
+      <li>The growth rate — a 5% grower at 23x is pricey; a 25% grower is cheap</li>
+      <li>The sector — software trades at 30x, banks at 15x, utilities at 10x</li>
+      <li>Where the company is in its cycle — peak earnings make PE look low</li>
+    </ul>
+
+    <div class="row-card info">
+      <strong style="font-size: 13.5px;">💡 The catch</strong>
+      <div style="font-size: 13px; color: #3B414E; margin-top: 4px; line-height: 1.55;">PE is computed on past earnings (TTM) or expected earnings (forward). Forward PE is what the market actually prices in. Always check both.</div>
+    </div>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="cta cta-accent" href="#">Continue lesson</a></p>
+    <p style="text-align: center; font-size: 12.5px; color: #6B7280;">You're on a <strong style="color: #F5A623;">7-day learning streak</strong> 🔥</p>
+  `,
+
+  feature: `
+    <span class="badge badge-info" style="margin-bottom: 14px;">NEW · v1.4</span>
+    <h1>Multi-model <span class="accent">Fair Value</span> is live.</h1>
+    <p class="lede">Three valuation models — DCF, relative (PE bands) and Earnings Power Value — weighted into a single, honest estimate.</p>
+
+    <div class="row-card" style="background: linear-gradient(135deg, #EFF6FF, #ECFDF5); border: 1px solid #BFDBFE; padding: 22px; text-align: center;">
+      <div style="font-family: 'Geist Mono'; font-size: 10px; color: #1E5EFF; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 500;">FAIR VALUE · 1Y · RELIANCE</div>
+      <div style="font-family: 'Geist Mono'; font-size: 40px; font-weight: 500; letter-spacing: -0.03em; margin: 6px 0;">₹3,120</div>
+      <span class="badge badge-pos">+9.8% upside</span>
+    </div>
+
+    <h2 style="font-size: 16px; font-weight: 500; margin: 24px 0 10px;">What you can do</h2>
+    <ul class="checklist">
+      <li>See whether any stock is over- or under-valued — instantly</li>
+      <li>Drill into each model's assumptions and tweak them</li>
+      <li>Get notified when fair value crosses market price</li>
+    </ul>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="cta cta-accent" href="#">See it on any stock →</a></p>
+  `,
+
+  price_alert: `
+    <div class="row-card success" style="display: flex; align-items: center; gap: 12px;">
+      <span style="font-size: 22px;">↑</span>
+      <div><strong style="font-size: 14px;">TCS crossed ₹4,100</strong><div style="font-size: 12.5px; color: #3B414E;">Your alert triggered at 14:32 IST</div></div>
+    </div>
+
+    <h1 style="margin-top: 20px;">TCS now at <span class="accent">₹4,102.10</span></h1>
+
+    <div class="ticker" style="border: 1px solid #E4E1D9; border-radius: 10px; padding: 14px; margin: 18px 0;">
+      <div class="tk-logo" style="background: #1F4E9E;">T</div>
+      <div style="flex:1;">
+        <div class="tk-name">Tata Consultancy Services</div>
+        <div class="tk-sub">NSE: TCS · IT Services</div>
+      </div>
+      <div style="text-align: right;">
+        <div class="mono" style="font-size: 18px; font-weight: 500;">₹4,102.10</div>
+        <div class="pos mono" style="font-size: 12px;">+25.40 (+0.62%)</div>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat"><div class="l">DhanRadar Score</div><div class="v" style="color: #00B386;">91</div></div>
+      <div class="stat"><div class="l">Signal</div><div class="v" style="font-size: 14px;">Strong Buy</div></div>
+      <div class="stat"><div class="l">Fair Value</div><div class="v" style="font-size: 16px;">₹4,420</div></div>
+    </div>
+
+    <p style="text-align: center; margin: 20px 0;"><a class="cta cta-accent" href="#">Open TCS in DhanRadar</a></p>
+  `,
+
+  score_alert: `
+    <div class="row-card info" style="display: flex; align-items: center; gap: 12px;">
+      <span style="font-size: 22px;">◎</span>
+      <div><strong style="font-size: 14px;">Score changed</strong><div style="font-size: 12.5px; color: #3B414E;">RELIANCE · 85 → 86</div></div>
+    </div>
+
+    <h1 style="margin-top: 20px;">Quality and momentum <span class="accent">improved.</span></h1>
+    <p class="lede">Reliance's DhanRadar Score moved up 1 point this quarter. Here's what shifted.</p>
+
+    <div class="score-row"><span style="width: 38%; font-size: 13px;">Quality</span><div class="score-bar"><div style="width: 91%; background: #00B386;"></div></div><span class="mono pos" style="width: 60px; text-align: right; font-size: 13px;">88 → 91</span></div>
+    <div class="score-row"><span style="width: 38%; font-size: 13px;">Momentum</span><div class="score-bar"><div style="width: 88%; background: #00B386;"></div></div><span class="mono pos" style="width: 60px; text-align: right; font-size: 13px;">82 → 88</span></div>
+    <div class="score-row"><span style="width: 38%; font-size: 13px;">Valuation</span><div class="score-bar"><div style="width: 78%; background: #00B386;"></div></div><span class="mono" style="width: 60px; text-align: right; font-size: 13px;">78 → 78</span></div>
+    <div class="score-row"><span style="width: 38%; font-size: 13px;">Risk</span><div class="score-bar"><div style="width: 71%; background: #F5A623;"></div></div><span class="mono neg" style="width: 60px; text-align: right; font-size: 13px;">74 → 71</span></div>
+
+    <p style="font-size: 14px; line-height: 1.6; margin-top: 20px;">Q2 PAT beat estimates by 3.5%. The 50-DMA crossed above the 200-DMA. Promoter holding ticked up 22bps. Risk score softened a touch on rising capex intensity, but the move is small.</p>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="cta cta-accent" href="#">Open RELIANCE analysis</a></p>
+  `,
+
+  risk_alert: `
+    <div class="row-card alert" style="display: flex; align-items: center; gap: 12px;">
+      <span style="font-size: 22px; color: #E5484D;">⚠</span>
+      <div><strong style="font-size: 14px; color: #E5484D;">High volatility detected</strong><div style="font-size: 12.5px; color: #3B414E;">ADANIENT · 30-day vol up 28%</div></div>
+    </div>
+
+    <h1 style="margin-top: 20px;">Consider a <span class="accent">stop-loss</span> or trim.</h1>
+    <p class="lede">Adani Enterprises has seen volatility climb sharply this week. Your position is ₹56,800 (4.2% of portfolio).</p>
+
+    <div class="stat-grid">
+      <div class="stat"><div class="l">30-day vol</div><div class="v" style="color: #E5484D;">+28%</div></div>
+      <div class="stat"><div class="l">DhanRadar Risk</div><div class="v" style="color: #E5484D;">48</div></div>
+      <div class="stat"><div class="l">Drawdown</div><div class="v" style="color: #E5484D;">−14%</div></div>
+    </div>
+
+    <h2 style="font-size: 15px; font-weight: 500; margin: 22px 0 8px;">Suggested actions</h2>
+    <ul class="checklist">
+      <li>Set a stop-loss 8-10% below current price</li>
+      <li>Trim position size to below 3% of portfolio</li>
+      <li>Wait for the score to recover above 65 before adding</li>
+    </ul>
+
+    <p style="font-size: 12px; color: #6B7280; margin-top: 16px;">This is a risk signal, not advice. Investments carry market risk.</p>
+
+    <p style="text-align: center; margin: 24px 0;"><a class="cta" href="#">Review my position</a></p>
+  `,
+
+  sip_reminder: `
+    <h1>Your SIP runs <span class="accent">tomorrow.</span></h1>
+    <p class="lede">3 SIPs total, ₹15,000 will be auto-debited from your registered bank account on <strong>21 May 2026</strong>.</p>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px;">
+      <thead><tr style="border-bottom: 1px solid #E4E1D9;"><th style="text-align: left; padding: 10px 4px; font-family: 'Geist Mono'; font-size: 10.5px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;">Fund</th><th style="text-align: right; padding: 10px 4px; font-family: 'Geist Mono'; font-size: 10.5px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;">Amount</th></tr></thead>
+      <tbody>
+        <tr><td style="padding: 10px 4px;"><div style="font-weight: 500;">Parag Parikh Flexi Cap</div><div style="font-size: 11.5px; color: #6B7280;">21st of every month</div></td><td style="text-align: right; padding: 10px 4px; font-family: 'Geist Mono'; font-weight: 500;">₹5,000</td></tr>
+        <tr style="border-top: 1px solid #E4E1D9;"><td style="padding: 10px 4px;"><div style="font-weight: 500;">Mirae Asset Large Cap</div><div style="font-size: 11.5px; color: #6B7280;">21st of every month</div></td><td style="text-align: right; padding: 10px 4px; font-family: 'Geist Mono'; font-weight: 500;">₹5,000</td></tr>
+        <tr style="border-top: 1px solid #E4E1D9;"><td style="padding: 10px 4px;"><div style="font-weight: 500;">Quant Small Cap</div><div style="font-size: 11.5px; color: #6B7280;">21st of every month</div></td><td style="text-align: right; padding: 10px 4px; font-family: 'Geist Mono'; font-weight: 500;">₹5,000</td></tr>
+        <tr style="border-top: 1px solid #E4E1D9;"><td style="padding: 14px 4px; font-weight: 500;">Total</td><td style="text-align: right; padding: 14px 4px; font-family: 'Geist Mono'; font-weight: 500; font-size: 15px;">₹15,000</td></tr>
+      </tbody>
+    </table>
+
+    <div class="row-card info" style="font-size: 13px; color: #3B414E; line-height: 1.55;"><strong>3-year compounded view:</strong> at 14% CAGR, ₹15,000/mo grows to <strong>₹6.65L</strong> after 3 years (₹5.4L invested).</div>
+
+    <p style="text-align: center; margin: 22px 0;"><a class="ghost" href="#">Pause or modify SIP</a></p>
+  `,
+};
+
+let currentEmail = 'welcome';
+let currentEmailMode = 'desk';
+
+function renderEmail(id) {
+  currentEmail = id;
+  const tpl = EMAIL_TEMPLATES.find(t => t.id === id);
+  const body = EMAIL_BODIES[id] || '<p>Template not found.</p>';
+  const html = emailWrapper(body, currentEmailMode === 'mob');
+  const iframe = $('#emailIframe');
+  iframe.srcdoc = html;
+  iframe.width = currentEmailMode === 'mob' ? 380 : 600;
+  iframe.height = 800;
+  $('#emailFrame').classList.toggle('mob', currentEmailMode === 'mob');
+  // Meta
+  $('#emailMeta').innerHTML = `
+    <div class="k">From</div><div class="v mono">${tpl.from}</div>
+    <div class="k">Subject</div><div class="v"><strong>${tpl.subj}</strong></div>
+    <div class="k">Preheader</div><div class="v" style="color:var(--text-secondary);">${tpl.pre}</div>
+    <div class="k">Category</div><div class="v"><span class="badge ${tpl.cat === 'Transactional' ? 'badge-info' : tpl.cat === 'Engagement' ? 'badge-pos' : 'badge-warn'}">${tpl.cat}</span></div>
+  `;
+  $$('.email-list-item').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+}
+
+function buildEmailList() {
+  const groups = { 'Transactional': [], 'Engagement': [], 'Alerts': [] };
+  EMAIL_TEMPLATES.forEach(t => groups[t.cat].push(t));
+  $('#emailList').innerHTML = Object.entries(groups).map(([cat, items]) => `
+    <div class="nav-label" style="padding: 12px 4px 6px;">${cat}</div>
+    ${items.map((t, i) => {
+      const idx = EMAIL_TEMPLATES.findIndex(x => x.id === t.id);
+      return `<button class="screen-list-item email-list-item ${t.id === 'welcome' ? 'active' : ''}" data-id="${t.id}" onclick="renderEmail('${t.id}')">
+        <span class="sn">${String(idx+1).padStart(2,'0')}</span>
+        <span>${t.name}</span>
+      </button>`;
+    }).join('')}
+  `).join('');
+}
+
+buildEmailList();
+renderEmail('welcome');
+
+$('#emailDesk').addEventListener('click', () => {
+  currentEmailMode = 'desk';
+  $('#emailDesk').classList.add('active'); $('#emailMob').classList.remove('active');
+  renderEmail(currentEmail);
+});
+$('#emailMob').addEventListener('click', () => {
+  currentEmailMode = 'mob';
+  $('#emailMob').classList.add('active'); $('#emailDesk').classList.remove('active');
+  renderEmail(currentEmail);
+});
+$('#emailCopyHtml').addEventListener('click', () => {
+  const tpl = EMAIL_TEMPLATES.find(t => t.id === currentEmail);
+  const html = emailWrapper(EMAIL_BODIES[currentEmail], false);
+  DR.copyText(html);
+  const btn = $('#emailCopyHtml');
+  const orig = btn.textContent; btn.textContent = '✓ Copied';
+  setTimeout(() => btn.textContent = orig, 1200);
+});
+
+window.renderEmail = renderEmail;
+</script>
+
+</body>
+</html>

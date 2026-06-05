@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DhanRadar — Component Library & Responsive Variants</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%230B1F3A'/><stop offset='100%25' stop-color='%232563EB'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><circle cx='16' cy='16' r='8' fill='none' stroke='white' stroke-width='1.6' opacity='0.5'/><circle cx='16' cy='16' r='4.5' fill='none' stroke='white' stroke-width='1.6' opacity='0.8'/><line x1='16' y1='16' x2='23' y2='12.5' stroke='white' stroke-width='1.6' stroke-linecap='round'/><circle cx='23' cy='12.5' r='1.8' fill='%2310B981'/></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+/* ── Locked tokens (mirror css-variables.css) ── */
+:root{
+  --dr-navy:#0B1F3A;--dr-blue:#2563EB;--dr-emerald:#10B981;--dr-cyan:#06B6D4;--dr-amber:#F59E0B;--dr-red:#EF4444;
+  --font-display:'Manrope',ui-sans-serif,system-ui,sans-serif;
+  --font-body:'Inter',ui-sans-serif,system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;--r-2xl:20px;
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-6:24px;--sp-8:32px;
+}
+.theme-light{
+  --bg:#FFFFFF;--bg-alt:#F8FAFC;--surface:#FFFFFF;--surface-2:#F1F5F9;--surface-3:#E2E8F0;
+  --border:#E5E7EB;--border-strong:#CBD5E1;
+  --text:#0F172A;--text-2:#334155;--text-muted:#64748B;--text-faint:#94A3B8;
+  --positive:#10B981;--negative:#EF4444;--warn:#F59E0B;
+  --blue-soft:rgba(37,99,235,0.10);--emerald-soft:rgba(16,185,129,0.10);--amber-soft:rgba(245,158,11,0.14);--red-soft:rgba(239,68,68,0.10);
+  --shadow-sm:0 1px 3px rgba(15,23,42,0.06),0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md:0 4px 12px rgba(15,23,42,0.06),0 2px 4px rgba(15,23,42,0.04);
+  --shadow-lg:0 16px 40px -12px rgba(15,23,42,0.12);
+  --ring-bg:rgba(15,23,42,0.08);
+}
+.theme-dark{
+  --bg:#020617;--bg-alt:#0F172A;--surface:#0F172A;--surface-2:#1E293B;--surface-3:#293548;
+  --border:rgba(255,255,255,0.08);--border-strong:rgba(255,255,255,0.16);
+  --text:#F1F5F9;--text-2:#CBD5E1;--text-muted:#94A3B8;--text-faint:#64748B;
+  --positive:#22D3A6;--negative:#F87171;--warn:#FBBF24;
+  --blue-soft:rgba(37,99,235,0.18);--emerald-soft:rgba(34,211,166,0.16);--amber-soft:rgba(251,191,36,0.18);--red-soft:rgba(248,113,113,0.16);
+  --shadow-sm:0 1px 3px rgba(0,0,0,0.5);--shadow-md:0 8px 24px rgba(0,0,0,0.45);--shadow-lg:0 24px 60px -18px rgba(0,0,0,0.6);
+  --ring-bg:rgba(255,255,255,0.08);
+}
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;transition:background .18s,color .18s;}
+.display{font-family:var(--font-display);letter-spacing:-0.02em;}
+.mono{font-family:var(--font-mono);font-feature-settings:'tnum';}
+.pos{color:var(--positive);}.neg{color:var(--negative);}.muted{color:var(--text-muted);}.sec{color:var(--text-2);}
+:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,0.32);border-radius:var(--r-md);}
+
+/* ── Shell ── */
+.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh;}
+.side{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--bg);border-right:1px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:2px;}
+.side::-webkit-scrollbar{width:6px;}.side::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px;}
+.brand{display:flex;align-items:center;gap:11px;padding:4px 10px 16px;}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--dr-navy),var(--dr-blue));display:grid;place-items:center;flex-shrink:0;}
+.brand-name{font-family:var(--font-display);font-weight:700;font-size:16px;letter-spacing:-0.015em;}
+.brand-sub{font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-top:1px;}
+.nav-label{font-size:10px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.1em;padding:14px 12px 6px;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:8px;font-size:13px;color:var(--text-2);cursor:pointer;font-weight:500;border:none;background:transparent;text-align:left;width:100%;font-family:inherit;transition:background .12s,color .12s;}
+.nav-item:hover{background:var(--surface-2);color:var(--text);}
+.nav-item.active{background:var(--surface-2);color:var(--text);font-weight:600;}
+.nav-item .dot{width:7px;height:7px;border-radius:2px;flex-shrink:0;}
+.side-foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);}
+.theme-toggle{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);cursor:pointer;font-size:13px;color:var(--text-2);width:100%;font-family:inherit;}
+.tt-track{width:30px;height:18px;border-radius:10px;background:var(--border-strong);position:relative;}
+.tt-knob{position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text);transition:transform .2s;}
+.theme-dark .tt-knob{transform:translateX(12px);}
+
+.main{min-width:0;}
+.section{display:none;padding:48px 56px 80px;max-width:1180px;}
+.section.active{display:block;}
+.eyebrow{font-family:var(--font-mono);font-size:11px;color:var(--dr-blue);text-transform:uppercase;letter-spacing:0.14em;font-weight:600;margin-bottom:12px;}
+h1.title{font-family:var(--font-display);font-size:44px;font-weight:700;letter-spacing:-0.03em;margin:0 0 14px;line-height:1.05;}
+.lede{font-size:16px;line-height:1.6;color:var(--text-2);max-width:660px;margin:0 0 8px;}
+h2.h2{font-family:var(--font-display);font-size:24px;font-weight:700;letter-spacing:-0.02em;margin:48px 0 4px;}
+.h2-sub{color:var(--text-muted);font-size:14px;margin-bottom:20px;}
+h3.h3{font-size:11px;font-family:var(--font-mono);font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin:28px 0 14px;}
+
+/* ── Responsive variant frames ── */
+.variants{display:grid;grid-template-columns:1fr;gap:18px;}
+.vp{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg-alt);}
+.vp-head{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface);}
+.vp-label{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:0.06em;display:flex;align-items:center;gap:8px;}
+.vp-w{font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);}
+.vp-body{padding:24px;display:flex;justify-content:center;}
+.frame{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:100%;box-shadow:var(--shadow-sm);}
+.frame.w-desktop{max-width:100%;}
+.frame.w-tablet{max-width:680px;}
+.frame.w-mobile{max-width:360px;}
+
+/* ── Tokens / cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);}
+.card-pad{padding:20px 22px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.row{display:flex;align-items:center;}.col{display:flex;flex-direction:column;}
+.gap-2{gap:8px;}.gap-3{gap:12px;}.gap-4{gap:16px;}.wrap{flex-wrap:wrap;}.between{justify-content:space-between;}.grow{flex:1;min-width:0;}
+.mt-2{margin-top:8px;}.mt-3{margin-top:12px;}.mt-4{margin-top:16px;}.mb-2{margin-bottom:8px;}.mb-3{margin-bottom:12px;}
+.t11{font-size:11px;}.t12{font-size:12px;}.t13{font-size:13px;}.t14{font-size:14px;}.t15{font-size:15px;}.t16{font-size:16px;}.t18{font-size:18px;}
+.w-500{font-weight:500;}.w-600{font-weight:600;}.w-700{font-weight:700;}.upper{text-transform:uppercase;letter-spacing:0.08em;}
+.right{text-align:right;}
+
+/* Swatches */
+.sw-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.sw{border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.sw-c{height:72px;}
+.sw-m{padding:10px 12px;}
+.sw-n{font-size:12.5px;font-weight:600;}
+.sw-h{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px;}
+
+/* ── COMPONENTS ── */
+/* Buttons */
+.btn{font-family:inherit;font-size:14px;font-weight:600;padding:9px 16px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s;white-space:nowrap;letter-spacing:-0.005em;}
+.btn-primary{background:var(--dr-blue);color:#fff;box-shadow:var(--shadow-sm);}.btn-primary:hover{background:#1D4ED8;}
+.btn-dark{background:var(--text);color:var(--bg);}.btn-ghost{background:var(--surface-2);border:1px solid var(--border);}.btn-ghost:hover{background:var(--surface-3);}
+.btn-outline{border:1px solid var(--border-strong);}.btn-success{background:var(--positive);color:#fff;}.btn-danger{background:var(--negative);color:#fff;}
+.btn-sm{padding:6px 12px;font-size:12.5px;border-radius:6px;}.btn-lg{padding:12px 22px;font-size:15px;border-radius:10px;}
+.btn[disabled]{opacity:.5;cursor:not-allowed;}
+.btn-icon{width:38px;height:38px;padding:0;justify-content:center;}
+
+/* Badges/chips */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;font-family:var(--font-mono);}
+.badge-pos{background:var(--emerald-soft);color:var(--positive);}.badge-neg{background:var(--red-soft);color:var(--negative);}
+.badge-info{background:var(--blue-soft);color:var(--dr-blue);}.badge-warn{background:var(--amber-soft);color:var(--warn);}.badge-neutral{background:var(--surface-2);color:var(--text-2);}
+.signal-sb{background:rgba(16,185,129,0.18);color:var(--positive);}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);font-size:12px;color:var(--text-2);cursor:pointer;font-weight:500;font-family:inherit;}
+.chip.active{background:var(--text);color:var(--bg);border-color:var(--text);}
+.chip .x{opacity:.5;}
+
+/* Inputs */
+.label{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;display:block;margin-bottom:6px;}
+.input{width:100%;height:40px;padding:0 12px;background:var(--surface);border:1px solid var(--border-strong);border-radius:8px;font:inherit;font-size:14px;color:var(--text);outline:none;transition:border .15s,box-shadow .15s;}
+.input:focus{border-color:var(--dr-blue);box-shadow:0 0 0 3px var(--blue-soft);}
+.input::placeholder{color:var(--text-faint);}
+.input.err{border-color:var(--negative);}
+.help{font-size:12px;color:var(--text-muted);margin-top:5px;}
+.help.err{color:var(--negative);}
+.select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px;}
+.slider{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--surface-3);outline:none;width:100%;}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--dr-blue);cursor:pointer;border:2px solid var(--bg);}
+.toggle{width:40px;height:22px;border-radius:11px;background:var(--border-strong);position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;}
+.toggle.on{background:var(--dr-blue);}
+.toggle .knob{position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:var(--shadow-sm);}
+.toggle.on .knob{transform:translateX(18px);}
+
+/* Search */
+.search{position:relative;}
+.search .ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);}
+.search input{padding-left:38px;}
+.search .kbd{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:var(--font-mono);font-size:10px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:2px 6px;}
+.suggest{margin-top:6px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-md);overflow:hidden;}
+.suggest-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;}
+.suggest-item:last-child{border-bottom:none;}
+.suggest-item:hover{background:var(--surface-2);}
+
+/* Tables */
+.dt{width:100%;border-collapse:collapse;font-size:13.5px;}
+.dt th{text-align:left;font-weight:600;color:var(--text-muted);padding:11px 14px;font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid var(--border);font-family:var(--font-mono);}
+.dt th.r,.dt td.r{text-align:right;}
+.dt td{padding:13px 14px;border-bottom:1px solid var(--border);}
+.dt tr:last-child td{border-bottom:none;}
+.dt tr.hov:hover td{background:var(--surface-2);}
+.tk{display:flex;align-items:center;gap:10px;}
+.tk-logo{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px;flex-shrink:0;}
+/* Mobile table → cards */
+.dt-cards{display:flex;flex-direction:column;gap:8px;}
+.dt-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;}
+
+/* Ring */
+.ring{position:relative;display:inline-grid;place-items:center;}
+.ring svg{transform:rotate(-90deg);}
+.ring-n{position:absolute;font-family:var(--font-mono);font-weight:600;letter-spacing:-0.025em;}
+
+/* Alerts (inline banners) */
+.alert{display:flex;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid;align-items:flex-start;}
+.alert-ico{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;flex-shrink:0;font-size:14px;color:#fff;}
+.alert-info{background:var(--blue-soft);border-color:transparent;}.alert-info .alert-ico{background:var(--dr-blue);}
+.alert-pos{background:var(--emerald-soft);border-color:transparent;}.alert-pos .alert-ico{background:var(--positive);}
+.alert-warn{background:var(--amber-soft);border-color:transparent;}.alert-warn .alert-ico{background:var(--warn);}
+.alert-neg{background:var(--red-soft);border-color:transparent;}.alert-neg .alert-ico{background:var(--negative);}
+.alert-title{font-size:13.5px;font-weight:600;}
+.alert-body{font-size:12.5px;color:var(--text-2);margin-top:2px;line-height:1.5;}
+
+/* Notifications (toasts + list) */
+.toast{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-md);font-size:13px;}
+.notif{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);}
+.notif:last-child{border-bottom:none;}
+.notif-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px;}
+
+/* Watchlist */
+.wl-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);}
+.wl-row:last-child{border-bottom:none;}
+
+/* Recommendation card */
+.rec{border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--surface);}
+.rec-top{padding:18px 20px;display:flex;align-items:flex-start;gap:14px;}
+.rec-body{padding:0 20px 18px;}
+.rec-reason{background:var(--bg-alt);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--text-2);line-height:1.5;}
+.rec-foot{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--border);}
+
+/* Chart */
+.spark-area svg,.bars{display:block;}
+
+/* responsive section padding */
+@media (max-width:900px){.section{padding:28px 20px 60px;}.app{grid-template-columns:1fr;}.side{position:relative;height:auto;}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" opacity="0.4"/><circle cx="12" cy="12" r="5" opacity="0.7"/><path d="M12 12 L19 8"/><circle cx="17.5" cy="9" r="1.3" fill="#10B981" stroke="none"/></svg></div>
+      <div><div class="brand-name">DhanRadar</div><div class="brand-sub">Component Library</div></div>
+    </div>
+    <nav id="nav">
+      <div class="nav-label">Foundations</div>
+      <button class="nav-item active" data-t="foundations"><span class="dot" style="background:var(--dr-blue);"></span>Foundations</button>
+      <button class="nav-item" data-t="tokens"><span class="dot" style="background:var(--dr-emerald);"></span>Design Tokens</button>
+      <div class="nav-label">Components</div>
+      <button class="nav-item" data-t="buttons"><span class="dot" style="background:var(--dr-blue);"></span>Buttons</button>
+      <button class="nav-item" data-t="cards"><span class="dot" style="background:var(--dr-blue);"></span>Cards</button>
+      <button class="nav-item" data-t="tables"><span class="dot" style="background:var(--dr-blue);"></span>Tables</button>
+      <button class="nav-item" data-t="forms"><span class="dot" style="background:var(--dr-blue);"></span>Forms</button>
+      <button class="nav-item" data-t="search"><span class="dot" style="background:var(--dr-blue);"></span>Search</button>
+      <button class="nav-item" data-t="charts"><span class="dot" style="background:var(--dr-blue);"></span>Charts</button>
+      <button class="nav-item" data-t="filters"><span class="dot" style="background:var(--dr-blue);"></span>Filters</button>
+      <button class="nav-item" data-t="alerts"><span class="dot" style="background:var(--dr-amber);"></span>Alerts</button>
+      <button class="nav-item" data-t="notifications"><span class="dot" style="background:var(--dr-amber);"></span>Notifications</button>
+      <button class="nav-item" data-t="watchlists"><span class="dot" style="background:var(--dr-emerald);"></span>Watchlists</button>
+      <button class="nav-item" data-t="recommendations"><span class="dot" style="background:var(--dr-emerald);"></span>Recommendation Cards</button>
+    </nav>
+    <div class="side-foot">
+      <button class="theme-toggle" id="themeToggle"><span>Dark mode</span><span class="tt-track"><span class="tt-knob"></span></span></button>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-align:center;padding:8px 4px 0;">Branding locked · v1.0</div>
+    </div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+function setTheme(t){document.documentElement.classList.toggle('theme-light',t==='light');document.documentElement.classList.toggle('theme-dark',t==='dark');try{localStorage.setItem('dr-cl-theme',t);}catch(e){}}
+setTheme((()=>{try{return localStorage.getItem('dr-cl-theme')||'light';}catch(e){return 'light';}})());
+$('#themeToggle').addEventListener('click',()=>setTheme(document.documentElement.classList.contains('theme-dark')?'light':'dark'));
+
+// Responsive variant wrapper: shows the same component HTML at desktop/tablet/mobile widths
+function variants(desktopHTML, tabletHTML, mobileHTML){
+  const t = tabletHTML || desktopHTML;
+  const m = mobileHTML || tabletHTML || desktopHTML;
+  return `<div class="variants">
+    <div class="vp"><div class="vp-head"><span class="vp-label">▦ Desktop</span><span class="vp-w">≥ 1024px</span></div><div class="vp-body"><div class="frame w-desktop">${desktopHTML}</div></div></div>
+    <div class="vp"><div class="vp-head"><span class="vp-label">▢ Tablet</span><span class="vp-w">768px</span></div><div class="vp-body"><div class="frame w-tablet">${t}</div></div></div>
+    <div class="vp"><div class="vp-head"><span class="vp-label">▯ Mobile</span><span class="vp-w">375px</span></div><div class="vp-body"><div class="frame w-mobile">${m}</div></div></div>
+  </div>`;
+}
+function ring(score,size,stroke){const r=(size-stroke)/2;const c=2*Math.PI*r;const off=c*(1-score/100);const col=score>=85?'var(--positive)':score>=70?'var(--dr-blue)':score>=55?'var(--warn)':score>=40?'#F97316':'var(--negative)';return `<div class="ring" style="width:${size}px;height:${size}px;"><svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--ring-bg)" stroke-width="${stroke}"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${col}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/></svg><div class="ring-n" style="font-size:${Math.round(size*0.34)}px;">${score}</div></div>`;}
+function area(seed,w,h,up){let s=seed,N=48,d=[],v=100;const rnd=()=>{s=(s*9301+49297)%233280;return s/233280;};for(let i=0;i<N;i++){v*=(1+(rnd()-0.5)*0.03+(up?0.006:-0.005));d.push(v);}const lo=Math.min(...d)*0.99,hi=Math.max(...d)*1.01,rg=hi-lo,sx=w/(N-1);const pts=d.map((y,i)=>[i*sx,h-((y-lo)/rg)*(h-8)-4]);const dd='M'+pts.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L');const col=up?'var(--positive)':'var(--negative)';return `<svg width="${w}" height="${h}" style="display:block;max-width:100%;"><defs><linearGradient id="a${seed}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity="0.3"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${dd} L ${w},${h} L 0,${h} Z" fill="url(#a${seed})"/><path d="${dd}" fill="none" stroke="${col}" stroke-width="1.8"/></svg>`;}
+
+window.DR={variants,ring,area,$,$$};
+</script>
+<script>
+/* DhanRadar — Component Library sections. Branding locked; tokens reused. */
+(function(){
+const V = window.DR.variants, ring = window.DR.ring, area = window.DR.area;
+
+/* ---------- shared snippets ---------- */
+const btnRow = `<div class="row gap-2 wrap"><button class="btn btn-primary">Analyze</button><button class="btn btn-dark">Get started</button><button class="btn btn-ghost">Compare</button><button class="btn btn-outline">Learn more</button></div>`;
+const stockRow = (sym,name,c,l,price,chg,score)=>`<div class="tk"><div class="tk-logo" style="background:${c};">${l}</div><div class="grow"><div class="t13 w-600">${name}</div><div class="t11 muted mono">${sym}</div></div><div class="col right"><div class="mono t13 w-600">₹${price}</div><div class="mono t11 ${chg>=0?'pos':'neg'}">${chg>=0?'+':''}${chg}%</div></div>${ring(score,40,4)}</div>`;
+
+/* ============ FOUNDATIONS ============ */
+const foundations = `
+<section class="section active" id="s-foundations">
+  <div class="eyebrow">// Foundations</div>
+  <h1 class="title">Foundations.</h1>
+  <p class="lede">The locked primitives — colors, type, grid, spacing, motion and accessibility — that every component inherits. Branding is fixed; this extends the system without altering it.</p>
+
+  <h2 class="h2">Color</h2>
+  <div class="h2-sub">Three brand colors, four semantic accents, one neutral scale per theme. Toggle the theme (bottom-left) to see dark mode.</div>
+  <div class="sw-grid">
+    <div class="sw"><div class="sw-c" style="background:#0B1F3A;"></div><div class="sw-m"><div class="sw-n">Deep Navy</div><div class="sw-h">#0B1F3A</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#2563EB;"></div><div class="sw-m"><div class="sw-n">Electric Blue</div><div class="sw-h">#2563EB</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#10B981;"></div><div class="sw-m"><div class="sw-n">Emerald</div><div class="sw-h">#10B981</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#06B6D4;"></div><div class="sw-m"><div class="sw-n">Cyan</div><div class="sw-h">#06B6D4</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#F59E0B;"></div><div class="sw-m"><div class="sw-n">Amber</div><div class="sw-h">#F59E0B</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#EF4444;"></div><div class="sw-m"><div class="sw-n">Red</div><div class="sw-h">#EF4444</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#0F172A;"></div><div class="sw-m"><div class="sw-n">Text</div><div class="sw-h">#0F172A</div></div></div>
+    <div class="sw"><div class="sw-c" style="background:#64748B;"></div><div class="sw-m"><div class="sw-n">Muted</div><div class="sw-h">#64748B</div></div></div>
+  </div>
+
+  <h2 class="h2">Typography</h2>
+  <div class="h2-sub">Manrope (display) · Inter (body/UI) · JetBrains Mono (numbers). Scale flexes by breakpoint.</div>
+  <div class="card card-pad">
+    <div class="display" style="font-size:44px;font-weight:700;letter-spacing:-0.03em;line-height:1.05;">Smarter investments</div>
+    <div style="font-size:16px;color:var(--text-2);margin-top:10px;line-height:1.6;max-width:560px;">Body copy in Inter. One score from valuation, growth, quality, momentum and risk — explained in plain English.</div>
+    <div class="mono mt-3" style="font-size:24px;font-weight:600;">₹2,841.30 <span class="pos" style="font-size:14px;">+1.84%</span></div>
+  </div>
+
+  <h2 class="h2">Grid & Layout</h2>
+  <div class="h2-sub">12-col (lg+) · 8-col (md) · 4-col (sm). Max container 1200px, 32px side padding. App shell: sidebar + content (desktop), off-canvas + bottom-tab (mobile).</div>
+  <div class="card card-pad">
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;">
+      ${Array.from({length:12}).map(()=>`<div style="height:48px;background:var(--blue-soft);border:1px solid var(--border);border-radius:6px;"></div>`).join('')}
+    </div>
+    <div class="row between mt-3"><span class="t12 muted mono">12 columns · 24px gutter</span><span class="t12 muted mono">desktop</span></div>
+  </div>
+
+  <h2 class="h2">Spacing</h2>
+  <div class="h2-sub">4px base grid. Tokens: 1·2·3·4·5·6·8·10·12·16 (× 4px).</div>
+  <div class="card card-pad">
+    ${[1,2,3,4,6,8,12,16].map(n=>`<div class="row gap-3" style="padding:5px 0;align-items:center;"><span class="mono t12" style="width:90px;color:var(--text-muted);">space-${n}</span><div style="width:${n*4}px;height:16px;background:var(--dr-blue);border-radius:2px;"></div><span class="mono t12 muted">${n*4}px</span></div>`).join('')}
+  </div>
+
+  <h2 class="h2">Motion</h2>
+  <div class="h2-sub">Fast 120ms (hover) · Base 200ms (dropdowns) · Slow 320ms spring (modals, score fill) · Stage 560ms (page transitions). Respects prefers-reduced-motion.</div>
+  <div class="grid-4">
+    ${[['Fast','120ms','Hover, focus'],['Base','200ms','Dropdown, tooltip'],['Slow','320ms','Modal, score fill'],['Stage','560ms','Page transition']].map(([n,d,u])=>`<div class="card card-pad"><div class="t14 w-600">${n}</div><div class="mono t13 mt-2" style="color:var(--dr-blue);">${d}</div><div class="t12 muted mt-2">${u}</div></div>`).join('')}
+  </div>
+
+  <h2 class="h2">Accessibility</h2>
+  <div class="h2-sub">WCAG 2.1 AA floor — baked into every component below.</div>
+  <div class="card card-pad">
+    ${['AA contrast on every text/background pair','Visible :focus-visible ring (3px blue, 32% alpha) on all interactive elements','Min tap target 44×44 on mobile; body ≥ 14px','Color never the only signal — paired with icon, label or weight','Semantic HTML; ARIA labels on icon-only controls','Honours prefers-reduced-motion and prefers-color-scheme'].map(t=>`<div class="row gap-2" style="padding:6px 0;align-items:flex-start;"><span class="pos w-700" style="flex-shrink:0;">✓</span><span class="t13 sec" style="line-height:1.5;">${t}</span></div>`).join('')}
+  </div>
+</section>`;
+
+/* ============ TOKENS ============ */
+const tokens = `
+<section class="section" id="s-tokens">
+  <div class="eyebrow">// Design Tokens</div>
+  <h1 class="title">Design tokens.</h1>
+  <p class="lede">One source of truth, three formats. Ship as Figma Variables, CSS custom properties, and a Tailwind preset — all in the package folder.</p>
+  <div class="grid-3 mt-4">
+    <div class="card card-pad"><div class="t15 w-600">Figma Variables</div><div class="t13 muted mt-2" style="line-height:1.5;">Color (Light/Dark modes), Typography, Spacing, Radius, Breakpoint collections.</div><div class="mono t12 mt-3" style="color:var(--dr-blue);">figma-variables.json</div></div>
+    <div class="card card-pad"><div class="t15 w-600">CSS Variables</div><div class="t13 muted mt-2" style="line-height:1.5;">Drop-in custom properties with .theme-light / .theme-dark scopes.</div><div class="mono t12 mt-3" style="color:var(--dr-blue);">css-variables.css</div></div>
+    <div class="card card-pad"><div class="t15 w-600">Tailwind</div><div class="t13 muted mt-2" style="line-height:1.5;">Preset with colors, fonts, sizes, radii, shadows, breakpoints wired.</div><div class="mono t12 mt-3" style="color:var(--dr-blue);">tailwind.config.js</div></div>
+  </div>
+  <h2 class="h2">Naming convention</h2>
+  <div class="card card-pad">
+    <table class="dt"><thead><tr><th>Layer</th><th>Figma</th><th>CSS</th><th>Tailwind</th></tr></thead><tbody>
+      <tr class="hov"><td>Brand blue</td><td class="mono">brand/blue</td><td class="mono">--dr-blue</td><td class="mono">blue</td></tr>
+      <tr class="hov"><td>Surface 2</td><td class="mono">surface/2</td><td class="mono">--surface-2</td><td class="mono">surface-2</td></tr>
+      <tr class="hov"><td>Text muted</td><td class="mono">text/muted</td><td class="mono">--text-muted</td><td class="mono">ink-muted</td></tr>
+      <tr class="hov"><td>Space 4</td><td class="mono">space/4</td><td class="mono">--dr-space-4</td><td class="mono">p-4</td></tr>
+      <tr class="hov"><td>Radius xl</td><td class="mono">radius/xl</td><td class="mono">--dr-r-xl</td><td class="mono">rounded-xl</td></tr>
+    </tbody></table>
+  </div>
+</section>`;
+
+/* ============ BUTTONS ============ */
+const buttons = `
+<section class="section" id="s-buttons">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Buttons.</h1>
+  <p class="lede">Primary action is Electric Blue. Dark for high-emphasis neutral. Ghost/outline for secondary. Success/danger for semantic. Three sizes. Full-width on mobile.</p>
+  <h3 class="h3">Variants & states</h3>
+  <div class="card card-pad">
+    <div class="row gap-2 wrap mb-3">${btnRow.replace('<div class="row gap-2 wrap">','').replace('</div>','')}</div>
+    <div class="row gap-2 wrap mb-3"><button class="btn btn-success">Add holding</button><button class="btn btn-danger">Delete</button><button class="btn btn-primary" disabled>Disabled</button><button class="btn btn-icon btn-ghost">★</button></div>
+    <div class="row gap-2 wrap"><button class="btn btn-primary btn-sm">Small</button><button class="btn btn-primary">Default</button><button class="btn btn-primary btn-lg">Large</button></div>
+  </div>
+  <h3 class="h3">Responsive variants</h3>
+  ${V(
+    `<div class="row gap-2"><button class="btn btn-primary">Start free trial</button><button class="btn btn-ghost">Sign in</button></div>`,
+    `<div class="row gap-2"><button class="btn btn-primary">Start free trial</button><button class="btn btn-ghost">Sign in</button></div>`,
+    `<button class="btn btn-primary" style="width:100%;justify-content:center;height:46px;">Start free trial</button><button class="btn btn-ghost" style="width:100%;justify-content:center;height:46px;margin-top:8px;">Sign in</button>`
+  )}
+  <div class="t12 muted mt-3">Mobile: primary actions go full-width, 46px tall (≥44px tap target), stacked.</div>
+</section>`;
+
+/* ============ CARDS ============ */
+const cards = `
+<section class="section" id="s-cards">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Cards.</h1>
+  <p class="lede">The workhorse surface. 16px radius, hairline border, theme-aware. KPI, instrument, and content variants. Grid reflows 3→2→1 across breakpoints.</p>
+  <h3 class="h3">KPI · responsive grid</h3>
+  ${V(
+    `<div class="grid-4">${[['Portfolio','₹4.83L','+3.49%','pos'],['XIRR','18.42%','+0.18 MoM','muted'],['vs NIFTY','+4.6%','12-month','muted'],['Score','82','Above avg','muted']].map(([l,v,d,c])=>`<div class="card card-pad"><div class="label">${l}</div><div class="display mono" style="font-size:26px;font-weight:700;letter-spacing:-0.02em;margin-top:4px;">${v}</div><div class="mono t12 mt-2 ${c}">${d}</div></div>`).join('')}</div>`,
+    `<div class="grid-2">${[['Portfolio','₹4.83L','+3.49%','pos'],['XIRR','18.42%','+0.18 MoM','muted'],['vs NIFTY','+4.6%','12-month','muted'],['Score','82','Above avg','muted']].map(([l,v,d,c])=>`<div class="card card-pad"><div class="label">${l}</div><div class="display mono" style="font-size:24px;font-weight:700;margin-top:4px;">${v}</div><div class="mono t12 mt-2 ${c}">${d}</div></div>`).join('')}</div>`,
+    `<div style="display:flex;flex-direction:column;gap:8px;">${[['Portfolio','₹4.83L','+3.49%','pos'],['XIRR','18.42%','+0.18 MoM','muted']].map(([l,v,d,c])=>`<div class="card card-pad row between"><div class="label" style="margin:0;">${l}</div><div class="col right"><div class="display mono" style="font-size:20px;font-weight:700;">${v}</div><div class="mono t11 ${c}">${d}</div></div></div>`).join('')}</div>`
+  )}
+  <h3 class="h3">Instrument card</h3>
+  <div class="card card-pad" style="max-width:420px;">${stockRow('RELIANCE','Reliance Industries','#0A1F4A','R','2,841','1.84',86)}</div>
+</section>`;
+
+/* ============ TABLES ============ */
+const rows = [['RELIANCE','Reliance','#0A1F4A','R','Energy','2,841',1.84,86],['TCS','TCS','#1F4E9E','T','IT','4,102',0.62,91],['HDFCBANK','HDFC Bank','#003E80','H','Banking','1,672',-0.42,84],['INFY','Infosys','#0E3F7C','I','IT','1,842',1.21,82]];
+const tables = `
+<section class="section" id="s-tables">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Tables.</h1>
+  <p class="lede">Dense data, mono numbers, sortable headers, row hover. On mobile, tables collapse into stacked cards — no horizontal scroll for core data.</p>
+  ${V(
+    `<table class="dt"><thead><tr><th>Stock</th><th>Sector</th><th class="r">Price</th><th class="r">1D</th><th class="r">Score</th></tr></thead><tbody>${rows.map(r=>`<tr class="hov"><td><div class="tk"><div class="tk-logo" style="background:${r[2]};">${r[3]}</div><div><div class="t13 w-600">${r[1]}</div><div class="t11 muted mono">${r[0]}</div></div></div></td><td class="t13 sec">${r[4]}</td><td class="r mono">${r[5]}</td><td class="r mono ${r[6]>=0?'pos':'neg'}">${r[6]>=0?'+':''}${r[6]}%</td><td class="r mono w-600">${r[7]}</td></tr>`).join('')}</tbody></table>`,
+    `<table class="dt"><thead><tr><th>Stock</th><th class="r">Price</th><th class="r">1D</th><th class="r">Score</th></tr></thead><tbody>${rows.map(r=>`<tr class="hov"><td><div class="tk"><div class="tk-logo" style="background:${r[2]};">${r[3]}</div><div class="t13 w-600">${r[0]}</div></div></td><td class="r mono">${r[5]}</td><td class="r mono ${r[6]>=0?'pos':'neg'}">${r[6]>=0?'+':''}${r[6]}%</td><td class="r mono w-600">${r[7]}</td></tr>`).join('')}</tbody></table>`,
+    `<div class="dt-cards">${rows.map(r=>`<div class="dt-card"><div class="row between"><div class="tk"><div class="tk-logo" style="background:${r[2]};">${r[3]}</div><div><div class="t13 w-600">${r[0]}</div><div class="t11 muted">${r[4]}</div></div></div>${ring(r[7],38,4)}</div><div class="row between mt-3"><span class="mono t13 w-600">₹${r[5]}</span><span class="mono t12 ${r[6]>=0?'pos':'neg'}">${r[6]>=0?'+':''}${r[6]}%</span></div></div>`).join('')}</div>`
+  )}
+</section>`;
+
+/* ============ FORMS ============ */
+const forms = `
+<section class="section" id="s-forms">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Forms.</h1>
+  <p class="lede">Inputs, selects, sliders, toggles, validation. 40px height, focus ring, mono uppercase labels. Single-column on mobile; fields never below 16px to avoid iOS zoom.</p>
+  ${V(
+    `<div class="grid-2">
+      <div><label class="label">Email</label><input class="input" value="aarav.s@example.com"/><div class="help">We never share your email.</div></div>
+      <div><label class="label">Risk appetite</label><select class="input select"><option>Conservative</option><option selected>Moderate</option><option>Aggressive</option></select></div>
+      <div><label class="label">Password</label><input class="input err" type="password" value="123"/><div class="help err">Min 8 characters.</div></div>
+      <div><label class="label">SIP amount</label><input class="input mono" value="₹5,000"/></div>
+      <div style="grid-column:1/-1;"><label class="label">DhanRadar Score ≥ 75</label><input type="range" class="slider" min="0" max="100" value="75"/></div>
+      <div class="row between" style="grid-column:1/-1;"><span class="t13 sec">Email me weekly digest</span><span class="toggle on"><span class="knob"></span></span></div>
+    </div>`,
+    null,
+    `<div style="display:flex;flex-direction:column;gap:14px;">
+      <div><label class="label">Email</label><input class="input" value="aarav.s@example.com"/></div>
+      <div><label class="label">Risk appetite</label><select class="input select"><option selected>Moderate</option></select></div>
+      <div><label class="label">SIP amount</label><input class="input mono" value="₹5,000"/></div>
+      <div class="row between"><span class="t13 sec">Weekly digest</span><span class="toggle on"><span class="knob"></span></span></div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center;height:46px;">Continue</button>
+    </div>`
+  )}
+</section>`;
+
+/* ============ SEARCH ============ */
+const sg = (sym,name,c,l,sec,score)=>`<div class="suggest-item"><div class="tk-logo" style="background:${c};width:32px;height:32px;">${l}</div><div class="grow"><div class="t13 w-600">${name}</div><div class="t11 muted mono">${sym} · ${sec}</div></div><span class="badge badge-info">Score ${score}</span></div>`;
+const search = `
+<section class="section" id="s-search">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Search.</h1>
+  <p class="lede">Global ⌘K entry with autosuggest. Each result shows logo, name, ticker, sector and live Score. Full-width on mobile; ⌘K hint hidden on touch.</p>
+  ${V(
+    `<div class="search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 L21 21"/></svg></span><input class="input" placeholder='Search "Reliance", "Parag Parikh Flexi Cap"…'/><span class="kbd">⌘K</span></div>
+     <div class="suggest">${sg('RELIANCE','Reliance Industries','#0A1F4A','R','Energy',86)}${sg('TCS','Tata Consultancy','#1F4E9E','T','IT Services',91)}${sg('HDFCBANK','HDFC Bank','#003E80','H','Banking',84)}</div>`,
+    null,
+    `<div class="search"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16 16 L21 21"/></svg></span><input class="input" placeholder="Search stocks, funds…"/></div>
+     <div class="suggest">${sg('RELIANCE','Reliance Ind.','#0A1F4A','R','Energy',86)}${sg('TCS','TCS','#1F4E9E','T','IT',91)}</div>`
+  )}
+</section>`;
+
+/* ============ CHARTS ============ */
+const charts = `
+<section class="section" id="s-charts">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Charts.</h1>
+  <p class="lede">Score gauge, area/price chart, factor bars, sparklines, donut. Simplified axes and full-bleed on mobile; tooltips on desktop.</p>
+  <h3 class="h3">Score gauge · sizes</h3>
+  <div class="card card-pad row gap-4 wrap" style="justify-content:center;">
+    <div style="text-align:center;">${ring(42,56,5)}<div class="mono t11 muted mt-2">Avoid</div></div>
+    <div style="text-align:center;">${ring(62,56,5)}<div class="mono t11 muted mt-2">Hold</div></div>
+    <div style="text-align:center;">${ring(78,56,5)}<div class="mono t11 muted mt-2">Buy</div></div>
+    <div style="text-align:center;">${ring(86,96,7)}<div class="mono t11 muted mt-2">Strong Buy</div></div>
+  </div>
+  <h3 class="h3">Price chart · responsive</h3>
+  ${V(
+    `<div class="row between mb-3"><div class="t14 w-600">RELIANCE · 1Y</div><div class="row gap-2"><span class="chip">6M</span><span class="chip active">1Y</span><span class="chip">5Y</span></div></div>${area(91,720,200,true)}`,
+    `<div class="row between mb-3"><div class="t14 w-600">RELIANCE · 1Y</div></div>${area(91,620,180,true)}`,
+    `<div class="t14 w-600 mb-3">RELIANCE · 1Y</div>${area(91,320,140,true)}<div class="row gap-2 mt-3">${['1M','6M','1Y','5Y'].map((p,i)=>`<span class="chip ${i===2?'active':''}" style="flex:1;justify-content:center;">${p}</span>`).join('')}</div>`
+  )}
+  <h3 class="h3">Factor bars</h3>
+  <div class="card card-pad" style="max-width:420px;">${[['Valuation',78,'var(--positive)'],['Growth',82,'var(--positive)'],['Quality',91,'var(--positive)'],['Momentum',88,'var(--positive)'],['Risk',71,'var(--warn)']].map(([n,v,c])=>`<div style="padding:6px 0;"><div class="row between t12 sec mb-2"><span>${n}</span><span class="mono w-600">${v}</span></div><div style="height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden;"><div style="width:${v}%;height:100%;background:${c};border-radius:3px;"></div></div></div>`).join('')}</div>
+</section>`;
+
+/* ============ FILTERS ============ */
+const filters = `
+<section class="section" id="s-filters">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Filters.</h1>
+  <p class="lede">Screener controls — chips, range sliders, applied-filter pills. Sidebar on desktop, collapsible drawer on tablet, bottom-sheet on mobile.</p>
+  <h3 class="h3">Applied filters (removable pills)</h3>
+  <div class="card card-pad row gap-2 wrap">
+    <span class="chip active">Banking <span class="x">×</span></span>
+    <span class="chip active">IT Services <span class="x">×</span></span>
+    <span class="chip active">Score ≥ 75 <span class="x">×</span></span>
+    <span class="chip active">PE ≤ 30 <span class="x">×</span></span>
+    <span class="chip">+ Add filter</span>
+    <span class="t12 muted" style="margin-left:auto;align-self:center;">42 results</span>
+  </div>
+  <h3 class="h3">Filter panel · responsive</h3>
+  ${V(
+    `<div style="display:grid;grid-template-columns:240px 1fr;gap:16px;">
+      <div class="card card-pad"><div class="t13 w-600 mb-3">Filters</div>
+        <div class="mb-3"><div class="label">Sector</div><div class="row gap-2 wrap"><span class="chip active">Banking</span><span class="chip active">IT</span><span class="chip">FMCG</span><span class="chip">Auto</span></div></div>
+        <div class="mb-3"><div class="row between t12 sec mb-2"><span>Score</span><span class="mono">≥ 75</span></div><input type="range" class="slider" min="0" max="100" value="75"/></div>
+        <div><div class="row between t12 sec mb-2"><span>PE ratio</span><span class="mono">≤ 30</span></div><input type="range" class="slider" min="5" max="100" value="30"/></div>
+      </div>
+      <div class="card card-pad"><div class="t13 muted">Results table →</div></div>
+    </div>`,
+    `<div class="card card-pad"><div class="row between mb-3"><div class="t13 w-600">Filters</div><span class="chip">▾ Collapse</span></div><div class="row gap-2 wrap"><span class="chip active">Banking</span><span class="chip active">IT</span><span class="chip">FMCG</span></div></div>`,
+    `<div><button class="btn btn-ghost" style="width:100%;justify-content:space-between;"><span>⚙ Filters · 4 active</span><span>▾</span></button><div class="t12 muted mt-3" style="text-align:center;">Opens as bottom-sheet on tap</div></div>`
+  )}
+</section>`;
+
+/* ============ ALERTS ============ */
+const alerts = `
+<section class="section" id="s-alerts">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Alerts.</h1>
+  <p class="lede">Inline status banners (info/success/warning/danger) and configurable alert rules. Color is always paired with an icon and label.</p>
+  <h3 class="h3">Inline banners</h3>
+  <div class="card card-pad" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="alert alert-info"><div class="alert-ico">i</div><div><div class="alert-title">Score updated</div><div class="alert-body">RELIANCE moved 85 → 86. Quality and momentum improved this quarter.</div></div></div>
+    <div class="alert alert-pos"><div class="alert-ico">✓</div><div><div class="alert-title">Alert created</div><div class="alert-body">You'll be notified when TCS crosses ₹4,100.</div></div></div>
+    <div class="alert alert-warn"><div class="alert-ico">!</div><div><div class="alert-title">Earnings due</div><div class="alert-body">HDFC Bank reports Q2 results in 3 days.</div></div></div>
+    <div class="alert alert-neg"><div class="alert-ico">!</div><div><div class="alert-title">High volatility</div><div class="alert-body">ADANIENT 30-day volatility up 28%. Consider a stop-loss.</div></div></div>
+  </div>
+  <h3 class="h3">Alert rule · responsive</h3>
+  ${V(
+    `<div class="card card-pad row gap-3 between"><div class="row gap-3"><span class="toggle on"><span class="knob"></span></span><div><div class="t13 w-600">TCS · Price alert</div><div class="t12 muted mono">Notify when &gt; ₹4,100</div></div></div><div class="row gap-2"><span class="badge badge-pos">Active</span><button class="btn btn-ghost btn-sm">Edit</button></div></div>`,
+    null,
+    `<div class="card card-pad"><div class="row between mb-2"><div class="t13 w-600">TCS · Price alert</div><span class="toggle on"><span class="knob"></span></span></div><div class="t12 muted mono">Notify when &gt; ₹4,100</div><button class="btn btn-ghost btn-sm mt-3" style="width:100%;justify-content:center;">Edit alert</button></div>`
+  )}
+</section>`;
+
+/* ============ NOTIFICATIONS ============ */
+const notifications = `
+<section class="section" id="s-notifications">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Notifications.</h1>
+  <p class="lede">Transient toasts and a persistent notification center. Calibrated hard — only material moves notify. Toast anchors bottom-right (desktop) / top (mobile).</p>
+  <h3 class="h3">Toasts</h3>
+  <div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start;">
+    <div class="toast"><span class="pos">●</span> Watchlist updated · Reliance added</div>
+    <div class="toast" style="border-color:var(--positive);"><span class="pos">✓</span> Alert created · TCS &gt; ₹4,100</div>
+    <div class="toast" style="border-color:var(--negative);"><span class="neg">!</span> Score dropped · ITC 78 → 72</div>
+  </div>
+  <h3 class="h3">Notification center · responsive</h3>
+  ${V(
+    `<div class="card" style="max-width:420px;"><div class="row between" style="padding:14px 16px;border-bottom:1px solid var(--border);"><div class="t14 w-600">Notifications</div><span class="t12" style="color:var(--dr-blue);">Mark all read</span></div>
+      ${[['var(--positive)','Price crossed','TCS · ₹4,102 > ₹4,100','2h'],['var(--dr-blue)','Score change','RELIANCE 85 → 86','4h'],['var(--negative)','Risk alert','ADANIENT volatility +28%','6h']].map(n=>`<div class="notif"><span class="notif-dot" style="background:${n[0]};"></span><div class="grow"><div class="t13 w-600">${n[1]}</div><div class="t12 muted mono">${n[2]}</div></div><span class="t11 muted">${n[3]}</span></div>`).join('')}</div>`,
+    null,
+    `<div class="card"><div class="row between" style="padding:14px 16px;border-bottom:1px solid var(--border);"><div class="t14 w-600">Notifications</div></div>
+      ${[['var(--positive)','Price crossed','TCS > ₹4,100','2h'],['var(--dr-blue)','Score change','RELIANCE 85→86','4h']].map(n=>`<div class="notif"><span class="notif-dot" style="background:${n[0]};"></span><div class="grow"><div class="t13 w-600">${n[1]}</div><div class="t11 muted mono">${n[2]}</div></div><span class="t11 muted">${n[3]}</span></div>`).join('')}</div>`
+  )}
+</section>`;
+
+/* ============ WATCHLISTS ============ */
+const wl = (sym,name,c,l,price,chg,score)=>`<div class="wl-row"><div class="tk-logo" style="background:${c};">${l}</div><div class="grow"><div class="t13 w-600">${name}</div><div class="t11 muted mono">${sym}</div></div>${area(sym.charCodeAt(0)*3,70,28,chg>=0)}<div class="col right" style="width:70px;"><div class="mono t13 w-600">₹${price}</div><div class="mono t11 ${chg>=0?'pos':'neg'}">${chg>=0?'+':''}${chg}%</div></div>${ring(score,36,4)}</div>`;
+const watchlists = `
+<section class="section" id="s-watchlists">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Watchlists.</h1>
+  <p class="lede">Track a set; spot moves at a glance. Each row: logo, name, sparkline, price/change, live Score. Sparkline hidden on narrow mobile to keep numbers legible.</p>
+  ${V(
+    `<div class="card"><div class="row between" style="padding:16px 18px;border-bottom:1px solid var(--border);"><div><div class="t14 w-600">Watchlist · Primary</div><div class="t12 muted">5 instruments</div></div><button class="btn btn-ghost btn-sm">+ Add</button></div><div style="padding:4px 18px;">
+      ${wl('RELIANCE','Reliance Industries','#0A1F4A','R','2,841','1.84',86)}${wl('TCS','Tata Consultancy','#1F4E9E','T','4,102','0.62',91)}${wl('HDFCBANK','HDFC Bank','#003E80','H','1,672','-0.42',84)}</div></div>`,
+    null,
+    `<div class="card"><div class="row between" style="padding:14px 16px;border-bottom:1px solid var(--border);"><div class="t14 w-600">Primary</div><button class="btn btn-ghost btn-sm">+</button></div><div style="padding:2px 16px;">
+      ${[['RELIANCE','#0A1F4A','R','2,841','1.84',86],['TCS','#1F4E9E','T','4,102','0.62',91],['HDFCBANK','#003E80','H','1,672','-0.42',84]].map(r=>`<div class="wl-row"><div class="tk-logo" style="background:${r[1]};">${r[2]}</div><div class="grow"><div class="t13 w-600">${r[0]}</div></div><div class="col right"><div class="mono t13 w-600">₹${r[3]}</div><div class="mono t11 ${r[4]>=0?'pos':'neg'}">${r[4]>=0?'+':''}${r[4]}%</div></div>${ring(r[5],34,4)}</div>`).join('')}</div></div>`
+  )}
+</section>`;
+
+/* ============ RECOMMENDATION CARDS ============ */
+const recCard = (sym,name,c,l,signal,sigClass,score,price,target,reason)=>`<div class="rec"><div class="rec-top"><div class="tk-logo" style="background:${c};width:44px;height:44px;border-radius:11px;font-size:15px;">${l}</div><div class="grow"><div class="t15 w-600">${name}</div><div class="t12 muted mono">${sym} · NSE</div><div class="row gap-2 mt-2"><span class="badge ${sigClass}">● ${signal}</span><span class="badge badge-neutral">Target ₹${target}</span></div></div>${ring(score,64,6)}</div><div class="rec-body"><div class="rec-reason"><strong style="color:var(--text);">Why ${signal}:</strong> ${reason}</div></div><div class="rec-foot"><button class="btn btn-primary btn-sm">Add to Watchlist</button><button class="btn btn-ghost btn-sm">Why ${score}? →</button></div></div>`;
+const recommendations = `
+<section class="section" id="s-recommendations">
+  <div class="eyebrow">// Component</div>
+  <h1 class="title">Recommendation cards.</h1>
+  <p class="lede">The signature surface — Score, signal, fair-value target, and a plain-English reason. AI "Why?" is always one tap away. The reason box is non-negotiable: never a signal without a why.</p>
+  ${V(
+    `<div class="grid-2">${recCard('RELIANCE','Reliance Industries','#0A1F4A','R','Strong Buy','signal-sb',86,'2,841','3,120','Q2 PAT beat estimates, net debt down ₹38K Cr, and the 50-DMA crossed above the 200-DMA. Top 8% in Energy.')}${recCard('TITAN','Titan Company','#6A1B9A','T','Hold','badge-warn',70,'3,344','3,400','Premiumisation intact but PE of 88x leaves little margin for error. Demand softness in Q2 is a watch-item.')}</div>`,
+    `<div style="display:flex;flex-direction:column;gap:14px;">${recCard('RELIANCE','Reliance Industries','#0A1F4A','R','Strong Buy','signal-sb',86,'2,841','3,120','Q2 PAT beat estimates, net debt down ₹38K Cr, 50-DMA crossed above 200-DMA.')}</div>`,
+    `${recCard('RELIANCE','Reliance Ind.','#0A1F4A','R','Strong Buy','signal-sb',86,'2,841','3,120','Q2 beat estimates, net debt down, momentum positive. Top 8% in Energy.')}`
+  )}
+</section>`;
+
+window.CL_SECTIONS = foundations+tokens+buttons+cards+tables+forms+search+charts+filters+alerts+notifications+watchlists+recommendations;
+})();
+
+</script>
+<script>
+// Router
+function go(t){$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.t===t));$$('.section').forEach(s=>s.classList.toggle('active',s.id==='s-'+t));window.scrollTo({top:0});try{history.replaceState(null,'','#'+t);}catch(e){}}
+$('#main').innerHTML = window.CL_SECTIONS;
+$$('.nav-item').forEach(b=>b.addEventListener('click',()=>go(b.dataset.t)));
+const init=(location.hash||'#foundations').slice(1);
+go($$('.nav-item').find(b=>b.dataset.t===init)?init:'foundations');
+</script>
+</body>
+</html>

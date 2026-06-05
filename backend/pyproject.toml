@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "dhanradar"
+version = "0.1.0"
+description = "DhanRadar — AI-powered Indian mutual fund & stock radar"
+requires-python = ">=3.12"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Lock the fixture loop scope to function (matches db_engine/db_tables scope)
+# and silence pytest-asyncio's "unset loop scope" deprecation warning.
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "integration: requires a live Postgres database and fakeredis (deselect with -m 'not integration')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:fakeredis",
+    "ignore::DeprecationWarning:asyncio",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
