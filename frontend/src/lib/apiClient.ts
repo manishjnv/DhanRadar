@@ -9,8 +9,24 @@
  *  - 401 → ONE silent refresh attempt via POST /auth/refresh, then retry
  */
 
-const API_BASE =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) ?? '/api/v1';
+// Base path is the non-negotiable `/api/v1` contract. `NEXT_PUBLIC_API_URL`
+// may override the origin (e.g. in tests / previews) but MUST still terminate in
+// `/api/v1` — otherwise every request silently misses the versioned base path
+// (B10). We fail closed at module load rather than emit subtly-wrong requests.
+// NOTE: the previous `(cond && value) ?? '/api/v1'` form returned the boolean
+// `false` when `process` was undefined; `||` below also fixes that.
+const RAW_API_URL =
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) || '';
+
+if (RAW_API_URL && !/\/api\/v1\/?$/.test(RAW_API_URL)) {
+  throw new Error(
+    `[apiClient] NEXT_PUBLIC_API_URL must end with the "/api/v1" base path (got "${RAW_API_URL}"). ` +
+      'The /api/v1 prefix is an architecture non-negotiable.',
+  );
+}
+
+// Strip any trailing slash so `${API_BASE}${path}` never doubles the separator.
+const API_BASE = (RAW_API_URL || '/api/v1').replace(/\/$/, '');
 
 // ---------------------------------------------------------------------------
 // Error type

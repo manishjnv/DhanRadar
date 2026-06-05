@@ -3,221 +3,25 @@
     "next/core-web-vitals",
     "plugin:jsx-a11y/recommended"
   ],
-  "plugins": ["jsx-a11y", "import"],
+  "plugins": ["jsx-a11y", "import", "boundaries"],
+  "settings": {
+    "boundaries/elements": [
+      { "type": "feature", "mode": "folder", "pattern": "src/features/*", "capture": ["name"] },
+      { "type": "shared", "mode": "full", "pattern": ["src/components/**", "src/lib/**", "src/hooks/**", "src/types/**", "src/styles/**"] },
+      { "type": "app", "mode": "full", "pattern": "src/app/**" }
+    ],
+    "boundaries/ignore": ["**/*.test.*", "**/*.spec.*", "**/*.stories.*"]
+  },
   "rules": {
-    "import/no-restricted-paths": [
+    "boundaries/dependencies": [
       "error",
       {
-        "zones": [
+        "default": "allow",
+        "rules": [
           {
-            "target": "./src/features/instrument",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals. Use src/components, src/lib, src/hooks, or src/types."
-          },
-          {
-            "target": "./src/features/instrument",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/instrument",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/instrument",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/instrument",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/instrument",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/portfolio",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/watchlist",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/ai",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/billing",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/auth",
-            "from": "./src/features/news",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/instrument",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/portfolio",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/watchlist",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/ai",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/billing",
-            "message": "Features must not import other feature internals."
-          },
-          {
-            "target": "./src/features/news",
-            "from": "./src/features/auth",
-            "message": "Features must not import other feature internals."
+            "from": ["feature"],
+            "disallow": [["feature", { "name": "!({{from.name}})" }]],
+            "message": "Feature isolation: a feature must not import another feature's internals. Share code via src/components, src/lib, src/hooks, or src/types. (Enforced generically — every feature folder, including new ones, is covered automatically.)"
           }
         ]
       }
