@@ -15,6 +15,33 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-06 — Phase-7 §5: RequireConsent returned 403 to anonymous (fragile 401-before-403 contract) + container memory over budget
+
+- **Symptom:** the Phase-7 §5 pre-deploy adversarial gate found (a) `RequireConsent`
+  (the fail-closed DPDP consent gate) raised **403 consent_required** for an ANONYMOUS
+  caller — relying on each route to add its own `is_anonymous → 401` check first (the MF
+  route does; a future route adopting `Depends(RequireConsent(...))` directly would not),
+  a fragile contract and a mild 401-vs-403 route-topology oracle; (b) the docker-compose
+  memory limits summed to 3572M, over the architecture §A6 ~3 GB budget.
+- **Root cause:** (a) the gate deferred the auth-ordering decision to its callers instead
+  of being safe-by-default — the same fail-open-by-construction class as the ESLint matrix
+  (B10) and the `/test` tier-gate-before-auth (Phase 6 RCA): a primitive that is only
+  correct when every caller remembers to wrap it. (b) limits were set generously
+  per-service at scaffold time without summing against the budget.
+- **Fix:** (a) `RequireConsent.__call__` now raises **401 not_authenticated** for anonymous
+  as its first operation, before any DB read (`backend/dhanradar/deps.py`); the 401-before-403
+  ordering now holds without caller discipline. `UserContext.consented_purposes` annotated as
+  an intentionally-unpopulated non-gate (fresh-DB read is the only consent path). (b) limits
+  trimmed to exactly **3072M** (postgres 1024 / fastapi 512 / nextjs 448 / batch 256 /
+  mood 192 / misc 192 / redis 256 / beat 64 / cloudflared 128) (`docker-compose.yml`).
+- **Prevention:** rule — a security/consent gate primitive must be safe-by-default (deny in
+  the correct order on its own), never correct-only-if-the-caller-guards-first; the same rule
+  that produced the `/test` and ESLint fixes. `test_consent.py` asserts the 401 path; the
+  remediation was re-verified by an independent adversarial pass (ACCEPT, no bypass). A
+  compose memory-sum check is part of the Phase-7 constraint audit.
+- **Phase/area:** Phase 7 / §5 pre-deploy adversarial gate + constraint audit (not a field
+  incident).
+
 ### 2026-06-06 — Notification (Phase 6) review-found defects: tier-gate-before-auth 402-leak + Telegram HTML injection in text body
 
 - **Symptom:** pre-merge governance review of the Phase-6 Notification module found
