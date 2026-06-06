@@ -96,12 +96,11 @@ async def _drain() -> str:
 async def _handle_job(db: Any, redis: Any, job: NotificationJob, now: Any) -> bool:
     """Process one job. Returns True iff it was actually delivered.
 
-    DPDP cross-border note (B31, deploy gate): this seam transmits user-specific
-    PII (chat_id / email) + labels to NON-Indian processors (Telegram, Resend).
-    The channel opt-in below is NOT a DPDP cross-border consent grant — a
-    `RequireConsent`-equivalent purpose gate (analogous to the AI gateway's B20)
-    must be enforced before these channels carry production traffic. Tracked in
-    BLOCKERS.md (B31); the channels are token-gated off until then.
+    DPDP cross-border gate (B31, deploy gate): this seam transmits user-specific
+    PII (chat_id / email) + labels to NON-Indian processors (Telegram, Resend-
+    Tokyo). The channel opt-in is NOT a cross-border transfer grant, so step 1b
+    below ENFORCES the `cross_border_notify` DPDP consent (ADR-0024) fail-closed
+    before any delivery — no grant ⇒ skip + audit, never transmit.
     """
     channel = job.channel
     prefs = await service.get_preferences(db, job.user_id)
@@ -109,6 +108,20 @@ async def _handle_job(db: Any, redis: Any, job: NotificationJob, now: Any) -> bo
     # 1. Opt-in gate — the user must have enabled this channel (fail-closed).
     if not prefs["channels_enabled"].get(channel):
         await service.log_delivery(db, job.user_id, channel, job.template_id, "failed", "channel_disabled")
+        return False
+
+    # 1b. DPDP cross-border consent (B31, deploy gate, ADR-0024). Telegram +
+    #     Resend-Tokyo are NON-Indian processors; the opt-in above is not a
+    #     transfer grant. Fail-closed: no `cross_border_notify` grant ⇒ skip
+    #     (never deliver), audit, and DROP — a retry would re-attempt the blocked
+    #     transfer; a later grant re-publishes via the normal flow.
+    from dhanradar.deps import consent_granted
+
+    if not await consent_granted(job.user_id, "cross_border_notify", db):
+        await service.log_delivery(
+            db, job.user_id, channel, job.template_id, "failed",
+            "cross_border_consent_required",
+        )
         return False
 
     # 2. Quiet hours — defer NORMAL priority by re-queuing; HIGH bypasses.
