@@ -208,6 +208,21 @@ async def upsert_preferences(db: Any, user_id: str, fields: dict) -> dict:
     return await get_preferences(db, user_id)
 
 
+async def post_public_card(text: str) -> bool:
+    """Post a public broadcast card to the Telegram public channel (the daily Mood
+    card seam, architecture §5). No per-user prefs/opt-in — it is a public channel.
+    Best-effort: disabled (no-op) unless the bot token + public channel id are set.
+    The disclosure/NOT_ADVICE must already be in `text` (the caller owns the copy)."""
+    from dhanradar.config import settings
+    from dhanradar.notifications import channels
+
+    chat_id = settings.TELEGRAM_PUBLIC_CHANNEL_ID
+    if not chat_id:
+        return False
+    result = await channels.deliver_telegram(chat_id, text)
+    return result.ok
+
+
 async def log_delivery(
     db: Any, user_id: str, channel: str, template_id: str, status: str, error_text: Optional[str] = None
 ) -> None:
