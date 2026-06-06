@@ -14,7 +14,11 @@ import hashlib
 from typing import Any, Optional
 
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
-from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+from dhanradar.scoring.engine.schemas import (
+    DISCLAIMER_VERSION,
+    DISCLOSURE_BUNDLE,
+    NOT_ADVICE,
+)
 
 _DEDUP_PREFIX = "mf:cas:dedup:"
 _DEDUP_TTL = 24 * 3600  # match the 24h raw-file purge window
@@ -50,6 +54,7 @@ def assemble_report(
     funds: list[dict],
     model_version: Optional[str] = None,
     generated_at: Optional[str] = None,
+    disclaimer_version: Optional[str] = None,
 ) -> PortfolioReport:
     """Build the client report. The disclosure bundle + NOT_ADVICE are ALWAYS
     injected here; `unified_score` is never included (each fund carries only
@@ -83,4 +88,5 @@ def assemble_report(
         generated_at=generated_at,
         disclosure=DISCLOSURE_BUNDLE,
         not_advice=NOT_ADVICE,
+        disclaimer_version=disclaimer_version or DISCLAIMER_VERSION,
     )

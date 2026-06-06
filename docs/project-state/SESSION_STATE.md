@@ -98,10 +98,16 @@ lives in the linked docs.
   `scripts/check_compose_memory.py` (§A6 ≤3072M) now run in the CI `guards` job, with a subprocess
   self-test (`backend/tests/unit/test_anti_pattern_sweep.py`). Closes the Phase-7 improvement suggestion
   — these regressions are caught automatically now.
-- **NEXT BUILD — B26 Compliance Audit module** (top deploy blocker): `ai_recommendation_audit`
-  partitioned table (pg_partman, 7-yr) + R2 archival + caller writes at the MF-report and
-  notification-deliver seams. Tier-B/C (Compliance + Security). **Recommended as a fresh session** —
-  this is a full module build with governance fan-out; warm-start from this doc + architecture §4.
+- **B26 Compliance Audit module: DONE (ADDRESSED)** — `compliance` schema + Alembic 0006
+  (partitioned 7-yr `ai_recommendation_audit` + DEFAULT partition + guarded pg_partman; seeded
+  `disclaimers`); fire-and-forget `record_served_label`; both live seams write `(label, model,
+  disclaimer_version)` (MF generation + notification deliver); served surfaces stamp the version;
+  allowlisted `recommendation_type`; public rate-limited `GET /disclaimers/{type}`; daily R2 archival;
+  ADR-0022. Tier-B governance ACCEPT-WITH-CONDITIONS (allowlist/version-stamp/endpoint-DoS/backdating
+  fixed in-branch). New **B34** (archival R2 residency, deploy gate). Ledger
+  `reviews/b26-compliance-audit.md`; feature doc `features/compliance-audit.md`.
+- **NEXT BUILD — Mood Compass** (Tier-C): twice-daily regime score → 5 buckets + commentary; emits
+  `mood.snapshot.published` (unblocks the daily public Mood card + notification event consumers).
 - Then continue the build order: **Mood Compass** (unblocks the daily public Mood card + notification
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
@@ -113,7 +119,8 @@ lives in the linked docs.
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B26–B33.
+See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B27–B34
+(**B26 now ADDRESSED**). New: **B34** (compliance R2 archival residency, deploy gate).
 Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
 later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25. New: **B31** (notification
 cross-border consent, deploy gate), **B32** (notification residuals, low), **B33** (auth/session
