@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import date, datetime, timezone
@@ -22,7 +23,9 @@ from typing import Any, Optional
 
 from dhanradar.celery_app import celery_app
 from dhanradar.mf import service
-from dhanradar.mf.cas import ParsedHolding, parse_cas
+from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
+
+logger = logging.getLogger(__name__)
 from dhanradar.mf.scoring_bridge import FundSignals, score_fund, upsert_user_fund_score
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
@@ -57,20 +60,24 @@ def parsed_to_snapshot_holdings(
 
 
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
-def parse_cas_job(self, job_id: str, path: str, password: Optional[str], user_id: str) -> str:
-    """CAS→report worker. Always purges the raw file; marks the job failed on error."""
-    started = time.monotonic()
+def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
+    """CAS→report worker. Always purges the raw file; marks the job failed with an
+    OPAQUE code (never the raw exception, which could carry a path/PII)."""
     try:
-        return asyncio.run(_run_pipeline(job_id, path, password, user_id))
-    except Exception as exc:  # noqa: BLE001 — record + purge, never leak the raw file
-        asyncio.run(_mark_failed(job_id, str(exc)))
-        return f"failed: {exc}"
+        return asyncio.run(_run_pipeline(job_id, path, user_id))
+    except CasParseError:
+        logger.warning("CAS parse failed job=%s", job_id)  # full detail not echoed to client
+        asyncio.run(_mark_failed(job_id, "parse_failed"))
+        return "failed: parse_failed"
+    except Exception:  # noqa: BLE001 — record opaque code + purge, never leak detail
+        logger.exception("CAS pipeline error job=%s", job_id)
+        asyncio.run(_mark_failed(job_id, "internal_error"))
+        return "failed: internal_error"
     finally:
         _purge(path)
-        _ = started
 
 
-async def _run_pipeline(job_id: str, path: str, password: Optional[str], user_id: str) -> str:
+async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -81,6 +88,13 @@ async def _run_pipeline(job_id: str, path: str, password: Optional[str], user_id
 
     redis = get_redis()
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    # Consume-and-delete the CAS password from its short-lived Redis key (it was
+    # never put on the broker). Missing → None (an unprotected CAS still parses).
+    pw_key = f"mf:cas:pw:{job_id}"
+    password = await redis.get(pw_key)
+    if password is not None:
+        await redis.delete(pw_key)
 
     parsed = parse_cas(path, password)  # raises CasParseError on bad password/format
     rengine = RatingEngine()
@@ -120,7 +134,7 @@ async def _run_pipeline(job_id: str, path: str, password: Optional[str], user_id
                 "xirr_pct": snap.xirr_pct, "category_allocation": snap.category_allocation,
                 "overlap_matrix": snap.overlap_matrix,
             },
-            "funds": funds_payload, "model_version": rengine._config.model_version,
+            "funds": funds_payload, "model_version": rengine.model_version,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         await redis.set(
@@ -136,6 +150,7 @@ async def _run_pipeline(job_id: str, path: str, password: Optional[str], user_id
 
 
 async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -> None:
+    from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
     from dhanradar.models.mf import MfUserHolding
@@ -147,7 +162,7 @@ async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -
         ).on_conflict_do_update(
             constraint="uq_mf_holding",
             set_={"units": p.units, "invested_amount": p.cost, "source": "cas",
-                  "as_of_date": p.as_of_date},
+                  "as_of_date": p.as_of_date, "updated_at": func.now()},
         )
         await db.execute(stmt)
     await db.commit()

@@ -53,27 +53,33 @@ async def upload_cas(
     password: Annotated[Optional[str], Form()] = None,
     _rl: Annotated[None, Depends(_rl_upload)] = None,
 ) -> CasUploadResponse:
-    # 1. Auth (401) BEFORE consent (403).
+    # 1. Auth (401) BEFORE consent (403). The consent gate is invoked explicitly
+    #    (keyword args) to preserve the 401-then-403 ordering; it is the same
+    #    fail-closed RequireConsent used as a Depends elsewhere.
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
     # 2. DPDP consent gate (B20) — fail-closed.
-    await _require_mf_consent(user, db)
+    await _require_mf_consent(user=user, db=db)
 
-    data = await file.read()
+    # 3. Bounded read (cap memory at ~15MB+1 — never buffer an unbounded body).
+    data = await file.read(_MAX_CAS_BYTES + 1)
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
     if len(data) > _MAX_CAS_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+    if not data.startswith(b"%PDF-"):  # magic-byte check before touching disk
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_pdf")
 
     redis = get_redis()
     source_hash = service.cas_sha256(data)
 
-    # 3. SHA-256 dedup — re-upload of the same statement returns the existing job.
-    existing = await service.dedup_lookup(redis, source_hash)
+    # 4. Per-USER SHA-256 dedup — re-upload of the same statement returns the
+    #    existing job; another user's identical bytes get an independent job.
+    existing = await service.dedup_lookup(redis, user.user_id, source_hash)
     if existing:
         return CasUploadResponse(job_id=existing, deduped=True)
 
-    # 4. Persist the raw file for the worker (purged after parse + 24h backstop),
+    # 5. Persist the raw file for the worker (purged after parse + 24h backstop),
     #    create the job row queued, enqueue, return < 200ms.
     job_id = str(uuid.uuid4())
     path = os.path.join(_upload_dir(), f"{job_id}.pdf")
@@ -83,11 +89,16 @@ async def upload_cas(
     db.add(MfCasJob(job_id=uuid.UUID(job_id), user_id=uuid.UUID(user.user_id),
                     status="queued", progress_pct=0, source_hash=source_hash))
     await db.commit()
-    await service.dedup_record(redis, source_hash, job_id)
+    await service.dedup_record(redis, user.user_id, source_hash, job_id)
+
+    # 6. Keep the CAS password OFF the Celery broker — stash it in a short-lived
+    #    Redis key the worker consumes-and-deletes (never serialized into a task arg).
+    if password:
+        await redis.set(f"mf:cas:pw:{job_id}", password, ex=600)
 
     from dhanradar.tasks.mf import parse_cas_job
 
-    parse_cas_job.delay(job_id, path, password, user.user_id)
+    parse_cas_job.delay(job_id, path, user.user_id)
     return CasUploadResponse(job_id=job_id, estimated_seconds=60)
 
 

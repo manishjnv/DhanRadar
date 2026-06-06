@@ -1,9 +1,10 @@
 """mf_schema — Mutual Fund module schema (Phase 5).
 
 Creates the `mf` schema + 6 tables (architecture Tier-C MF Module). `mf_nav_history`
-is a TimescaleDB hypertable (1-month chunks) with a `mf_nav_monthly_agg` continuous
-aggregate. Hypertable/CAGG steps are guarded on the timescaledb extension so the
-migration also applies on a plain-Postgres box (they no-op there); the CI test DB
+is a TimescaleDB hypertable (1-month chunks); the `mf_nav_monthly_agg` continuous
+aggregate lands with the AMFI NAV pipeline (it needs populated NAV data) — deferred,
+not created here. The hypertable step is guarded on the timescaledb extension so the
+migration also applies on a plain-Postgres box (it no-ops there); the CI test DB
 builds tables from ORM metadata, not this migration.
 
 Additive + reversible. user_id columns FK auth.users(id) ON DELETE CASCADE
@@ -142,7 +143,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP MATERIALIZED VIEW IF EXISTS mf.mf_nav_monthly_agg")
     for tbl in (
         "user_fund_scores", "mf_cas_jobs", "mf_portfolio_snapshots",
         "mf_user_holdings", "mf_nav_history", "mf_funds",

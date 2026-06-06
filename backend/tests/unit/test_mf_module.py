@@ -14,7 +14,7 @@ from datetime import date
 
 from dhanradar.mf.cas import parse_cas
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
-from dhanradar.mf.service import assemble_report, cas_sha256
+from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.tasks.mf import parsed_to_snapshot_holdings
 
@@ -60,6 +60,14 @@ def test_cas_sha256_is_deterministic():
     assert cas_sha256(b"abc") == cas_sha256(b"abc")
     assert cas_sha256(b"abc") != cas_sha256(b"abd")
     assert len(cas_sha256(b"abc")) == 64
+
+
+def test_dedup_key_is_namespaced_per_user():
+    # Same CAS bytes, different users → DIFFERENT dedup keys (no cross-user leak).
+    h = cas_sha256(b"same-cas-bytes")
+    assert dedup_key("userA", h) != dedup_key("userB", h)
+    assert dedup_key("userA", h) == dedup_key("userA", h)
+    assert "userA" in dedup_key("userA", h) and h in dedup_key("userA", h)
 
 
 # --- report assembly: disclosure injected, NO numeric score ------------------
