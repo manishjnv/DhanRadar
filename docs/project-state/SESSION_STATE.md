@@ -94,11 +94,14 @@ lives in the linked docs.
 
 ## Next action
 
-- **Push `phase7/verification-hardening` + open the PR + merge after CI green** (operator granted full
-  permission).
-- Top deploy blocker is **B26** — build the **Compliance Audit module** (`ai_recommendation_audit`
-  partitioned table + R2 archival + caller writes at the MF-report and notification-deliver seams).
-  This is the single largest gate between "merge-eligible" and "deploy-eligible".
+- **CI regression guards wired (DONE):** `scripts/anti_pattern_sweep.py` (Plan §0.3, 9 guards) +
+  `scripts/check_compose_memory.py` (§A6 ≤3072M) now run in the CI `guards` job, with a subprocess
+  self-test (`backend/tests/unit/test_anti_pattern_sweep.py`). Closes the Phase-7 improvement suggestion
+  — these regressions are caught automatically now.
+- **NEXT BUILD — B26 Compliance Audit module** (top deploy blocker): `ai_recommendation_audit`
+  partitioned table (pg_partman, 7-yr) + R2 archival + caller writes at the MF-report and
+  notification-deliver seams. Tier-B/C (Compliance + Security). **Recommended as a fresh session** —
+  this is a full module build with governance fan-out; warm-start from this doc + architecture §4.
 - Then continue the build order: **Mood Compass** (unblocks the daily public Mood card + notification
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
