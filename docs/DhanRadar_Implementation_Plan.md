@@ -250,7 +250,7 @@ Standing rules — apply to this phase, not optional:
    the template in docs/features/README.md, kept in sync; the phase is not done
    until it is updated.
 3. UI branding: any UI work uses the design tokens (frontend/tailwind.config.js,
-   frontend/app/tokens.css, frontend/styles/tokens.json) and matches docs/brand/
+   frontend/src/styles/tokens.css, frontend/styles/tokens.json) and matches docs/ui-system/brand/
    and its mockups; no ad-hoc colours, spacing, typography, or off-system components.
 4. Reply/summary format: answer and summarize in simple-sentence pointers under
    these sections — Implemented, Pending, Not implemented, Action for you,

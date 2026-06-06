@@ -32,7 +32,8 @@ architecture on framing/stack/auth/tokens and is internally self-contradictory. 
 - Architecture / module contracts → `docs/DhanRadar_Architecture_Final.md`
 - Phase sequence / Allowed-APIs / anti-patterns → `docs/DhanRadar_Implementation_Plan.md`
 - API contract (paths / auth / errors / enums) → `docs/project-state/CANONICAL_OPENAPI_ALIGNMENT.md`
-- Design tokens / components → `docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md` + `docs/brand/`
+- Design tokens / components → `docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md` + live `frontend/` token files
+- UI/UX build rules (creating screens/components) → `agent.md`
 - Scoring / rating engine → `docs/project-state/FINAL_SCORING_SPEC.md`
 - ui-system KEEP/MERGE/REPLACE/IGNORE → `docs/project-state/MIGRATION_STRATEGY_FINAL.md`
 - Current stage plan → `docs/project-state/STAGE2_EXECUTION_PLAN.md`
@@ -126,7 +127,7 @@ GitHub `production` env is main-branch-gated.
 - **RCA** on every bug fix → `docs/rca/README.md` (symptom/cause/fix-with-file:line/prevention).
 - **Feature doc** per module → `docs/features/<module>.md`, kept as-built.
 - **ADR** for every major architectural decision → `docs/project-state/ARCHITECTURE_DECISIONS.md`.
-- **UI** uses the design tokens + `docs/brand/` (Geist/warm); no ad-hoc styling.
+- **UI** uses the live `frontend/` design tokens (Geist/warm) per `agent.md`; no ad-hoc styling.
 - **Reply format** — simple-sentence pointers under: Implemented · Pending · Not implemented ·
   Action for you · Dependencies · Issues · Deviations · Agent/model usage & % · Improvements.
   No dense tables.

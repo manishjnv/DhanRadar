@@ -17,14 +17,15 @@ docker compose up -d                          # postgres(+schema.sql), redis, el
 cd ../api && uv sync --frozen && uv run alembic upgrade head && uv run uvicorn app.main:app --reload
 # web:
 cd ../web && npm ci && npm run gen:api        # types from contracts/openapi.yaml
-cp ../tokens/css-variables.css src/styles/tokens.css
+# tokens come from the canonical frontend/ pipeline (gen-tokens.mjs) — no copy from ../tokens/
 npm run dev
 # seed: load contracts/seed-data.json
 ```
 Verify: dashboard renders seed instruments + scores; theme toggles; /docs matches openapi.yaml.
 
 ## 2. Build order (do not reorder)
-1. **Tokens + components/ui** — from `/tokens` + `/components/*.md` + `reference-impl/*` (Button, Card, ScoreRing exist). Lint: no magic numbers.
+
+1. **Tokens + components/ui** — from canonical `frontend/` tokens (`frontend/styles/tokens.json`) + `frontend/src/components/`, using `/components/*.md` here as spec reference only (Button, Card, ScoreRing exist). Lint: no magic numbers.
 2. **Backend core** — schema (contracts/schema.sql), auth (claude-code/auth-spec), instruments/scores read API (openapi.yaml). Repository→service→router layering.
 3. **Score engine** — implement exactly per `recommendation-engine/score-formula.md` + `confidence-formula.md`. Deterministic; `scores` table read-only except scoring worker; `scoring` must NOT import `billing`.
 4. **Frontend core** — App Router groups per `route-map.md`; public stock page SSR/ISR with ungated score; four states on every data component.

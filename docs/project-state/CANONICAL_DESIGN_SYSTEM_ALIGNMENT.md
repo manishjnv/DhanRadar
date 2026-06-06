@@ -4,6 +4,8 @@
 **Date:** 2026-06-05
 **Decision applied:** **D1 — existing DhanRadar branding is the single source of truth** (Geist typography, existing warm palette, existing frontend token structure). No second design language; no parallel token systems; retire duplicates.
 
+**Update (2026-06-06):** the retirement in §5 has been **executed** — `docs/ui-system/design-system/`, `docs/ui-system/tokens/`, `docs/ui-system/reference-impl/`, and the `docs/ui-system/brand/` token mirror are deleted from the repo. Canonical UI now lives solely in `frontend/`; `docs/ui-system/` is reference-only (see `docs/ui-system/README.md`). `docs/brand/` was folded into `docs/ui-system/brand/`.
+
 ---
 
 ## 0. Root cause being fixed
@@ -13,7 +15,7 @@ The UI package ships **three** token sets under one `--dr-*` prefix that resolve
 - `docs/ui-system/design-system/` — Manrope/Inter + **cool** palette (`blue #2563EB`, `emerald #10B981`…), keys `blue`, `ink-2`.
 - `docs/ui-system/tokens/` — duplicate of `design-system/` (cool/Manrope).
 
-The existing repo (`frontend/styles/tokens.json`, `frontend/app/tokens.css`, `frontend/tailwind.config.js`) is an **exact copy of `brand/`** (Geist/warm). But the UI package's **buildable components, Figma, and screen specs are authored in `design-system/` (Manrope/cool)** — so they will not compile or render correctly against the canonical tokens.
+The existing repo (`frontend/styles/tokens.json`, `frontend/src/styles/tokens.css`, `frontend/tailwind.config.js`) is an **exact copy of `brand/`** (Geist/warm). But the UI package's **buildable components, Figma, and screen specs are authored in `design-system/` (Manrope/cool)** — so they will not compile or render correctly against the canonical tokens.
 
 **D1 resolves this:** the **brand/Geist/warm** set wins. Everything authored in Manrope/cool must be **retokenized** to it.
 
@@ -21,9 +23,9 @@ The existing repo (`frontend/styles/tokens.json`, `frontend/app/tokens.css`, `fr
 
 ## 1. Winning token source (canonical)
 
-**Canonical source of truth = the existing repo token files, which mirror `docs/ui-system/brand/`:**
+**Canonical source of truth = the live `frontend/` token files** (the `docs/ui-system/brand/` token mirror was deleted 2026-06-06):
 - `frontend/styles/tokens.json` — framework-agnostic tokens.
-- `frontend/app/tokens.css` — CSS custom properties (`--dr-*` + theme-scoped).
+- `frontend/src/styles/tokens.css` — CSS custom properties (`--dr-*` + theme-scoped).
 - `frontend/tailwind.config.js` — Tailwind theme mapping.
 
 **Canonical identity:**
@@ -101,9 +103,9 @@ After reconciliation, these are **retired** (kept in git history; removed from t
 | `docs/ui-system/reference-impl/tailwind.preset.ts` | **DISCARD** | cool/Manrope subset; regenerated from canonical |
 | `docs/ui-system/figma/*` Manrope/cool variable references | **SUPERSEDE** | retokenized; Figma variables re-exported from canonical |
 | `docs/ui-system/html/*` mockups | **REFERENCE-ONLY** | visual reference; not a build source |
-| `docs/ui-system/brand/` | **KEEP as the upstream mirror** of the canonical repo tokens (Geist/warm) | it *is* the winning set |
+| `docs/ui-system/brand/` tokens (`tokens.json`, `tokens.css`, `tailwind.config.js`) | **RETIRED (deleted 2026-06-06)** | stale Geist mirror that still carried an advisory `signal` block; canonical lives in `frontend/`. The folder's `README.md` (brand guide) + `mockups/` are kept as reference. |
 
-**Retirement is documentation-state only in Stage 1.** No files are deleted now; this table is the instruction for Stage 2. Branding remains "locked" — the warm/Geist identity is unchanged; we are removing the competing cool/Manrope set, not altering the brand.
+**Executed 2026-06-06:** `design-system/`, `tokens/`, `reference-impl/`, and the `brand/` token mirror are deleted (recoverable from git history); `docs/brand/` was folded into `docs/ui-system/brand/`. Branding remains "locked" — the warm/Geist identity is unchanged; we removed the competing cool/Manrope set and the stale mirror, not the brand.
 
 ---
 
