@@ -72,6 +72,12 @@ class RatingEngine:
         self._valid_for = valid_for_seconds
         self._now = now or _utcnow
 
+    @property
+    def model_version(self) -> str:
+        """Public accessor for the active config's model_version (so consumers
+        never reach into engine internals)."""
+        return self._config.model_version
+
     async def score(self, inputs: FactorInputs) -> ScoringResult:
         cfg = self._config
 
