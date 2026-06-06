@@ -33,14 +33,27 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.batch.*": {"queue": "batch"},
     "dhanradar.tasks.mood.*":  {"queue": "mood"},
     "dhanradar.tasks.misc.*":  {"queue": "misc"},
+    "dhanradar.tasks.mf.*":    {"queue": "batch"},
 }
 
 # ---------------------------------------------------------------------------
-# Beat schedule
-# Phase 5 will populate this dict with the scheduled data-fetch and scoring
-# tasks once cron windows are confirmed (ref: Implementation Plan Phase 5).
+# Beat schedule (timezone = Asia/Kolkata, enable_utc=False above)
 # ---------------------------------------------------------------------------
-celery_app.conf.beat_schedule = {}  # populated in Phase 5
+from celery.schedules import crontab  # noqa: E402
+
+celery_app.conf.beat_schedule = {
+    # AMFI NAV daily refresh — 23:30 IST (data-fetch pipeline; currently a stub
+    # pending the AMFI NAVAll.txt fetch — Implementation Plan Phase 5 §2).
+    "mf-nav-daily-fetch": {
+        "task": "dhanradar.tasks.mf.nav_daily_fetch",
+        "schedule": crontab(hour=23, minute=30),
+    },
+    # Raw CAS file purge — 24h backstop (anti-pattern guard). 02:00 IST.
+    "mf-purge-cas-files": {
+        "task": "dhanradar.tasks.mf.purge_cas_files",
+        "schedule": crontab(hour=2, minute=0),
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Auto-discover tasks

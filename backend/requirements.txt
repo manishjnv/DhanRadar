@@ -21,3 +21,7 @@ email-validator>=2.1.0
 python-multipart>=0.0.9
 # --- Phase 3: Market Data Adapter + AI/LLM Gateway ---
 pyyaml>=6.0.1
+# --- Phase 5: Mutual Fund module (CAS parsing + XIRR) ---
+casparser>=0.7.0       # CAMS/KFintech CAS PDF parsing (worker; lazily imported)
+scipy>=1.11.0          # XIRR via brentq
+
