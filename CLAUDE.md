@@ -90,6 +90,16 @@ another tier is clearly present (e.g. a Tier-C change that ships a screen adds U
 showing a score/label/AI adds Compliance). Minor changes → Builder + Architect only (logged).
 Reviewers are **independent agents**, never the builder instance; fan out in one parallel message.
 
+**Review cadence (pre-launch, `AI_GOVERNANCE_MODEL.md` §3.2):** the tier's reviewer ceremony is
+**batched, not per-session**. Per session: **Builder + Architect only** — build features, move the
+MF-first wedge forward. The full tier panel (Security/Compliance/UI/Product) runs as **one
+end-of-phase / pre-deploy audit pass** folded into the Phase-7 §5 gate. **Hard exception:** any
+change touching a **load-bearing path** (list above) keeps its **full inline Tier-B/C review in the
+same session it lands** — Security/Compliance sign-off there is never deferred. Deterministic gates
+(tests · secrets · anti-pattern grep · ruff/mypy/tsc) run **per commit** regardless. A deferred
+change is logged `NOT-COMPLETE (reviews batched to phase audit)` and is merge-eligible as WIP only,
+never deploy-eligible until the batched pass clears it.
+
 **A change is complete only when** the deterministic gates are green, the tier's required reviews
 pass (ACCEPT / ACCEPT-WITH-CONDITIONS), and the gate ledger is signed off. **All review output for
 one change lives in a single file:** `docs/project-state/reviews/<change-id>.md`.

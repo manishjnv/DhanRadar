@@ -63,6 +63,17 @@ async def _make_pro(db_session, user_id: str) -> None:
     await db_session.commit()
 
 
+async def _grant_cross_border_notify(db_session, user_id: str) -> None:
+    """Grant the DPDP cross-border notification consent (B31) so the deliver seam
+    will transmit to the non-Indian processors (Telegram/Resend)."""
+    await db_session.execute(
+        update(User)
+        .where(User.id == _uuid.UUID(user_id))
+        .values(dpdp_consents={"cross_border_notify": True})
+    )
+    await db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # 1. GET preferences — anonymous → 401
 # ---------------------------------------------------------------------------
@@ -270,6 +281,7 @@ async def test_drain_delivers_to_fake_telegram(
     email = f"notif_drain_{_uuid.uuid4().hex[:8]}@example.com"
     user_id, access = await _signup(async_client, email)
     await _make_pro(db_session, user_id)
+    await _grant_cross_border_notify(db_session, user_id)  # B31 deploy-gate
 
     await async_client.post(
         "/api/v1/notifications/preferences",
@@ -329,6 +341,7 @@ async def test_drain_quiet_hours_defers_normal_job(
     email = f"notif_quiet_{_uuid.uuid4().hex[:8]}@example.com"
     user_id, access = await _signup(async_client, email)
     await _make_pro(db_session, user_id)
+    await _grant_cross_border_notify(db_session, user_id)  # B31: reach the quiet path
 
     await async_client.post(
         "/api/v1/notifications/preferences",
@@ -364,4 +377,55 @@ async def test_drain_quiet_hours_defers_normal_job(
     assert len(delivered) == 0, "deliver_telegram must NOT be called during quiet hours"
     assert await get_redis().llen("notifications:queue:telegram") == 1, (
         "Deferred job must still be on the queue after quiet-hours deferral"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10. B31 — no cross-border consent ⇒ deliver seam refuses (fail-closed)
+# ---------------------------------------------------------------------------
+
+
+async def test_drain_skips_without_cross_border_consent(
+    async_client, db_session, fake_redis, monkeypatch
+):
+    """B31 (deploy gate): a pro user with the channel enabled + chat_id set but
+    WITHOUT `cross_border_notify` consent must have NOTHING delivered — the
+    Telegram transport is never invoked, and the blocked job is dropped (not
+    re-queued)."""
+    import dhanradar.db as _db_mod
+    import dhanradar.tasks.misc as misc
+    from dhanradar.notifications import service
+    from dhanradar.notifications.channels import DeliveryResult
+    from dhanradar.redis_client import get_redis
+
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+
+    email = f"notif_noconsent_{_uuid.uuid4().hex[:8]}@example.com"
+    user_id, access = await _signup(async_client, email)
+    await _make_pro(db_session, user_id)
+    # Deliberately NO _grant_cross_border_notify — the cross-border grant is absent.
+
+    await async_client.post(
+        "/api/v1/notifications/preferences",
+        json={"telegram_chat_id": "555", "channels_enabled": {"telegram": True}},
+        headers=make_auth_headers(access_token=access),
+    )
+    await db_session.commit()
+
+    called: list[tuple[str, str]] = []
+
+    async def _must_not_call(chat_id: str, text: str, *, client=None) -> DeliveryResult:
+        called.append((chat_id, text))
+        return DeliveryResult(ok=True, transient=False, code="ok")
+
+    monkeypatch.setattr(misc.channels, "deliver_telegram", _must_not_call)
+
+    await service.publish_notification(
+        get_redis(), user_id, "telegram", "test_ping", data={}, priority="high"
+    )
+    await misc._drain()
+
+    assert called == [], "B31: no cross_border_notify consent → Telegram must NOT be invoked"
+    assert await get_redis().llen("notifications:queue:telegram") == 0, (
+        "Blocked job must be dropped (not re-queued)"
     )

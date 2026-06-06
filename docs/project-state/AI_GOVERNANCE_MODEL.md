@@ -1,9 +1,9 @@
 # DhanRadar — AI Governance Model (Multi-Agent Roles & Tiered Approval Gates)
 
-**Date:** 2026-06-05 (rev. 2 — tiered review model applied)
+**Date:** 2026-06-06 (rev. 3 — review cadence: full ceremony batched to end-of-phase / pre-deploy)
 **Status:** Canonical operating model for how Claude Code executes work on DhanRadar.
-**Supersedes:** the implicit "Claude Code = builder + planner" model, and rev. 1's
-all-six-gates-per-major-change rule.
+**Supersedes:** the implicit "Claude Code = builder + planner" model, rev. 1's
+all-six-gates-per-major-change rule, and rev. 2's implied per-change full-ceremony cadence.
 **Authority order (binding):** `DhanRadar_Architecture_Final.md` →
 `DhanRadar_Implementation_Plan.md` → existing code → `docs/features` → `docs/ui-system` →
 mockups.
@@ -113,6 +113,40 @@ recommendation surface.*
   change) → **Builder + Architect Review only**, classified "minor: <reason>" in the ledger. A
   minor change may never touch a load-bearing or compliance-sensitive path; if it does, it is by
   definition Tier B or C.
+
+### 3.2 Review cadence (when the tier's reviews actually run)
+
+DhanRadar is **pre-launch with no users**; review value scales with blast radius, which is
+currently near zero. To keep feature throughput high without weakening the gates that matter, the
+**tier's reviewer ceremony is batched, not per-session** — with a hard load-bearing exception.
+
+- **Per-session default (active development):** run **Builder + Architect Review only** and log it.
+  Build features; do not fan out the full tier panel for every change. The goal each session is to
+  move the MF-first wedge forward (CAS upload → ≤60s labelled report), not to produce review
+  artifacts.
+- **Load-bearing exception (never deferred):** any change touching a **load-bearing path**
+  (`backend/**/auth/*`, session/JWT, `RequireTier`/`RequireConsent`; payments/webhook;
+  scoring/rating engine + `ranking_configs`; AI gateway/prompt/classifier/budget; consent/DPDP +
+  `ai_recommendation_audit`; Alembic migrations; compose/cloudflared/`infra/`) gets its full tier
+  review (**Tier B/C**, incl. `codex:rescue` Security + Opus Compliance) **inline, in the same
+  session it lands** — fail-closed, exactly as §3 specifies. Security/Compliance sign-off on these
+  paths is **never batched or deferred**.
+- **Deterministic gates are never deferred:** tests, secrets scan, anti-pattern + IGNORE-list grep,
+  ruff/mypy/tsc run **per commit** on every change regardless of cadence (Principle 3 stands).
+- **Batched audit pass (end-of-phase / pre-deploy):** the deferred dimensions for non-load-bearing
+  work — **UI, Product, full Architect drift sweep, and a consolidated Compliance read of any
+  score/label/AI surfaces shipped during the phase** — run as **one dedicated audit pass at the end
+  of a development phase**, and always before a KVM4 deploy. This pass folds into the **Phase-7 §5
+  adversarial gate** (§7.3); a phase is not deploy-eligible until it clears.
+- **Ledger honesty:** a change whose tier reviews were deferred is recorded in
+  `reviews/<change-id>.md` as **status `NOT-COMPLETE (reviews batched to phase audit)`**, naming the
+  pending dimensions. Deferral is a logged decision, never silent, and a deferred change is
+  **merge-eligible only as work-in-progress, never deploy-eligible** until the batched pass clears
+  it.
+
+**One-line rule:** build features per session with Builder + Architect; run the full reviewer
+panel once per phase (and always pre-deploy) — except on load-bearing paths, which keep their full
+inline review every time they are touched.
 
 ---
 
@@ -381,14 +415,18 @@ stateDiagram-v2
 ## 9. Integration with the existing playbook
 
 - **Phase 0–1** → Builder. **Phase 2** → the deterministic machine plane (run before reviewers).
-- **Phase 3** → fans out into the **tier's reviewers** (independent agents) instead of one Opus
-  pass. **Phase 4** → the revision loop + abort criterion. **Phase 5** → read as-landed files +
-  green tests; the ledger is the verification record. **Phase 6** → update `SESSION_STATE.md` +
-  `BLOCKERS.md`; commit the review file with the change; footer records tier · verdict · reworked.
+- **Phase 3** → per the cadence (§3.2): Builder + Architect inline each session; the full tier
+  panel fans out **once per phase / pre-deploy** for non-load-bearing work, but **inline every time**
+  for load-bearing paths. **Phase 4** → the revision loop + abort criterion. **Phase 5** → read
+  as-landed files + green tests; the ledger is the verification record. **Phase 6** → update
+  `SESSION_STATE.md` + `BLOCKERS.md`; commit the review file with the change; footer records tier ·
+  verdict · reworked (and "reviews batched" where deferred).
 - **Routing telemetry** (per review): tier used · verdict · reworked Y/N — surfaces which routes
   misfire over time.
 
 ---
 
-*End of governance model (rev. 2). No runtime code was modified. The first change to adopt this
-model creates `docs/project-state/reviews/<change-id>.md` per §5.*
+*End of governance model (rev. 3). No runtime code was modified. Review cadence (§3.2): build
+features per session with Builder + Architect; batch the full reviewer panel to the end-of-phase /
+pre-deploy audit pass — except on load-bearing paths, which keep their full inline review every
+time. Deterministic gates run per commit regardless.*
