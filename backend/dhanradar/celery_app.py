@@ -34,6 +34,7 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.mood.*":  {"queue": "mood"},
     "dhanradar.tasks.misc.*":  {"queue": "misc"},
     "dhanradar.tasks.mf.*":    {"queue": "batch"},
+    "dhanradar.tasks.compliance.*": {"queue": "batch"},
 }
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,11 @@ celery_app.conf.beat_schedule = {
     "notify-drain": {
         "task": "dhanradar.tasks.misc.drain_notifications",
         "schedule": crontab(minute="*"),
+    },
+    # Compliance audit → R2 daily archival (§4). 02:00 IST, 7-yr lifecycle.
+    "compliance-archive-audit": {
+        "task": "dhanradar.tasks.compliance.archive_audit_daily",
+        "schedule": crontab(hour=2, minute=0),
     },
 }
 

@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 _DELIVER_CHANNELS = ("telegram", "email")
 _MAX_PER_TICK = 100  # safety bound per channel per drain
 
+# Templates that DELIVER a served rating-engine label → owe a B26 audit row. Maps
+# the template_id to the job.data key holding the served verb-label.
+_LABEL_TEMPLATES = {"mf_label_change": "new_label"}
+
 
 @celery_app.task(name="dhanradar.tasks.misc.send_notification")
 def send_notification(user_id: str, channel: str, template_id: str, data: dict | None = None) -> str:
@@ -146,6 +150,27 @@ async def _handle_job(db: Any, redis: Any, job: NotificationJob, now: Any) -> bo
     if result.ok:
         await service.rate_cap_increment(redis, job.user_id, channel)
         await service.log_delivery(db, job.user_id, channel, job.template_id, "sent", None)
+        # B26 — a delivered label is a served output; persist its provenance.
+        label_key = _LABEL_TEMPLATES.get(job.template_id)
+        if label_key:
+            from dhanradar.compliance import service as compliance_service
+
+            # Pin the disclaimer version that was in force when the label was
+            # GENERATED (carried on the job), so the audit ties to what was served —
+            # not the live constant. Compliance is the version authority for the
+            # fallback (no cross-module import of scoring internals here).
+            disclaimer_version = job.data.get("disclaimer_version") or (
+                compliance_service.active_disclaimer_version()
+            )
+            await compliance_service.record_served_label(
+                surface=f"notification_{channel}",
+                label=job.data.get(label_key),
+                model=None,  # re-served label; the engine model was recorded at generation
+                disclaimer_version=disclaimer_version,
+                user_id=job.user_id,
+                identifier=job.data.get("isin") or job.data.get("scheme_name"),
+                confidence_band=job.data.get("confidence_band"),
+            )
         return True
 
     if result.transient and (job.attempts + 1) < service.RETRY_CAPS.get(channel, 3):

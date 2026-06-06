@@ -85,6 +85,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
+    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
     redis = get_redis()
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -113,12 +114,26 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
 
         snap = build_snapshot(parsed_to_snapshot_holdings(parsed))
 
+        from dhanradar.compliance import service as compliance_service
+
         funds_payload: list[dict] = []
         for p in parsed:
             # v1 signals are thin (NAV/fundamentals pipeline lands later); the
             # engine refuses (insufficient_data) where coverage is too low.
             result = await score_fund(rengine, FundSignals(isin=p.isin))
             await upsert_user_fund_score(db, user_id, result)
+            # B26 — persist (label, model_used, disclaimer_version) for this served
+            # label at GENERATION (once, with full provenance). Fire-and-forget: a
+            # failure is logged and never breaks the report pipeline.
+            await compliance_service.record_served_label(
+                surface="mf_report",
+                label=result.verb_label.value,
+                model=rengine.model_version,
+                disclaimer_version=result.disclaimer_version,
+                user_id=user_id,
+                identifier=p.isin,
+                confidence_band=result.confidence_band.value,
+            )
             funds_payload.append({
                 "isin": p.isin, "scheme_name": p.scheme_name, "folio_number": p.folio_number,
                 "units": p.units, "invested_amount": p.cost, "current_value": p.value,
@@ -136,6 +151,9 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
             },
             "funds": funds_payload, "model_version": rengine.model_version,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            # Stamp the in-force disclaimer version on the served + cached report so
+            # it matches the audit rows written above (B26 tie-to-version).
+            "disclaimer_version": DISCLAIMER_VERSION,
         }
         await redis.set(
             f"{service._REPORT_PREFIX}{job_id}", json.dumps(report_payload), ex=service._REPORT_TTL

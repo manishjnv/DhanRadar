@@ -290,3 +290,30 @@ sub-minute SLA is ever required, swap the beat drain for a dedicated BLPOP consu
 without changing the publisher interface.
 **Source:** `docs/DhanRadar_Architecture_Final.md` §5; `docs/DhanRadar_Implementation_Plan.md`
 Phase 6; `BLOCKERS.md` B32; `reviews/phase6-notification.md`.
+
+## ADR-0022 — `ai_recommendation_audit`: never-lose-a-row design + 7-yr `user_id` retention survives DPDP erasure (B26)
+
+**Date:** 2026-06-06 · **Status:** Accepted
+**Context:** §4 requires an immutable 7-yr SEBI audit tying every served label to the
+in-force disclaimer version. Two tensions: (a) a fire-and-forget audit write must NEVER
+be lost (a missing partition or a referential hiccup dropping a compliance row is worse
+than the elegance of strict FKs); (b) SEBI 7-yr recordkeeping conflicts with the DPDP
+right to erasure — the audit must identify who was served what, yet the user may request
+deletion.
+**Decision:** (1) **Never-lose-a-row:** the table is RANGE-partitioned monthly on
+`served_at` with a **DEFAULT partition** so an insert always lands even before monthly
+partitions exist; `disclaimer_version` is a denormalized NOT-NULL text (NOT a hard FK) and
+`user_id` has NO FK — so a write never fails on a referential miss. (2) **Retention vs
+erasure:** `user_id` (no FK/CASCADE) means the audit OUTLIVES a user erasure; the legal
+basis is the **SEBI recordkeeping obligation**, which overrides DPDP erasure for this table
+only. The erasure module MUST skip `compliance.ai_recommendation_audit` and log the
+override with this basis. (3) **recommendation_type** is a POSITIVE allowlist (DB CHECK +
+service) — only educational types may be audited as served (non-neg #1). (4) The R2 archive
+keeps `user_id` (it is the 7-yr record-of-serving and must stay user-identifiable); the
+control on cross-border PII is **R2 bucket India-residency** (B34), not de-identification.
+**Consequences:** a `user_id` (DPDP personal data) is retained 7 years post-erasure — an
+intentional, documented exception, not a leak. Adding a new auditable `recommendation_type`
+is a deliberate migration (controlled vocabulary). A reconcile job asserting every
+`disclaimer_version` exists in `disclaimers` is owed (denormalized value could drift).
+**Source:** `docs/DhanRadar_Architecture_Final.md` §4; `BLOCKERS.md` B26/B34;
+`reviews/b26-compliance-audit.md`; `docs/features/compliance-audit.md`.

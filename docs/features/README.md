@@ -53,3 +53,4 @@ How to prove this module works end-to-end (commands, tests, MCP/curl checks).
 - [rating-scoring-engine.md](rating-scoring-engine.md) — Rating/Scoring Engine v1 (Phase 4): rule-table labels, no-numeric boundary.
 - [mutual-fund.md](mutual-fund.md) — Mutual Fund module (Phase 5): CAS → ≤60s labelled report.
 - [notification.md](notification.md) — Notification module (Phase 6): Telegram + Resend email + share-cards, quiet-hours + rate caps.
+- [compliance-audit.md](compliance-audit.md) — Compliance Audit module (B26): 7-yr `ai_recommendation_audit` + disclaimer registry + served-label writes + R2 archival.
