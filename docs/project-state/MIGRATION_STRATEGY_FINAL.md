@@ -68,10 +68,10 @@ Classifies every asset across 8 domains as **KEEP** / **MERGE** / **REPLACE** / 
 
 | Item | Class | Rationale |
 |---|---|---|
-| Geist/warm brand tokens (repo + `ui-system/brand/`) | **KEEP** | D1 winner |
+| Geist/warm brand tokens (repo + `ui-system/brand/`) | **KEEP** | D1 winner — executed: `ui-system/brand/` token mirror deleted 2026-06-06; canonical = `frontend/` |
 | reference-impl components | **MERGE** | retokenize to canonical |
 | component specs `/components/*.md`, screens `/screens/*.md`, figma `/figma/*` | **MERGE** | retokenize + relabel advisory copy; rebuild in canonical |
-| `ui-system/design-system/` + `ui-system/tokens/` (Manrope/cool) | **IGNORE/RETIRE** | duplicate competing language |
+| `ui-system/design-system/` + `ui-system/tokens/` (Manrope/cool) | **IGNORE/RETIRE** | duplicate competing language — deleted 2026-06-06 |
 | `/html/*` mockups | **KEEP (reference-only)** | visual reference, not build source |
 
 ## 6. Infrastructure

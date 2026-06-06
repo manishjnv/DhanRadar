@@ -1,6 +1,0 @@
-{
-  "fast": "120ms cubic-bezier(0.4, 0, 0.2, 1)",
-  "base": "200ms cubic-bezier(0.4, 0, 0.2, 1)",
-  "slow": "320ms cubic-bezier(0.2, 0.7, 0.2, 1)",
-  "stage": "560ms cubic-bezier(0.16, 1, 0.3, 1)"
-}

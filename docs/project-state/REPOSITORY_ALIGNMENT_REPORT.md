@@ -1,5 +1,7 @@
 # DhanRadar — Repository Alignment Report
 
+> **Resolved 2026-06-06:** the UI-package token conflict described below is closed. The Manrope/cool `design-system/`, `tokens/`, `reference-impl/`, and the `brand/` token mirror were deleted; canonical UI lives in `frontend/`, reference material in `docs/ui-system/` (see `docs/ui-system/README.md`).
+
 **Date:** 2026-06-05
 **Author:** Architecture review (read-only; no code changed)
 **Scope reviewed:**
@@ -233,7 +235,7 @@ Legend for each conflict block:
 - **This is the upstream cause of every design conflict below.**
 
 ### G1 — Existing frontend tracks the Geist/warm "brand", components expect Manrope/cool "design-system"
-- **Existing:** `frontend/styles/tokens.json`, `frontend/app/tokens.css`, `frontend/tailwind.config.js` are **exact copies of `brand/`** (Geist, warm, `royal`/`ink-secondary`). Architecture/implementation-plan rule #3 + project memory point UI work at `docs/brand` (Geist).
+- **Existing:** `frontend/styles/tokens.json`, `frontend/src/styles/tokens.css`, `frontend/tailwind.config.js` are **exact copies of `brand/`** (Geist, warm, `royal`/`ink-secondary`). Architecture/implementation-plan rule #3 + project memory point UI work at the canonical `frontend/` tokens (Geist); the former `docs/brand/` guide now lives at `docs/ui-system/brand/`.
 - **UI package:** the buildable components (`reference-impl/components/ui/Button.tsx`, `ScoreRing.tsx`), the Figma handoff, and all `/screens` specs assume **design-system** (Manrope, cool, `blue`/`ink-2`/`positive`). They won't compile or render correctly against the existing config.
 - **Source of truth:** **Decision required (D1).** Branding is declared "locked" to Geist/warm AND the repo already adopted it AND memory enforces it — that argues Geist/warm wins. But the entire component/figma/screen layer is authored in Manrope/cool.
 - **Resolution (recommended, pending D1):** Pick **brand (Geist + warm) as the single token source of truth**, delete/retire `design-system/` + `tokens/` as duplicates, and **retokenize the UI-package components/screens** to brand keys (`blue→royal` or rename brand's `royal→blue`; `ink-2→ink-secondary`; swap Manrope/Inter→Geist; map cool hexes→warm). Alternatively, if the Manrope/cool direction is actually preferred, formally update `brand/` + the repo tokens to match and re-sign the "locked" branding. **Do not ship both.**

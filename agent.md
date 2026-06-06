@@ -2,29 +2,34 @@
 
 ## Canonical design source (read this first)
 
-The single source of truth for DhanRadar UI is **`docs/brand/` (Geist Sans/Mono +
-Instrument Serif, warm "locked" palette)** as reconciled in
-**`docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md`**, materialised in the repo token
-files: `frontend/tailwind.config.js`, `frontend/app/tokens.css`, `frontend/styles/tokens.json`
-(Tailwind color keys `royal`, `ink-secondary`, etc.).
+The single source of truth for DhanRadar UI is the **live `frontend/` token files** (Geist
+Sans/Mono + Instrument Serif, warm "locked" palette), emitted by the
+`frontend/scripts/gen-tokens.mjs` pipeline: `frontend/styles/tokens.json` (hand-maintained
+master) → `frontend/src/styles/tokens.css` + `frontend/tailwind.config.js` /
+`frontend/tailwind.tokens.cjs` (Tailwind color keys `royal`, `ink-secondary`, etc.). The decision
+is recorded in **`docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md`** (D1). The built,
+compliant components live in `frontend/src/components/` — reuse those; never copy from a spec.
 
-**RETIRED — do NOT build against these:** `docs/ui-system/design-system/` and
-`docs/ui-system/tokens/` (Manrope/Inter + cool palette, keys `blue`/`ink-2`). They are a competing
-language and are superseded. `docs/ui-system/reference-impl/*`, `docs/ui-system/figma/*`, and the
-`/screens` specs are **visual reference only** and must be **retokenized to brand (Geist/warm)**
-before they compile or ship. `docs/ui-system/html/*` mockups are reference-only.
+**REMOVED (2026-06-06) — gone from the repo, never resurrect:** the Manrope/cool token sets
+`docs/ui-system/design-system/` + `docs/ui-system/tokens/`, the pre-compliance component source
+`docs/ui-system/reference-impl/`, and the stale Geist token mirror under `docs/ui-system/brand/`.
+**Reference only (retokenize to Geist/warm + relabel advisory copy before building):**
+`docs/ui-system/components/*`, `docs/ui-system/screens/*`, `docs/ui-system/figma/*`,
+`docs/ui-system/html/*`, and the brand guide `docs/ui-system/brand/` (README + `mockups/`). The
+full map is in `docs/ui-system/README.md`.
 
 ## Design authority vs the SEBI boundary (hard)
 
 The design package is a **reference system**, not a complete spec, and is a **living** system —
-you may create missing screens/components and improve patterns. **But UI never overrides a
-non-negotiable** (see project `CLAUDE.md`):
+you may create missing screens/components and improve patterns. **UI never overrides a
+non-negotiable.** The rules are defined authoritatively in project `CLAUDE.md`
+(§Non-negotiables) — do not restate them here; the UI bindings that follow are:
 
-- No advisory copy or advisory labels anywhere. `RecommendationCard` and any label UI use
+- **#1** → no advisory copy/labels; `RecommendationCard` + any label UI use
   `in_form/on_track/off_track/out_of_form` + confidence **band**.
-- `ScoreRing` and any score UI render the **confidence band, not a raw numeric score** on ungated
-  views — numeric score / factor-weights / fair-value never appear in the DOM.
-- Every surface showing a score/label/AI output renders the disclosure bundle + `NOT_ADVICE`.
+- **#2** → `ScoreRing` + any score UI render the confidence band, never a raw numeric score; the
+  numeric score / factor-weights / fair-value never enter the DOM.
+- **#9** → every score/label/AI surface renders the disclosure bundle + `NOT_ADVICE`.
 
 Where the design package shows advisory framing or a numeric score, **relabel/regate first**, then
 build.
@@ -57,13 +62,13 @@ the module feature doc / component spec. No magic numbers (token-only).
 Reuse existing layouts, navigation, cards/widgets; maintain visual hierarchy. Build production-
 quality pages (no placeholder-only screens); prefer complete working experiences.
 
-## Governance gate for UI work (`docs/project-state/AI_GOVERNANCE_MODEL.md`)
+## Governance gate for UI work
 
-Any user-facing screen or shared component is at least **Tier A**: it requires a **UI Review**
-(branding · design system · accessibility · mobile · token compliance). If it surfaces a
-score/label/AI output, a **Compliance Review** is also required. New tokens are added under brand
-naming only and go through UI Review. All review output for the change lives in the single file
-`docs/project-state/reviews/<change-id>.md`.
+UI work is at least **Tier A** (UI Review; +Compliance Review if it surfaces a score/label/AI
+output). Whether those reviews run **inline or batch to the end-of-phase audit** is set by
+`CLAUDE.md` (review cadence) + `docs/project-state/AI_GOVERNANCE_MODEL.md` — follow those; don't
+restate the tier mechanics here. New tokens are added under brand naming only. Per-change review
+output lives in `docs/project-state/reviews/<change-id>.md`.
 
 ## Definition of done (per UI feature)
 

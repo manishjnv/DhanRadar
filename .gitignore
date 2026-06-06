@@ -56,6 +56,11 @@ Thumbs.db
 *.swp
 *~
 
+# ── Generated / runtime ───────────────────────────────────────────────
+# claude-mem writes session memory context into AGENTS.md (regenerated each
+# session). Local runtime artifact, not an instruction file — never commit it.
+AGENTS.md
+
 # private ops runbook — never in the public repo
 docs/infra-notes.md
 _redact.py

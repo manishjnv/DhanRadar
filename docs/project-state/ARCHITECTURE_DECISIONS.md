@@ -63,7 +63,7 @@ CI) per `MIGRATION_STRATEGY_FINAL.md` KEEP/MERGE/REPLACE/IGNORE; never adopt who
 **Context:** ui-system ships three token sets under one `--dr-*` prefix resolving to different
 fonts/hexes; the repo already adopted brand/Geist/warm and memory enforces it.
 **Decision:** brand (Geist Sans/Mono + Instrument Serif, warm palette, keys `royal`/`ink-secondary`)
-is the single source of truth; `design-system/` + `tokens/` (Manrope/cool) are retired;
+is the single source of truth; `design-system/` + `tokens/` (Manrope/cool) are retired (deleted 2026-06-06; `frontend/` is canonical);
 components/screens/figma are retokenized to brand.
 **Consequences:** `agent.md` re-pointed; ui-package components won't compile until retokenized.
 **Source:** `CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md`.

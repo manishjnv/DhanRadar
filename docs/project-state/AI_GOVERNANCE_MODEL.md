@@ -279,7 +279,7 @@ Each review is a section inside `reviews/<change-id>.md`, headed by its **Verdic
 
 ### 6.5 UI review (Tier A; or added)
 
-- Branding (`docs/brand/` Geist/warm; Manrope/cool retired, must not appear) · design system
+- Branding (`frontend/` tokens + `docs/ui-system/brand/` guide, Geist/warm; Manrope/cool retired, must not appear) · design system
   (reuse patterns/tokens; new components reusable + documented) · accessibility (four states,
   focus rings, chart text-alternatives, axe + Lighthouse budgets, keyboard, contrast) · mobile
   responsiveness · token compliance (tokens only, no magic numbers, brand keys `royal`/

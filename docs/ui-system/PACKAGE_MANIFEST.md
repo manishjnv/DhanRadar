@@ -8,7 +8,7 @@ DhanRadar-Complete/
   README.md
   PACKAGE_MANIFEST.md
   brand/            README.md tokens.json tokens.css tailwind.config.js
-  design-system/    tokens.json css-variables.css tailwind.config.js figma-variables.json
+  (REMOVED 2026-06-06 — retired, see README.md) design-system/    tokens.json css-variables.css tailwind.config.js figma-variables.json
   tokens/           colors.json typography.json spacing.json radius.json elevation.json motion.json themes.json tailwind.config.js css-variables.css tokens.md
   components/        Button.md Card.md Input.md Search.md Table.md Sidebar.md Chart.md Watchlist.md RecommendationCard.md
   screens/          dashboard.md recommendations.md stock-detail.md fund-detail.md etf-detail.md portfolio.md watchlist.md ai-search.md ai-assistant.md news.md subscription.md settings.md admin.md
