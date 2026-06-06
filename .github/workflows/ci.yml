@@ -18,6 +18,10 @@ jobs:
           python-version: "3.12"
       - name: Non-negotiable guards + secret scan
         run: python scripts/ci_guards.py
+      - name: Anti-pattern sweep (Plan §0.3)
+        run: python scripts/anti_pattern_sweep.py
+      - name: Compose memory budget (§A6 ~3 GB)
+        run: python scripts/check_compose_memory.py
 
   # ---------------------------------------------------------------------------
   # Backend tests (pytest, incl. integration) against a Postgres service.
