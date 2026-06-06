@@ -65,6 +65,11 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.compliance.archive_audit_daily",
         "schedule": crontab(hour=2, minute=0),
     },
+    # Mood Compass twice-daily snapshot — 09:00 & 16:00 IST (architecture cadence).
+    "mood-compute-snapshot": {
+        "task": "dhanradar.tasks.mood.compute_mood_snapshot",
+        "schedule": crontab(hour="9,16", minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------

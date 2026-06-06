@@ -106,8 +106,16 @@ lives in the linked docs.
   ADR-0022. Tier-B governance ACCEPT-WITH-CONDITIONS (allowlist/version-stamp/endpoint-DoS/backdating
   fixed in-branch). New **B34** (archival R2 residency, deploy gate). Ledger
   `reviews/b26-compliance-audit.md`; feature doc `features/compliance-audit.md`.
-- **NEXT BUILD — Mood Compass** (Tier-C): twice-daily regime score → 5 buckets + commentary; emits
-  `mood.snapshot.published` (unblocks the daily public Mood card + notification event consumers).
+- **Mood Compass module: DONE** — `mood` schema + Alembic 0007; pure compute (11 weights, 5 buckets,
+  confidence floor → `insufficient_data` <0.30, factors); twice-daily Celery beat (09:00/16:00 IST);
+  anon endpoints (`/market/mood`, `/mood/history`, `/why-today`) — **regime + band, no numeric** (non-neg
+  #2, ADR-0023); `mood.snapshot.published` = B26 audit (`mood_regime`) + public card via the Notification
+  interface (`post_public_card`). Tier-C governance (Architect+Compliance+Product) ACCEPT-WITH-CONDITIONS;
+  sub-0.30 refuse + bucket-gap + commentary-screen fixed in-branch. Go-live gaps → **B35** (real signals,
+  embed widget, empty-state, factor labels, structured event, mood_history, commentary). Ledger
+  `reviews/mood-compass.md`; feature `features/mood-compass.md`.
+- **UI is next** (operator-chosen sequence): launch screens against the now-frozen contracts (MF report +
+  CAS upload → disclosure rendering → notification prefs → Mood page). Recommended as a fresh session.
 - Then continue the build order: **Mood Compass** (unblocks the daily public Mood card + notification
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
@@ -119,8 +127,9 @@ lives in the linked docs.
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B27–B34
-(**B26 now ADDRESSED**). New: **B34** (compliance R2 archival residency, deploy gate).
+See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B27–B35
+(**B26 now ADDRESSED**). New: **B34** (compliance R2 archival residency, deploy gate), **B35**
+(Mood Compass go-live: real signals + embed widget + product polish).
 Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
 later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25. New: **B31** (notification
 cross-border consent, deploy gate), **B32** (notification residuals, low), **B33** (auth/session
