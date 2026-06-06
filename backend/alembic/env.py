@@ -42,6 +42,7 @@ import dhanradar.models.auth  # noqa: E402, F401  — registers auth.users + aut
 import dhanradar.models.billing  # noqa: E402, F401  — registers billing.plans
 import dhanradar.models.mf  # noqa: E402, F401  — registers the mf.* tables
 import dhanradar.models.notifications  # noqa: E402, F401  — registers notify.* tables
+import dhanradar.models.compliance  # noqa: E402, F401  — registers compliance.* tables
 
 target_metadata = Base.metadata
 

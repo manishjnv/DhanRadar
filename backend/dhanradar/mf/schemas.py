@@ -55,6 +55,9 @@ class PortfolioReport(BaseModel):
     funds: list[FundReportItem] = []
     model_version: Optional[str] = None
     generated_at: Optional[str] = None
-    # Mandatory disclosure bundle (non-neg #9) — injected at serialization.
+    # Mandatory disclosure bundle (non-neg #9) — injected at serialization. The
+    # in-force `disclaimer_version` is stamped on the SERVED surface so it matches
+    # the `ai_recommendation_audit` row for this report (B26 / §4 tie-to-version).
     disclosure: str
     not_advice: str
+    disclaimer_version: Optional[str] = None
