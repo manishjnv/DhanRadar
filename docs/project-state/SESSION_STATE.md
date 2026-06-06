@@ -38,8 +38,8 @@ lives in the linked docs.
   casparser-injectable parse; XIRR/allocation/overlap; Rating-Engine bridge → `user_fund_scores`;
   disclosure-injected, no-numeric report; 24h raw-file purge; Alembic 0004 mf schema. Residuals
   B26/B29/B30. AMFI NAV pipeline deferred.
-- **Phase 6 (Notification: Telegram + Resend email + Pillow share-cards): BUILT on branch
-  `phase6/notification`** (Opus core + reviews; Sonnet test suites). `notify` schema + Alembic 0005
+- **Phase 6 (Notification: Telegram + Resend email + Pillow share-cards): DONE & merged** via PR #13
+  (squash `7f2fc5e`), CI green (incl. the 10 integration tests against Postgres). `notify` schema + Alembic 0005
   (`notification_preferences`/`notification_log`); `publish_notification` LPUSH → Redis channel queues;
   1-min Celery-beat LPOP drain (ADR-0021) with opt-in, IST quiet-hours, per-channel daily rate caps,
   and transient retry (Telegram 3×); Telegram/Resend transports (real UA, Cloudflare-1010 guard, Resend
@@ -50,6 +50,16 @@ lives in the linked docs.
   2026-06-06); **B31** (cross-border consent, deploy gate) + **B32** (low) filed, **B26** extended.
   Pending: FE preferences screen; daily public Mood card (needs Mood Compass). Ledger:
   `reviews/phase6-notification.md`.
+- **Phase 7 (Verification & Hardening): DONE on branch `phase7/verification-hardening`** (Opus
+  synthesis; 5 independent auditor agents — 2 Haiku sweeps, 2 Sonnet coverage, 1 Sonnet adversarial
+  §5 + 1 Sonnet re-verify). Anti-pattern sweep **CLEAN (9/9)**; constraint audit (secrets/timezone/
+  budget PASS; **container memory trimmed 3572M→3072M**; DPDP→B31; audit table→B26); coverage matrix
+  (launch-critical path COVERED; "missing" endpoints/events/beat-tasks are unbuilt future-phase
+  modules, catalogued not defects); **§5 adversarial gate ACCEPT-WITH-CONDITIONS, no BLOCKER**. Fixed
+  in-branch: `RequireConsent` anonymous→**401** safe-by-default (re-verified ACCEPT, RCA 2026-06-06);
+  consented_purposes trap annotated. New **B33** (auth/session hygiene, low). Report:
+  `PHASE7_VERIFICATION.md`. Merge-eligible; **NOT deploy-eligible** (deploy checklist: B26/B31/B6/B28/
+  B18/B2 + live-stack runtime proofs + PC4/PC5 human approval).
 
 ## In flight
 
@@ -84,35 +94,41 @@ lives in the linked docs.
 
 ## Next action
 
-- **Push `phase6/notification` + open the PR + merge after CI green** (operator granted full permission).
-- Then **Implementation-Plan Phase 7** (Verification & Hardening: end-to-end MF flow, coverage matrix,
-  anti-pattern sweep, the §5 adversarial gate) — OR continue the build order (Mood Compass, then
-  Stock/Search), OR close the MF data pipeline (**B29**: AMFI NAV + scheme metadata) so reports return
-  real labels instead of `insufficient_data`.
-- Before any Notification channel goes live: **B31** cross-border consent gate + **B26** audit-row write.
+- **Push `phase7/verification-hardening` + open the PR + merge after CI green** (operator granted full
+  permission).
+- Top deploy blocker is **B26** — build the **Compliance Audit module** (`ai_recommendation_audit`
+  partitioned table + R2 archival + caller writes at the MF-report and notification-deliver seams).
+  This is the single largest gate between "merge-eligible" and "deploy-eligible".
+- Then continue the build order: **Mood Compass** (unblocks the daily public Mood card + notification
+  event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
+  metadata) so reports return real labels instead of `insufficient_data`.
+- Other deploy gates before KVM4: **B31** (notification cross-border consent), **B6/B28** (scoring
+  activation), **B18** (atomic AI budget), **B2/B7/B8** (Razorpay data-seeding) + the live-stack
+  runtime proofs + separate human approval (PC4/PC5).
 - Before MF DEPLOY: **B26** `ai_recommendation_audit` write at the report serve seam; **B29** NAV
   pipeline; **B6/B28** scoring activation gates.
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B26–B32.
+See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B26–B33.
 Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
-later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25. New this session: **B31**
-(notification cross-border consent, deploy gate), **B32** (notification delivery residuals, low).
+later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25. New: **B31** (notification
+cross-border consent, deploy gate), **B32** (notification residuals, low), **B33** (auth/session
+hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
 
-Footer below is the current Phase-6 (Notification) work on branch `phase6/notification`.
+Footer below is the current Phase-7 (Verification & Hardening) work on branch
+`phase7/verification-hardening`.
 
-- **Phase 6 footer:** Opus — orchestration + Builder (models, migration, service, templates,
-  channels, share-card, storage, router, drain task — the compliance-critical core) + all
-  condition-fixes + all docs. Sonnet — the unit + integration test suites (fixed contract,
-  Opus-reviewed) + 2 independent reviewers (Architect, Security-adversarial). Opus — independent
-  Compliance reviewer. Haiku — n/a. codex:rescue — n/a (cross-border Security gate run as independent
-  Sonnet adversarial per the approved fallback ladder; verdict = ACCEPT-WITH-CONDITIONS).
-- Per-delegation (telemetry): notif-unit-tests · Sonnet · reworked N (49 green, clean) |
-  notif-integration-tests · Sonnet · reworked N (10 collect, clean) | governance reviewers ·
-  Sonnet×2 + Opus×1 · independent, all ACCEPT-WITH-CONDITIONS.
-- Verification note: 212 backend unit tests pass locally (49 new) + ci_guards 0 + F-lint 0 +
-  py_compile 0 + markdownlint 0; the drain round-trip + 10 integration tests collect locally and run
-  in CI (no local PG/Redis — B1).
+- **Phase 7 footer:** Opus — orchestration + synthesis of all five audits + remediation (RequireConsent
+  401, compose memory trim, doc de-stale) + the verification report + all docs. Sonnet — 2 coverage-matrix
+  auditors + the §5 adversarial gate + the independent re-verify of the security fix. Haiku — 2 mechanical
+  sweeps (anti-pattern §0.3, constraint/DPDP). codex:rescue — n/a (§5 adversarial gate run as independent
+  Sonnet per the approved fallback ladder; verdict ACCEPT-WITH-CONDITIONS, no BLOCKER).
+- Per-delegation (telemetry): anti-pattern-sweep · Haiku · reworked N (CLEAN 9/9) | constraint-audit ·
+  Haiku · reworked N (caught the 3572M memory overage) | coverage-A/B · Sonnet×2 · reworked N | §5-adversarial
+  · Sonnet · reworked N (3 MAJOR, no BLOCKER) | consent-401-reverify · Sonnet · ACCEPT.
+- Verification note: 212 backend unit tests pass locally + ci_guards 0 + F-lint 0 + markdownlint 0;
+  compose YAML valid + memory sum = 3072M; integration suite collects (63) and runs in CI (B1). Live-stack
+  hops (E2E, NTP, R2 archival, measured box memory) are deploy-time — listed in the deploy checklist.
