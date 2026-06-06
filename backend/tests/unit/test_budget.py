@@ -99,8 +99,8 @@ async def test_budget_guard_premium_initialises_key(patch_redis):
 
 async def test_budget_guard_free_does_not_increment_counter(patch_redis):
     """
-    Phase 3 stub: budget_guard does NOT increment the counter post-yield.
-    Counter must still be 0 after the context manager exits.
+    A guarded block that records nothing on the meter (units=0) must leave the
+    counter at 0: the up-front reservation is fully reconciled away on clean exit.
     """
     from dhanradar.budget import budget_guard, _REDIS_KEYS
 
@@ -109,8 +109,8 @@ async def test_budget_guard_free_does_not_increment_counter(patch_redis):
         pass
 
     val = await patch_redis.get(key)
-    assert int(val) == 0, (
-        "budget_guard is a Phase-3 stub and must NOT increment the counter. "
+    assert int(float(val)) == 0, (
+        "A block that records nothing must reconcile the reservation back to 0. "
         f"Got {val!r}"
     )
 
@@ -242,3 +242,157 @@ async def test_budget_guard_does_not_increment_on_exception(patch_redis):
             meter.units = 1
             raise RuntimeError("boom")
     assert int(await patch_redis.get(key)) == 0
+
+
+# ---------------------------------------------------------------------------
+# B18 — atomic admission (incr-then-rollback). No check-then-act overshoot.
+# ---------------------------------------------------------------------------
+
+async def test_premium_reject_does_not_inflate_counter(patch_redis):
+    """A rejected premium call must RELEASE its reservation — the counter must
+    settle back at the true value, never at value+reserve (else a single rejected
+    call would permanently wedge the budget)."""
+    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+
+    key = _REDIS_KEYS["premium"]
+    hard_cap = float(_CAPS["premium_hard"])
+    await patch_redis.set(key, str(hard_cap))  # already at the cap
+
+    with pytest.raises(BudgetExhaustedError):
+        async with budget_guard("premium"):
+            pytest.fail("must not yield — cap met")
+
+    # Counter is exactly the hard cap, NOT hard_cap + reserve.
+    assert abs(float(await patch_redis.get(key)) - hard_cap) < 1e-9
+
+
+async def test_free_reject_does_not_inflate_counter(patch_redis):
+    """Same release-on-reject invariant for the free count cap."""
+    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+
+    key = _REDIS_KEYS["free"]
+    cap = int(_CAPS["free"])
+    await patch_redis.set(key, str(cap))
+
+    with pytest.raises(BudgetExhaustedError):
+        async with budget_guard("free"):
+            pytest.fail("must not yield — cap met")
+
+    assert int(float(await patch_redis.get(key))) == cap
+
+
+async def test_premium_concurrent_reservation_is_visible(patch_redis):
+    """The core B18 fix: a reservation made by an in-flight call is visible to the
+    next caller. Simulate an in-flight spillover by reserving manually just below
+    the cap; a second budget_guard entry must then be rejected — it cannot read a
+    stale pre-reservation value and also pass the cap check."""
+    from dhanradar.budget import (
+        budget_guard,
+        BudgetExhaustedError,
+        _REDIS_KEYS,
+        _CAPS,
+        _PREMIUM_RESERVE_USD,
+    )
+
+    key = _REDIS_KEYS["premium"]
+    hard_cap = float(_CAPS["premium_hard"])
+    # Counter sits one reservation below the cap, and an in-flight call has
+    # already reserved — pushing the live value to/over the cap.
+    await patch_redis.set(key, str(hard_cap - _PREMIUM_RESERVE_USD))
+    await patch_redis.incrbyfloat(key, _PREMIUM_RESERVE_USD)  # in-flight reservation
+
+    with pytest.raises(BudgetExhaustedError):
+        async with budget_guard("premium"):
+            pytest.fail("second concurrent caller must be rejected")
+
+
+async def test_premium_reconciles_reservation_to_actual_cost(patch_redis):
+    """On clean exit the reservation is reconciled to the actual cost — the final
+    counter equals the actual spend, not the (larger) reservation."""
+    from dhanradar.budget import budget_guard, _REDIS_KEYS, _PREMIUM_RESERVE_USD
+
+    key = _REDIS_KEYS["premium"]
+    actual = 0.012
+    assert actual < _PREMIUM_RESERVE_USD  # reserve is larger, must be reconciled down
+    async with budget_guard("premium") as meter:
+        meter.cost_usd = actual
+    assert abs(float(await patch_redis.get(key)) - actual) < 1e-9
+
+
+async def test_reserve_override_is_applied_in_flight_then_reconciled(patch_redis):
+    """An explicit reserve overrides the per-kind default: that amount is held on
+    the counter DURING the guarded block (so concurrent callers see it) and is
+    reconciled to the actual recorded spend on clean exit. Admission itself keys
+    off the pre-reservation value, so the reserve does not move the cap boundary —
+    it sizes the in-flight hold."""
+    from dhanradar.budget import budget_guard, _REDIS_KEYS
+
+    key = _REDIS_KEYS["premium"]
+    async with budget_guard("premium", reserve=0.40) as meter:
+        # Mid-flight the override reservation is on the counter.
+        assert abs(float(await patch_redis.get(key)) - 0.40) < 1e-9
+        meter.cost_usd = 0.05
+    # After clean exit the reservation is reconciled down to the actual cost.
+    assert abs(float(await patch_redis.get(key)) - 0.05) < 1e-9
+
+
+async def test_premium_concurrent_gather_admits_exactly_one(patch_redis):
+    """The PRIMARY B18 fix, exercised by a real race. Two budget_guard entries run
+    concurrently via asyncio.gather from a counter with room for exactly ONE
+    reservation. Exactly one must be admitted; the other rejected. This test FAILS
+    against the old check-then-act code (both would read the stale pre-value and
+    both be admitted)."""
+    import asyncio
+
+    from dhanradar.budget import (
+        budget_guard,
+        BudgetExhaustedError,
+        _REDIS_KEYS,
+        _CAPS,
+        _PREMIUM_RESERVE_USD,
+    )
+
+    key = _REDIS_KEYS["premium"]
+    hard_cap = float(_CAPS["premium_hard"])
+    # Exactly one reservation of headroom remains under the hard cap.
+    await patch_redis.set(key, str(hard_cap - _PREMIUM_RESERVE_USD))
+
+    results = {"admitted": 0, "rejected": 0}
+
+    async def attempt() -> None:
+        try:
+            async with budget_guard("premium") as meter:
+                await asyncio.sleep(0)  # yield so the other task races our reservation
+                meter.cost_usd = _PREMIUM_RESERVE_USD
+        except BudgetExhaustedError:
+            results["rejected"] += 1
+        else:
+            results["admitted"] += 1
+
+    await asyncio.gather(attempt(), attempt())
+
+    assert results["admitted"] == 1, f"expected exactly one admission, got {results}"
+    assert results["rejected"] == 1, f"expected exactly one rejection, got {results}"
+
+
+async def test_redis_failure_on_rollback_does_not_mask_original_error(patch_redis, monkeypatch):
+    """A Redis failure while RELEASING a reservation must not mask the guarded
+    block's own exception, and must not crash the guard. The leak self-heals at the
+    daily TTL; the failure is logged, not raised (Vector 2)."""
+    from dhanradar.budget import budget_guard
+
+    real_incr = patch_redis.incrbyfloat
+
+    async def flaky_incr(name, amount, *args, **kwargs):
+        if float(amount) < 0:  # the reservation release / rollback
+            raise ConnectionError("redis down during rollback")
+        return await real_incr(name, amount, *args, **kwargs)
+
+    monkeypatch.setattr(patch_redis, "incrbyfloat", flaky_incr)
+
+    # The ORIGINAL RuntimeError must surface — NOT the ConnectionError from the
+    # swallowed rollback.
+    with pytest.raises(RuntimeError, match="boom"):
+        async with budget_guard("free") as meter:
+            meter.units = 1
+            raise RuntimeError("boom")

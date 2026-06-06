@@ -15,6 +15,143 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-06 — AI premium budget hard-cap was check-then-act → concurrent spillovers could overshoot the $9.50/day cap (B18)
+
+- **Symptom:** found in the Phase-3 governance review (tracked as B18, not a field
+  incident). `budget_guard` did `GET key` → compare to cap → `yield` → `INCRBYFLOAT`
+  **after** the guarded call. Under concurrency, N premium Sonnet spillovers could all
+  read `current < $9.50`, all pass the gate, all call, all increment — overshooting the
+  hard money cap by up to (N−1) calls' cost. The free call-count cap had the same race.
+- **Root cause:** a check-then-act (TOCTOU) sequence on a shared Redis counter — the read
+  and the increment were separate round-trips with the network call in between, so the
+  decision was made on a stale value. The same non-atomic-critical-key class as the
+  refresh-rotation `GET`-then-`DELETE` RCA (2026-05-19), where the rule "any Redis
+  check-then-act on a critical key must use an atomic primitive" was set but not yet
+  applied to the budget counter.
+- **Fix:** `budget_guard` reworked to **incr-then-rollback**
+  (`backend/dhanradar/budget.py`): reserve the per-call amount up front with an atomic
+  `INCRBYFLOAT`, admit only if the value that existed BEFORE our reservation was under the
+  cap (so concurrent callers observe each other's reservations — at most one is admitted
+  past the boundary, the irreducible single-call cost). On reject the reservation is
+  released; on a failed call it is fully rolled back; on clean exit it is reconciled to the
+  caller's actual recorded spend. Release/reconcile go through `_adjust_quietly` (swallows +
+  logs a Redis error so it never masks the caller's real outcome; the daily EXPIREAT is the
+  self-heal backstop). A warning fires when a premium call's actual cost exceeds the reserve
+  (`_PREMIUM_RESERVE_USD = $0.20`), since the concurrency guarantee needs the reserve to be
+  an upper bound. No Lua used — `INCRBYFLOAT` + `SET NX EXAT` are atomic and fakeredis-safe.
+- **Prevention:** `backend/tests/unit/test_budget.py` (now 21) adds a real
+  `asyncio.gather` race that admits **exactly one** caller from one reservation of headroom
+  (this test FAILS against the old check-then-act code — a positive control), a
+  release-on-reject test (counter never left inflated), and a Redis-failure-on-rollback
+  test (original exception still propagates). The "atomic primitive for critical Redis
+  keys" rule now has a second enforced instance. Independent adversarial review (Sonnet
+  takeover — Codex companion lacked model entitlement) ACCEPT-WITH-CONDITIONS; all four
+  conditions were applied in the same session before commit.
+- **Phase/area:** Phase 3 / AI gateway — budget governor (B18). Load-bearing path;
+  adversarial sign-off completed inline.
+
+### 2026-06-06 — Navigation off the brand guideline: unicode-glyph icons + missing a11y (aria-current / focus ring)
+
+- **Symptom:** UI-guideline audit of the nav (sidebar) against `docs/ui-system/brand/mockups/app.jsx`
+  and `docs/ui-system/components/Sidebar.md`. The sidebar used unicode glyphs (`⊞ ↑ ◐ ◎`) as
+  "icons" (off-system, inconsistent stroke/size; `◎`/`◐` are not real icons), had **no
+  `aria-current="page"`** on the active item, **no focus-visible ring** on nav links, an
+  `aria-label="Main navigation"` instead of the spec's `"Primary"`, and a bare wordmark with
+  no logo mark / sub-label (the brand lockup is mark + "DhanRadar" + sub).
+- **Root cause:** the shell was scaffolded with placeholder glyphs and minimal markup before
+  the brand assets/icon system were wired; "renders a nav" was mistaken for "matches the
+  nav guideline". Same config-vs-live gap class as the Geist-font RCA below — the tokens/
+  assets existed (`public/brand/icon.svg`) but weren't used.
+- **Fix:** `frontend/src/components/ui/AppShell.tsx` rebuilt to use the `lucide-react`
+  line-icon set (LayoutDashboard / Upload / Compass / Settings), a single `NavLink` that sets
+  `aria-current="page"` + a `focus-visible:ring-royal/40` ring, `aria-label="Primary"`, the
+  `public/brand/icon.svg` mark + "Investor Console" sub-label, a "Workspace" section label,
+  and Settings pinned to the footer (per the mockup). Public Mood header
+  (`src/app/mood/page.tsx`) given the same logo mark; its empty-state `◐` glyph replaced with
+  a lucide `Compass`.
+- **Prevention:** icons come from one set (`lucide-react`) — no unicode glyphs in product
+  chrome. Nav a11y checklist: active item carries `aria-current="page"`, links have a
+  focus-visible ring. Recorded in the [[ui-follows-branding-guide]] memory: verify the LIVE
+  screen against the brand mockup (icons, lockup, a11y), not just tokens. Deferred (future
+  scope, logged not lost): topbar search/⌘K + market-indices ticker + theme toggle + avatar,
+  the plan-aware Upgrade card, and the mobile bottom-tab/collapsed responsive variants.
+- **Phase/area:** UI launch screens / app shell + navigation.
+
+### 2026-06-06 — Brand font (Geist) specified in tokens but never loaded; Tailwind fontFamily hardcoded (token drift)
+
+- **Symptom:** every screen rendered in the system fallback font, not Geist. Found during the
+  UI-guideline review (non-neg #8 = Geist/warm identity).
+- **Root cause:** two layers. (a) `tokens.json`/`tokens.css` declared `font-family: 'Geist', …`
+  but **no Geist webfont was ever bundled** — `layout.tsx` had only a commented `@font-face`
+  placeholder, so the browser fell straight through to `ui-sans-serif`. (b) `scripts/gen-tokens.mjs`
+  **hardcoded** the Tailwind `fontFamily` array instead of deriving it from `tokens.json`, so the
+  "single source of truth" wasn't single — a font change in the source wouldn't reach Tailwind.
+- **Fix:** self-hosted fonts via `next/font` in `src/app/layout.tsx` — Geist Sans + Mono from the
+  official `geist` package, Instrument Serif from `next/font/google` — each exposing a CSS var
+  (`--font-geist-sans`/`-mono`/`--font-instrument-serif`) referenced first in `tokens.json`
+  `type.family`. `gen-tokens.mjs` now derives the Tailwind `fontFamily` from `tokens.json`
+  (`famArr()`), so `tokens.css` + `tailwind.tokens.cjs` are both generated from one source.
+- **Prevention:** added `npm run check:tokens` (`gen-tokens --check`) which fails if the committed
+  generated files drift from `tokens.json`; **wired into CI** (`.github/workflows/ci.yml` — runs
+  `check:tokens` instead of silently regenerating). Rule (in [[ui-follows-branding-guide]]):
+  verify the brand RENDERS, not just that tokens are configured.
+- **Phase/area:** UI launch screens / design-token pipeline + fonts.
+
+### 2026-06-06 — App bricked on "Starting development mocks…": MSW gate had no failure path
+
+- **Symptom:** the app hung forever on the "Starting development mocks…" loading screen
+  (observed on `/mood`). Root server state was also corrupted (404 on every route) because a
+  `next build` was running concurrently with `next dev` (see next entry).
+- **Root cause:** `src/app/providers.tsx` did `initMocks().then(() => setReady(true))` with **no
+  `.catch` and no timeout**. If `worker.start()` rejected or stalled (stale/"waiting" service
+  worker from a prior session, integrity warning, transient SW lifecycle), the rejection was
+  unhandled, `setReady(true)` never fired, and the whole app was trapped on the loader with no
+  recovery — a single point of failure with no fallback.
+- **Fix:** `providers.tsx` mock gate now `.catch`es (logs) and `.finally(setReady(true))`s, with a
+  3s timeout backstop — the app renders even if the mock layer fails, and logs the error.
+- **Prevention:** any "block the UI until X initialises" gate must fail OPEN (timeout + catch),
+  never trap the user on an init step. App must never hang on the mock/dev-only layer.
+- **Phase/area:** UI launch screens / dev mock layer.
+
+### 2026-06-06 — Dev server 404'd every route: `next build` run concurrently with `next dev` corrupted `.next/`
+
+- **Symptom:** the running dev server returned 404 for `/`, `/mood`, `/settings/notifications`,
+  `/dashboard` (while still serving `public/` files like `/mockServiceWorker.js`); the browser
+  showed a stale shell. A fresh dev server also failed to reach "Ready". Process list showed a
+  `next build` (PID) running alongside two `next dev` servers.
+- **Root cause:** `next build` and `next dev` both write to the same `frontend/.next/` directory;
+  running them simultaneously corrupts the dev route manifest → all-route 404. Triggered by the
+  "optional `npm run build`" testing suggestion being run while `npm run dev` was up.
+- **Fix:** stop all frontend node processes, `Remove-Item -Recurse -Force frontend/.next`, start a
+  single `npm run dev` (Ready in ~2s, all routes 200).
+- **Prevention:** never run `next build` and `next dev` together (shared `.next/`). For a build
+  sanity check, stop dev first. Test-steps guidance corrected to say so.
+- **Phase/area:** UI launch screens / local dev environment.
+
+### 2026-06-06 — CAS upload: PDF password captured in the UI but never sent to the backend
+
+- **Symptom:** found in the UI launch-screens review (not a field incident). The CAS
+  upload page (`frontend/src/app/(app)/mf/upload/page.tsx`) collects a "Password
+  (optional)" field and tells users CAS PDFs are "usually password-protected", but
+  `useUploadCas` built the `FormData` with only the `file` part — the password was held in
+  React state and silently dropped. Any password-protected CAS (the common case) would
+  parse-fail with no usable signal to the user.
+- **Root cause:** the upload hook's `mutationFn` took a bare `File` and never threaded the
+  password through, while the backend `POST /mf/upload/cas` has accepted an optional
+  `password: Form()` since Phase 5 (`backend/dhanradar/mf/router.py:53`, stashed to a
+  short-lived Redis key for the parser). The frontend contract drifted from the backend
+  form contract — "field shown" was mistaken for "field wired", the same exists≠applied
+  class as the auth rate-limiter RCA (2026-05-19).
+- **Fix:** `useUploadCas` now takes `{ file, password? }` and appends `password` to the
+  `FormData` only when set (`frontend/src/features/mf/api.ts`); the upload page passes
+  `password || undefined` and now renders the field via the shared `Input` component
+  instead of a hand-rolled `<input>`.
+- **Prevention:** when a screen renders an input, the review checklist now asks "is this
+  value actually in the request payload?" — a visible-but-unsent field is a silent
+  data-loss bug. Longer-term, generating the FE request types from the backend OpenAPI
+  (already on the Stage-2 dependency list) would make a dropped form field a type error.
+- **Phase/area:** Phase 5 (MF) / UI launch screens.
+
 ### 2026-06-06 — Phase-7 §5: RequireConsent returned 403 to anonymous (fragile 401-before-403 contract) + container memory over budget
 
 - **Symptom:** the Phase-7 §5 pre-deploy adversarial gate found (a) `RequireConsent`
