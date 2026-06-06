@@ -23,6 +23,10 @@ asyncio_mode = "auto"
 # and silence pytest-asyncio's "unset loop scope" deprecation warning.
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# Hard per-test timeout (CI safety net) — a hung test fails with a traceback
+# pinpointing the stall instead of stalling the whole job (a DB-lock deadlock once
+# hung the backend job for 37 min). Generous vs the ~70s full-suite runtime.
+timeout = 180
 markers = [
     "integration: requires a live Postgres database and fakeredis (deselect with -m 'not integration')",
 ]

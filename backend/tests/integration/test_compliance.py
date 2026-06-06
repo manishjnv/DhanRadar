@@ -48,17 +48,26 @@ _IST = ZoneInfo("Asia/Kolkata")
 
 @pytest.fixture(autouse=True)
 async def _truncate_compliance(db_session):
-    """Truncate compliance tables after each test so rows don't bleed across."""
+    """Truncate compliance tables after each test so rows don't bleed across.
+
+    MUST run on `db_session`'s OWN connection — NOT a separate `db_session.bind.begin()`
+    connection. The test may leave an open read transaction on `db_session` (e.g. a
+    trailing SELECT) holding an ACCESS SHARE lock on these tables; a TRUNCATE from a
+    second connection would wait forever for ACCESS EXCLUSIVE (the test's lock only
+    releases when db_session tears down, which happens AFTER this fixture) → deadlock /
+    CI hang. Same-connection TRUNCATE upgrades the lock in-transaction, no wait.
+    """
     yield
     from sqlalchemy import text
 
-    async with db_session.bind.begin() as conn:
-        await conn.execute(
-            text(
-                "TRUNCATE TABLE compliance.ai_recommendation_audit, "
-                "compliance.disclaimers RESTART IDENTITY CASCADE"
-            )
+    await db_session.rollback()  # drop any open read txn so the TRUNCATE is clean
+    await db_session.execute(
+        text(
+            "TRUNCATE TABLE compliance.ai_recommendation_audit, "
+            "compliance.disclaimers RESTART IDENTITY CASCADE"
         )
+    )
+    await db_session.commit()
 
 
 # ---------------------------------------------------------------------------
