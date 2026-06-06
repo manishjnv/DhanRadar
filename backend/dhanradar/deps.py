@@ -178,8 +178,24 @@ require_tier = RequireTier
 
 # Canonical DPDP purpose taxonomy (DhanRadar_Architecture_Final.md §Compliance).
 # A purpose outside this set is a programming error, caught at construction time.
+#
+# Cross-border purposes grant transfer of the user's personal data OUTSIDE India
+# (a DPDP concern distinct from the per-feature *processing* purposes). They are
+# kept PER-PROCESSOR — not one bundled grant — per DPDP's specific-consent /
+# no-bundling principle (ADR-0024): `cross_border_ai` gates the AI gateway →
+# OpenRouter (B20); `cross_border_notify` gates the notification deliver seam →
+# Telegram / Resend-Tokyo (B31). Enforced at the CALL SITE via
+# consent_granted / assert_consent.
 _CONSENT_PURPOSES: frozenset[str] = frozenset(
-    {"mf_analytics", "ai_insights", "marketing", "portfolio_sync", "behavioral_nudges"}
+    {
+        "mf_analytics",
+        "ai_insights",
+        "marketing",
+        "portfolio_sync",
+        "behavioral_nudges",
+        "cross_border_ai",
+        "cross_border_notify",
+    }
 )
 
 
@@ -191,6 +207,10 @@ def _consent_granted(consents: object, purpose: str) -> bool:
     NOT granted. The Consent module owns the write format; this reader stays
     forward-compatible with both `{purpose: true}` and
     `{purpose: {"granted": true, ...}}` while never failing open.
+
+    REVOKE CONTRACT (the future Consent-module writer MUST honour): a revoke is
+    written as ``granted: false`` or by removing the key — NEVER by adding a
+    separate ``revoked`` key, which this reader would ignore and thus fail OPEN.
     """
     if not isinstance(consents, dict):
         return False
@@ -276,3 +296,67 @@ class RequireConsent:
 
 # Convenience alias matching the contract name in the spec
 require_consent = RequireConsent
+
+
+# ---------------------------------------------------------------------------
+# Reusable, NON-route consent checks (B20/B31 foundation)
+# ---------------------------------------------------------------------------
+#
+# RequireConsent is a FastAPI route dependency. Internal call sites — Celery
+# workers, the notification deliver seam, AI consumers — have no Request/route,
+# so they use these instead. Both read `auth.users.dpdp_consents` FRESH (no
+# cache) via the same fail-closed reader as RequireConsent, so a revoke is
+# honoured immediately and identically.
+
+
+class ConsentRequiredError(Exception):
+    """Raised by ``assert_consent`` when a required DPDP purpose is not granted.
+
+    Deliberately NOT an HTTPException — it is raised at non-route call sites; the
+    caller decides how to surface it (skip a channel, refuse a job, log + drop).
+    """
+
+    def __init__(self, purpose: str) -> None:
+        super().__init__(f"consent_required:{purpose}")
+        self.purpose = purpose
+
+
+async def consent_granted(user_id: str, purpose: str, db: AsyncSession) -> bool:
+    """Fail-closed bool check of a user's DPDP consent for ``purpose``.
+
+    The non-raising counterpart of ``RequireConsent`` for internal call sites
+    (e.g. a deliver seam that should SKIP a channel rather than error). Fail
+    CLOSED everywhere: an unknown ``purpose`` is a programming error
+    (``ValueError``); a malformed/absent user, or a missing/false/malformed
+    grant → ``False``. Never raises on bad data, never fails open.
+    """
+    if purpose not in _CONSENT_PURPOSES:
+        raise ValueError(
+            f"Unknown consent purpose '{purpose}'. "
+            f"Valid values: {sorted(_CONSENT_PURPOSES)}"
+        )
+
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import select as _select
+
+    from dhanradar.models.auth import User
+
+    # Fail closed on any non-string / malformed subject (mirrors RequireConsent's
+    # direct parse; a `None`/`True`/object id must never reach the DB or pass).
+    if not isinstance(user_id, str):
+        return False
+    try:
+        uid = _UUID(user_id)
+    except (ValueError, TypeError):
+        return False
+
+    consents = await db.scalar(_select(User.dpdp_consents).where(User.id == uid))
+    return _consent_granted(consents, purpose)
+
+
+async def assert_consent(user_id: str, purpose: str, db: AsyncSession) -> None:
+    """Hard-stop variant: raise ``ConsentRequiredError`` if consent is not
+    granted. For call sites that must REFUSE (not skip)."""
+    if not await consent_granted(user_id, purpose, db):
+        raise ConsentRequiredError(purpose)
