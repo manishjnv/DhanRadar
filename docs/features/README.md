@@ -47,4 +47,9 @@ How to prove this module works end-to-end (commands, tests, MCP/curl checks).
 
 (Add a line here as each module doc is created.)
 
-- _none yet — Phase 1 delivered infra skeleton only; first module docs land with Phase 2+._
+- [auth.md](auth.md) — Auth & Tiering (Phase 2): RS256 JWT `__Host-` cookies, refresh rotation, tier gates.
+- [market-data-adapter.md](market-data-adapter.md) — Market Data Adapter (Phase 3): provider interface + circuit breaker.
+- [ai-gateway.md](ai-gateway.md) — AI/LLM Gateway (Phase 3): governed OpenRouter gateway + budget + advisory screen.
+- [rating-scoring-engine.md](rating-scoring-engine.md) — Rating/Scoring Engine v1 (Phase 4): rule-table labels, no-numeric boundary.
+- [mutual-fund.md](mutual-fund.md) — Mutual Fund module (Phase 5): CAS → ≤60s labelled report.
+- [notification.md](notification.md) — Notification module (Phase 6): Telegram + Resend email + share-cards, quiet-hours + rate caps.

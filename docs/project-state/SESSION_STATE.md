@@ -33,12 +33,23 @@ lives in the linked docs.
 - **Phase 4 (Rating/Scoring Engine v1 §S): DONE & merged** via PR #11 (squash `033af0e`), CI green.
   Rule-table labels (not score), floor→refuse, 2-eval hysteresis, governance; `activated:false` →
   `provisional_model`. Residuals B24–B28.
-- **Phase 5 (Mutual Fund module, CAS→≤60s report): BUILT on branch `phase5/mf-module`** (Opus
-  compliance core + router; Sonnet snapshot math; `acb6def` + governance fixes). Consent-gated upload
-  (B20, `mf_analytics`) + per-user SHA-256 dedup + <200ms enqueue; casparser-injectable parse;
-  XIRR/allocation/overlap; Rating-Engine bridge → `user_fund_scores`; disclosure-injected, no-numeric
-  report; 24h raw-file purge; Alembic 0004 mf schema. 163 unit tests; ci_guards green. Tier-B fan-out
-  done (2 BLOCKERs fixed; no open blocker); residuals B26/B29/B30. AMFI NAV pipeline deferred.
+- **Phase 5 (Mutual Fund module, CAS→≤60s report): DONE & merged** via PR #12 (squash `ad93d65`),
+  CI green. Consent-gated upload (B20, `mf_analytics`) + per-user SHA-256 dedup + <200ms enqueue;
+  casparser-injectable parse; XIRR/allocation/overlap; Rating-Engine bridge → `user_fund_scores`;
+  disclosure-injected, no-numeric report; 24h raw-file purge; Alembic 0004 mf schema. Residuals
+  B26/B29/B30. AMFI NAV pipeline deferred.
+- **Phase 6 (Notification: Telegram + Resend email + Pillow share-cards): BUILT on branch
+  `phase6/notification`** (Opus core + reviews; Sonnet test suites). `notify` schema + Alembic 0005
+  (`notification_preferences`/`notification_log`); `publish_notification` LPUSH → Redis channel queues;
+  1-min Celery-beat LPOP drain (ADR-0021) with opt-in, IST quiet-hours, per-channel daily rate caps,
+  and transient retry (Telegram 3×); Telegram/Resend transports (real UA, Cloudflare-1010 guard, Resend
+  not SendGrid); template renderer (label-only, disclosure+NOT_ADVICE+DISCLAIMER_VERSION injected
+  structurally, no numeric/advisory); Pillow 1200×630 share-card → R2 (`storage.py`); prefs API +
+  `/test` (Pro). 49 unit + 10 integration tests; full deterministic gates green. Tier-A+Compliance
+  +Security fan-out: all ACCEPT-WITH-CONDITIONS, no merge BLOCKER; MAJOR/MINORs fixed in-branch (RCA
+  2026-06-06); **B31** (cross-border consent, deploy gate) + **B32** (low) filed, **B26** extended.
+  Pending: FE preferences screen; daily public Mood card (needs Mood Compass). Ledger:
+  `reviews/phase6-notification.md`.
 
 ## In flight
 
@@ -73,32 +84,35 @@ lives in the linked docs.
 
 ## Next action
 
-- **Push `phase5/mf-module` + open the PR + merge after CI green** (operator granted full permission).
-- Then **Implementation-Plan Phase 6+** (Notification/Telegram, Mood Compass, then Stock/Search) per
-  the build order; OR close the MF data pipeline (**B29**: AMFI NAV + scheme metadata) to make the
-  CAS report return real labels instead of `insufficient_data`.
+- **Push `phase6/notification` + open the PR + merge after CI green** (operator granted full permission).
+- Then **Implementation-Plan Phase 7** (Verification & Hardening: end-to-end MF flow, coverage matrix,
+  anti-pattern sweep, the §5 adversarial gate) — OR continue the build order (Mood Compass, then
+  Stock/Search), OR close the MF data pipeline (**B29**: AMFI NAV + scheme metadata) so reports return
+  real labels instead of `insufficient_data`.
+- Before any Notification channel goes live: **B31** cross-border consent gate + **B26** audit-row write.
 - Before MF DEPLOY: **B26** `ai_recommendation_audit` write at the report serve seam; **B29** NAV
   pipeline; **B6/B28** scoring activation gates.
 
 ## Open blockers
 
-See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B26–B30.
+See `BLOCKERS.md`. Open (low/residual/non-blocking/deploy-gated): B6, B14, B16–B24, B26–B32.
 Resolved: B5 (CI), **B10**, **B11** (ADR-0020), **B13**. Addressed (code/tests; data-only or
-later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25.
+later-module work remains): B1, B2, B3, B4, B7, B8, B9, B12, B25. New this session: **B31**
+(notification cross-border consent, deploy gate), **B32** (notification delivery residuals, low).
 
 ## Agent-utilization & routing-telemetry footer
 
-Phases this session (merged): hardening B13/B10/B9/B3/B4/B11 (#9); Phase 3 Market Data + AI Gateway
-(#10); Phase 4 Rating/Scoring Engine (#11). Footer below is the current Phase-5 work.
+Footer below is the current Phase-6 (Notification) work on branch `phase6/notification`.
 
-- **Phase 5 footer:** Opus — orchestration + Builder (models, CAS parse, service, router, scoring
-  bridge, celery task, migration — the compliance-critical core) + all condition-fixes. Sonnet —
-  snapshot math (XIRR/allocation/overlap, fixed contract, Opus-reviewed) + 2 independent reviewers
-  (Architect, Security-adversarial). Opus — independent Compliance reviewer. Haiku — n/a.
-  codex:rescue — n/a (Tier-B Security gate run as independent Sonnet adversarial, fallback ladder).
-- Per-delegation (telemetry): mf-snapshot · Sonnet · reworked N (19 tests, clean) | mf-core+router ·
-  Opus · reworked Y (2 BLOCKERs fixed: per-user dedup, no engine-internals; + bounded read, password
-  off-broker, opaque errors, magic-byte, migration orphan) | governance reviewers · Sonnet×2 + Opus×1
-  · independent.
-- Verification note: 163 backend unit tests run locally + ci_guards 0 + py_compile 0 + markdownlint 0;
-  the upload→worker round trip + integration run in CI (no local PG/Redis/casparser — B1).
+- **Phase 6 footer:** Opus — orchestration + Builder (models, migration, service, templates,
+  channels, share-card, storage, router, drain task — the compliance-critical core) + all
+  condition-fixes + all docs. Sonnet — the unit + integration test suites (fixed contract,
+  Opus-reviewed) + 2 independent reviewers (Architect, Security-adversarial). Opus — independent
+  Compliance reviewer. Haiku — n/a. codex:rescue — n/a (cross-border Security gate run as independent
+  Sonnet adversarial per the approved fallback ladder; verdict = ACCEPT-WITH-CONDITIONS).
+- Per-delegation (telemetry): notif-unit-tests · Sonnet · reworked N (49 green, clean) |
+  notif-integration-tests · Sonnet · reworked N (10 collect, clean) | governance reviewers ·
+  Sonnet×2 + Opus×1 · independent, all ACCEPT-WITH-CONDITIONS.
+- Verification note: 212 backend unit tests pass locally (49 new) + ci_guards 0 + F-lint 0 +
+  py_compile 0 + markdownlint 0; the drain round-trip + 10 integration tests collect locally and run
+  in CI (no local PG/Redis — B1).

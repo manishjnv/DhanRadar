@@ -15,6 +15,37 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-06 — Notification (Phase 6) review-found defects: tier-gate-before-auth 402-leak + Telegram HTML injection in text body
+
+- **Symptom:** pre-merge governance review of the Phase-6 Notification module found
+  (a) `POST /notifications/test` declared `Depends(RequireTier("pro"))`, which runs
+  before the route body — so an **anonymous** caller received `402 upgrade_required`
+  instead of `401 not_authenticated` (anonymous defaults to `tier="free"`, rank 1 <
+  pro), leaking that the endpoint exists / is Pro-gated and contradicting the route's
+  own "auth first" contract; (b) message templates HTML-escaped dynamic values
+  (`scheme_name`, `report_url`) only in the email `html` part — but the `text` part is
+  rendered by Telegram with `parse_mode=HTML`, so a crafted scheme name could inject
+  markup into the delivered Telegram message.
+- **Root cause:** (a) FastAPI resolves all `Depends` **before** the function body, so a
+  body-level `_require_auth(user)` can never precede a dependency-level tier gate —
+  `RequireTier` treats anonymous as `free` and 402s first by construction. (b) the two
+  output parts (`text` for Telegram-HTML + email-plaintext, `html` for email) were
+  escaped inconsistently — the `text` part's double duty as a Telegram-HTML payload was
+  missed.
+- **Fix:** (a) removed the `RequireTier` dependency from `/test`; the gate is now invoked
+  in-body **after** the auth check — `_require_auth(user)` (401) then `await _pro_gate(user)`
+  (402) (`backend/dhanradar/notifications/router.py`). (b) `scheme_name`/`report_url` are
+  now `_esc`-escaped in the `text` body as well as the `html`
+  (`backend/dhanradar/notifications/templates.py`). Also added a `^-?\d{1,20}$` pattern on
+  `telegram_chat_id` to reject garbage at write time.
+- **Prevention:** rule — when an endpoint must distinguish 401-then-402, the auth check
+  must run **before** the tier gate, which means in-body (or an auth dependency ordered
+  first), never relying on `RequireTier` to imply authentication. Rule — any value
+  interpolated into a Telegram `parse_mode=HTML` payload is HTML and must be escaped, even
+  when the same string is also an email plain-text part. Both are covered by the new unit
+  tests (`tests/unit/test_notifications.py`) + the 402/401 integration cases.
+- **Phase/area:** Phase 6 / Notification — pre-merge Security review (not a field incident).
+
 ### 2026-06-05 — DPDP gates fail-open: RequireConsent was a pass-through stub; deletion_requested_at unenforced (B3/B4)
 
 - **Symptom:** `RequireConsent` (the per-purpose DPDP consent gate) always returned
