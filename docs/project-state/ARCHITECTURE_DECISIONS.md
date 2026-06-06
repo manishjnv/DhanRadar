@@ -317,3 +317,28 @@ is a deliberate migration (controlled vocabulary). A reconcile job asserting eve
 `disclaimer_version` exists in `disclaimers` is owed (denormalized value could drift).
 **Source:** `docs/DhanRadar_Architecture_Final.md` §4; `BLOCKERS.md` B26/B34;
 `reviews/b26-compliance-audit.md`; `docs/features/compliance-audit.md`.
+
+## ADR-0023 — Mood Compass public surface is regime + band (no numeric), and a sub-0.30-confidence regime refuses to `insufficient_data`
+
+**Date:** 2026-06-06 · **Status:** Accepted
+**Context:** Mood Compass computes a 0–100 market-regime score. The genre (CNN Fear &
+Greed) makes the NUMBER the viral hook. But non-neg #2 forbids any numeric score on a
+client surface, and a public "60 = greed" number invites the "60 → buy" reading the
+SEBI educational boundary forbids. Separately, a regime computed from a few low-weight
+signals (e.g. only `news_sentiment`, weight 0.06) would otherwise broadcast a confident
+directional bucket at near-zero confidence.
+**Decision:** (1) The public surface exposes the **regime bucket + confidence band +
+commentary + evidence only**; the 0–100 `mood_score` and the confidence float stay
+**server-side** (`market_mood` columns) and never serialize to a client (non-neg #2).
+A future "is it getting worse?" hook must be a NON-numeric directional field (e.g.
+`trend: rising|falling|stable` from comparing the last two rows), not the number. (2) The
+refuse floor (non-neg #4) degrades the **label, not just the band**: when confidence
+< 0.30 the served `regime` is coerced to `insufficient_data` (mirroring the rating
+engine), so a degraded snapshot cannot over-claim a directional regime. (3) Free-text AI
+commentary is advisory-screened before publish (non-neg #1).
+**Consequences:** Mood deliberately diverges from the Fear&Greed convention — it loses the
+shareable number but stays inside the educational boundary. Compliance confirmed a public
+number would be a BLOCKER. The directional-trend enhancement is tracked (B35). The 0–100
+remains available server-side for internal/event consumers (AI-Enrichment analogues).
+**Source:** `docs/DhanRadar_Architecture_Final.md` Mood Compass §; CLAUDE.md non-neg #2/#4;
+`BLOCKERS.md` B35; `reviews/mood-compass.md`; `docs/features/mood-compass.md`.
