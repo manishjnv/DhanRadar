@@ -67,11 +67,13 @@ def test_require_consent_rejects_unknown_purpose():
 
 
 async def test_require_consent_anonymous_denied():
+    # Anonymous → 401 not_authenticated (safe-by-default 401-before-403 ordering;
+    # Phase-7 §5 hardening). A non-anonymous-but-ungranted user gets 403 below.
     gate = RequireConsent("ai_insights")
     with pytest.raises(HTTPException) as ei:
         await gate(UserContext(), _FakeDB(None))  # anonymous (default)
-    assert ei.value.status_code == 403
-    assert ei.value.detail["error"] == "consent_required"
+    assert ei.value.status_code == 401
+    assert ei.value.detail == "not_authenticated"
 
 
 async def test_require_consent_granted_passes():

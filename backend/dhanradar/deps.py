@@ -5,7 +5,9 @@ Provides:
   - UserContext           dataclass returned by current_user_or_anonymous
   - current_user_or_anonymous  reads __Host-access JWT cookie; anonymous if absent/invalid
   - RequireTier           class-based dependency; raises HTTP 402 on insufficient tier
-  - RequireConsent        STUB — Consent module is a later session (shape preserved)
+  - RequireConsent        fail-closed per-purpose DPDP gate (B3); anonymous → 401,
+                          missing/false grant → 403. The full Consent module
+                          (audit log, grant/revoke endpoints, CMP) is a later slice.
 
 Anti-pattern (FORBIDDEN):
     def require_tier(tier: str):
@@ -46,6 +48,10 @@ class UserContext:
     user_id: str = "anonymous"
     tier: str = "free"
     is_anonymous: bool = True
+    # Intentionally NOT populated by current_user_or_anonymous — the ONLY valid
+    # consent check is `Depends(RequireConsent(purpose))`, which reads the grant
+    # FRESH from the DB. Do not gate on this list (it stays empty, so a check
+    # against it would fail OPEN); kept for the future Consent module.
     consented_purposes: list[str] = field(default_factory=list)
 
 
@@ -229,13 +235,15 @@ class RequireConsent:
         user: Annotated[UserContext, Depends(current_user_or_anonymous)],
         db: Annotated[AsyncSession, Depends(get_db)],
     ) -> None:
-        # Anonymous principals cannot hold consent — deny (fail-closed). A route
-        # that also needs auth should additionally gate with RequireTier so the
-        # client gets a 401 first; on its own this still refuses.
+        # Anonymous principals cannot hold consent. Raise 401 (not 403) so the
+        # gate is safe-by-default: a future route that adopts RequireConsent
+        # WITHOUT a preceding auth check still returns "authenticate first" to an
+        # anonymous caller, and the 401-before-403 ordering holds without relying
+        # on each caller to add its own is_anonymous guard (Phase-7 §5 hardening).
         if user.is_anonymous:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"error": "consent_required", "purpose": self.purpose},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="not_authenticated",
             )
 
         from uuid import UUID as _UUID
