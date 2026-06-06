@@ -46,6 +46,26 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
 
     # ------------------------------------------------------------------
+    # Notification module (Phase 6, architecture Global §5)
+    # ------------------------------------------------------------------
+    # Telegram Bot API. Token EMPTY ⇒ Telegram delivery is DISABLED (fail-closed):
+    # the drain logs the job failed rather than calling a tokenless endpoint.
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_API_BASE: str = "https://api.telegram.org"
+    # Optional public-channel chat id for the daily Mood card (deferred until Mood
+    # Compass ships); empty ⇒ that path is skipped.
+    TELEGRAM_PUBLIC_CHANNEL_ID: str = ""
+    # Resend email. Verified-working sender domain is any @dhanradar.com.
+    # api.resend.com is behind Cloudflare and 403s the default urllib UA (error
+    # 1010) — httpx sends a real UA; we also set one explicitly.
+    RESEND_API_BASE: str = "https://api.resend.com"
+    EMAIL_FROM: str = "noreply@dhanradar.com"
+    NOTIFY_USER_AGENT: str = "DhanRadar/1.0 (+https://dhanradar.com)"
+    # Optional public base URL for R2 share-cards served without a signature
+    # (public mood/badge cards). Empty ⇒ a presigned S3 URL is returned instead.
+    R2_PUBLIC_BASE_URL: str = ""
+
+    # ------------------------------------------------------------------
     # AI / LLM Gateway (Phase 3, architecture §B3)
     # ------------------------------------------------------------------
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"

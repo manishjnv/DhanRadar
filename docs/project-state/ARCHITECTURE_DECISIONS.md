@@ -263,3 +263,30 @@ unweighted sub-factor.
 §2.5/§6.1 carry cross-pointers; `ranking_configs_v1.json._concentration_note` records the resolution.
 Adding concentration in v2 is a FINAL-element change → new ADR + Tier-C review + B6 gate at that time.
 **Source:** `FINAL_SCORING_SPEC.md` §2.5/§6.1, `BLOCKERS.md` B11, ADR-0019.
+
+## ADR-0021 — Notification delivery uses a 1-minute Celery-beat LPOP drain, not a long-running BLPOP consumer (Phase 6)
+
+**Date:** 2026-06-06 · **Status:** Accepted
+**Context:** Architecture Global §5 specifies "`celery-misc` BLPOPs" the
+`notifications:queue:{channel}` Redis lists. A blocking `BLPOP` needs a bespoke
+long-running consumer process; the DhanRadar stack already runs Celery workers +
+beat and routes tasks through the broker — there is no dedicated consumer process
+in the compose stack, and adding one is extra surface for a low-volume educational
+alert channel.
+**Decision:** `publish_notification` still LPUSHes the documented job onto
+`notifications:queue:{telegram,email}` (the interface is unchanged). A
+beat-scheduled `dhanradar.tasks.misc.drain_notifications` task runs **every minute**
+and drains each channel with a bounded `RPOP` loop (FIFO with the LPUSH publisher),
+applying quiet-hours + per-channel daily rate caps, rendering the label-only
+disclosure-injected template, delivering via the channel transport, logging, and
+re-queuing transient failures up to the per-channel cap. Each tick is bounded to the
+pre-loop queue length so re-queued jobs are not re-processed the same tick (loop-safe).
+**Consequences:** delivery latency is ≤ ~1 minute (acceptable for educational
+alerts; not a real-time/transactional channel). No bespoke consumer process to
+operate or supervise. The drain must run on a **single** beat worker (or with a
+Redis lock / `acks_late`) to keep the non-atomic rate-cap counter exact — tracked as
+**B32**; a Redis Lua counter is the path before multi-worker scale. If a
+sub-minute SLA is ever required, swap the beat drain for a dedicated BLPOP consumer
+without changing the publisher interface.
+**Source:** `docs/DhanRadar_Architecture_Final.md` §5; `docs/DhanRadar_Implementation_Plan.md`
+Phase 6; `BLOCKERS.md` B32; `reviews/phase6-notification.md`.
