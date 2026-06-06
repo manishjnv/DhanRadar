@@ -32,6 +32,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0018 | Operating model: multi-agent tiered governance (A/B/C) | Accepted |
 | ADR-0019 | Scoring Engine Authority: FINAL_SCORING_SPEC.md is the sole source of truth | Accepted |
 | ADR-0020 | Concentration: catalogued-but-unweighted risk sub-factor in scoring v1 (B11) | Accepted |
+| ADR-0024 | DPDP cross-border consent: per-processor purposes + fail-closed non-route gate (B20/B31) | Accepted |
 
 ---
 
@@ -342,3 +343,27 @@ number would be a BLOCKER. The directional-trend enhancement is tracked (B35). T
 remains available server-side for internal/event consumers (AI-Enrichment analogues).
 **Source:** `docs/DhanRadar_Architecture_Final.md` Mood Compass §; CLAUDE.md non-neg #2/#4;
 `BLOCKERS.md` B35; `reviews/mood-compass.md`; `docs/features/mood-compass.md`.
+
+## ADR-0024 — DPDP cross-border consent: per-processor purposes + fail-closed non-route gate (B20/B31)
+
+**Date:** 2026-06-05 · **Status:** Accepted
+**Context:** transferring user personal data OUTSIDE India — the AI gateway → OpenRouter (B20) and
+the notification deliver seam → Telegram + Resend-Tokyo (B31) — is a DPDP cross-border concern
+distinct from the per-feature *processing* purposes. The seams had no cross-border consent gate
+(two MAJOR deploy-gates), and `RequireConsent` is a FastAPI route dependency unusable from Celery
+workers / internal seams.
+**Decision:** (a) add **per-processor** cross-border purposes — `cross_border_ai` (B20) +
+`cross_border_notify` (B31) — NOT one bundled grant, honouring DPDP's specific-consent /
+no-bundling principle (Compliance review). (b) add reusable, non-route
+`consent_granted(user_id, purpose, db) -> bool` (skip semantics) and `assert_consent(...)` (raises
+`ConsentRequiredError`) in `deps.py`, reusing the existing fail-closed `_consent_granted` reader,
+read FRESH (no cache) so a revoke is honoured immediately. The gate is enforced at the CALL SITE
+(the gateway cannot know the user).
+**Consequences:** B20/B31 wiring (consuming-module PRs) must call the gate and prove "no grant →
+egress client never invoked." Until the Consent-module grant/revoke WRITER exists (non-neg #10,
+still a stub), every user fails closed → the cross-border seams are inert for real users, which is
+safe. Revoke contract: the writer MUST set `granted:false` / remove the key, never add a separate
+`revoked` key (documented in `_consent_granted`). The ADR index is currently behind (0021–0024
+un-indexed beyond this addition; reconcile separately).
+**Source:** `backend/dhanradar/deps.py`; `reviews/consent-cross-border-primitive.md`;
+`docs/DhanRadar_Architecture_Final.md` §Compliance; CLAUDE.md non-neg #10; ADR-0022 (R2 residency).
