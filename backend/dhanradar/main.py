@@ -24,6 +24,7 @@ from dhanradar.errors import (
 )
 from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
+from dhanradar.notifications.router import router as notifications_router
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
 from dhanradar.scoring.engine.router import router as internal_scoring_router
@@ -77,6 +78,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(subscriptions_router, prefix="/api/v1")  # legacy /subscriptions/webhook alias
 app.include_router(billing_router, prefix="/api/v1")
 app.include_router(mf_router, prefix="/api/v1")  # Phase 5 — MF CAS→report (consent-gated)
+app.include_router(notifications_router, prefix="/api/v1")  # Phase 6 — Notification prefs + test
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).

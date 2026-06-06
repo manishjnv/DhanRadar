@@ -53,6 +53,12 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.purge_cas_files",
         "schedule": crontab(hour=2, minute=0),
     },
+    # Notification queue drain — every minute (Phase 6). Pops the Redis channel
+    # queues, applies quiet-hours + rate caps, delivers, logs, retries transient.
+    "notify-drain": {
+        "task": "dhanradar.tasks.misc.drain_notifications",
+        "schedule": crontab(minute="*"),
+    },
 }
 
 # ---------------------------------------------------------------------------
