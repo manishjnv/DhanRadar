@@ -17,7 +17,7 @@ docker compose up -d                          # postgres(+schema.sql), redis, el
 cd ../api && uv sync --frozen && uv run alembic upgrade head && uv run uvicorn app.main:app --reload
 # web:
 cd ../web && npm ci && npm run gen:api        # types from contracts/openapi.yaml
-cp ../tokens/css-variables.css src/styles/tokens.css
+# tokens come from the canonical frontend/ pipeline (gen-tokens.mjs) — no copy from ../tokens/
 npm run dev
 # seed: load contracts/seed-data.json
 ```

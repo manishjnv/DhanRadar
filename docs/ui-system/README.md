@@ -19,9 +19,18 @@
 - `brand/` — brand guide (voice/tone, colour, typography, logo usage) + `mockups/` (`.jsx` design mockups).
 - `components/`, `screens/` — component & screen specs. **Authored against the retired Manrope/cool
   language; relabel any advisory copy and retokenize to Geist/warm before building.**
+  - **Built — use the live component, ignore the spec's styling:** Button, Card, Input, Chart
+    (→ `ScoreRing` / `AllocationDonut`). Catalog: `frontend/src/components/README.md`.
+  - **Pending — retokenize the spec before building:** Search, Sidebar, Table, Watchlist,
+    RecommendationCard (RecommendationCard must also drop advisory verbs → educational labels).
 - `figma/`, `html/` — Figma handoff notes and rendered HTML mockups; visual reference only.
-- `claude-code/`, `contracts/`, `compliance/`, `analytics/`, `ai-governance/`,
-  `event-architecture/`, `launch/`, `docs/` — supporting reference docs.
+- `compliance/`, `analytics/`, `ai-governance/`, `recommendation-engine/`, `event-architecture/`,
+  `launch/` — supporting reference docs with harvest value (numbers, frameworks).
+- ⚠️ **`docs/` (01–07 + audits), `claude-code/*-spec.md`, `contracts/` (`openapi.yaml`, `schema.sql`),
+  and the bootstrap guides (`GETTING_STARTED.md`, `CLAUDE_CODE_STARTER_GUIDE.md`, `nextjs-blueprint/`)
+  describe the original package's standalone build — a DIFFERENT stack / auth / API / DB than the
+  real project. Do NOT follow them.** The real build is `backend/` + `frontend/` per
+  `../DhanRadar_Architecture_Final.md` + `../DhanRadar_Implementation_Plan.md`.
 
 ## Retired (removed 2026-06-06)
 
