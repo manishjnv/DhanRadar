@@ -127,6 +127,31 @@ const MOCK_USER = {
 const PRO_TIERS = ['pro', 'pro_plus', 'founder_lifetime'];
 
 // ---------------------------------------------------------------------------
+// Consent — mutable mock state (mirrors ConsentState).
+// Default: all purposes false, version "2026-06-01".
+// grant/revoke set listed purposes true/false and return full state.
+// ---------------------------------------------------------------------------
+type ConsentPurpose =
+  | 'mf_analytics'
+  | 'ai_insights'
+  | 'marketing'
+  | 'portfolio_sync'
+  | 'behavioral_nudges'
+  | 'cross_border_ai'
+  | 'cross_border_notify';
+
+let mockConsents: Record<ConsentPurpose, boolean> = {
+  mf_analytics: false,
+  ai_insights: false,
+  marketing: false,
+  portfolio_sync: false,
+  behavioral_nudges: false,
+  cross_border_ai: false,
+  cross_border_notify: false,
+};
+const CONSENT_VERSION = '2026-06-01';
+
+// ---------------------------------------------------------------------------
 // Notification preferences — mutable mock state (mirrors PreferencesResponse).
 // Persists across GET/POST so the settings screen round-trips realistically.
 // ---------------------------------------------------------------------------
@@ -378,5 +403,31 @@ export const handlers = [
       not_advice: MOOD_SNAPSHOT.not_advice,
       disclaimer_version: MOOD_SNAPSHOT.disclaimer_version,
     });
+  }),
+
+  // GET /api/v1/consent (authed) — current DPDP consent state
+  http.get('/api/v1/consent', () => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    return HttpResponse.json({ consents: { ...mockConsents }, consent_version: CONSENT_VERSION });
+  }),
+
+  // POST /api/v1/consent/grant (authed) — set the listed purposes granted
+  http.post('/api/v1/consent/grant', async ({ request }) => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    const body = (await request.json().catch(() => ({}))) as { purposes?: ConsentPurpose[] };
+    for (const p of body.purposes ?? []) {
+      if (p in mockConsents) mockConsents[p] = true;
+    }
+    return HttpResponse.json({ consents: { ...mockConsents }, consent_version: CONSENT_VERSION });
+  }),
+
+  // POST /api/v1/consent/revoke (authed) — set the listed purposes not-granted
+  http.post('/api/v1/consent/revoke', async ({ request }) => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    const body = (await request.json().catch(() => ({}))) as { purposes?: ConsentPurpose[] };
+    for (const p of body.purposes ?? []) {
+      if (p in mockConsents) mockConsents[p] = false;
+    }
+    return HttpResponse.json({ consents: { ...mockConsents }, consent_version: CONSENT_VERSION });
   }),
 ];

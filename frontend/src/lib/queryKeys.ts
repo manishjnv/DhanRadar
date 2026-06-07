@@ -54,4 +54,7 @@ export const queryKeys = {
     history:  (days: number) => ['mood', 'history', days] as const,
     whyToday: () => ['mood', 'why-today'] as const,
   },
+  consent: {
+    state: () => ['consent', 'state'] as const,
+  },
 } as const;
