@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import datetime
 import json
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any
 
 from openai import APIStatusError, RateLimitError
 
@@ -56,6 +57,16 @@ _STRIKE_LIMIT = 3
 class _LLMResult:
     data: dict
     total_tokens: int
+    model: str
+
+
+@dataclass(frozen=True)
+class CompletionResult:
+    """Returned by ``OpenRouterGateway.complete()``: the validated output and the
+    model that served it (needed by audit/compliance consumers — B21)."""
+
+    output: AIOutputBase
+    model_used: str
 
 
 def _parse_csv(value: str) -> list[str]:
@@ -69,10 +80,10 @@ class OpenRouterGateway:
         self,
         *,
         client: Any = None,
-        free_models: Optional[Sequence[str]] = None,
-        sonnet_model: Optional[str] = None,
-        high_stakes_tasks: Optional[Iterable[str]] = None,
-        task_model_preferences: Optional[dict[str, list[str]]] = None,
+        free_models: Sequence[str] | None = None,
+        sonnet_model: str | None = None,
+        high_stakes_tasks: Iterable[str] | None = None,
+        task_model_preferences: dict[str, list[str]] | None = None,
         redis: Any = None,
     ) -> None:
         self._client = client  # injected (tests) or lazily built
@@ -96,11 +107,11 @@ class OpenRouterGateway:
         task_type: str,
         messages: list[dict[str, str]],
         schema: type[AIOutputBase],
-        ticker: Optional[str] = None,
+        ticker: str | None = None,
         contains_personal_data: bool = True,
         cross_border_consent_verified: bool = False,
-    ) -> AIOutputBase:
-        """Return a validated AIOutputBase for ``task_type`` or raise.
+    ) -> CompletionResult:
+        """Return a ``CompletionResult`` for ``task_type`` or raise.
 
         Args:
             task_type: Routing key used to select the model pool.
@@ -140,7 +151,7 @@ class OpenRouterGateway:
 
         validator = QualityValidator(schema)
         models = self._models_for(task_type)
-        last_quality_error: Optional[QualityValidationError] = None
+        last_quality_error: QualityValidationError | None = None
         got_any_response = False
 
         # --- Free pool, round-robin, inside the free budget ---------------
@@ -173,14 +184,14 @@ class OpenRouterGateway:
                 except QualityValidationError as qe:
                     last_quality_error = qe
                     continue  # quality fail → try the next free model
-                return result
+                return CompletionResult(output=result, model_used=model)
 
         # --- Escalation: free pool produced no valid output ---------------
         if last_quality_error is not None and task_type in self._high_stakes:
             # Premium Sonnet spillover — but bound it with the SAME 3-strike skip
             # so a persistently-bad high-stakes ticker cannot loop premium spend.
             try:
-                return await self._spillover_to_sonnet(messages, validator)
+                return await self._spillover_to_sonnet(messages, validator)  # returns CompletionResult
             except QualityValidationError:
                 strikes = await self._record_strike(task_type, ticker)
                 if strikes >= _STRIKE_LIMIT:
@@ -234,11 +245,11 @@ class OpenRouterGateway:
         data = json.loads(content)  # may raise JSONDecodeError
         usage = getattr(resp, "usage", None)
         total = int(getattr(usage, "total_tokens", 0) or 0)
-        return _LLMResult(data=data, total_tokens=total)
+        return _LLMResult(data=data, total_tokens=total, model=model)
 
     async def _spillover_to_sonnet(
         self, messages: list[dict[str, str]], validator: QualityValidator
-    ) -> AIOutputBase:
+    ) -> CompletionResult:
         """Premium Sonnet spillover. Records the (charged) cost even if the
         response then fails validation — Sonnet bills on response, so the budget
         is debited as soon as we get one; validation runs AFTER the budgeted
@@ -253,17 +264,20 @@ class OpenRouterGateway:
                     ) from exc
                 raise
             meter.cost_usd = (res.total_tokens / 1_000_000) * _SONNET_USD_PER_1M_TOKENS
-        return validator.validate(res.data)  # raises QualityValidationError if Sonnet also fails
+        output = validator.validate(res.data)  # raises QualityValidationError if Sonnet also fails
+        # Audit the model that actually served (res.model == self._sonnet_model here,
+        # but use the threaded field so provenance stays symmetric with the free pool).
+        return CompletionResult(output=output, model_used=res.model)
 
-    async def _record_strike(self, task_type: str, ticker: Optional[str]) -> int:
+    async def _record_strike(self, task_type: str, ticker: str | None) -> int:
         """Increment and return the 3-strike-per-(ticker, day) counter."""
         redis = self._redis or get_redis()
-        day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+        day = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d")
         key = f"ai:strike:{ticker or task_type}:{day}"
         strikes = int(await redis.incr(key))
         if strikes == 1:
             # Expire at next UTC midnight (daily reset of the strike window).
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.UTC)
             midnight = (now + datetime.timedelta(days=1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )

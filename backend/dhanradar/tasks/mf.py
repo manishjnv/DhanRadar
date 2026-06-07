@@ -25,17 +25,17 @@ import json
 import logging
 import os
 import time
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, date, datetime, timedelta, timezone
+from typing import Any
 
 from dhanradar.celery_app import celery_app
 from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
-
-logger = logging.getLogger(__name__)
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
+
+logger = logging.getLogger(__name__)
 
 _UPLOAD_TTL_SECONDS = 24 * 3600
 
@@ -44,7 +44,7 @@ _UPSERT_CHUNK = 2000
 
 
 def parsed_to_snapshot_holdings(
-    parsed: list[ParsedHolding], nav_map: Optional[dict[str, float]] = None
+    parsed: list[ParsedHolding], nav_map: dict[str, float] | None = None
 ) -> list[Holding]:
     """Map parsed CAS holdings → snapshot.Holding, applying the latest NAV when
     available (else falling back to the CAS-reported valuation). Pure + testable."""
@@ -224,17 +224,31 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "overlap_matrix": snap.overlap_matrix,
             },
             "funds": funds_payload, "model_version": rengine.model_version,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             # Stamp the in-force disclaimer version on the served + cached report so
             # it matches the audit rows written above (B26 tie-to-version).
             "disclaimer_version": DISCLAIMER_VERSION,
         }
+        # First AI consumer — governed portfolio commentary (B20/B21/B22 gated).
+        # Best-effort: a commentary failure NEVER breaks the report (mirrors the
+        # fire-and-forget audit pattern above).
+        try:
+            from dhanradar.ai_gateway.gateway import OpenRouterGateway
+            from dhanradar.mf.commentary import generate_commentary
+
+            report_payload["ai_commentary"] = await generate_commentary(
+                OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
+            )
+        except Exception:  # noqa: BLE001 — commentary is best-effort; report still completes
+            logger.exception("AI commentary failed job=%s", job_id)
+            report_payload["ai_commentary"] = {"state": "unavailable", "reason": "internal_error"}
+
         await redis.set(
             f"{service._REPORT_PREFIX}{job_id}", json.dumps(report_payload), ex=service._REPORT_TTL
         )
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(
-                status="done", progress_pct=100, completed_at=datetime.now(timezone.utc)
+                status="done", progress_pct=100, completed_at=datetime.now(UTC)
             )
         )
         await db.commit()
