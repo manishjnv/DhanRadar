@@ -55,3 +55,4 @@ How to prove this module works end-to-end (commands, tests, MCP/curl checks).
 - [notification.md](notification.md) — Notification module (Phase 6): Telegram + Resend email + share-cards, quiet-hours + rate caps.
 - [compliance-audit.md](compliance-audit.md) — Compliance Audit module (B26): 7-yr `ai_recommendation_audit` + disclaimer registry + served-label writes + R2 archival.
 - [mood-compass.md](mood-compass.md) — Mood Compass module (Phase 2): twice-daily market regime + commentary, `mood.snapshot.published`, public anon API.
+- [consent.md](consent.md) — Consent module (Phase 2, B44): DPDP grant/revoke writer, append-only audit log, point-of-use modal + settings/privacy panel.

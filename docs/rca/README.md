@@ -15,6 +15,32 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-08 — Consent writer idempotency key shared across grant+revoke (review-found fail-open) + 0-row UPDATE false audit (B44)
+
+- **Symptom:** found in inline Opus review + the Tier-B Sonnet adversarial takeover (codex n/a)
+  BEFORE any commit — two defects in the B44 consent writer draft: (1) the Redis idempotency key
+  `consent:idem:{uid}:{key}` was not scoped by operation, so reusing one key value for a grant then
+  a revoke made the revoke look like a replay → silently skipped → consent stayed granted while the
+  caller received HTTP 200 (fail-open: user believes they revoked; the gate still passes them).
+  (2) a grant/revoke for a user whose row was deleted mid-session (DPDP-erasure race) matched 0 rows
+  on the `UPDATE` but still committed an audit row — a false forensic record of a consent change
+  that never happened.
+- **Root cause:** (1) the idempotency key was namespaced only by `uid` + client key, with no
+  operation dimension — same dedup-without-full-scope class as the auth refresh `GETDEL` RCA
+  (2026-05-19). (2) `result.rowcount` was not checked after the `UPDATE`; the audit append is only
+  meaningful if the data write actually changed a row.
+- **Fix:** (1) key namespaced per action — `consent:idem:grant:{uid}:{key}` /
+  `consent:idem:revoke:{uid}:{key}` (`backend/dhanradar/consent/router.py`). (2) `rowcount == 0` →
+  `await db.rollback()` + raise 401 `user_not_found` before any audit row is added
+  (`backend/dhanradar/consent/service.py`). Both applied before the first commit (`927f64f`).
+- **Prevention:** regression tests `test_same_idempotency_key_across_grant_then_revoke_still_revokes`
+  and `test_grant_for_deleted_user_fails_closed_no_audit`
+  (`backend/tests/integration/test_consent_writer.py`). Rule: an idempotency key that deduplicates
+  mutating operations MUST include the operation name in its namespace; a data write and its audit
+  append must be gated on `rowcount > 0`.
+- **Phase/area:** B44 consent writer (load-bearing) — caught at inline Tier-B review, not a field
+  incident.
+
 ### 2026-06-07 — Duplicate alembic revision `0008` silently broke `alembic upgrade head` (B36)
 
 - **Symptom:** `alembic heads` warned `Revision 0008 is present more than once` and `alembic history`

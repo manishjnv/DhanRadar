@@ -5,6 +5,54 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## B44 consent writer + B42 responsive AppShell landed (2026-06-08, branch `hardening/launch-gate-blockers`)
+
+**B44 — DPDP consent grant/revoke writer + capture UI (`927f64f` backend, `4b40f83` frontend).**
+The fail-closed `RequireConsent` gate (B3) finally has a WRITER, so consent-gated routes can
+legally go live. Backend: `consent/` module — `GET /consent`, `POST /consent/grant`+`/revoke`
+(authed, anonymous→401-first, RFC7807, action-scoped `Idempotency-Key`, atomic per-purpose
+`jsonb_set`, single-commit append to new append-only `consent.consent_audit_log`, migration 0010).
+Revoke writes `{"granted":false}` — never a `revoked` key. Frontend: point-of-use `ConsentModal`
+(gates MF upload on `mf_analytics`) + `settings/privacy` panel (all 7 purposes). Tier-B adversarial
+sign-off: codex n/a → independent Sonnet takeover **ACCEPT-WITH-CONDITIONS**, all 3 applied (0-row
+UPDATE guard, ORM CheckConstraint, Redis graceful-degrade). 34 unit + 14 integration + 6 FE tests.
+Ledger `reviews/b44-consent-writer.md`; feature doc `docs/features/consent.md`; RCA 2026-06-08.
+B44 now ADDRESSED; **B48 (re-enforce the consent kill-switch at launch) remains the deploy gate**.
+
+**B42 — responsive AppShell + UI fixes (`725e3eb` + `588a719`).** Shared `SidebarContent`; desktop
+`<aside>` now `hidden md:flex`; topbar hamburger opens the same nav as a `role=dialog` slide-in
+drawer (backdrop/Escape/nav-click/route-change close; dynamic `aria-expanded`). Folded in: `Field`
+`aria-describedby`+`aria-invalid` wiring; `MoodGauge` hex→`var(--dr-*)` tokens. Independent UI
+review ACCEPT-WITH-CONDITIONS; high (hardcoded `aria-expanded`) + med test gaps fixed in `588a719`.
+Low findings logged (no focus-trap in nav drawer; Settings outside the Primary nav landmark
+[pre-existing]; no `--dr-muted` alias). 38 FE vitest pass.
+
+**Deferred (concurrent-session contention):** `BLOCKERS.md` rows B44/B42 were NOT updated to
+ADDRESSED this session — another session held the file across every write attempt. Authoritative
+status lives in the ledger + feature doc above; reconcile the BLOCKERS rows when the file is free.
+**No merge/deploy** (human-gated). Backend full unit suite: 388 pass, 2 pre-existing network-DNS
+failures in `test_market_data.py` (unrelated). Governance audit re-run: B44 Tier-B (Security+
+Compliance) and B42 Tier-A UI all signed off this session; the full Phase-7 §5 pre-deploy panel
+across the whole repo remains the gate before flipping PR #28 to ready.
+
+### Agent-utilization & routing-telemetry footer (B44 + B42 session, 2026-06-08)
+
+- **Opus** — orchestration; load-bearing Tier-B review of the consent writer (caught the
+  idempotency fail-open + 0-row false-audit before commit); Compliance sign-off; the small
+  load-bearing fixes + governance docs (ledger, RCA/SESSION_STATE edits) hand-finished.
+- **Sonnet** — 3 builder drafts (B44 backend; B44 frontend; B42) + 1 independent adversarial
+  Security takeover + 1 independent B42 UI review + 1 doc-draft agent (feature doc + RCA/session
+  blocks).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (ChatGPT-account entitlement error; no Codex model available) → Sonnet
+  takeover per the approved fallback ladder; verdict ACCEPT-WITH-CONDITIONS, all 3 conditions applied.
+- Per-delegation telemetry: B44-backend-builder · Sonnet · reworked: Y (Opus fixed action-scoped
+  idempotency key + 0-row guard + main.py import order) · B44-frontend-builder · Sonnet · reworked: Y
+  (timed out twice mid-run; Opus completed handlers + upload wiring + settings/privacy page + tests +
+  apostrophe syntax fix) · B42-builder · Sonnet · reworked: Y (UI-review high+med a11y conditions
+  fixed by Opus) · B44-adversarial · Sonnet · reworked: N · B42-UI-review · Sonnet · reworked: N ·
+  docs-draft · Sonnet · reworked: Y (Opus trimmed RCA/session blocks; ledger written Opus-direct).
+
 ## Monetization model decided (2026-06-08) — implement at Phase 5
 
 MF launch = **freemium + Founding Access**, written into `DhanRadar_Implementation_Plan.md`
