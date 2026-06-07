@@ -33,6 +33,8 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0019 | Scoring Engine Authority: FINAL_SCORING_SPEC.md is the sole source of truth | Accepted |
 | ADR-0020 | Concentration: catalogued-but-unweighted risk sub-factor in scoring v1 (B11) | Accepted |
 | ADR-0024 | DPDP cross-border consent: per-processor purposes + fail-closed non-route gate (B20/B31) | Accepted |
+| ADR-0025 | AMFI historical NAV report as the canonical backfill source for MF return signals (B29) | Accepted |
+| ADR-0026 | Scoring-engine activation: admin-triggered, DB-registry-authoritative two-person + backtest gate (B6/B28) | Accepted |
 
 ---
 
@@ -367,3 +369,96 @@ safe. Revoke contract: the writer MUST set `granted:false` / remove the key, nev
 un-indexed beyond this addition; reconcile separately).
 **Source:** `backend/dhanradar/deps.py`; `reviews/consent-cross-border-primitive.md`;
 `docs/DhanRadar_Architecture_Final.md` §Compliance; CLAUDE.md non-neg #10; ADR-0022 (R2 residency).
+
+## ADR-0025 — AMFI historical NAV report is the canonical backfill source for MF return signals (B29)
+
+**Date:** 2026-06-07 · **Status:** Accepted
+**Context:** Producing real (still provisional) MF labels needs 1Y/3Y category-relative return
+signals, which need NAV **history**. The verified Allowed-APIs block covered only `NAVAll.txt`
+(today's NAV). A backfill source was required; the options were the official AMFI historical NAV
+report, a third-party aggregator (e.g. `mfapi.in`), or accrue-forward-only (no backfill, labels
+stay `insufficient_data` for 1–3 years). Introducing an external API requires an architecture-owner
+decision + an Allowed-APIs entry (the "never invent an external API" rule).
+**Decision:** Use the **official AMFI historical NAV report**
+(`GET portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=&todt=`) as the canonical
+backfill source — the **same official, free, India-resident** source as the daily feed; **no
+third-party NAV vendor is introduced.** Live-verified 2026-06-07. It is semicolon-delimited but
+**8-field with a different column order** than `NAVAll.txt`, so it gets a separate parser
+(`parse_nav_history`); AMFI caps each request to ~3 months, so a multi-year backfill loops over
+non-overlapping windows. Added to the Implementation Plan §0 Allowed-APIs block.
+**Consequences:** the MF data pipeline (B29) can compute return-based signals — Momentum (category
+rank), Trend (rolling-return trajectory), Risk (volatility/drawdown), partial Quality, and the
+`outperform_1y/3y` / `drawdown_controlled` label signals — per `FINAL_SCORING_SPEC` §2.6/§4.1/§8.
+**Valuation stays uncomputed** (needs an expense-ratio feed) and `structural_concern`/`manager_change`
+stay False (no qualitative feed) → coverage ~3/5 → confidence caps at `medium`, and every result keeps
+the **`provisional_model`** flag because the weights are `activated:false` (B28) pending the backtest
+pass-gates + two-person methodology gate (B6). The signal-derivation **thresholds are provisional and
+config-gated, not frozen methodology** — finalizing them is a FINAL-element calibration → B6 gate
+before any numeric is treated as authoritative. DPDP-clean: public NAV data, no PII, India-resident.
+**Source:** Implementation Plan §0 Allowed-APIs ("AMFI NAV — historical"); `FINAL_SCORING_SPEC`
+§2.6/§4.1/§8; `BLOCKERS.md` B29/B28/B6; `GROWTH_BACKLOG.md` Tier-0; `reviews/independent-audit-2026-06-06.md`.
+
+## ADR-0026 — Scoring-engine activation: admin-triggered, DB-registry-authoritative two-person + backtest gate (B6/B28)
+
+**Date:** 2026-06-07 · **Status:** Accepted
+
+**Context:** `ranking_configs_v1.json` carries `activated:false` and every result is tagged
+`provisional_model`. ADR-0018/ADR-0019 document the two-person methodology gate (`approved_by ≠
+created_by`) and the §8 backtest pass-gates as pre-conditions for treating any numeric as
+authoritative. No enforcement mechanism existed: the gate was a written rule without a runtime
+trigger or a durable activation state. Three implementation approaches were evaluated.
+
+- **Option A — Admin endpoint + DB registry (chosen):** a `POST /api/v1/admin/scoring/{version}/activate`
+  endpoint (`RequireAdmin()` → surface-hiding 404 for non-admins) writes a row to
+  `compliance.rating_engine_changelog` with `activated=true`. The registry row is the authoritative
+  runtime activation state; the endpoint is the only activation trigger.
+- **Option B — Ops-script service function (rejected):** a pure Python function callable only from a
+  CLI script; no HTTP trigger, smaller attack surface, but no operator UI action and no audit trail
+  in the compliance table.
+- **Option C — Gated CLI flips `activated:true` in the JSON (rejected):** simplest engine path, but
+  activation requires a redeploy, and the "state" is a file edit with no immutable audit row.
+
+**Decision:** Option A. The `compliance.rating_engine_changelog` table is the **authoritative
+runtime activation state** for a scoring `model_version`. A version is "activated" iff it has a
+changelog row with `activated=true`. Activation is gated by
+`scoring/engine/activation.py:assert_activatable`, which enforces fail-early:
+
+1. `backtest_passed` must be `true` (the §8 backtest pass-gates, asserted by the operator) — else
+   422 `backtest_not_passed`.
+2. `approved_by ≠ created_by` two-person gate (reuses `governance.two_person_gate_ok`) — else 409
+   `two_person_gate_failed`. `created_by` is the authoring ROLE from `ranking_configs_v1.json`
+   (`"architecture-review"`); `approved_by` is the activating admin's UUID. `EngineConfig.validate()`
+   rejects a UUID-shaped `created_by` to prevent trivial/deceptive satisfaction of the gate.
+
+On success, one `rating_engine_changelog` row is written via `compliance.service.record_engine_changelog`
+(interface-only coupling; scoring never imports the compliance ORM model). A
+`uq_engine_changelog_activated_per_version` partial-unique index (migration 0009) is the
+multi-worker race-safe backstop against double-activation (409 `model_already_activated`).
+
+The engine's synchronous `score()` path is **unchanged** — it reads `cfg.activated` from the JSON
+file flag as a "no DB session" fallback (`provisional_model` tag). Surfaces with a DB session call
+`activation.is_activated(db, model_version)` (positive-memoized via a process-global set; activation
+is monotonic). `GET /api/v1/admin/scoring/{version}/status` reports `file_activated`,
+`registry_activated`, `effective_activated` (file OR registry), and `provisional` (NOT
+`registry_activated` — the registry gate governs provisional determination, not the file flag).
+
+**v1 stays provisional**: no backtest has been run, so v1 is not activated. The mechanism is built
+and ready; actual v1 activation still requires real §8 backtest pass-gates (human/data) and a human
+approver admin whose UUID differs from the authoring role.
+
+**Consequences:** runtime activation requires no redeploy. The compliance table carries an immutable
+audit row for every activation event. The two-person gate is structurally enforced, not discipline-
+dependent. The engine sync path retains the JSON-flag fallback so scoring is never blocked by a DB
+session absence. Adding v1 activation is a data + human gate (backtest + admin action), not a code
+change.
+
+**Tier-C review:** independent adversarial review (Sonnet takeover; codex unavailable) —
+ACCEPT-WITH-CONDITIONS; all 3 conditions applied in-session (UUID `created_by` validation;
+partial-unique index + IntegrityError→409; `provisional` governed by registry). 7 unit + 7
+integration tests; ci_guards green.
+
+**Files:** `scoring/engine/activation.py` (new); `scoring/engine/config.py`; `compliance/service.py`;
+`admin/router.py` + `admin/schemas.py`; `models/compliance.py`; `alembic/versions/0009_engine_activation_unique.py`.
+
+**Source:** `BLOCKERS.md` B6/B28; `AI_GOVERNANCE_MODEL.md` §7.2; `FINAL_SCORING_SPEC.md` §8;
+`docs/project-state/reviews/b6-b28-scoring-activation.md`.

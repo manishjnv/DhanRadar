@@ -1,8 +1,9 @@
 # Feature — Compliance Audit module
 
-**Status:** partial (audit-row linkage + disclaimer registry + archival built; admin
-disclaimer-management / changelog / label-churn deferred to the Admin module) ·
-**Phase:** B26 (post-Phase-7) · **Last updated:** 2026-06-06
+**Status:** built (audit-row linkage + disclaimer registry + archival + admin
+disclaimer-management / label-churn gate / changelog + low-confidence tables) — table WRITERS
+for `rating_engine_changelog` (B6/B28) and `ai_low_confidence_log` (B22) still pending ·
+**Phase:** B26 (post-Phase-7) · **Last updated:** 2026-06-07
 
 ## Purpose & scope
 
@@ -16,8 +17,12 @@ to R2 for the 7-yr lifecycle. Records and gates; produces no content.
 - No user UI beyond the disclaimer text. No RIA logic.
 - No advisory output can be audited as served — `recommendation_type` is a positive
   allowlist (non-neg #1).
-- Not the full §4 yet: admin disclaimer activation, `rating_engine_changelog`, the
-  label-churn human-review gate, and `ai_low_confidence_log` are deferred (Admin module).
+- No RIA logic. The admin surface is operator-only (allowlist-gated, 404 to all others).
+- Built in the Admin module (2026-06-07): admin disclaimer create/activate, the
+  `rating_engine_changelog` + `ai_low_confidence_log` tables, and the label-churn
+  human-review gate. Their WRITERS are still pending: `rating_engine_changelog` is
+  written by the B6/B28 scoring-activation gate; `ai_low_confidence_log` by the B22
+  confidence-floor consumer.
 
 ## Public interface (the only coupling surface)
 
@@ -29,6 +34,18 @@ to R2 for the 7-yr lifecycle. Records and gates; produces no content.
 
 Consumers (caller writes): the MF module (`tasks/mf.py`, at report **generation**) and
 the Notification module (`tasks/misc.py`, at successful **deliver**).
+
+Admin surface (operator-only, `RequireAdmin()` → 404 to all non-admins;
+`dhanradar/admin/router.py`, mounted `/api/v1/admin`):
+
+- `POST /admin/disclaimers` — create a disclaimer version INACTIVE (conflict-guarded; body
+  bounded to 64 KiB).
+- `POST /admin/disclaimers/{version}/activate` — single-active-per-type transition (enforced
+  atomically by the `uq_disclaimer_active_per_type` partial-unique index) → R2 HTML snapshot →
+  flush `disclaimer:active:{type}`. Concurrent-activation loser → 409.
+- `GET /admin/audit/label-churn` — reuses `scoring.engine.governance.review_batch` over the two
+  most-recent audit days; surfaces the >5% human-review gate (`pending_publish`). Type is
+  allowlist-validated (400 on a non-allowlisted/advisory type).
 
 ## Data
 
@@ -43,7 +60,18 @@ Postgres schema `compliance` (Alembic 0006):
   `request_id`, `created_at`. RANGE-partitioned monthly on `served_at` with a **DEFAULT
   partition** (an insert always lands) + guarded pg_partman 84-month retention.
 
-Redis `disclaimer:active:{type}` 1 h. R2 `audit/YYYY/MM/DD.jsonl.gz` (daily).
+Alembic 0008 adds two append-only tables (no writer wired yet):
+
+- `rating_engine_changelog` — one row per scoring/rating methodology version change
+  (factors before/after, methodology URL, `two_person_ok`, `activated`/`activated_at`);
+  written by the B6/B28 two-person scoring-activation gate. Helper:
+  `service.record_engine_changelog`.
+- `ai_low_confidence_log` — one row per AI/scoring emission below the confidence floor;
+  written by the B22 confidence-floor consumer. Helper: `service.log_low_confidence`
+  (fire-and-forget, own session, never raises).
+
+Redis `disclaimer:active:{type}` 1 h. R2 `audit/YYYY/MM/DD.jsonl.gz` (daily) +
+`disclaimers/{type}/{version}.html` (immutable activation snapshot).
 
 ## Pipeline / behaviour
 
@@ -64,8 +92,14 @@ rating engine (compliance is the recording authority via `active_disclaimer_vers
 
 ## Failure modes & fallbacks
 
-- Audit write fails → logged, swallowed, returns False (serve path unaffected). Residual:
-  no failure METRIC yet (a systemic audit outage is not alertable — Observability module).
+- Audit write fails → logged, swallowed, returns False (serve path unaffected). **B34:** the
+  failure path now also bumps a best-effort daily Redis counter
+  `metrics:compliance:audit_write_failures:{YYYYMMDD}` (`bump_audit_metric`, 35-day TTL,
+  never raises) so a systemic audit outage is alertable.
+- **Reconcile (B34):** `reconcile_audit_disclaimers` (beat 02:30 IST) flags any audited
+  `disclaimer_version` not present in the `disclaimers` registry (a served label tied to an
+  unregistered disclaimer = broken version tie); logs each orphan + bumps
+  `metrics:compliance:audit_orphan_disclaimer_versions`.
 - DEFAULT partition + denormalized `disclaimer_version` → a row is never lost to a missing
   monthly partition or a referential hiccup.
 - Archival fails / R2 unconfigured → logged, rows kept in Postgres, next run retries.
@@ -80,9 +114,12 @@ rating engine (compliance is the recording authority via `active_disclaimer_vers
   obligation (ADR-0022). The erasure module MUST skip this table and log the override.
   This means a `user_id` (DPDP personal data) is retained 7 years post-erasure — an
   intentional, documented exception, not a leak.
-- **B34 (deploy gate):** the R2 archival exports `user_id`; the bucket must be verified
-  India-resident before archival is enabled (the archive is the 7-yr record-of-serving and
-  must stay user-identifiable — the control is residency, not de-identification).
+- **B34 (deploy gate — R2 residency, OPEN):** the R2 archival exports `user_id`; the bucket
+  must be verified India-resident before archival is enabled (the archive is the 7-yr
+  record-of-serving and must stay user-identifiable — the control is residency, not
+  de-identification). This part is human/infra and remains a deploy gate. The two CODEABLE
+  B34 items — the audit-write-failure metric and the disclaimer-version reconcile job — are
+  **DONE 2026-06-07** (above).
 
 ## Dependencies
 
@@ -105,3 +142,19 @@ by: MF + Notification (via `record_served_label`). Build (boto3/S3).
   ACCEPT-WITH-CONDITIONS; MAJORs fixed in-branch (allowlist, version stamping, endpoint
   DoS, backdating). B26 ADDRESSED for the two shipped surfaces; B34 filed. Ledger:
   `reviews/b26-compliance-audit.md`.
+- 2026-06-07 — **B26 Admin endpoints DONE:** admin router (`dhanradar/admin/`,
+  `RequireAdmin()`-gated, 404 to non-admins) — `POST /admin/disclaimers`,
+  `POST /admin/disclaimers/{version}/activate` (single-active transition + R2 HTML snapshot +
+  cache flush; concurrent loser → 409), `GET /admin/audit/label-churn` (reuses
+  `governance.review_batch`, >5% gate). Alembic 0008: `rating_engine_changelog` +
+  `ai_low_confidence_log` (no writer yet) + `uq_disclaimer_active_per_type` partial-unique index.
+  Tier-B review: Security ACCEPT-WITH-CONDITIONS (Sonnet takeover; codex n/a) — content bound +
+  churn-type allowlist + atomic single-active index, all applied in-session. 10 unit + 10
+  integration tests. Ledger `reviews/b26-admin-endpoints.md`.
+- 2026-06-07 — **B34 codeable parts DONE:** `bump_audit_metric` daily Redis counter +
+  audit-write-failure metric on the fire-and-forget failure path (`compliance/service.py`);
+  `reconcile_audit_disclaimers` beat task (02:30 IST) flagging audited `disclaimer_version`s
+  absent from the registry (`tasks/compliance.py`, `celery_app.py`). Right-sized
+  (Builder+Architect; additive observability + read-only reconcile, no enforcement/auth/PII
+  surface). +1 unit test, +2 integration tests (collect; run in CI). B34's R2-residency
+  deploy gate remains OPEN (human/infra).

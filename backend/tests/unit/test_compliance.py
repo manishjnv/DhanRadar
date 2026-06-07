@@ -12,7 +12,9 @@ Covered:
 
 from __future__ import annotations
 
-from dhanradar.compliance.service import content_hash, record_served_label
+from datetime import datetime, timezone
+
+from dhanradar.compliance.service import bump_audit_metric, content_hash, record_served_label
 
 
 # ---------------------------------------------------------------------------
@@ -87,3 +89,30 @@ async def test_record_served_label_buy_sell_no_write_on_retry():
             disclaimer_version="2026-06-06.v1",
         )
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# bump_audit_metric — increments daily Redis key; TTL is positive
+# ---------------------------------------------------------------------------
+
+
+async def test_bump_audit_metric_increments_daily_key(patch_redis):
+    """bump_audit_metric increments a daily-keyed Redis counter (B34).
+
+    Uses the patch_redis fixture (fakeredis) from conftest. Calls the function
+    twice and asserts the counter advances from "1" to "2" for the key
+    ``metrics:compliance:audit_write_failures:{today UTC}``.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    expected_key = f"metrics:compliance:audit_write_failures:{today}"
+
+    await bump_audit_metric("audit_write_failures")
+    val = await patch_redis.get(expected_key)
+    assert val == "1", f"Expected '1' after first bump, got {val!r}"
+
+    ttl = await patch_redis.ttl(expected_key)
+    assert ttl > 0, f"Expected positive TTL, got {ttl}"
+
+    await bump_audit_metric("audit_write_failures")
+    val = await patch_redis.get(expected_key)
+    assert val == "2", f"Expected '2' after second bump, got {val!r}"

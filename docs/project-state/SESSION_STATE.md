@@ -1,9 +1,34 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-07
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+Multi-slice load-bearing blocker work, one slice per commit, each with full inline Tier-B/C review
+plus an independent adversarial sign-off (Sonnet takeover — codex unavailable on this account):
+
+- **Slice 1 — B26 Admin endpoints** (`c365fca`): admin router (`dhanradar/admin/`, `RequireAdmin()`
+  → 404 to non-admins) — disclaimer create + activate (single-active transition → R2 HTML snapshot →
+  cache flush; concurrent loser → 409) + label-churn gate (reuses `governance.review_batch`). Alembic
+  0008: `rating_engine_changelog` + `ai_low_confidence_log` (no writer yet) + `uq_disclaimer_active_per_type`
+  partial-unique index. Adversarial ACCEPT-WITH-CONDITIONS — content bound, churn-type allowlist
+  (fail-open fix), atomic single-active index — all applied in-session. Ledger `reviews/b26-admin-endpoints.md`.
+- **Slice 2 — B6/B28 scoring-activation gate** (`35cace1`, ADR-0026): admin-triggered, DB-registry-
+  authoritative two-person (`approved_by≠created_by`) + backtest gate; `compliance.rating_engine_changelog`
+  is the authoritative runtime state; the engine sync `score()` keeps the JSON file-flag fallback so v1
+  stays provisional. Alembic 0009: `uq_engine_changelog_activated_per_version` index. Adversarial
+  ACCEPT-WITH-CONDITIONS — UUID `created_by` guard, the index + 409, `provisional`=registry — all
+  applied. Ledger `reviews/b6-b28-scoring-activation.md`.
+- **Slice 3 — B2/B7/B8 Razorpay** (`9d0016c`): DEFERRED data-only (no code) — re-verified the billing
+  fail-safes (checkout 503 + `_derive_tier` free-on-unmapped) and documented exactly what to seed when
+  the Razorpay dashboard exists. `BLOCKERS.md`.
+
+Gates each slice: pytest (unit green, integration collects — run in CI per B1), `ci_guards.py` 0,
+`py_compile` 0, markdownlint 0. **B26 admin / B6 / B28 mechanisms now BUILT;** remaining for B6/B28 is
+the production activation of v1 (real §8 backtest + human approver), a data/human gate.
 
 ## Where we are
 
@@ -114,8 +139,31 @@ lives in the linked docs.
   sub-0.30 refuse + bucket-gap + commentary-screen fixed in-branch. Go-live gaps → **B35** (real signals,
   embed widget, empty-state, factor labels, structured event, mood_history, commentary). Ledger
   `reviews/mood-compass.md`; feature `features/mood-compass.md`.
-- **UI is next** (operator-chosen sequence): launch screens against the now-frozen contracts (MF report +
-  CAS upload → disclosure rendering → notification prefs → Mood page). Recommended as a fresh session.
+- **UI launch screens: BUILT on branch `frontend/auth-screens`** (this session, Tier-A Builder+Architect;
+  reviews batched to phase audit per the cadence rule). Notification preferences screen
+  (`/settings/notifications`) + public Mood page (`/mood`, anon + sidebar link) built against the frozen
+  contracts; `MoodGauge` (band-only, symmetric non-advisory colour scale) added. MF report + CAS upload +
+  disclosure verified compliant; **fixed a real CAS bug** — the upload password was captured but never sent
+  (RCA 2026-06-06; `useUploadCas` now threads `password`). Shared wiring (queryKeys, MSW handlers, AppShell
+  nav) added. Deterministic gates green: tsc 0, eslint 0 (1 pre-existing boundaries migration warning),
+  anti-pattern sweep 9/9, compliance greps clean (no numeric/advisory/Authorization in rendered copy).
+  Co-located with the in-flight uncommitted auth screens on the same branch. **Pending:** in-browser visual
+  pass (MSW dev server) + the batched Tier-A/Compliance phase-audit sign-off before deploy-eligible.
+- **Launch-gate blockers (2026-06-07, branch `hardening/launch-gate-blockers`): 4 reviewed commits.**
+  **B18** atomic incr-then-rollback premium budget cap (`00a809b`); **B20** default-deny cross-border
+  contract in the AI gateway `complete()` + **B31** confirmed (notify deliver-seam step-1b gate) +
+  **ci_guards** `role="switch"` false-positive fix (`894d170`); **B34** codeable parts —
+  audit-write-failure metric + disclaimer-version reconcile job; R2 India-residency stays a human/infra
+  deploy gate (`84903df`); **B26-admin FOUNDATION** — `RequireAdmin` fail-closed surface-hiding 404 gate plus
+  the `settings.ADMIN_USER_IDS` allowlist (`207eb53`). Each slice: deterministic gates green + an
+  INDEPENDENT Sonnet adversarial sign-off (codex:rescue unavailable — account not entitled for Codex
+  models; approved fallback) → all ACCEPT / ACCEPT-WITH-CONDITIONS (conditions applied). **Deferred:**
+  B2/B7/B8 (Razorpay — needs real plan IDs; code already fail-safe). **Remaining (next session, prompt
+  handed off):** B26-admin ENDPOINTS (disclaimer activate/HTML-snapshot, label-churn + >5% gate,
+  `rating_engine_changelog` + `ai_low_confidence_log` tables + Alembic migration) on the new
+  `RequireAdmin`; then **B6/B28** (two-person `approved_by≠created_by` scoring activation gate +
+  provisional→activated state machine). Ledgers: `reviews/b20-ai-callsite-gate.md`,
+  `reviews/b26-admin-auth.md`.
 - Then continue the build order: **Mood Compass** (unblocks the daily public Mood card + notification
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
@@ -137,8 +185,93 @@ hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
 
-Footer below is the current Phase-7 (Verification & Hardening) work on branch
-`phase7/verification-hardening`.
+### Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+- **Opus** — Phase-0 warm reads (canonical docs + scoring/compliance code); orchestration; both build
+  contracts; line-by-line Phase-3 diff review of every slice; ALL adversarial-condition fixes (slice 1:
+  content bound + churn-type allowlist + single-active index; slice 2: UUID `created_by` guard +
+  activation index + `provisional`=registry); both review ledgers; slice-3 fail-safe verification; the
+  session-exit docs.
+- **Sonnet** — 2 builders (slice-1 B26-admin endpoints; slice-2 B6/B28 activation) against exact
+  contracts; 2 independent adversarial sign-offs (codex unavailable → Sonnet takeover); 1 doc-drafter
+  (ADR-0026 + feature doc + BLOCKERS B6/B28).
+- **Haiku** — n/a (no bulk grep/triage; targeted greps run inline).
+- **codex:rescue** — n/a — companion lacks model entitlement; both Tier-B/C adversarial sign-offs run
+  as independent Sonnet takeovers (slice 1 + slice 2 each ACCEPT-WITH-CONDITIONS), all conditions
+  applied in-session before commit.
+- Per-delegation (telemetry): slice1-builder · Sonnet · reworked: Y (Opus fixed a fail-open churn-type
+  gap + added a content bound + the atomic single-active index from the adversarial pass) |
+  slice1-adversarial · Sonnet · reworked: N | slice2-builder · Sonnet · reworked: Y (Opus added the
+  UUID `created_by` guard, the activation partial-unique index + IntegrityError→409, and
+  `provisional`=registry) | slice2-adversarial · Sonnet · reworked: N | slice2-docs-drafter · Sonnet ·
+  reworked: N (ADR/feature/BLOCKERS applied as-drafted). Two review ledgers + this footer were
+  Opus-direct (needed the adversarial-review context / precise telemetry; one-shot exemption).
+
+### Orchestration-config session (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+Meta session — **no product code**. User flagged that most sessions run on Opus; reviewed the last
+two footers (this section confirms the leak: "all RCA / feature-doc / BLOCKERS / ledger writes" by
+Opus). Cut Opus-token leaks via config (not discipline):
+
+- **Doc-drafting nudge hook** — `PreToolUse(Write|Edit)` on doc/governance paths → reminds to draft
+  prose on Tier-4 free-chain / Sonnet, Opus reviews only. Lives in `.claude/settings.local.json` +
+  `.claude/hooks/doc-drafting-reminder.ps1` (**gitignored — personal**, embeds the `or.mjs` path).
+  Active after a `/hooks` reload.
+- **`warm-start` subagent** — `.claude/agents/warm-start.md` (Sonnet, read-only). Returns a one-page
+  Phase-0 brief so Opus stops ingesting the full canon every session. Committed; active after
+  `/agents` reload.
+- **Routing overlay** (`CLAUDE.md`, committed) — tightened `reworked:Y` = any Opus change to a
+  subagent's output; Tier-2 (`dsf`/`grok-code`) activation note; warm-start + heavy-skill-payload
+  isolation rules. Carried-context insight: ingestion is re-billed every turn, so it outweighs typed
+  output in long sessions.
+- Est. saving ≈ **25–40k Opus tokens/session (~10–20%)**, adoption-dependent (only the hook is
+  enforced; warm-start + isolation are conventions).
+- **Opus** — 100% this session (advisory judgment + small config authoring in hot cache; self-execute
+  beats subagent cold-start under the tiny-edit rule). **Sonnet / Haiku / codex:rescue** — n/a (no
+  load-bearing/security path; no bulk sweep). Per-delegation: none.
+- Commit: config + warm-start agent + routing overlay (this session). Markdownlint 0; hook logic
+  pipe-tested (3 match / 3 skip); `settings.local.json` schema-validated.
+
+### Launch-gate blockers session (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+- **Opus** — Phase-0 warm read; the B18 atomic-budget design + the B20 / `RequireAdmin` / B34
+  contracts; every Phase-3 diff review; the admin-auth keystone (config + `RequireAdmin`) and the
+  `ci_guards` lookbehind fix hand-written; all RCA / feature-doc / BLOCKERS / ledger writes; the
+  concurrent-session branch-collision untangle.
+- **Sonnet** — B20 gateway contract build; B34 (metric + reconcile job + tests); 3 independent
+  adversarial sign-offs (B18, B20, admin-auth) run as the codex:rescue fallback.
+- **Haiku** — n/a.
+- **codex:rescue** — n/a — companion unavailable (ChatGPT account not entitled for any Codex model;
+  hard 400). Sonnet takeover per the approved fallback ladder. Verdicts: **B18** ACCEPT-WITH-CONDITIONS
+  (4 applied), **B20** ACCEPT, **admin-auth** ACCEPT (8 vectors, no fail-open); **B34** right-sized
+  (observability + read-only reconcile → Builder+Architect, no adversarial gate).
+- Per-delegation (telemetry): B20-gateway-contract · Sonnet · reworked N | B34-metric+reconcile ·
+  Sonnet · reworked N | adversarial-B18/B20/admin · Sonnet · reworked N. Commits: `00a809b`,
+  `894d170`, `84903df`, `207eb53`. Tests green; `ci_guards` exit 0; markdownlint 0.
+- **Collision note:** a concurrent session committed B29 (`2989df3` AMFI NAV parsers) + an audit doc
+  (`cd9c3dd`) onto this branch lineage mid-session. `hardening/launch-gate-blockers` and the other
+  session's `feat/mf-data-pipeline` share that history (identical commits → merge to `main` cleanly).
+  Do NOT branch-surgery while the other session is active.
+
+### UI launch-screens session (2026-06-06, branch `frontend/auth-screens`)
+
+- **Opus** — Phase-0 warm read (design system, migration strategy, frozen notification/mood
+  contracts, FE component kit); orchestration; shared-file wiring (queryKeys, MSW handlers, nav);
+  Phase-3 line-by-line diff review; the MF CAS-password bug fix + RCA; the type-ownership flip
+  (Regime → shared MoodGauge); all docs.
+- **Sonnet** — 2 parallel screen builders (notification preferences slice+page; mood slice+page+gauge),
+  each against a self-contained frozen contract with disjoint files (no shared-file conflicts).
+- **Haiku** — n/a (no bulk grep/triage needed this session).
+- **codex:rescue** — n/a (no load-bearing/security/auth/AI-classifier path touched; UI is Tier-A,
+  reviews batched to the phase audit per the cadence rule).
+- Per-delegation (telemetry): notif-prefs-screen · Sonnet · reworked N | mood-page+gauge · Sonnet ·
+  reworked N (Opus flipped the Regime type ownership feature→shared to match the ScoreRing precedent;
+  no rebuild). Verification: tsc 0 · eslint 0 (1 pre-existing migration warning) · anti-pattern 9/9 ·
+  compliance greps clean.
+
+### Phase-7 (Verification & Hardening) — branch `phase7/verification-hardening`
+
+Footer below is the prior Phase-7 work.
 
 - **Phase 7 footer:** Opus — orchestration + synthesis of all five audits + remediation (RequireConsent
   401, compose memory trim, doc de-stale) + the verification report + all docs. Sonnet — 2 coverage-matrix

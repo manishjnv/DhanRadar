@@ -40,11 +40,42 @@ Redis (hysteresis eval state + internal result cache). Reads `ranking_configs_v1
 
 `backend/tests/unit/test_scoring_engine.py` — 17 tests: golden-set score+label; **label ≠ pure score function** (same 60 score → in_form vs out_of_form); confidence floor → insufficient_data + no numeric; 2-eval hysteresis flip suppression; partial-coverage→medium cap; churn>5%→hold + distribution-collapse→hold; `risk_profile`/`user` absent from inputs; PublicScore has no numeric; two-person gate; config weight-sum + double-count validators; publish emits PublicScore + caches the full internal result. Full unit suite 129 pass; ci_guards green.
 
+## Activation gate (B6/B28)
+
+Runtime activation is triggered by `POST /api/v1/admin/scoring/{model_version}/activate`
+(`RequireAdmin()` — surface-hiding 404 for non-admins). The gate (`scoring/engine/activation.py:
+assert_activatable`) enforces fail-early: (1) `backtest_passed` must be true (§8 backtest
+pass-gates, operator-asserted) else 422 `backtest_not_passed`; (2) `approved_by ≠ created_by`
+two-person gate (reuses `governance.two_person_gate_ok`) else 409 `two_person_gate_failed`.
+`created_by` is the authoring ROLE from `ranking_configs_v1.json` (`"architecture-review"`);
+`approved_by` is the activating admin's UUID. `EngineConfig.validate()` rejects a UUID-shaped
+`created_by` to prevent deceptive gate satisfaction.
+
+On success, one row is written to `compliance.rating_engine_changelog` (`activated=true`) via
+`compliance.service.record_engine_changelog` (interface-only coupling; scoring never imports the
+compliance ORM model). The registry row is the **authoritative activation state**; a
+`uq_engine_changelog_activated_per_version` partial-unique index (migration 0009) is the
+multi-worker race-safe backstop against double-activation.
+
+The engine's synchronous `score()` path is unchanged — it reads the JSON `cfg.activated` file flag
+as a "no DB session" fallback. Surfaces with a DB session call `activation.is_activated(db,
+model_version)` (positive-memoized; activation is monotonic). `GET /api/v1/admin/scoring/{version}/
+status` reports `file_activated`, `registry_activated`, `effective_activated` (file OR registry),
+and `provisional` (`NOT registry_activated` — the registry gate governs provisional determination).
+
+**v1 stays provisional.** No backtest has been run; v1 is not activated. Actual v1 activation
+requires real §8 backtest pass-gates (human/data) and a human approver admin (approved_by ≠
+authoring role). The mechanism is built and ready.
+
+Ledger: `docs/project-state/reviews/b6-b28-scoring-activation.md`.
+
 ## Known limitations / deferred (tracked in BLOCKERS)
 
 - **B28/B6** — weights are **PROPOSED v1** (`activated:false`); every result is tagged
   `provisional_model`. Full activation (backtest pass-gates + calibration + two-person gate) before
-  any numeric is treated as authoritative.
+  any numeric is treated as authoritative. The activation **mechanism** is built (2026-06-07) — see
+  Activation gate section above. What remains is the data/human gate: real §8 backtest pass + human
+  approver admin action.
 - **B24** — label precedence: `manager_change`/`structural_concern` veto `in_form` even over
   1Y+3Y outperformance (fail-safe caution veto, documented); a recency window is a spec/architecture-
   owner decision.
@@ -60,5 +91,13 @@ Redis (hysteresis eval state + internal result cache). Reads `ranking_configs_v1
 
 ## Changelog
 
+- 2026-06-07 — B6/B28 activation gate built: admin endpoint `POST /api/v1/admin/scoring/{version}/activate`
+  (`RequireAdmin()`); `assert_activatable` enforces backtest_passed + two-person gate fail-early;
+  `compliance.rating_engine_changelog` is the authoritative registry; `uq_engine_changelog_activated_per_version`
+  partial-unique index (migration 0009) is the multi-worker double-activation backstop; engine sync
+  path keeps the JSON file-flag fallback; `provisional` governed by registry (not file flag); v1
+  stays provisional pending real §8 backtest + human approver. Independent adversarial review (Sonnet
+  takeover) ACCEPT-WITH-CONDITIONS — all 3 conditions applied. Ledger:
+  `reviews/b6-b28-scoring-activation.md`.
 - 2026-06-06 — Engine v1 built (Phase 4 §S): deterministic collapse, rule-table labels (not score), confidence model + floor, 2-eval hysteresis, governance (churn/distribution/two-person/changelog), internal read API. Built on Opus (Tier-C).
 - 2026-06-06 — Tier-C governance fan-out (Architect/Compliance/Product, no BLOCKER): config completeness validation; `provisional_model` tag when not activated; `disclaimer_version` + `prior_label` on results; fail-closed `X-Internal-Token` on the internal endpoint; neutral factor-agreement on sparse inputs. Residuals B24–B28. 21 unit tests (133 suite). Ledger: `reviews/phase4-rating-scoring-engine.md`.

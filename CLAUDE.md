@@ -122,6 +122,42 @@ Security/Compliance BLOCKER + the Phase-7 §5 adversarial gate logged + **separa
 approval**. Honor the ❌ NEVER-TOUCH list and the 3 cloudflared gotchas (`infra-notes.md`). The
 GitHub `production` env is main-branch-gated.
 
+## Routing & telemetry (overlay to the global playbook)
+
+The global `~/.claude/CLAUDE.md` routing matrix applies. This overlay tightens two things the
+DhanRadar session footers have been getting wrong:
+
+- **`reworked: Y` means any Opus correction that changed a subagent's output** — not just a full
+  rebuild or a P3→P4 bounce. If Opus re-typed prose, flipped a type's ownership, fixed a contract
+  detail, or rewrote more than a trivial line of what a Sonnet/Haiku/Tier-2/Tier-4 agent produced,
+  the per-delegation telemetry line is **`reworked: Y (<one-line why>)`**. A run is `reworked: N`
+  only when Opus shipped the agent's output essentially as-returned. Honest `Y`s are the whole
+  point — they are how the matrix gets retuned; a footer of all-`N` carries no signal.
+- **Cheap-tier doc drafting is the default, not the exception.** Session-state updates, RCA
+  entries, feature-doc prose, ADR bodies, and commit messages are **drafted by Tier-4 free-chain
+  (`or.mjs free-chain`) or a Sonnet subagent, then reviewed/edited by Opus** — never typed on Opus
+  from scratch. A `PreToolUse(Write|Edit)` nudge fires on doc/governance paths as a reminder. The
+  one-shot drafting exemption (≤~30 lines already in Opus's hot cache) still applies for tiny edits.
+- **Activate Tier-2 (paid OpenRouter `dsf`/`grok-code`) for non-load-bearing batches.** It has been
+  dormant; the $2/day cap is unused headroom. Route reporting queries, dev-only tooling, Storybook,
+  and scratch scripts there with Opus review. Same data-privacy rules as Tier-4 (assume logged; no
+  PII/credentials/prompt-skills/proprietary logic). **Never** Tier-2/Tier-4 in a load-bearing path.
+- **Delegate the Phase-0 warm start; don't read the canon on Opus.** Carried context is re-billed
+  every turn, so the bigger long-session cost is what Opus *ingests*, not what it types. Spawn the
+  **`warm-start` subagent** (`.claude/agents/warm-start.md`) with the task focus; it reads the
+  read-first docs + the area-specific canonical doc and returns a one-page brief (where we are ·
+  binding blockers · the rules that bind this task · load-bearing paths in reach · known traps ·
+  next action · read-next pointers). Opus starts from the brief and opens a full doc only for the
+  specific seam it touches. Lean on the claude-mem digest / `mem-search` for "where are we" rather
+  than re-reading whole docs. Judgment still lives on Opus — warm-start is orientation, not review.
+- **Isolate token-heavy skill/tool payloads in a subagent.** Skills that dump large schemas into
+  context (e.g. `update-config`'s full settings schema), big MCP tool schemas, doc-discovery, or
+  "read N files for one fact" run **inside a Sonnet/Haiku subagent that returns only the answer** —
+  the bulk never enters the Opus context. This is distinct from the output-token rules: it cuts
+  *ingestion*, which is re-billed on every subsequent turn until `/clear`. Pair with the standing
+  rule to `/clear` and reload from `SESSION_STATE.md` past ~60 tool calls — a fresh Opus on a lean
+  context both reasons better and costs less than a drifting one on a bloated one.
+
 ## Standing rules (part of "done" every phase)
 
 - **RCA** on every bug fix → `docs/rca/README.md` (symptom/cause/fix-with-file:line/prevention).

@@ -1,6 +1,6 @@
 # Feature — Notification module
 
-**Status:** built (backend; FE preferences screen pending) · **Phase:** Phase 6
+**Status:** built (backend + FE preferences screen) · **Phase:** Phase 6
 **Last updated:** 2026-06-06
 
 ## Purpose & scope
@@ -138,25 +138,47 @@ WhatsApp = partner (Y2).
 - Every delivered template + share card carries the disclosure bundle + NOT_ADVICE +
   the in-force `DISCLAIMER_VERSION`, injected structurally so a new template cannot
   omit it. Labels are action-free educational form words only.
-- **B31 (deploy gate):** the deliver seam sends PII + labels to **non-Indian**
-  processors (Telegram, Resend/Tokyo). A `channels_enabled` opt-in is **not** a DPDP
-  cross-border consent grant — a `RequireConsent`-equivalent purpose gate (analogous
-  to the AI gateway's B20) must be wired before any channel carries production traffic.
+- ~~**B31 (deploy gate):**~~ **RESOLVED** — the deliver seam sends PII + labels to
+  **non-Indian** processors (Telegram, Resend/Tokyo), and a `channels_enabled` opt-in is
+  **not** a DPDP cross-border grant. `tasks/misc.py` `_handle_job` **step 1b** now enforces
+  the per-processor `cross_border_notify` consent (ADR-0024) fail-closed BEFORE any
+  transport: no grant ⇒ `log_delivery(..., "cross_border_consent_required")` + drop (no
+  retry — a retry would re-attempt the blocked transfer). Fresh read → revoke honoured
+  immediately; audit records an opaque code only (no chat_id/email/body). Test:
+  `test_drain_skips_without_cross_border_consent` (Telegram never invoked without the grant).
+  Ledger `reviews/b31-notify-cross-border-gate.md`. **Still inert for real users until the
+  Consent-module grant/revoke writer lands (non-neg #10) — safe (every user fails closed).**
 - **B26 (deploy gate):** every delivered label owes an `ai_recommendation_audit` row
   `(label, model_used, disclaimer_version)`; `notification_log` records channel/
   template/status only.
 - **B32 (low):** rate-cap counter is non-atomic (single-beat-worker safe; Redis Lua
   before multi-worker); `/test` rate-limit is IP-keyed.
 
+## Frontend
+
+- `/settings/notifications` (authed, in the app shell). Loads `GET
+  /notifications/preferences`; channel toggles (Telegram + Email; WhatsApp shown
+  "Coming soon", disabled) with a Telegram chat-id field (client-validated
+  `^-?\d{1,20}$`) and an email Verified/Unverified chip (read-only); IST quiet-hours
+  start/end (`<input type=time>` → HH:MM) + Clear; Save computes a diff and POSTs
+  **only changed allowed keys** (never `email_verified`/`whatsapp`). Test-send is
+  Pro-gated in the UI — disabled with a "Pro" tag + upgrade hint for non-Pro tiers,
+  matching the backend 402. Files: `frontend/src/features/notifications/{types,api}.ts`,
+  `frontend/src/app/(app)/settings/notifications/page.tsx`. Token-only styling; no
+  numeric/advisory surface.
+
 ## Pending (not built this phase)
 
-- Frontend `/notifications/preferences` screen (Tier-A UI; backend API is built).
 - Daily public-channel Mood card (needs the Mood Compass module + its
   `mood.snapshot.published` event).
 - WhatsApp delivery (Y2).
 
 ## Changelog
 
+- 2026-06-06 — FE preferences screen built (`/settings/notifications`, Tier-A UI):
+  diff-based partial save, Pro-gated test-send (disabled + hint for non-Pro), accessible
+  toggles, token-only styling. MSW mocks for all three endpoints. tsc + eslint +
+  anti-pattern sweep green.
 - 2026-06-06 — Module built (Phase 6): `notify` schema + migration 0005; preferences
   API + `/test` (Pro); Telegram + Resend transports (real UA); template renderer
   (disclosure/label-only, no numeric/advisory); Pillow share-card → R2; Celery

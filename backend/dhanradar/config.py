@@ -121,6 +121,17 @@ class Settings(BaseSettings):
     INTERNAL_API_TOKEN: str = ""
 
     # ------------------------------------------------------------------
+    # Admin authorization (B26 Admin module)
+    # ------------------------------------------------------------------
+    # Comma-separated allowlist of admin user-id UUIDs. There is NO admin tier/role
+    # in the DB — admins are an operator-set allowlist (set via env/secret). EMPTY ⇒
+    # no admins ⇒ every admin endpoint is effectively disabled (fail-closed, like
+    # INTERNAL_API_TOKEN). Resolve via the `admin_user_ids` computed set, never the
+    # raw string. NOTE: read once at process start (pydantic-settings) — adding or
+    # removing an admin requires a process restart to take effect.
+    ADMIN_USER_IDS: str = ""
+
+    # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------
     ENV: str = "development"
@@ -153,6 +164,25 @@ class Settings(BaseSettings):
     @property
     def jwt_public_key(self) -> str:
         return self._resolve_pem(self.JWT_PUBLIC_KEY_FILE, self.JWT_PUBLIC_KEY)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def admin_user_ids(self) -> frozenset[str]:
+        """Normalized (canonical UUID string) set of admin user-ids. Malformed or
+        blank entries are dropped — fail-closed: a garbage id simply is not an
+        admin, it never widens access."""
+        from uuid import UUID
+
+        out: set[str] = set()
+        for raw in self.ADMIN_USER_IDS.split(","):
+            s = raw.strip()
+            if not s:
+                continue
+            try:
+                out.add(str(UUID(s)))
+            except ValueError:
+                continue
+        return frozenset(out)
 
     @computed_field  # type: ignore[misc]
     @property

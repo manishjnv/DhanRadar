@@ -254,3 +254,85 @@ async def test_archive_zero_rows(db_session, monkeypatch):
 
     assert len(uploads) == 0, "No uploads expected when no rows exist"
     assert "0 rows" in result, f"Expected '0 rows' in result, got: {result!r}"
+
+
+# ---------------------------------------------------------------------------
+# 6. _reconcile_disclaimers() — orphan detection + OK path (B34)
+# ---------------------------------------------------------------------------
+
+
+async def test_reconcile_audit_disclaimers_finds_orphan(db_session, monkeypatch):
+    """_reconcile_disclaimers() returns a string containing 'ORPHAN' and the
+    orphan version when an audit row references a disclaimer_version not present
+    in the disclaimers registry."""
+    from dhanradar.tasks.compliance import _reconcile_disclaimers
+
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+
+    # Seed one registered disclaimer.
+    disc = Disclaimer(
+        version="2026-06-06.v1",
+        type="ai_recommendation",
+        content="Educational analysis only — not investment advice.",
+        active=True,
+    )
+    db_session.add(disc)
+
+    # Seed two audit rows: one tied to the registered version, one orphan.
+    row_ok = AiRecommendationAudit(
+        served_at=datetime.now(timezone.utc),
+        recommendation_type="educational_label",
+        label="on_track",
+        content_hash="a" * 64,
+        disclaimer_version="2026-06-06.v1",
+        surface="mf_report",
+    )
+    row_orphan = AiRecommendationAudit(
+        served_at=datetime.now(timezone.utc),
+        recommendation_type="educational_label",
+        label="off_track",
+        content_hash="b" * 64,
+        disclaimer_version="9999-orphan.vX",
+        surface="mf_report",
+    )
+    db_session.add(row_ok)
+    db_session.add(row_orphan)
+    await db_session.commit()
+
+    result = await _reconcile_disclaimers()
+
+    assert "ORPHAN" in result, f"Expected 'ORPHAN' in result, got: {result!r}"
+    assert "9999-orphan.vX" in result, f"Expected orphan version in result, got: {result!r}"
+
+
+async def test_reconcile_audit_disclaimers_ok_when_all_registered(db_session, monkeypatch):
+    """_reconcile_disclaimers() returns a string starting with 'reconcile: OK'
+    when every audited disclaimer_version is present in the disclaimers registry."""
+    from dhanradar.tasks.compliance import _reconcile_disclaimers
+
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+
+    # Seed one registered disclaimer.
+    disc = Disclaimer(
+        version="2026-06-06.v1",
+        type="ai_recommendation",
+        content="Educational analysis only — not investment advice.",
+        active=True,
+    )
+    db_session.add(disc)
+
+    # Seed one audit row tied to the registered version only.
+    row = AiRecommendationAudit(
+        served_at=datetime.now(timezone.utc),
+        recommendation_type="educational_label",
+        label="on_track",
+        content_hash="c" * 64,
+        disclaimer_version="2026-06-06.v1",
+        surface="mf_report",
+    )
+    db_session.add(row)
+    await db_session.commit()
+
+    result = await _reconcile_disclaimers()
+
+    assert result.startswith("reconcile: OK"), f"Expected 'reconcile: OK' prefix, got: {result!r}"

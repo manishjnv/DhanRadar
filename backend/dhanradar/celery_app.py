@@ -65,6 +65,12 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.compliance.archive_audit_daily",
         "schedule": crontab(hour=2, minute=0),
     },
+    # Compliance audit ↔ disclaimers reconcile (B34) — 02:30 IST daily. Flags any
+    # served disclaimer_version missing from the registry (compliance gap alert).
+    "compliance-reconcile-disclaimers": {
+        "task": "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
+        "schedule": crontab(hour=2, minute=30),
+    },
     # Mood Compass twice-daily snapshot — 09:00 & 16:00 IST (architecture cadence).
     "mood-compute-snapshot": {
         "task": "dhanradar.tasks.mood.compute_mood_snapshot",

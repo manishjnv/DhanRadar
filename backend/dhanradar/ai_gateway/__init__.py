@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dhanradar.ai_gateway.errors import (
     AllFreeModelsFailedError,
+    ConsentNotVerifiedError,
     CreditExhaustedError,
     GatewayError,
     QualityValidationError,
@@ -35,6 +36,7 @@ __all__ = [
     "AI_DISCLAIMER",
     "QualityValidator",
     "GatewayError",
+    "ConsentNotVerifiedError",
     "CreditExhaustedError",
     "ThreeStrikeSkipError",
     "AllFreeModelsFailedError",

@@ -1,13 +1,19 @@
 """
 DhanRadar — Compliance Audit service (architecture Global §4, B26).
 
-Two responsibilities:
+Responsibilities:
   * `record_served_label(...)` — fire-and-forget write of one served label to the
     7-yr `ai_recommendation_audit` trail. Opens its OWN DB session and swallows all
     errors (logged) so an audit failure NEVER breaks or corrupts the serving path;
     the table's DEFAULT partition + denormalized `disclaimer_version` mean the row is
     not lost to a missing partition or a referential hiccup.
   * `get_active_disclaimer(db, type)` — read the in-force disclaimer (Redis-cached 1h).
+  * `create_disclaimer(db, ...)` — insert a new disclaimer version (INACTIVE).
+  * `activate_disclaimer(db, ...)` — promote one version to active (single-active-per-type).
+  * `_snapshot_from_rows(rows)` — pure helper: group audit rows into date→key→label dict.
+  * `label_churn_review(db, ...)` — churn gate over the two most-recent audit days.
+  * `log_low_confidence(...)` — fire-and-forget low-confidence event log (no writer yet).
+  * `record_engine_changelog(db, ...)` — insert one scoring methodology changelog row.
 
 `recommendation_type='buy_sell'` is rejected at the DB (CHECK) AND defensively here.
 """
@@ -15,6 +21,7 @@ Two responsibilities:
 from __future__ import annotations
 
 import hashlib
+import html as _html
 import json
 import logging
 from datetime import datetime, timezone
@@ -23,6 +30,26 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Disclaimer creation / activation helpers
+# ---------------------------------------------------------------------------
+
+_KNOWN_DISCLAIMER_TYPES = frozenset({"ai_recommendation"})
+
+
+class DisclaimerConflictError(Exception):
+    """Raised when a disclaimer with the requested version already exists."""
+
+
+class ActivationConflictError(Exception):
+    """Raised when a concurrent activation would leave two disclaimers of the same
+    type active at once (the DB partial-unique index rejects the losing commit)."""
+
+
+# Max disclaimer body length — bounds an admin-only DoS against DB/R2/Redis on
+# activation (a disclaimer is a short legal paragraph, never a large document).
+_MAX_DISCLAIMER_CONTENT = 65536
+
 _DISCLAIMER_CACHE_PREFIX = "disclaimer:active:"
 _DISCLAIMER_TTL = 3600
 
@@ -30,6 +57,22 @@ _DISCLAIMER_TTL = 3600
 # may be recorded as served (non-neg #1). Anything else (incl. any advisory verb)
 # is refused before the DB. Mirrors the DB CHECK `ck_audit_recommendation_type`.
 _ALLOWED_TYPES = frozenset({"educational_label", "mood_regime"})
+
+
+async def bump_audit_metric(name: str, amount: int = 1) -> None:
+    """Best-effort daily Redis counter for compliance-audit observability (B34).
+    Ops/alerting reads ``metrics:compliance:{name}:{YYYYMMDD}``. NEVER raises — an
+    observability failure must not touch the serve/audit path."""
+    try:
+        from dhanradar.redis_client import get_redis
+
+        redis = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = f"metrics:compliance:{name}:{day}"
+        await redis.incrby(key, amount)
+        await redis.expire(key, 35 * 86400)  # self-clean; alerting reads are recent
+    except Exception:  # noqa: BLE001 — observability is best-effort
+        logger.debug("compliance: metric bump failed for %s", name, exc_info=True)
 
 
 def active_disclaimer_version() -> str:
@@ -106,6 +149,7 @@ async def record_served_label(
         return True
     except Exception:  # noqa: BLE001 — fire-and-forget: audit must not break the serve path
         logger.exception("compliance: audit write failed surface=%s label=%s", surface, label)
+        await bump_audit_metric("audit_write_failures")
         return False
 
 
@@ -139,3 +183,357 @@ async def get_active_disclaimer(db: Any, disclaimer_type: str) -> Optional[dict]
     except Exception:  # noqa: BLE001
         pass
     return result
+
+
+async def create_disclaimer(
+    db: Any,
+    *,
+    version: str,
+    content: str,
+    type: str = "ai_recommendation",
+    created_by: str,
+) -> dict:
+    """Insert a new disclaimer version as INACTIVE.
+
+    Activation is a separate, deliberate step (``activate_disclaimer``) so that
+    an operator can review the content before it goes live.
+
+    Raises:
+        ValueError: if version/type/content validation fails.
+        DisclaimerConflictError: if a disclaimer with that version already exists.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import Disclaimer
+
+    version = version.strip()
+    if not version or len(version) > 128:
+        raise ValueError(
+            f"version must be a non-empty string of at most 128 characters, got {version!r}"
+        )
+    if type not in _KNOWN_DISCLAIMER_TYPES:
+        raise ValueError(
+            f"unknown disclaimer type {type!r}; valid types: {sorted(_KNOWN_DISCLAIMER_TYPES)}"
+        )
+    if not content or not content.strip():
+        raise ValueError("content must be non-empty")
+    if len(content) > _MAX_DISCLAIMER_CONTENT:
+        raise ValueError(
+            f"content exceeds the {_MAX_DISCLAIMER_CONTENT}-char limit (len={len(content)})"
+        )
+
+    existing = await db.scalar(select(Disclaimer).where(Disclaimer.version == version))
+    if existing is not None:
+        raise DisclaimerConflictError(version)
+
+    # Created INACTIVE — activation is a separate, deliberate step.
+    row = Disclaimer(version=version, type=type, content=content, active=False)
+    db.add(row)
+    await db.commit()
+    return {"version": version, "type": type, "active": False, "created_by": created_by}
+
+
+async def activate_disclaimer(db: Any, *, version: str, activated_by: str) -> dict:
+    """Promote one disclaimer version to active; deactivate all others of the same type.
+
+    Single-active-per-type invariant is enforced in ONE transaction. After commit,
+    attempts a best-effort R2 HTML snapshot and Redis cache flush (both silently
+    degrade on failure so the committed activation is never rolled back).
+
+    Raises:
+        KeyError: if no disclaimer with that version exists.
+    """
+    from sqlalchemy import select, update
+    from sqlalchemy.exc import IntegrityError
+
+    from dhanradar import storage
+    from dhanradar.models.compliance import Disclaimer
+    from dhanradar.redis_client import get_redis
+
+    row = await db.scalar(select(Disclaimer).where(Disclaimer.version == version))
+    if row is None:
+        raise KeyError(version)
+
+    now = datetime.now(timezone.utc)
+
+    # Deactivate all currently-active disclaimers of the same type in one UPDATE,
+    # then activate the target row — single transaction, single commit. The
+    # `uq_disclaimer_active_per_type` partial-unique index enforces the
+    # single-active-per-type invariant atomically: a concurrent activation of a
+    # different version races to commit, and the loser's commit is rejected
+    # (IntegrityError) rather than silently leaving two versions active.
+    await db.execute(
+        update(Disclaimer)
+        .where(Disclaimer.type == row.type, Disclaimer.active.is_(True), Disclaimer.version != version)
+        .values(active=False, effective_to=now)
+    )
+    row.active = True
+    row.effective_from = now
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ActivationConflictError(version) from exc
+
+    effective_from_iso = now.isoformat()
+
+    # Best-effort R2 HTML snapshot — source of truth is the committed DB row.
+    snapshot_key: Optional[str] = None
+    snapshot_status: str
+    try:
+        safe_content = _html.escape(row.content)
+        html_doc = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            f"<title>Disclaimer {_html.escape(version)}</title></head><body>"
+            f"<p>{safe_content}</p>"
+            f"<footer><small>version: {_html.escape(version)} | "
+            f"type: {_html.escape(row.type)} | "
+            f"activated_at: {_html.escape(effective_from_iso)}</small></footer>"
+            "</body></html>"
+        )
+        _key = f"disclaimers/{row.type}/{version}.html"
+        storage.put_object(_key, html_doc.encode("utf-8"), "text/html; charset=utf-8")
+        snapshot_key = _key
+        snapshot_status = "ok"
+    except storage.StorageNotConfigured:
+        snapshot_status = "skipped_r2_unconfigured"
+    except Exception:  # noqa: BLE001 — R2 failure must not roll back a committed activation
+        logger.exception("compliance: R2 snapshot failed for disclaimer version=%s", version)
+        snapshot_status = "failed"
+
+    # Best-effort Redis cache flush — a Redis blip must never fail the activation.
+    try:
+        await get_redis().delete(f"{_DISCLAIMER_CACHE_PREFIX}{row.type}")
+    except Exception:  # noqa: BLE001
+        logger.debug("compliance: Redis flush failed after activating disclaimer %s", version)
+
+    return {
+        "version": version,
+        "type": row.type,
+        "active": True,
+        "effective_from": effective_from_iso,
+        "snapshot_status": snapshot_status,
+        "snapshot_key": snapshot_key,
+    }
+
+
+def _snapshot_from_rows(rows: Any) -> dict:
+    """Group audit rows into ``{date_iso: {key: label}}`` — pure, no DB.
+
+    Caller must sort rows by ``served_at`` ASC before passing. Within each UTC
+    calendar date, the key is ``str(user_id)`` when present, falling back to
+    ``session_id``, then ``request_id``, then ``content_hash``. Later rows (ASC
+    order) overwrite earlier ones for the same key on the same date, so the
+    snapshot captures the *latest* label seen per subject per day.
+    """
+    result: dict = {}
+    for row in rows:
+        date_key = row.served_at.astimezone(timezone.utc).date().isoformat()
+        if row.user_id is not None:
+            subject = str(row.user_id)
+        elif row.session_id:
+            subject = row.session_id
+        elif row.request_id:
+            subject = row.request_id
+        else:
+            subject = row.content_hash
+        if date_key not in result:
+            result[date_key] = {}
+        result[date_key][subject] = row.label
+    return result
+
+
+async def label_churn_review(db: Any, *, recommendation_type: str = "educational_label") -> dict:
+    """Compute label churn between the two most-recent audit batch days.
+
+    The churn universe is keyed by served subject (user_id, falling back to
+    session/request id) over the two most recent UTC days that have audited
+    labels — a documented PROXY until a dedicated instrument-universe
+    batch-snapshot table lands with B28 engine activation. Reuses the canonical
+    ``governance.review_batch`` (>5 % → hold) and surfaces the hold/publish
+    decision to the operator.
+
+    Returns a dict matching ``LabelChurnResponse`` (admin router) and
+    ``BatchDecision`` values from ``governance.BatchDecision``.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import AiRecommendationAudit
+    from dhanradar.scoring.engine import governance
+
+    # Validate the type against the SAME positive allowlist the audit writer uses
+    # (non-neg #1). Without this, an unrecognized/advisory type silently returns
+    # `insufficient_data` + `requires_human_review=False` — a fail-open signal if a
+    # downstream operator script gates on that boolean for an invalid input.
+    if recommendation_type not in _ALLOWED_TYPES:
+        raise ValueError(
+            f"unknown recommendation_type {recommendation_type!r}; "
+            f"valid types: {sorted(_ALLOWED_TYPES)}"
+        )
+
+    rows = (
+        await db.scalars(
+            select(AiRecommendationAudit)
+            .where(AiRecommendationAudit.recommendation_type == recommendation_type)
+            .order_by(AiRecommendationAudit.served_at.asc())
+        )
+    ).all()
+
+    snapshots = _snapshot_from_rows(rows)
+    sorted_days = sorted(snapshots.keys())
+
+    _insufficient = {
+        "recommendation_type": recommendation_type,
+        "previous_day": None,
+        "current_day": sorted_days[-1] if sorted_days else None,
+        "universe": len(snapshots[sorted_days[-1]]) if sorted_days else 0,
+        "changed": 0,
+        "churn": 0.0,
+        "threshold": governance.DEFAULT_CHURN_THRESHOLD,
+        "decision": "insufficient_data",
+        "requires_human_review": False,
+        "distribution_violations": [],
+        "reason": "need >=2 batch days of audited labels",
+    }
+
+    if len(sorted_days) < 2:
+        return _insufficient
+
+    prev_day = sorted_days[-2]
+    curr_day = sorted_days[-1]
+    prev = snapshots[prev_day]
+    curr = snapshots[curr_day]
+
+    review = governance.review_batch(prev, curr)
+    changed = sum(1 for k in curr if k in prev and curr[k] != prev[k])
+
+    return {
+        "recommendation_type": recommendation_type,
+        "previous_day": prev_day,
+        "current_day": curr_day,
+        "universe": len(curr),
+        "changed": changed,
+        "churn": review.churn,
+        "threshold": governance.DEFAULT_CHURN_THRESHOLD,
+        "decision": review.decision.value,
+        "requires_human_review": review.decision is governance.BatchDecision.hold,
+        "distribution_violations": review.distribution_violations,
+        "reason": review.reason,
+    }
+
+
+async def log_low_confidence(
+    *,
+    surface: Optional[str] = None,
+    confidence_score: Optional[float] = None,
+    confidence_band: Optional[str] = None,
+    model: Optional[str] = None,
+    reason: Optional[str] = None,
+    identifier: Optional[str] = None,
+    request_id: Optional[str] = None,
+) -> bool:
+    """Fire-and-forget insert of one low-confidence event log row.
+
+    No writer wired yet — the AI/scoring confidence-floor consumer (B22) calls
+    this; built ahead like B20's call site. Opens its own session and NEVER
+    raises — on any failure, logs and returns False.
+    """
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        from dhanradar.db import engine
+        from dhanradar.models.compliance import AiLowConfidenceLog
+
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with SessionLocal() as db:
+            db.add(
+                AiLowConfidenceLog(
+                    surface=surface,
+                    identifier=identifier,
+                    confidence_score=confidence_score,
+                    confidence_band=confidence_band,
+                    model=model,
+                    reason=reason,
+                    request_id=request_id,
+                )
+            )
+            await db.commit()
+        return True
+    except Exception:  # noqa: BLE001 — fire-and-forget: never breaks the caller
+        logger.exception(
+            "compliance: low-confidence log write failed surface=%s", surface
+        )
+        return False
+
+
+async def is_engine_version_activated(db: Any, model_version: str) -> bool:
+    """The rating_engine_changelog registry is the authoritative runtime activation
+    state for a scoring model_version (B6/B28).
+
+    Returns True iff a RatingEngineChangelog row exists with the given model_version
+    AND activated is True.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import RatingEngineChangelog
+
+    result = await db.scalar(
+        select(RatingEngineChangelog.id)
+        .where(
+            RatingEngineChangelog.model_version == model_version,
+            RatingEngineChangelog.activated.is_(True),
+        )
+        .limit(1)
+    )
+    return result is not None
+
+
+async def record_engine_changelog(
+    db: Any,
+    *,
+    model_version: str,
+    created_by: str,
+    approved_by: Optional[str],
+    factors_before: dict,
+    factors_after: dict,
+    methodology_url: Optional[str],
+    activated: bool = False,
+    activated_at: Optional[datetime] = None,
+) -> dict:
+    """Insert one scoring/rating methodology changelog row.
+
+    Computes ``two_person_ok`` via ``governance.two_person_gate_ok`` (documented
+    gate; non-blocking at this stage — enforced at activation time). Written by
+    the B6/B28 two-person scoring-activation gate (slice 2) — built ahead; no
+    caller yet.
+    """
+    from dhanradar.models.compliance import RatingEngineChangelog
+    from dhanradar.scoring.engine import governance
+
+    two_person_ok = governance.two_person_gate_ok(created_by, approved_by)
+    row = RatingEngineChangelog(
+        model_version=model_version,
+        created_by=created_by,
+        approved_by=approved_by,
+        two_person_ok=two_person_ok,
+        factors_before=factors_before,
+        factors_after=factors_after,
+        methodology_url=methodology_url,
+        activated=activated,
+        activated_at=activated_at,
+    )
+    db.add(row)
+    await db.commit()
+    return {
+        "id": str(row.id),
+        "model_version": row.model_version,
+        "created_by": row.created_by,
+        "approved_by": row.approved_by,
+        "two_person_ok": row.two_person_ok,
+        "factors_before": row.factors_before,
+        "factors_after": row.factors_after,
+        "methodology_url": row.methodology_url,
+        "activated": row.activated,
+        "activated_at": row.activated_at.isoformat() if row.activated_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
