@@ -5,6 +5,32 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## Deploy-gate hardening: B36 + B37 (2026-06-07, merged to `main`)
+
+Worked in isolated `git worktree`s off `main` (the shared `hardening/launch-gate-blockers` checkout
+had a concurrent session's dirty tree — stayed out of its lane). Each slice: deterministic gates →
+review → squash-merge.
+
+- **B36 deploy automation** (merged PR #25 `6c0d85c`): `docs/ops/deploy-runbook.md` (cold + update
+  deploy, 3 cloudflared gotchas, pre-serve migration ordering, 2-path rollback, post-deploy
+  checklist) + `scripts/deploy.sh` (`deploy`/`status`/`rollback`/`help`; every docker op scoped
+  `-p dhanradar`; no `pkill`/bare `docker rm`; NEVER-TOUCH host-cloudflared/etip; smoke-test gate;
+  `alembic downgrade` manual-only) + `.gitattributes` (`*.sh eol=lf`). Independent adversarial review
+  (Sonnet takeover; codex n/a) ACCEPT-WITH-CONDITIONS, applied. Ledger `reviews/b36-deploy-runbook.md`.
+- **B37 DB backup** (merged PR #26 `b93cf38`): `scripts/backup-db.sh` (`pg_dump -Fc` in the postgres
+  container → one-off `run --rm` fastapi container → R2 via `storage.put_object`; scoped, empty-dump
+  guard, `list` mode) + `dhanradar/ops/r2_put.py` (stdin→R2, empty-guard, 5 unit tests) +
+  `docs/ops/backup-and-restore.md`. Opus review fixed an OOM-the-live-API risk (`exec`→`run --rm`).
+  Ledger `reviews/b37-db-backup.md`.
+
+Both are **authored, not validated** — first real runs on KVM4 are the validation step, still gated
+on PC4/PC5 + the residual human/infra gates (B37 R2 India-residency + retention + restore drill).
+**Remaining CRITICAL deploy gate: B38** (Sentry `init` + a `/metrics` endpoint — both inert today).
+
+This session also confirmed the **MF AI-consumer (B20/B21/B22/B26) was already shipped by a
+concurrent session** (PR #23) — not duplicated. OpenRouter key wiring documented
+([[ai-gateway-built-unconsumed]]): `OPENROUTER_API_KEY` + `AI_FREE_MODELS` go in the root `.env`.
+
 ## First AI-gateway consumer — MF report portfolio commentary (2026-06-07, merged PR #23 `c085444`, branch `feat/ai-consumer`)
 
 The governed OpenRouter gateway now has its first end-to-end consumer. Built in an isolated
@@ -209,6 +235,26 @@ cross-border consent, deploy gate), **B32** (notification residuals, low), **B33
 hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
+
+### Deploy-gate hardening B36 + B37 (2026-06-07, worktrees off `main`)
+
+- **Opus** — orchestration; Phase-0 reads (compose/cloudflared/Dockerfile/celery beat/storage); both
+  build contracts; line-by-line review of both slices; the B36 robustness fixes (pipefail SIGPIPE,
+  `run -T`, wait_healthy diagnostics) + the B37 **OOM fix** (`exec`→`run --rm`); both review ledgers;
+  the worktree git workflow (isolated off `main` to avoid the concurrent session's shared dirty
+  tree); both PRs + merges; this handoff.
+- **Sonnet** — 2 builders (B36 runbook+script; B37 backup script+r2_put+tests) against exact
+  contracts; 1 adversarial sign-off (B36 deploy script — scope-escape focus; codex n/a → Sonnet
+  takeover, ACCEPT-WITH-CONDITIONS).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (no Codex entitlement). B36 got an independent Sonnet adversarial pass; B37
+  got a proportionate Builder+Architect+Compliance(Opus) review (read-only DB op, smaller blast
+  radius) — no separate adversarial pass, logged honestly in its ledger.
+- Per-delegation (telemetry): b36-builder · Sonnet · reworked: Y (Opus added 3 script robustness
+  fixes + applied the 2 adversarial conditions) | b36-adversarial · Sonnet · reworked: N | b37-builder
+  · Sonnet · reworked: Y (Opus changed the uploader `exec`→`run --rm` to stop a backup OOM-ing the
+  live API). Doc prose (runbooks, ledgers, this footer) was Opus-direct — safety-critical infra where
+  the NEVER-TOUCH constraints needed Opus judgment; routing nudge noted, exemption taken.
 
 ### Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
 
