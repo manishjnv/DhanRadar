@@ -24,14 +24,39 @@ jobs:
         run: python scripts/check_compose_memory.py
 
   # ---------------------------------------------------------------------------
-  # Backend tests (pytest, incl. integration) against a Postgres service.
-  # Redis is faked in tests (fakeredis), so no redis service is needed.
+  # Lint — ruff + mypy (B40). ADVISORY for now (continue-on-error): the codebase
+  # has a pre-existing ruff backlog (~361, mostly import-sort autofixes) and has
+  # never been mypy-checked. These steps INVOKE both tools so the signal is
+  # visible on every PR; promote this job to blocking (drop continue-on-error)
+  # after the one-off lint-cleanup pass — tracked in BLOCKERS.md (B40-followup).
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff + mypy
+        run: python -m pip install --upgrade ruff mypy
+      - name: ruff check (advisory)
+        working-directory: backend
+        run: python -m ruff check .
+      - name: mypy (advisory)
+        working-directory: backend
+        run: python -m mypy dhanradar --ignore-missing-imports --no-error-summary || true
+
+  # ---------------------------------------------------------------------------
+  # Backend tests (pytest, incl. integration) against a TimescaleDB service
+  # (B40: was postgres:16; the real image gives extension availability closer to
+  # prod). Redis is faked in tests (fakeredis), so no redis service is needed.
   # ---------------------------------------------------------------------------
   backend:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: timescale/timescaledb-ha:pg16
         env:
           POSTGRES_USER: dhanradar
           POSTGRES_PASSWORD: dhanradar
@@ -67,6 +92,68 @@ jobs:
         run: python -m pytest -q
 
   # ---------------------------------------------------------------------------
+  # Migrations (B40) — exercise the REAL Alembic chain on the TimescaleDB image,
+  # not the ORM `create_all` the test suite uses. Runs the init SQL (minus
+  # pg_cron, which needs shared_preload_libraries a GH service container can't
+  # set), then upgrade head -> downgrade base -> upgrade head to prove the chain
+  # is linear AND fully reversible. This is the gate that would have caught the
+  # duplicate-0008 branch (see docs/rca/README.md).
+  # ---------------------------------------------------------------------------
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_USER: dhanradar
+          POSTGRES_PASSWORD: dhanradar
+          POSTGRES_DB: dhanradar
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U dhanradar -d dhanradar"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: dhanradar
+      POSTGRES_PASSWORD: dhanradar
+      POSTGRES_DB: dhanradar
+      PGPASSWORD: dhanradar
+      # config import requires these (no JWT keys needed — resolved lazily).
+      RAZORPAY_KEY_ID: rzp_test_ci
+      RAZORPAY_KEY_SECRET: ci_secret
+      RAZORPAY_WEBHOOK_SECRET: ci_webhook_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Init schemas + extensions (01_init.sql, minus pg_cron)
+        run: |
+          # pg_cron needs shared_preload_libraries, which a GH Actions service
+          # container cannot set — strip only that line; everything else (the
+          # timescaledb/vector/pg_trgm/pg_partman extensions, the app role, all
+          # schemas) runs verbatim so 01_init.sql itself is exercised.
+          sed '/pg_cron/d' infra/postgres/init/01_init.sql \
+            | psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1
+      - name: alembic upgrade head
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: alembic downgrade base (prove reversibility)
+        working-directory: backend
+        run: python -m alembic downgrade base
+      - name: alembic upgrade head (re-apply clean)
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+  # ---------------------------------------------------------------------------
   # Frontend — runs fully only once the foundation (frontend/src) is present
   # (it lands via the frontend-foundation PR). On the bare skeleton it skips
   # gracefully so this workflow is green on whichever branch merges first.
@@ -93,5 +180,9 @@ jobs:
           npm run gen:api --if-present
           npm run typecheck --if-present
           npm run lint --if-present
+          # B39: vitest now runs real tests (no --passWithNoTests); an empty or
+          # broken suite fails here instead of passing vacuously.
           npm run test --if-present
-          npm run build
+          # B45: prove the app builds with the MSW mock layer OFF — the prod
+          # build must never depend on mocks (it has only ever run on MSW).
+          NEXT_PUBLIC_API_MOCKING=disabled npm run build
