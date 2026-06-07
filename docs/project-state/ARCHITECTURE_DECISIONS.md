@@ -33,6 +33,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0019 | Scoring Engine Authority: FINAL_SCORING_SPEC.md is the sole source of truth | Accepted |
 | ADR-0020 | Concentration: catalogued-but-unweighted risk sub-factor in scoring v1 (B11) | Accepted |
 | ADR-0024 | DPDP cross-border consent: per-processor purposes + fail-closed non-route gate (B20/B31) | Accepted |
+| ADR-0025 | AMFI historical NAV report as the canonical backfill source for MF return signals (B29) | Accepted |
 
 ---
 
@@ -367,3 +368,31 @@ safe. Revoke contract: the writer MUST set `granted:false` / remove the key, nev
 un-indexed beyond this addition; reconcile separately).
 **Source:** `backend/dhanradar/deps.py`; `reviews/consent-cross-border-primitive.md`;
 `docs/DhanRadar_Architecture_Final.md` §Compliance; CLAUDE.md non-neg #10; ADR-0022 (R2 residency).
+
+## ADR-0025 — AMFI historical NAV report is the canonical backfill source for MF return signals (B29)
+
+**Date:** 2026-06-07 · **Status:** Accepted
+**Context:** Producing real (still provisional) MF labels needs 1Y/3Y category-relative return
+signals, which need NAV **history**. The verified Allowed-APIs block covered only `NAVAll.txt`
+(today's NAV). A backfill source was required; the options were the official AMFI historical NAV
+report, a third-party aggregator (e.g. `mfapi.in`), or accrue-forward-only (no backfill, labels
+stay `insufficient_data` for 1–3 years). Introducing an external API requires an architecture-owner
+decision + an Allowed-APIs entry (the "never invent an external API" rule).
+**Decision:** Use the **official AMFI historical NAV report**
+(`GET portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=&todt=`) as the canonical
+backfill source — the **same official, free, India-resident** source as the daily feed; **no
+third-party NAV vendor is introduced.** Live-verified 2026-06-07. It is semicolon-delimited but
+**8-field with a different column order** than `NAVAll.txt`, so it gets a separate parser
+(`parse_nav_history`); AMFI caps each request to ~3 months, so a multi-year backfill loops over
+non-overlapping windows. Added to the Implementation Plan §0 Allowed-APIs block.
+**Consequences:** the MF data pipeline (B29) can compute return-based signals — Momentum (category
+rank), Trend (rolling-return trajectory), Risk (volatility/drawdown), partial Quality, and the
+`outperform_1y/3y` / `drawdown_controlled` label signals — per `FINAL_SCORING_SPEC` §2.6/§4.1/§8.
+**Valuation stays uncomputed** (needs an expense-ratio feed) and `structural_concern`/`manager_change`
+stay False (no qualitative feed) → coverage ~3/5 → confidence caps at `medium`, and every result keeps
+the **`provisional_model`** flag because the weights are `activated:false` (B28) pending the backtest
+pass-gates + two-person methodology gate (B6). The signal-derivation **thresholds are provisional and
+config-gated, not frozen methodology** — finalizing them is a FINAL-element calibration → B6 gate
+before any numeric is treated as authoritative. DPDP-clean: public NAV data, no PII, India-resident.
+**Source:** Implementation Plan §0 Allowed-APIs ("AMFI NAV — historical"); `FINAL_SCORING_SPEC`
+§2.6/§4.1/§8; `BLOCKERS.md` B29/B28/B6; `GROWTH_BACKLOG.md` Tier-0; `reviews/independent-audit-2026-06-06.md`.
