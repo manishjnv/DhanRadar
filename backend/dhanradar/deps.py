@@ -299,6 +299,63 @@ require_consent = RequireConsent
 
 
 # ---------------------------------------------------------------------------
+# RequireAdmin — fail-closed admin gate (B26 Admin module)
+# ---------------------------------------------------------------------------
+
+class RequireAdmin:
+    """Dependency that restricts an endpoint to operator-configured admins.
+
+    There is NO admin tier/role in the DB — admins are an allowlist of user-id
+    UUIDs in ``settings.ADMIN_USER_IDS`` (operator-set via env/secret). The gate is
+    fail-closed and surface-hiding:
+
+      - EVERY non-admin — anonymous OR an authenticated non-admin — receives **404
+        not_found**, not 401/403. This hides the admin surface entirely (no oracle
+        that the endpoint exists or that it is admin-gated), and avoids a
+        401-vs-404 distinction that would confirm the route to an authenticated
+        non-admin.
+      - An EMPTY allowlist ⇒ no admins ⇒ every admin endpoint is disabled
+        (fail-closed default, mirroring INTERNAL_API_TOKEN).
+
+    Returns the admin's ``UserContext`` so the endpoint can attribute actions
+    (e.g. activated_by / created_by) to the admin.
+
+    Usage::
+
+        @router.post("/admin/disclaimers/{version}/activate")
+        async def activate(
+            admin: UserContext = Depends(RequireAdmin()),
+        ): ...
+    """
+
+    async def __call__(
+        self,
+        user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    ) -> UserContext:
+        from uuid import UUID as _UUID
+
+        from dhanradar.config import settings
+
+        # Normalize the subject to a canonical UUID; anonymous ("anonymous") and any
+        # malformed id raise → treated as non-admin → 404 (never an unhandled 500).
+        try:
+            uid = str(_UUID(user.user_id))
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not_found"
+            )
+        if user.is_anonymous or uid not in settings.admin_user_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not_found"
+            )
+        return user
+
+
+# Convenience alias
+require_admin = RequireAdmin
+
+
+# ---------------------------------------------------------------------------
 # Reusable, NON-route consent checks (B20/B31 foundation)
 # ---------------------------------------------------------------------------
 #

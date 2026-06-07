@@ -84,7 +84,12 @@ _ADV_HARD = re.compile(r"strong[\s_-]?(?:buy|sell)", re.I)  # never innocent
 # (ai_gateway/quality.py) carries a broader, domain-owned set; this static net
 # guards SOURCE/label assets.
 _ADV_WORD = r"(?:strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)"
-_ADV_QUOTED = re.compile(rf"""["']{_ADV_WORD}["']""", re.I)  # quoted label value
+# Negative lookbehind exempts the ARIA accessibility attribute role="switch" — a
+# standard, non-advisory a11y role and the ONLY advisory verb that collides with a
+# valid HTML role (used by every toggle/switch component). A standalone advisory
+# value like "switch" NOT preceded by role= is still caught (verified in
+# backend/tests/unit/test_ci_guards.py).
+_ADV_QUOTED = re.compile(rf"""(?<!role=)["']{_ADV_WORD}["']""", re.I)  # quoted label value
 _ADV_KEY = re.compile(
     r"""(?:^|[{,])\s*["']?(?:strongBuy|strongSell|buy|sell|hold|switch|avoid|caution)["']?\s*:""",
     re.I,

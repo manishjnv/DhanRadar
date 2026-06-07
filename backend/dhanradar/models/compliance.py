@@ -35,6 +35,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -49,7 +50,18 @@ class Disclaimer(Base):
     `disclaimer_version` can be reconciled by value."""
 
     __tablename__ = "disclaimers"
-    __table_args__ = _SCHEMA
+    # Partial-unique index: at most one active disclaimer per type (single-active
+    # invariant enforced atomically at the DB level; migration 0008). Mirrors the
+    # raw-SQL `uq_disclaimer_active_per_type` so CI create_all == prod alembic.
+    __table_args__ = (
+        Index(
+            "uq_disclaimer_active_per_type",
+            "type",
+            unique=True,
+            postgresql_where=text("active"),
+        ),
+        _SCHEMA,
+    )
 
     version: Mapped[str] = mapped_column(Text, primary_key=True)
     type: Mapped[str] = mapped_column(Text, nullable=False, server_default="ai_recommendation")
@@ -103,6 +115,88 @@ class AiRecommendationAudit(Base):
     disclaimer_version: Mapped[str] = mapped_column(Text, nullable=False)
     surface: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # mf_report | notification_*
     session_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RatingEngineChangelog(Base):
+    """Append-only methodology changelog for the scoring/rating engine.
+
+    One row per methodology version change — stores factors before/after,
+    the two-person approval outcome, and an optional methodology URL so every
+    weight/band change is reproducible for SEBI regulatory purposes (spec §8).
+
+    No writer wired yet — written by the B6/B28 two-person scoring-activation
+    gate (slice 2) via ``compliance.service.record_engine_changelog``."""
+
+    __tablename__ = "rating_engine_changelog"
+    # Partial-unique: at most one ACTIVATED row per model_version (the single
+    # activation-record-per-version invariant, enforced atomically; migration 0009).
+    # Many activated=false rows per version are allowed (proposed methodology changes).
+    __table_args__ = (
+        Index(
+            "uq_engine_changelog_activated_per_version",
+            "model_version",
+            unique=True,
+            postgresql_where=text("activated"),
+        ),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(Text, nullable=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    two_person_ok: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    factors_before: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
+    factors_after: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
+    methodology_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    activated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AiLowConfidenceLog(Base):
+    """Append-only log of AI/scoring surface emissions below the confidence floor.
+
+    No writer wired yet — the AI/scoring confidence-floor consumer (B22) calls
+    ``compliance.service.log_low_confidence``; built ahead like B20's call site so
+    the schema is stable before the consumer lands."""
+
+    __tablename__ = "ai_low_confidence_log"
+    __table_args__ = (
+        Index("ix_low_conf_logged_at", "logged_at"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    surface: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    identifier: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence_band: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

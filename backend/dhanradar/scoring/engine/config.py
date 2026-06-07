@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID as _UUID
 
 from dhanradar.scoring.engine.schemas import Axis
 
@@ -38,6 +39,8 @@ class EngineConfig:
     confidence_weights: dict[str, float]
     low_coverage_threshold_pct: float
     confidence_floor: float
+    created_by: str = ""
+    methodology_url: str = ""
 
     def validate(self) -> None:
         # Every axis must carry a weight, else the engine KeyErrors under traffic
@@ -69,6 +72,21 @@ class EngineConfig:
         c_total = sum(self.confidence_weights.values())
         if abs(c_total - 1.0) > 0.001:
             raise ConfigError(f"confidence weights must sum to 1.0; got {c_total}")
+        # Two-person methodology gate integrity (B6): `created_by` is the authoring
+        # ROLE/TEAM identifier and is compared against the activating admin's UUID
+        # (`approved_by`). A UUID-shaped `created_by` would make the gate trivially or
+        # deceptively satisfiable — forbid it at load so the gate cannot be weakened by
+        # a future config edit.
+        if self.created_by:
+            try:
+                _UUID(self.created_by)
+            except (ValueError, AttributeError, TypeError):
+                pass  # not UUID-shaped → a valid role/team identifier
+            else:
+                raise ConfigError(
+                    "created_by must be a role/team identifier, not a user UUID: "
+                    f"{self.created_by!r}"
+                )
 
 
 def load_config(path: Path | None = None) -> EngineConfig:
@@ -83,6 +101,8 @@ def load_config(path: Path | None = None) -> EngineConfig:
         confidence_weights={k: float(v) for k, v in raw["confidence"]["weights"].items()},
         low_coverage_threshold_pct=float(raw["missing_data"]["axis_low_coverage_threshold_pct"]),
         confidence_floor=float(raw["confidence"]["floor"]["below"]),
+        created_by=str(raw.get("created_by") or ""),
+        methodology_url=str(raw.get("methodology_url") or ""),
     )
     cfg.validate()
     return cfg
