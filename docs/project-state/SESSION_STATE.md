@@ -204,6 +204,32 @@ hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
 
+### B38 observability + deploy-gate checklist (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+User drove toward a full deploy; I built the one CRITICAL ops gate in my lane and held the line on
+the hard gates.
+
+- **B38 monitoring — DONE & pushed** (`efc6556`): `dhanradar/observability.py` — `init_sentry()`
+  (DPDP-safe `before_send` scrubber: cookies / auth+cookie+internal-token headers (dict AND list) /
+  body / query_string / env-`REMOTE_ADDR` / breadcrumbs / user; `send_default_pii=False`, traces off);
+  plus a Prometheus `/metrics` endpoint (method/route-TEMPLATE/status labels only — no raw paths/ids;
+  outside `/api/v1`, network-isolated, no bearer per non-neg #5). 24 DB-free tests.
+- **Deploy-gate checklist created**: `docs/project-state/DEPLOY_GATE_CHECKLIST.md` — 7 gate groups +
+  owner tags; the single path from this branch → a legitimate KVM4 deploy. B38 ticked (`67d5915`).
+- **B36 / B37 NOT done** — both need KVM4 box access (tested migration round-trip; backups verified
+  India-resident) that this session does not have; only draftable untested. Needs a box session.
+- **DEPLOY refused** — open Compliance BLOCKERs + unsigned audit + no backups/consent-UI/residency +
+  PC5 human approval. **MERGE refused** — `main` is PR-protected, needs the audit, and the branch
+  carries the concurrent session's load-bearing work. Owner consent does not waive legal (DPDP) /
+  integrity (two-person) / data / infra gates.
+- **Opus** — orchestration, infra-notes grounding, line-by-line review, the ci_guards/bearer
+  resolution, gating/commit/push. **Sonnet ×2** — B38 builder (reworked **Y**: adversarial round) +
+  adversarial reviewer (found **4 real DPDP PII leaks** the build missed — high value). **Haiku** —
+  n/a. **codex:rescue** — n/a (unavailable; Sonnet adversarial takeover per the approved ladder).
+- Gates: pytest 24 · ruff 0 · ci_guards 0 · anti-pattern 9/9 · markdownlint 0. Commits `efc6556`,
+  `67d5915` (latter has a cosmetic stray `@` in its message — bash/PowerShell heredoc mixup; not
+  force-fixing on a shared branch).
+
 ### DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
 
 - **Opus** — Phase-0 status read; the kill-switch design (single `_consent_granted` chokepoint,
