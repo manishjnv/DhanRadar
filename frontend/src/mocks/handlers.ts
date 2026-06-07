@@ -430,4 +430,14 @@ export const handlers = [
     }
     return HttpResponse.json({ consents: { ...mockConsents }, consent_version: CONSENT_VERSION });
   }),
+
+  // POST /api/v1/onboarding/risk-quiz (authed)
+  // Accepts { answers: number[] } (5 values, each 0..3).
+  // Returns { risk_profile: 'conservative' | 'moderate' | 'aggressive' }.
+  // The mock always responds 'moderate'; integration tests may override with
+  // server.use() to test conservative/aggressive paths.
+  http.post('*/onboarding/risk-quiz', () => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    return HttpResponse.json({ risk_profile: 'moderate' });
+  }),
 ];

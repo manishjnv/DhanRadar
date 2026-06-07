@@ -20,9 +20,19 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading, isError } = useMe();
 
   React.useEffect(() => {
-    if (!isLoading && (isError || !user)) {
+    if (isLoading) return;
+
+    // 1. Anonymous user → /login (primary guard, runs first).
+    if (isError || !user) {
       const next = encodeURIComponent(pathname || '/dashboard');
       router.replace(`/login?next=${next}`);
+      return;
+    }
+
+    // 2. Cold-start: authenticated but risk_profile not yet set → /onboarding.
+    //    Guard against redirect loops: skip when already on /onboarding.
+    if (user.risk_profile == null && pathname !== '/onboarding') {
+      router.replace('/onboarding');
     }
   }, [isLoading, isError, user, pathname, router]);
 
@@ -38,8 +48,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Redirecting — render nothing rather than flashing protected chrome.
+  // Redirecting to /login — render nothing rather than flashing protected chrome.
   if (isError || !user) return null;
+
+  // Redirecting to /onboarding — suppress children until navigation fires.
+  if (user.risk_profile == null && pathname !== '/onboarding') return null;
 
   return <>{children}</>;
 }
