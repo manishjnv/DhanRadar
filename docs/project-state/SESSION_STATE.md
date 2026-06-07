@@ -5,22 +5,56 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## Session handoff (2026-06-08, end of B44+B42 session)
+## Session handoff (2026-06-08, end of functionality-first B29+B42+B43 session)
 
-- **Pushed:** branch `hardening/launch-gate-blockers` → origin at `2a56aad` (all commits noreply).
-- **Merge — BLOCKED:** PR #28 is **draft** and **`mergeable: CONFLICTING`** (DIRTY) against `main`,
-  no review approval. Next session must **resolve the merge conflicts with main**, mark the PR
-  ready, and clear required checks before any merge. `main` is protected (PR-only).
-- **Deploy — BLOCKED (do NOT deploy):** binding deploy gates still open — **B48** (DPDP consent
-  enforcement is disabled in dev; must be re-enforced via `ENV=production` / `DPDP_CONSENT_ENFORCED=
-  true` so a real grant is required — legal), **B34** (R2 bucket India-residency for the 7-yr audit),
-  **B29** (no live NAV data → funds score `insufficient_data`), **B36/B37** (deploy/backup scripts
-  never run live on KVM4). Deploy also needs the Phase-7 §5 pre-deploy panel logged + **separate
-  explicit human approval**; the GitHub `production` env is main-gated (merge must land first).
-- **Adversarial tooling:** codex unavailable all session (ChatGPT-account entitlement) — Sonnet
-  takeover is the working fallback; run `/codex:setup` to restore.
-- **Next action:** resolve PR #28 conflicts → run the full Phase-7 §5 pre-deploy governance panel
-  across the repo → human go/no-go → then merge, then deploy with B48 re-enforced.
+- **Built this session (branch `hardening/launch-gate-blockers`, all commits noreply):**
+  - **B29** — NAV-derived signals so a seeded fund scores a REAL label (`on_track`, not
+    `insufficient_data`): `58db876` (code), `fa729de` (docs).
+  - **B42** — mobile AppShell focus-trap residual closed (acceptance #1/#2/#3 met): `9fe0a99`
+    (code), `0622681` (docs).
+  - **B43** — onboarding risk-quiz: sole-writer `POST /onboarding/risk-quiz`, cold-start redirect,
+    and a source-level non-neg-#3 separation guard: `a9509fb` (code), `1375ce9` (docs).
+  - Build-sequence items **1–4 (B29, B42, B43, B44) all ADDRESSED**.
+- **Pushed:** branch → origin at `1375ce9` (fast-forward `843a5f4..1375ce9`; all commits noreply,
+  push privacy block satisfied).
+- **Merge — BLOCKED:** PR #28 is **draft** and **`mergeable: CONFLICTING`** against `main`, no
+  review approval. A future session must **resolve the merge conflicts with main**, mark the PR
+  ready, and clear required checks. `main` is protected (PR-only).
+- **Deploy — BLOCKED (NOT done; cannot be done from a session):** binding deploy gates still open —
+  **B48** (DPDP consent enforcement disabled in dev; re-enforce via `ENV=production` /
+  `DPDP_CONSENT_ENFORCED=true`), **B34** (R2 India-residency for the 7-yr audit), **B29** (code
+  landed but **no live NAV data populated** — run `nav_daily_fetch`/`nav_backfill` on a live
+  TimescaleDB), **B36/B37** (deploy/backup scripts never run live on KVM4). Deploy also needs the
+  Phase-7 §5 pre-deploy panel logged + **separate explicit human approval**; the GitHub
+  `production` env is main-gated (merge must land first). **Deploy is a human-gated event after
+  merge, not a session action.**
+- **Gates green this session:** backend 51 targeted unit + ruff + route-reg + ci_guards/anti-pattern;
+  frontend 52 vitest + tsc + eslint + token-sync. Backend full unit suite carries 2 pre-existing
+  network-DNS failures in `test_market_data.py` (unrelated). Integration tests (B29 scoring, B43
+  writer) collect; run on a live DB.
+- **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
+  touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
+  to restore before the next load-bearing/security change (item 5 AI gateway will need it).
+- **Next action (two independent tracks):** (a) **dev** — build-sequence **item 5: AI MF
+  commentary** (first AI consumer; load-bearing AI gateway → inline Security/Compliance review
+  stays in-session; needs codex restored). (b) **pre-deploy** — resolve PR #28 conflicts → Phase-7
+  §5 pre-deploy panel → human go/no-go → merge → deploy with B48 re-enforced + live NAV populated.
+
+### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
+
+- **Opus** — orchestration; B29 NAV-signal design + wiring (load-bearing scoring seam, self-authored);
+  B42 focus-trap (scope collapsed to a ~20-line a11y fix, self-authored); B43 contract authoring +
+  full diff review + the non-neg-#3 source-level separation guard (the compliance check Opus owns);
+  all gate runs; doc edits.
+- **Sonnet** — 2 parallel B43 builders (backend onboarding module; frontend onboarding flow).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (no security-critical scoring-engine change this session; ChatGPT-account
+  entitlement still down regardless).
+- Per-delegation telemetry: `B43-backend-builder · Sonnet · reworked: N (mirrored consent house
+  pattern; gates green as-returned)` · `B43-frontend-builder · Sonnet · reworked: N (quiz +
+  AuthGuard cold-start + tests token-compliant, green as-returned)` · `warm-start ×3 (B29/B42/B43) ·
+  Sonnet · reworked: N` · B29 & B42 self-authored on Opus (load-bearing / sub-30-line, per the
+  don't-delegate-when-faster rule).
 
 ## B44 consent writer + B42 responsive AppShell landed (2026-06-08, branch `hardening/launch-gate-blockers`)
 
