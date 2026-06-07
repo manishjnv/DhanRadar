@@ -5,6 +5,15 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## Monetization model decided (2026-06-08) — implement at Phase 5
+
+MF launch = **freemium + Founding Access**, written into `DhanRadar_Implementation_Plan.md`
+**PHASE 5M** (ready to slot into Phase 5 execution; small `pro_access_until` add at Phase 2).
+Paid tier = **DhanRadar Plus** (₹149/mo · ₹1,199/yr; Founding ₹599/yr locked); paywall axis =
+tracking over time; AI commentary = Pro + one-time taster, metered. Free is **gateway-
+independent** — billing go-live is a data-only flip via the existing B7/B8 checkout fail-safe.
+Full contract + open-item-free decision log in PHASE 5M.
+
 ## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
 
 Concurrent-session note: this branch had 28 uncommitted frontend files from a parallel session.

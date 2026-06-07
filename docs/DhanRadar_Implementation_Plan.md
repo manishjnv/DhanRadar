@@ -173,6 +173,68 @@ Resulting footprint: **8 internal containers** (own-postgres, own-redis, fastapi
 
 ---
 
+## PHASE 5M — Monetization Overlay: MF Freemium + Founding Access (GTM)
+
+**Design decision 2026-06-08.** The launch monetization model. Spans **Phase 2** (tiering
+mechanism), **Phase 5** (MF report gating) and **Stage-2 billing Steps 6–7**.
+**Gateway-independent** — ships before Razorpay KYC clears; billing go-live is a **data-only
+flip**, no code change.
+
+**Model:** freemium (Free forever + one paid **Pro** tier), not free-trial-then-pay. Free =
+"no active subscription"; Pro = the first `billing.plans` row behind `RequireTier` → **402**.
+Paywall axis = **tracking over time** (the only axis that creates recurring value and keeps the
+acquisition surface off the gateway). The paid tier ships to users as **DhanRadar Plus**
+(internal tier id stays `pro`).
+
+**Free (ungated):** CAS upload → full labelled report (label + confidence band per holding);
+unlimited manual re-uploads; one portfolio; disclosure bundle + `NOT_ADVICE` always render.
+
+**Pro (402-gated):** stored trend history; auto monthly re-score (Celery beat); label-change
+alerts (e.g. `in_form → off_track`) via the Notification module; multiple portfolios; AI
+portfolio commentary — **Pro + a one-time first-report taster**, metered by the budget governor
+**even during free-Pro** so founders cannot drain the AI budget.
+
+**Free-Pro mechanic:**
+
+1. **Founding Access (now, pre-billing):** every user who joins before billing go-live gets
+   Pro free until **go-live + a 30-day grace period**, then converts at a locked founding
+   discount. The window spans 2–3 monthly re-scores so founders see the tracking value before
+   paying. Pro is given away only while billing is impossible — zero revenue forgone.
+2. **Triggered trial (post go-live):** new users get a 30-day Pro unlock fired by their **first
+   label change** (value-moment, not day-0); ends in a soft landing to Free (no lockout).
+3. **Mechanism (Phase 2 work):** per-user `pro_access_until` (timestamp) + `pro_access_reason`
+   (`founding` / `triggered_trial` / `subscription`). `RequireTier` grants Pro when
+   `now < pro_access_until` **OR** an active subscription exists; downgrade is automatic by
+   timestamp comparison — no gateway, no revoke job.
+
+**Pricing (confirmed 2026-06-08):** DhanRadar Plus **₹149/mo** or **₹1,199/yr**; Founding
+**₹599/yr, locked for the subscription's life**. Each is a separate `billing.plans` row, not a
+code branch.
+
+**Go-live = data-only flip:** the Pro plan sits in the catalog with `create_checkout` inert —
+the existing **B7/B8 503 fail-safe** refuses checkout until a real `razorpay_plan_id` +
+`total_count` are seeded. The upgrade button reads "Join founding members" until KYC clears;
+then seed the real ids and set `active`. No code change.
+
+**Compliance (every tier):** Free is **not** consent-free — a CAS report processes PII, so
+`RequireConsent` (DPDP) gates the upload route regardless of tier. Alerts stay **factual /
+educational** ("this fund's label changed to `off_track`"), never advisory verbs. **No numeric
+in DOM** holds in the paid tier too (label + confidence **band** only). Tier-gate = **402**,
+RFC7807 + `request_id`.
+
+**Load-bearing — full inline Tier-B review when implemented:** `billing/*` (do **not** weaken
+the B7/B8 fail-safe), `RequireTier` (the new `pro_access_until` OR-clause), `RequireConsent` on
+the CAS upload route, AI gateway / budget-governor metering of commentary.
+
+**Out of scope (YAGNI):** recurring-mandate UX beyond the Razorpay subscription object; stocks/
+ETF breadth tiering; multi-currency rails.
+
+**Decisions confirmed 2026-06-08:** AI commentary = Pro + one-time first-report taster (metered
+throughout); pricing as above; paid tier displays as **DhanRadar Plus** (internal id `pro`). No
+open items — ready to slot into Phase 5 execution.
+
+---
+
 ## PHASE 6 — Notification (Telegram) + Email substitution (architecture Global §5)
 
 **✅ Pre-Phase-6 gate — CLEARED 2026-05-19:** (a) Resend dashboard shows `dhanradar.com` = **Verified**; (b) a live test send returned **HTTP 200** (Resend id `149a367b-d4a6-45d0-8327-032ac674be0f`, from `noreply@dhanradar.com` to the founder inbox). **Gotcha for the email module:** `api.resend.com` is behind Cloudflare and **rejects the default `Python-urllib` User-Agent with HTTP 403 / Cloudflare error 1010** — the email client must send a real `User-Agent` header, or use the official `resend` SDK (which sets one).
