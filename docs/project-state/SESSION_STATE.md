@@ -35,10 +35,12 @@ lives in the linked docs.
 - **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
   touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
   to restore before the next load-bearing/security change (item 5 AI gateway will need it).
-- **Next action (two independent tracks):** (a) **dev** — build-sequence **item 5: AI MF
-  commentary** (first AI consumer; load-bearing AI gateway → inline Security/Compliance review
-  stays in-session; needs codex restored). (b) **pre-deploy** — resolve PR #28 conflicts → Phase-7
-  §5 pre-deploy panel → human go/no-go → merge → deploy with B48 re-enforced + live NAV populated.
+- **Next action (two independent tracks):** (a) **dev** — build-sequence **item 6: PHASE 5M tiering**
+  (freemium + Founding Access — `pro_access_until` on `RequireTier`, one-time taster; makes AI MF
+  commentary a DhanRadar Plus feature). Item 5 (AI MF commentary, first AI consumer) DONE 2026-06-08
+  (`2b967d7`): B20/B21/B22 call sites wired; Tier-B inline ACCEPT (Security Sonnet takeover +
+  Compliance Opus). (b) **pre-deploy** — resolve PR #28 conflicts → Phase-7 §5 pre-deploy panel →
+  human go/no-go → merge → deploy with B48 re-enforced + live NAV populated.
 
 ### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
 
