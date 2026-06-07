@@ -30,6 +30,7 @@ from openai import APIStatusError, RateLimitError
 
 from dhanradar.ai_gateway.errors import (
     AllFreeModelsFailedError,
+    ConsentNotVerifiedError,
     CreditExhaustedError,
     QualityValidationError,
     ThreeStrikeSkipError,
@@ -96,12 +97,47 @@ class OpenRouterGateway:
         messages: list[dict[str, str]],
         schema: type[AIOutputBase],
         ticker: Optional[str] = None,
+        contains_personal_data: bool = True,
+        cross_border_consent_verified: bool = False,
     ) -> AIOutputBase:
         """Return a validated AIOutputBase for ``task_type`` or raise.
 
-        Raises CreditExhaustedError (402), ThreeStrikeSkipError, QualityValidationError,
-        AllFreeModelsFailedError, or BudgetExhaustedError.
+        Args:
+            task_type: Routing key used to select the model pool.
+            messages: Prompt messages sourced from the Admin module's versioned
+                prompt templates.
+            schema: Pydantic schema (subclass of AIOutputBase) for validation.
+            ticker: Optional ticker symbol; used for 3-strike-per-(ticker, day)
+                tracking.
+            contains_personal_data: Set to ``False`` only for anonymous /
+                aggregate calls (e.g. public market data, Mood Compass) that carry
+                no user PII. Defaults to ``True`` (fail-closed). When ``True``,
+                ``cross_border_consent_verified`` must also be ``True`` or this
+                method raises ``ConsentNotVerifiedError`` before any payload
+                reaches OpenRouter.
+            cross_border_consent_verified: Must be ``True`` when
+                ``contains_personal_data=True``. The call site is responsible for
+                calling ``assert_consent(user_id, "cross_border_ai", db)``
+                (deps.py) before invoking the gateway; the gateway is
+                module-isolated and cannot read consent itself.
+
+        Raises:
+            ConsentNotVerifiedError: if ``contains_personal_data=True`` and
+                ``cross_border_consent_verified=False`` (default-deny, B20).
+            CreditExhaustedError: OpenRouter returned HTTP 402.
+            ThreeStrikeSkipError: 3 consecutive quality failures for this
+                ticker/day.
+            QualityValidationError: LLM response failed schema or advisory screen.
+            AllFreeModelsFailedError: every free model was rate-limited.
+            BudgetExhaustedError: daily budget cap reached.
         """
+        # B20 — cross-border DPDP defense-in-depth (default-deny). A payload that
+        # carries user personal data must have had cross_border_ai consent verified
+        # at the call site (assert_consent); the gateway is module-isolated and
+        # cannot read consent itself. Refuse BEFORE any payload reaches OpenRouter.
+        if contains_personal_data and not cross_border_consent_verified:
+            raise ConsentNotVerifiedError("cross_border_ai")
+
         validator = QualityValidator(schema)
         models = self._models_for(task_type)
         last_quality_error: Optional[QualityValidationError] = None

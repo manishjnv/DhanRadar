@@ -15,6 +15,30 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-07 — ci_guards advisory scan false-positive: ARIA `role="switch"` flagged as an advisory verb
+
+- **Symptom:** `scripts/ci_guards.py` failed (exit 1) on the notification preferences UI
+  page, flagging `role="switch"` at two lines as "advisory verb usage (non-neg #2)". The
+  prior session's "compliance greps clean" claim missed it because the page was untracked
+  when that claim was made.
+- **Root cause:** the advisory word set legitimately includes **`switch`** (the architecture's
+  recommendation set has "switch funds"), and `_ADV_QUOTED` matches any `"switch"` quoted
+  value. But `role="switch"` is the standard **ARIA accessibility role** used by every
+  toggle/switch component — `switch` is the one advisory verb that collides with a valid HTML
+  role. The guard could not tell the a11y attribute from an advisory label. Same
+  over-/under-matching class as the earlier `ci_guards` tuning RCAs (B12/B13).
+- **Fix:** added a negative lookbehind to `_ADV_QUOTED` —
+  `(?<!role=)["']{_ADV_WORD}["']` (`scripts/ci_guards.py`) — so a quoted advisory word
+  **immediately preceded by `role=`** is exempt, while a standalone advisory value like
+  `"switch"` (not an ARIA role) is still caught. Verified: full guard now exits 0; the
+  notification page passes.
+- **Prevention:** `backend/tests/unit/test_ci_guards.py` gains two regression tests run as a
+  subprocess against planted fixtures — `test_aria_role_switch_is_not_flagged` (asserts
+  `role="switch"` is NOT flagged) and `test_standalone_switch_value_still_flagged` (asserts a
+  bare advisory `"switch"` IS still caught, proving the lookbehind did not weaken detection).
+- **Phase/area:** CI tooling / compliance net for non-negotiable #1 (advisory verbs). Found
+  during the B20/B31 slice; not a field incident.
+
 ### 2026-06-06 — AI premium budget hard-cap was check-then-act → concurrent spillovers could overshoot the $9.50/day cap (B18)
 
 - **Symptom:** found in the Phase-3 governance review (tracked as B18, not a field

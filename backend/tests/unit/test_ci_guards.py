@@ -60,3 +60,34 @@ def test_advisory_in_noncode_asset_is_caught(filename: str, payload: str) -> Non
         assert filename in result.stdout
     finally:
         fixture.unlink(missing_ok=True)
+
+
+def test_aria_role_switch_is_not_flagged() -> None:
+    """ARIA ``role="switch"`` is a legitimate accessibility attribute (used by every
+    toggle component), not advisory copy — it must NOT trip the advisory scan.
+    Regression: "switch" is in the recommendation verb set and collided with the
+    HTML role before the lookbehind exemption."""
+    fixture = FRONTEND / "__ci_guard_selftest_aria__.tsx"
+    fixture.write_text('<button role="switch" aria-checked={true} />\n', encoding="utf-8")
+    try:
+        result = _run_guard()
+        assert "__ci_guard_selftest_aria__" not in result.stdout, (
+            f'ARIA role="switch" must NOT be flagged as advisory:\n{result.stdout}'
+        )
+    finally:
+        fixture.unlink(missing_ok=True)
+
+
+def test_standalone_switch_value_still_flagged() -> None:
+    """Proof the ARIA lookbehind did NOT weaken detection: a standalone advisory
+    ``"switch"`` label value (not preceded by ``role=``) is still caught."""
+    fixture = FRONTEND / "__ci_guard_selftest_switch__.json"
+    fixture.write_text('{"label": "switch"}\n', encoding="utf-8")
+    try:
+        result = _run_guard()
+        assert result.returncode == 1, (
+            f'guard must still flag a standalone advisory "switch":\n{result.stdout}'
+        )
+        assert "__ci_guard_selftest_switch__" in result.stdout
+    finally:
+        fixture.unlink(missing_ok=True)

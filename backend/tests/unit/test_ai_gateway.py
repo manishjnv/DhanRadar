@@ -23,6 +23,7 @@ from openai import APIStatusError, RateLimitError
 
 from dhanradar.ai_gateway import (
     AIOutputBase,
+    ConsentNotVerifiedError,
     CreditExhaustedError,
     OpenRouterGateway,
     QualityValidator,
@@ -115,7 +116,7 @@ _MSGS = [{"role": "user", "content": "analyse"}]
 async def test_429_rotates_to_next_model_no_sleep(patch_redis):
     client = _Client({"free_a": _rate_limit(), "free_b": _Resp(_valid())})
     gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
-    out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+    out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
     assert isinstance(out, _StockOut)
     assert client.chat.completions.calls == ["free_a", "free_b"]  # rotated, no sleep
 
@@ -124,7 +125,7 @@ async def test_402_raises_credit_and_does_not_retry(patch_redis):
     client = _Client({"free_a": _status(402), "free_b": _Resp(_valid())})
     gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
     with pytest.raises(CreditExhaustedError):
-        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
     # 402 must NOT fall through to the next model
     assert client.chat.completions.calls == ["free_a"]
 
@@ -134,7 +135,7 @@ async def test_schema_fail_stock_pick_spills_to_sonnet(patch_redis):
     gw = OpenRouterGateway(
         client=client, free_models=["free_a"], sonnet_model="sonnet"
     )
-    out = await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut)
+    out = await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
     assert isinstance(out, _StockOut)
     assert client.chat.completions.calls == ["free_a", "sonnet"]
     # premium budget debited by the Sonnet spend
@@ -150,11 +151,13 @@ async def test_schema_fail_news_summary_three_strike_skip(patch_redis):
     for _ in range(2):
         with pytest.raises(QualityValidationError):
             await gw.complete(
-                task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="INFY"
+                task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="INFY",
+                contains_personal_data=False,
             )
     with pytest.raises(ThreeStrikeSkipError):
         await gw.complete(
-            task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="INFY"
+            task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="INFY",
+            contains_personal_data=False,
         )
 
 
@@ -163,14 +166,14 @@ async def test_advisory_output_is_rejected(patch_redis):
     client = _Client({"free_a": _Resp(_valid(thesis="investors should buy this fund now"))})
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
     with pytest.raises(QualityValidationError) as ei:
-        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="X")
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="X", contains_personal_data=False)
     assert "buy" in ei.value.reasons
 
 
 async def test_free_success_increments_free_budget_by_one(patch_redis):
     client = _Client({"free_a": _Resp(_valid())})
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
-    await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+    await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
     free = await patch_redis.get("ai:budget:free:today")
     assert int(free) == 1
 
@@ -179,7 +182,7 @@ async def test_descriptive_holding_is_not_a_false_positive(patch_redis):
     # "holding" / "buyer" must NOT trip the advisory screen (word-boundary).
     client = _Client({"free_a": _Resp(_valid(thesis="largest holding is a quality buyer brand"))})
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
-    out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+    out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
     assert out.thesis.startswith("largest holding")
 
 
@@ -200,7 +203,7 @@ async def test_expanded_advisory_terms_are_rejected(patch_redis, thesis):
     client = _Client({"free_a": _Resp(_valid(thesis=thesis))})
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
     with pytest.raises(QualityValidationError):
-        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="Z")
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, ticker="Z", contains_personal_data=False)
 
 
 async def test_all_free_models_rate_limited_raises_all_free_models_failed(patch_redis):
@@ -209,7 +212,7 @@ async def test_all_free_models_rate_limited_raises_all_free_models_failed(patch_
     client = _Client({"free_a": _rate_limit(), "free_b": _rate_limit()})
     gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
     with pytest.raises(AllFreeModelsFailedError):
-        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut)
+        await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
 
 
 async def test_high_stakes_failed_spillover_hits_three_strike(patch_redis):
@@ -219,9 +222,9 @@ async def test_high_stakes_failed_spillover_hits_three_strike(patch_redis):
     gw = OpenRouterGateway(client=client, free_models=["free_a"], sonnet_model="sonnet")
     for _ in range(2):
         with pytest.raises(QualityValidationError):
-            await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS")
+            await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS", contains_personal_data=False)
     with pytest.raises(ThreeStrikeSkipError):
-        await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS")
+        await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, ticker="TCS", contains_personal_data=False)
 
 
 def test_disclaimer_cannot_be_stripped_via_model_copy():
@@ -232,4 +235,48 @@ def test_disclaimer_cannot_be_stripped_via_model_copy():
     )
     tampered = m.model_copy(update={"disclaimer": "no disclaimer"})
     assert tampered.disclaimer == AI_DISCLAIMER
+
+
+# ---------------------------------------------------------------------------
+# B20 — cross-border DPDP consent gate (default-deny, fail-closed)
+# ---------------------------------------------------------------------------
+
+
+async def test_personal_data_without_consent_refuses_before_any_openrouter_call(patch_redis):
+    """contains_personal_data=True (default) + no consent → ConsentNotVerifiedError
+    raised BEFORE any call reaches OpenRouter and BEFORE any budget counter moves."""
+    client = _Client({"free_a": _Resp(_valid())})
+    gw = OpenRouterGateway(client=client, free_models=["free_a"], redis=patch_redis)
+    with pytest.raises(ConsentNotVerifiedError):
+        await gw.complete(task_type="mf_pick", messages=_MSGS, schema=_StockOut, contains_personal_data=True)
+    # OpenRouter must never have been touched
+    assert client.chat.completions.calls == []
+    # Neither budget counter may move (guard runs before both budget_guard blocks).
+    assert await patch_redis.get("ai:budget:free:today") is None
+    assert await patch_redis.get("ai:budget:premium:today") is None
+
+
+async def test_personal_data_with_verified_consent_proceeds(patch_redis):
+    """contains_personal_data=True + cross_border_consent_verified=True → proceeds
+    normally and returns a valid output."""
+    client = _Client({"free_a": _Resp(_valid())})
+    gw = OpenRouterGateway(client=client, free_models=["free_a"], redis=patch_redis)
+    out = await gw.complete(
+        task_type="mf_pick",
+        messages=_MSGS,
+        schema=_StockOut,
+        contains_personal_data=True,
+        cross_border_consent_verified=True,
+    )
+    assert isinstance(out, _StockOut)
+    assert client.chat.completions.calls == ["free_a"]
+
+
+async def test_default_is_fail_closed_for_personal_data(patch_redis):
+    """Calling complete() with no flags (defaults) must raise ConsentNotVerifiedError
+    — proving the contract is default-deny for personal-data payloads."""
+    client = _Client({"free_a": _Resp(_valid())})
+    gw = OpenRouterGateway(client=client, free_models=["free_a"], redis=patch_redis)
+    with pytest.raises(ConsentNotVerifiedError):
+        await gw.complete(task_type="mf_pick", messages=_MSGS, schema=_StockOut)
 

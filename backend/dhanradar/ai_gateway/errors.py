@@ -45,3 +45,17 @@ class ThreeStrikeSkipError(GatewayError):
             f"3-strike skip for ticker={ticker!r}: {strikes} consecutive quality "
             "failures today; skipping until next UTC day."
         )
+
+
+class ConsentNotVerifiedError(Exception):
+    """Raised by the gateway when a call carrying user personal data has not had
+    its cross-border DPDP consent verified at the call site (B20 defense-in-depth).
+
+    The gateway is module-isolated and cannot read consent itself, so the consuming
+    call site MUST call ``assert_consent(user_id, "cross_border_ai", db)`` (deps.py)
+    and pass ``cross_border_consent_verified=True``. Default-deny: an unmarked call
+    is treated as carrying personal data and is refused."""
+
+    def __init__(self, purpose: str = "cross_border_ai") -> None:
+        super().__init__(f"cross_border_consent_not_verified:{purpose}")
+        self.purpose = purpose
