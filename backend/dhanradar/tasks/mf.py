@@ -6,9 +6,16 @@ parse → upsert holdings → snapshot → score (via the engine interface) → 
 report → done. The raw CAS file is deleted immediately after parse; a daily
 `purge_cas_files` sweep is the 24h backstop (anti-pattern guard).
 
-The Celery task is sync; the async DB/Redis/engine pipeline runs under
-`asyncio.run`. The pure mapping (`parsed_to_snapshot_holdings`) is factored out so
-it is unit-testable without a worker.
+`nav_daily_fetch` pulls the current NAVAll.txt from AMFI, bulk-upserts
+mf_nav_history and mf_funds metadata (amfi_code, scheme_name, category only —
+other metadata columns such as expense_ratio/aum are not overwritten).
+
+`nav_backfill` bootstraps multi-year historical NAV data by iterating over
+<=90-day windows and upserting into mf_nav_history.  It is NOT in the beat
+schedule — invoke manually.
+
+All Celery tasks are sync; async DB/Redis/network pipelines run under asyncio.run.
+Pure mapping helpers are factored out for unit testing without a worker.
 """
 
 from __future__ import annotations
@@ -18,7 +25,7 @@ import json
 import logging
 import os
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from dhanradar.celery_app import celery_app
@@ -30,6 +37,9 @@ from dhanradar.mf.scoring_bridge import FundSignals, score_fund, upsert_user_fun
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 _UPLOAD_TTL_SECONDS = 24 * 3600
+
+# Batch size for bulk-upsert statements — bounds memory and statement size.
+_UPSERT_CHUNK = 2000
 
 
 def parsed_to_snapshot_holdings(
@@ -58,6 +68,62 @@ def parsed_to_snapshot_holdings(
         )
     return out
 
+
+# ---------------------------------------------------------------------------
+# Pure mapping helpers — unit-testable without DB
+# ---------------------------------------------------------------------------
+
+def _navrows_to_nav_upserts(rows: Any) -> list[dict]:
+    """
+    Map a list of NavRow → list of dicts ready for mf_nav_history upsert.
+
+    Keying strategy: prefer isin_growth; fall back to isin_reinvest.
+    Rows where BOTH ISINs are None are silently skipped (cannot key the row).
+    Returns dicts with keys: isin, nav_date, nav, source.
+    """
+    out: list[dict] = []
+    for row in rows:
+        isin = row.isin_growth or row.isin_reinvest
+        if isin is None:
+            continue
+        out.append(
+            {
+                "isin": isin,
+                "nav_date": row.nav_date,
+                "nav": row.nav,
+                "source": "amfi",
+            }
+        )
+    return out
+
+
+def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
+    """
+    Map a list of NavRow → list of dicts ready for mf_funds upsert.
+
+    Only the three columns this feed owns are included: amfi_code, scheme_name,
+    category.  isin is the PK (isin_growth preferred, else isin_reinvest).
+    Rows without a keyable ISIN are skipped.
+    """
+    out: list[dict] = []
+    for row in rows:
+        isin = row.isin_growth or row.isin_reinvest
+        if isin is None:
+            continue
+        out.append(
+            {
+                "isin": isin,
+                "amfi_code": row.amfi_code,
+                "scheme_name": row.scheme_name,
+                "category": row.category,
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# CAS pipeline helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
 def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
@@ -211,14 +277,163 @@ def _purge(path: str) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# NAV ingestion tasks
+# ---------------------------------------------------------------------------
+
 @celery_app.task(name="dhanradar.tasks.mf.nav_daily_fetch")
 def nav_daily_fetch() -> str:
-    """AMFI NAV daily refresh (Implementation Plan Phase 5 §2): fetch
-    portal.amfiindia.com/spages/NAVAll.txt → bulk-upsert mf_nav_history →
-    refresh Redis → emit mf.nav.refreshed → targeted invalidation via
-    mf:isin_users. STUB — the AMFI fetch + hypertable bulk-upsert is the data
-    pipeline, deferred (no scheme metadata/NAV feed wired yet). Tracked B-mf-nav."""
-    return "nav_daily_fetch: stub — AMFI fetch pipeline deferred"
+    """AMFI NAV daily refresh: fetch NAVAll.txt → bulk-upsert mf_nav_history +
+    mf_funds metadata (amfi_code, scheme_name, category only).  Real network call
+    via fetch_navall_rows_with_category.  Wired to the beat schedule."""
+    try:
+        return asyncio.run(_nav_daily_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("nav_daily_fetch pipeline error")
+        return "nav_daily_fetch: failed — see worker logs"
+
+
+async def _nav_daily_pipeline() -> str:
+    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine
+    from dhanradar.market_data import amfi
+    from dhanradar.models.mf import MfFund, MfNavHistory
+
+    logger.info("nav_daily_fetch: fetching NAVAll.txt from AMFI")
+    rows = await amfi.fetch_navall_rows_with_category()
+    logger.info("nav_daily_fetch: fetched %d rows", len(rows))
+
+    nav_dicts = _navrows_to_nav_upserts(rows)
+    fund_dicts = _navrows_to_fund_upserts(rows)
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as db:
+        # -- mf_nav_history bulk upsert in chunks ---------------------------------
+        n_nav = 0
+        for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
+            chunk = nav_dicts[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
+                constraint="uq_mf_nav_isin_date",
+                set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+            )
+            await db.execute(stmt)
+            n_nav += len(chunk)
+
+        # -- mf_funds upsert (only the 3 AMFI-owned columns) ---------------------
+        n_funds = 0
+        for i in range(0, len(fund_dicts), _UPSERT_CHUNK):
+            chunk = fund_dicts[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = insert(MfFund).values(chunk).on_conflict_do_update(
+                index_elements=["isin"],
+                set_={
+                    "amfi_code": insert(MfFund).excluded.amfi_code,
+                    "scheme_name": insert(MfFund).excluded.scheme_name,
+                    "category": insert(MfFund).excluded.category,
+                },
+            )
+            await db.execute(stmt)
+            n_funds += len(chunk)
+
+        await db.commit()
+
+    summary = f"nav_daily_fetch: {n_nav} navs, {n_funds} funds"
+    logger.info(summary)
+    return summary
+
+
+@celery_app.task(name="dhanradar.tasks.mf.nav_backfill")
+def nav_backfill(years: int = 3) -> str:
+    """Bootstrap multi-year historical NAV from AMFI history endpoint.
+
+    Iterates backwards in <=90-day windows from (today - years*365) to today.
+    Upserts nav rows only (no mf_funds update — history feed carries no category).
+    NOT in the beat schedule — invoke manually.
+    """
+    try:
+        return asyncio.run(_nav_backfill_pipeline(years))
+    except Exception:  # noqa: BLE001
+        logger.exception("nav_backfill pipeline error years=%d", years)
+        return f"nav_backfill: failed after error — see worker logs (years={years})"
+
+
+async def _nav_backfill_pipeline(years: int) -> str:
+    import asyncio as _asyncio
+
+    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine
+    from dhanradar.market_data import amfi
+    from dhanradar.market_data.exceptions import ProviderError
+    from dhanradar.models.mf import MfNavHistory
+
+    today = datetime.now(timezone.utc).date()  # noqa: UP017 — matches pre-existing style in this file
+    start = today - timedelta(days=years * 365)
+
+    # Build list of (frmdt, todt) windows of at most 90 days each, from
+    # start → today, non-overlapping.
+    _WINDOW_DAYS = 90
+    windows: list[tuple[date, date]] = []
+    cursor = start
+    while cursor < today:
+        end = min(cursor + timedelta(days=_WINDOW_DAYS - 1), today)
+        windows.append((cursor, end))
+        cursor = end + timedelta(days=1)
+
+    logger.info(
+        "nav_backfill: years=%d, windows=%d, start=%s, end=%s",
+        years, len(windows), start, today,
+    )
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    total_rows = 0
+    windows_fetched = 0
+
+    for idx, (frmdt, todt) in enumerate(windows, start=1):
+        try:
+            rows = await amfi.fetch_nav_history(frmdt, todt)
+        except ProviderError as exc:
+            logger.warning(
+                "nav_backfill: window %d/%d (%s–%s) fetch failed: %s",
+                idx, len(windows), frmdt, todt, exc,
+            )
+            await _asyncio.sleep(1)
+            continue
+
+        nav_dicts = _navrows_to_nav_upserts(rows)
+        if nav_dicts:
+            async with SessionLocal() as db:
+                for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
+                    chunk = nav_dicts[i : i + _UPSERT_CHUNK]
+                    if not chunk:
+                        continue
+                    stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
+                        constraint="uq_mf_nav_isin_date",
+                        set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+                    )
+                    await db.execute(stmt)
+                await db.commit()
+            total_rows += len(nav_dicts)
+
+        windows_fetched += 1
+        logger.info(
+            "nav_backfill: window %d/%d (%s–%s) → %d rows (total so far: %d)",
+            idx, len(windows), frmdt, todt, len(nav_dicts), total_rows,
+        )
+        await _asyncio.sleep(1)
+
+    summary = (
+        f"nav_backfill: {total_rows} rows upserted across {windows_fetched}/{len(windows)} windows"
+        f" (years={years})"
+    )
+    logger.info(summary)
+    return summary
 
 
 @celery_app.task(name="dhanradar.tasks.mf.purge_cas_files")

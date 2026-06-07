@@ -62,6 +62,7 @@ class NavRow:
     scheme_name: str
     nav: float
     nav_date: datetime.date
+    category: str | None = None   # scheme-type category from NAVAll.txt section header
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,57 @@ def parse_navall(text: str) -> list[NavRow]:
                 scheme_name=parts[3].strip(),
                 nav=nav,
                 nav_date=nav_date,
+            )
+        )
+    return rows
+
+
+def parse_navall_with_category(text: str) -> list[NavRow]:
+    """
+    Parse the DAILY AMFI feed (NAVAll.txt) with scheme-type category tracking.
+
+    Same skip rules as ``parse_navall``.  Additionally, non-data lines that
+    contain BOTH "(" and ")" are treated as scheme-type section headers; the
+    text between the outermost parentheses is extracted and carried as
+    ``category`` on every subsequent ``NavRow`` until the next such header.
+
+    A bare AMC-name line (e.g. "Taurus Mutual Fund") has no parentheses and
+    does NOT change the current category.  Schemes before any category header
+    receive ``category=None``.
+    """
+    rows: list[NavRow] = []
+    current_category: str | None = None
+    for line in text.splitlines():
+        parts = line.split(";")
+        if len(parts) != _NAVALL_FIELDS:
+            # Non-data line — check whether it is a category header.
+            stripped = line.strip()
+            if stripped and "(" in stripped and ")" in stripped:
+                # Extract text inside the outermost parentheses.
+                open_idx = stripped.index("(")
+                close_idx = stripped.rindex(")")
+                if close_idx > open_idx:
+                    current_category = stripped[open_idx + 1 : close_idx].strip()
+            # AMC-name lines (no parens) are ignored; blank lines too.
+            continue
+        # Skip the column-header row.
+        if parts[0].strip().lower() == _SCHEME_CODE_HEADER:
+            continue
+        nav = _parse_nav(parts[4])
+        if nav is None:
+            continue
+        nav_date = _parse_date(parts[5])
+        if nav_date is None:
+            continue
+        rows.append(
+            NavRow(
+                amfi_code=parts[0].strip(),
+                isin_growth=_isin_or_none(parts[1]),
+                isin_reinvest=_isin_or_none(parts[2]),
+                scheme_name=parts[3].strip(),
+                nav=nav,
+                nav_date=nav_date,
+                category=current_category,
             )
         )
     return rows
@@ -223,6 +275,37 @@ async def fetch_navall(
                 f"HTTP {resp.status_code} from NAVAll.txt",
             )
         return parse_navall(resp.text)
+    except ProviderError:
+        raise
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise ProviderError("amfi_nav", exc) from exc
+
+
+async def fetch_navall_rows_with_category(
+    client: httpx.AsyncClient | None = None,
+) -> list[NavRow]:
+    """
+    Fetch the daily NAV snapshot from AMFI and parse it with category tracking.
+
+    Mirrors ``fetch_navall`` but uses ``parse_navall_with_category`` so each
+    returned ``NavRow`` carries the scheme-type section-header category
+    (e.g. "Equity Scheme - Large Cap Fund").
+
+    Raises ``ProviderError("amfi_nav", ...)`` on any HTTP or transport error.
+    """
+    headers = {"User-Agent": _USER_AGENT}
+    try:
+        if client is not None:
+            resp = await client.get(NAVALL_URL, headers=headers, timeout=_TIMEOUT)
+        else:
+            async with httpx.AsyncClient() as c:
+                resp = await c.get(NAVALL_URL, headers=headers, timeout=_TIMEOUT)
+        if resp.status_code != 200:
+            raise ProviderError(
+                "amfi_nav",
+                f"HTTP {resp.status_code} from NAVAll.txt",
+            )
+        return parse_navall_with_category(resp.text)
     except ProviderError:
         raise
     except (httpx.TimeoutException, httpx.TransportError) as exc:
