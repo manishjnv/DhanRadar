@@ -1,9 +1,61 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-07
+**Last updated:** 2026-06-08
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
+
+Concurrent-session note: this branch had 28 uncommitted frontend files from a parallel session.
+That session was confirmed not running; its work (auth/mood/settings/notifications screens +
+responsive-ish AppShell rework) was verified coherent (tsc + lint clean, but **no component tests**)
+and parked as one WIP commit (`868688c`) with explicit owner approval, then this session continued.
+
+**Blockers ADDRESSED this session (all on the branch / PR #28, none merged):**
+
+- **B36** (`7035400`, `71a3ed2`) — deploy/rollback automation (`scripts/deploy.sh`, `rollback.sh`) +
+  runbook. Fixed a **duplicate-`0008` Alembic branch** that broke `alembic upgrade head` (renumbered
+  mf_nav → `0008a`, single head `0009`; RCA logged). Pre-push adversarial review applied.
+- **B37** (`c93e387`, `71a3ed2`, `8e422af`) — `scripts/backup.sh` + `restore.sh`: nightly `pg_dump`
+  and Redis AOF → India-resident R2, checksum-verified, + runbook. Audit path-traversal fix applied.
+- **B40** (`ddc3f98`) — CI: backend→`timescaledb-ha:pg16`, NEW migrations job (alembic up→down→up on
+  the real image), ruff+mypy invoked (ADVISORY — see B40-followup), mocks-off build.
+- **B39** (`a152b2b`) — vitest + 17 tests, `--passWithNoTests` dropped, vitest global types fix.
+- **B45** (`a152b2b`, `ddc3f98`) — mocks-off CI build + Playwright smoke test.
+- **B46** (`c86c413`) — CAS error surfaces (no infinite spinner).
+- **Security (audit conditions)** (`8e422af`) — Sentry `_scrub_event` strips exception msgs +
+  `logentry` (DPDP leak); `restore.sh` MANIFEST filename allowlist. +2 tests; 26/26 observability green.
+
+**Governance audit (pre-deploy, 4 independent Sonnet reviewers) — verdict: NOT MERGEABLE.**
+Security ACCEPT-WITH-CONDITIONS (2 MAJOR fixed this session) · Compliance **REJECT** · UI **REJECT** ·
+Product **NO-GO**. Full verdict on **PR #28** (draft). Hard merge-blockers remaining:
+
+- **B44 (legal)** — DPDP consent-capture is genuinely unbuilt: **no grant/revoke writer endpoint, no
+  consent UI**. Consent is *enforced* (B48 default-true) but ungrantable → every consent-gated route
+  bricked + no lawful consent record. **Load-bearing Tier-B feature — not started.**
+- **B42** — AppShell still desktop-only (the WIP rework did not add responsive/hamburger/bottom-nav).
+- **B29** — MF NAV pipeline unseeded → every fund scores `insufficient_data` (core wedge void).
+- New follow-ups to file: **B40-followup** (promote ruff/mypy from advisory→blocking after a
+  lint-cleanup: ~361 ruff findings, never mypy-checked); admin routes lack `Idempotency-Key`;
+  `ADMIN_USER_IDS` must be real UUIDs pre-launch (currently non-UUID → admin module non-operational).
+
+**Merge / deploy:** NOT done, correctly. Merge blocked by Gate 0 (open Compliance BLOCKER B44);
+deploy additionally needs human PC5 + infra residuals. PR #28 stays a **draft**.
+
+**Next action:** fresh session for **B44** (consent table/writer endpoint + capture UI + inline
+Tier-B Security/Compliance review), then **B42**. Start prompt is in the handoff (below / chat).
+
+**Agent utilization (this session):**
+
+- **Opus** — orchestration, concurrency/parking judgment, alembic-branch fix, CI authoring + the
+  config-contract analysis, the 3 bounded fixes, audit adjudication, all commits.
+- **Sonnet** — B36/B37 script drafts (`reworked: Y`, health-gate container-id bug + 3 adversarial
+  conditions); B39/B45 frontend tests (`reworked: Y`, added vitest-env.d.ts — tests broke tsc);
+  governance audit ×4 Security/Compliance/UI/Product (`reworked: N`, findings adopted as-is).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (companion unhealthy: `gpt-5` 400); adversarial + audit ran via Sonnet
+  takeover per the approved fallback.
 
 ## DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
 
