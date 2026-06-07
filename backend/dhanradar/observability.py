@@ -121,6 +121,15 @@ def _scrub_event(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
     # Strip user identity
     event.pop("user", None)
 
+    # Strip exception messages + log message. A RequestValidationError (and
+    # similar) embeds the raw submitted value (e.g. an email / PAN / phone) in
+    # its message string, which would otherwise ship cross-border to Sentry
+    # (DPDP). The exception type and stacktrace are retained for diagnosis.
+    for _exc in event.get("exception", {}).get("values", []):
+        if isinstance(_exc, dict) and "value" in _exc:
+            _exc["value"] = "<scrubbed>"
+    event.pop("logentry", None)
+
     return event
 
 

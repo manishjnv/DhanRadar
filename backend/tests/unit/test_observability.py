@@ -131,6 +131,26 @@ def test_scrub_event_preserves_exception() -> None:
     assert result["exception"]["values"][0]["type"] == "ValueError"
 
 
+def test_scrub_event_scrubs_exception_value() -> None:
+    """The exception MESSAGE can embed raw submitted PII (a RequestValidationError
+    echoes the bad value, e.g. an email/PAN) — scrub it; keep type + stacktrace."""
+    event = _make_sample_event()
+    event["exception"]["values"][0]["value"] = "not a valid email: investor@example.com"
+    event["exception"]["values"][0]["stacktrace"] = {"frames": []}
+    result = _scrub_event(event, {})
+    assert result["exception"]["values"][0]["value"] == "<scrubbed>"
+    assert result["exception"]["values"][0]["type"] == "ValueError"
+    assert "stacktrace" in result["exception"]["values"][0]
+
+
+def test_scrub_event_removes_logentry() -> None:
+    """logentry.message mirrors the exception message and can carry the same PII."""
+    event = _make_sample_event()
+    event["logentry"] = {"message": "bad value investor@example.com"}
+    result = _scrub_event(event, {})
+    assert "logentry" not in result
+
+
 def test_scrub_event_no_request_key() -> None:
     """Events without a request key (e.g. background tasks) must not crash."""
     event: dict = {"exception": {"values": []}}

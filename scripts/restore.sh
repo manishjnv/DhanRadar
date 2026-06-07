@@ -128,6 +128,13 @@ while IFS= read -r line; do
   if [[ "${line}" =~ ^file=([^[:space:]]+)[[:space:]]+size=[^[:space:]]+[[:space:]]+sha256=([^[:space:]]+) ]]; then
     fname="${BASH_REMATCH[1]}"
     expected_sha="${BASH_REMATCH[2]}"
+    # Reject path traversal / unexpected names: a malicious MANIFEST from a
+    # compromised R2 bucket could set fname=../../etc/shadow and have sha256sum
+    # read an arbitrary host file. Positive allowlist of the only artifacts we write.
+    case "${fname}" in
+      db.dump|redis-dump.rdb|redis-appendonly.tar.gz) ;;
+      *) die "MANIFEST lists an unexpected artifact name '${fname}' — refusing (possible tampering)." ;;
+    esac
     fpath="${RESTORE_DIR}/${fname}"
 
     if [[ "${expected_sha}" == "absent" ]]; then
