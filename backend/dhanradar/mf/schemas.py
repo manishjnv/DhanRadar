@@ -53,6 +53,8 @@ class PortfolioReport(BaseModel):
     category_allocation: dict[str, float] = {}
     overlap_matrix: dict[str, dict[str, float]] = {}
     funds: list[FundReportItem] = []
+    # Optional non-blocking AI portfolio commentary (omitted/None on refusal or failure).
+    commentary: Optional[str] = None
     model_version: Optional[str] = None
     generated_at: Optional[str] = None
     # Mandatory disclosure bundle (non-neg #9) — injected at serialization. The

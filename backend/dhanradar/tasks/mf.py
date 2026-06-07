@@ -142,6 +142,14 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "contradicting_signals": result.contradicting_signals,
             })
 
+        from dhanradar.mf import commentary as mf_commentary
+
+        commentary_text = await mf_commentary.maybe_generate_commentary(
+            user_id=user_id, job_id=job_id, funds=funds_payload,
+            category_allocation=snap.category_allocation, db=db,
+            disclaimer_version=DISCLAIMER_VERSION,
+        )
+
         report_payload = {
             "job_id": job_id, "status": "done",
             "snapshot": {
@@ -149,7 +157,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "xirr_pct": snap.xirr_pct, "category_allocation": snap.category_allocation,
                 "overlap_matrix": snap.overlap_matrix,
             },
-            "funds": funds_payload, "model_version": rengine.model_version,
+            "funds": funds_payload, "commentary": commentary_text, "model_version": rengine.model_version,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             # Stamp the in-force disclaimer version on the served + cached report so
             # it matches the audit rows written above (B26 tie-to-version).
