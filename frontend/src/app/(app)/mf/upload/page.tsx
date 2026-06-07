@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 import { FileDrop } from '@/components/mf/FileDrop';
 import { useUploadCas } from '@/features/mf/api';
@@ -24,7 +25,7 @@ export default function UploadCasPage() {
     e.preventDefault();
     if (!file) return;
 
-    uploadCas(file, {
+    uploadCas({ file, password: password || undefined }, {
       onSuccess: (res) => {
         router.push(`/mf/report/${res.job_id}`);
       },
@@ -68,14 +69,13 @@ export default function UploadCasPage() {
             </CardDescription>
           </CardHeader>
           <CardBody>
-            <input
+            <Input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="e.g. ABCDE1234F01011990"
               disabled={isPending}
               autoComplete="off"
-              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40 disabled:opacity-50"
             />
           </CardBody>
         </Card>

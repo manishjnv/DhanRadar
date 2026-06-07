@@ -86,7 +86,10 @@ jobs:
             exit 0
           fi
           npm install
-          npm run gen:tokens --if-present
+          # Enforce the design-system single source: fail if the committed token
+          # files (tokens.css / tailwind.tokens.cjs) have drifted from tokens.json.
+          # Use check (not gen) so stale committed tokens are caught, not masked.
+          npm run check:tokens --if-present
           npm run gen:api --if-present
           npm run typecheck --if-present
           npm run lint --if-present

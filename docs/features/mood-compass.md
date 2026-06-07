@@ -29,6 +29,21 @@ card via the Notification interface.
 - Emits `mood.snapshot.published` (via `emit_published`: B26 audit + public card).
 - Deferred: `GET /market/mood/embed` (creator widget).
 
+## Frontend
+
+- `/mood` — a **public** route (top-level `app/mood/`, outside the `(app)` group → no
+  AuthGuard, no AppShell), matching the anonymous backend; also linked from the app
+  sidebar for signed-in users. Renders a band-only `MoodGauge` (semicircular arc; regime
+  word + confidence-band word, **never a number**), commentary (withheld when
+  degraded/absent), "Supporting"/"Counterweights" factor lists (neutral `+`/`−` markers —
+  no up/down arrows that imply buy/sell), a 30-day regime history strip, and the
+  `disclosure` + `not_advice` strings + `<Disclaimer/>` (non-neg #9). 404 → "being
+  computed" empty state. `MoodGauge` uses a **symmetric attention colour scale** (both
+  extremes red, neutral cyan) so greed is never coloured as positive/buy. Files:
+  `frontend/src/features/mood/{types,api}.ts`, `frontend/src/components/mood/MoodGauge.tsx`
+  (owns the `Regime` enum + `REGIME_COLOR`/`REGIME_DISPLAY`, mirroring ScoreRing),
+  `frontend/src/app/mood/page.tsx`.
+
 ## Data
 
 Schema `mood` (Alembic 0007): `market_mood` (snapshot_date PK, snapshot_time,
@@ -90,6 +105,10 @@ disclosure constants. Build entirely in-house.
 
 ## Changelog
 
+- 2026-06-06 — FE public page built (`/mood`, Tier-A UI): band-only `MoodGauge`
+  (symmetric non-advisory colour scale), factor lists, 30-day history strip, disclosure +
+  NOT_ADVICE rendered, 404/empty/error states. MSW mocks for `/market/mood`,
+  `/mood/history`, `/why-today`. tsc + eslint + anti-pattern sweep green.
 - 2026-06-06 — Module built (Phase 2, post-B26): `mood` schema + Alembic 0007; pure compute
   (11 weights, 5 buckets, confidence, factors); twice-daily Celery beat; anon endpoints;
   `mood.snapshot.published` (B26 audit + public card via Notification interface); ADR-0023.

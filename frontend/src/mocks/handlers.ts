@@ -109,7 +109,132 @@ const SCHEMES = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Mock auth session. Defaults to logged-IN so `npm run dev` lands on the
+// dashboard without forcing a login each reload; logout flips it false so the
+// login/signup flow is still exercisable against the mock.
+// ---------------------------------------------------------------------------
+let mockLoggedIn = true;
+const MOCK_USER = {
+  id: '00000000-0000-0000-0000-000000000001',
+  email: 'demo@dhanradar.in',
+  tier: 'free',
+  totp_verified: false,
+  risk_profile: null,
+  dpdp_consent_version: null,
+};
+
+const PRO_TIERS = ['pro', 'pro_plus', 'founder_lifetime'];
+
+// ---------------------------------------------------------------------------
+// Notification preferences — mutable mock state (mirrors PreferencesResponse).
+// Persists across GET/POST so the settings screen round-trips realistically.
+// ---------------------------------------------------------------------------
+let mockPrefs: {
+  telegram_chat_id: string | null;
+  email_verified: boolean;
+  whatsapp_number: string | null;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  channels_enabled: Record<string, boolean>;
+} = {
+  telegram_chat_id: null,
+  email_verified: true,
+  whatsapp_number: null,
+  quiet_hours_start: '22:00',
+  quiet_hours_end: '07:00',
+  channels_enabled: { telegram: false, email: true },
+};
+
+function problem(status: number, title: string, detail?: string) {
+  return HttpResponse.json(
+    { type: 'about:blank', title, status, detail, request_id: `mock-${status}` },
+    { status, headers: { 'Content-Type': 'application/problem+json' } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mood Compass — deterministic mock snapshot + 30-day history (no numerics).
+// ---------------------------------------------------------------------------
+const MOOD_SNAPSHOT = {
+  snapshot_date: '2026-06-06',
+  regime: 'neutral',
+  confidence_band: 'medium',
+  data_quality: 'ok',
+  contributing_factors: [
+    'NIFTY trend steady over the last 20 sessions',
+    'Market breadth balanced (advances vs declines ~1:1)',
+    'FII flows mildly positive through June',
+  ],
+  contradicting_factors: [
+    'India VIX slightly elevated versus its 1-month average',
+    'USD/INR firm near recent highs',
+  ],
+  commentary:
+    'Markets are in a balanced regime — neither fearful nor euphoric. Breadth is even and volatility is moderate. This is an educational read of market sentiment, not a recommendation to act.',
+  disclosure:
+    'Educational market-regime read, computed twice daily from public macro and market indicators.',
+  not_advice: 'This is not investment advice.',
+  disclaimer_version: '2026-06-01',
+};
+
+const MOOD_HISTORY_CYCLE = [
+  'fear', 'fear', 'neutral', 'neutral', 'neutral', 'greed', 'greed',
+  'neutral', 'fear', 'extreme_fear', 'fear', 'neutral', 'greed', 'extreme_greed',
+];
+
 export const handlers = [
+  // GET /api/v1/auth/me — 401 when anonymous (a normal state, not an error)
+  http.get('/api/v1/auth/me', () => {
+    if (!mockLoggedIn) {
+      return HttpResponse.json(
+        { type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'not_authenticated', request_id: 'mock-401' },
+        { status: 401, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    }
+    return HttpResponse.json({ user: MOCK_USER });
+  }),
+
+  // POST /api/v1/auth/login
+  http.post('/api/v1/auth/login', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: string };
+    mockLoggedIn = true;
+    return HttpResponse.json({
+      message: 'login_successful',
+      user: { ...MOCK_USER, email: body.email || MOCK_USER.email },
+    });
+  }),
+
+  // POST /api/v1/auth/signup
+  http.post('/api/v1/auth/signup', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: string };
+    mockLoggedIn = true;
+    return HttpResponse.json(
+      {
+        message: 'account_created',
+        user: { ...MOCK_USER, email: body.email || MOCK_USER.email },
+      },
+      { status: 201 },
+    );
+  }),
+
+  // POST /api/v1/auth/logout
+  http.post('/api/v1/auth/logout', () => {
+    mockLoggedIn = false;
+    return HttpResponse.json({ message: 'logged_out' });
+  }),
+
+  // POST /api/v1/auth/refresh — succeeds while the mock session is live
+  http.post('/api/v1/auth/refresh', () => {
+    if (!mockLoggedIn) {
+      return HttpResponse.json(
+        { type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'invalid_refresh_token', request_id: 'mock-401' },
+        { status: 401, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    }
+    return HttpResponse.json({ message: 'tokens_rotated' });
+  }),
+
   // POST /api/v1/mf/upload/cas
   http.post('/api/v1/mf/upload/cas', async () => {
     const jobId = `job_${Math.random().toString(36).slice(2, 10)}`;
@@ -190,5 +315,68 @@ export const handlers = [
       { type: 'about:blank', title: 'Not Found', status: 404, request_id: 'mock-404' },
       { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
     );
+  }),
+
+  // GET /api/v1/notifications/preferences (authed)
+  http.get('/api/v1/notifications/preferences', () => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    return HttpResponse.json(mockPrefs);
+  }),
+
+  // POST /api/v1/notifications/preferences — partial update (only sent keys)
+  http.post('/api/v1/notifications/preferences', async ({ request }) => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    const body = (await request.json().catch(() => ({}))) as Partial<typeof mockPrefs>;
+    mockPrefs = {
+      ...mockPrefs,
+      ...body,
+      channels_enabled: { ...mockPrefs.channels_enabled, ...(body.channels_enabled ?? {}) },
+    };
+    return HttpResponse.json(mockPrefs);
+  }),
+
+  // POST /api/v1/notifications/test (authed, Pro) — 402 for non-Pro, 400 if channel unset
+  http.post('/api/v1/notifications/test', () => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    if (!PRO_TIERS.includes(MOCK_USER.tier)) {
+      return problem(402, 'Payment Required', 'tier_required');
+    }
+    if (!mockPrefs.telegram_chat_id) return problem(400, 'Bad Request', 'telegram_not_set');
+    return HttpResponse.json({ enqueued: true, channel: 'telegram', detail: 'queued for delivery' });
+  }),
+
+  // GET /api/v1/market/mood (anonymous)
+  http.get('/api/v1/market/mood', () => {
+    return HttpResponse.json(MOOD_SNAPSHOT);
+  }),
+
+  // GET /api/v1/market/mood/history?days=N (anonymous)
+  http.get('/api/v1/market/mood/history', ({ request }) => {
+    const url = new URL(request.url);
+    const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 30, 1), 365);
+    const base = new Date('2026-06-06T00:00:00Z');
+    const items = Array.from({ length: days }, (_, i) => {
+      const d = new Date(base);
+      d.setUTCDate(base.getUTCDate() - (days - 1 - i));
+      return {
+        snapshot_date: d.toISOString().slice(0, 10),
+        regime: MOOD_HISTORY_CYCLE[i % MOOD_HISTORY_CYCLE.length],
+      };
+    });
+    return HttpResponse.json(items);
+  }),
+
+  // GET /api/v1/market/why-today (anonymous)
+  http.get('/api/v1/market/why-today', () => {
+    return HttpResponse.json({
+      snapshot_date: MOOD_SNAPSHOT.snapshot_date,
+      regime: MOOD_SNAPSHOT.regime,
+      commentary: MOOD_SNAPSHOT.commentary,
+      contributing_factors: MOOD_SNAPSHOT.contributing_factors,
+      contradicting_factors: MOOD_SNAPSHOT.contradicting_factors,
+      disclosure: MOOD_SNAPSHOT.disclosure,
+      not_advice: MOOD_SNAPSHOT.not_advice,
+      disclaimer_version: MOOD_SNAPSHOT.disclaimer_version,
+    });
   }),
 ];

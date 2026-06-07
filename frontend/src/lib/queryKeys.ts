@@ -3,6 +3,9 @@
  * Centralised so key shape is never duplicated across features.
  */
 export const queryKeys = {
+  auth: {
+    me: () => ['auth', 'me'] as const,
+  },
   instruments: {
     all:       () => ['instruments'] as const,
     list:      (params?: Record<string, unknown>) => ['instruments', 'list', params] as const,
@@ -42,5 +45,13 @@ export const queryKeys = {
   mf: {
     casStatus: (jobId: string) => ['mf', 'cas-status', jobId] as const,
     report:    (jobId: string) => ['mf', 'report', jobId] as const,
+  },
+  notifications: {
+    preferences: () => ['notifications', 'preferences'] as const,
+  },
+  mood: {
+    current:  () => ['mood', 'current'] as const,
+    history:  (days: number) => ['mood', 'history', days] as const,
+    whyToday: () => ['mood', 'why-today'] as const,
   },
 } as const;
