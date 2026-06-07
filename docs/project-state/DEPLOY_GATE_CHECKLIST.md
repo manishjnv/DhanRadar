@@ -26,9 +26,9 @@ Owner tags: **[CC]** Claude Code can build/drive · **[human]** needs a person/d
 
 ## Gate 2 — CI / gate reliability
 
-- [ ] **B40** invoke ruff + mypy in CI; use the TimescaleDB image; run Alembic migrations (not `create_all`) **[CC]**
-- [ ] **B39** drop `--passWithNoTests`; add FE component/MSW/api-client tests **[CC]**
-- [ ] **B45** one real-backend smoke test + a mocks-off staging build (FE has only ever run on MSW) **[CC · infra]**
+- [x] **B40** DONE (`ddc3f98`): TimescaleDB image + new migrations job (alembic up→down→up on real image) + ruff/mypy invoked. **Caveat:** ruff/mypy are ADVISORY (`continue-on-error`) pending a lint-cleanup before they can block; migrations job validated on first CI run **[CC]**
+- [x] **B39** DONE (`a152b2b`): `--passWithNoTests` dropped; vitest + 17 component/MSW/api-client tests, 17/17 green locally **[CC]**
+- [x] **B45** CODE DONE (`a152b2b`, `ddc3f98`): mocks-off CI build (`NEXT_PUBLIC_API_MOCKING=disabled`) + Playwright smoke test. Residual: run the smoke test against a real backend+frontend staging deploy **[infra]**
 
 ## Gate 3 — Compliance / DPDP (legal — blocks the relevant routes)
 
