@@ -5,6 +5,31 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+Multi-slice load-bearing blocker work, one slice per commit, each with full inline Tier-B/C review
+plus an independent adversarial sign-off (Sonnet takeover — codex unavailable on this account):
+
+- **Slice 1 — B26 Admin endpoints** (`c365fca`): admin router (`dhanradar/admin/`, `RequireAdmin()`
+  → 404 to non-admins) — disclaimer create + activate (single-active transition → R2 HTML snapshot →
+  cache flush; concurrent loser → 409) + label-churn gate (reuses `governance.review_batch`). Alembic
+  0008: `rating_engine_changelog` + `ai_low_confidence_log` (no writer yet) + `uq_disclaimer_active_per_type`
+  partial-unique index. Adversarial ACCEPT-WITH-CONDITIONS — content bound, churn-type allowlist
+  (fail-open fix), atomic single-active index — all applied in-session. Ledger `reviews/b26-admin-endpoints.md`.
+- **Slice 2 — B6/B28 scoring-activation gate** (`35cace1`, ADR-0026): admin-triggered, DB-registry-
+  authoritative two-person (`approved_by≠created_by`) + backtest gate; `compliance.rating_engine_changelog`
+  is the authoritative runtime state; the engine sync `score()` keeps the JSON file-flag fallback so v1
+  stays provisional. Alembic 0009: `uq_engine_changelog_activated_per_version` index. Adversarial
+  ACCEPT-WITH-CONDITIONS — UUID `created_by` guard, the index + 409, `provisional`=registry — all
+  applied. Ledger `reviews/b6-b28-scoring-activation.md`.
+- **Slice 3 — B2/B7/B8 Razorpay** (`9d0016c`): DEFERRED data-only (no code) — re-verified the billing
+  fail-safes (checkout 503 + `_derive_tier` free-on-unmapped) and documented exactly what to seed when
+  the Razorpay dashboard exists. `BLOCKERS.md`.
+
+Gates each slice: pytest (unit green, integration collects — run in CI per B1), `ci_guards.py` 0,
+`py_compile` 0, markdownlint 0. **B26 admin / B6 / B28 mechanisms now BUILT;** remaining for B6/B28 is
+the production activation of v1 (real §8 backtest + human approver), a data/human gate.
+
 ## Where we are
 
 - **Phase 1** (infra skeleton, KVM4 shared-infra): **done** — 8-container stack, dedicated
@@ -159,6 +184,28 @@ cross-border consent, deploy gate), **B32** (notification residuals, low), **B33
 hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
+
+### Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+- **Opus** — Phase-0 warm reads (canonical docs + scoring/compliance code); orchestration; both build
+  contracts; line-by-line Phase-3 diff review of every slice; ALL adversarial-condition fixes (slice 1:
+  content bound + churn-type allowlist + single-active index; slice 2: UUID `created_by` guard +
+  activation index + `provisional`=registry); both review ledgers; slice-3 fail-safe verification; the
+  session-exit docs.
+- **Sonnet** — 2 builders (slice-1 B26-admin endpoints; slice-2 B6/B28 activation) against exact
+  contracts; 2 independent adversarial sign-offs (codex unavailable → Sonnet takeover); 1 doc-drafter
+  (ADR-0026 + feature doc + BLOCKERS B6/B28).
+- **Haiku** — n/a (no bulk grep/triage; targeted greps run inline).
+- **codex:rescue** — n/a — companion lacks model entitlement; both Tier-B/C adversarial sign-offs run
+  as independent Sonnet takeovers (slice 1 + slice 2 each ACCEPT-WITH-CONDITIONS), all conditions
+  applied in-session before commit.
+- Per-delegation (telemetry): slice1-builder · Sonnet · reworked: Y (Opus fixed a fail-open churn-type
+  gap + added a content bound + the atomic single-active index from the adversarial pass) |
+  slice1-adversarial · Sonnet · reworked: N | slice2-builder · Sonnet · reworked: Y (Opus added the
+  UUID `created_by` guard, the activation partial-unique index + IntegrityError→409, and
+  `provisional`=registry) | slice2-adversarial · Sonnet · reworked: N | slice2-docs-drafter · Sonnet ·
+  reworked: N (ADR/feature/BLOCKERS applied as-drafted). Two review ledgers + this footer were
+  Opus-direct (needed the adversarial-review context / precise telemetry; one-shot exemption).
 
 ### Orchestration-config session (2026-06-07, branch `hardening/launch-gate-blockers`)
 
