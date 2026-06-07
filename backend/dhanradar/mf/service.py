@@ -55,6 +55,7 @@ def assemble_report(
     model_version: Optional[str] = None,
     generated_at: Optional[str] = None,
     disclaimer_version: Optional[str] = None,
+    commentary: Optional[str] = None,
 ) -> PortfolioReport:
     """Build the client report. The disclosure bundle + NOT_ADVICE are ALWAYS
     injected here; `unified_score` is never included (each fund carries only
@@ -84,6 +85,7 @@ def assemble_report(
         category_allocation=snap.get("category_allocation", {}),
         overlap_matrix=snap.get("overlap_matrix", {}),
         funds=items,
+        commentary=commentary,
         model_version=model_version,
         generated_at=generated_at,
         disclosure=DISCLOSURE_BUNDLE,
