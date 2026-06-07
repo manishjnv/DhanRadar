@@ -5,6 +5,23 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+User decision: disable the fail-closed DPDP consent gate during pre-launch dev (no real
+user data; consent-capture UI B44 not built) and auto-re-enforce at the 2026-07-15 launch.
+Built as a fail-safe env kill-switch, NOT a hardcoded bypass:
+
+- `DPDP_CONSENT_ENFORCED` (default `true`) + `consent_bypassed` computed property; the bypass
+  takes effect at the single `_consent_granted` chokepoint (covers `RequireConsent` /
+  `consent_granted` / `assert_consent`) ONLY in an allowlisted `development/test/ci` ENV.
+- Setting it `false` in any other ENV is a **hard boot failure** (`config.model_post_init`) —
+  a leaked override cannot disable consent in prod/staging. One startup warning when active.
+- Dev `.env` set to `false`; `.env.example` documents the knob (default `true`).
+- Independent Security review (Sonnet takeover; codex n/a) ACCEPT-WITH-CONDITIONS — env-allowlist
+  invert + boot guard both applied in-session. 28 consent unit tests; runtime proofs captured
+  (dev bypass active, prod boot-crash). Ledger `reviews/b48-consent-killswitch.md`; **B48 filed (OPEN —
+  must re-enable before launch)**. Auth (anonymous→401) is untouched; only consent is relaxed.
+
 ## Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
 
 Multi-slice load-bearing blocker work, one slice per commit, each with full inline Tier-B/C review
@@ -84,7 +101,8 @@ the production activation of v1 (real §8 backtest + human approver), a data/hum
   in-branch: `RequireConsent` anonymous→**401** safe-by-default (re-verified ACCEPT, RCA 2026-06-06);
   consented_purposes trap annotated. New **B33** (auth/session hygiene, low). Report:
   `PHASE7_VERIFICATION.md`. Merge-eligible; **NOT deploy-eligible** (deploy checklist: B26/B31/B6/B28/
-  B18/B2 + live-stack runtime proofs + PC4/PC5 human approval).
+  B18/B2 + **B48** (re-enforce DPDP consent: `ENV=production` and/or `DPDP_CONSENT_ENFORCED=true`,
+  then verify a gated route 403s without a grant) + live-stack runtime proofs + PC4/PC5 human approval).
 
 ## In flight
 
@@ -168,8 +186,9 @@ the production activation of v1 (real §8 backtest + human approver), a data/hum
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
 - Other deploy gates before KVM4: **B31** (notification cross-border consent), **B6/B28** (scoring
-  activation), **B18** (atomic AI budget), **B2/B7/B8** (Razorpay data-seeding) + the live-stack
-  runtime proofs + separate human approval (PC4/PC5).
+  activation), **B18** (atomic AI budget), **B2/B7/B8** (Razorpay data-seeding), **B48** (re-enforce
+  the DPDP consent gate — set `ENV=production` and/or `DPDP_CONSENT_ENFORCED=true`, then verify a
+  consent-gated route 403s without a grant) + the live-stack runtime proofs + separate human approval (PC4/PC5).
 - Before MF DEPLOY: **B26** `ai_recommendation_audit` write at the report serve seam; **B29** NAV
   pipeline; **B6/B28** scoring activation gates.
 
@@ -184,6 +203,24 @@ cross-border consent, deploy gate), **B32** (notification residuals, low), **B33
 hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
+
+### DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+- **Opus** — Phase-0 status read; the kill-switch design (single `_consent_granted` chokepoint,
+  env-allowlist, boot guard); both edits (config.py / deps.py) hand-written (load-bearing
+  compliance path + small/hot-cache); the two adversarial-condition fixes (env allowlist invert,
+  `model_post_init` boot guard); the test additions; runtime proofs; B48 + the review ledger +
+  this footer.
+- **Sonnet** — 1 independent adversarial Security/Compliance sign-off (7 vectors; codex n/a →
+  takeover) → ACCEPT-WITH-CONDITIONS, both required conditions applied before commit.
+- **Haiku** — n/a (targeted greps run inline).
+- **codex:rescue** — n/a — account not entitled for Codex models; Sonnet takeover per the approved
+  fallback ladder.
+- Per-delegation (telemetry): b48-adversarial · Sonnet · reworked N (verdict + 3 conditions adopted
+  as-found; Opus implemented the fixes). Doc prose (B48 row / ledger / this footer) Opus-direct under
+  the load-bearing one-shot exemption (needed the precise adversarial-review context). Gates: 28
+  consent unit tests green; 350 unit pass (2 pre-existing network failures unrelated); ci_guards +
+  anti-pattern sweep PASS; markdownlint 0.
 
 ### Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
 

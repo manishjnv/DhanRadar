@@ -212,6 +212,22 @@ def _consent_granted(consents: object, purpose: str) -> bool:
     written as ``granted: false`` or by removing the key — NEVER by adding a
     separate ``revoked`` key, which this reader would ignore and thus fail OPEN.
     """
+    # TEMPORARY pre-launch kill-switch (B48): when consent enforcement is disabled
+    # via config — dev/pre-launch only, no real user data — every purpose reads as
+    # granted so gated routes/call sites work without a consent-capture UI (B44).
+    # Single chokepoint: RequireConsent, consent_granted, and assert_consent all
+    # route through here, so this disables all three. Fail-safe by design:
+    #   - default config is ENFORCED=True, so the gate is on unless explicitly off;
+    #   - `consent_bypassed` is True ONLY in an allowlisted dev/test/ci env, and a
+    #     disabled flag in any other env is a hard boot failure (config.model_post_init),
+    #     so the bypass can never reach production/staging.
+    # The one-time "disabled" warning is emitted at startup, not here. Remove this
+    # block when B48 is closed at launch.
+    from dhanradar.config import settings
+
+    if settings.consent_bypassed:
+        return True
+
     if not isinstance(consents, dict):
         return False
     value = consents.get(purpose)
