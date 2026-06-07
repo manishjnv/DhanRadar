@@ -5,6 +5,31 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## First AI-gateway consumer — MF report portfolio commentary (2026-06-07, merged PR #23 `c085444`, branch `feat/ai-consumer`)
+
+The governed OpenRouter gateway now has its first end-to-end consumer. Built in an isolated
+worktree off `origin/main` (a concurrent session held `hardening/launch-gate-blockers`).
+
+- **Gateway (B21):** `complete()` returns `CompletionResult(output, model_used)` so callers can
+  audit the winning model; all prior semantics unchanged.
+- **Consumer** (`backend/dhanradar/mf/commentary.py`, called from `tasks/mf.py::_run_pipeline`):
+  one portfolio-level LLM call per report, non-blocking (omitted on any refusal/failure), wiring
+  all four gates — B20 (consent-first via `assert_consent("cross_border_ai")`, data-minimized,
+  fail-closed), B21/B26 (audit `surface=mf_report_ai` + model_used/disclaimer_version/prompt_version,
+  served-path only), B22 (pre- and post-call floor, NaN/inf-safe, + `log_low_confidence`), B23
+  (second defense-in-depth advisory net; taxonomy still open). Served commentary is
+  SEBI-disclaimer-postfixed.
+- **Gates:** CI `backend` (Postgres integration) GREEN; 326 unit pass; `ci_guards.py` 0;
+  markdownlint 0. Tier-B Security ACCEPT (Sonnet adversarial — codex n/a), Tier-C Compliance ACCEPT
+  (disclaimer-postfix condition applied). Ledger `reviews/ai-consumer-mf-commentary.md`, ADR-0027.
+- **Decision:** chose MF over Mood Compass — Mood is anonymous and cannot exercise B20's
+  `assert_consent` (no PII). Mood Compass is the trivial fast-follow (`contains_personal_data=False`).
+- **NOT deployed** — merge-eligible only; KVM4 deploy stays gated on PC4/PC5 + B36/B37/B38.
+
+Agent footer: Opus orchestrate+review+governance ~55% · Sonnet build+adversarial ~35% (consumer
+reworked:Y) · Tier-4 free-chain docs ~10% (reworked:Y) · Haiku n/a · codex:rescue n/a (Sonnet
+takeover, verdict=ACCEPT).
+
 ## Launch-gate blocker hardening (2026-06-07, branch `hardening/launch-gate-blockers`)
 
 Multi-slice load-bearing blocker work, one slice per commit, each with full inline Tier-B/C review
