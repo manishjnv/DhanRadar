@@ -14,9 +14,14 @@ TimescaleDB notes (version-sensitive — Allowed-APIs §0; verify at install):
     box and the CI test DB (which builds tables from ORM metadata, not migrations)
     simply skip it — exactly like the 0004 hypertable step.
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0008a
+Revises: 0008
 Create Date: 2026-06-07
+
+Note: renumbered from 0008 -> 0008a to linearize a duplicate-0008 branch
+(0008_admin_compliance_tables also claimed 0008). This migration is
+independent of the admin/compliance tables, so chaining it after 0008 is
+order-safe. No production DB had been stamped at renumber time (pre-launch).
 """
 
 from __future__ import annotations
@@ -26,8 +31,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0008"
-down_revision: Union[str, None] = "0007"
+revision: str = "0008a"
+down_revision: Union[str, None] = "0008"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
