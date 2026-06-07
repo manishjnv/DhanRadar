@@ -182,7 +182,7 @@ async def test_create_then_activate_disclaimer(
     assert body["snapshot_key"] is None
 
     # Verify single-active invariant: v1 must now be inactive.
-    await db_session.expire_all()
+    db_session.expire_all()  # sync on AsyncSession — must NOT be awaited
     from sqlalchemy import select
     rows = (await db_session.scalars(select(Disclaimer))).all()
     by_version = {r.version: r for r in rows}

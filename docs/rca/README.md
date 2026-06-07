@@ -15,7 +15,27 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
-### 2026-06-07 — ci_guards advisory scan false-positive: ARIA `role="switch"` flagged as an advisory verb
+### 2026-06-07 — Integration test awaited a SYNC `AsyncSession.expire_all()` — passed local collect, failed first CI run (B26-admin)
+
+- **Symptom:** the B26-admin PR (#22) backend CI job failed: `test_create_then_activate_disclaimer`
+  raised `TypeError: object NoneType can't be used in 'await' expression` at
+  `tests/integration/test_admin.py:185`. 411 passed, 1 failed. Found by CI before merge (not a
+  field incident).
+- **Root cause:** the test wrote `await db_session.expire_all()`. `AsyncSession.expire_all()` is a
+  **synchronous** method (returns `None`), so `await None` raises `TypeError`. The bug survived local
+  checks because the integration suite is only ever **collected** locally (no local Postgres, B1) and
+  first **executes** in CI — `--collect-only` imports and parses the test but never runs the awaited
+  expression. Same exists≠executed class as the "field shown ≠ field wired" RCAs, applied to tests.
+- **Fix:** `db_session.expire_all()` (no `await`) with an inline note "sync on AsyncSession — must
+  NOT be awaited" (`tests/integration/test_admin.py`). Scanned the slice's test + code for sibling
+  awaited-sync calls (`expire(_all)`/`expunge`/`add`/`put_object`) — none (the only `await
+  redis.expire` is the genuinely-async Redis client).
+- **Prevention:** rule — a new integration test that only collects locally is UNVERIFIED until the
+  CI backend job runs it; treat the first CI run as the real gate and read its result before merging
+  (do not merge over a pending/failed backend check). Sync vs async on `AsyncSession`: `execute`,
+  `scalar(s)`, `commit`, `rollback`, `flush`, `get` are async (await); `add`, `add_all`, `expire`,
+  `expire_all`, `expunge` are sync (never await).
+- **Phase/area:** B26-admin endpoints / integration test harness. Caught at the PR-#22 CI gate.
 
 - **Symptom:** `scripts/ci_guards.py` failed (exit 1) on the notification preferences UI
   page, flagging `role="switch"` at two lines as "advisory verb usage (non-neg #2)". The
