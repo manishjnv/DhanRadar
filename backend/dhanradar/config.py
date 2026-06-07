@@ -7,7 +7,7 @@ Pydantic-settings v2 automatically validates types and raises on missing require
 
 from __future__ import annotations
 
-from typing import Optional
+from datetime import UTC, datetime
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Observability
     # ------------------------------------------------------------------
-    SENTRY_DSN: Optional[str] = None
+    SENTRY_DSN: str | None = None
 
     # ------------------------------------------------------------------
     # JWT (RS256 asymmetric)
@@ -162,6 +162,15 @@ class Settings(BaseSettings):
     # grant/revoke row so the version in force at consent time is auditable.
     # ------------------------------------------------------------------
     DPDP_CONSENT_VERSION: str = "2026-06-01"
+
+    # ------------------------------------------------------------------
+    # PHASE 5M Founding Access window end (placeholder — reset to
+    # (billing_go_live + 30d) at go-live). Signup stamps pro_access_until
+    # to this while now < it.
+    # ------------------------------------------------------------------
+    FOUNDING_ACCESS_UNTIL: datetime | None = datetime(
+        2026, 12, 31, 23, 59, 59, tzinfo=UTC
+    )
 
     # ------------------------------------------------------------------
     # Runtime

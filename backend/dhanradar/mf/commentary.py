@@ -18,6 +18,7 @@ No billing, no scoring imports.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from pydantic import Field
 
@@ -29,10 +30,45 @@ from dhanradar.compliance.service import (
     log_low_confidence,
     record_served_label,
 )
-from dhanradar.deps import ConsentRequiredError, assert_consent
+from dhanradar.deps import ConsentRequiredError, assert_consent, is_plus
 
 _SURFACE = "mf_commentary"
 _CONFIDENCE_FLOOR = 0.30
+
+
+# ---------------------------------------------------------------------------
+# Entitlement gate (PHASE 5M)
+# ---------------------------------------------------------------------------
+
+
+async def is_commentary_entitled(user_id: str, db: object) -> bool:
+    """PHASE 5M gate for AI commentary. Plus users → always entitled. Free users
+    get a ONE-TIME first-report taster: if their taster is unused, CONSUME it
+    (stamp users.ai_taster_used_at) and entitle this one report; otherwise refuse
+    (Plus-only thereafter). Returns True if commentary should be generated."""
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import update as _update
+
+    from dhanradar.models.auth import User
+
+    if await is_plus(user_id, db):  # type: ignore[arg-type]
+        return True
+    try:
+        uid = _UUID(user_id)
+    except (ValueError, TypeError):
+        return False
+    # Atomically CLAIM the one-time free taster: only the request that flips
+    # ai_taster_used_at NULL→now wins (rowcount == 1). Concurrent first-reports
+    # for the same user cannot both pass — closes the read-then-update race so a
+    # free user can never get more than one taster (Tier-B security finding).
+    result = await db.execute(  # type: ignore[union-attr]
+        _update(User)
+        .where(User.id == uid, User.ai_taster_used_at.is_(None))
+        .values(ai_taster_used_at=datetime.now(UTC))
+    )
+    await db.commit()  # type: ignore[union-attr]
+    return result.rowcount == 1
 
 
 # ---------------------------------------------------------------------------

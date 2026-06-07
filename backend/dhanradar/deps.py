@@ -30,14 +30,14 @@ Security notes:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-
 
 # ---------------------------------------------------------------------------
 # UserContext — returned by current_user_or_anonymous
@@ -62,7 +62,7 @@ class UserContext:
 async def current_user_or_anonymous(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    access_token: Annotated[Optional[str], Cookie(alias="__Host-access")] = None,
+    access_token: Annotated[str | None, Cookie(alias="__Host-access")] = None,
 ) -> UserContext:
     """
     FastAPI dependency — returns the authenticated user or a default
@@ -119,9 +119,40 @@ _TIER_ORDER: dict[str, int] = {
     "founder_lifetime": 4,  # treated as >= pro_plus
 }
 
+_PRO_RANK = _TIER_ORDER["pro"]
+_ACTIVE_SUB_STATUSES = frozenset({"active", "authenticated"})  # mirror subscriptions/service._ACTIVE_STATUSES
+
 
 def _tier_rank(tier: str) -> int:
     return _TIER_ORDER.get(tier, 0)
+
+
+async def is_plus(user_id: str, db: AsyncSession) -> bool:
+    """True iff the user currently has DhanRadar Plus — a LIVE time-window grant
+    (now < users.pro_access_until) OR an active subscription. Computed live (no
+    cache) so an expired window auto-downgrades by timestamp (no revoke job).
+    Fail-closed: malformed/anonymous subject → False."""
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import select as _select
+
+    from dhanradar.models.auth import Subscription, User
+
+    if not isinstance(user_id, str) or user_id == "anonymous":
+        return False
+    try:
+        uid = _UUID(user_id)
+    except (ValueError, TypeError):
+        return False
+    pro_until = await db.scalar(_select(User.pro_access_until).where(User.id == uid))
+    if pro_until is not None and datetime.now(UTC) < pro_until:
+        return True
+    sub = await db.scalar(
+        _select(Subscription.id)
+        .where(Subscription.user_id == uid, Subscription.status.in_(_ACTIVE_SUB_STATUSES))
+        .limit(1)
+    )
+    return sub is not None
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +185,16 @@ class RequireTier:
     async def __call__(
         self,
         user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+        db: Annotated[AsyncSession, Depends(get_db)],
     ) -> None:
         required_rank = _tier_rank(self.tier)
         user_rank = _tier_rank(user.tier)
+
+        # PHASE 5M: a time-window grant or active subscription bumps an otherwise
+        # sub-pro user up to pro rank (live check; auto-downgrades by timestamp).
+        if user_rank < _PRO_RANK and required_rank <= _PRO_RANK and not user.is_anonymous:
+            if await is_plus(user.user_id, db):
+                user_rank = _PRO_RANK
 
         if user_rank < required_rank:
             raise HTTPException(
