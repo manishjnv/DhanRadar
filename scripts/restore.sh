@@ -93,8 +93,15 @@ else
   R2_SRC="s3://${R2_BACKUP_BUCKET}/${BACKUP_ARG}/"
 
   log "Downloading backup from R2: ${R2_SRC} → ${RESTORE_DIR} ..."
-  AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" \
-  AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+  # R2 creds via a private temp credentials file (chmod 600), not inline env
+  # vars, so they never appear in the aws process's /proc/<pid>/environ.
+  R2_CRED_FILE="$(mktemp)"
+  chmod 600 "${R2_CRED_FILE}"
+  trap 'rm -f "${R2_CRED_FILE}"' EXIT
+  printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
+    "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${R2_CRED_FILE}"
+
+  AWS_SHARED_CREDENTIALS_FILE="${R2_CRED_FILE}" AWS_PROFILE=default \
     aws s3 cp \
       --recursive \
       "${R2_SRC}" \
@@ -102,6 +109,9 @@ else
       --endpoint-url "${R2_ENDPOINT}" \
       --no-progress \
     || die "R2 download failed. Check prefix and credentials."
+
+  rm -f "${R2_CRED_FILE}"
+  trap - EXIT
   log "Download complete."
 fi
 
@@ -115,7 +125,7 @@ log "Verifying MANIFEST checksums ..."
 # Read each file=... line and compare sha256.
 checksum_ok=true
 while IFS= read -r line; do
-  if [[ "${line}" =~ ^file=([^\ ]+)\ size=[^\ ]+\ sha256=([^\ ]+) ]]; then
+  if [[ "${line}" =~ ^file=([^[:space:]]+)[[:space:]]+size=[^[:space:]]+[[:space:]]+sha256=([^[:space:]]+) ]]; then
     fname="${BASH_REMATCH[1]}"
     expected_sha="${BASH_REMATCH[2]}"
     fpath="${RESTORE_DIR}/${fname}"

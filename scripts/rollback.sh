@@ -73,11 +73,19 @@ else
       || die "Alembic downgrade failed. DB may be in an inconsistent state — inspect manually."
     log "Alembic downgrade to '${TARGET_ALEMBIC}' completed."
     DB_DOWNGRADED="yes (${CURRENT_ALEMBIC} → ${TARGET_ALEMBIC})"
+  elif [[ "${ALLOW_SCHEMA_AHEAD:-0}" == "1" ]]; then
+    # Code-only rollback: schema stays AHEAD of the rolled-back code. This is
+    # safe ONLY for additive/backward-compatible migrations (old code ignores
+    # new columns/tables). The operator must assert this explicitly.
+    warn "ALLOW_SCHEMA_AHEAD=1 — code-only rollback; DB stays at ${CURRENT_ALEMBIC}."
+    warn "Verified safe only if migrations ${TARGET_ALEMBIC}..${CURRENT_ALEMBIC} are additive."
+    DB_DOWNGRADED="skipped (ALLOW_SCHEMA_AHEAD=1, schema left at ${CURRENT_ALEMBIC})"
   else
-    warn "CONFIRM_DB_DOWNGRADE not set — SKIPPING DB downgrade."
-    warn "Code will be rolled back but DB schema remains at: ${CURRENT_ALEMBIC}"
-    warn "Ensure the target code version is compatible with the current DB schema."
-    DB_DOWNGRADED="skipped (CONFIRM_DB_DOWNGRADE not set)"
+    die "DB is ahead of the rollback target (${CURRENT_ALEMBIC} > ${TARGET_ALEMBIC}). \
+A code-only rollback would run old code against a newer schema. Choose one: \
+set CONFIRM_DB_DOWNGRADE=1 to downgrade the schema too, or ALLOW_SCHEMA_AHEAD=1 \
+to intentionally leave the schema ahead (additive migrations only). Refusing to \
+guess — this protects the SEBI ai_recommendation_audit trail."
   fi
 fi
 

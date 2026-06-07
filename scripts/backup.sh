@@ -165,8 +165,16 @@ R2_DEST="s3://${R2_BACKUP_BUCKET}/${R2_PREFIX}/"
 
 log "Uploading backup to R2: ${R2_DEST} ..."
 
-AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" \
-AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+# R2 creds go in a private temp credentials file (chmod 600) rather than inline
+# env vars, so they never appear in the aws process's /proc/<pid>/environ
+# (readable by same-UID/root processes on the shared KVM4 box).
+R2_CRED_FILE="$(mktemp)"
+chmod 600 "${R2_CRED_FILE}"
+trap 'rm -f "${R2_CRED_FILE}"' EXIT
+printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
+  "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${R2_CRED_FILE}"
+
+AWS_SHARED_CREDENTIALS_FILE="${R2_CRED_FILE}" AWS_PROFILE=default \
   aws s3 cp \
     --recursive \
     "${WORK_DIR}/" \
@@ -174,6 +182,9 @@ AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
     --endpoint-url "${R2_ENDPOINT}" \
     --no-progress \
   || die "R2 upload failed. A backup that is not offsite is not a backup. Check R2 credentials and bucket name."
+
+rm -f "${R2_CRED_FILE}"
+trap - EXIT
 
 log "Upload complete: ${R2_DEST}"
 
