@@ -66,3 +66,7 @@ docs/infra-notes.md
 _redact.py
 *.tsbuildinfo
 next-env.d.ts
+
+# Personal Claude Code routing config (user-specific or.mjs path; do not commit)
+.claude/settings.local.json
+.claude/hooks/

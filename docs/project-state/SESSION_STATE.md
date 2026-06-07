@@ -1,6 +1,6 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-07
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -159,6 +159,31 @@ cross-border consent, deploy gate), **B32** (notification residuals, low), **B33
 hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
+
+### Orchestration-config session (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+Meta session — **no product code**. User flagged that most sessions run on Opus; reviewed the last
+two footers (this section confirms the leak: "all RCA / feature-doc / BLOCKERS / ledger writes" by
+Opus). Cut Opus-token leaks via config (not discipline):
+
+- **Doc-drafting nudge hook** — `PreToolUse(Write|Edit)` on doc/governance paths → reminds to draft
+  prose on Tier-4 free-chain / Sonnet, Opus reviews only. Lives in `.claude/settings.local.json` +
+  `.claude/hooks/doc-drafting-reminder.ps1` (**gitignored — personal**, embeds the `or.mjs` path).
+  Active after a `/hooks` reload.
+- **`warm-start` subagent** — `.claude/agents/warm-start.md` (Sonnet, read-only). Returns a one-page
+  Phase-0 brief so Opus stops ingesting the full canon every session. Committed; active after
+  `/agents` reload.
+- **Routing overlay** (`CLAUDE.md`, committed) — tightened `reworked:Y` = any Opus change to a
+  subagent's output; Tier-2 (`dsf`/`grok-code`) activation note; warm-start + heavy-skill-payload
+  isolation rules. Carried-context insight: ingestion is re-billed every turn, so it outweighs typed
+  output in long sessions.
+- Est. saving ≈ **25–40k Opus tokens/session (~10–20%)**, adoption-dependent (only the hook is
+  enforced; warm-start + isolation are conventions).
+- **Opus** — 100% this session (advisory judgment + small config authoring in hot cache; self-execute
+  beats subagent cold-start under the tiny-edit rule). **Sonnet / Haiku / codex:rescue** — n/a (no
+  load-bearing/security path; no bulk sweep). Per-delegation: none.
+- Commit: config + warm-start agent + routing overlay (this session). Markdownlint 0; hook logic
+  pipe-tested (3 match / 3 skip); `settings.local.json` schema-validated.
 
 ### Launch-gate blockers session (2026-06-07, branch `hardening/launch-gate-blockers`)
 
