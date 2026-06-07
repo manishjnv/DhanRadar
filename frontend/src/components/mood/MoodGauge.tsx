@@ -48,12 +48,12 @@ export type Regime =
 //   insufficient  → muted  (#6B7280)
 // ---------------------------------------------------------------------------
 export const REGIME_COLOR: Record<Regime, string> = {
-  extreme_fear:      '#E5484D',
-  fear:              '#F5A623',
-  neutral:           '#00C2FF',
-  greed:             '#F5A623',
-  extreme_greed:     '#E5484D',
-  insufficient_data: '#6B7280',
+  extreme_fear:      'var(--dr-red)',    // #E5484D — danger/negative token
+  fear:              'var(--dr-amber)',  // #F5A623 — warning/attention token
+  neutral:           'var(--dr-cyan)',   // #00C2FF — info/calm token
+  greed:             'var(--dr-amber)',  // #F5A623 — warning/attention token (symmetric)
+  extreme_greed:     'var(--dr-red)',    // #E5484D — danger/negative token (symmetric)
+  insufficient_data: 'var(--text-muted)', // #6B7280 light / #7E8699 dark — muted neutral
 };
 
 export const REGIME_DISPLAY: Record<Regime, string> = {
@@ -135,7 +135,7 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
   const bandWord     = BAND_DISPLAY[confidenceBand] ?? confidenceBand;
   const ordinal      = REGIME_ORDINAL[regime];
   const isInsufficient = regime === 'insufficient_data';
-  const trackColor   = isInsufficient ? '#6B7280' : 'var(--border)';
+  const trackColor   = isInsufficient ? 'var(--text-muted)' : 'var(--border)';
 
   const accessibleLabel = `${displayWord} — ${bandWord}`;
 
@@ -203,7 +203,7 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
             cx={needleX}
             cy={needleY}
             r={NEEDLE_R}
-            fill={isInsufficient ? '#6B7280' : color}
+            fill={isInsufficient ? 'var(--text-muted)' : color}
             stroke="var(--bg)"
             strokeWidth={2}
           />

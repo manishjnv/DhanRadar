@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Upload, Compass, Settings, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Upload, Compass, Settings, Menu, X, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ const SETTINGS: NavItem = { href: '/settings/notifications', label: 'Settings', 
 // ---------------------------------------------------------------------------
 // NavLink — single source for active state, aria-current, focus ring.
 // ---------------------------------------------------------------------------
-function NavLink({ item }: { item: NavItem }) {
+function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
   const pathname = usePathname();
   const { href, label, icon: Icon } = item;
   // /settings matches any /settings/* child; others match exact or nested.
@@ -39,6 +39,7 @@ function NavLink({ item }: { item: NavItem }) {
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
+      onClick={onClick}
       className={cn(
         'flex items-center gap-3 rounded-md px-3 py-2 text-small transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
@@ -54,14 +55,17 @@ function NavLink({ item }: { item: NavItem }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar
+// SidebarContent — shared nav markup used by both the desktop <aside> and the
+// mobile drawer, so there is ONE source of nav truth. The optional onNavClick
+// callback lets the drawer close itself when a link is activated.
 // ---------------------------------------------------------------------------
-function Sidebar() {
+function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
   return (
-    <aside className="flex h-full w-56 shrink-0 flex-col border-r border-line bg-surface">
+    <>
       {/* Brand lockup — logo mark + wordmark + sub-label (matches brand mockup) */}
       <Link
         href="/dashboard"
+        onClick={onNavClick}
         className="flex h-14 items-center gap-2.5 border-b border-line px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
       >
         {/* Decorative mark; the wordmark text provides the accessible name. */}
@@ -79,29 +83,115 @@ function Sidebar() {
           Workspace
         </p>
         {WORKSPACE.map((item) => (
-          <NavLink key={item.href} item={item} />
+          <NavLink key={item.href} item={item} onClick={onNavClick} />
         ))}
       </nav>
 
       {/* Footer — Settings + educational note */}
       <div className="flex flex-col gap-2 border-t border-line p-3">
-        <NavLink item={SETTINGS} />
+        <NavLink item={SETTINGS} onClick={onNavClick} />
         <p className="px-3 text-caption text-ink-muted">Educational use only</p>
       </div>
-    </aside>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Topbar — `userSlot` is supplied by the (app) layout (the auth UserMenu), so
 // this shared shell stays presentation-only and never imports a feature.
+// `onMenuOpen` wires the hamburger (mobile only) back to AppShell state.
 // ---------------------------------------------------------------------------
-function Topbar({ userSlot }: { userSlot?: React.ReactNode }) {
+function Topbar({
+  userSlot,
+  onMenuOpen,
+}: {
+  userSlot?: React.ReactNode;
+  onMenuOpen?: () => void;
+}) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
-      <span className="text-small text-ink-muted">Research Analytics</span>
+      <div className="flex items-center gap-3">
+        {/* Hamburger — only rendered on small screens */}
+        <button
+          type="button"
+          className="md:hidden -ml-2 flex items-center justify-center rounded-md p-2 text-ink-secondary hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          aria-label="Open navigation"
+          aria-expanded={false}
+          onClick={onMenuOpen}
+        >
+          <Menu size={20} strokeWidth={2} aria-hidden="true" />
+        </button>
+        <span className="text-small text-ink-muted">Research Analytics</span>
+      </div>
       {userSlot}
     </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MobileDrawer — slide-in left drawer for small screens.
+// Renders the same SidebarContent as the desktop aside.
+// ---------------------------------------------------------------------------
+function MobileDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const firstFocusRef = React.useRef<HTMLButtonElement>(null);
+
+  // Close on Escape key
+  React.useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  // Move focus into the drawer when it opens
+  React.useEffect(() => {
+    if (open) {
+      firstFocusRef.current?.focus();
+    }
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/40 md:hidden"
+        aria-hidden="true"
+        onClick={onClose}
+      />
+
+      {/* Drawer panel */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
+        className="fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-line bg-surface md:hidden"
+      >
+        {/* Close button at the top-right of the drawer */}
+        <button
+          ref={firstFocusRef}
+          type="button"
+          className="absolute right-3 top-3 flex items-center justify-center rounded-md p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          aria-label="Close navigation"
+          onClick={onClose}
+        >
+          <X size={16} strokeWidth={2} aria-hidden="true" />
+        </button>
+
+        <SidebarContent onNavClick={onClose} />
+      </div>
+    </>
   );
 }
 
@@ -115,11 +205,26 @@ export interface AppShellProps {
 }
 
 export function AppShell({ children, userSlot }: AppShellProps) {
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const pathname = usePathname();
+
+  // Close the drawer whenever the route changes (user navigated)
+  React.useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-bg">
-      <Sidebar />
+      {/* Desktop sidebar — hidden on small screens, flex on md+ */}
+      <aside className="hidden md:flex h-full w-56 shrink-0 flex-col border-r border-line bg-surface">
+        <SidebarContent />
+      </aside>
+
+      {/* Mobile drawer + backdrop */}
+      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userSlot={userSlot} />
+        <Topbar userSlot={userSlot} onMenuOpen={() => setDrawerOpen(true)} />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

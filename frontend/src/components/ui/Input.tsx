@@ -45,12 +45,33 @@ export interface FieldProps {
 }
 
 export function Field({ id, label, error, hint, children }: FieldProps) {
+  // Compose aria-describedby: error id takes priority over hint id.
+  const describedById = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+
+  // Inject aria-describedby, aria-invalid, and id onto the single child input
+  // via cloneElement — only when the caller has not already set these attrs,
+  // so caller-provided values are always respected (we merge describedby).
+  let enhancedChildren = children;
+  if (React.isValidElement(children)) {
+    const child = children as React.ReactElement<React.InputHTMLAttributes<HTMLInputElement>>;
+    const existingDescribedBy = child.props['aria-describedby'];
+    const mergedDescribedBy = [existingDescribedBy, describedById]
+      .filter(Boolean)
+      .join(' ') || undefined;
+
+    enhancedChildren = React.cloneElement(child, {
+      id: child.props.id ?? id,
+      'aria-describedby': mergedDescribedBy,
+      'aria-invalid': child.props['aria-invalid'] ?? (error ? (true as const) : undefined),
+    } as React.InputHTMLAttributes<HTMLInputElement>);
+  }
+
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-small font-medium text-ink">
         {label}
       </label>
-      {children}
+      {enhancedChildren}
       {hint && !error && (
         <p id={`${id}-hint`} className="text-caption text-ink-muted">
           {hint}
