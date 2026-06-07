@@ -33,7 +33,8 @@ from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
 
 logger = logging.getLogger(__name__)
-from dhanradar.mf.scoring_bridge import FundSignals, score_fund, upsert_user_fund_score
+from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
+from dhanradar.mf.signals import compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 _UPLOAD_TTL_SECONDS = 24 * 3600
@@ -178,15 +179,22 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
         )
         await db.commit()
 
-        snap = build_snapshot(parsed_to_snapshot_holdings(parsed))
+        # Load each holding's NAV history (mf schema, read-only) so the engine
+        # scores on real momentum/risk signals derived from NAV, and the snapshot
+        # values on the latest NAV (B29). A holding with no NAV history yields no
+        # axes → the engine refuses with insufficient_data (honest fail-safe).
+        nav_series, latest_nav = await _load_nav_series(db, [p.isin for p in parsed])
+
+        snap = build_snapshot(parsed_to_snapshot_holdings(parsed, nav_map=latest_nav))
 
         from dhanradar.compliance import service as compliance_service
 
         funds_payload: list[dict] = []
         for p in parsed:
-            # v1 signals are thin (NAV/fundamentals pipeline lands later); the
-            # engine refuses (insufficient_data) where coverage is too low.
-            result = await score_fund(rengine, FundSignals(isin=p.isin))
+            # Signals are computed from the fund's own NAV series (momentum/risk);
+            # fundamentals-backed axes stay None → partial_coverage (≤ medium).
+            signals = compute_fund_signals(p.isin, nav_series.get(p.isin, []))
+            result = await score_fund(rengine, signals)
             await upsert_user_fund_score(db, user_id, result)
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
@@ -250,6 +258,34 @@ async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -
         )
         await db.execute(stmt)
     await db.commit()
+
+
+async def _load_nav_series(
+    db: Any, isins: list[str], lookback_days: int = 400
+) -> tuple[dict[str, list[tuple[date, float]]], dict[str, float]]:
+    """Load recent NAV history for the given ISINs from mf_nav_history.
+
+    Returns (series, latest_nav) where series maps isin → [(nav_date, nav), …]
+    ascending, and latest_nav maps isin → its most recent NAV.  Read-only on the
+    MF module's own schema (no cross-module access).  Empty isins → ({}, {})."""
+    if not isins:
+        return {}, {}
+
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfNavHistory
+
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=lookback_days)  # noqa: UP017
+    result = await db.execute(
+        select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
+        .where(MfNavHistory.isin.in_(isins), MfNavHistory.nav_date >= cutoff)
+        .order_by(MfNavHistory.isin, MfNavHistory.nav_date)
+    )
+    series: dict[str, list[tuple[date, float]]] = {}
+    for isin, nav_date, nav in result.all():
+        series.setdefault(isin, []).append((nav_date, float(nav)))
+    latest_nav = {isin: pts[-1][1] for isin, pts in series.items()}
+    return series, latest_nav
 
 
 async def _mark_failed(job_id: str, message: str) -> None:
