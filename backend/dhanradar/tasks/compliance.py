@@ -87,3 +87,45 @@ async def _archive() -> str:
         logger.exception("archive_audit_daily: R2 upload failed for %s", key)
         return "archive: upload failed (rows kept in PG)"
     return f"archive: {len(rows)} rows → r2://{key}"
+
+
+@celery_app.task(name="dhanradar.tasks.compliance.reconcile_audit_disclaimers")
+def reconcile_audit_disclaimers() -> str:
+    """Flag any audited disclaimer_version not present in the disclaimers registry.
+    A served label tied to an unregistered disclaimer version is a compliance gap
+    (the in-force-version tie is broken). Logs + emits a metric; returns status."""
+    return asyncio.run(_reconcile_disclaimers())
+
+
+async def _reconcile_disclaimers() -> str:
+    from sqlalchemy import distinct, select
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.compliance.service import bump_audit_metric
+    from dhanradar.db import engine
+    from dhanradar.models.compliance import AiRecommendationAudit, Disclaimer
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as db:
+        audited = set(
+            (
+                await db.scalars(
+                    select(distinct(AiRecommendationAudit.disclaimer_version)).where(
+                        AiRecommendationAudit.disclaimer_version.is_not(None)
+                    )
+                )
+            ).all()
+        )
+        known = set((await db.scalars(select(distinct(Disclaimer.version)))).all())
+
+    orphans = sorted(audited - known)
+    if not orphans:
+        return f"reconcile: OK — all {len(audited)} audited disclaimer_version(s) registered"
+    logger.error(
+        "compliance reconcile: %d audited disclaimer_version(s) NOT in the disclaimers "
+        "registry (served labels tie to an unregistered disclaimer — compliance gap): %s",
+        len(orphans),
+        ", ".join(orphans),
+    )
+    await bump_audit_metric("audit_orphan_disclaimer_versions", len(orphans))
+    return f"reconcile: {len(orphans)} ORPHAN disclaimer_version(s): {', '.join(orphans)}"

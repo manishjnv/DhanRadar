@@ -32,6 +32,22 @@ _DISCLAIMER_TTL = 3600
 _ALLOWED_TYPES = frozenset({"educational_label", "mood_regime"})
 
 
+async def bump_audit_metric(name: str, amount: int = 1) -> None:
+    """Best-effort daily Redis counter for compliance-audit observability (B34).
+    Ops/alerting reads ``metrics:compliance:{name}:{YYYYMMDD}``. NEVER raises — an
+    observability failure must not touch the serve/audit path."""
+    try:
+        from dhanradar.redis_client import get_redis
+
+        redis = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = f"metrics:compliance:{name}:{day}"
+        await redis.incrby(key, amount)
+        await redis.expire(key, 35 * 86400)  # self-clean; alerting reads are recent
+    except Exception:  # noqa: BLE001 — observability is best-effort
+        logger.debug("compliance: metric bump failed for %s", name, exc_info=True)
+
+
 def active_disclaimer_version() -> str:
     """The in-force disclaimer version (compliance is the §4 authority for it).
     A sync constant for fire-and-forget call sites; the DB-backed
@@ -106,6 +122,7 @@ async def record_served_label(
         return True
     except Exception:  # noqa: BLE001 — fire-and-forget: audit must not break the serve path
         logger.exception("compliance: audit write failed surface=%s label=%s", surface, label)
+        await bump_audit_metric("audit_write_failures")
         return False
 
 

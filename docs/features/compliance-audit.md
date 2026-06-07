@@ -64,8 +64,14 @@ rating engine (compliance is the recording authority via `active_disclaimer_vers
 
 ## Failure modes & fallbacks
 
-- Audit write fails → logged, swallowed, returns False (serve path unaffected). Residual:
-  no failure METRIC yet (a systemic audit outage is not alertable — Observability module).
+- Audit write fails → logged, swallowed, returns False (serve path unaffected). **B34:** the
+  failure path now also bumps a best-effort daily Redis counter
+  `metrics:compliance:audit_write_failures:{YYYYMMDD}` (`bump_audit_metric`, 35-day TTL,
+  never raises) so a systemic audit outage is alertable.
+- **Reconcile (B34):** `reconcile_audit_disclaimers` (beat 02:30 IST) flags any audited
+  `disclaimer_version` not present in the `disclaimers` registry (a served label tied to an
+  unregistered disclaimer = broken version tie); logs each orphan + bumps
+  `metrics:compliance:audit_orphan_disclaimer_versions`.
 - DEFAULT partition + denormalized `disclaimer_version` → a row is never lost to a missing
   monthly partition or a referential hiccup.
 - Archival fails / R2 unconfigured → logged, rows kept in Postgres, next run retries.
@@ -80,9 +86,12 @@ rating engine (compliance is the recording authority via `active_disclaimer_vers
   obligation (ADR-0022). The erasure module MUST skip this table and log the override.
   This means a `user_id` (DPDP personal data) is retained 7 years post-erasure — an
   intentional, documented exception, not a leak.
-- **B34 (deploy gate):** the R2 archival exports `user_id`; the bucket must be verified
-  India-resident before archival is enabled (the archive is the 7-yr record-of-serving and
-  must stay user-identifiable — the control is residency, not de-identification).
+- **B34 (deploy gate — R2 residency, OPEN):** the R2 archival exports `user_id`; the bucket
+  must be verified India-resident before archival is enabled (the archive is the 7-yr
+  record-of-serving and must stay user-identifiable — the control is residency, not
+  de-identification). This part is human/infra and remains a deploy gate. The two CODEABLE
+  B34 items — the audit-write-failure metric and the disclaimer-version reconcile job — are
+  **DONE 2026-06-07** (above).
 
 ## Dependencies
 
@@ -105,3 +114,10 @@ by: MF + Notification (via `record_served_label`). Build (boto3/S3).
   ACCEPT-WITH-CONDITIONS; MAJORs fixed in-branch (allowlist, version stamping, endpoint
   DoS, backdating). B26 ADDRESSED for the two shipped surfaces; B34 filed. Ledger:
   `reviews/b26-compliance-audit.md`.
+- 2026-06-07 — **B34 codeable parts DONE:** `bump_audit_metric` daily Redis counter +
+  audit-write-failure metric on the fire-and-forget failure path (`compliance/service.py`);
+  `reconcile_audit_disclaimers` beat task (02:30 IST) flagging audited `disclaimer_version`s
+  absent from the registry (`tasks/compliance.py`, `celery_app.py`). Right-sized
+  (Builder+Architect; additive observability + read-only reconcile, no enforcement/auth/PII
+  surface). +1 unit test, +2 integration tests (collect; run in CI). B34's R2-residency
+  deploy gate remains OPEN (human/infra).
