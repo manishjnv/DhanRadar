@@ -104,19 +104,22 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 function Topbar({
   userSlot,
   onMenuOpen,
+  menuOpen = false,
 }: {
   userSlot?: React.ReactNode;
   onMenuOpen?: () => void;
+  menuOpen?: boolean;
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
       <div className="flex items-center gap-3">
-        {/* Hamburger — only rendered on small screens */}
+        {/* Hamburger — only rendered on small screens. aria-expanded reflects
+            the actual drawer state (WCAG 4.1.2), driven by AppShell. */}
         <button
           type="button"
           className="md:hidden -ml-2 flex items-center justify-center rounded-md p-2 text-ink-secondary hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
           aria-label="Open navigation"
-          aria-expanded={false}
+          aria-expanded={menuOpen}
           onClick={onMenuOpen}
         >
           <Menu size={20} strokeWidth={2} aria-hidden="true" />
@@ -168,6 +171,7 @@ function MobileDrawer({
       <div
         className="fixed inset-0 z-40 bg-black/40 md:hidden"
         aria-hidden="true"
+        data-testid="drawer-backdrop"
         onClick={onClose}
       />
 
@@ -224,7 +228,11 @@ export function AppShell({ children, userSlot }: AppShellProps) {
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userSlot={userSlot} onMenuOpen={() => setDrawerOpen(true)} />
+        <Topbar
+          userSlot={userSlot}
+          menuOpen={drawerOpen}
+          onMenuOpen={() => setDrawerOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

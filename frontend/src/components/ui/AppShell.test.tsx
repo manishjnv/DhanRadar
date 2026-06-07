@@ -149,16 +149,24 @@ describe('AppShell', () => {
     await user.click(screen.getByRole('button', { name: /open navigation/i }));
     expect(screen.getByRole('dialog', { name: /navigation/i })).toBeInTheDocument();
 
-    // The backdrop div is aria-hidden; click on it should close the drawer.
-    // We simulate this by clicking the hamburger-opened area; since backdrop
-    // is aria-hidden we use the container approach — just test that the drawer
-    // closes after a click on the backdrop element.
-    // Find by the CSS backdrop class indicator via the aria-hidden=true sibling.
-    const backdrop = document
-      .querySelector('[aria-hidden="true"].fixed.inset-0') as HTMLElement | null;
-    if (backdrop) {
-      await user.click(backdrop);
-      expect(screen.queryByRole('dialog', { name: /navigation/i })).not.toBeInTheDocument();
-    }
+    // The backdrop carries an explicit data-testid so this assertion fails
+    // loudly if the element is missing (no silent if-guard).
+    const backdrop = screen.getByTestId('drawer-backdrop');
+    await user.click(backdrop);
+    expect(screen.queryByRole('dialog', { name: /navigation/i })).not.toBeInTheDocument();
+  });
+
+  it('hamburger aria-expanded reflects the drawer open state', async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    const hamburger = screen.getByRole('button', { name: /open navigation/i });
+    expect(hamburger).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(hamburger);
+    expect(hamburger).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+    expect(hamburger).toHaveAttribute('aria-expanded', 'false');
   });
 });
