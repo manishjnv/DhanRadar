@@ -50,7 +50,10 @@ export function useCasStatus(jobId: string | null) {
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return 1500;
-      return data.status === 'done' ? false : 1500;
+      // B46: stop polling on ANY terminal state. 'error' previously fell
+      // through to 1500ms forever, leaving the report page spinning with no
+      // way for the user to learn the job failed.
+      return data.status === 'done' || data.status === 'error' ? false : 1500;
     },
     staleTime: 0,
   });
