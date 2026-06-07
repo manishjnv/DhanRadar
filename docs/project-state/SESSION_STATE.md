@@ -85,9 +85,11 @@ Course-correction: stop the deploy-gate/audit/docs drift; build product + a mini
 slice. See `BLOCKERS.md` → **Build sequence (functionality-first)**. **B29 CODE ADDRESSED
 2026-06-08 (58db876)** — `mf/signals.py` computes NAV-derived momentum/risk signals; a seeded fund
 now scores `on_track` (not `insufficient_data`); live-data populate is the remaining deploy-gate.
-**Next action = B42** (responsive AppShell — mobile-first shell; min test: nav renders at a mobile
-breakpoint). Deploy/governance/billing/security-residual blockers stay PARKED until a pre-deploy
-phase.
+**B42 DONE** — responsive AppShell shipped earlier (`725e3eb`+`588a719`); focus-trap residual
+closed this session (`9fe0a99`), acceptance #1/#2/#3 met, 13 AppShell tests pass. **Next action =
+B43** (onboarding / risk-profile UI — Onboarding is the sole writer of `risk_profile`; min test:
+submit sets `risk_profile`). Deploy/governance/billing/security-residual blockers stay PARKED until
+a pre-deploy phase.
 
 ## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
 
