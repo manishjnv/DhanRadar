@@ -17,10 +17,12 @@ Full contract + open-item-free decision log in PHASE 5M.
 ## Working order reset (2026-06-08) — functionality-first
 
 Course-correction: stop the deploy-gate/audit/docs drift; build product + a minimum test per
-slice. See `BLOCKERS.md` → **Build sequence (functionality-first)**. **Next action = B29** (seed
-real MF NAV + `mf_funds` + agg) so `CAS upload → real labelled report` actually works instead of
-`insufficient_data`. Deploy/governance/billing/security-residual blockers are PARKED until a
-pre-deploy phase.
+slice. See `BLOCKERS.md` → **Build sequence (functionality-first)**. **B29 CODE ADDRESSED
+2026-06-08 (58db876)** — `mf/signals.py` computes NAV-derived momentum/risk signals; a seeded fund
+now scores `on_track` (not `insufficient_data`); live-data populate is the remaining deploy-gate.
+**Next action = B42** (responsive AppShell — mobile-first shell; min test: nav renders at a mobile
+breakpoint). Deploy/governance/billing/security-residual blockers stay PARKED until a pre-deploy
+phase.
 
 ## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
 
