@@ -28,10 +28,17 @@ from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
 from dhanradar.notifications.router import router as notifications_router
+from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
 from dhanradar.scoring.engine.router import router as internal_scoring_router
 from dhanradar.subscriptions.router import router as subscriptions_router
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry (B38). Called ONCE at module load, before app = FastAPI().
+# No-op when SENTRY_DSN is unset (the default); activates when DSN is configured.
+# ---------------------------------------------------------------------------
+init_sentry()
 
 
 @asynccontextmanager
@@ -69,9 +76,24 @@ app = FastAPI(
 # StarletteHTTPException covers FastAPI's HTTPException (a subclass).
 # ---------------------------------------------------------------------------
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PrometheusMiddleware)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# ---------------------------------------------------------------------------
+# Metrics scrape endpoint — intentionally OUTSIDE /api/v1.
+# The Cloudflare tunnel ingress routes only ^/api/.* to FastAPI, so /metrics
+# is NOT reachable through the public tunnel. It is scraped server-to-server
+# on the Docker network by the prometheus container. include_in_schema=False
+# keeps it out of the OpenAPI docs. (B38)
+# ---------------------------------------------------------------------------
+app.add_api_route(
+    "/metrics",
+    metrics_endpoint,
+    methods=["GET"],
+    include_in_schema=False,
+)
 
 # ---------------------------------------------------------------------------
 # Routers
