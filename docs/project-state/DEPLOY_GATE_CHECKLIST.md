@@ -22,7 +22,7 @@ Owner tags: **[CC]** Claude Code can build/drive · **[human]** needs a person/d
 
 - [ ] **B36** deploy automation + rollback runbook + tested `alembic upgrade/downgrade` **[CC builds · infra runs]**
 - [ ] **B37** DB backup/PITR + Redis AOF backup → **India-resident** storage (protects the 7-yr SEBI trail) **[CC builds · infra]**
-- [ ] **B38** monitoring: call `sentry_sdk.init` + add `/metrics` + alerting **[CC]**
+- [x] **B38** monitoring CODE DONE (`efc6556`): `init_sentry()` (DPDP-safe scrubber, adversarial-reviewed) + Prometheus `/metrics` (bounded labels, network-isolated). Residual: alert rules + Prometheus scrape config **[infra]**
 
 ## Gate 2 — CI / gate reliability
 
