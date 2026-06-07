@@ -35,6 +35,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0024 | DPDP cross-border consent: per-processor purposes + fail-closed non-route gate (B20/B31) | Accepted |
 | ADR-0025 | AMFI historical NAV report as the canonical backfill source for MF return signals (B29) | Accepted |
 | ADR-0026 | Scoring-engine activation: admin-triggered, DB-registry-authoritative two-person + backtest gate (B6/B28) | Accepted |
+| ADR-0027 | First AI-gateway consumer = MF report portfolio commentary; complete() returns CompletionResult(output, model_used) | Accepted |
 
 ---
 
@@ -462,3 +463,32 @@ integration tests; ci_guards green.
 
 **Source:** `BLOCKERS.md` B6/B28; `AI_GOVERNANCE_MODEL.md` §7.2; `FINAL_SCORING_SPEC.md` §8;
 `docs/project-state/reviews/b6-b28-scoring-activation.md`.
+
+## ADR-0027 — First AI-gateway consumer = MF report portfolio commentary; complete() returns CompletionResult(output, model_used)
+
+**Date:** 2026-06-07 · **Status:** Accepted
+
+**Context:** The governed OpenRouter gateway was built but had zero consumers; `complete()` returned
+the bare `AIOutputBase` schema with no way to surface the winning model (B21). The first consumer
+had to wire all four AI gates — B20 (DPDP cross-border consent), B21 (`model_used` audit), B22
+(confidence floor), B23 (advisory screen) — plus the B26 third audit seam.
+
+**Decision:** (a) The first consumer is MF report portfolio-level commentary
+(`dhanradar/mf/commentary.py`, called from `tasks/mf.py::_run_pipeline` after scoring, before
+report assembly). Mood Compass was the alternative but is anonymous — it cannot exercise B20's
+`assert_consent("cross_border_ai")` (no user/PII) — and is inert in prod (signals stubbed). MF is
+the launch wedge, live, carries real per-user PII, and is the only surface that genuinely wires all
+four gates. Granularity is one portfolio-level LLM call per report (bounded budget); commentary is
+non-blocking and omitted on any refusal/failure (architecture §MF line 257). (b) `complete()` now
+returns a frozen `CompletionResult(output, model_used)` dataclass instead of the bare `AIOutputBase`,
+so callers can record `model_used` into `ai_recommendation_audit` (B21). No production consumers
+existed, so the blast radius was gateway tests only.
+
+**Consequences:** B20/B21/B22 call sites wired and B26 third audit seam opened
+(`surface=mf_report_ai`). B23 gains a second defense-in-depth net but its taxonomy stays open.
+Commentary is SEBI-disclaimer-postfixed. Mood Compass is the trivial fast-follow
+(`contains_personal_data=False`). In prod, commentary refuses until `cross_border_ai` consent
+capture lands — the correct fail-closed behaviour.
+
+**Source:** `docs/project-state/reviews/ai-consumer-mf-commentary.md`; `BLOCKERS.md`
+B20/B21/B22/B23/B26; `docs/DhanRadar_Architecture_Final.md` §MF line 257.

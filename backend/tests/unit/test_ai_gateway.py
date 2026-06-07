@@ -117,7 +117,7 @@ async def test_429_rotates_to_next_model_no_sleep(patch_redis):
     client = _Client({"free_a": _rate_limit(), "free_b": _Resp(_valid())})
     gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
     out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
-    assert isinstance(out, _StockOut)
+    assert isinstance(out.output, _StockOut)
     assert client.chat.completions.calls == ["free_a", "free_b"]  # rotated, no sleep
 
 
@@ -136,7 +136,8 @@ async def test_schema_fail_stock_pick_spills_to_sonnet(patch_redis):
         client=client, free_models=["free_a"], sonnet_model="sonnet"
     )
     out = await gw.complete(task_type="stock_pick", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
-    assert isinstance(out, _StockOut)
+    assert isinstance(out.output, _StockOut)
+    assert out.model_used == "sonnet"
     assert client.chat.completions.calls == ["free_a", "sonnet"]
     # premium budget debited by the Sonnet spend
     premium = await patch_redis.get("ai:budget:premium:today")
@@ -183,7 +184,7 @@ async def test_descriptive_holding_is_not_a_false_positive(patch_redis):
     client = _Client({"free_a": _Resp(_valid(thesis="largest holding is a quality buyer brand"))})
     gw = OpenRouterGateway(client=client, free_models=["free_a"])
     out = await gw.complete(task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False)
-    assert out.thesis.startswith("largest holding")
+    assert out.output.thesis.startswith("largest holding")
 
 
 @pytest.mark.parametrize(
@@ -268,7 +269,8 @@ async def test_personal_data_with_verified_consent_proceeds(patch_redis):
         contains_personal_data=True,
         cross_border_consent_verified=True,
     )
-    assert isinstance(out, _StockOut)
+    assert isinstance(out.output, _StockOut)
+    assert out.model_used == "free_a"
     assert client.chat.completions.calls == ["free_a"]
 
 
@@ -279,4 +281,34 @@ async def test_default_is_fail_closed_for_personal_data(patch_redis):
     gw = OpenRouterGateway(client=client, free_models=["free_a"], redis=patch_redis)
     with pytest.raises(ConsentNotVerifiedError):
         await gw.complete(task_type="mf_pick", messages=_MSGS, schema=_StockOut)
+
+
+# ---------------------------------------------------------------------------
+# B21 — CompletionResult.model_used provenance
+# ---------------------------------------------------------------------------
+
+
+async def test_complete_returns_winning_free_model_used(patch_redis):
+    """When free_a is rate-limited and free_b succeeds, model_used == 'free_b' (B21)."""
+    client = _Client({"free_a": _rate_limit(), "free_b": _Resp(_valid())})
+    gw = OpenRouterGateway(
+        client=client, free_models=["free_a", "free_b"], redis=patch_redis
+    )
+    out = await gw.complete(
+        task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert out.model_used == "free_b"
+    assert isinstance(out.output, _StockOut)
+
+
+async def test_spillover_sets_sonnet_model_used(patch_redis):
+    """When the free pool fails validation and Sonnet spills over, model_used == 'sonnet' (B21)."""
+    client = _Client({"free_a": _Resp(_schema_invalid()), "sonnet": _Resp(_valid(), total=500)})
+    gw = OpenRouterGateway(
+        client=client, free_models=["free_a"], sonnet_model="sonnet", redis=patch_redis
+    )
+    out = await gw.complete(
+        task_type="stock_pick", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert out.model_used == "sonnet"
 

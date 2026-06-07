@@ -58,6 +58,14 @@ class _LLMResult:
     total_tokens: int
 
 
+@dataclass(frozen=True)
+class CompletionResult:
+    """The validated AI output plus provenance of the winning model (B21). The
+    caller records `model_used` into ai_recommendation_audit at the serve seam."""
+    output: AIOutputBase
+    model_used: str
+
+
 def _parse_csv(value: str) -> list[str]:
     return [v.strip() for v in value.split(",") if v.strip()]
 
@@ -99,8 +107,8 @@ class OpenRouterGateway:
         ticker: Optional[str] = None,
         contains_personal_data: bool = True,
         cross_border_consent_verified: bool = False,
-    ) -> AIOutputBase:
-        """Return a validated AIOutputBase for ``task_type`` or raise.
+    ) -> CompletionResult:
+        """Return a validated ``CompletionResult`` for ``task_type`` or raise.
 
         Args:
             task_type: Routing key used to select the model pool.
@@ -120,6 +128,11 @@ class OpenRouterGateway:
                 calling ``assert_consent(user_id, "cross_border_ai", db)``
                 (deps.py) before invoking the gateway; the gateway is
                 module-isolated and cannot read consent itself.
+
+        Returns:
+            ``CompletionResult`` with the validated output and the name of the
+            model that produced it (``model_used``), for recording into
+            ``ai_recommendation_audit`` at the serve seam (B21).
 
         Raises:
             ConsentNotVerifiedError: if ``contains_personal_data=True`` and
@@ -173,7 +186,7 @@ class OpenRouterGateway:
                 except QualityValidationError as qe:
                     last_quality_error = qe
                     continue  # quality fail → try the next free model
-                return result
+                return CompletionResult(output=result, model_used=model)
 
         # --- Escalation: free pool produced no valid output ---------------
         if last_quality_error is not None and task_type in self._high_stakes:
@@ -238,7 +251,7 @@ class OpenRouterGateway:
 
     async def _spillover_to_sonnet(
         self, messages: list[dict[str, str]], validator: QualityValidator
-    ) -> AIOutputBase:
+    ) -> CompletionResult:
         """Premium Sonnet spillover. Records the (charged) cost even if the
         response then fails validation — Sonnet bills on response, so the budget
         is debited as soon as we get one; validation runs AFTER the budgeted
@@ -253,7 +266,10 @@ class OpenRouterGateway:
                     ) from exc
                 raise
             meter.cost_usd = (res.total_tokens / 1_000_000) * _SONNET_USD_PER_1M_TOKENS
-        return validator.validate(res.data)  # raises QualityValidationError if Sonnet also fails
+        return CompletionResult(
+            output=validator.validate(res.data),  # raises QualityValidationError if Sonnet also fails
+            model_used=self._sonnet_model,
+        )
 
     async def _record_strike(self, task_type: str, ticker: Optional[str]) -> int:
         """Increment and return the 3-strike-per-(ticker, day) counter."""

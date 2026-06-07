@@ -25,11 +25,12 @@ from dhanradar.ai_gateway.errors import (
     QualityValidationError,
     ThreeStrikeSkipError,
 )
-from dhanradar.ai_gateway.gateway import OpenRouterGateway
+from dhanradar.ai_gateway.gateway import CompletionResult, OpenRouterGateway
 from dhanradar.ai_gateway.quality import QualityValidator
 from dhanradar.ai_gateway.schemas import AI_DISCLAIMER, AIOutputBase, ConfidenceBand
 
 __all__ = [
+    "CompletionResult",
     "OpenRouterGateway",
     "AIOutputBase",
     "ConfidenceBand",
