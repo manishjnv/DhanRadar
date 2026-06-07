@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
@@ -22,10 +23,24 @@ router = APIRouter(prefix="/market", tags=["mood-compass"])
 
 @router.get("/mood", response_model=MoodPublic)
 async def market_mood(db: Annotated[AsyncSession, Depends(get_db)]) -> MoodPublic:
+    """Return the latest market mood snapshot.
+
+    Always returns 200; when no snapshot exists, returns regime='data_unavailable'
+    instead of 404 so the public widget never shows an error state (GAP c).
+    """
     latest = await service.get_latest(db)
-    if latest is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mood_unavailable")
-    return latest
+    return latest or service.unavailable_public()
+
+
+@router.get("/mood/embed")
+async def market_mood_embed(db: Annotated[AsyncSession, Depends(get_db)]) -> Response:
+    """Return a self-contained embeddable HTML widget for the Mood Compass (GAP b).
+
+    The widget is inline-styled (no external JS/CSS), suitable for iframes or
+    direct embedding.  It contains no numeric mood_score or confidence_score.
+    """
+    html = await service.get_embed_html(db)
+    return Response(content=html, media_type="text/html")
 
 
 @router.get("/mood/history", response_model=list[MoodHistoryItem])

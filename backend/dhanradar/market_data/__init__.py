@@ -17,10 +17,12 @@ from dhanradar.market_data.config import DataKind, DataRequest, load_ladders
 from dhanradar.market_data.events import (
     EVENT_AA_HOLDINGS_RECEIVED,
     EVENT_BROKER_POSITIONS_RECEIVED,
+    EVENT_MACRO_SIGNAL_RECEIVED,
     EVENT_MFCENTRAL_HOLDINGS_RECEIVED,
     EVENT_NAV_REFRESHED,
     EVENT_PRICE_REFRESHED,
     HoldingsReceived,
+    MacroSignalReceived,
     NavRefreshed,
     PriceRefreshed,
 )
@@ -38,11 +40,13 @@ __all__ = [
     "NavRefreshed",
     "PriceRefreshed",
     "HoldingsReceived",
+    "MacroSignalReceived",
     "EVENT_MFCENTRAL_HOLDINGS_RECEIVED",
     "EVENT_AA_HOLDINGS_RECEIVED",
     "EVENT_BROKER_POSITIONS_RECEIVED",
     "EVENT_NAV_REFRESHED",
     "EVENT_PRICE_REFRESHED",
+    "EVENT_MACRO_SIGNAL_RECEIVED",
     # Exceptions
     "ProviderError",
     "AllProvidersFailedError",

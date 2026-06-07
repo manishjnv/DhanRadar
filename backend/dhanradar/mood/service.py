@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import date, datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
@@ -31,8 +32,32 @@ logger = logging.getLogger(__name__)
 
 _LATEST_KEY = "mood:latest"
 _WHY_KEY = "mood:why-today"
+_EMBED_KEY = "mood:embed"
 _TTL_12H = 12 * 3600
 MODEL_VERSION = "mood_v1"
+
+# ---------------------------------------------------------------------------
+# Human-readable factor labels (GAP d)
+# ---------------------------------------------------------------------------
+
+_FACTOR_LABELS: dict[str, str] = {
+    "nifty_trend": "Nifty Trend",
+    "market_breadth": "Market Breadth",
+    "india_vix": "India VIX",
+    "fii_flows": "FII Flows",
+    "global_indices": "Global Indices",
+    "dii_flows": "DII Flows",
+    "us_bond_10y": "US 10Y Yield",
+    "oil_brent": "Brent Crude",
+    "usd_inr": "USD/INR",
+    "put_call_ratio": "Put-Call Ratio",
+    "news_sentiment": "News Sentiment",
+}
+
+
+def _labelize(keys: list[str]) -> list[str]:
+    """Map raw signal keys to human-readable labels; unknown keys pass through unchanged."""
+    return [_FACTOR_LABELS.get(k, k) for k in keys]
 
 # Defense-in-depth advisory screen over the FREE-TEXT commentary before publish — no
 # advisory verb may reach a public surface (non-neg #1). This is the CORE set; the
@@ -42,7 +67,7 @@ _ADVISORY_RE = re.compile(
 )
 
 
-def default_fetch_inputs() -> dict[str, Optional[float]]:
+def default_fetch_inputs() -> dict[str, float | None]:
     """Stubbed ingestion — all inputs missing until the Market Data Adapter providers
     are wired (deferred). Returns the 11 keys mapped to None."""
     return {k: None for k in WEIGHTS}
@@ -52,9 +77,9 @@ async def compute_and_store(
     *,
     snapshot_date: date,
     snapshot_time: datetime,
-    fetch: Callable[[], dict[str, Optional[float]]] = default_fetch_inputs,
-    generate_commentary: Optional[Callable[[MoodResult], Optional[str]]] = None,
-) -> Optional[MoodResult]:
+    fetch: Callable[[], dict[str, float | None]] = default_fetch_inputs,
+    generate_commentary: Callable[[MoodResult], str | None] | None = None,
+) -> MoodResult | None:
     """Run one snapshot. Returns the MoodResult, or None if ALL inputs are missing
     (caller skips + retries)."""
     result = compute_mood(fetch())
@@ -80,7 +105,7 @@ async def compute_and_store(
     return result
 
 
-async def _persist(result: MoodResult, snapshot_date: date, snapshot_time: datetime, commentary: Optional[str]) -> None:
+async def _persist(result: MoodResult, snapshot_date: date, snapshot_time: datetime, commentary: str | None) -> None:
     from sqlalchemy.dialects.postgresql import insert
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -106,14 +131,14 @@ async def _persist(result: MoodResult, snapshot_date: date, snapshot_time: datet
         await db.commit()
 
 
-def _public_dict(result: MoodResult, snapshot_date: date, commentary: Optional[str]) -> dict:
+def _public_dict(result: MoodResult, snapshot_date: date, commentary: str | None) -> dict:
     return {
         "snapshot_date": snapshot_date.isoformat(),
         "regime": result.regime,
         "confidence_band": result.confidence_band,
         "data_quality": result.data_quality,
-        "contributing_factors": result.contributing_factors,
-        "contradicting_factors": result.contradicting_factors,
+        "contributing_factors": _labelize(list(result.contributing_factors)),
+        "contradicting_factors": _labelize(list(result.contradicting_factors)),
         "commentary": commentary,
         "disclosure": DISCLOSURE_BUNDLE,
         "not_advice": NOT_ADVICE,
@@ -121,7 +146,7 @@ def _public_dict(result: MoodResult, snapshot_date: date, commentary: Optional[s
     }
 
 
-async def _cache_latest(result: MoodResult, snapshot_date: date, commentary: Optional[str]) -> None:
+async def _cache_latest(result: MoodResult, snapshot_date: date, commentary: str | None) -> None:
     from dhanradar.redis_client import get_redis
 
     try:
@@ -167,7 +192,61 @@ async def emit_published(result: MoodResult, snapshot_date: date) -> None:
 # Public reads (anon).
 # ---------------------------------------------------------------------------
 
-async def get_latest(db: Any) -> Optional[MoodPublic]:
+def unavailable_public() -> MoodPublic:
+    """Return a structured MoodPublic for when no snapshot exists (GAP c).
+
+    Returns regime='data_unavailable' instead of raising 404 so the GET /mood
+    endpoint always returns 200 with the disclosure bundle.
+    """
+    return MoodPublic(
+        snapshot_date="",
+        regime="data_unavailable",
+        confidence_band="insufficient_data",
+        data_quality="unavailable",
+        contributing_factors=[],
+        contradicting_factors=[],
+        commentary=None,
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+        disclaimer_version=DISCLAIMER_VERSION,
+        trend=None,
+    )
+
+
+async def _compute_trend(db: Any) -> str | None:
+    """Derive a non-numeric trend label from the two most recent snapshots (GAP g / ADR-0023).
+
+    Reads server-side mood_score from the two most recent MarketMood rows.
+    Returns 'improving' (diff > +2.0), 'deteriorating' (diff < -2.0),
+    'stable' (|diff| ≤ 2.0), or None when fewer than 2 rows exist.
+    The numeric diff is never exposed — only the label is returned.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.mood import MarketMood
+
+    rows = (
+        await db.scalars(
+            select(MarketMood).order_by(MarketMood.snapshot_date.desc()).limit(2)
+        )
+    ).all()
+
+    if len(rows) < 2:
+        return None
+
+    latest_score = float(rows[0].mood_score or 0)
+    prior_score = float(rows[1].mood_score or 0)
+    diff = latest_score - prior_score
+
+    if diff > 2.0:
+        return "improving"
+    if diff < -2.0:
+        return "deteriorating"
+    return "stable"
+
+
+async def get_latest(db: Any) -> MoodPublic | None:
+    """Return the most recent MoodPublic snapshot, or None if no snapshot exists."""
     from sqlalchemy import select
 
     from dhanradar.models.mood import MarketMood
@@ -175,13 +254,15 @@ async def get_latest(db: Any) -> Optional[MoodPublic]:
     row = await db.scalar(select(MarketMood).order_by(MarketMood.snapshot_date.desc()))
     if row is None:
         return None
+    trend = await _compute_trend(db)
     return MoodPublic(
         snapshot_date=row.snapshot_date.isoformat(), regime=row.regime,
         confidence_band=row.confidence_band, data_quality=row.data_quality,
-        contributing_factors=list(row.contributing_factors or []),
-        contradicting_factors=list(row.contradicting_factors or []),
+        contributing_factors=_labelize(list(row.contributing_factors or [])),
+        contradicting_factors=_labelize(list(row.contradicting_factors or [])),
         commentary=row.ai_commentary, disclosure=DISCLOSURE_BUNDLE,
         not_advice=NOT_ADVICE, disclaimer_version=DISCLAIMER_VERSION,
+        trend=trend,
     )
 
 
@@ -199,7 +280,8 @@ async def get_history(db: Any, days: int) -> list[MoodHistoryItem]:
     return [MoodHistoryItem(snapshot_date=r.snapshot_date.isoformat(), regime=r.regime) for r in rows]
 
 
-async def get_why_today(db: Any) -> Optional[WhyToday]:
+async def get_why_today(db: Any) -> WhyToday | None:
+    """Return the WhyToday breakdown with human-readable factor labels."""
     from sqlalchemy import select
 
     from dhanradar.models.mood import MarketMood
@@ -210,8 +292,89 @@ async def get_why_today(db: Any) -> Optional[WhyToday]:
     return WhyToday(
         snapshot_date=row.snapshot_date.isoformat(), regime=row.regime,
         commentary=row.ai_commentary,
-        contributing_factors=list(row.contributing_factors or []),
-        contradicting_factors=list(row.contradicting_factors or []),
+        contributing_factors=_labelize(list(row.contributing_factors or [])),
+        contradicting_factors=_labelize(list(row.contradicting_factors or [])),
         disclosure=DISCLOSURE_BUNDLE, not_advice=NOT_ADVICE,
         disclaimer_version=DISCLAIMER_VERSION,
     )
+
+
+async def get_embed_html(db: Any) -> str:
+    """Return a self-contained embeddable widget HTML for the Mood Compass (GAP b).
+
+    Read-through Redis cache (key 'mood:embed', TTL 12h).  The HTML is
+    inline-styled, contains no external JS/CSS, and MUST NOT expose any
+    numeric mood_score or confidence_score (non-neg #2).  Shows the humanized
+    regime, confidence band, trend, and the full disclosure bundle + NOT_ADVICE.
+    """
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+    try:
+        cached = await redis.get(_EMBED_KEY)
+        if cached:
+            return cached if isinstance(cached, str) else cached.decode()
+    except Exception:  # noqa: BLE001 — cache miss is fine
+        pass
+
+    latest = await get_latest(db)
+    pub = latest or unavailable_public()
+    trend = pub.trend
+
+    regime_display = pub.regime.replace("_", " ").title()
+    band_display = pub.confidence_band.replace("_", " ").title()
+    trend_display = trend.replace("_", " ").title() if trend else ""
+
+    contrib_html = ""
+    if pub.contributing_factors:
+        items = "".join(f"<li>{f}</li>" for f in pub.contributing_factors)
+        contrib_html = f"<p style='margin:6px 0 2px;font-weight:600;font-size:12px;'>Supporting signals:</p><ul style='margin:0;padding-left:18px;font-size:12px;'>{items}</ul>"
+
+    contra_html = ""
+    if pub.contradicting_factors:
+        items = "".join(f"<li>{f}</li>" for f in pub.contradicting_factors)
+        contra_html = f"<p style='margin:6px 0 2px;font-weight:600;font-size:12px;'>Contradicting signals:</p><ul style='margin:0;padding-left:18px;font-size:12px;'>{items}</ul>"
+
+    trend_html = (
+        f"<p style='margin:4px 0;font-size:13px;'>Trend: <strong>{trend_display}</strong></p>"
+        if trend_display else ""
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DhanRadar Market Mood</title>
+</head>
+<body style="margin:0;padding:0;background:transparent;">
+<article
+  role="region"
+  aria-label="DhanRadar Market Mood Compass"
+  style="font-family:system-ui,sans-serif;max-width:340px;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.07);"
+>
+  <header>
+    <h2 style="margin:0 0 4px;font-size:15px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">
+      Market Mood
+    </h2>
+    <p style="margin:0 0 8px;font-size:22px;font-weight:700;color:#1e293b;">{regime_display}</p>
+  </header>
+  <p style="margin:4px 0;font-size:13px;">Confidence: <strong>{band_display}</strong></p>
+  {trend_html}
+  {contrib_html}
+  {contra_html}
+  <footer style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;">
+    <p style="margin:0 0 4px;font-size:11px;color:#94a3b8;font-weight:700;">{pub.not_advice}</p>
+    <p style="margin:0 0 4px;font-size:10px;color:#94a3b8;">{pub.disclosure}</p>
+    <p style="margin:0;font-size:10px;color:#cbd5e1;">Disclaimer version: {pub.disclaimer_version} &middot; <a href="https://dhanradar.com" style="color:#94a3b8;">DhanRadar</a></p>
+  </footer>
+</article>
+</body>
+</html>"""
+
+    try:
+        await redis.set(_EMBED_KEY, html, ex=_TTL_12H)
+    except Exception:  # noqa: BLE001 — cache write is best-effort
+        pass
+
+    return html

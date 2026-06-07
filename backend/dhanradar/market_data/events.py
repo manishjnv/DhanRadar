@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Canonical event name constants
 # ---------------------------------------------------------------------------
@@ -21,6 +20,7 @@ EVENT_AA_HOLDINGS_RECEIVED = "aa.holdings.received"
 EVENT_BROKER_POSITIONS_RECEIVED = "broker.positions.received"
 EVENT_NAV_REFRESHED = "nav.refreshed"
 EVENT_PRICE_REFRESHED = "price.refreshed"
+EVENT_MACRO_SIGNAL_RECEIVED = "macro.signal.received"
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,26 @@ class PriceRefreshed:
     source: str
 
     event_name: str = EVENT_PRICE_REFRESHED
+
+    @property
+    def name(self) -> str:
+        return self.event_name
+
+
+@dataclass(frozen=True)
+class MacroSignalReceived:
+    """Best-effort macro signals for the Mood Compass (from nse_macro provider).
+
+    ``signals`` carries raw or lightly-processed values for the subset of
+    signals the provider managed to fetch; absent signals are omitted (None
+    means the key is not present, not that it was normalised to 0).
+    Consumer (mood/signals.py) normalises each value to [0,1] independently.
+    """
+
+    source: str
+    signals: dict  # e.g. {"nifty_trend": 0.42, "india_vix": 15.3, ...}
+    fetched_at: str  # ISO-8601 timestamp string
+    event_name: str = EVENT_MACRO_SIGNAL_RECEIVED
 
     @property
     def name(self) -> str:
