@@ -132,7 +132,18 @@ class RatingEngineChangelog(Base):
     gate (slice 2) via ``compliance.service.record_engine_changelog``."""
 
     __tablename__ = "rating_engine_changelog"
-    __table_args__ = _SCHEMA
+    # Partial-unique: at most one ACTIVATED row per model_version (the single
+    # activation-record-per-version invariant, enforced atomically; migration 0009).
+    # Many activated=false rows per version are allowed (proposed methodology changes).
+    __table_args__ = (
+        Index(
+            "uq_engine_changelog_activated_per_version",
+            "model_version",
+            unique=True,
+            postgresql_where=text("activated"),
+        ),
+        _SCHEMA,
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")

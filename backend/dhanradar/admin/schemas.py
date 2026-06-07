@@ -39,3 +39,31 @@ class LabelChurnResponse(BaseModel):
     requires_human_review: bool
     distribution_violations: list[str]
     reason: str
+
+
+# ---------------------------------------------------------------------------
+# B6/B28 — two-person scoring-engine activation gate schemas
+# ---------------------------------------------------------------------------
+
+
+class ActivateModelRequest(BaseModel):
+    backtest_passed: bool = False
+    methodology_url: str | None = None
+
+
+class ActivateModelResponse(BaseModel):
+    model_version: str
+    created_by: str
+    approved_by: str | None
+    two_person_ok: bool
+    activated: bool
+    activated_at: str | None
+    methodology_url: str | None
+
+
+class ModelActivationStatusResponse(BaseModel):
+    model_version: str
+    file_activated: bool
+    registry_activated: bool
+    effective_activated: bool
+    provisional: bool

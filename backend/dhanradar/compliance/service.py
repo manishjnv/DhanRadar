@@ -466,6 +466,28 @@ async def log_low_confidence(
         return False
 
 
+async def is_engine_version_activated(db: Any, model_version: str) -> bool:
+    """The rating_engine_changelog registry is the authoritative runtime activation
+    state for a scoring model_version (B6/B28).
+
+    Returns True iff a RatingEngineChangelog row exists with the given model_version
+    AND activated is True.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import RatingEngineChangelog
+
+    result = await db.scalar(
+        select(RatingEngineChangelog.id)
+        .where(
+            RatingEngineChangelog.model_version == model_version,
+            RatingEngineChangelog.activated.is_(True),
+        )
+        .limit(1)
+    )
+    return result is not None
+
+
 async def record_engine_changelog(
     db: Any,
     *,

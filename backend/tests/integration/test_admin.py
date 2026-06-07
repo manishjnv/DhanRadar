@@ -38,6 +38,20 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)
+def _clear_activation_cache():
+    """The scoring activation registry uses a process-global positive memo
+    (`activation._activated_cache`). The DB is truncated between tests but that set
+    is not — clear it before each test so no activated-version state leaks across
+    tests (removes order-dependence; production activation is monotonic so the memo
+    is correct there)."""
+    from dhanradar.scoring.engine import activation
+
+    activation._activated_cache.clear()
+    yield
+    activation._activated_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 async def _truncate_admin(db_session):
     """Truncate compliance tables after each test — same-connection pattern as
     test_compliance._truncate_compliance to avoid cross-connection lock deadlocks."""
@@ -366,3 +380,193 @@ async def test_label_churn_invalid_type_400(async_client, monkeypatch, patch_red
     )
     assert r.status_code == 400, r.text
     assert "invalid_recommendation_type" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# B6/B28 — scoring activation gate integration tests
+# ---------------------------------------------------------------------------
+
+
+async def test_scoring_activate_404_for_non_admin(async_client, monkeypatch):
+    """Empty allowlist: authenticated non-admin → 404 (surface-hiding)."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", "")
+
+    user_id, access = await _signup(async_client, "activate_nonadmin@example.com")
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v1/activate",
+        json={"backtest_passed": False},
+        headers=headers,
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_scoring_activate_backtest_not_passed_422(
+    async_client, db_session, monkeypatch
+):
+    """Admin posting backtest_passed=false → 422 backtest_not_passed."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "activate_nobacktest@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v1/activate",
+        json={"backtest_passed": False},
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "backtest_not_passed"
+
+
+async def test_scoring_activate_happy_path(
+    async_client, db_session, monkeypatch
+):
+    """Admin activates v1 with backtest_passed=true → 200 with full registry row;
+    subsequent GET /status shows registry_activated=True, provisional=False."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+    from dhanradar.scoring.engine import activation as _activation
+
+    _activation._activated_cache.clear()
+
+    user_id, access = await _signup(async_client, "activate_happy@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v1/activate",
+        json={"backtest_passed": True},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["activated"] is True
+    assert body["two_person_ok"] is True
+    assert body["approved_by"] == user_id
+    assert body["created_by"] == "architecture-review"
+    assert body["model_version"] == "v1"
+
+    # Clear memo so status check goes to DB.
+    _activation._activated_cache.clear()
+
+    r = await async_client.get(
+        "/api/v1/admin/scoring/v1/status",
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    status_body = r.json()
+    assert status_body["registry_activated"] is True
+    assert status_body["effective_activated"] is True
+    assert status_body["provisional"] is False
+
+
+async def test_scoring_activate_unknown_version_404(
+    async_client, monkeypatch
+):
+    """POSTing an unknown model_version → 404 model_version_not_found."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "activate_badver@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v9/activate",
+        json={"backtest_passed": True},
+        headers=headers,
+    )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "model_version_not_found"
+
+
+async def test_scoring_activate_double_activation_409(
+    async_client, db_session, monkeypatch
+):
+    """Activating the same model_version twice → second request returns 409
+    model_already_activated."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+    from dhanradar.scoring.engine import activation as _activation
+
+    _activation._activated_cache.clear()
+
+    user_id, access = await _signup(async_client, "activate_double@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    monkeypatch.setattr(_db_mod, "engine", db_session.bind)
+    headers = make_auth_headers(access_token=access)
+
+    # First activation — must succeed.
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v1/activate",
+        json={"backtest_passed": True},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+    # Clear memo so second attempt hits the DB guard (not the local cache).
+    _activation._activated_cache.clear()
+
+    # Second activation — must return 409.
+    r = await async_client.post(
+        "/api/v1/admin/scoring/v1/activate",
+        json={"backtest_passed": True},
+        headers=headers,
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "model_already_activated"
+
+
+async def test_two_activated_changelog_rows_rejected_by_index(db_session):
+    """`uq_engine_changelog_activated_per_version` must reject a second activated=true
+    row for the same model_version (the race-safe single-activation-record backstop)."""
+    import sqlalchemy.exc
+
+    from dhanradar.models.compliance import RatingEngineChangelog
+
+    db_session.add(
+        RatingEngineChangelog(
+            model_version="v1", created_by="architecture-review",
+            approved_by="admin-a", two_person_ok=True, activated=True,
+        )
+    )
+    await db_session.commit()
+
+    db_session.add(
+        RatingEngineChangelog(
+            model_version="v1", created_by="architecture-review",
+            approved_by="admin-b", two_person_ok=True, activated=True,
+        )
+    )
+    with pytest.raises(sqlalchemy.exc.IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+async def test_scoring_status_provisional_before_activation(
+    async_client, db_session, monkeypatch
+):
+    """Before any registry activation, status must show registry_activated=False and
+    provisional=True (the gate, not the file flag, governs `provisional`)."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "status_provisional@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.get("/api/v1/admin/scoring/v1/status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["registry_activated"] is False
+    assert body["file_activated"] is False  # ranking_configs_v1.json has activated:false
+    assert body["provisional"] is True
