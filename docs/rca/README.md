@@ -15,6 +15,31 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-07 — Duplicate alembic revision `0008` silently broke `alembic upgrade head` (B36)
+
+- **Symptom:** `alembic heads` warned `Revision 0008 is present more than once` and `alembic history`
+  errored `FAILED: Requested revision 0009 overlaps with other requested revisions 0008`. A real
+  deploy would have had no resolvable single head — `alembic upgrade head` is ambiguous/unrunnable.
+  Caught while building the B36 deploy runbook, not in the field (the stack has never been deployed).
+- **Root cause:** two migrations both declared `revision = "0008"` with `down_revision = "0007"` —
+  `0008_admin_compliance_tables.py` and `0008_mf_nav_monthly_agg.py` (B29, landed in a separate
+  slice). `0009` then set `down_revision = "0008"`, which no longer named a unique parent. The two
+  0008s were authored in different sessions/PRs that each picked the next integer independently;
+  nothing rejected the collision because the local test DB builds tables from ORM metadata
+  (`create_all`), never runs the migration chain (B40), so CI never exercised `upgrade head`.
+- **Fix:** linearized the chain — renumbered the independent mf_nav migration to `revision = "0008a"`,
+  `down_revision = "0008"` (file renamed `0008a_mf_nav_monthly_agg.py`), and repointed
+  `0009_engine_activation_unique.py` `down_revision` to `"0008a"`. Order is safe: 0009's real
+  dependency (`compliance.rating_engine_changelog`, created in admin 0008) stays upstream; mf_nav is
+  an independent `mf` schema continuous aggregate. Verified `alembic heads` → single `0009` and
+  `alembic history` resolves linearly. No production DB was stamped (pre-launch), so renumbering is
+  free. (`7035400`)
+- **Prevention:** B40 will run `alembic upgrade head` against the real TimescaleDB image in CI — that
+  turns this exact failure (duplicate/branched revision) into a red CI check instead of a deploy-time
+  surprise. Rule for authors: when adding a migration, run `alembic heads` and confirm a **single**
+  head before committing; never reuse an integer another in-flight branch may have taken.
+- **Phase/area:** Alembic migration chain (load-bearing) / B36 deploy gate.
+
 ### 2026-06-07 — Integration test awaited a SYNC `AsyncSession.expire_all()` — passed local collect, failed first CI run (B26-admin)
 
 - **Symptom:** the B26-admin PR (#22) backend CI job failed: `test_create_then_activate_disclaimer`
