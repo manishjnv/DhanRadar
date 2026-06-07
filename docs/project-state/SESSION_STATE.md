@@ -5,6 +5,23 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## Session handoff (2026-06-08, end of B44+B42 session)
+
+- **Pushed:** branch `hardening/launch-gate-blockers` → origin at `2a56aad` (all commits noreply).
+- **Merge — BLOCKED:** PR #28 is **draft** and **`mergeable: CONFLICTING`** (DIRTY) against `main`,
+  no review approval. Next session must **resolve the merge conflicts with main**, mark the PR
+  ready, and clear required checks before any merge. `main` is protected (PR-only).
+- **Deploy — BLOCKED (do NOT deploy):** binding deploy gates still open — **B48** (DPDP consent
+  enforcement is disabled in dev; must be re-enforced via `ENV=production` / `DPDP_CONSENT_ENFORCED=
+  true` so a real grant is required — legal), **B34** (R2 bucket India-residency for the 7-yr audit),
+  **B29** (no live NAV data → funds score `insufficient_data`), **B36/B37** (deploy/backup scripts
+  never run live on KVM4). Deploy also needs the Phase-7 §5 pre-deploy panel logged + **separate
+  explicit human approval**; the GitHub `production` env is main-gated (merge must land first).
+- **Adversarial tooling:** codex unavailable all session (ChatGPT-account entitlement) — Sonnet
+  takeover is the working fallback; run `/codex:setup` to restore.
+- **Next action:** resolve PR #28 conflicts → run the full Phase-7 §5 pre-deploy governance panel
+  across the repo → human go/no-go → then merge, then deploy with B48 re-enforced.
+
 ## B44 consent writer + B42 responsive AppShell landed (2026-06-08, branch `hardening/launch-gate-blockers`)
 
 **B44 — DPDP consent grant/revoke writer + capture UI (`927f64f` backend, `4b40f83` frontend).**
