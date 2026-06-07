@@ -202,10 +202,16 @@ portfolio commentary — **Pro + a one-time first-report taster**, metered by th
    paying. Pro is given away only while billing is impossible — zero revenue forgone.
 2. **Triggered trial (post go-live):** new users get a 30-day Pro unlock fired by their **first
    label change** (value-moment, not day-0); ends in a soft landing to Free (no lockout).
-3. **Mechanism (Phase 2 work):** per-user `pro_access_until` (timestamp) + `pro_access_reason`
-   (`founding` / `triggered_trial` / `subscription`). `RequireTier` grants Pro when
-   `now < pro_access_until` **OR** an active subscription exists; downgrade is automatic by
-   timestamp comparison — no gateway, no revoke job.
+3. **Mechanism — ✅ BUILT 2026-06-08 (`af850f9`):** per-user `pro_access_until` (timestamp) +
+   `pro_access_reason` (`founding` / `triggered_trial` / `subscription`) on `auth.users`
+   (migration `0011`). `deps.is_plus(user_id, db)` is a LIVE (no-cache) check — `RequireTier`
+   grants Pro when `now < pro_access_until` **OR** an active subscription exists; downgrade is
+   automatic by timestamp — no gateway, no revoke job. Founding stamp lands at signup (leaving
+   `tier=free` so expiry is purely time-driven). AI commentary is Plus-gated with a one-time Free
+   first-report taster (atomically claimed). `create_checkout` untouched (B7/B8 inert). Tier-B
+   inline ACCEPT (Security Sonnet takeover + Compliance Opus); `reviews/phase5m-tiering-pro-access.md`.
+   **Still data-only at go-live:** seed the `billing.plans` rows (B2/B7/B8) + the `triggered_trial`
+   firing on first label change.
 
 **Pricing (confirmed 2026-06-08):** DhanRadar Plus **₹149/mo** or **₹1,199/yr**; Founding
 **₹599/yr, locked for the subscription's life**. Each is a separate `billing.plans` row, not a

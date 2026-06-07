@@ -39,8 +39,11 @@ Nothing is batched to a phase audit during dev.
    before payload, `model_used` audit, `<0.30` floor. Best-effort in `tasks/mf.py` (a failure never
    breaks the report); no numeric float in the payload. Tier-B inline ACCEPT (Security Sonnet
    takeover + Compliance Opus); 34 tests pass. **Next functional slice → item 6 (PHASE 5M tiering).**
-6. **PHASE 5M tiering (freemium + Founding Access).** `pro_access_until` on `RequireTier`,
-   Free/Plus gating. Touches billing/tiering (load-bearing). After the wedge + UI work.
+6. **PHASE 5M tiering (freemium + Founding Access). ✅ ADDRESSED 2026-06-08 (`af850f9`).**
+   `pro_access_until`/`pro_access_reason`/`ai_taster_used_at` (migration `0011`); `deps.is_plus`
+   live check + `RequireTier` OR-clause → 402; founding stamp at signup; AI commentary Plus-gated
+   with a one-time Free taster (atomic claim); `create_checkout` untouched (B7/B8 inert). Tier-B
+   inline ACCEPT; 431 unit pass. Go-live stays data-only (seed plans B2/B7/B8). **Next → item 7 (B35).**
 7. **B35 — Mood Compass** data + embed widget (fast-follow, after the MF wedge).
 
 **PARKED until a pre-deploy phase — do NOT spend dev sessions on these:**
