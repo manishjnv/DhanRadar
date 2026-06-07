@@ -20,8 +20,8 @@ Owner tags: **[CC]** Claude Code can build/drive · **[human]** needs a person/d
 
 ## Gate 1 — CRITICAL infra/ops (no automation exists yet)
 
-- [ ] **B36** deploy automation + rollback runbook + tested `alembic upgrade/downgrade` **[CC builds · infra runs]**
-- [ ] **B37** DB backup/PITR + Redis AOF backup → **India-resident** storage (protects the 7-yr SEBI trail) **[CC builds · infra]**
+- [x] **B36** CODE DONE (`7035400`, `71a3ed2`): `scripts/deploy.sh` + `scripts/rollback.sh` + `docs/ops/deploy-runbook.md`; duplicate-0008 alembic branch fixed (single head 0009). Residual: live up/down run + first real deploy **[infra runs]**
+- [x] **B37** CODE DONE (`c93e387`, `71a3ed2`): `scripts/backup.sh` + `scripts/restore.sh` + `docs/ops/backup-restore-runbook.md` (nightly `pg_dump`→India R2, checksum-verified restore). Residual: R2 bucket `"jurisdiction":"in"` + 7-yr lifecycle + cron schedule **[infra]**
 - [x] **B38** monitoring CODE DONE (`efc6556`): `init_sentry()` (DPDP-safe scrubber, adversarial-reviewed) + Prometheus `/metrics` (bounded labels, network-isolated). Residual: alert rules + Prometheus scrape config **[infra]**
 
 ## Gate 2 — CI / gate reliability
