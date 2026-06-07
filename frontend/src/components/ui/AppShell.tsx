@@ -142,22 +142,53 @@ function MobileDrawer({
   open: boolean;
   onClose: () => void;
 }) {
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const firstFocusRef = React.useRef<HTMLButtonElement>(null);
+  // Element focused before the drawer opened, so we can restore it on close.
+  const restoreFocusRef = React.useRef<HTMLElement | null>(null);
 
-  // Close on Escape key
+  // Close on Escape + trap Tab focus inside the drawer (WCAG 2.1.2 / 2.4.3) —
+  // a modal drawer must not let keyboard focus wander to the background shell.
   React.useEffect(() => {
     if (!open) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      // Wrap at the edges (and re-capture focus if it ever left the panel).
+      if (e.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !panel.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
-  // Move focus into the drawer when it opens
+  // Move focus into the drawer when it opens; restore it to the trigger on close.
   React.useEffect(() => {
     if (open) {
       firstFocusRef.current?.focus();
+    } else {
+      restoreFocusRef.current?.focus?.();
     }
   }, [open]);
 
@@ -177,6 +208,7 @@ function MobileDrawer({
 
       {/* Drawer panel */}
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation"

@@ -156,6 +156,44 @@ describe('AppShell', () => {
     expect(screen.queryByRole('dialog', { name: /navigation/i })).not.toBeInTheDocument();
   });
 
+  it('moves focus into the drawer on open (close button is first focusable)', async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+    expect(screen.getByRole('button', { name: /close navigation/i })).toHaveFocus();
+  });
+
+  it('traps Tab focus inside the open drawer (guard: focus never escapes to the shell)', async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole('button', { name: /open navigation/i }));
+    const drawer = screen.getByRole('dialog', { name: /navigation/i });
+
+    // Shift+Tab from the first focusable wraps to the last one INSIDE the drawer
+    // (it must not land on the background hamburger / userSlot).
+    await user.tab({ shift: true });
+    expect(drawer.contains(document.activeElement)).toBe(true);
+
+    // Tabbing forward several times also stays within the drawer.
+    for (let i = 0; i < 6; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await user.tab();
+      expect(drawer.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it('restores focus to the hamburger trigger when the drawer closes', async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    const hamburger = screen.getByRole('button', { name: /open navigation/i });
+    await user.click(hamburger);
+    await user.keyboard('{Escape}');
+    expect(hamburger).toHaveFocus();
+  });
+
   it('hamburger aria-expanded reflects the drawer open state', async () => {
     const user = userEvent.setup();
     renderShell();
