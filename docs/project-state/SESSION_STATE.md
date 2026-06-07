@@ -35,13 +35,15 @@ lives in the linked docs.
 - **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
   touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
   to restore before the next load-bearing/security change (item 5 AI gateway will need it).
-- **Next action (two independent tracks):** (a) **dev** — build-sequence **item 7: B35 Mood Compass**
-  (data + embed widget; fast-follow after the MF wedge). Item 6 (PHASE 5M tiering) DONE 2026-06-08
-  (`af850f9`): `pro_access_until` + `is_plus` live check + `RequireTier` OR-clause → 402, founding
-  stamp at signup, AI commentary Plus-gated with a one-time Free taster, checkout stays inert; Tier-B
-  inline ACCEPT (Security Sonnet takeover + Compliance Opus). Item 5 (AI MF commentary) DONE
-  (`2b967d7`). (b) **pre-deploy** — resolve PR #28 conflicts → Phase-7 §5 pre-deploy panel → human
-  go/no-go → merge → deploy with B48 re-enforced + live NAV + billing plans seeded (B2/B7/B8).
+- **Next action — the functionality-first build sequence is COMPLETE (items 1–7 all addressed).**
+  → move to the **pre-deploy phase**: (1) resolve PR #28 conflicts against `main`; (2) run the
+  **Phase-7 §5 governance panel** (the batched full-tier audit — Security/Compliance/UI/Product over
+  the whole branch); (3) close the deploy gates — **B48** consent re-enforce, **B2/B7/B8** billing
+  plan-data seeding, live **NAV** populated, and the best-effort NSE mood provider verified or left
+  to `data_unavailable`; (4) human go/no-go → merge → deploy. Item 7 (B35 Mood Compass go-live) DONE
+  2026-06-08 (`6c192ae`): real signals via the adapter + 200 `data_unavailable` + labels + `trend` +
+  `/market/mood/embed`; gaps e/f deferred. Item 6 (PHASE 5M tiering) DONE (`af850f9`); item 5 (AI MF
+  commentary) DONE (`2b967d7`).
 
 ### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
 
