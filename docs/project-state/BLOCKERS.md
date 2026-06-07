@@ -3,6 +3,52 @@
 Single register of deferred items. Each names the gate/phase it blocks. Clear an item only when
 proven resolved (link the commit/RCA). New items get the next B-number.
 
+## Build sequence — functionality-first (set 2026-06-08)
+
+**Decision (course-correction).** Recent sessions drifted into deploy-gate hardening, governance
+audits, and docs while the core wedge still does not produce a real labelled report. From now,
+during the development phase we build **product functionality + a minimum unit test per slice**
+only. Deploy hardening, governance/activation gates, billing go-live data, and security/scaling
+residuals are **PARKED** until a dedicated pre-deploy phase. Do **not** run a pre-deploy
+governance audit on an inert product.
+
+**Per slice:** build it, add one happy-path test + one critical-guard test, move on. The only
+ceremony kept during dev is the deterministic gates (tests · secrets · anti-pattern grep ·
+ruff/tsc) and — because it is a non-negotiable — the inline security/compliance check **only**
+where a slice touches a load-bearing path (auth · consent · billing · scoring · AI gateway).
+Nothing is batched to a phase audit during dev.
+
+**Build in this order (finish each before starting the next):**
+
+1. **B29 — seed real MF data (THE unlock).** AMFI NAV daily fetch + `mf_funds` scheme metadata +
+   `mf_nav_monthly_agg`. Until this lands, CAS upload returns `insufficient_data` for most funds
+   and the wedge is a demo, not a product. Min test: NAV file parses + a seeded fund scores a
+   real label (not `insufficient_data`).
+2. **B42 — responsive AppShell.** Mobile-first market; a desktop-only shell is unusable. Min
+   test: nav renders at a mobile breakpoint.
+3. **B43 — onboarding / risk-profile UI.** Onboarding is the sole writer of `risk_profile`; users
+   are stuck in a null cold-start without it. Min test: submit sets `risk_profile`.
+4. **B44 — DPDP consent-capture UI.** The legal door for real users; also lets B48 be re-enabled
+   later. Touches consent (load-bearing → inline check stays). Min test: grant writes
+   `users.dpdp_consents`; revoke clears it.
+5. **AI MF commentary (first AI consumer).** Wires the B20/B21/B22 call sites; the DhanRadar Plus
+   differentiator (Implementation Plan PHASE 5M). Touches AI gateway (load-bearing). Build only
+   after 1–4. Min test: consent-gated call refused without grant + happy path returns commentary.
+6. **PHASE 5M tiering (freemium + Founding Access).** `pro_access_until` on `RequireTier`,
+   Free/Plus gating. Touches billing/tiering (load-bearing). After the wedge + UI work.
+7. **B35 — Mood Compass** data + embed widget (fast-follow, after the MF wedge).
+
+**PARKED until a pre-deploy phase — do NOT spend dev sessions on these:**
+
+- Deploy / ops: B25, B34, B36, B37, B38, B40 + B40-followup, B48 re-enable.
+- Governance / activation gates: B6, B11, B24, B28.
+- Billing go-live (data-only seeding + tests): B2, B7, B8, B9, B14, B16.
+- Security / scaling residuals (none exploitable as-shipped): B15, B17, B19, B30, B32, B33.
+- Other: B41 (a 10-minute compliance banner — do opportunistically), B47 (equities phase).
+
+The full register below is unchanged — it is the source of truth for each item's detail; this
+section only sets the working order.
+
 | ID | Item | Blocks | Source | Status |
 |---|---|---|---|---|
 | B1 | Auth pytest suite written but never executed locally | green CI run | `docs/features/auth.md` | ADDRESSED — CI `backend` job runs pytest (PR+push); confirm green |

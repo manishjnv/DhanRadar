@@ -14,6 +14,14 @@ tracking over time; AI commentary = Pro + one-time taster, metered. Free is **ga
 independent** — billing go-live is a data-only flip via the existing B7/B8 checkout fail-safe.
 Full contract + open-item-free decision log in PHASE 5M.
 
+## Working order reset (2026-06-08) — functionality-first
+
+Course-correction: stop the deploy-gate/audit/docs drift; build product + a minimum test per
+slice. See `BLOCKERS.md` → **Build sequence (functionality-first)**. **Next action = B29** (seed
+real MF NAV + `mf_funds` + agg) so `CAS upload → real labelled report` actually works instead of
+`insufficient_data`. Deploy/governance/billing/security-residual blockers are PARKED until a
+pre-deploy phase.
+
 ## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
 
 Concurrent-session note: this branch had 28 uncommitted frontend files from a parallel session.
