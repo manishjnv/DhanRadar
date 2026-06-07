@@ -157,6 +157,13 @@ class Settings(BaseSettings):
     DPDP_CONSENT_ENFORCED: bool = True
 
     # ------------------------------------------------------------------
+    # DPDP consent version (B44 — consent grant/revoke writer)
+    # Bumped when the consent text/purposes change; stored on every
+    # grant/revoke row so the version in force at consent time is auditable.
+    # ------------------------------------------------------------------
+    DPDP_CONSENT_VERSION: str = "2026-06-01"
+
+    # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------
     ENV: str = "development"

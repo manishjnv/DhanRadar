@@ -198,6 +198,11 @@ _CONSENT_PURPOSES: frozenset[str] = frozenset(
     }
 )
 
+# Public alias — used by the Consent module (B44) for purpose validation.
+# The underscore-prefixed frozenset is the canonical internal name; this alias
+# lets other modules import without touching private symbols.
+CONSENT_PURPOSES = _CONSENT_PURPOSES
+
 
 def _consent_granted(consents: object, purpose: str) -> bool:
     """Fail-closed read of the user's `dpdp_consents` JSONB for one purpose.
