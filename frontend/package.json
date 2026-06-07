@@ -11,7 +11,8 @@
     "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/types/api.ts",
     "gen:tokens": "node scripts/gen-tokens.mjs",
     "check:tokens": "node scripts/gen-tokens.mjs --check",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1",
@@ -38,9 +39,11 @@
     "@playwright/test": "^1",
     "@testing-library/jest-dom": "^6",
     "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10",
     "eslint": "^8",
     "eslint-config-next": "14.2.29",
