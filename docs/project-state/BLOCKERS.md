@@ -61,9 +61,19 @@ proven resolved (link the commit/RCA). New items get the next B-number.
   `main` (`ci_guards.py` guards + secret scan, pytest, frontend build). **B12 ADDRESSED** (guard
   broadened + now scans token files); residual coverage gaps tracked as **B13**. Optional local
   `PreToolUse` commit hook still not wired.
-- **B7/B8/B2 are code-ADDRESSED (merged) with fail-safes** — checkout refuses (503) and tier
-  derivation grants nothing until the catalog is seeded with the REAL Razorpay plan ids +
-  `total_count` + `EXACT_PLAN_TIERS`. What remains before charges is **data-only seeding** (await
-  the Razorpay dashboard), not code. A charge/tier cannot be created from wrong config.
+- **B7/B8/B2 — DEFERRED, DATA-ONLY (no code action): real Razorpay seeding awaits the dashboard.**
+  Re-verified in code 2026-06-07 (this slice): the fail-safes are present and correct, so charges
+  cannot be created from wrong/absent config. What remains is **data-only seeding at launch**, gated
+  on the Razorpay dashboard being provisioned — there is **no further implementation**.
+  - **Verified fail-safes:** checkout REFUSES with **503** when a plan is unseeded —
+    `if plan.razorpay_plan_id is None or plan.total_count is None` (`billing/service.py:113`); tier
+    derivation is fail-safe — an `plan_id` not in `EXACT_PLAN_TIERS` grants **NO paid tier** (returns
+    `free` + logs an error), never a substring/guess (`subscriptions/service.py:_derive_tier`, ~L52-73).
+  - **What to seed (data only, when the Razorpay dashboard exists):** (1) `billing.plans.razorpay_plan_id`
+    = the REAL dashboard plan id per plan (B7); (2) `billing.plans.total_count` = each plan's own cycle
+    count (B8, e.g. 12 monthly / 1 annual — never the old hardcoded constant); (3) the
+    `EXACT_PLAN_TIERS` map in `subscriptions/service.py` = exact `plan_id → tier` (B2). Plus the
+    plans-seed copy Compliance pass (B9 residual). Until all three are seeded, billing stays
+    fail-closed (503 / free), which is the intended pre-launch state.
 - **B11** is an architecture-owner decision (a `FINAL_SCORING_SPEC` §2.5/§6.1 reconciliation), gated
   to scoring v1 activation alongside B6.
