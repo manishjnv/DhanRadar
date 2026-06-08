@@ -13,7 +13,9 @@ These are enforced by `scripts/ci_guards.py` on shipped code:
   **label + confidence band**, never a 0–100 number.
 - **Educational labels only (#1).** `in_form / on_track / off_track / out_of_form /
   insufficient_data`. Advisory verbs (`strong_buy/buy/hold/caution/avoid`) are rejected.
-- **Disclosure on every score/label/AI surface (#9)** — render `<Disclaimer>` (NOT_ADVICE).
+- **Disclosure on every score/label/AI surface (#9)** — the standing line lives once in layout
+  chrome (`<Disclaimer>` in the AppShell/auth/public-page footer); the contextual, version-tied
+  disclosure (`disclosure` + `not_advice`) renders next to the content via `<DisclosureBundle>`.
 - **Geist/warm tokens only; no magic numbers** (token classes such as `royal`, `surface`, `line`,
   `ink-secondary`; never `blue`/`ink-2`).
 

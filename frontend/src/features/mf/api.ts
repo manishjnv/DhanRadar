@@ -154,6 +154,9 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     schemes,
     category_allocation,
     overlap,
+    // Contextual #9 disclosure — surfaced next to the holdings labels.
+    disclosure: r.disclosure ?? '',
+    not_advice: r.not_advice ?? '',
   };
 }
 

@@ -21,6 +21,7 @@ import { Skeleton }   from '@/components/ui/Skeleton';
 import { ErrorCard }  from '@/components/ui/ErrorCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Disclaimer } from '@/components/ui/Disclaimer';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_COLOR, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
@@ -119,7 +120,7 @@ export default function MoodPage() {
         <div className="mb-6">
           <h1 className="text-h2 font-medium text-ink">Market Mood</h1>
           <p className="text-small text-ink-secondary mt-1">
-            An educational read of market sentiment, updated twice daily. Not investment advice.
+            An educational read of market sentiment, updated twice daily.
           </p>
         </div>
 
@@ -220,9 +221,12 @@ export default function MoodPage() {
               <p className="text-caption text-ink-muted">
                 As of {data.snapshot_date}
               </p>
-              {/* disclosure and not_advice from API MUST be rendered (#9) */}
-              <p className="text-caption text-ink-muted">{data.disclosure}</p>
-              <p className="text-caption text-ink-muted">{data.not_advice}</p>
+              {/* Contextual #9 disclosure from API (next to the mood read). */}
+              <DisclosureBundle
+                disclosure={data.disclosure}
+                notAdvice={data.not_advice}
+              />
+              {/* Standing site-wide line — public page has no AppShell footer. */}
               <Disclaimer />
             </footer>
           </div>
