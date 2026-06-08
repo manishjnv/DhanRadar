@@ -8,6 +8,10 @@ networks:
 
 volumes:
   dhanradar_pgdata:
+  # Shared scratch for CAS uploads: the API (dhanradar-fastapi) writes the PDF
+  # and the dhanradar-celery-batch worker reads + purges it. Without a shared
+  # volume the worker's container can't see the API's /tmp file (job → failed).
+  dhanradar_cas_tmp:
 
 services:
 
@@ -82,6 +86,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    volumes:
+      # Writer side of the CAS hand-off (read + purged by dhanradar-celery-batch).
+      - dhanradar_cas_tmp:/tmp/dhanradar_cas
     networks:
       - dhanradar
     depends_on:
@@ -149,6 +156,9 @@ services:
     restart: unless-stopped
     env_file: .env
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "batch", "--loglevel=info"]
+    volumes:
+      # Reader/purger side of the CAS hand-off (written by dhanradar-fastapi).
+      - dhanradar_cas_tmp:/tmp/dhanradar_cas
     networks:
       - dhanradar
     depends_on:
