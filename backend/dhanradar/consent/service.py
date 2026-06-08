@@ -17,7 +17,6 @@ Design notes:
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime
 
@@ -55,7 +54,6 @@ async def apply_consent_change(
     ts_iso = datetime.now(UTC).isoformat()
 
     payload = {"granted": granted, "ts": ts_iso, "version": version}
-    payload_json = json.dumps(payload)
 
     for purpose in purposes:
         # Build the Postgres text[] path for jsonb_set safely.
@@ -72,7 +70,12 @@ async def apply_consent_change(
                 dpdp_consents=func.jsonb_set(
                     User.dpdp_consents,
                     path_arr,                    # text[] path
-                    cast(payload_json, JSONB),   # new value (bound param)
+                    # Pass the dict (NOT json.dumps(...)): the JSONB bind type
+                    # serialises it exactly once. Passing a pre-dumped str here
+                    # double-encodes it into a JSONB *string* scalar, so the
+                    # reader's ``isinstance(value, dict)`` check fails and every
+                    # grant reads back as not-granted (B54 regression).
+                    cast(payload, JSONB),        # new value (bound param)
                     True,                        # create_missing
                 ),
                 dpdp_consent_version=version,

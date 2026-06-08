@@ -372,6 +372,43 @@ async def test_multi_purpose_grant_writes_one_audit_row_each(async_client, db_se
 
 
 # ---------------------------------------------------------------------------
+# (k) B48 — consent ENFORCEMENT: a gated data-processing route refuses a user
+#     who has not granted the purpose. Fail-closed 403, never fail-open.
+#     This proves the production posture (settings.consent_bypassed is False);
+#     in production ENV=production forces that, see
+#     tests/unit/test_b48_consent_prod_guard.py for the boot-guard mechanism.
+# ---------------------------------------------------------------------------
+
+async def test_consent_gated_route_refuses_without_grant(async_client, db_session):
+    from dhanradar.config import settings
+
+    # Premise: the gate must be ON for this assertion to mean anything. The
+    # default test env (ENV=development, DPDP_CONSENT_ENFORCED=True) and
+    # production both yield consent_bypassed=False. If a dev box has flipped the
+    # B48 kill-switch, the premise does not hold — surface that explicitly
+    # rather than passing vacuously.
+    assert settings.consent_bypassed is False, (
+        "consent gate is bypassed in this env (B48 kill-switch on); "
+        "cannot assert production enforcement here"
+    )
+
+    uid, access = await _signup(async_client)  # fresh user — NO consent grant
+
+    # The MF CAS-upload route is consent-gated (RequireConsent('mf_analytics'))
+    # immediately after the 401 auth check. A real (dummy) multipart file is
+    # required so the request reaches the handler body where the gate fires.
+    r = await async_client.post(
+        "/api/v1/mf/upload/cas",
+        headers=_auth(access),
+        files={"file": ("cas.pdf", b"%PDF-1.4 dummy", "application/pdf")},
+    )
+    assert r.status_code == 403, r.text
+    detail = r.json()["detail"]
+    assert detail["error"] == "consent_required"
+    assert detail["purpose"] == "mf_analytics"
+
+
+# ---------------------------------------------------------------------------
 # (j) Deleted-mid-session user → 401, and NO false audit row is written
 #     (Finding 1: a 0-row UPDATE must not commit a forensic record of a
 #     consent change that never happened).

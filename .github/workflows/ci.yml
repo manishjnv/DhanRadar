@@ -135,13 +135,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-      - name: Init schemas + extensions (01_init.sql, minus pg_cron)
+      - name: Init schemas + extensions (01_init.sql, minus pg_cron/pg_partman)
         run: |
-          # pg_cron needs shared_preload_libraries, which a GH Actions service
-          # container cannot set — strip only that line; everything else (the
-          # timescaledb/vector/pg_trgm/pg_partman extensions, the app role, all
-          # schemas) runs verbatim so 01_init.sql itself is exercised.
-          sed '/pg_cron/d' infra/postgres/init/01_init.sql \
+          # Two extensions can't be created on the GH Actions service container
+          # and are stripped here ONLY for the CI exercise (production 01_init.sql
+          # keeps both, fail-loud if missing on KVM4):
+          #   - pg_cron    needs shared_preload_libraries a GH service can't set.
+          #   - pg_partman is not bundled in timescale/timescaledb-ha:pg16, so the
+          #     CREATE EXTENSION errors out. The only migration that uses partman
+          #     (0006_compliance_schema) already guards it behind
+          #     `IF EXISTS (... pg_extension WHERE extname='pg_partman')` and
+          #     RAISE NOTICE-skips when absent, so the alembic chain stays clean
+          #     without it. Everything else (timescaledb/vector/pg_trgm, the app
+          #     role, all schemas) runs verbatim so 01_init.sql itself is exercised.
+          sed -e '/pg_cron/d' -e '/pg_partman/d' infra/postgres/init/01_init.sql \
             | psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1
       - name: alembic upgrade head
         working-directory: backend
