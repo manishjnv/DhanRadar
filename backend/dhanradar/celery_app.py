@@ -18,6 +18,20 @@ celery_app = Celery(
     "dhanradar",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
+    # Explicit task-module imports so EVERY worker registers EVERY task on boot.
+    # Do NOT rely on autodiscover_tasks(["dhanradar.tasks"]) — that resolves to
+    # the non-existent module `dhanradar.tasks.tasks` (package + default
+    # related_name="tasks") and `tasks/__init__.py` is empty, so the worker would
+    # register ZERO tasks and silently discard every message as "unregistered"
+    # (prod incident 2026-06-08: CAS jobs hung at status='queued'). Keep this list
+    # in sync with the task modules under dhanradar/tasks/ (test_celery_task_registration).
+    include=[
+        "dhanradar.tasks.mf",
+        "dhanradar.tasks.batch",
+        "dhanradar.tasks.mood",
+        "dhanradar.tasks.misc",
+        "dhanradar.tasks.compliance",
+    ],
 )
 
 # ---------------------------------------------------------------------------
@@ -85,6 +99,7 @@ celery_app.conf.beat_schedule = {
 }
 
 # ---------------------------------------------------------------------------
-# Auto-discover tasks
+# Task registration is via the explicit `include=[...]` list on the Celery()
+# constructor above (autodiscover_tasks was removed — it silently registered
+# nothing; see the comment there). The worker imports those modules on boot.
 # ---------------------------------------------------------------------------
-celery_app.autodiscover_tasks(["dhanradar.tasks"])
