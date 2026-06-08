@@ -62,12 +62,14 @@ def test_cas_sha256_is_deterministic():
     assert len(cas_sha256(b"abc")) == 64
 
 
-def test_dedup_key_is_namespaced_per_user():
-    # Same CAS bytes, different users → DIFFERENT dedup keys (no cross-user leak).
+def test_dedup_key_is_namespaced_per_user_and_portfolio():
+    # Same CAS bytes → DIFFERENT dedup keys across users AND across a user's
+    # portfolios (no cross-user leak; the same statement can go to two portfolios).
     h = cas_sha256(b"same-cas-bytes")
-    assert dedup_key("userA", h) != dedup_key("userB", h)
-    assert dedup_key("userA", h) == dedup_key("userA", h)
-    assert "userA" in dedup_key("userA", h) and h in dedup_key("userA", h)
+    assert dedup_key("userA", "pf1", h) != dedup_key("userB", "pf1", h)  # cross-user
+    assert dedup_key("userA", "pf1", h) != dedup_key("userA", "pf2", h)  # cross-portfolio
+    assert dedup_key("userA", "pf1", h) == dedup_key("userA", "pf1", h)  # stable
+    assert "userA" in dedup_key("userA", "pf1", h) and h in dedup_key("userA", "pf1", h)
 
 
 # --- report assembly: disclosure injected, NO numeric score ------------------

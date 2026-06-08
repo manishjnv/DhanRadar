@@ -4,7 +4,9 @@ DhanRadar — Stub implementations for every provider ladder rung.
 ALL providers here are stubs.  No real network calls are made anywhere in
 this file.  Each stub raises ``ProviderError("not_configured")`` by default
 (no vendor keys / partnerships in place) EXCEPT:
-  - ``amfi_nav``  → returns canned ``NavRefreshed`` so the FUND_NAV happy path works.
+  - ``amfi_nav``  → reads the latest NAV for the requested scheme from the DB
+                    (mf_nav_history joined via mf_funds.amfi_code when only a
+                    scheme_code is given).  Raises ProviderError if no row found.
   - ``nse_dump``  → returns canned ``PriceRefreshed`` so the EQUITY_PRICE happy path works.
 
 Replace each stub's ``fetch()`` with a real implementation once the vendor
@@ -17,10 +19,6 @@ import datetime
 
 from dhanradar.market_data.config import DataKind, DataRequest
 from dhanradar.market_data.events import (
-    EVENT_AA_HOLDINGS_RECEIVED,
-    EVENT_BROKER_POSITIONS_RECEIVED,
-    EVENT_MFCENTRAL_HOLDINGS_RECEIVED,
-    HoldingsReceived,
     NavRefreshed,
     PriceRefreshed,
 )
@@ -29,7 +27,7 @@ from dhanradar.market_data.providers.base import MarketDataProvider
 
 
 def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +82,15 @@ class CASParserProvider(MarketDataProvider):
 
 class AMFINavProvider(MarketDataProvider):
     """
-    STUB — AMFI public NAV feed (amfiindia.com).
+    AMFI public NAV feed — DB-backed (reads mf_nav_history).
 
-    Returns canned data so the FUND_NAV happy path is demonstrable without
-    a live network call.  Replace with a real HTTP fetch when wiring production.
+    ``request.params`` must carry either ``isin`` (direct lookup) or
+    ``scheme_code`` (AMFI code; joined via mf_funds.amfi_code).  Returns the
+    most recent ``NavRefreshed`` event for the scheme.  Raises
+    ``ProviderError(self.name, "no_nav_data")`` when no row exists yet.
+
+    DB imports are deferred to ``fetch()`` to keep module-level imports light
+    and to avoid engine initialisation at import time (mirrors tasks/mf.py).
     """
 
     name = "amfi_nav"
@@ -96,14 +99,63 @@ class AMFINavProvider(MarketDataProvider):
         return kind in (DataKind.FUND_NAV,)
 
     async def fetch(self, request: DataRequest) -> object:
-        # STUB: returns canned NAV data — no real network call.
-        scheme_code = request.params.get("scheme_code", "120503")
-        return NavRefreshed(
-            scheme_code=str(scheme_code),
-            nav=82.5432,
-            nav_date="2026-06-05",
-            source=self.name,
-        )
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        from dhanradar.db import engine
+        from dhanradar.models.mf import MfFund, MfNavHistory
+
+        isin: str | None = request.params.get("isin")
+        scheme_code: str | None = request.params.get("scheme_code")
+
+        if not isin and not scheme_code:
+            raise ProviderError(self.name, "request must include 'isin' or 'scheme_code'")
+
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with SessionLocal() as db:
+            if isin:
+                # Direct lookup by ISIN.
+                stmt = (
+                    select(MfNavHistory.nav, MfNavHistory.nav_date)
+                    .where(MfNavHistory.isin == isin)
+                    .order_by(MfNavHistory.nav_date.desc())
+                    .limit(1)
+                )
+                row = (await db.execute(stmt)).one_or_none()
+                if row is None:
+                    raise ProviderError(self.name, "no_nav_data")
+                return NavRefreshed(
+                    scheme_code=isin,
+                    nav=float(row.nav),
+                    nav_date=row.nav_date.isoformat(),
+                    source=self.name,
+                )
+            else:
+                # scheme_code (amfi_code) → resolve ISIN via mf_funds then fetch NAV.
+                isin_stmt = (
+                    select(MfFund.isin)
+                    .where(MfFund.amfi_code == str(scheme_code))
+                    .limit(1)
+                )
+                isin_row = (await db.execute(isin_stmt)).one_or_none()
+                if isin_row is None:
+                    raise ProviderError(self.name, "no_nav_data")
+                resolved_isin: str = isin_row.isin
+                nav_stmt = (
+                    select(MfNavHistory.nav, MfNavHistory.nav_date)
+                    .where(MfNavHistory.isin == resolved_isin)
+                    .order_by(MfNavHistory.nav_date.desc())
+                    .limit(1)
+                )
+                nav_row = (await db.execute(nav_stmt)).one_or_none()
+                if nav_row is None:
+                    raise ProviderError(self.name, "no_nav_data")
+                return NavRefreshed(
+                    scheme_code=str(scheme_code),
+                    nav=float(nav_row.nav),
+                    nav_date=nav_row.nav_date.isoformat(),
+                    source=self.name,
+                )
 
 
 # ---------------------------------------------------------------------------

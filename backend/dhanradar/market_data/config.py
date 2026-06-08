@@ -13,7 +13,6 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
-
 # ---------------------------------------------------------------------------
 # DataKind
 # ---------------------------------------------------------------------------
@@ -25,6 +24,7 @@ class DataKind(str, enum.Enum):
     FUND_HOLDINGS = "fund_holdings"
     EQUITY_PRICE = "equity_price"
     EQUITY_HOLDINGS = "equity_holdings"
+    MACRO_SIGNAL = "macro_signal"
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,8 @@ DEFAULT_LADDERS: dict[DataKind, list[str]] = {
     # Equities/ETF: upstox → kite → twelvedata → nse_dump
     DataKind.EQUITY_PRICE: ["upstox", "kite", "twelvedata", "nse_dump"],
     DataKind.EQUITY_HOLDINGS: ["upstox", "kite", "twelvedata", "nse_dump"],
+    # Macro signals for Mood Compass (best-effort, NSE public JSON)
+    DataKind.MACRO_SIGNAL: ["nse_macro"],
 }
 
 

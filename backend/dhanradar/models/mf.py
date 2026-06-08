@@ -70,10 +70,33 @@ class MfNavHistory(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default="amfi")
 
 
+class MfPortfolio(Base):
+    """Named portfolio container — one per Free user, unlimited for Plus."""
+
+    __tablename__ = "mf_portfolios"
+    __table_args__ = (
+        Index("ix_mf_portfolios_user", "user_id"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfUserHolding(Base):
     __tablename__ = "mf_user_holdings"
     __table_args__ = (
-        UniqueConstraint("user_id", "isin", "folio_number", name="uq_mf_holding"),
+        UniqueConstraint("portfolio_id", "isin", "folio_number", name="uq_mf_holding"),
         Index("ix_mf_holdings_user", "user_id"),
         Index("ix_mf_holdings_isin", "isin"),
         _SCHEMA,
@@ -85,6 +108,11 @@ class MfUserHolding(Base):
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
         nullable=False,
     )
     isin: Mapped[str] = mapped_column(Text, nullable=False)
@@ -102,7 +130,7 @@ class MfUserHolding(Base):
 class MfPortfolioSnapshot(Base):
     __tablename__ = "mf_portfolio_snapshots"
     __table_args__ = (
-        UniqueConstraint("user_id", "snapshot_date", name="uq_mf_snapshot"),
+        UniqueConstraint("portfolio_id", "snapshot_date", name="uq_mf_snapshot"),
         _SCHEMA,
     )
 
@@ -111,6 +139,11 @@ class MfPortfolioSnapshot(Base):
     )
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
     )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     total_invested: Mapped[Optional[float]] = mapped_column(Numeric(16, 2), nullable=True)
@@ -133,6 +166,11 @@ class MfCasJob(Base):
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False
     )
+    portfolio_id: Mapped[Optional[UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
     progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     source_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -143,11 +181,52 @@ class MfCasJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class MfUserFundScoreHistory(Base):
+    """Per-fund label history for Plus users.
+
+    Stores ONE row per (portfolio, isin, snapshot_date) capturing only the public
+    projection: verb_label + confidence_band + model_version.  NO unified_score
+    column — zero numeric-leak surface (non-neg #2).
+
+    source values: 'cas_upload' | 'monthly_rescore'.
+    """
+
+    __tablename__ = "mf_user_fund_score_history"
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "isin", "snapshot_date", name="uq_mf_score_history"),
+        Index("ix_mf_score_history_user_date", "user_id", "snapshot_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    verb_label: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence_band: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    scored_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class UserFundScore(Base):
     # `unified_score` is server-side / tier-gated — never serialized to a client.
     __tablename__ = "user_fund_scores"
     __table_args__ = (
-        UniqueConstraint("user_id", "isin", name="uq_user_fund_score"),
+        UniqueConstraint("portfolio_id", "isin", name="uq_user_fund_score"),
         Index("ix_user_fund_scores_user", "user_id"),
         _SCHEMA,
     )
@@ -157,6 +236,11 @@ class UserFundScore(Base):
     )
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
     )
     isin: Mapped[str] = mapped_column(Text, nullable=False)
     unified_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # tier-gated

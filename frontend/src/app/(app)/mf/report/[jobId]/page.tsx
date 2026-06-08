@@ -247,6 +247,7 @@ export default function ReportPage({ params }: { params: { jobId: string } }) {
   const { jobId } = params;
   const { data: statusData } = useCasStatus(jobId);
   const isDone = statusData?.status === 'done';
+  const isError = statusData?.status === 'error';
 
   return (
     <div className="flex flex-col gap-6">
@@ -257,7 +258,23 @@ export default function ReportPage({ params }: { params: { jobId: string } }) {
         </p>
       </div>
 
-      {!isDone ? (
+      {isError ? (
+        <div className="rounded-lg border p-6">
+          <h2 className="text-base font-medium text-ink">
+            We couldn&rsquo;t process this statement
+          </h2>
+          <p className="mt-2 text-small text-ink-secondary">
+            The upload failed — the CAS PDF may be password-protected, not a CAS
+            statement, or corrupted. Nothing was saved.
+          </p>
+          <a
+            href="/mf/upload"
+            className="mt-4 inline-block text-small font-medium text-ink underline"
+          >
+            Upload again &rarr;
+          </a>
+        </div>
+      ) : !isDone ? (
         <ProgressView progress={statusData?.progress_pct ?? 0} />
       ) : (
         <ReportView jobId={jobId} />

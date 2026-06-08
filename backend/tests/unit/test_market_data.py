@@ -362,18 +362,25 @@ class TestMarketDataAdapter:
 # ---------------------------------------------------------------------------
 
 class TestStubHappyPath:
-    """amfi_nav and nse_dump stubs return canned events without network calls."""
+    """nse_dump returns canned events without network calls.
 
-    async def test_amfi_nav_returns_nav_refreshed(self):
+    NOTE (B29): ``amfi_nav`` is no longer a canned stub — it is DB-backed,
+    reading the latest NAV from ``mf.mf_nav_history`` (joined via
+    ``mf_funds.amfi_code``). Its happy path therefore requires a seeded DB and
+    is covered by ``tests/integration/test_mf_nav_scoring.py`` (which exercises
+    the same read path the CAS pipeline uses). The DB-free contract that stays a
+    true unit test is the request-validation guard below.
+    """
+
+    async def test_amfi_nav_requires_isin_or_scheme_code(self):
+        """DB-free contract: with neither ``isin`` nor ``scheme_code`` the
+        provider fails fast (before any engine/session access) so an empty
+        request never reaches the DB. The DB-backed happy path lives in
+        tests/integration/test_mf_nav_scoring.py."""
         provider = AMFINavProvider()
-        req = DataRequest(kind=DataKind.FUND_NAV, params={"scheme_code": "120503"})
-        result = await provider.fetch(req)
-
-        assert isinstance(result, NavRefreshed)
-        assert result.source == "amfi_nav"
-        assert result.scheme_code == "120503"
-        assert result.nav > 0
-        assert result.event_name == "nav.refreshed"
+        req = DataRequest(kind=DataKind.FUND_NAV, params={})
+        with pytest.raises(ProviderError):
+            await provider.fetch(req)
 
     async def test_nse_dump_returns_price_refreshed(self):
         provider = NSEDumpProvider()
@@ -385,27 +392,6 @@ class TestStubHappyPath:
         assert result.symbol == "INFY"
         assert result.price > 0
         assert result.event_name == "price.refreshed"
-
-    async def test_adapter_fund_nav_via_amfi_nav_stub(self):
-        """Full adapter happy path for FUND_NAV using canned amfi_nav stub."""
-        from dhanradar.market_data.providers.stubs import (
-            AMFINavProvider,
-            MFCentralProvider,
-        )
-
-        providers = {
-            "mf_central": MFCentralProvider(),
-            "amfi_nav": AMFINavProvider(),
-        }
-        adapter = MarketDataAdapter(
-            providers=providers,
-            ladders={DataKind.FUND_NAV: ["mf_central", "amfi_nav"]},
-        )
-        req = DataRequest(kind=DataKind.FUND_NAV, params={"scheme_code": "120503"})
-        result = await adapter.fetch(req)
-
-        assert isinstance(result, NavRefreshed)
-        assert result.source == "amfi_nav"
 
     async def test_adapter_equity_price_via_nse_dump_stub(self):
         """Full adapter happy path for EQUITY_PRICE using canned nse_dump stub."""

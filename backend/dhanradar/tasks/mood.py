@@ -19,13 +19,37 @@ _IST = ZoneInfo("Asia/Kolkata")
 
 @celery_app.task(name="dhanradar.tasks.mood.compute_mood_snapshot")
 def compute_mood_snapshot() -> str:
-    """Compute + publish the current twice-daily market-mood snapshot."""
+    """Compute + publish the current twice-daily market-mood snapshot.
+
+    Builds a minimal macro adapter (NseMacroProvider), fetches the best-effort
+    signal subset, then calls compute_and_store.  Signal fetch failure is caught
+    and degrades gracefully to the all-None (data_unavailable) path.
+    """
+    from dhanradar.market_data.adapter import MarketDataAdapter
+    from dhanradar.market_data.config import load_ladders
+    from dhanradar.market_data.providers.macro import NseMacroProvider
     from dhanradar.mood import service
+    from dhanradar.mood.signals import fetch_mood_inputs
 
     async def _go() -> str:
         now_ist = datetime.now(_IST)
+
+        # Build a minimal adapter carrying only the macro provider.
+        adapter = MarketDataAdapter(
+            providers={"nse_macro": NseMacroProvider()},
+            ladders=load_ladders(),
+        )
+
+        # Fetch signals best-effort; any failure returns the all-None dict.
+        try:
+            inputs = await fetch_mood_inputs(adapter)
+        except Exception:  # noqa: BLE001 — never let signal fetch crash the task
+            inputs = service.default_fetch_inputs()
+
         result = await service.compute_and_store(
-            snapshot_date=now_ist.date(), snapshot_time=now_ist
+            snapshot_date=now_ist.date(),
+            snapshot_time=now_ist,
+            fetch=lambda: inputs,
         )
         if result is None:
             return "mood: skipped (all inputs missing)"

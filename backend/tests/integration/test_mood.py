@@ -25,7 +25,7 @@ Covered:
   2. GET /api/v1/market/mood → 200 with regime, confidence_band, disclosure, not_advice,
      disclaimer_version; response JSON must NOT contain 'mood_score' or 'confidence_score'
      keys (non-neg #2 — no numeric leaks).
-  3. GET /api/v1/market/mood with no snapshot → 404 mood_unavailable.
+  3. GET /api/v1/market/mood with no snapshot → structured 200 data_unavailable (B35 gap c).
   4. GET /api/v1/market/mood/history?days=10 → 200; ≥1 item with regime + snapshot_date.
   5. B26 audit linkage: after compute_and_store, AiRecommendationAudit has exactly one
      row with surface='mood', recommendation_type='mood_regime', label='extreme_greed'.
@@ -139,16 +139,22 @@ async def test_get_mood_200_no_numeric_leak(
 
 
 # ---------------------------------------------------------------------------
-# 3. GET /api/v1/market/mood with no snapshot → 404 mood_unavailable
+# 3. GET /api/v1/market/mood with no snapshot → structured 200 data_unavailable (B35 gap c)
 # ---------------------------------------------------------------------------
 
 
-async def test_get_mood_no_snapshot_404(async_client, patch_redis):
-    """With no row in mood.market_mood, GET /market/mood must return 404 with
-    detail='mood_unavailable'."""
+async def test_get_mood_no_snapshot_data_unavailable(async_client, patch_redis):
+    """With no row in mood.market_mood, GET /market/mood must return a structured
+    200 'data_unavailable' (NOT 404) so the anon magnet always renders something
+    compliant — regime='data_unavailable', no numeric, disclosure bundle present."""
     r = await async_client.get("/api/v1/market/mood")
-    assert r.status_code == 404, r.text
-    assert r.json()["detail"] == "mood_unavailable"
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["regime"] == "data_unavailable"
+    assert body["confidence_band"] == "insufficient_data"
+    assert body["disclosure"] and body["not_advice"] and body["disclaimer_version"]
+    raw = r.text
+    assert "mood_score" not in raw and "confidence_score" not in raw
 
 
 # ---------------------------------------------------------------------------

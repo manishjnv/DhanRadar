@@ -58,6 +58,62 @@ def test_consent_granted_truth_table(consents, expected):
 
 
 # ---------------------------------------------------------------------------
+# B48 — pre-launch consent kill-switch (DPDP_CONSENT_ENFORCED)
+# ---------------------------------------------------------------------------
+
+def test_consent_killswitch_off_grants_all(monkeypatch):
+    """ENFORCED=False (dev/pre-launch) → every purpose reads granted, even with
+    no recorded grant. This is the intentional pre-launch bypass (B48)."""
+    from dhanradar.config import settings
+
+    monkeypatch.setattr(settings, "DPDP_CONSENT_ENFORCED", False)
+    monkeypatch.setattr(settings, "ENV", "development")
+    assert _consent_granted(None, "ai_insights") is True
+    assert _consent_granted({}, "mf_analytics") is True
+    assert _consent_granted({"ai_insights": False}, "ai_insights") is True
+
+
+def test_consent_killswitch_ignored_in_production(monkeypatch):
+    """The bypass is HARD-DISABLED when ENV == 'production' — even if the override
+    leaks into a prod env file, the gate stays fail-closed."""
+    from dhanradar.config import settings
+
+    monkeypatch.setattr(settings, "DPDP_CONSENT_ENFORCED", False)
+    monkeypatch.setattr(settings, "ENV", "production")
+    assert _consent_granted(None, "ai_insights") is False
+    assert _consent_granted({"ai_insights": False}, "ai_insights") is False
+    assert _consent_granted({"ai_insights": True}, "ai_insights") is True
+
+
+def test_consent_default_is_enforced():
+    """Sanity: the shipped default enforces the gate (production-safe default)."""
+    from dhanradar.config import settings
+
+    assert settings.DPDP_CONSENT_ENFORCED is True
+
+
+@pytest.mark.parametrize("env", ["production", "Production", "staging", "preview", "uat", ""])
+def test_consent_killswitch_boot_guard_rejects_nonallowlisted_env(env):
+    """Disabling consent in any non-dev env is a hard boot failure — a leaked
+    override on a prod/staging box refuses to start instead of failing open."""
+    from dhanradar.config import Settings
+
+    with pytest.raises(ValueError):
+        Settings(POSTGRES_PASSWORD="x", DPDP_CONSENT_ENFORCED=False, ENV=env)
+
+
+def test_consent_killswitch_boot_guard_allows_dev_env():
+    """The bypass is permitted (and active) only in the dev allowlist."""
+    from dhanradar.config import Settings
+
+    s = Settings(POSTGRES_PASSWORD="x", DPDP_CONSENT_ENFORCED=False, ENV="development")
+    assert s.consent_bypassed is True
+    # Enforced default in production → never bypassed.
+    s2 = Settings(POSTGRES_PASSWORD="x", DPDP_CONSENT_ENFORCED=True, ENV="production")
+    assert s2.consent_bypassed is False
+
+
+# ---------------------------------------------------------------------------
 # B3 — RequireConsent
 # ---------------------------------------------------------------------------
 

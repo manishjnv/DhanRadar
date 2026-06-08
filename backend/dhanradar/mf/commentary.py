@@ -1,131 +1,170 @@
 """
-DhanRadar — MF portfolio-level AI commentary: the first AI-gateway consumer.
+DhanRadar — MF portfolio AI commentary (B20/B21/B22 gated).
 
-Commentary is NON-BLOCKING: any refusal, gate failure, or unexpected exception
-returns ``None``; the report is ALWAYS served without commentary rather than
-failing. See architecture §MF line 257.
+The first AI consumer in the governed gateway pipeline. Generates an educational,
+descriptive commentary on a user's MF portfolio: diversification, category mix,
+and concentration — NEVER advice, never numeric scores in the public payload.
 
-Four governance gates, in order:
+Four-gate wiring order (per architecture §B3 / B20 / B21 / B22):
+  1. CONSENT  — assert cross_border_ai granted (B20); refuse without calling gateway.
+  2. CALL     — gateway.complete() with personal-data flag + verified consent (B20).
+  3. FLOOR    — confidence < 0.30 → log low-confidence event (B22), return insufficient_data.
+  4. AUDIT    — record_served_label (B21), return public payload (no numeric confidence).
 
-  B20 — cross-border DPDP consent (``cross_border_ai``) verified before any
-        personal data reaches OpenRouter.
-  B21 — audit row written to ``ai_recommendation_audit`` for every served
-        commentary (``record_served_label``, surface="mf_report_ai").
-  B22 — confidence floor: ``< 0.30`` (or no usable labels) → log low-confidence
-        event and omit commentary.
-  B23 — defense-in-depth advisory screen: a regex over the published ``summary``
-        catches advisory verbs that slipped past the gateway's own
-        ``QualityValidator`` screen (two independent nets before publish).
-
-B26 — the audit row carries ``prompt_version``, ``model_used``, and
-      ``disclaimer_version`` so every served AI surface is traceable to the
-      in-force disclaimer and the model that generated it.
+Module isolation: only touches ai_gateway + compliance + deps interfaces.
+No billing, no scoring imports.
 """
 
 from __future__ import annotations
 
 import json
-import logging
-import math
-import re
-from typing import Any, Optional
+from datetime import UTC, datetime
 
 from pydantic import Field
 
+from dhanradar.ai_gateway.errors import ConsentNotVerifiedError, GatewayError
 from dhanradar.ai_gateway.schemas import AI_DISCLAIMER, AIOutputBase
-
-_SURFACE = "mf_report_ai"
-_TASK_TYPE = "mf_commentary"
-_PROMPT_VERSION = "mf_commentary_v1"
-_REFUSE_CONFIDENCE = 0.30          # non-neg #4 confidence floor (B22)
-_INSUFFICIENT_LABEL = "insufficient_data"
-_MIN_USABLE_FUNDS = 1              # need >=1 labelled fund to have anything to say
-
-# Defense-in-depth advisory screen over the PUBLISHED summary (B23). complete()
-# already screens via quality.py; this is a second, independent net before publish.
-_ADVISORY_RE = re.compile(
-    r"\b(strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)\b", re.IGNORECASE
+from dhanradar.budget import BudgetExhaustedError
+from dhanradar.compliance.service import (
+    active_disclaimer_version,
+    log_low_confidence,
+    record_served_label,
 )
+from dhanradar.deps import ConsentRequiredError, assert_consent, is_plus
 
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Output schema
-# ---------------------------------------------------------------------------
-
-class MfPortfolioCommentary(AIOutputBase):
-    """Portfolio-level educational commentary. Inherits the AIOutputBase invariants
-    (>=2 contributing signals, forced disclaimer, confidence band)."""
-
-    summary: str = Field(min_length=1, description="Plain-English educational read of the labelled portfolio.")
+_SURFACE = "mf_commentary"
+_CONFIDENCE_FLOOR = 0.30
 
 
 # ---------------------------------------------------------------------------
-# System prompt
+# Entitlement gate (PHASE 5M)
+# ---------------------------------------------------------------------------
+
+
+async def is_commentary_entitled(user_id: str, db: object) -> bool:
+    """PHASE 5M gate for AI commentary. Plus users → always entitled. Free users
+    get a ONE-TIME first-report taster: if their taster is unused, CONSUME it
+    (stamp users.ai_taster_used_at) and entitle this one report; otherwise refuse
+    (Plus-only thereafter). Returns True if commentary should be generated."""
+    from uuid import UUID as _UUID
+
+    from sqlalchemy import update as _update
+
+    from dhanradar.models.auth import User
+
+    if await is_plus(user_id, db):  # type: ignore[arg-type]
+        return True
+    try:
+        uid = _UUID(user_id)
+    except (ValueError, TypeError):
+        return False
+    # Atomically CLAIM the one-time free taster: only the request that flips
+    # ai_taster_used_at NULL→now wins (rowcount == 1). Concurrent first-reports
+    # for the same user cannot both pass — closes the read-then-update race so a
+    # free user can never get more than one taster (Tier-B security finding).
+    result = await db.execute(  # type: ignore[union-attr]
+        _update(User)
+        .where(User.id == uid, User.ai_taster_used_at.is_(None))
+        .values(ai_taster_used_at=datetime.now(UTC))
+    )
+    await db.commit()  # type: ignore[union-attr]
+    return result.rowcount == 1
+
+
+# ---------------------------------------------------------------------------
+# Schema
+# ---------------------------------------------------------------------------
+
+
+class MFCommentary(AIOutputBase):
+    """AI output schema for MF portfolio commentary.
+
+    Extends ``AIOutputBase`` — inherits all base invariants (signal floors,
+    disclaimer enforcement, advisory screen via QualityValidator). Adds a
+    free-text ``commentary`` field. No numeric score/factor/fair-value fields
+    (non-negotiable #2 — no numeric in DOM).
+    """
+
+    # INVARIANT: every string field added here is screened by QualityValidator's
+    # advisory net (quality.py walks ALL string fields of the model dump). Any new
+    # free-text field is therefore covered automatically — but it MUST remain a
+    # plain str/list[str] so the recursive screen reaches it (non-neg #1).
+    commentary: str = Field(
+        min_length=1,
+        description=(
+            "Educational, descriptive portfolio commentary — no advice. "
+            "Describes diversification, category mix, and concentration."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Message builder
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = (
-    "You are an educational financial information assistant for DhanRadar, a "
-    "SEBI-educational (not advisory) market-intelligence platform for Indian retail investors. "
-    "Your role is to provide DESCRIPTIVE, educational commentary about a user's mutual fund "
-    "portfolio based only on the fund labels provided. "
-    "\n\n"
-    "STRICT RULES:\n"
-    "1. You MUST NOT issue or imply any buy / sell / hold / switch / avoid recommendation "
-    "   for any fund or the portfolio as a whole.\n"
-    "2. You MUST NOT reference any numeric scores, factor weights, or fair-value estimates — "
-    "   use only the label strings and confidence bands provided.\n"
-    "3. Describe what the fund labels collectively suggest in plain English, in an educational "
-    "   framing (e.g. 'several funds appear to be performing relative to benchmark', NOT "
-    "   'you should buy more equity funds').\n"
-    "4. Output MUST be a single JSON object with exactly these keys:\n"
-    "   - confidence: float 0–1 reflecting how complete and consistent the portfolio label data is\n"
-    "   - confidence_band: one of 'high', 'medium', 'low'\n"
-    "   - contributing_signals: array of >=2 short strings (the signals that support the read)\n"
-    "   - contradicting_signals: array of short strings (may be empty, but include disagreements)\n"
-    "   - summary: a short plain-English paragraph describing what the fund labels collectively "
-    "     suggest, in strict educational framing\n"
-    "5. No other keys are permitted. Do not include any prose outside the JSON object."
+    "You are an educational assistant for Indian retail mutual-fund investors. "
+    "Your role is to DESCRIBE the portfolio's diversification, category mix, and "
+    "concentration in plain, factual language. "
+    "NEVER give buy/sell/hold/switch/avoid advice or recommend any action. "
+    "NEVER mention specific rupee amounts, folio numbers, or personal identifiers. "
+    "Output STRICT JSON matching this schema exactly:\n"
+    "{\n"
+    '  "confidence": <float 0.0–1.0>,\n'
+    '  "confidence_band": <"high"|"medium"|"low">,\n'
+    '  "contributing_signals": [<string>, ...],  // >= 2 items\n'
+    '  "contradicting_signals": [<string>, ...],  // may be empty\n'
+    '  "commentary": "<educational description — no advice>"\n'
+    "}\n"
+    "contributing_signals must list >= 2 observable portfolio features that informed "
+    "the commentary (e.g. category concentration, overlap). "
+    "If confidence > 0.7, list >= 3 contributing_signals."
 )
 
 
-# ---------------------------------------------------------------------------
-# Data minimization helper
-# ---------------------------------------------------------------------------
+def build_messages(snapshot: object, funds: list[dict]) -> list[dict[str, str]]:
+    """Build the prompt message list for the gateway.
 
-def build_messages(funds: list[dict], category_allocation: dict) -> list[dict[str, str]]:
-    """Build the LLM message list for the portfolio commentary request.
-
-    DATA MINIMIZATION (DPDP B20): the user message includes ONLY the fields
-    needed for educational commentary — ``verb_label``, ``confidence_band``,
-    ``contributing_signals``, ``contradicting_signals`` — plus the portfolio
-    ``category_allocation``. PII fields (``isin``, ``scheme_name``,
-    ``folio_number``, ``units``, ``invested_amount``, ``current_value``) are
-    intentionally excluded so they never reach OpenRouter.
-
-    ``category_allocation`` is included verbatim: by the ``build_snapshot``
-    contract (``mf/snapshot.py``) its keys are fund-CATEGORY labels (e.g.
-    "uncategorized", "Equity") and its values are aggregate percentages — never
-    fund identifiers (ISIN/folio/scheme). It carries no per-fund PII.
+    Serialises a COMPACT, PII-free view of the portfolio — no user_id, no
+    folio_number, no raw rupee amounts. Deterministic and small so token cost
+    stays bounded and the gateway's quality validator can screen the response.
     """
-    _PII_KEYS = frozenset({
-        "isin", "scheme_name", "folio_number", "units",
-        "invested_amount", "current_value",
-    })
-    _KEEP_KEYS = frozenset({
-        "verb_label", "confidence_band",
-        "contributing_signals", "contradicting_signals",
-    })
+    # Category allocation from the snapshot (no raw amounts).
+    category_allocation: dict = {}
+    if hasattr(snapshot, "category_allocation") and snapshot.category_allocation:
+        category_allocation = snapshot.category_allocation
 
-    minimized = [
-        {k: v for k, v in fund.items() if k in _KEEP_KEYS}
-        for fund in funds
-    ]
-
-    user_content = json.dumps(
-        {"funds": minimized, "category_allocation": category_allocation}
+    # Overlap matrix presence (boolean — not the full matrix).
+    has_overlap = bool(
+        hasattr(snapshot, "overlap_matrix")
+        and snapshot.overlap_matrix
     )
+
+    # XIRR expressed as a band to avoid surfacing numeric precision.
+    xirr_pct: float | None = getattr(snapshot, "xirr_pct", None)
+    if xirr_pct is None:
+        xirr_band = "unknown"
+    elif xirr_pct >= 12.0:
+        xirr_band = "above_12pct"
+    elif xirr_pct >= 8.0:
+        xirr_band = "8_to_12pct"
+    elif xirr_pct >= 0.0:
+        xirr_band = "0_to_8pct"
+    else:
+        xirr_band = "negative"
+
+    portfolio_view = {
+        "num_funds": len(funds),
+        "category_allocation": category_allocation,
+        "has_overlap_data": has_overlap,
+        "xirr_band": xirr_band,
+    }
+
+    user_content = (
+        "Analyse this portfolio summary and provide educational commentary.\n"
+        f"Portfolio: {json.dumps(portfolio_view, separators=(',', ':'))}"
+    )
+
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
@@ -133,140 +172,122 @@ def build_messages(funds: list[dict], category_allocation: dict) -> list[dict[st
 
 
 # ---------------------------------------------------------------------------
-# Main consumer
+# Orchestrator
 # ---------------------------------------------------------------------------
 
-async def maybe_generate_commentary(
+
+async def generate_commentary(
+    gateway: object,
     *,
     user_id: str,
-    job_id: str,
+    db: object,
+    snapshot: object,
     funds: list[dict],
-    category_allocation: dict,
-    db: Any,
-    disclaimer_version: str,
-    gateway: Any = None,
-) -> Optional[str]:
-    """Return the published commentary string, or None to OMIT it. NEVER raises:
-    every refusal/failure path returns None so the report still serves."""
+    request_id: str | None = None,
+) -> dict:
+    """Generate MF portfolio commentary with B20/B21/B22 gates.
+
+    Returns a dict with ``state`` key:
+      - ``"ok"``               — commentary served; includes commentary + compliance fields.
+      - ``"insufficient_data"`` — confidence below floor; includes disclaimer only.
+      - ``"unavailable"``      — consent denied, budget exhausted, or gateway error.
+
+    NEVER raises — all errors are translated to the ``"unavailable"`` payload so
+    the pipeline caller can treat this as best-effort (mirrors fire-and-forget
+    audit pattern).
+    """
+    disclaimer = AI_DISCLAIMER
+    disclaimer_version = active_disclaimer_version()
+
+    # ------------------------------------------------------------------
+    # Gate 1 — CONSENT (B20): refuse before touching the gateway.
+    # ------------------------------------------------------------------
     try:
-        # Lazy imports to avoid circular-import cycles at module level.
-        from dhanradar.compliance import service as compliance_service
-        from dhanradar.deps import ConsentRequiredError, assert_consent
+        await assert_consent(user_id, "cross_border_ai", db)  # type: ignore[arg-type]
+    except ConsentRequiredError:
+        return {
+            "state": "unavailable",
+            "reason": "consent_required",
+            "disclaimer": disclaimer,
+            "disclaimer_version": disclaimer_version,
+        }
+    except ValueError:
+        # assert_consent raises ValueError only on an unknown purpose (a programming
+        # error — the purpose here is a hardcoded valid constant, so this is currently
+        # unreachable). Catch it anyway to honor the never-raises contract and fail
+        # CLOSED: refuse without ever building a payload or touching the gateway.
+        return {
+            "state": "unavailable",
+            "reason": "consent_gate_error",
+            "disclaimer": disclaimer,
+            "disclaimer_version": disclaimer_version,
+        }
 
-        # ------------------------------------------------------------------
-        # B20 — cross-border DPDP consent gate
-        # ------------------------------------------------------------------
-        try:
-            await assert_consent(user_id, "cross_border_ai", db)
-        except ConsentRequiredError:
-            logger.info(
-                "mf_commentary: cross_border_ai consent absent for user=%s job=%s — omit",
-                user_id, job_id,
-            )
-            return None
-
-        # ------------------------------------------------------------------
-        # B22 pre-call — require at least _MIN_USABLE_FUNDS labelled funds
-        # ------------------------------------------------------------------
-        usable = [
-            f for f in funds
-            if f.get("verb_label") and f["verb_label"] != _INSUFFICIENT_LABEL
-        ]
-        if len(usable) < _MIN_USABLE_FUNDS:
-            await compliance_service.log_low_confidence(
-                surface=_SURFACE,
-                confidence_score=None,
-                confidence_band=_INSUFFICIENT_LABEL,
-                model=None,
-                reason="portfolio_no_usable_labels",
-                identifier=job_id,
-            )
-            return None
-
-        # ------------------------------------------------------------------
-        # Build messages + call the gateway
-        # ------------------------------------------------------------------
-        # Lazy-import OpenRouterGateway here — AFTER the gates — so an omitted
-        # path never constructs a client or opens a network connection.
-        from dhanradar.ai_gateway import OpenRouterGateway
-
-        gw = gateway or OpenRouterGateway()
-        messages = build_messages(usable, category_allocation)
-
-        result = await gw.complete(
-            task_type=_TASK_TYPE,
-            messages=messages,
-            schema=MfPortfolioCommentary,
+    # ------------------------------------------------------------------
+    # Gate 2 — CALL: build messages and invoke the gateway.
+    # ------------------------------------------------------------------
+    msgs = build_messages(snapshot, funds)
+    try:
+        res = await gateway.complete(  # type: ignore[attr-defined]
+            task_type="mf_pick",
+            messages=msgs,
+            schema=MFCommentary,
             contains_personal_data=True,
-            cross_border_consent_verified=True,  # verified above via assert_consent
+            cross_border_consent_verified=True,
         )
-        output = result.output
-        model_used = result.model_used
+    # CreditExhaustedError, AllFreeModelsFailedError, QualityValidationError and
+    # ThreeStrikeSkipError all subclass GatewayError, so the 402/credit, empty-pool
+    # and quality/skip paths are all caught here. ConsentNotVerifiedError (the gateway
+    # default-deny backstop) is a bare Exception, so it is listed explicitly.
+    except (GatewayError, BudgetExhaustedError, ConsentNotVerifiedError) as exc:
+        return {
+            "state": "unavailable",
+            "reason": type(exc).__name__,
+            "disclaimer": disclaimer,
+            "disclaimer_version": disclaimer_version,
+        }
 
-        # ------------------------------------------------------------------
-        # B22 post-call — confidence floor (non-neg #4)
-        # ------------------------------------------------------------------
-        # A non-finite confidence (NaN/inf) must be treated as BELOW the floor:
-        # `nan < 0.30` is False in Python, so a naive comparison would fail OPEN
-        # and publish an un-graded commentary. isfinite() closes that gap.
-        if not math.isfinite(output.confidence) or output.confidence < _REFUSE_CONFIDENCE:
-            await compliance_service.log_low_confidence(
-                surface=_SURFACE,
-                confidence_score=output.confidence if math.isfinite(output.confidence) else None,
-                confidence_band=output.confidence_band,
-                model=model_used,
-                reason="model_confidence_below_floor",
-                identifier=job_id,
-            )
-            return None
-
-        # ------------------------------------------------------------------
-        # B23 defense-in-depth advisory screen
-        # ------------------------------------------------------------------
-        if _ADVISORY_RE.search(output.summary):
-            logger.error(
-                "mf_commentary: advisory verb detected in summary — withheld "
-                "job=%s model=%s",
-                job_id, model_used,
-            )
-            return None
-
-        # ------------------------------------------------------------------
-        # B21 / B26 audit — record served AI surface
-        # ------------------------------------------------------------------
-        # record_served_label is fire-and-forget (never raises) by its own
-        # contract; the local try/except is belt-and-suspenders so an audit-layer
-        # change can never suppress a clean, already-screened commentary. House
-        # posture is serve + alert-on-audit-failure (see the per-fund B26 call in
-        # tasks/mf.py), not audit-or-nothing.
-        try:
-            await compliance_service.record_served_label(
-                surface=_SURFACE,
-                label=None,
-                model=model_used,
-                disclaimer_version=disclaimer_version,
-                recommendation_type="educational_label",
-                user_id=user_id,
-                identifier=job_id,
-                confidence_band=output.confidence_band,
-                prompt_version=_PROMPT_VERSION,
-            )
-        except Exception:  # noqa: BLE001 — audit must never drop a served commentary
-            logger.exception(
-                "mf_commentary: audit write raised unexpectedly — serving anyway job=%s",
-                job_id,
-            )
-
-        # SEBI-disclaimer-postfixed at serialization (architecture §MF line 257;
-        # line 220: LLM commentary is labelled "AI-generated insight, not
-        # investment advice"). The label rides with the string itself so any
-        # consumer of the cached/served commentary carries it, not only the
-        # report's general disclosure bundle.
-        return f"{output.summary}\n\n{AI_DISCLAIMER}"
-
-    except Exception:  # noqa: BLE001 — commentary is non-blocking
-        logger.warning(
-            "mf_commentary: unexpected error — omitting commentary job=%s",
-            job_id, exc_info=True,
+    # ------------------------------------------------------------------
+    # Gate 3 — CONFIDENCE FLOOR (B22): log and return insufficient_data.
+    # ------------------------------------------------------------------
+    if res.output.confidence < _CONFIDENCE_FLOOR:
+        await log_low_confidence(
+            surface=_SURFACE,
+            confidence_score=res.output.confidence,
+            confidence_band=res.output.confidence_band,
+            model=res.model_used,
+            reason="below_floor",
+            identifier=None,
+            request_id=request_id,
         )
-        return None
+        return {
+            "state": "insufficient_data",
+            "disclaimer": disclaimer,
+            "disclaimer_version": disclaimer_version,
+        }
+
+    # ------------------------------------------------------------------
+    # Gate 4 — AUDIT (B21) + SERVE: write audit row, return public payload.
+    # CRITICAL: confidence float is NEVER included in the returned dict (non-neg #2).
+    # ------------------------------------------------------------------
+    await record_served_label(
+        surface=_SURFACE,
+        label="ai_commentary",
+        model=res.model_used,
+        disclaimer_version=disclaimer_version,
+        recommendation_type="educational_label",
+        user_id=user_id,
+        identifier=None,
+        confidence_band=res.output.confidence_band,
+        request_id=request_id,
+    )
+
+    return {
+        "state": "ok",
+        "commentary": res.output.commentary,
+        "confidence_band": res.output.confidence_band,
+        "contributing_signals": res.output.contributing_signals,
+        "contradicting_signals": res.output.contradicting_signals,
+        "disclaimer": res.output.disclaimer,
+        "disclaimer_version": disclaimer_version,
+    }

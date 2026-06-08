@@ -11,7 +11,7 @@ DB level (a concurrent loser's INSERT is rejected → surfaced as 409). Many
 Additive + reversible. Mirrors `uq_disclaimer_active_per_type` (migration 0008).
 
 Revision ID: 0009
-Revises: 0008
+Revises: 0008a
 Create Date: 2026-06-07
 """
 
@@ -22,7 +22,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = "0009"
-down_revision: Union[str, None] = "0008"
+down_revision: Union[str, None] = "0008a"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -13,9 +13,9 @@
   --dr-red-dark:    #FF6166;
 
   /* --- Typography families --- */
-  --dr-font-sans:   'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --dr-font-mono:   'Geist Mono', ui-monospace, 'SF Mono', monospace;
-  --dr-font-serif:  'Instrument Serif', Georgia, serif;
+  --dr-font-sans:   var(--font-geist-sans), 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --dr-font-mono:   var(--font-geist-mono), 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --dr-font-serif:  var(--font-instrument-serif), 'Instrument Serif', Georgia, serif;
 
   /* --- Spacing scale --- */
   --dr-space-1:  4px;
