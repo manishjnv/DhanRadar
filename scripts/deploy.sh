@@ -174,7 +174,11 @@ cmd_deploy() {
     info "Running Alembic migrations (alembic upgrade head)…"
     # -T: no pseudo-TTY — required when run non-interactively over SSH (else
     # `compose run` errors "the input device is not a TTY").
-    $COMPOSE run --rm -T dhanradar-fastapi alembic upgrade head
+    # `python -m alembic` (NOT bare `alembic`): the package is copied to /app but
+    # not pip-installed, so only an invocation that puts CWD on sys.path can import
+    # `dhanradar` from alembic/env.py. uvicorn does this implicitly; bare `alembic`
+    # does not (ModuleNotFoundError). `python -m` adds CWD, matching the CI job.
+    $COMPOSE run --rm -T dhanradar-fastapi python -m alembic upgrade head
 
     # 5. Bring up the full stack
     info "Starting full stack…"
