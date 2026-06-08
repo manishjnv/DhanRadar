@@ -15,7 +15,6 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { LabelChip } from '@/components/ui/LabelChip';
-import { Disclaimer } from '@/components/ui/Disclaimer';
 import {
   useIndices,
   useTopScored,
@@ -237,7 +236,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-h2 font-medium text-ink">Dashboard</h1>
         <p className="mt-1 text-small text-ink-secondary">
-          Indian market overview · educational research only
+          Indian market overview
         </p>
       </div>
 
@@ -265,10 +264,8 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Footer — Portfolio snapshot + disclaimer */}
+      {/* Portfolio snapshot. Standing disclaimer is the AppShell footer. */}
       <PortfolioSnapshot />
-
-      <Disclaimer className="mt-2 text-center" />
     </div>
   );
 }
