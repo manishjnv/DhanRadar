@@ -206,9 +206,15 @@ portfolio commentary — **Pro + a one-time first-report taster**, metered by th
   through holdings/snapshots/score-history/scores/cas-jobs (data-preserving migration `0013`,
   each existing user backfilled to a 'Default'); `GET/POST/PATCH/DELETE /mf/portfolios`; Free capped
   at one (`count>=1 && !is_plus → 402`), Plus uncapped; upload + history + re-score all per-portfolio.
-- ⏳ **Label-change alerts** (Notification module — fire on `in_form → off_track` from the monthly
-  re-score) — **the ONLY remaining Plus feature** (a notification template scaffold exists; the
-  detection task does not). NEXT.
+- ✅ **Label-change alerts** — BUILT (`ef69a28`): the monthly re-score diffs each fund's label vs the
+  prior snapshot (per portfolio) and, on a flip, enqueues an educational `mf_label_change` alert that
+  RIDES the existing Notification deliver seam (B31 cross-border consent + quiet-hours + rate-cap +
+  B26 audit all apply; no parallel path). Idempotent (the `inserted` guard); factual copy names the
+  portfolio (escaped); no advisory verb, no numeric. Tier-B inline ACCEPT.
+
+**→ The Plus feature set is now COMPLETE: AI commentary · stored history · auto monthly re-score ·
+multiple portfolios · label-change alerts.** Remaining PHASE 5M work is data-only at go-live (seed
+`billing.plans` B2/B7/B8) + the post-launch triggered-trial on first label change.
 
 **Free-Pro mechanic:**
 

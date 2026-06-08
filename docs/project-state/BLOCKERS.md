@@ -61,9 +61,15 @@ Nothing is batched to a phase audit during dev.
   threaded through all MF tables (data-preserving migration `0013`, existing users backfilled to a
   'Default'); portfolio CRUD; Free capped at 1 (`count>=1 && !is_plus → 402`), Plus uncapped. Tier-A;
   492 unit pass + 15 new.
-- ⏳ **Label-change alerts** (Notification module — `in_form → off_track` etc.) — **the ONLY
-  remaining Plus feature.** Only a notification template scaffold exists (`_t_mf_label_change`); the
-  old-vs-new label detection task/beat is NOT built. NEXT.
+- ✅ **Label-change alerts** — DONE 2026-06-08 (`ef69a28`): the monthly re-score diffs each fund's
+  label vs the prior snapshot (per portfolio) and enqueues an educational `mf_label_change` alert
+  that RIDES the existing deliver seam (B31 consent + quiet-hours + rate-cap + B26 audit apply; no
+  parallel path). Idempotent (`inserted` guard); factual, portfolio-named, escaped, no numeric.
+  Tier-B inline ACCEPT (Security Sonnet takeover + Compliance Opus); `reviews/plus-label-change-alerts.md`.
+  511 unit pass + 19 new.
+
+**→ The Plus feature set is COMPLETE** (AI commentary · history · auto re-score · multi-portfolio ·
+alerts). All dev is done; the project is fully in the **pre-deploy phase**.
 
 **PARKED until a pre-deploy phase — do NOT spend dev sessions on these:**
 

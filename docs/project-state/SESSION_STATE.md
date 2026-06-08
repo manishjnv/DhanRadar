@@ -35,17 +35,16 @@ lives in the linked docs.
 - **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
   touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
   to restore before the next load-bearing/security change (item 5 AI gateway will need it).
-- **Next action (two tracks).** (a) **dev — Plus tracking growth:** functionality-first sequence
-  (items 1–7) COMPLETE. Plus features built: AI commentary (`2b967d7`), stored history + auto monthly
-  re-score (`d89f133`), **multiple portfolios DONE 2026-06-08 (`cef5345`)**. **Next & ONLY remaining
-  Plus slice → label-change alerts** (Notification module — fire on `in_form → off_track` from the
-  monthly re-score, `is_plus`-gated; a notification template scaffold exists, the detection task does
-  not). (b) **pre-deploy:** (1) resolve PR #28 conflicts against `main`; (2) run the **Phase-7 §5
-  governance panel** (batched full-tier audit over the whole branch — note: migration `0013`'s
-  data-preserving backfill is verified by review, the create_all test fixture precludes an alembic
-  down/up test); (3) close deploy gates — **B48** consent re-enforce, **B2/B7/B8** billing plan-data
-  seeding, live **NAV** populated, best-effort NSE mood provider verified or left to
-  `data_unavailable`; (4) human go/no-go → merge → deploy.
+- **Next action — ALL dev is COMPLETE.** Functionality-first sequence (items 1–7) + the full Plus
+  feature set are done: AI commentary (`2b967d7`), stored history + auto monthly re-score (`d89f133`),
+  multiple portfolios (`cef5345`), **label-change alerts DONE 2026-06-08 (`ef69a28`)**. → The project
+  is fully in the **pre-deploy phase**: (1) resolve PR #28 conflicts against `main`; (2) run the
+  **Phase-7 §5 governance panel** (batched full-tier audit over the whole branch — notes for the
+  panel: migration `0013`'s data-preserving backfill is verified by review since the `create_all`
+  test fixture precludes an alembic down/up test; the NSE mood provider + label-change alerts are
+  inert-but-safe until consent/data land); (3) close deploy gates — **B48** consent re-enforce (also
+  un-gates `cross_border_notify` so alerts actually deliver), **B2/B7/B8** billing plan-data seeding,
+  live **NAV** populated; (4) human go/no-go → merge → deploy.
 
 ### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
 
