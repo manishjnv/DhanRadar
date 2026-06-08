@@ -17,6 +17,12 @@ COPY dhanradar/ ./dhanradar/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 
+# Pre-create the CAS scratch dir owned by the runtime user. A shared named
+# volume is mounted here in compose (API writes, celery-batch reads/purges);
+# Docker seeds an empty named volume from the image dir's ownership, so this
+# makes the volume writable by appuser instead of root-owned (EACCES).
+RUN mkdir -p /tmp/dhanradar_cas && chown appuser:appgroup /tmp/dhanradar_cas
+
 # Switch to non-root user
 USER appuser
 
