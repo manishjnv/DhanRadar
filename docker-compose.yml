@@ -113,6 +113,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Next.js standalone server.js binds to $HOSTNAME, which Docker sets to the
+      # container id → it listens ONLY on the container's network IP, so the
+      # localhost healthcheck (and any loopback probe) fails. Bind all interfaces
+      # so the wget healthcheck passes and cloudflared's service_healthy dep is met.
+      HOSTNAME: "0.0.0.0"
     networks:
       - dhanradar
     deploy:
@@ -199,7 +205,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
-    command: ["celery", "-A", "dhanradar.celery_app", "beat", "--loglevel=info"]
+    # --schedule in /tmp: the image runs as non-root (appuser) and /app is
+    # root-owned, so the default ./celerybeat-schedule write fails with EACCES
+    # and beat crash-loops. /tmp is writable; the schedule file only caches
+    # last-run times (safe to lose on restart).
+    command: ["celery", "-A", "dhanradar.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
     networks:
       - dhanradar
     depends_on:
