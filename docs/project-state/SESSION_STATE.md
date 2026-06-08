@@ -1,9 +1,31 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-08 (pre-deploy gate)
+**Last updated:** 2026-06-08 (DEPLOYED to production)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## 🟢 DEPLOYED TO PRODUCTION — 2026-06-08
+
+**Deployed: YES. URL live: YES — <https://dhanradar.com> (HTTP 200, app + API).** Full record:
+`docs/ops/DEPLOY_LOG_2026-06-08.md`.
+
+- **dhanradar.com:** `/` → 200 (Next.js, title `DhanRadar`); `/api/v1/health` → 200
+  `{"status":"ok","db":"ok","redis":"ok"}`; anonymous `/api/v1/consent` → 401. Verified from an
+  independent network path (local → CF edge → tunnel → KVM4).
+- **Stack:** 8 own containers (`-p dhanradar -f docker-compose.yml`, **no host ports**) + dedicated
+  `dhanradar` cloudflared container (4 QUIC conns, CF Mumbai edge). All healthy. `main` = `3221543`.
+- **Consent enforced (B48): VERIFIED** — `ENV=production`; signup→201, consent-gated CAS upload
+  without a grant → 403 `consent_required`.
+- **Schema:** Alembic `0001→0013` (72 tables) via `python -m alembic`. **Footprint** ~630 MiB (cap
+  ~3 GB). **Shared-box impact: NONE** (etip up, host etip-ssh lifeline untouched).
+- **5 first-deploy blockers fixed** (PRs #29/#30/#31): pg_partman init guard, nextjs
+  `HOSTNAME=0.0.0.0` + healthcheck `127.0.0.1`, celery-beat `/tmp` schedule, `python -m alembic`.
+  Plus a box-only cloudflared creds `chown 65532` (not in the public repo).
+- **Degraded / operator follow-ups (non-blocking):** B34 R2 India-residency unverified (archival +
+  backups best-effort until then); `ADMIN_USER_IDS` unset (admin → 404 fail-closed); pg_partman
+  absent (auto-partition rollover off; table exists); B38 Sentry/Prometheus not wired; B29 NAV
+  backfill not yet run (funds read `insufficient_data` until seeded).
 
 ## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
 
@@ -712,3 +734,22 @@ backend ✅ migrations ✅ frontend ✅ guards ✅; lint ⚠ advisory. No KVM4 s
   copy-paste commands are safety-critical and were derived from this turn's exact reads of the 4
   scripts + verification doc (hot cache); a cheap-tier redraft risked inaccurate commands. One-shot
   Opus exemption applied deliberately.
+
+### Agent-utilization footer — PRODUCTION DEPLOY session (2026-06-08)
+
+Headline: executed the first KVM4 production deploy end-to-end — dhanradar.com LIVE, consent
+enforced, zero shared-box impact. Fixed 5 first-deploy blockers (PRs #29/#30/#31) + a box-only
+cloudflared creds chown. Deploy log: `docs/ops/DEPLOY_LOG_2026-06-08.md`.
+
+- **Opus** — all remote orchestration (scripted via scp'd .sh per the harness gotcha), every
+  diagnosis (pg_partman init abort, nextjs `$HOSTNAME` bind, IPv6 `localhost` healthcheck trap,
+  beat EACCES, bare-`alembic` import, cloudflared creds uid), the 5 infra fixes, the go/no-go
+  judgment, and the phased internal→public gating with a human pause before go-live.
+- **Sonnet / Haiku / codex:rescue** — n/a (deploy orchestration + infra diagnosis is Opus
+  judgment; no parallel implementation or adversarial-gate work this session).
+- **claude-mem** — wrote `dhanradar-deployed-live-kvm4` (deploy + 5 gotchas) and
+  `codex-rescue-unavailable-account` earlier; indexed in MEMORY.md.
+- Routing deviation: the deploy log + RCA + SESSION_STATE/BLOCKERS updates were drafted on Opus,
+  not delegated (doc-drafting nudge). Reason: a production deploy record's exact commit SHAs, PR
+  numbers, and verification outputs were all in Opus's hot cache this turn; accuracy of the
+  permanent record outweighed the cheap-tier draft. One-shot exemption applied.

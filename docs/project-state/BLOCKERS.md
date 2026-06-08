@@ -3,6 +3,26 @@
 Single register of deferred items. Each names the gate/phase it blocks. Clear an item only when
 proven resolved (link the commit/RCA). New items get the next B-number.
 
+## 🟢 DEPLOYED TO PRODUCTION — 2026-06-08 (live at <https://dhanradar.com>)
+
+First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
+`docs/ops/DEPLOY_LOG_2026-06-08.md`):
+
+- **B48 — DONE (enforced in prod).** `ENV=production` + `DPDP_CONSENT_ENFORCED=true` on the box;
+  consent enforcement VERIFIED live (signup→201, no-grant CAS upload → 403 `consent_required`).
+- **B36 — DONE (first live deploy executed).** `deploy.sh`/compose brought the 8-container stack up
+  on KVM4; `python -m alembic` migration chain `0001→0013` applied. `deploy.sh` fixed to
+  `python -m alembic` (PR #30). Rollback not yet exercised live.
+- **B37 — PARTIAL.** Backup/restore scripts present + validated; **NOT yet run live** — still owed:
+  R2 India bucket + 7-yr lifecycle, nightly cron, a tested restore drill.
+- **B38 — PARTIAL.** App emits `/metrics` + Sentry hook; **scrape/alerts onto `etip_prometheus`
+  NOT yet wired**; `SENTRY_DSN` not set on the box.
+- **B34 — PARTIAL (infra/human).** R2 archival code live but bucket **India-residency NOT verified**;
+  archival + backups stay best-effort/skipped until confirmed. Do not rely on the 7-yr archive yet.
+- **Also open:** `ADMIN_USER_IDS` unset (admin endpoints fail-closed 404); pg_partman absent →
+  auto monthly-partition rollover off (table + DEFAULT partition exist); **B29** first live NAV
+  backfill not yet run (funds read `insufficient_data` until seeded).
+
 ## ⏱ PRE-DEPLOY GATE RUN — 2026-06-08 (the parked pre-deploy phase is now ACTIVE)
 
 - **PR #28 reconciled with `main`** (merge `d07a19e`): consolidated main's PRs #22–27 (B29
