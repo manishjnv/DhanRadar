@@ -5,7 +5,14 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
-import type { CasUploadResponse, CasStatusResponse, MfReport } from './types';
+import type {
+  CasUploadResponse,
+  CasStatusResponse,
+  MfReport,
+  MfScheme,
+  BackendCasJobStatus,
+  BackendPortfolioReport,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Upload CAS
@@ -42,10 +49,36 @@ export function useUploadCas() {
 // ---------------------------------------------------------------------------
 // Poll job status
 // ---------------------------------------------------------------------------
+
+/** Map backend status values → the frontend CasStatusResponse enum the page expects. */
+function mapBackendStatus(raw: BackendCasJobStatus): CasStatusResponse {
+  let status: CasStatusResponse['status'];
+  switch (raw.status) {
+    case 'done':
+      status = 'done';
+      break;
+    case 'failed':
+      status = 'error';
+      break;
+    case 'parsing':
+    case 'scoring':
+      status = 'processing';
+      break;
+    case 'queued':
+    default:
+      status = 'pending';
+      break;
+  }
+  return { status, progress_pct: raw.progress_pct };
+}
+
 export function useCasStatus(jobId: string | null) {
   return useQuery({
     queryKey: queryKeys.mf.casStatus(jobId ?? ''),
-    queryFn: () => api.get<CasStatusResponse>(`/mf/upload/cas/${jobId}/status`),
+    queryFn: async () => {
+      const raw = await api.get<BackendCasJobStatus>(`/mf/upload/cas/${jobId}/status`);
+      return mapBackendStatus(raw);
+    },
     enabled: !!jobId,
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -62,10 +95,76 @@ export function useCasStatus(jobId: string | null) {
 // ---------------------------------------------------------------------------
 // Fetch full report
 // ---------------------------------------------------------------------------
+
+/** Transform backend PortfolioReport wire shape → MfReport (page contract). */
+function mapBackendReport(r: BackendPortfolioReport): MfReport {
+  // Build a name-lookup from isin → scheme_name for overlap matrix resolution.
+  const nameByIsin: Record<string, string> = {};
+  for (const f of r.funds) {
+    nameByIsin[f.isin] = f.scheme_name;
+  }
+
+  const schemes = r.funds.map((f) => ({
+    isin: f.isin,
+    scheme_name: f.scheme_name,
+    amc_name: '',          // backend doesn't send amc_name
+    category: '',          // not per-fund from backend
+    units: f.units,
+    invested: f.invested_amount ?? 0,
+    current_value: f.current_value ?? 0,
+    return_pct:
+      f.invested_amount && f.invested_amount > 0
+        ? ((f.current_value ?? 0) - f.invested_amount) / f.invested_amount * 100
+        : 0,
+    label: f.verb_label as MfScheme['label'],
+    confidence_band: f.confidence_band as MfScheme['confidence_band'],
+  }));
+
+  const category_allocation = Object.entries(r.category_allocation ?? {}).map(
+    ([category, pct]) => ({ category, pct }),
+  );
+
+  // Flatten the upper-triangle of the overlap matrix into OverlapPair[].
+  const overlap: MfReport['overlap'] = [];
+  const isins = Object.keys(r.overlap_matrix ?? {});
+  for (let i = 0; i < isins.length; i++) {
+    const isinA = isins[i];
+    const row = r.overlap_matrix[isinA];
+    if (!row) continue;
+    for (const [isinB, pct] of Object.entries(row)) {
+      // Only emit each pair once (i < j by position, guard by string compare).
+      if (isinA < isinB) {
+        overlap.push({
+          fund_a: nameByIsin[isinA] ?? isinA,
+          fund_b: nameByIsin[isinB] ?? isinB,
+          overlap_pct: pct,
+        });
+      }
+    }
+  }
+
+  return {
+    summary: {
+      total_invested: r.total_invested ?? 0,
+      current_value: r.current_value ?? 0,
+      xirr_pct: r.xirr_pct ?? 0,
+      as_of: r.generated_at ?? '',
+      scheme_count: r.funds.length,
+    },
+    schemes,
+    category_allocation,
+    overlap,
+  };
+}
+
 export function useMfReport(jobId: string | null, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.mf.report(jobId ?? ''),
-    queryFn: () => api.get<MfReport>(`/mf/portfolio/report?job_id=${jobId}`),
+    queryFn: async () => {
+      // Path param (not query string) per backend contract: GET /api/v1/mf/report/{job_id}
+      const raw = await api.get<BackendPortfolioReport>(`/mf/report/${jobId}`);
+      return mapBackendReport(raw);
+    },
     enabled: !!jobId && enabled,
     staleTime: 5 * 60 * 1000,
   });

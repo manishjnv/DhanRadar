@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     R2_BUCKET: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
+    # DPDP / ADR-0022: the audit archive carries user_id and MUST be India-resident.
+    # OFF by default — the daily audit→R2 export is gated on this so PII is never
+    # sent cross-border until an India-resident archive target is explicitly enabled.
+    # The primary 7-yr audit record lives in the India-resident Postgres regardless.
+    AUDIT_ARCHIVE_ENABLED: bool = False
 
     # ------------------------------------------------------------------
     # External APIs

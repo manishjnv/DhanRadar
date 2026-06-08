@@ -37,8 +37,15 @@ async def _archive() -> str:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from dhanradar import storage
+    from dhanradar.config import settings
     from dhanradar.db import engine
     from dhanradar.models.compliance import AiRecommendationAudit
+
+    # DPDP / ADR-0022 fail-safe: do NOT export user_id-bearing audit rows to the
+    # (currently cross-border) R2 bucket unless an India-resident archive is
+    # explicitly enabled. The audit data remains in the India-resident Postgres.
+    if not settings.AUDIT_ARCHIVE_ENABLED:
+        return "audit archival disabled (AUDIT_ARCHIVE_ENABLED=false) — rows retained in Postgres only"
 
     # Prior IST calendar day → UTC bounds.
     now_ist = datetime.now(_IST)
