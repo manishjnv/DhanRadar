@@ -30,6 +30,7 @@ from dhanradar.ai_gateway.quality import QualityValidator
 from dhanradar.ai_gateway.schemas import AI_DISCLAIMER, AIOutputBase, ConfidenceBand
 
 __all__ = [
+    "CompletionResult",
     "OpenRouterGateway",
     "CompletionResult",
     "AIOutputBase",
