@@ -7,7 +7,18 @@ proven resolved (link the commit/RCA). New items get the next B-number.
 
 - **PR #28 reconciled with `main`** (merge `d07a19e`): consolidated main's PRs #22–27 (B29
   foundation, admin/ops, B6/B28, B34, B36/B37, the parallel AI commentary) with this branch's Plus
-  stack. Branch is mergeable; deterministic gates GREEN (516 unit pass, single-head `0013`).
+  stack. Conflict-free vs main. **BUT branch CI is RED — NOT mergeable yet (PR back to draft):**
+  - **B54 `[CC, needs live DB]` — `test_consent_writer` (5 fails):** B44 (`927f64f`, prior session)
+    `apply_consent_change` `jsonb_set` write fails in CI (grant not persisted / sibling clobbered /
+    revoke format). Red in CI since B44 (its "tests pass" was local-DB only; integration tests only
+    run in CI). **Merge-blocker. Debug with docker-compose Postgres.**
+  - **B55 `[CI-infra]` — `migrations` job:** `ERROR: extension "pg_partman" is not available` at the
+    `infra/postgres/init/01_init.sql` psql step (file identical to main → CI image `timescaledb-ha:pg16`
+    env drift). Guard `CREATE EXTENSION pg_partman`/`pg_cron` with a DO-block availability check, or
+    fix the CI service image. **Merge-blocker (CI red); not a branch code defect.**
+  - **3× `test_notifications` `RequireTier.__call__() missing db`** — **FIXED `ee059db`** (PHASE 5M
+    regression: `/test` `_pro_gate(user)` → `_pro_gate(user, db)`).
+  - `lint` job red = B40-followup advisory backlog (below). `guards` + `frontend` green.
 - **Phase-7 §5 governance panel RAN** — Security/Compliance ACCEPT-WITH-CONDITIONS (no blocker),
   UI/Product ACCEPT-WITH-CONDITIONS. Ledger: `reviews/phase7-predeploy-panel.md`. The Gate-0
   batched-audit checklist item is satisfied. **Deploy still needs the operational punch-list closed

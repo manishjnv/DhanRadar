@@ -84,7 +84,12 @@ passes. UI: no numeric score in any component DOM; disclosure rendered on every 
 
 ## Status
 
-PR #28 is **merge-eligible** (panel passed; the two code findings fixed; deterministic gates green
-on the merged tree — 516 unit pass, 2 pre-existing network failures, alembic single head 0013).
-**Deploy remains human-gated** — the operational punch-list above + the parked infra gates
+The governance **panel passed** (no Security/Compliance blocker) and the two panel code findings
+were fixed. **However the branch is NOT merge-ready: GitHub CI is RED** — the panel's "merge-eligible"
+read was based on LOCAL unit tests; the CI integration suite + migrations job (the real gate, with a
+live Postgres) fail. Merge-blockers: **B54** (`test_consent_writer` `jsonb_set`, B44 bug — needs a
+live DB), **B55** (`migrations` `pg_partman` CI-image drift), and the `lint` advisory backlog
+(B40-followup). The 3 `test_notifications` RequireTier regressions are FIXED (`ee059db`). PR #28 is
+back to **draft** until CI is green. See SESSION_STATE "CI status" for the authoritative state.
+**Deploy remains human-gated** regardless — the operational punch-list + parked infra gates
 (B25/B34/B36/B37/B38/B40-followup) must close and a human must explicitly approve the KVM4 deploy.

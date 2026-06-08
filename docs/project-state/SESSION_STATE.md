@@ -7,18 +7,46 @@ lives in the linked docs.
 
 ## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
 
-**Verdict: MERGE-READY, NOT DEPLOY-READY.** All dev complete; PR #28 reconciled with `main` and the
-Phase-7 §5 governance panel passed. Deploy stays human-gated behind the operational punch-list.
+**Verdict: NOT merge-ready, NOT deploy-ready — branch CI is RED.** PR #28 is conflict-free and the
+governance panel passed, but the GitHub CI (the real gate — it runs the integration suite +
+migrations against a live Postgres, which local runs cannot) is FAILING. PR #28 is back to **draft**.
 
-- **PR #28 mergeable:** YES. Merged `origin/main` (PRs #22–27: B29 foundation, admin/ops, B6/B28,
-  B34, B36/B37, parallel AI commentary) into the branch — 16 conflicts resolved (merge `d07a19e`):
-  kept this branch's AI-commentary/gateway contract (the Plus stack depends on it), main's reviewed
-  B36/B37 deploy/backup artifacts, the `amfi.py` superset, the `0008a→0013` single-head migration
-  chain, and the B48/FOUNDING config. Docs unioned (no ADR/RCA/blocker dropped). Pushed; HEAD now
-  fully contains `origin/main`.
-- **Deterministic gates:** GREEN on the merged tree — 516 backend unit pass (2 pre-existing
-  `test_market_data` network/DNS failures; 1 xfail), `ci_guards` + `anti_pattern` + secrets clean,
-  ruff clean on resolved code, `alembic heads` = single `0013` (linear chain). Frontend untouched by
+> **CORRECTION (2026-06-08 pm):** an earlier note here said "MERGE-READY / gates GREEN." That was
+> based on LOCAL UNIT tests only (516 pass). The CI **integration tests + migrations job** are RED
+> and have been since B44 landed (after the Jun-7 green run `63e312d5`). Local `pytest` does NOT run
+> integration tests (no Postgres) and the `create_all` fixture bypasses the alembic chain — so CI is
+> authoritative. Do NOT merge until CI is green.
+
+### CI status (run on HEAD) — `guards` ✅ `frontend` ✅; `backend` ❌ `migrations` ❌ `lint` ❌
+
+- **backend (10 failed / 629 passed):**
+  - 3× `test_notifications` `RequireTier.__call__() missing 'db'` — **FIXED** (`ee059db`): PHASE 5M
+    (`af850f9`) added a required `db` to `RequireTier.__call__`; the notifications `/test` in-body
+    `_pro_gate(user)` call didn't pass it. Now `_pro_gate(user, db)`.
+  - 5× `test_consent_writer` (grant not written / sibling clobbered / revoke format) — **OPEN**:
+    a real B44 (`927f64f`, prior session) `jsonb_set` integration bug; the B44 "tests pass" was
+    local-DB only — red in CI since. **Needs a live Postgres (docker-compose) to debug + verify.**
+  - 2× `test_market_data` (no_nav_data / event-loop) — known network/loop flakes (pre-existing).
+- **migrations ❌:** `ERROR: extension "pg_partman" is not available` at the `01_init.sql` psql
+  step. `infra/postgres/init/01_init.sql` is **identical to main**; the CI Postgres image
+  (`timescaledb-ha:pg16`) no longer ships `pg_partman` (env drift — a re-run of main would likely
+  fail too). Fix: guard `CREATE EXTENSION pg_partman`/`pg_cron` (DO-block availability check) or fix
+  the CI service image. **CI-infra, not a code defect in this branch.**
+- **lint ❌:** the ~361 advisory ruff findings + never-run mypy (B40-followup) — the parked
+  lint-cleanup-then-make-blocking item.
+
+**Merge path:** fix `test_consent_writer` (live DB), resolve the `pg_partman` CI-image issue, and
+clear/quiet the lint job → CI green → flip PR #28 ready → human merge. The merge reconciliation,
+governance panel, and RequireTier fix are done.
+
+- **PR #28 reconciliation (done):** merged `origin/main` (PRs #22–27: B29 foundation, admin/ops,
+  B6/B28, B34, B36/B37, parallel AI commentary) — 16 conflicts resolved (merge `d07a19e`): kept this
+  branch's AI-commentary/gateway contract (the Plus stack depends on it), main's reviewed B36/B37
+  deploy/backup artifacts, the `amfi.py` superset, the `0008a→0013` single-head migration chain, and
+  the B48/FOUNDING config. Docs unioned (no ADR/RCA/blocker dropped). Pushed; HEAD contains `origin/main`.
+- **Local gates (NOT the full gate):** 516 backend UNIT pass (integration tests only COLLECT — no
+  local Postgres), `ci_guards` + `anti_pattern` + secrets clean, ruff clean on resolved code,
+  `alembic heads` = single `0013`. Frontend untouched by
   the merge (string-constant nav fix only).
 - **Phase-7 §5 panel:** Security ACCEPT-WITH-CONDITIONS (no blocker), Compliance ACCEPT-WITH-
   CONDITIONS (no blocker — all 10 non-negs hold on every shipping surface), UI ACCEPT-WITH-
@@ -50,11 +78,16 @@ empty-portfolio silent-`done` guard (Product F4); `ui-system/contracts` deprecat
 mood embed `Cache-Control` (Product F9); B40-followup (promote ruff/mypy to blocking after a
 lint-cleanup pass).
 
-### SINGLE NEXT ACTION FOR THE HUMAN OPERATOR
+### SINGLE NEXT ACTION (CI must go green BEFORE merge)
 
-PR #28 is marked ready (merge-eligible). **Review + merge to `main`, then work the operational
-punch-list above on KVM4 (NAV seed → B48 enforce → admin/scoring activate → billing seed → deploy
-scripts) and give explicit go/no-go before the KVM4 deploy.** Do NOT deploy until items 1–5 close.
+**Get the branch CI green first — this needs a live Postgres (run `docker compose` locally or in
+CI):** (1) debug + fix the 5 `test_consent_writer` `jsonb_set` failures (B54); (2) guard
+`pg_partman`/`pg_cron` in `infra/postgres/init/01_init.sql` or fix the CI Postgres image (B55);
+(3) quiet/clear the `lint` job (B40-followup). The RequireTier fix (`ee059db`) already clears the 3
+notification failures. THEN flip PR #28 ready → human merge → work the operational deploy punch-list
+(NAV seed → B48 enforce → admin/scoring activate → billing seed → B36/B37/B38 live) → human go/no-go.
+**Do NOT merge red CI; do NOT deploy.** (This session refused both — deploy is forbidden; merge is
+blocked by red CI.)
 
 ## Session handoff (2026-06-08, end of functionality-first B29+B42+B43 session)
 
