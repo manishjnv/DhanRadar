@@ -240,7 +240,14 @@ async def upload_cas(
     #    the existing job; a different portfolio or user gets an independent job.
     existing = await service.dedup_lookup(redis, user.user_id, resolved_portfolio_id, source_hash)
     if existing:
-        return CasUploadResponse(job_id=existing, deduped=True)
+        # Only short-circuit to a job that actually SUCCEEDED (report available).
+        # A prior job that failed or got stuck must NOT be returned — the user is
+        # re-uploading precisely because it did not work; bouncing them back to a
+        # dead job is the bug. Drop the stale record and reprocess fresh.
+        prior = await db.get(MfCasJob, uuid.UUID(existing))
+        if prior is not None and prior.status == "done":
+            return CasUploadResponse(job_id=existing, deduped=True)
+        await service.dedup_clear(redis, user.user_id, resolved_portfolio_id, source_hash)
 
     # 6. Persist the raw file for the worker (purged after parse + 24h backstop),
     #    create the job row queued, enqueue, return < 200ms.

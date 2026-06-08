@@ -72,6 +72,33 @@ def test_dedup_key_is_namespaced_per_user_and_portfolio():
     assert "userA" in dedup_key("userA", "pf1", h) and h in dedup_key("userA", "pf1", h)
 
 
+class _FakeRedis:
+    def __init__(self) -> None:
+        self._d: dict[str, str] = {}
+
+    async def get(self, k):
+        return self._d.get(k)
+
+    async def set(self, k, v, ex=None):
+        self._d[k] = v
+
+    async def delete(self, k):
+        self._d.pop(k, None)
+
+
+async def test_dedup_clear_removes_record_so_reupload_reprocesses():
+    """A re-upload after a failed/stuck job must NOT be deduped to the dead job:
+    the upload route drops the stale dedup record (only a `done` job short-circuits).
+    dedup_clear is the primitive that enables that reprocess path."""
+    from dhanradar.mf import service
+
+    r = _FakeRedis()
+    await service.dedup_record(r, "u1", "pf1", "hash1", "job-old")
+    assert await service.dedup_lookup(r, "u1", "pf1", "hash1") == "job-old"
+    await service.dedup_clear(r, "u1", "pf1", "hash1")
+    assert await service.dedup_lookup(r, "u1", "pf1", "hash1") is None
+
+
 # --- report assembly: disclosure injected, NO numeric score ------------------
 def test_report_has_no_unified_score_field():
     item_fields = {f for f in FundReportItem.model_fields}

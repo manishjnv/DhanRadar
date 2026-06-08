@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-08 — CAS re-upload bounced to a dead job (dedup returned a non-`done` job)
+
+- **Symptom:** after the pipeline was fixed, re-uploading the same eCAS "did nothing" — the UI returned to the old, failed job and spun. The upload POST returned 202 but the status poll was for the OLD job id.
+- **Root cause:** the SHA-256 upload dedup (`mf/router.py` :: `upload_cas`) returned ANY existing job for the content hash via `service.dedup_lookup` (Redis `mf:cas:dedup:{user}:{pf}:{hash}` → job_id), regardless of that job's status. The user's first upload had recorded job `4dd2d997`; every re-upload of the same file deduped straight back to it — even after it was marked `failed`. Re-uploading is exactly the retry path, so returning the dead job is the bug.
+- **Fix:** only short-circuit to a job that actually `done` — `backend/dhanradar/mf/router.py` now `db.get(MfCasJob, existing)` and returns the dedup only when `status == "done"`; otherwise it calls the new `service.dedup_clear(...)` and falls through to create a fresh job. Unblocked the live user by deleting the stale Redis dedup keys. Unit test `test_dedup_clear_removes_record_so_reupload_reprocesses`.
+- **Prevention:** a dedup/idempotency cache must key on a SUCCESSFUL terminal state, never "an attempt happened". Any "return the existing X" path needs to check that X is actually usable. (Mirrors the consent-writer lesson: validate the stored value, don't trust its presence.)
+- **Phase/area:** Post-launch / MF CAS upload dedup.
+
 ### 2026-06-08 — Core MF wedge non-functional in prod: Celery task-discard, CAS file not shared, NAV-backfill OOM, frontend↔backend contract drift
 
 - **Symptom:** an uploaded CAS hung forever on "Analysing your portfolio…". Reported live after go-live.
