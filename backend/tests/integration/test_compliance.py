@@ -226,6 +226,9 @@ async def test_archive_exports_row(db_session, monkeypatch):
 
     monkeypatch.setattr(_storage, "put_object", _record_put)
 
+    # Exercise the ENABLED export path (off by default for DPDP residency).
+    from dhanradar.config import settings as _settings
+    monkeypatch.setattr(_settings, "AUDIT_ARCHIVE_ENABLED", True)
     result = await _archive()
 
     assert len(uploads) == 1, f"Expected 1 upload, got {len(uploads)}"
@@ -250,6 +253,9 @@ async def test_archive_zero_rows(db_session, monkeypatch):
 
     monkeypatch.setattr(_storage, "put_object", _record_put)
 
+    # Exercise the ENABLED export path (off by default for DPDP residency).
+    from dhanradar.config import settings as _settings
+    monkeypatch.setattr(_settings, "AUDIT_ARCHIVE_ENABLED", True)
     result = await _archive()
 
     assert len(uploads) == 0, "No uploads expected when no rows exist"
