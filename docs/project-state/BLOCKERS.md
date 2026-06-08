@@ -23,6 +23,20 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
   auto monthly-partition rollover off (table + DEFAULT partition exist); **B29** first live NAV
   backfill not yet run (funds read `insufficient_data` until seeded).
 
+## 📋 POST-LAUNCH BACKLOG — 2026-06-08 (after go-live)
+
+- **MF wedge end-to-end FIXED** (PRs #33/#34 + dedup fix): Celery task registration, shared CAS
+  volume, NAV backfill (one-off, 2.1M rows), frontend↔backend report contract, status route,
+  CAS password UX, and the dedup "bounce to dead job" bug. B34 archival gated OFF (DPDP); audit
+  stays in the India-resident Mumbai Postgres. CAS upload→labelled report is functional.
+- **B56 `[backlog]` — Dashboard / Market-Mood endpoint drift.** The frontend calls
+  `/api/v1/instruments/top-scored`, `/news`, `/indices`, `/portfolio/summary` → all 404 (same
+  mocks-vs-backend drift the MF report had). Those pages need the same contract-alignment pass.
+- **B57 `[backlog, design ready]` — Centralised log management.** Two-tier plan (lean 7-yr
+  India-resident compliance ledger + verbose rotated debug stream + `request_id` correlation)
+  is fully specified for a future session in `docs/project-state/LOGGING_PLAN.md`. Not implemented.
+  Start with P1 (structlog JSON + correlation + Docker `json-file` rotation).
+
 ## ⏱ PRE-DEPLOY GATE RUN — 2026-06-08 (the parked pre-deploy phase is now ACTIVE)
 
 - **PR #28 reconciled with `main`** (merge `d07a19e`): consolidated main's PRs #22–27 (B29
