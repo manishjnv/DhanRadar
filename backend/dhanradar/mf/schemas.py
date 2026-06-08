@@ -44,6 +44,33 @@ class FundReportItem(BaseModel):
     contradicting_signals: list[str] = []
 
 
+class FundLabelHistory(BaseModel):
+    """Per-fund verdict in a history snapshot — label + band ONLY (non-neg #2)."""
+
+    isin: str
+    verb_label: str
+    confidence_band: str
+
+
+class SnapshotHistoryItem(BaseModel):
+    """One snapshot date with all scored funds for that day."""
+
+    snapshot_date: str
+    funds: list[FundLabelHistory]
+
+
+class PortfolioHistoryResponse(BaseModel):
+    """Plus-gated history of portfolio labels over time.
+
+    No unified_score / total_invested / xirr_pct — only the public projection.
+    """
+
+    snapshots: list[SnapshotHistoryItem]
+    disclosure: str
+    not_advice: str
+    disclaimer_version: Optional[str] = None
+
+
 class PortfolioReport(BaseModel):
     job_id: str
     status: str

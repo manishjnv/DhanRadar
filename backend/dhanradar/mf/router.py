@@ -25,9 +25,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous
+from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous, is_plus
+from dhanradar.mf import history as mf_history
 from dhanradar.mf import service
-from dhanradar.mf.schemas import CasJobStatus, CasUploadResponse, PortfolioReport
+from dhanradar.mf.schemas import (
+    CasJobStatus,
+    CasUploadResponse,
+    PortfolioHistoryResponse,
+    PortfolioReport,
+    SnapshotHistoryItem,
+)
 from dhanradar.models.mf import MfCasJob
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
@@ -137,6 +144,44 @@ async def cas_report(
         # Not ready yet — return the current status with the disclosure injected.
         return service.assemble_report(job_id=job_id, status=job.status, snapshot=None, funds=[])
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report_expired")
+
+
+@router.get("/history", response_model=PortfolioHistoryResponse)
+async def portfolio_history(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> PortfolioHistoryResponse:
+    """Return Plus users' label history grouped by snapshot date.
+
+    Gating order: 401 (anonymous) → 402 (not Plus) → 403 (no consent).
+    No numeric fields in the response (non-neg #2).
+    """
+    from dhanradar.scoring.engine.schemas import (
+        DISCLAIMER_VERSION,
+        DISCLOSURE_BUNDLE,
+        NOT_ADVICE,
+    )
+
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    if not await is_plus(user.user_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"error": "upgrade_required", "upgrade_url": "/pricing"},
+        )
+    await _require_mf_consent(user=user, db=db)
+
+    raw = await mf_history.get_snapshot_history(db, user.user_id)
+    snapshots = [
+        SnapshotHistoryItem(snapshot_date=item["snapshot_date"], funds=item["funds"])
+        for item in raw
+    ]
+    return PortfolioHistoryResponse(
+        snapshots=snapshots,
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+        disclaimer_version=DISCLAIMER_VERSION,
+    )
 
 
 async def _own_job(db: AsyncSession, job_id: str, user_id: str) -> MfCasJob:

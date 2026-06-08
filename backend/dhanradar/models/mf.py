@@ -143,6 +143,42 @@ class MfCasJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class MfUserFundScoreHistory(Base):
+    """Per-fund label history for Plus users.
+
+    Stores ONE row per (user, isin, snapshot_date) capturing only the public
+    projection: verb_label + confidence_band + model_version.  NO unified_score
+    column — zero numeric-leak surface (non-neg #2).
+
+    source values: 'cas_upload' | 'monthly_rescore'.
+    """
+
+    __tablename__ = "mf_user_fund_score_history"
+    __table_args__ = (
+        UniqueConstraint("user_id", "isin", "snapshot_date", name="uq_mf_score_history"),
+        Index("ix_mf_score_history_user_date", "user_id", "snapshot_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    verb_label: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence_band: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    scored_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class UserFundScore(Base):
     # `unified_score` is server-side / tier-gated — never serialized to a client.
     __tablename__ = "user_fund_scores"

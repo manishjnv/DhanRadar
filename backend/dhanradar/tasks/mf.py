@@ -179,6 +179,12 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
         )
         await db.commit()
 
+        # Resolve Plus status once — controls whether history rows are written.
+        from dhanradar.deps import is_plus
+        from dhanradar.mf import history as mf_history
+
+        plus = await is_plus(user_id, db)
+
         # Load each holding's NAV history (mf schema, read-only) so the engine
         # scores on real momentum/risk signals derived from NAV, and the snapshot
         # values on the latest NAV (B29). A holding with no NAV history yields no
@@ -196,6 +202,15 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
             signals = compute_fund_signals(p.isin, nav_series.get(p.isin, []))
             result = await score_fund(rengine, signals)
             await upsert_user_fund_score(db, user_id, result)
+            # Plus-only: retain label history per fund (no numeric persisted).
+            if plus:
+                await mf_history.append_score_history(
+                    db,
+                    user_id=user_id,
+                    result=result,
+                    snapshot_date=date.today(),
+                    source="cas_upload",
+                )
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
             # failure is logged and never breaks the report pipeline.
@@ -215,6 +230,15 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "contributing_signals": result.contributing_signals,
                 "contradicting_signals": result.contradicting_signals,
             })
+
+        # Plus-only: persist the portfolio-level snapshot (numbers stay server-side).
+        if plus:
+            await mf_history.persist_portfolio_snapshot(
+                db,
+                user_id=user_id,
+                snapshot_date=date.today(),
+                snap=snap,
+            )
 
         report_payload = {
             "job_id": job_id, "status": "done",
@@ -485,6 +509,119 @@ async def _nav_backfill_pipeline(years: int) -> str:
         f"nav_backfill: {total_rows} rows upserted across {windows_fetched}/{len(windows)} windows"
         f" (years={years})"
     )
+    logger.info(summary)
+    return summary
+
+
+@celery_app.task(name="dhanradar.tasks.mf.monthly_rescore_plus_users")
+def monthly_rescore_plus_users() -> str:
+    """Re-score every Plus user's current holdings from the latest NAV without
+    requiring a re-upload.  Writes label history + portfolio snapshot (Plus only).
+    Free users are skipped — no history rows, no snapshot.  Wired to the beat
+    schedule (1st of month, 03:00 IST).
+    """
+    try:
+        return asyncio.run(_monthly_rescore())
+    except Exception:  # noqa: BLE001
+        logger.exception("monthly_rescore_plus_users pipeline error")
+        return "monthly_rescore: failed — see worker logs"
+
+
+async def _monthly_rescore() -> str:
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine as _engine
+    from dhanradar.deps import is_plus
+    from dhanradar.mf import history as mf_history
+    from dhanradar.mf.snapshot import CashFlow as _CashFlow
+    from dhanradar.mf.snapshot import Holding as _Holding
+    from dhanradar.models.mf import MfUserHolding
+    from dhanradar.scoring.engine import RatingEngine
+
+    SessionLocal = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
+    rengine = RatingEngine()
+    today = date.today()
+
+    async with SessionLocal() as db:
+        # All users who currently have holdings.
+        user_rows = (
+            await db.execute(
+                select(MfUserHolding.user_id).distinct()
+            )
+        ).all()
+        user_ids = [str(row[0]) for row in user_rows]
+
+    rescored = 0
+
+    for uid in user_ids:
+        try:
+            async with SessionLocal() as db:
+                if not await is_plus(uid, db):
+                    continue  # Free users — no history/snapshot written.
+
+                # Load holding rows for this user.
+                holding_rows = (
+                    await db.execute(
+                        select(MfUserHolding).where(
+                            MfUserHolding.user_id == uid  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalars().all()
+
+                if not holding_rows:
+                    continue
+
+                isins = [h.isin for h in holding_rows]
+                nav_series, latest_nav = await _load_nav_series(db, isins)
+
+                # Score each fund via the bridge (never recompute the engine directly).
+                for h_row in holding_rows:
+                    isin = h_row.isin
+                    signals = compute_fund_signals(isin, nav_series.get(isin, []))
+                    result = await score_fund(rengine, signals)
+                    await upsert_user_fund_score(db, uid, result)
+                    await mf_history.append_score_history(
+                        db,
+                        user_id=uid,
+                        result=result,
+                        snapshot_date=today,
+                        source="monthly_rescore",
+                    )
+
+                # Build snapshot from current holdings + latest NAV.
+                holdings: list[_Holding] = []
+                for h_row in holding_rows:
+                    nav = latest_nav.get(h_row.isin)
+                    current_value = (
+                        float(h_row.units) * nav if nav is not None else 0.0
+                    )
+                    invested = float(h_row.invested_amount) if h_row.invested_amount is not None else 0.0
+                    holdings.append(
+                        _Holding(
+                            isin=h_row.isin,
+                            units=float(h_row.units),
+                            invested_amount=invested,
+                            current_value=current_value,
+                            category="uncategorized",
+                            cashflows=[_CashFlow(when=today, amount=current_value)],
+                        )
+                    )
+
+                snap = build_snapshot(holdings)
+                await mf_history.persist_portfolio_snapshot(
+                    db,
+                    user_id=uid,
+                    snapshot_date=today,
+                    snap=snap,
+                )
+                rescored += 1
+
+        except Exception:  # noqa: BLE001 — one bad user never aborts the beat
+            logger.exception("monthly_rescore: failed for user_id=%s", uid)
+            continue
+
+    summary = f"monthly_rescore: rescored {rescored} Plus users"
     logger.info(summary)
     return summary
 
