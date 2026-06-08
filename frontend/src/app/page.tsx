@@ -10,9 +10,6 @@ export default function HomePage() {
         Upload your mutual fund Consolidated Account Statement and get an
         educational, label-based portfolio report in about 60 seconds.
       </p>
-      <p className="mt-2 text-small text-ink-muted">
-        Educational research only — never investment advice.
-      </p>
 
       <div className="mt-8 flex flex-col gap-3 sm:flex-row">
         <Button asChild size="lg">

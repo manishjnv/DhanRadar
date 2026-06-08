@@ -17,7 +17,6 @@ import {
   CardDescription,
   CardBody,
 } from '@/components/ui/Card';
-import { Disclaimer } from '@/components/ui/Disclaimer';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { cn } from '@/lib/cn';
@@ -173,8 +172,6 @@ export default function PrivacyConsentPage() {
           })}
         </CardBody>
       </Card>
-
-      <Disclaimer className="text-center" />
     </div>
   );
 }

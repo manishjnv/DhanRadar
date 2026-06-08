@@ -14,7 +14,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { LabelChip } from '@/components/ui/LabelChip';
-import { Disclaimer } from '@/components/ui/Disclaimer';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { useCasStatus, useMfReport } from '@/features/mf/api';
@@ -199,7 +199,7 @@ function ReportView({ jobId }: { jobId: string }) {
     );
   }
 
-  const { summary, schemes, category_allocation, overlap } = data;
+  const { summary, schemes, category_allocation, overlap, disclosure, not_advice } = data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -233,9 +233,14 @@ function ReportView({ jobId }: { jobId: string }) {
 
       <OverlapSection pairs={overlap} />
 
-      <div className="rounded-lg border border-line bg-surface-2 p-4">
-        <Disclaimer />
-      </div>
+      {/* Contextual #9 disclosure — version-tied disclosure + not_advice from
+          the backend, rendered on the labelled-holdings surface. The standing
+          site-wide line is the AppShell footer, not here. */}
+      {(disclosure || not_advice) && (
+        <div className="rounded-lg border border-line bg-surface-2 p-4">
+          <DisclosureBundle disclosure={disclosure} notAdvice={not_advice} />
+        </div>
+      )}
     </div>
   );
 }
@@ -254,7 +259,7 @@ export default function ReportPage({ params }: { params: { jobId: string } }) {
       <div>
         <h1 className="text-h2 font-medium text-ink">Portfolio Report</h1>
         <p className="mt-1 text-small text-ink-secondary">
-          Educational analysis · not investment advice
+          Educational analysis of your mutual fund holdings
         </p>
       </div>
 
