@@ -7,7 +7,7 @@ Endpoints (all under /api/v1):
   PATCH /mf/portfolios/{pid}       (authed) — rename (owner-only)
   DELETE /mf/portfolios/{pid}      (authed) — delete + cascade (owner-only)
   POST /mf/upload/cas              (authed + mf_analytics consent) — enqueue CAS parse
-  GET  /mf/cas/{job}/status        (authed, own job) — poll progress
+  GET  /mf/upload/cas/{job}/status (authed, own job) — poll progress (canonical path)
   GET  /mf/report/{job}            (authed, own job) — labelled report (disclosure-injected)
   GET  /mf/history                 (authed + Plus + mf_analytics consent) — label history
 
@@ -276,7 +276,7 @@ async def upload_cas(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/cas/{job_id}/status", response_model=CasJobStatus)
+@router.get("/upload/cas/{job_id}/status", response_model=CasJobStatus)
 async def cas_status(
     job_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

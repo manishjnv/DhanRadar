@@ -7,6 +7,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +22,7 @@ export default function UploadCasPage() {
   const router = useRouter();
   const [file, setFile] = React.useState<File | null>(null);
   const [password, setPassword] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
   const [consentOpen, setConsentOpen] = React.useState(false);
   const { mutate: uploadCas, isPending } = useUploadCas();
   const { data: consent } = useConsent();
@@ -80,18 +82,37 @@ export default function UploadCasPage() {
           <CardHeader>
             <CardTitle>Password (optional)</CardTitle>
             <CardDescription>
-              CAS PDFs are usually password-protected with your PAN + date of birth.
+              CAS PDFs are usually password-protected. The password is typically your
+              PAN in capital letters (e.g. ABCDE1234F). Leave blank if your statement
+              isn&apos;t protected.
             </CardDescription>
           </CardHeader>
           <CardBody>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="e.g. ABCDE1234F01011990"
-              disabled={isPending}
-              autoComplete="off"
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="e.g. ABCDE1234F"
+                disabled={isPending}
+                autoComplete="off"
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                disabled={isPending}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-muted hover:text-ink focus:outline-none focus:ring-2 focus:ring-royal/40 rounded-r-md disabled:opacity-50"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </CardBody>
         </Card>
 
