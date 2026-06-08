@@ -15,6 +15,40 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-08 — P1 logging adversarial review: raw user_id in two log messages + Celery contextvar leak on revoke
+
+- **Symptom:** found by the independent Sonnet adversarial review of the P1 logging change
+  (B57) before any commit — not a field incident. Two MUST-FIX findings: (M1) `tasks/mf.py`
+  and `billing/service.py` each called `logging.warning`/`logger.error` with a raw user UUID
+  %-interpolated into the message string, bypassing the key-based redaction rules. (M2)
+  `celery_app.py` had `task_prerun` binding `request_id` + `user_ref` into contextvars and
+  `task_postrun` / `task_failure` clearing them, but `task_revoked` had no clear — a revoked
+  task left its contextvars bound, so the next task picked up on the same worker thread could
+  log under the wrong `user_ref` / `request_id`.
+- **Root cause:** (M1) The value-based regex in `_redaction_processor` catches known patterns
+  (JWT, PAN, mobile, email, API keys) but a plain UUID4 has no distinct pattern — UUID regex
+  was deliberately omitted so `job_id` stays visible. %-interpolation into a message string
+  means the value appears as an unstructured substring of the `event` field; the key-based
+  hash rule (`user_id` → sha256[:16]) never fires because the key is `event`, not `user_id`.
+  (M2) The `task_revoked` signal path was not listed alongside `task_postrun` and
+  `task_failure` when the contextvar clear was written — an omission, not a design choice.
+- **Fix:** (M1) `backend/dhanradar/tasks/mf.py` — replaced
+  `_slog.warning("...", user_id)` with `_slog.warning("...", user_ref=hash_user_ref(uid))`.
+  `backend/dhanradar/billing/service.py` — replaced
+  `logger.error("...", str(user_id))` with `logger.error("...", hash_user_ref(str(user_id)))`.
+  (M2) `backend/dhanradar/celery_app.py` — added `@task_revoked.connect` handler that calls
+  `structlog.contextvars.clear_contextvars()`, mirroring the `task_postrun` and
+  `task_failure` handlers.
+- **Prevention:** never %-interpolate a user id or any PII into a log message string — always
+  pass a hashed `user_ref=hash_user_ref(uid)` as a structured keyword argument so the
+  key-based redaction rule fires. Every `task_prerun` contextvar bind must be matched by a
+  clear on ALL exit signals: `task_postrun`, `task_failure`, AND `task_revoked`. The
+  redaction filter is test-enforced (`backend/tests/test_logging_redaction.py`, 16 tests) but
+  cannot protect against values that bypass the key rules via message-string interpolation —
+  the "never %-interpolate PII" rule is the only guard for that class.
+- **Phase/area:** B57 P1 logging — load-bearing middleware + Celery signal wiring; caught at
+  Tier-B adversarial review, not a field incident.
+
 ### 2026-06-08 — CAS re-upload bounced to a dead job (dedup returned a non-`done` job)
 
 - **Symptom:** after the pipeline was fixed, re-uploading the same eCAS "did nothing" — the UI returned to the old, failed job and spun. The upload POST returned 202 but the status poll was for the OLD job id.

@@ -21,6 +21,7 @@ import re
 import uuid
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 # An inbound request id is echoed into logs, a response header, and the JSON
 # error body. Only accept a conservative charset + length so a caller cannot
@@ -67,4 +68,11 @@ class RequestIDMiddleware:
                 message["headers"] = headers
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        # user_ref is NOT bound here — auth runs later in a route dependency (deps.py).
+        bind_contextvars(request_id=request_id)
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # Clear on exit to prevent cross-request context leakage on reused
+            # asyncio tasks (e.g. anyio worker threads in Starlette's routing).
+            clear_contextvars()

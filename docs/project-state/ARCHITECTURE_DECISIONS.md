@@ -36,6 +36,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0025 | AMFI historical NAV report as the canonical backfill source for MF return signals (B29) | Accepted |
 | ADR-0026 | Scoring-engine activation: admin-triggered, DB-registry-authoritative two-person + backtest gate (B6/B28) | Accepted |
 | ADR-0027 | First AI-gateway consumer = MF report portfolio commentary; complete() returns CompletionResult(output, model_used) | Accepted |
+| ADR-0028 | Centralised structured logging (P1): structlog JSON + request_id correlation + Docker json-file rotation + compliance redaction | Accepted |
 
 ---
 
@@ -492,3 +493,79 @@ refuses until `cross_border_ai` consent capture lands — the correct fail-close
 
 **Source:** `docs/project-state/reviews/ai-consumer-mf-commentary.md`; `BLOCKERS.md`
 B20/B21/B22/B23/B26; `docs/DhanRadar_Architecture_Final.md` §MF line 257.
+
+## ADR-0028 — Centralised structured logging (P1): structlog JSON + request_id correlation + Docker json-file rotation + compliance redaction
+
+**Date:** 2026-06-08 · **Status:** Accepted
+
+**Context:** The pre-P1 stack had ~19 stdlib `logging.getLogger()` call sites emitting
+unstructured text, no cross-request correlation, no redaction, and no log rotation — a
+compliance gap (DPDP/non-neg #10) and an operability gap on a shared box (KVM4, ~3 GB cap).
+BLOCKERS B57 tracked the requirement. Four decisions required architecture-owner sign-off:
+(a) whether to unify structlog and the existing stdlib callers under one chain or run two
+parallel chains; (b) whether to introduce OpenTelemetry 16-byte W3C trace IDs or keep UUID4
+`request_id`; (c) how to implement the two-layer PII/credential redaction filter required by
+DPDP; (d) how to rotate Docker logs within the shared-box cap without adding external infra.
+
+**Decision:**
+
+(a) **structlog + stdlib unification via `ProcessorFormatter` + `foreign_pre_chain`.**
+`configure_logging()` (`backend/dhanradar/core/logging.py`, stdlib-only imports plus structlog)
+installs a single structlog processor chain and wires the same chain to the stdlib root handler
+via structlog's `ProcessorFormatter`. Every existing `logging.getLogger()` call site emits the
+same redacted JSON without modification. The chain is: `merge_contextvars` → `add_log_level`
+→ `TimeStamper(iso,utc)` → `CallsiteParameterAdder` → `_redaction_processor` → `JSONRenderer`.
+One JSON object per line to stdout. `configure_logging()` is idempotent; public API also exposes
+`get_logger(name=None)` and `hash_user_ref(user_id) -> sha256(user_id)[:16]`.
+
+(b) **Keep UUID4 `request_id` in P1; defer OpenTelemetry to P3.** UUID4 already exists in
+`RequestIDMiddleware` (PURE ASGI — deliberately NOT `BaseHTTPMiddleware`, which breaks async
+SQLAlchemy sessions). The middleware binds `request_id` as a contextvars key and clears it in a
+`finally` block. `user_ref = hash_user_ref(user_id)` is bound in `deps.current_user_or_anonymous`
+(auth resolves AFTER the pre-routing middleware), in the CAS worker pipeline, and is propagated
+to Celery as a task kwarg and re-bound in `task_prerun`; cleared in `task_postrun`,
+`task_failure`, and `task_revoked`. `request_id` is also threaded into `gateway.complete()`
+and into the `ai_recommendation_audit` ledger write. W3C 16-byte trace IDs and a Grafana Loki
+collector are deferred to P3 (no OpenTelemetry dependency introduced in P1).
+
+(c) **Two-layer `_redaction_processor` (COMPLIANCE-CRITICAL, DPDP).** The processor runs
+BEFORE `JSONRenderer` and applies: (1) KEY-based rules — user-id fields → SHA-256[:16] hash;
+contact/PAN fields → `[REDACTED]`; credential/auth fields → `[REDACTED]`; API-key fields →
+`[REDACTED:key]`; prompt/message fields → `[REDACTED:prompt]`; AI response fields →
+`[REDACTED:response]`; binary/file fields and any `bytes` value → `[REDACTED]`. (2) VALUE-based
+regex on every string and the event message: JWT (`eyJ…`), PAN, Indian mobile (`[6-9]\d{9}`),
+email, and API-key patterns (`sk-`, `sk-or-`, `rzp_(test|live)_`, `AKIA…`). The processor
+recurses dict/list/tuple/set and never raises — on internal error it returns a safe
+`[REDACTED_ERROR]` sentinel that preserves only the non-PII correlation keys (`request_id`,
+`job_id`, `task`, `task_id`, `user_ref`). Enforced by 16 unit tests in
+`backend/tests/test_logging_redaction.py`.
+
+(d) **Docker `json-file` rotation via an `x-logging` YAML anchor (no new infra).**
+`docker-compose.yml` defines an `x-logging: &default-logging` anchor (`json-file` driver,
+`max-size: 50m`, `max-file: 5`) applied to all 9 services. Worst-case ~250 MB per container,
+~2 GB total — within the 3 GB box cap. Grafana Loki collection is deferred to P3.
+
+**Consequences:** all ~19 existing stdlib callers emit redacted JSON without code changes. A
+`request_id` + `user_ref` thread is available end-to-end from HTTP → Celery → AI gateway →
+audit. DPDP/SEBI compliance is enforced at the log layer (not call-site discipline) for the
+known key/value patterns. Log rotation is bounded within the shared-box cap. Four residual
+risks are accepted for P1: (1) a raw UUID interpolated into a log message string under no
+structured key is not regex-caught (UUID regex deliberately omitted so `job_id` stays visible —
+mitigated by hashing at known call sites); (2) exception tracebacks are appended AFTER the
+redaction processor, so an exception embedding PII in its message could leak — this codebase
+raises opaque error codes; traceback scrubbing deferred to P2; (3) base64-encoded bytes under
+an arbitrary key rely on call-site discipline; (4) `configure_logging()` clears root handlers
+(intentional — single JSON handler), which drops any separately-configured uvicorn
+access-log file handler.
+
+**Tier-B adversarial sign-off:** independent Sonnet adversarial takeover (codex unavailable —
+ChatGPT-plan entitlement error). Verdict **ACCEPT-WITH-CONDITIONS**; all MUST-FIX and
+SHOULD-FIX conditions applied in-session. MUST-FIX: (M1) raw user UUID was %-interpolated
+in `tasks/mf.py` and `billing/service.py` — replaced with `hash_user_ref(uid)` structured
+fields; (M2) `task_revoked` had no contextvar clear — added, so a revoked task cannot
+misattribute the next task's logs. SHOULD-FIX applied: phone value-regex backstop,
+tuple/set recursion, safe-error sentinel preserving correlation keys. RCA:
+`docs/rca/README.md` (2026-06-08 entry). Review ledger: `docs/project-state/reviews/b57-p1-logging.md`.
+
+**Source:** `docs/project-state/LOGGING_PLAN.md` §1–§8; `BLOCKERS.md` B57;
+`docs/project-state/reviews/b57-p1-logging.md`.

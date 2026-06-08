@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai import APIStatusError, RateLimitError
+from structlog.contextvars import bind_contextvars
 
 from dhanradar.ai_gateway.errors import (
     AllFreeModelsFailedError,
@@ -110,6 +111,7 @@ class OpenRouterGateway:
         ticker: str | None = None,
         contains_personal_data: bool = True,
         cross_border_consent_verified: bool = False,
+        request_id: str | None = None,
     ) -> CompletionResult:
         """Return a ``CompletionResult`` for ``task_type`` or raise.
 
@@ -131,6 +133,9 @@ class OpenRouterGateway:
                 calling ``assert_consent(user_id, "cross_border_ai", db)``
                 (deps.py) before invoking the gateway; the gateway is
                 module-isolated and cannot read consent itself.
+            request_id: Correlation id threaded from the originating HTTP request;
+                bound into the gateway's log context and forwarded to audit/ledger
+                writes (P1 logging).
 
         Raises:
             ConsentNotVerifiedError: if ``contains_personal_data=True`` and
@@ -148,6 +153,12 @@ class OpenRouterGateway:
         # cannot read consent itself. Refuse BEFORE any payload reaches OpenRouter.
         if contains_personal_data and not cross_border_consent_verified:
             raise ConsentNotVerifiedError("cross_border_ai")
+
+        # Bind the correlation id into the structlog context so every log line
+        # emitted inside this call (budget guard, quality validator, spillover)
+        # carries the originating request id without callers threading it manually.
+        if request_id is not None:
+            bind_contextvars(request_id=request_id)
 
         validator = QualityValidator(schema)
         models = self._models_for(task_type)

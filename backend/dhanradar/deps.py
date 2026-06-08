@@ -36,7 +36,9 @@ from typing import Annotated
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from structlog.contextvars import bind_contextvars
 
+from dhanradar.core.logging import hash_user_ref
 from dhanradar.db import get_db
 
 # ---------------------------------------------------------------------------
@@ -99,6 +101,9 @@ async def current_user_or_anonymous(
     # Resolve tier with Redis cache + DB fallback
     from dhanradar.auth.service import resolve_tier_with_db
     tier = await resolve_tier_with_db(user_id, db)
+
+    # Bind hashed user ref into the structlog context (raw user_id never logged).
+    bind_contextvars(user_ref=hash_user_ref(user_id))
 
     return UserContext(
         user_id=user_id,
