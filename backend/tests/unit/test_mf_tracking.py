@@ -123,6 +123,7 @@ async def test_append_score_history_writes_label_fields(monkeypatch):
                 result=result,
                 snapshot_date=date(2026, 6, 1),
                 source="cas_upload",
+                portfolio_id="portfolio-a",
             )
 
     # verify only public fields were written
@@ -156,6 +157,7 @@ async def test_append_score_history_commits(monkeypatch):
                 result=result,
                 snapshot_date=date(2026, 6, 1),
                 source="monthly_rescore",
+                portfolio_id="portfolio-a",
             )
 
     assert db.committed >= 1
@@ -186,7 +188,7 @@ async def test_get_snapshot_history_shape_no_numerics():
         async def execute(self, stmt):
             return _FakeResult()
 
-    result = await mf_history.get_snapshot_history(_FakeDB2(), "user-123")
+    result = await mf_history.get_snapshot_history(_FakeDB2(), "user-123", "portfolio-abc")
 
     assert len(result) == 1
     item = result[0]
@@ -222,7 +224,7 @@ async def test_get_snapshot_history_groups_multiple_dates():
         async def execute(self, stmt):
             return _FakeResult()
 
-    result = await mf_history.get_snapshot_history(_FakeDB2(), "user-123")
+    result = await mf_history.get_snapshot_history(_FakeDB2(), "user-123", "portfolio-abc")
     assert len(result) == 2
     # First item is the most recent date (d1)
     assert result[0]["snapshot_date"] == "2026-06-01"
@@ -413,6 +415,8 @@ async def test_portfolio_history_free_user_returns_402(monkeypatch):
 
 async def test_portfolio_history_plus_user_returns_response(monkeypatch):
     """Plus user with consent → 200 with disclosure fields, no numeric fields."""
+    import uuid as _uuid
+
     from dhanradar.mf.router import portfolio_history
 
     async def _is_plus(uid, db):
@@ -421,7 +425,7 @@ async def test_portfolio_history_plus_user_returns_response(monkeypatch):
     async def _no_consent_error(*, user, db):
         pass  # consent granted
 
-    async def _fake_history(db, user_id):
+    async def _fake_history(db, user_id, portfolio_id):
         return [
             {
                 "snapshot_date": "2026-06-01",
@@ -431,14 +435,22 @@ async def test_portfolio_history_plus_user_returns_response(monkeypatch):
             }
         ]
 
+    fake_pid = str(_uuid.uuid4())
+
+    async def _fake_own_portfolio(db, portfolio_id, user_id):
+        m = MagicMock()
+        m.id = _uuid.UUID(portfolio_id)
+        return m
+
     monkeypatch.setattr("dhanradar.mf.router.is_plus", _is_plus, raising=False)
     monkeypatch.setattr("dhanradar.mf.router._require_mf_consent", _no_consent_error, raising=False)
     monkeypatch.setattr("dhanradar.mf.router.mf_history.get_snapshot_history", _fake_history, raising=False)
+    monkeypatch.setattr("dhanradar.mf.router._own_portfolio", _fake_own_portfolio, raising=False)
 
     plus_user = _make_user(is_anonymous=False, user_id="user-plus")
     db = _FakeDB()
 
-    response = await portfolio_history(db=db, user=plus_user)
+    response = await portfolio_history(db=db, user=plus_user, portfolio_id=fake_pid)
 
     assert response.disclosure is not None and len(response.disclosure) > 0
     assert response.not_advice == "NOT_ADVICE"
@@ -456,6 +468,8 @@ async def test_portfolio_history_plus_user_returns_response(monkeypatch):
 
 async def test_portfolio_history_response_has_disclosure_bundle(monkeypatch):
     """PortfolioHistoryResponse always carries disclosure + not_advice + disclaimer_version."""
+    import uuid as _uuid
+
     from dhanradar.mf.router import portfolio_history
 
     async def _is_plus(uid, db):
@@ -464,14 +478,24 @@ async def test_portfolio_history_response_has_disclosure_bundle(monkeypatch):
     async def _no_consent(*, user, db):
         pass
 
-    async def _empty_history(db, user_id):
+    async def _empty_history(db, user_id, portfolio_id):
         return []
+
+    fake_pid = str(_uuid.uuid4())
+
+    async def _fake_own_portfolio(db, portfolio_id, user_id):
+        m = MagicMock()
+        m.id = _uuid.UUID(portfolio_id)
+        return m
 
     monkeypatch.setattr("dhanradar.mf.router.is_plus", _is_plus, raising=False)
     monkeypatch.setattr("dhanradar.mf.router._require_mf_consent", _no_consent, raising=False)
     monkeypatch.setattr("dhanradar.mf.router.mf_history.get_snapshot_history", _empty_history, raising=False)
+    monkeypatch.setattr("dhanradar.mf.router._own_portfolio", _fake_own_portfolio, raising=False)
 
-    response = await portfolio_history(db=_FakeDB(), user=_make_user(is_anonymous=False))
+    response = await portfolio_history(
+        db=_FakeDB(), user=_make_user(is_anonymous=False), portfolio_id=fake_pid
+    )
     d = response.model_dump()
 
     assert d["disclosure"] != ""

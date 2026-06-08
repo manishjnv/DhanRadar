@@ -14,7 +14,23 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class PortfolioSummary(BaseModel):
+    """Public representation of a named portfolio (no numeric score/value fields)."""
+
+    id: str
+    name: str
+    created_at: str
+
+
+class PortfolioListResponse(BaseModel):
+    portfolios: list[PortfolioSummary]
+
+
+class PortfolioCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
 
 
 class CasUploadResponse(BaseModel):

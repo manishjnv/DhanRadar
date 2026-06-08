@@ -89,7 +89,10 @@ async def score_fund(engine: RatingEngine, signals: FundSignals) -> ScoringResul
 
 
 async def upsert_user_fund_score(
-    db: Any, user_id: str, result: ScoringResult
+    db: Any,
+    user_id: str,
+    result: ScoringResult,
+    portfolio_id: Any,
 ) -> None:
     """Persist the engine result into mf.user_fund_scores (server-side; the
     unified_score is tier-gated and never serialized to a client)."""
@@ -99,6 +102,7 @@ async def upsert_user_fund_score(
 
     stmt = insert(UserFundScore).values(
         user_id=user_id,
+        portfolio_id=portfolio_id,
         isin=result.identifier,
         unified_score=result.unified_score,
         confidence_band=result.confidence_band.value,

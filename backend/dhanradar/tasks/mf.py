@@ -127,11 +127,11 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
-def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
+def parse_cas_job(self, job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
     """CAS→report worker. Always purges the raw file; marks the job failed with an
     OPAQUE code (never the raw exception, which could carry a path/PII)."""
     try:
-        return asyncio.run(_run_pipeline(job_id, path, user_id))
+        return asyncio.run(_run_pipeline(job_id, path, user_id, portfolio_id))
     except CasParseError:
         logger.warning("CAS parse failed job=%s", job_id)  # full detail not echoed to client
         asyncio.run(_mark_failed(job_id, "parse_failed"))
@@ -144,7 +144,7 @@ def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
         _purge(path)
 
 
-async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
+async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -173,7 +173,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
         )
         await db.commit()
 
-        await _upsert_holdings(db, user_id, parsed)
+        await _upsert_holdings(db, user_id, parsed, portfolio_id)
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="scoring", progress_pct=70)
         )
@@ -201,7 +201,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
             # fundamentals-backed axes stay None → partial_coverage (≤ medium).
             signals = compute_fund_signals(p.isin, nav_series.get(p.isin, []))
             result = await score_fund(rengine, signals)
-            await upsert_user_fund_score(db, user_id, result)
+            await upsert_user_fund_score(db, user_id, result, portfolio_id)
             # Plus-only: retain label history per fund (no numeric persisted).
             if plus:
                 await mf_history.append_score_history(
@@ -210,6 +210,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                     result=result,
                     snapshot_date=date.today(),
                     source="cas_upload",
+                    portfolio_id=portfolio_id,
                 )
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
@@ -238,6 +239,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 user_id=user_id,
                 snapshot_date=date.today(),
                 snap=snap,
+                portfolio_id=portfolio_id,
             )
 
         report_payload = {
@@ -282,7 +284,9 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
     return f"done: {len(parsed)} schemes"
 
 
-async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -> None:
+async def _upsert_holdings(
+    db: Any, user_id: str, parsed: list[ParsedHolding], portfolio_id: str
+) -> None:
     from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
@@ -290,7 +294,8 @@ async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -
 
     for p in parsed:
         stmt = insert(MfUserHolding).values(
-            user_id=user_id, isin=p.isin, folio_number=p.folio_number, units=p.units,
+            user_id=user_id, portfolio_id=portfolio_id, isin=p.isin,
+            folio_number=p.folio_number, units=p.units,
             avg_cost_nav=p.nav, invested_amount=p.cost, source="cas", as_of_date=p.as_of_date,
         ).on_conflict_do_update(
             constraint="uq_mf_holding",
@@ -536,7 +541,7 @@ async def _monthly_rescore() -> str:
     from dhanradar.mf import history as mf_history
     from dhanradar.mf.snapshot import CashFlow as _CashFlow
     from dhanradar.mf.snapshot import Holding as _Holding
-    from dhanradar.models.mf import MfUserHolding
+    from dhanradar.models.mf import MfPortfolio, MfUserHolding
     from dhanradar.scoring.engine import RatingEngine
 
     SessionLocal = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
@@ -544,27 +549,39 @@ async def _monthly_rescore() -> str:
     today = date.today()
 
     async with SessionLocal() as db:
-        # All users who currently have holdings.
-        user_rows = (
+        # All distinct portfolios that currently have holdings.
+        pid_rows = (
             await db.execute(
-                select(MfUserHolding.user_id).distinct()
+                select(MfUserHolding.portfolio_id).distinct()
             )
         ).all()
-        user_ids = [str(row[0]) for row in user_rows]
+        portfolio_ids = [str(row[0]) for row in pid_rows]
 
     rescored = 0
 
-    for uid in user_ids:
+    for pid in portfolio_ids:
         try:
             async with SessionLocal() as db:
+                # Resolve the owning user_id for this portfolio.
+                uid_row = (
+                    await db.execute(
+                        select(MfPortfolio.user_id).where(
+                            MfPortfolio.id == pid  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalar_one_or_none()
+                if uid_row is None:
+                    continue
+                uid = str(uid_row)
+
                 if not await is_plus(uid, db):
                     continue  # Free users — no history/snapshot written.
 
-                # Load holding rows for this user.
+                # Load holding rows for this portfolio.
                 holding_rows = (
                     await db.execute(
                         select(MfUserHolding).where(
-                            MfUserHolding.user_id == uid  # type: ignore[arg-type]
+                            MfUserHolding.portfolio_id == pid  # type: ignore[arg-type]
                         )
                     )
                 ).scalars().all()
@@ -580,13 +597,14 @@ async def _monthly_rescore() -> str:
                     isin = h_row.isin
                     signals = compute_fund_signals(isin, nav_series.get(isin, []))
                     result = await score_fund(rengine, signals)
-                    await upsert_user_fund_score(db, uid, result)
+                    await upsert_user_fund_score(db, uid, result, pid)
                     await mf_history.append_score_history(
                         db,
                         user_id=uid,
                         result=result,
                         snapshot_date=today,
                         source="monthly_rescore",
+                        portfolio_id=pid,
                     )
 
                 # Build snapshot from current holdings + latest NAV.
@@ -614,11 +632,12 @@ async def _monthly_rescore() -> str:
                     user_id=uid,
                     snapshot_date=today,
                     snap=snap,
+                    portfolio_id=pid,
                 )
                 rescored += 1
 
-        except Exception:  # noqa: BLE001 — one bad user never aborts the beat
-            logger.exception("monthly_rescore: failed for user_id=%s", uid)
+        except Exception:  # noqa: BLE001 — one bad portfolio never aborts the beat
+            logger.exception("monthly_rescore: failed for portfolio_id=%s", pid)
             continue
 
     summary = f"monthly_rescore: rescored {rescored} Plus users"

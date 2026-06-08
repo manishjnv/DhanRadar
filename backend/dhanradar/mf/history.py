@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
 
@@ -28,6 +29,7 @@ async def append_score_history(
     result: ScoringResult,
     snapshot_date: date,
     source: str,
+    portfolio_id: str | UUID,
 ) -> None:
     """INSERT a label-only history row for one fund.
 
@@ -41,6 +43,7 @@ async def append_score_history(
         insert(MfUserFundScoreHistory)
         .values(
             user_id=user_id,
+            portfolio_id=portfolio_id,
             isin=result.identifier,
             snapshot_date=snapshot_date,
             verb_label=result.verb_label.value,
@@ -60,6 +63,7 @@ async def persist_portfolio_snapshot(
     user_id: str,
     snapshot_date: date,
     snap: Any,
+    portfolio_id: str | UUID,
 ) -> None:
     """INSERT one MfPortfolioSnapshot row.
 
@@ -73,6 +77,7 @@ async def persist_portfolio_snapshot(
         insert(MfPortfolioSnapshot)
         .values(
             user_id=user_id,
+            portfolio_id=portfolio_id,
             snapshot_date=snapshot_date,
             total_invested=snap.total_invested,
             current_value=snap.current_value,
@@ -86,11 +91,12 @@ async def persist_portfolio_snapshot(
     await db.commit()
 
 
-async def get_snapshot_history(db: Any, user_id: str) -> list[dict]:
+async def get_snapshot_history(db: Any, user_id: str, portfolio_id: str | UUID) -> list[dict]:
     """Return the most recent snapshot dates with per-fund label + band only.
 
     Returns at most ``_MAX_SNAPSHOT_DATES`` snapshot_dates, descending.
     NEVER includes unified_score or any numeric field (non-neg #2).
+    Filtered by both user_id (defence-in-depth) and portfolio_id (scoping).
 
     Shape::
 
@@ -109,7 +115,7 @@ async def get_snapshot_history(db: Any, user_id: str) -> list[dict]:
 
     from dhanradar.models.mf import MfUserFundScoreHistory
 
-    # Fetch all rows for this user, ordered by date DESC then isin for stability.
+    # Fetch all rows for this portfolio, ordered by date DESC then isin for stability.
     rows = (
         await db.execute(
             select(
@@ -118,7 +124,10 @@ async def get_snapshot_history(db: Any, user_id: str) -> list[dict]:
                 MfUserFundScoreHistory.verb_label,
                 MfUserFundScoreHistory.confidence_band,
             )
-            .where(MfUserFundScoreHistory.user_id == user_id)
+            .where(
+                MfUserFundScoreHistory.user_id == user_id,
+                MfUserFundScoreHistory.portfolio_id == portfolio_id,
+            )
             .order_by(
                 MfUserFundScoreHistory.snapshot_date.desc(),
                 MfUserFundScoreHistory.isin,

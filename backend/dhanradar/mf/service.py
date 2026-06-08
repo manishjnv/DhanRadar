@@ -30,20 +30,20 @@ def cas_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def dedup_key(user_id: str, source_hash: str) -> str:
-    """Dedup is scoped PER USER — two users uploading the same CAS bytes get
-    INDEPENDENT jobs, so one user can never receive another's job_id (a financial
+def dedup_key(user_id: str, portfolio_id: str, source_hash: str) -> str:
+    """Dedup is scoped per (user, portfolio) — two users uploading the same CAS bytes
+    get INDEPENDENT jobs, so one user can never receive another's job_id (a financial
     co-relationship leak). Re-upload of one's own statement still dedups."""
-    return f"{_DEDUP_PREFIX}{user_id}:{source_hash}"
+    return f"{_DEDUP_PREFIX}{user_id}:{portfolio_id}:{source_hash}"
 
 
-async def dedup_lookup(redis: Any, user_id: str, source_hash: str) -> Optional[str]:
-    """Return an existing job_id for this (user, CAS hash), or None."""
-    return await redis.get(dedup_key(user_id, source_hash))
+async def dedup_lookup(redis: Any, user_id: str, portfolio_id: str, source_hash: str) -> Optional[str]:
+    """Return an existing job_id for this (user, portfolio, CAS hash), or None."""
+    return await redis.get(dedup_key(user_id, portfolio_id, source_hash))
 
 
-async def dedup_record(redis: Any, user_id: str, source_hash: str, job_id: str) -> None:
-    await redis.set(dedup_key(user_id, source_hash), job_id, ex=_DEDUP_TTL)
+async def dedup_record(redis: Any, user_id: str, portfolio_id: str, source_hash: str, job_id: str) -> None:
+    await redis.set(dedup_key(user_id, portfolio_id, source_hash), job_id, ex=_DEDUP_TTL)
 
 
 def assemble_report(
