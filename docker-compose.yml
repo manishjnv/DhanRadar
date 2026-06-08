@@ -127,10 +127,13 @@ services:
           memory: 448M
           cpus: "0.50"
     healthcheck:
+      # Use 127.0.0.1, NOT localhost: alpine resolves `localhost` to ::1 (IPv6)
+      # first, but the standalone server binds IPv4 0.0.0.0 only, so a localhost
+      # probe gets ECONNREFUSED. 127.0.0.1 forces IPv4 (covered by 0.0.0.0).
       test:
         - "CMD-SHELL"
         - >
-          wget -qO- http://localhost:3000/ > /dev/null 2>&1 && echo ok || exit 1
+          wget -qO- http://127.0.0.1:3000/ > /dev/null 2>&1 && echo ok || exit 1
       interval: 15s
       timeout: 10s
       retries: 5
