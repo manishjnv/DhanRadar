@@ -57,8 +57,13 @@ Nothing is batched to a phase audit during dev.
   `mf_user_fund_score_history` (label+band only), `is_plus`-gated persist on upload,
   `monthly_rescore_plus_users` beat (1st/month 03:00 IST, event-consume via scoring_bridge),
   `GET /mf/history` (402 for Free). Tier-A; 477 unit pass + 9 new.
-- ⏳ **Label-change alerts** (Notification module — `in_form → off_track` etc.) — NEXT.
-- ⏳ **Multiple portfolios** — PENDING (needs a `portfolio_id` dimension; architecture work).
+- ✅ **Multiple portfolios** — DONE 2026-06-08 (`cef5345`): `mf_portfolios` entity + `portfolio_id`
+  threaded through all MF tables (data-preserving migration `0013`, existing users backfilled to a
+  'Default'); portfolio CRUD; Free capped at 1 (`count>=1 && !is_plus → 402`), Plus uncapped. Tier-A;
+  492 unit pass + 15 new.
+- ⏳ **Label-change alerts** (Notification module — `in_form → off_track` etc.) — **the ONLY
+  remaining Plus feature.** Only a notification template scaffold exists (`_t_mf_label_change`); the
+  old-vs-new label detection task/beat is NOT built. NEXT.
 
 **PARKED until a pre-deploy phase — do NOT spend dev sessions on these:**
 

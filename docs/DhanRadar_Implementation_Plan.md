@@ -202,7 +202,13 @@ portfolio commentary — **Pro + a one-time first-report taster**, metered by th
   CAS upload; `monthly_rescore_plus_users` beat (1st of month, 03:00 IST) re-scores each Plus user's
   current holdings from the latest NAV via the scoring_bridge (no re-upload, event-consume only);
   `GET /mf/history` (402 for Free). Free keeps only the latest single (Redis) report.
-- ⏳ **Label-change alerts** (next slice — Notification module) + **multiple portfolios** — PENDING.
+- ✅ **Multiple portfolios** — BUILT (`cef5345`): `mf_portfolios` entity + `portfolio_id` threaded
+  through holdings/snapshots/score-history/scores/cas-jobs (data-preserving migration `0013`,
+  each existing user backfilled to a 'Default'); `GET/POST/PATCH/DELETE /mf/portfolios`; Free capped
+  at one (`count>=1 && !is_plus → 402`), Plus uncapped; upload + history + re-score all per-portfolio.
+- ⏳ **Label-change alerts** (Notification module — fire on `in_form → off_track` from the monthly
+  re-score) — **the ONLY remaining Plus feature** (a notification template scaffold exists; the
+  detection task does not). NEXT.
 
 **Free-Pro mechanic:**
 
