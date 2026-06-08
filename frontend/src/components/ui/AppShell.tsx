@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Upload, Compass, Settings, Menu, X, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { Disclaimer } from '@/components/ui/Disclaimer';
 
 // ---------------------------------------------------------------------------
 // Nav model — icons come from the lucide line-icon set (consistent stroke /
@@ -265,7 +266,18 @@ export function AppShell({ children, userSlot }: AppShellProps) {
           menuOpen={drawerOpen}
           onMenuOpen={() => setDrawerOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">
+          {/* Page content + the single standing disclaimer for every (app)
+              page. The standing line lives ONLY here as a footer — pages must
+              not render <Disclaimer/> themselves. Contextual #9 disclosures
+              (report/mood) use <DisclosureBundle/> next to their content. */}
+          <div className="flex min-h-full flex-col">
+            <div className="flex-1">{children}</div>
+            <footer className="mt-8 border-t border-line pt-4">
+              <Disclaimer className="text-center" />
+            </footer>
+          </div>
+        </main>
       </div>
     </div>
   );

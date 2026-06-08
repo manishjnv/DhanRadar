@@ -12,7 +12,6 @@ import { toast } from 'sonner';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Disclaimer } from '@/components/ui/Disclaimer';
 import { FileDrop } from '@/components/mf/FileDrop';
 import { useUploadCas } from '@/features/mf/api';
 import { useConsent } from '@/features/consent/api';
@@ -132,8 +131,6 @@ export default function UploadCasPage() {
           is not stored long-term and is deleted after processing.
         </p>
       </div>
-
-      <Disclaimer className="mt-4 text-center" />
 
       <ConsentModal
         open={consentOpen}

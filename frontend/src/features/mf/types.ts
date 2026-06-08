@@ -95,4 +95,8 @@ export interface MfReport {
   schemes: MfScheme[];
   category_allocation: AllocationSlice[];
   overlap: OverlapPair[];
+  /** Contextual compliance disclosure (non-negotiable #9) — rendered next to
+   *  the holdings labels via <DisclosureBundle/>. */
+  disclosure: string;
+  not_advice: string;
 }
