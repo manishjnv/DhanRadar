@@ -35,15 +35,15 @@ lives in the linked docs.
 - **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
   touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
   to restore before the next load-bearing/security change (item 5 AI gateway will need it).
-- **Next action — the functionality-first build sequence is COMPLETE (items 1–7 all addressed).**
-  → move to the **pre-deploy phase**: (1) resolve PR #28 conflicts against `main`; (2) run the
-  **Phase-7 §5 governance panel** (the batched full-tier audit — Security/Compliance/UI/Product over
-  the whole branch); (3) close the deploy gates — **B48** consent re-enforce, **B2/B7/B8** billing
-  plan-data seeding, live **NAV** populated, and the best-effort NSE mood provider verified or left
-  to `data_unavailable`; (4) human go/no-go → merge → deploy. Item 7 (B35 Mood Compass go-live) DONE
-  2026-06-08 (`6c192ae`): real signals via the adapter + 200 `data_unavailable` + labels + `trend` +
-  `/market/mood/embed`; gaps e/f deferred. Item 6 (PHASE 5M tiering) DONE (`af850f9`); item 5 (AI MF
-  commentary) DONE (`2b967d7`).
+- **Next action (two tracks).** (a) **dev — Plus tracking growth:** the functionality-first sequence
+  (items 1–7) is COMPLETE; Plus stored-history + auto monthly re-score DONE 2026-06-08 (`d89f133`).
+  **Next Plus slice → label-change alerts** (Notification module — fire on `in_form → off_track`
+  etc. from the monthly re-score, gated by `is_plus`); then **multiple portfolios**. (b) **pre-deploy:**
+  (1) resolve PR #28 conflicts against `main`; (2) run the **Phase-7 §5 governance panel** (batched
+  full-tier audit over the whole branch); (3) close deploy gates — **B48** consent re-enforce,
+  **B2/B7/B8** billing plan-data seeding, live **NAV** populated, best-effort NSE mood provider
+  verified or left to `data_unavailable`; (4) human go/no-go → merge → deploy. Recent: B35
+  (`6c192ae`), PHASE 5M tiering (`af850f9`), AI MF commentary (`2b967d7`).
 
 ### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
 

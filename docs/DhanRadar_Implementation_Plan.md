@@ -194,6 +194,16 @@ alerts (e.g. `in_form → off_track`) via the Notification module; multiple port
 portfolio commentary — **Pro + a one-time first-report taster**, metered by the budget governor
 **even during free-Pro** so founders cannot drain the AI budget.
 
+**Plus feature build status (2026-06-08):**
+
+- ✅ **AI commentary** — Plus + one-time taster (`2b967d7`).
+- ✅ **Stored trend history + auto monthly re-score** — BUILT (`d89f133`): append-only
+  `mf.mf_user_fund_score_history` (label + band only, no numeric), persisted for `is_plus` users on
+  CAS upload; `monthly_rescore_plus_users` beat (1st of month, 03:00 IST) re-scores each Plus user's
+  current holdings from the latest NAV via the scoring_bridge (no re-upload, event-consume only);
+  `GET /mf/history` (402 for Free). Free keeps only the latest single (Redis) report.
+- ⏳ **Label-change alerts** (next slice — Notification module) + **multiple portfolios** — PENDING.
+
 **Free-Pro mechanic:**
 
 1. **Founding Access (now, pre-billing):** every user who joins before billing go-live gets

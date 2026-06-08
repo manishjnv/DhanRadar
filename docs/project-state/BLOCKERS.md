@@ -51,6 +51,15 @@ Nothing is batched to a phase audit during dev.
    commentary) DEFERRED. Tier-A; 468 unit pass + 38 new. **← LAST item: functionality-first build
    sequence COMPLETE. Next phase = pre-deploy (resolve PR #28 conflicts → Phase-7 §5 governance panel).**
 
+**Plus tracking features (post-sequence growth; justify the PHASE 5M paywall):**
+
+- ✅ **Stored history + auto monthly re-score** — DONE 2026-06-08 (`d89f133`): append-only
+  `mf_user_fund_score_history` (label+band only), `is_plus`-gated persist on upload,
+  `monthly_rescore_plus_users` beat (1st/month 03:00 IST, event-consume via scoring_bridge),
+  `GET /mf/history` (402 for Free). Tier-A; 477 unit pass + 9 new.
+- ⏳ **Label-change alerts** (Notification module — `in_form → off_track` etc.) — NEXT.
+- ⏳ **Multiple portfolios** — PENDING (needs a `portfolio_id` dimension; architecture work).
+
 **PARKED until a pre-deploy phase — do NOT spend dev sessions on these:**
 
 - Deploy / ops: B25, B34, B36, B37, B38, B40 + B40-followup, B48 re-enable.
