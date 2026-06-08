@@ -46,6 +46,12 @@ async def dedup_record(redis: Any, user_id: str, portfolio_id: str, source_hash:
     await redis.set(dedup_key(user_id, portfolio_id, source_hash), job_id, ex=_DEDUP_TTL)
 
 
+async def dedup_clear(redis: Any, user_id: str, portfolio_id: str, source_hash: str) -> None:
+    """Drop a stale dedup record so a re-upload reprocesses. Used when the prior
+    job for this statement did NOT complete successfully (failed / stuck)."""
+    await redis.delete(dedup_key(user_id, portfolio_id, source_hash))
+
+
 def assemble_report(
     *,
     job_id: str,
