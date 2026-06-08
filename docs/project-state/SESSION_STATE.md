@@ -1,9 +1,60 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-08 (pre-deploy gate)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
+
+**Verdict: MERGE-READY, NOT DEPLOY-READY.** All dev complete; PR #28 reconciled with `main` and the
+Phase-7 §5 governance panel passed. Deploy stays human-gated behind the operational punch-list.
+
+- **PR #28 mergeable:** YES. Merged `origin/main` (PRs #22–27: B29 foundation, admin/ops, B6/B28,
+  B34, B36/B37, parallel AI commentary) into the branch — 16 conflicts resolved (merge `d07a19e`):
+  kept this branch's AI-commentary/gateway contract (the Plus stack depends on it), main's reviewed
+  B36/B37 deploy/backup artifacts, the `amfi.py` superset, the `0008a→0013` single-head migration
+  chain, and the B48/FOUNDING config. Docs unioned (no ADR/RCA/blocker dropped). Pushed; HEAD now
+  fully contains `origin/main`.
+- **Deterministic gates:** GREEN on the merged tree — 516 backend unit pass (2 pre-existing
+  `test_market_data` network/DNS failures; 1 xfail), `ci_guards` + `anti_pattern` + secrets clean,
+  ruff clean on resolved code, `alembic heads` = single `0013` (linear chain). Frontend untouched by
+  the merge (string-constant nav fix only).
+- **Phase-7 §5 panel:** Security ACCEPT-WITH-CONDITIONS (no blocker), Compliance ACCEPT-WITH-
+  CONDITIONS (no blocker — all 10 non-negs hold on every shipping surface), UI ACCEPT-WITH-
+  CONDITIONS, Product ACCEPT-WITH-CONDITIONS. **No REJECT, no Security/Compliance blocker** → the
+  formal deploy-gate condition is satisfied. Ledger: `reviews/phase7-predeploy-panel.md`.
+- **Panel code findings fixed in-gate (`2033b9a`):** `/market/why-today` 404→200 `data_unavailable`
+  (anon-magnet consistency); AppShell Settings link → `/settings/privacy`.
+
+### DEPLOY PUNCH-LIST (human/operator — code is NOT the gate here)
+
+**Operational (must close before opening to real users):**
+
+1. **B29 / NAV data** `[infra/human]` — run `nav_backfill(years=3)` + a `nav_daily_fetch` on the
+   live TimescaleDB, else every fund returns `insufficient_data` and the wedge produces no labels.
+2. **B48 / consent** `[CC+infra]` — set `ENV=production` AND `DPDP_CONSENT_ENFORCED=true` (or delete
+   the dev line); verify a gated route 403s without a grant. Legal blocker; boot guard fails-closed.
+3. **Admin + scoring activation** `[infra/human]` — seed `ADMIN_USER_IDS` (≥2 UUIDs); activate
+   scoring engine v1 via the two-person gate, else all reports stay `provisional_model`.
+4. **AI commentary path** `[CC+infra]` — set `OPENROUTER_API_KEY`; verify the privacy UI exposes the
+   `cross_border_ai` grant end-to-end (else commentary + the Free taster never fire).
+5. **B36/B37/B38** `[infra runs]` — first live deploy/rollback + DB backup + monitoring scrape on
+   KVM4; **B34** R2 India-residency bucket; **B25** internal mTLS network policy. **B2/B7/B8** seed
+   `billing.plans` data (billing go-live = data-only flip).
+
+**Should-fix (pre-launch, code — punch-listed, not blocking the merge):**
+ratelimit.py TOCTOU (Security F2, load-bearing — fix + adversarial re-pass); per-channel duplicate
+audit rows (Compliance F1); ScoreRing/AllocationDonut hex→`--dr-*` tokens (UI F1/F2);
+empty-portfolio silent-`done` guard (Product F4); `ui-system/contracts` deprecation banner (B41);
+mood embed `Cache-Control` (Product F9); B40-followup (promote ruff/mypy to blocking after a
+lint-cleanup pass).
+
+### SINGLE NEXT ACTION FOR THE HUMAN OPERATOR
+
+PR #28 is marked ready (merge-eligible). **Review + merge to `main`, then work the operational
+punch-list above on KVM4 (NAV seed → B48 enforce → admin/scoring activate → billing seed → deploy
+scripts) and give explicit go/no-go before the KVM4 deploy.** Do NOT deploy until items 1–5 close.
 
 ## Session handoff (2026-06-08, end of functionality-first B29+B42+B43 session)
 

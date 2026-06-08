@@ -3,6 +3,24 @@
 Single register of deferred items. Each names the gate/phase it blocks. Clear an item only when
 proven resolved (link the commit/RCA). New items get the next B-number.
 
+## ⏱ PRE-DEPLOY GATE RUN — 2026-06-08 (the parked pre-deploy phase is now ACTIVE)
+
+- **PR #28 reconciled with `main`** (merge `d07a19e`): consolidated main's PRs #22–27 (B29
+  foundation, admin/ops, B6/B28, B34, B36/B37, the parallel AI commentary) with this branch's Plus
+  stack. Branch is mergeable; deterministic gates GREEN (516 unit pass, single-head `0013`).
+- **Phase-7 §5 governance panel RAN** — Security/Compliance ACCEPT-WITH-CONDITIONS (no blocker),
+  UI/Product ACCEPT-WITH-CONDITIONS. Ledger: `reviews/phase7-predeploy-panel.md`. The Gate-0
+  batched-audit checklist item is satisfied. **Deploy still needs the operational punch-list closed
+  plus separate human approval** (see SESSION_STATE "DEPLOY PUNCH-LIST").
+- **New should-fix items from the panel (pre-launch, code; not merge-blocking):** B49 ratelimit
+  TOCTOU (Security); B50 per-channel duplicate label-change audit rows (Compliance); B51
+  ScoreRing/AllocationDonut hex→`--dr-*` tokens (UI); B52 empty-portfolio silent-`done` guard
+  (Product); B53 mood embed `Cache-Control`. (B41 ui-system deprecation banner + B40-followup
+  ruff/mypy-blocking already tracked below.)
+- **B36/B37 now merged from main** (deploy/backup scripts + runbooks); their LIVE KVM4 runs remain
+  the deploy-gate action. B29 NAV seeding, B48 consent re-enforce, admin/scoring activation, and AI
+  commentary consent-path are the operational launch-blockers (punch-list).
+
 ## Build sequence — functionality-first (set 2026-06-08)
 
 **Decision (course-correction).** Recent sessions drifted into deploy-gate hardening, governance
