@@ -74,7 +74,7 @@ async def test_notification(
     _rl: Annotated[None, Depends(_rl_test)] = None,
 ) -> TestNotificationResponse:
     _require_auth(user)        # 401 first (anonymous) ...
-    await _pro_gate(user)      # ... then 402 (tier below pro)
+    await _pro_gate(user, db)  # ... then 402 (tier below pro); RequireTier needs db (PHASE 5M is_plus)
     # Refuse if the user has not configured/opted into the chosen channel — a test
     # send to an unconfigured channel would just fail at the drain.
     prefs = await service.get_preferences(db, user.user_id)
