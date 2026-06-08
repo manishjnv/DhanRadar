@@ -7,37 +7,42 @@ lives in the linked docs.
 
 ## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
 
-**Verdict: NOT merge-ready, NOT deploy-ready — branch CI is RED.** PR #28 is conflict-free and the
-governance panel passed, but the GitHub CI (the real gate — it runs the integration suite +
-migrations against a live Postgres, which local runs cannot) is FAILING. PR #28 is back to **draft**.
+**Verdict: MERGE-ELIGIBLE (CI green on the blocking checks) — DEPLOY-ELIGIBLE pending the operator
+punch-list + human approval.** The deploy-readiness session (2026-06-08, commits `135ad63` +
+`be18200`) fixed the three red CI checks. The blocking jobs (`backend`, `migrations`, `frontend`,
+`guards`) are GREEN; `lint` stays advisory-red (`continue-on-error`, B40 ruff backlog — not a
+blocker). The merge itself is a **human approval on `main`** (PR is still draft — flip ready first);
+the KVM4 deploy needs the operator infra steps in **`docs/ops/LAUNCH_RUNBOOK.md`** + separate human
+sign-off. The session did NOT ssh to KVM4, merge `main`, or mutate any secret/infra.
 
-> **CORRECTION (2026-06-08 pm):** an earlier note here said "MERGE-READY / gates GREEN." That was
-> based on LOCAL UNIT tests only (516 pass). The CI **integration tests + migrations job** are RED
-> and have been since B44 landed (after the Jun-7 green run `63e312d5`). Local `pytest` does NOT run
-> integration tests (no Postgres) and the `create_all` fixture bypasses the alembic chain — so CI is
-> authoritative. Do NOT merge until CI is green.
+### CI status (HEAD `be18200`) — `guards` ✅ `frontend` ✅ `migrations` ✅ `backend` ✅; `lint` ⚠ advisory-red
 
-### CI status (run on HEAD) — `guards` ✅ `frontend` ✅; `backend` ❌ `migrations` ❌ `lint` ❌
+What the session fixed (all in `135ad63` unless noted):
 
-- **backend (10 failed / 629 passed):**
-  - 3× `test_notifications` `RequireTier.__call__() missing 'db'` — **FIXED** (`ee059db`): PHASE 5M
-    (`af850f9`) added a required `db` to `RequireTier.__call__`; the notifications `/test` in-body
-    `_pro_gate(user)` call didn't pass it. Now `_pro_gate(user, db)`.
-  - 5× `test_consent_writer` (grant not written / sibling clobbered / revoke format) — **OPEN**:
-    a real B44 (`927f64f`, prior session) `jsonb_set` integration bug; the B44 "tests pass" was
-    local-DB only — red in CI since. **Needs a live Postgres (docker-compose) to debug + verify.**
-  - 2× `test_market_data` (no_nav_data / event-loop) — known network/loop flakes (pre-existing).
-- **migrations ❌:** `ERROR: extension "pg_partman" is not available` at the `01_init.sql` psql
-  step. `infra/postgres/init/01_init.sql` is **identical to main**; the CI Postgres image
-  (`timescaledb-ha:pg16`) no longer ships `pg_partman` (env drift — a re-run of main would likely
-  fail too). Fix: guard `CREATE EXTENSION pg_partman`/`pg_cron` (DO-block availability check) or fix
-  the CI service image. **CI-infra, not a code defect in this branch.**
-- **lint ❌:** the ~361 advisory ruff findings + never-run mypy (B40-followup) — the parked
-  lint-cleanup-then-make-blocking item.
+- **B54 (was 5× `test_consent_writer`) — RESOLVED.** Root cause: `apply_consent_change` did
+  `cast(json.dumps(payload), JSONB)` — passing a STR through SQLAlchemy's JSONB bind type, which
+  `json.dumps`'d it a SECOND time, storing a JSON *string* scalar instead of an object; the reader's
+  `isinstance(value, dict)` was then False, so every grant read back as NOT-granted. Fix: pass the
+  dict (`cast(payload, JSONB)` — encode once). Proven via a SQL-compilation diagnostic. Load-bearing
+  consent/DPDP path → Tier-B adversarial review (Sonnet takeover, codex n/a — model unsupported on
+  account) **ACCEPT**, no fail-open across 6 vectors. RCA logged.
+- **2× `test_market_data` — RESOLVED.** B29 turned `AMFINavProvider` from a canned stub into a
+  DB-backed provider, but 2 `TestStubHappyPath` unit tests still asserted canned NAV (failing with
+  `no_nav_data` and "attached to a different loop"). Replaced with a DB-free request-validation test; the DB
+  happy-path is covered by `tests/integration/test_mf_nav_scoring.py`.
+- **B55 (`migrations` job) — RESOLVED.** `timescaledb-ha:pg16` CI image lacks `pg_partman`. Strip it
+  in the CI migrations job like `pg_cron` (`sed -e '/pg_cron/d' -e '/pg_partman/d'`); migration `0006`
+  already guards partman behind `IF EXISTS … pg_extension` + `RAISE NOTICE`-skip. Production
+  `01_init.sql` keeps the strict `CREATE EXTENSION` (fail-loud). Migration chain
+  (`upgrade head → downgrade base → upgrade head`) now passes clean in CI on the prod-like image.
+- **B48 production-enforcement PROOF added** (`135ad63`/`be18200`): `tests/unit/test_b48_consent_prod_guard.py`
+  (6 tests — prod/staging/unknown env + flag-off → hard boot crash; prod+flag-on → enforced; dev may
+  bypass) + `test_consent_writer.py::test_consent_gated_route_refuses_without_grant` (un-granted user
+  → 403 `consent_required`, RFC7807 shape). Config boot guard in `config.py` confirmed correct.
+- **3× `test_notifications` `RequireTier … missing 'db'`** — already FIXED earlier (`ee059db`).
 
-**Merge path:** fix `test_consent_writer` (live DB), resolve the `pg_partman` CI-image issue, and
-clear/quiet the lint job → CI green → flip PR #28 ready → human merge. The merge reconciliation,
-governance panel, and RequireTier fix are done.
+**Deploy path:** flip PR #28 ready → human merge to `main` → execute `docs/ops/LAUNCH_RUNBOOK.md`
+(ENV=production+consent → R2 residency → deploy.sh → backups+monitoring → mTLS → smoke → GO/NO-GO).
 
 - **PR #28 reconciliation (done):** merged `origin/main` (PRs #22–27: B29 foundation, admin/ops,
   B6/B28, B34, B36/B37, parallel AI commentary) — 16 conflicts resolved (merge `d07a19e`): kept this
@@ -684,3 +689,26 @@ Footer below is the prior Phase-7 work.
 - Verification note: 212 backend unit tests pass locally + ci_guards 0 + F-lint 0 + markdownlint 0;
   compose YAML valid + memory sum = 3072M; integration suite collects (63) and runs in CI (B1). Live-stack
   hops (E2E, NTP, R2 archival, measured box memory) are deploy-time — listed in the deploy checklist.
+
+### Agent-utilization footer — DEPLOY-READINESS session (2026-06-08)
+
+Headline: turned the CI-red launch branch GREEN (B54 consent jsonb_set double-encode, B55 pg_partman
+CI, 2 stale market_data tests) + added B48 prod-enforcement proof + emitted `docs/ops/LAUNCH_RUNBOOK.md`.
+Commits: `135ad63` (fixes + B48 tests), `be18200` (RFC7807 test-shape fix). CI HEAD `be18200`:
+backend ✅ migrations ✅ frontend ✅ guards ✅; lint ⚠ advisory. No KVM4 ssh, no `main` merge, no secret touched.
+
+- **Opus** — diagnosis (SQL-compilation double-encode proof, RFC7807 shape), all code/test edits
+  (small + hot-cache, self-executed per the tiny-edit rule), runbook authorship, doc updates, the
+  go/no-go reasoning, and the Tier-B review verdict adjudication.
+- **Sonnet** — warm-start brief (1) + the Tier-B consent adversarial review (1, ACCEPT). 2 calls.
+- **Haiku** — n/a (no bulk grep/log-triage sweep needed; CI logs read directly).
+- **codex:rescue** — n/a — ChatGPT account not entitled for any Codex model (`gpt-5*` 400s in job
+  logs); Tier-B consent sign-off ran as the Sonnet takeover fallback, verdict=ACCEPT.
+- **claude-mem** — recall via the read-first warm-start + memory index; no new corpus build.
+- Per-delegation (telemetry): warm-start · Sonnet · reworked: N (used as-returned for orientation) |
+  consent-jsonb-adversarial · Sonnet · reworked: N (ACCEPT, no changes — fix shipped as-reviewed).
+- Routing deviation logged: LAUNCH_RUNBOOK.md + the SESSION_STATE/BLOCKERS prose were drafted on
+  Opus, not delegated to Tier-4/Sonnet first (the doc-drafting nudge). Reason: a deploy runbook's
+  copy-paste commands are safety-critical and were derived from this turn's exact reads of the 4
+  scripts + verification doc (hot cache); a cheap-tier redraft risked inaccurate commands. One-shot
+  Opus exemption applied deliberately.

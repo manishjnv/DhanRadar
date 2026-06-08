@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-08 — Consent grant/revoke stored a double-encoded JSON string scalar → every grant read back as not-granted (B54)
+
+- **Symptom:** CI `backend` job red — 5 `test_consent_writer` integration tests failed: a grant returned `consents.mf_analytics == false`, the raw `dpdp_consents` value was not a dict after grant/revoke, and siblings appeared clobbered. Only reproduced in CI (integration tests need a live Postgres; local `pytest` skips them), so B44's "tests pass" missed it.
+- **Root cause:** `apply_consent_change` built `payload_json = json.dumps(payload)` and wrote `cast(payload_json, JSONB)`. The cast bound the *string* through SQLAlchemy's JSONB bind type, whose serializer ran `json.dumps` a SECOND time — storing a JSONB *string* scalar (`"{\"granted\": true …}"`) instead of an object. The canonical reader `_consent_granted` requires `isinstance(value, dict) and value.get("granted") is True`; a string fails `isinstance(dict)` → fail-CLOSED (not-granted) for every purpose. (Fail-closed, so not a security breach — but it makes consent unusable.)
+- **Fix:** pass the dict so the JSONB bind type serialises exactly once — `cast(payload, JSONB)`; removed the now-unused `payload_json`/`import json` — `backend/dhanradar/consent/service.py:57,72`. Proven before the fix via a DB-free SQL-compilation diagnostic (the bound param was a str pre-fix, a dict post-fix). Tier-B adversarial review (Sonnet takeover, codex n/a — account lacks any Codex model entitlement) ACCEPT: no fail-open path across 6 vectors.
+- **Prevention:** never `json.dumps(...)` a value that is then bound through a JSONB/JSON column or `cast(..., JSONB)` — the type's bind processor already serialises; pre-serialising double-encodes. Integration tests for any JSONB writer must assert the RAW column shape (`isinstance(dict)`, key truthiness), not just the API echo, and must run in CI against Postgres (the `create_all`/SQLite-ish local path does not exercise `jsonb_set`). Related: CI is the authoritative gate, not local `pytest`.
+- **Phase/area:** Pre-deploy launch-gate / Consent (B44/B48) writer.
+
 ### 2026-06-08 — Consent writer idempotency key shared across grant+revoke (review-found fail-open) + 0-row UPDATE false audit (B44)
 
 - **Symptom:** found in inline Opus review + the Tier-B Sonnet adversarial takeover (codex n/a)
