@@ -19,7 +19,7 @@ from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
 from dhanradar.compliance.router import router as compliance_router
 from dhanradar.consent.router import router as consent_router
-from dhanradar.onboarding.router import router as onboarding_router
+from dhanradar.core.logging import configure_logging
 from dhanradar.db import engine
 from dhanradar.errors import (
     http_exception_handler,
@@ -31,10 +31,17 @@ from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
 from dhanradar.notifications.router import router as notifications_router
 from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
+from dhanradar.onboarding.router import router as onboarding_router
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
 from dhanradar.scoring.engine.router import router as internal_scoring_router
 from dhanradar.subscriptions.router import router as subscriptions_router
+
+# ---------------------------------------------------------------------------
+# Structured JSON logging — must run BEFORE init_sentry() so all startup logs
+# (including Sentry's own initialisation) are emitted as JSON.
+# ---------------------------------------------------------------------------
+configure_logging()
 
 # ---------------------------------------------------------------------------
 # Observability: Sentry (B38). Called ONCE at module load, before app = FastAPI().

@@ -11,8 +11,17 @@ scheduled tasks are validated and the cron windows are confirmed.
 from __future__ import annotations
 
 from celery import Celery
+from celery.signals import (
+    setup_logging,
+    task_failure,
+    task_postrun,
+    task_prerun,
+    task_revoked,
+)
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from dhanradar.config import settings
+from dhanradar.core.logging import configure_logging
 
 celery_app = Celery(
     "dhanradar",
@@ -33,6 +42,58 @@ celery_app = Celery(
         "dhanradar.tasks.compliance",
     ],
 )
+
+# ---------------------------------------------------------------------------
+# Logging — disable Celery's logger hijack so our structlog JSON config is used.
+# The setup_logging signal re-applies configure_logging() inside the worker process.
+# ---------------------------------------------------------------------------
+celery_app.conf.worker_hijack_root_logger = False
+
+
+@setup_logging.connect
+def _configure_worker_logging(**_: object) -> None:
+    """Apply structlog JSON config when the Celery worker process starts."""
+    configure_logging()
+
+
+@task_prerun.connect
+def _bind_log_context(
+    task_id: str | None = None,
+    task: object = None,
+    args: object = None,
+    kwargs: object = None,
+    **_: object,
+) -> None:
+    """Bind per-task structlog context before each task runs.
+
+    Clears any stale context from a previous task on this worker process first
+    (contextvar-leak guard — the same OS thread/greenlet may be reused).
+    """
+    clear_contextvars()
+    task_name = getattr(task, "name", None)
+    request_id = (kwargs or {}).get("request_id") if isinstance(kwargs, dict) else None
+    bind_contextvars(task=task_name, task_id=task_id, request_id=request_id)
+
+
+@task_postrun.connect
+def _clear_log_context_postrun(**_: object) -> None:
+    """Clear structlog context after a task completes (prevents cross-task leakage)."""
+    clear_contextvars()
+
+
+@task_failure.connect
+def _clear_log_context_failure(**_: object) -> None:
+    """Clear structlog context after a task fails (prevents cross-task leakage)."""
+    clear_contextvars()
+
+
+@task_revoked.connect
+def _clear_log_context_revoked(**_: object) -> None:
+    """Clear context on revoke/SIGTERM/expiry — task_postrun/failure do NOT fire
+    for a revoked task, so without this a revoked task's user_ref/request_id can
+    survive on the worker and misattribute the next task's logs (DPDP leak)."""
+    clear_contextvars()
+
 
 # ---------------------------------------------------------------------------
 # Timezone — MUST be IST; beat schedule times in the plan are IST
