@@ -403,9 +403,14 @@ async def test_consent_gated_route_refuses_without_grant(async_client, db_sessio
         files={"file": ("cas.pdf", b"%PDF-1.4 dummy", "application/pdf")},
     )
     assert r.status_code == 403, r.text
-    detail = r.json()["detail"]
-    assert detail["error"] == "consent_required"
-    assert detail["purpose"] == "mf_analytics"
+    # RFC7807 problem+json (errors.py): the dict-detail raise
+    # {"error": "consent_required", "purpose": ...} is mapped to detail=<machine
+    # code> with the rest hoisted to top-level extension members.
+    body = r.json()
+    assert body["status"] == 403
+    assert body["detail"] == "consent_required"
+    assert body["purpose"] == "mf_analytics"
+    assert body["type"].endswith("/consent_required")
 
 
 # ---------------------------------------------------------------------------
