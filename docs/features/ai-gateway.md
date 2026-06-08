@@ -43,21 +43,21 @@ The single seam through which any module obtains LLM output. Domain modules call
 
 - `verify_models()` (live model-id check at openrouter.ai/models) and the Admin `prompt_templates` source are not wired — the gateway takes models/prompts as injected input today.
 - Premium cost is a rough `tokens × blended $/1M` estimate for budgeting only, not a billing source of truth.
-- **B20** — **ADDRESSED (defense-in-depth) 2026-06-07.** `complete()` now has a fail-closed default-deny contract: keyword-only `contains_personal_data=True` + `cross_border_consent_verified=False`; if a call carries personal data without verified consent it raises `ConsentNotVerifiedError` as its **first statement**, before any payload reaches OpenRouter. The gateway stays module-isolated (it cannot read consent), so the **call-site `assert_consent(user_id, "cross_border_ai", db)` is still owed** in the first AI-consuming module PR (Compliance-verified there) — but a forgetful consumer can no longer transfer PII by omission. Independent adversarial review ACCEPT. Ledger `reviews/b20-ai-callsite-gate.md`. **Call site WIRED 2026-06-07** by the MF commentary consumer (see Consumers; `reviews/ai-consumer-mf-commentary.md`).
+- **B20** — **ADDRESSED (defense-in-depth) 2026-06-07.** `complete()` now has a fail-closed default-deny contract: keyword-only `contains_personal_data=True` + `cross_border_consent_verified=False`; if a call carries personal data without verified consent it raises `ConsentNotVerifiedError` as its **first statement**, before any payload reaches OpenRouter. The gateway stays module-isolated (it cannot read consent), so the **call-site `assert_consent(user_id, "cross_border_ai", db)` is still owed** in the first AI-consuming module PR (Compliance-verified there) — but a forgetful consumer can no longer transfer PII by omission. Independent adversarial review ACCEPT. Ledger `reviews/b20-ai-callsite-gate.md`. **Call site WIRED 2026-06-08** by the MF commentary consumer (see Consumers; `reviews/ai-consumer-mf-commentary.md`).
 - ~~**B18** — premium hard-cap is check-then-act (concurrent overshoot by ≤1 call); needs atomic Redis before scale.~~ **RESOLVED 2026-06-06** — `budget_guard` is now atomic **incr-then-rollback**: the per-call reserve is added with an atomic `INCRBYFLOAT` and admission keys off the pre-reservation value, so concurrent callers observe each other's reservations and at most one is admitted past the cap (the irreducible single-call cost). Reservation released on reject, rolled back on a failed call (best-effort so the real outcome is never masked), reconciled to actual spend on clean exit; a warning fires if a premium call's actual cost exceeds the reserve (`_PREMIUM_RESERVE_USD = $0.20`). **B19** — circuit breaker is in-process, not distributed.
-- **B21** — **RESOLVED 2026-06-07.** `complete()` returns `CompletionResult(output, model_used)`; the MF commentary consumer writes `model_used` to `ai_recommendation_audit` via `record_served_label`. **B22** — **WIRED 2026-06-07** at the MF caller (pre- and post-call floor, NaN/inf-safe); still owed at any future consumer. **B23** — advisory list is the core set, full taxonomy + sign-off pending (the MF consumer adds a second defense-in-depth net over its published summary).
+- **B21** — **RESOLVED 2026-06-08.** `complete()` returns `CompletionResult(output, model_used)`; the MF commentary consumer writes `model_used` to `ai_recommendation_audit` via `record_served_label`. **B22** — **WIRED 2026-06-08** at the MF caller (pre- and post-call floor, NaN/inf-safe); still owed at any future consumer. **B23** — advisory list is the core set, full taxonomy + sign-off pending (the MF consumer adds a second defense-in-depth net over its published summary).
 
 ## Consumers
 
 ### MF report portfolio commentary
 
-`dhanradar/mf/commentary.py` — `maybe_generate_commentary(...)` — is called from
+`dhanradar/mf/commentary.py` — `generate_commentary(...)` — is called from
 `tasks/mf.py::_run_pipeline` after scoring and before report assembly. It uses the
-`MfPortfolioCommentary(AIOutputBase)` schema (`summary` field); `PortfolioReport.commentary`
+`MFCommentary(AIOutputBase)` schema (`summary` field); `PortfolioReport.commentary`
 (optional) carries it through to the cached and served report.
 
 `complete()` returns `CompletionResult(output, model_used)` (frozen dataclass); the consumer reads
-`model_used` and writes it via `record_served_label(surface="mf_report_ai", ...)` into
+`model_used` and writes it via `record_served_label(surface="mf_commentary", ...)` into
 `ai_recommendation_audit` — on the served path only (B21/B26). The audit write is wrapped so an
 audit-layer failure never drops a clean, already-screened commentary.
 
@@ -74,11 +74,13 @@ Four gates wired:
 - **B21/B26** — `model_used` recorded via `record_served_label` on the served path only; audit
   wrapped (serve + alert-on-failure posture).
 
-Commentary is **non-blocking** — any refusal or failure omits it and the report still serves
-(architecture §MF line 257). The served string is SEBI-disclaimer-postfixed
-(`AI-generated insight, not investment advice`). In prod, commentary refuses until
-`cross_border_ai` consent capture lands — the correct fail-closed behaviour. Mood Compass is the
-trivial fast-follow (`contains_personal_data=False`).
+The commentary tier-gate (`is_commentary_entitled`) enforces the PHASE 5M paywall: Plus subscribers
+get full commentary; Free users get a one-time taster (atomically claimed via `ai_taster_used_at`);
+subsequent Free requests return `unavailable`. Commentary is **non-blocking** — any refusal or
+failure omits it and the report still serves (architecture §MF line 257). The served string is
+SEBI-disclaimer-postfixed (`AI-generated insight, not investment advice`). In prod, commentary
+refuses until `cross_border_ai` consent capture lands — the correct fail-closed behaviour. Mood
+Compass is the trivial fast-follow (`contains_personal_data=False`).
 
 ## Changelog
 

@@ -28,9 +28,9 @@ module.exports = {
         'line-strong':   'var(--border-strong)',
       },
       fontFamily: {
-        sans:  ['Geist', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
-        mono:  ['Geist Mono', 'ui-monospace', 'SF Mono', 'monospace'],
-        serif: ['Instrument Serif', 'Georgia', 'serif'],
+        sans:  ['var(--font-geist-sans)', 'Geist', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        mono:  ['var(--font-geist-mono)', 'Geist Mono', 'ui-monospace', 'SF Mono', 'monospace'],
+        serif: ['var(--font-instrument-serif)', 'Instrument Serif', 'Georgia', 'serif'],
       },
       fontSize: {
         display: ['64px', { lineHeight: '1.02', letterSpacing: '-0.035em', fontWeight: '500' }],

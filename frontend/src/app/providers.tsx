@@ -28,6 +28,13 @@ async function initMocks() {
   await worker.start({ onUnhandledRequest: 'bypass' });
 }
 
+// The mock layer must NEVER be able to brick the app. If worker.start() rejects
+// (stale/"waiting" service-worker registration, integrity warning, transient SW
+// lifecycle stall…) or hangs, we still render the app rather than trapping the
+// user on the loading screen forever. A short timeout is the backstop; the error,
+// if any, is surfaced to the console for diagnosis.
+const MOCK_START_TIMEOUT_MS = 3000;
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(!mockingEnabled());
 
@@ -44,9 +51,26 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    if (mockingEnabled()) {
-      initMocks().then(() => setReady(true));
-    }
+    if (!mockingEnabled()) return;
+
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        setReady(true);
+      }
+    };
+
+    initMocks()
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[mocks] MSW failed to start; continuing without it:', err);
+      })
+      .finally(finish);
+
+    // Backstop: if start() neither resolves nor rejects, don't hang the UI.
+    const timer = setTimeout(finish, MOCK_START_TIMEOUT_MS);
+    return () => clearTimeout(timer);
   }, []);
 
   if (!ready) {

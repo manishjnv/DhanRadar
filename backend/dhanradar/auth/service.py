@@ -113,6 +113,15 @@ async def signup_user(email: str, password: str, db: AsyncSession) -> User:
         hashed_password=hashed,
         tier=UserTierEnum.free,
     )
+
+    # PHASE 5M Founding Access — stamp the configured window onto new signups.
+    from dhanradar.config import settings as _settings
+
+    founding_until = _settings.FOUNDING_ACCESS_UNTIL
+    if founding_until is not None and datetime.now(UTC) < founding_until:
+        user.pro_access_until = founding_until
+        user.pro_access_reason = "founding"
+
     db.add(user)
     try:
         await db.commit()

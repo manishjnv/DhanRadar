@@ -2,14 +2,22 @@
 DhanRadar — Mutual Fund API router (Phase 5, architecture Tier-C MF Module).
 
 Endpoints (all under /api/v1):
-  POST /mf/upload/cas       (authed + mf_analytics consent) — enqueue CAS parse
-  GET  /mf/cas/{job}/status (authed, own job) — poll progress
-  GET  /mf/report/{job}     (authed, own job) — labelled report (disclaimer-injected)
+  GET  /mf/portfolios              (authed) — list caller's portfolios
+  POST /mf/portfolios              (authed) — create; Free capped at 1
+  PATCH /mf/portfolios/{pid}       (authed) — rename (owner-only)
+  DELETE /mf/portfolios/{pid}      (authed) — delete + cascade (owner-only)
+  POST /mf/upload/cas              (authed + mf_analytics consent) — enqueue CAS parse
+  GET  /mf/cas/{job}/status        (authed, own job) — poll progress
+  GET  /mf/report/{job}            (authed, own job) — labelled report (disclosure-injected)
+  GET  /mf/history                 (authed + Plus + mf_analytics consent) — label history
 
 DPDP (B20): the CAS upload is a data-processing route handling financial PII, so
 it is gated by RequireConsent("mf_analytics") — fail-closed 403 without consent.
 Auth is checked first (401), then consent (403). IDOR: status/report are scoped to
-the caller's own job. The raw CAS file is purged after parse (+ a 24h backstop).
+the caller's own job; portfolio ops are scoped to the caller's user_id.
+
+Idempotency-Key on POST /mf/portfolios: header accepted optionally but full
+dedup is not implemented in this slice (noted for next iteration, non-neg #6).
 """
 
 from __future__ import annotations
@@ -20,15 +28,25 @@ import tempfile
 import uuid
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous
+from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous, is_plus
+from dhanradar.mf import history as mf_history
 from dhanradar.mf import service
-from dhanradar.mf.schemas import CasJobStatus, CasUploadResponse, PortfolioReport
-from dhanradar.models.mf import MfCasJob
+from dhanradar.mf.schemas import (
+    CasJobStatus,
+    CasUploadResponse,
+    PortfolioCreateRequest,
+    PortfolioHistoryResponse,
+    PortfolioListResponse,
+    PortfolioReport,
+    PortfolioSummary,
+    SnapshotHistoryItem,
+)
+from dhanradar.models.mf import MfCasJob, MfPortfolio
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
@@ -45,12 +63,128 @@ def _upload_dir() -> str:
     return d
 
 
+# ---------------------------------------------------------------------------
+# Portfolio CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.get("/portfolios", response_model=PortfolioListResponse)
+async def list_portfolios(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> PortfolioListResponse:
+    """Return the authenticated caller's portfolios (IDOR: WHERE user_id==caller)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    rows = (
+        await db.execute(
+            select(MfPortfolio)
+            .where(MfPortfolio.user_id == uuid.UUID(user.user_id))
+            .order_by(MfPortfolio.created_at)
+        )
+    ).scalars().all()
+
+    portfolios = [
+        PortfolioSummary(
+            id=str(p.id),
+            name=p.name,
+            created_at=p.created_at.isoformat(),
+        )
+        for p in rows
+    ]
+    return PortfolioListResponse(portfolios=portfolios)
+
+
+@router.post("/portfolios", response_model=PortfolioSummary, status_code=status.HTTP_201_CREATED)
+async def create_portfolio(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    body: Annotated[PortfolioCreateRequest, Body()],
+) -> PortfolioSummary:
+    """Create a named portfolio.
+
+    Free users are capped at 1 portfolio. Plus users are uncapped.
+    Idempotency-Key header is accepted but not fully deduped in this slice (§ non-neg #6).
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    uid = uuid.UUID(user.user_id)
+    count_row = await db.execute(
+        select(func.count()).where(MfPortfolio.user_id == uid)
+    )
+    count = count_row.scalar_one()
+
+    if count >= 1 and not await is_plus(user.user_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"error": "upgrade_required", "upgrade_url": "/pricing"},
+        )
+
+    portfolio = MfPortfolio(user_id=uid, name=body.name)
+    db.add(portfolio)
+    await db.commit()
+    await db.refresh(portfolio)
+
+    return PortfolioSummary(
+        id=str(portfolio.id),
+        name=portfolio.name,
+        created_at=portfolio.created_at.isoformat(),
+    )
+
+
+@router.patch("/portfolios/{portfolio_id}", response_model=PortfolioSummary)
+async def rename_portfolio(
+    portfolio_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    body: Annotated[PortfolioCreateRequest, Body()],
+) -> PortfolioSummary:
+    """Rename a portfolio. Owner-only (404 on mismatch or bad uuid)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
+    portfolio.name = body.name
+    await db.commit()
+    await db.refresh(portfolio)
+
+    return PortfolioSummary(
+        id=str(portfolio.id),
+        name=portfolio.name,
+        created_at=portfolio.created_at.isoformat(),
+    )
+
+
+@router.delete("/portfolios/{portfolio_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_portfolio(
+    portfolio_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> None:
+    """Delete a portfolio and all its holdings/snapshots/history (CASCADE).
+    Owner-only (404 on mismatch or bad uuid)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
+    await db.delete(portfolio)
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# CAS upload
+# ---------------------------------------------------------------------------
+
+
 @router.post("/upload/cas", response_model=CasUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_cas(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     file: Annotated[UploadFile, File()],
     password: Annotated[Optional[str], Form()] = None,
+    portfolio_id: Annotated[Optional[str], Form()] = None,
     _rl: Annotated[None, Depends(_rl_upload)] = None,
 ) -> CasUploadResponse:
     # 1. Auth (401) BEFORE consent (403). The consent gate is invoked explicitly
@@ -61,7 +195,36 @@ async def upload_cas(
     # 2. DPDP consent gate (B20) — fail-closed.
     await _require_mf_consent(user=user, db=db)
 
-    # 3. Bounded read (cap memory at ~15MB+1 — never buffer an unbounded body).
+    # 3. Resolve portfolio_id — validate ownership or resolve the default.
+    uid = uuid.UUID(user.user_id)
+    if portfolio_id is not None:
+        # Validate ownership (raises 404 on bad uuid / not owned).
+        portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
+        resolved_portfolio_id = str(portfolio.id)
+    else:
+        # Auto-resolve: count existing portfolios for this user.
+        count_row = await db.execute(select(func.count()).where(MfPortfolio.user_id == uid))
+        count = count_row.scalar_one()
+        if count == 0:
+            # First portfolio — create 'Default' for free (no cap).
+            portfolio = MfPortfolio(user_id=uid, name="Default")
+            db.add(portfolio)
+            await db.commit()
+            await db.refresh(portfolio)
+            resolved_portfolio_id = str(portfolio.id)
+        elif count == 1:
+            row = (
+                await db.execute(select(MfPortfolio).where(MfPortfolio.user_id == uid))
+            ).scalar_one()
+            resolved_portfolio_id = str(row.id)
+        else:
+            # Multiple portfolios — caller must specify which one.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="portfolio_id_required",
+            )
+
+    # 4. Bounded read (cap memory at ~15MB+1 — never buffer an unbounded body).
     data = await file.read(_MAX_CAS_BYTES + 1)
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
@@ -73,33 +236,44 @@ async def upload_cas(
     redis = get_redis()
     source_hash = service.cas_sha256(data)
 
-    # 4. Per-USER SHA-256 dedup — re-upload of the same statement returns the
-    #    existing job; another user's identical bytes get an independent job.
-    existing = await service.dedup_lookup(redis, user.user_id, source_hash)
+    # 5. Per-user-portfolio SHA-256 dedup — re-upload of the same statement returns
+    #    the existing job; a different portfolio or user gets an independent job.
+    existing = await service.dedup_lookup(redis, user.user_id, resolved_portfolio_id, source_hash)
     if existing:
         return CasUploadResponse(job_id=existing, deduped=True)
 
-    # 5. Persist the raw file for the worker (purged after parse + 24h backstop),
+    # 6. Persist the raw file for the worker (purged after parse + 24h backstop),
     #    create the job row queued, enqueue, return < 200ms.
     job_id = str(uuid.uuid4())
     path = os.path.join(_upload_dir(), f"{job_id}.pdf")
     with open(path, "wb") as fh:
         fh.write(data)
 
-    db.add(MfCasJob(job_id=uuid.UUID(job_id), user_id=uuid.UUID(user.user_id),
-                    status="queued", progress_pct=0, source_hash=source_hash))
+    db.add(MfCasJob(
+        job_id=uuid.UUID(job_id),
+        user_id=uid,
+        portfolio_id=uuid.UUID(resolved_portfolio_id),
+        status="queued",
+        progress_pct=0,
+        source_hash=source_hash,
+    ))
     await db.commit()
-    await service.dedup_record(redis, user.user_id, source_hash, job_id)
+    await service.dedup_record(redis, user.user_id, resolved_portfolio_id, source_hash, job_id)
 
-    # 6. Keep the CAS password OFF the Celery broker — stash it in a short-lived
+    # 7. Keep the CAS password OFF the Celery broker — stash it in a short-lived
     #    Redis key the worker consumes-and-deletes (never serialized into a task arg).
     if password:
         await redis.set(f"mf:cas:pw:{job_id}", password, ex=600)
 
     from dhanradar.tasks.mf import parse_cas_job
 
-    parse_cas_job.delay(job_id, path, user.user_id)
+    parse_cas_job.delay(job_id, path, user.user_id, resolved_portfolio_id)
     return CasUploadResponse(job_id=job_id, estimated_seconds=60)
+
+
+# ---------------------------------------------------------------------------
+# Job status + report
+# ---------------------------------------------------------------------------
 
 
 @router.get("/cas/{job_id}/status", response_model=CasJobStatus)
@@ -139,6 +313,64 @@ async def cas_report(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report_expired")
 
 
+# ---------------------------------------------------------------------------
+# History (Plus-gated)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/history", response_model=PortfolioHistoryResponse)
+async def portfolio_history(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    portfolio_id: Annotated[Optional[str], Query()] = None,
+) -> PortfolioHistoryResponse:
+    """Return Plus users' label history grouped by snapshot date.
+
+    ``portfolio_id`` query param is required (caller must specify which portfolio).
+    Gating order: 401 (anonymous) → 402 (not Plus) → 403 (no consent).
+    No numeric fields in the response (non-neg #2).
+    """
+    from dhanradar.scoring.engine.schemas import (
+        DISCLAIMER_VERSION,
+        DISCLOSURE_BUNDLE,
+        NOT_ADVICE,
+    )
+
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    if not await is_plus(user.user_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"error": "upgrade_required", "upgrade_url": "/pricing"},
+        )
+    await _require_mf_consent(user=user, db=db)
+
+    if portfolio_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="portfolio_id_required",
+        )
+    # Validate ownership (raises 404 on bad uuid / not owned).
+    portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
+
+    raw = await mf_history.get_snapshot_history(db, user.user_id, str(portfolio.id))
+    snapshots = [
+        SnapshotHistoryItem(snapshot_date=item["snapshot_date"], funds=item["funds"])
+        for item in raw
+    ]
+    return PortfolioHistoryResponse(
+        snapshots=snapshots,
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+        disclaimer_version=DISCLAIMER_VERSION,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 async def _own_job(db: AsyncSession, job_id: str, user_id: str) -> MfCasJob:
     try:
         jid = uuid.UUID(job_id)
@@ -150,3 +382,23 @@ async def _own_job(db: AsyncSession, job_id: str, user_id: str) -> MfCasJob:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
     return job
+
+
+async def _own_portfolio(db: AsyncSession, portfolio_id: str, user_id: str) -> MfPortfolio:
+    """Return the portfolio if it exists and belongs to user_id; 404 otherwise.
+
+    Also raises 404 for a malformed UUID — never leaks whether the row exists.
+    """
+    try:
+        pid = uuid.UUID(portfolio_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    portfolio = await db.scalar(
+        select(MfPortfolio).where(
+            MfPortfolio.id == pid,
+            MfPortfolio.user_id == uuid.UUID(user_id),
+        )
+    )
+    if portfolio is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    return portfolio

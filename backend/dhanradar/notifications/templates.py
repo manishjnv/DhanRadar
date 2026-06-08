@@ -70,7 +70,7 @@ def _label_word(data: dict, key: str) -> str:
 
 def _esc(s: object) -> str:
     """Minimal HTML escape for interpolated, possibly user-influenced strings
-    (scheme names) so a fund name can never inject markup into the email."""
+    (scheme names, user-named portfolios) so they can never inject markup into the email."""
     return (
         str(s)
         .replace("&", "&amp;")
@@ -117,18 +117,24 @@ def _t_mf_report_ready(data: dict) -> tuple[str, str, str]:
 
 def _t_mf_label_change(data: dict) -> tuple[str, str, str]:
     scheme = _esc(data.get("scheme_name", "A fund in your portfolio"))
+    # portfolio_name is user-supplied → must be escaped in BOTH text (Telegram-HTML)
+    # and html parts (RCA: Telegram-HTML injection guard).
+    portfolio = _esc(str(data.get("portfolio_name", ""))).strip()
     prior = _label_word(data, "prior_label")
     new = _label_word(data, "new_label")
+    where = f" in your “{portfolio}” portfolio" if portfolio else ""
     subject = "A fund's form label changed"
-    # `text` is Telegram-HTML-parsed → escape the scheme name here as well.
+    # `text` is Telegram-HTML-parsed → escape all user-influenced strings.
     text = (
-        f"{scheme}: its category-relative form label moved from {prior} to {new}. "
+        f"{scheme}{where}: its category-relative form label moved from {prior} to {new}. "
         f"This describes recent relative performance only — it is educational "
         f"context, not an action to take."
     )
     html = (
-        f"<p><strong>{scheme}</strong>: its category-relative form label moved from "
-        f"<em>{prior}</em> to <em>{new}</em>.</p>"
+        f"<p><strong>{scheme}</strong>{where}: its category-relative form label moved from "
+        # _esc the label words too (defence-in-depth: LABEL_DISPLAY is plain ASCII
+        # today, but escaping keeps the HTML safe if a label is ever localised).
+        f"<em>{_esc(prior)}</em> to <em>{_esc(new)}</em>.</p>"
         f"<p>This describes recent relative performance only — educational context, "
         f"not an action to take.</p>"
     )

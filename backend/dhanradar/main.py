@@ -18,6 +18,8 @@ from dhanradar.admin.router import router as admin_router
 from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
 from dhanradar.compliance.router import router as compliance_router
+from dhanradar.consent.router import router as consent_router
+from dhanradar.onboarding.router import router as onboarding_router
 from dhanradar.db import engine
 from dhanradar.errors import (
     http_exception_handler,
@@ -28,10 +30,17 @@ from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
 from dhanradar.notifications.router import router as notifications_router
+from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
 from dhanradar.scoring.engine.router import router as internal_scoring_router
 from dhanradar.subscriptions.router import router as subscriptions_router
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry (B38). Called ONCE at module load, before app = FastAPI().
+# No-op when SENTRY_DSN is unset (the default); activates when DSN is configured.
+# ---------------------------------------------------------------------------
+init_sentry()
 
 
 @asynccontextmanager
@@ -69,9 +78,24 @@ app = FastAPI(
 # StarletteHTTPException covers FastAPI's HTTPException (a subclass).
 # ---------------------------------------------------------------------------
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PrometheusMiddleware)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# ---------------------------------------------------------------------------
+# Metrics scrape endpoint — intentionally OUTSIDE /api/v1.
+# The Cloudflare tunnel ingress routes only ^/api/.* to FastAPI, so /metrics
+# is NOT reachable through the public tunnel. It is scraped server-to-server
+# on the Docker network by the prometheus container. include_in_schema=False
+# keeps it out of the OpenAPI docs. (B38)
+# ---------------------------------------------------------------------------
+app.add_api_route(
+    "/metrics",
+    metrics_endpoint,
+    methods=["GET"],
+    include_in_schema=False,
+)
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -85,6 +109,8 @@ app.include_router(notifications_router, prefix="/api/v1")  # Phase 6 — Notifi
 app.include_router(compliance_router, prefix="/api/v1")  # §4 — public disclaimer read
 app.include_router(admin_router, prefix="/api/v1")  # B26 — admin compliance (disclaimer activate, label-churn); RequireAdmin-gated
 app.include_router(mood_router, prefix="/api/v1")  # Mood Compass — anon market regime
+app.include_router(consent_router, prefix="/api/v1")  # B44 — DPDP consent grant/revoke writer
+app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile quiz (sole writer of users.risk_profile)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).

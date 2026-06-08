@@ -47,6 +47,8 @@ pnpm-debug.log*
 data/
 postgres-data/
 redis-data/
+# Deploy state (last-good SHA + alembic rev recorded by scripts/deploy.sh)
+.deploy/
 
 # ── OS / editor ───────────────────────────────────────────────────────
 .DS_Store

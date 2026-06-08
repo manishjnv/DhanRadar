@@ -1,11 +1,299 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-07
+**Last updated:** 2026-06-08 (pre-deploy gate)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## Deploy-gate hardening: B36 + B37 (2026-06-07, merged to `main`)
+## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
+
+**Verdict: MERGE-ELIGIBLE (CI green on the blocking checks) — DEPLOY-ELIGIBLE pending the operator
+punch-list + human approval.** The deploy-readiness session (2026-06-08, commits `135ad63` +
+`be18200`) fixed the three red CI checks. The blocking jobs (`backend`, `migrations`, `frontend`,
+`guards`) are GREEN; `lint` stays advisory-red (`continue-on-error`, B40 ruff backlog — not a
+blocker). The merge itself is a **human approval on `main`** (PR is still draft — flip ready first);
+the KVM4 deploy needs the operator infra steps in **`docs/ops/LAUNCH_RUNBOOK.md`** + separate human
+sign-off. The session did NOT ssh to KVM4, merge `main`, or mutate any secret/infra.
+
+### CI status (HEAD `be18200`) — `guards` ✅ `frontend` ✅ `migrations` ✅ `backend` ✅; `lint` ⚠ advisory-red
+
+What the session fixed (all in `135ad63` unless noted):
+
+- **B54 (was 5× `test_consent_writer`) — RESOLVED.** Root cause: `apply_consent_change` did
+  `cast(json.dumps(payload), JSONB)` — passing a STR through SQLAlchemy's JSONB bind type, which
+  `json.dumps`'d it a SECOND time, storing a JSON *string* scalar instead of an object; the reader's
+  `isinstance(value, dict)` was then False, so every grant read back as NOT-granted. Fix: pass the
+  dict (`cast(payload, JSONB)` — encode once). Proven via a SQL-compilation diagnostic. Load-bearing
+  consent/DPDP path → Tier-B adversarial review (Sonnet takeover, codex n/a — model unsupported on
+  account) **ACCEPT**, no fail-open across 6 vectors. RCA logged.
+- **2× `test_market_data` — RESOLVED.** B29 turned `AMFINavProvider` from a canned stub into a
+  DB-backed provider, but 2 `TestStubHappyPath` unit tests still asserted canned NAV (failing with
+  `no_nav_data` and "attached to a different loop"). Replaced with a DB-free request-validation test; the DB
+  happy-path is covered by `tests/integration/test_mf_nav_scoring.py`.
+- **B55 (`migrations` job) — RESOLVED.** `timescaledb-ha:pg16` CI image lacks `pg_partman`. Strip it
+  in the CI migrations job like `pg_cron` (`sed -e '/pg_cron/d' -e '/pg_partman/d'`); migration `0006`
+  already guards partman behind `IF EXISTS … pg_extension` + `RAISE NOTICE`-skip. Production
+  `01_init.sql` keeps the strict `CREATE EXTENSION` (fail-loud). Migration chain
+  (`upgrade head → downgrade base → upgrade head`) now passes clean in CI on the prod-like image.
+- **B48 production-enforcement PROOF added** (`135ad63`/`be18200`): `tests/unit/test_b48_consent_prod_guard.py`
+  (6 tests — prod/staging/unknown env + flag-off → hard boot crash; prod+flag-on → enforced; dev may
+  bypass) + `test_consent_writer.py::test_consent_gated_route_refuses_without_grant` (un-granted user
+  → 403 `consent_required`, RFC7807 shape). Config boot guard in `config.py` confirmed correct.
+- **3× `test_notifications` `RequireTier … missing 'db'`** — already FIXED earlier (`ee059db`).
+
+**Deploy path:** flip PR #28 ready → human merge to `main` → execute `docs/ops/LAUNCH_RUNBOOK.md`
+(ENV=production+consent → R2 residency → deploy.sh → backups+monitoring → mTLS → smoke → GO/NO-GO).
+
+- **PR #28 reconciliation (done):** merged `origin/main` (PRs #22–27: B29 foundation, admin/ops,
+  B6/B28, B34, B36/B37, parallel AI commentary) — 16 conflicts resolved (merge `d07a19e`): kept this
+  branch's AI-commentary/gateway contract (the Plus stack depends on it), main's reviewed B36/B37
+  deploy/backup artifacts, the `amfi.py` superset, the `0008a→0013` single-head migration chain, and
+  the B48/FOUNDING config. Docs unioned (no ADR/RCA/blocker dropped). Pushed; HEAD contains `origin/main`.
+- **Local gates (NOT the full gate):** 516 backend UNIT pass (integration tests only COLLECT — no
+  local Postgres), `ci_guards` + `anti_pattern` + secrets clean, ruff clean on resolved code,
+  `alembic heads` = single `0013`. Frontend untouched by
+  the merge (string-constant nav fix only).
+- **Phase-7 §5 panel:** Security ACCEPT-WITH-CONDITIONS (no blocker), Compliance ACCEPT-WITH-
+  CONDITIONS (no blocker — all 10 non-negs hold on every shipping surface), UI ACCEPT-WITH-
+  CONDITIONS, Product ACCEPT-WITH-CONDITIONS. **No REJECT, no Security/Compliance blocker** → the
+  formal deploy-gate condition is satisfied. Ledger: `reviews/phase7-predeploy-panel.md`.
+- **Panel code findings fixed in-gate (`2033b9a`):** `/market/why-today` 404→200 `data_unavailable`
+  (anon-magnet consistency); AppShell Settings link → `/settings/privacy`.
+
+### DEPLOY PUNCH-LIST (human/operator — code is NOT the gate here)
+
+**Operational (must close before opening to real users):**
+
+1. **B29 / NAV data** `[infra/human]` — run `nav_backfill(years=3)` + a `nav_daily_fetch` on the
+   live TimescaleDB, else every fund returns `insufficient_data` and the wedge produces no labels.
+2. **B48 / consent** `[CC+infra]` — set `ENV=production` AND `DPDP_CONSENT_ENFORCED=true` (or delete
+   the dev line); verify a gated route 403s without a grant. Legal blocker; boot guard fails-closed.
+3. **Admin + scoring activation** `[infra/human]` — seed `ADMIN_USER_IDS` (≥2 UUIDs); activate
+   scoring engine v1 via the two-person gate, else all reports stay `provisional_model`.
+4. **AI commentary path** `[CC+infra]` — set `OPENROUTER_API_KEY`; verify the privacy UI exposes the
+   `cross_border_ai` grant end-to-end (else commentary + the Free taster never fire).
+5. **B36/B37/B38** `[infra runs]` — first live deploy/rollback + DB backup + monitoring scrape on
+   KVM4; **B34** R2 India-residency bucket; **B25** internal mTLS network policy. **B2/B7/B8** seed
+   `billing.plans` data (billing go-live = data-only flip).
+
+**Should-fix (pre-launch, code — punch-listed, not blocking the merge):**
+ratelimit.py TOCTOU (Security F2, load-bearing — fix + adversarial re-pass); per-channel duplicate
+audit rows (Compliance F1); ScoreRing/AllocationDonut hex→`--dr-*` tokens (UI F1/F2);
+empty-portfolio silent-`done` guard (Product F4); `ui-system/contracts` deprecation banner (B41);
+mood embed `Cache-Control` (Product F9); B40-followup (promote ruff/mypy to blocking after a
+lint-cleanup pass).
+
+### SINGLE NEXT ACTION (CI must go green BEFORE merge)
+
+**Get the branch CI green first — this needs a live Postgres (run `docker compose` locally or in
+CI):** (1) debug + fix the 5 `test_consent_writer` `jsonb_set` failures (B54); (2) guard
+`pg_partman`/`pg_cron` in `infra/postgres/init/01_init.sql` or fix the CI Postgres image (B55);
+(3) quiet/clear the `lint` job (B40-followup). The RequireTier fix (`ee059db`) already clears the 3
+notification failures. THEN flip PR #28 ready → human merge → work the operational deploy punch-list
+(NAV seed → B48 enforce → admin/scoring activate → billing seed → B36/B37/B38 live) → human go/no-go.
+**Do NOT merge red CI; do NOT deploy.** (This session refused both — deploy is forbidden; merge is
+blocked by red CI.)
+
+## Session handoff (2026-06-08, end of functionality-first B29+B42+B43 session)
+
+- **Built this session (branch `hardening/launch-gate-blockers`, all commits noreply):**
+  - **B29** — NAV-derived signals so a seeded fund scores a REAL label (`on_track`, not
+    `insufficient_data`): `58db876` (code), `fa729de` (docs).
+  - **B42** — mobile AppShell focus-trap residual closed (acceptance #1/#2/#3 met): `9fe0a99`
+    (code), `0622681` (docs).
+  - **B43** — onboarding risk-quiz: sole-writer `POST /onboarding/risk-quiz`, cold-start redirect,
+    and a source-level non-neg-#3 separation guard: `a9509fb` (code), `1375ce9` (docs).
+  - Build-sequence items **1–4 (B29, B42, B43, B44) all ADDRESSED**.
+- **Pushed:** branch → origin at `1375ce9` (fast-forward `843a5f4..1375ce9`; all commits noreply,
+  push privacy block satisfied).
+- **Merge — BLOCKED:** PR #28 is **draft** and **`mergeable: CONFLICTING`** against `main`, no
+  review approval. A future session must **resolve the merge conflicts with main**, mark the PR
+  ready, and clear required checks. `main` is protected (PR-only).
+- **Deploy — BLOCKED (NOT done; cannot be done from a session):** binding deploy gates still open —
+  **B48** (DPDP consent enforcement disabled in dev; re-enforce via `ENV=production` /
+  `DPDP_CONSENT_ENFORCED=true`), **B34** (R2 India-residency for the 7-yr audit), **B29** (code
+  landed but **no live NAV data populated** — run `nav_daily_fetch`/`nav_backfill` on a live
+  TimescaleDB), **B36/B37** (deploy/backup scripts never run live on KVM4). Deploy also needs the
+  Phase-7 §5 pre-deploy panel logged + **separate explicit human approval**; the GitHub
+  `production` env is main-gated (merge must land first). **Deploy is a human-gated event after
+  merge, not a session action.**
+- **Gates green this session:** backend 51 targeted unit + ruff + route-reg + ci_guards/anti-pattern;
+  frontend 52 vitest + tsc + eslint + token-sync. Backend full unit suite carries 2 pre-existing
+  network-DNS failures in `test_market_data.py` (unrelated). Integration tests (B29 scoring, B43
+  writer) collect; run on a live DB.
+- **Adversarial tooling:** codex still unavailable (ChatGPT-account entitlement). This session
+  touched no security-critical scoring-engine code, so no rescue was required; run `/codex:setup`
+  to restore before the next load-bearing/security change (item 5 AI gateway will need it).
+- **Next action — ALL dev is COMPLETE.** Functionality-first sequence (items 1–7) + the full Plus
+  feature set are done: AI commentary (`2b967d7`), stored history + auto monthly re-score (`d89f133`),
+  multiple portfolios (`cef5345`), **label-change alerts DONE 2026-06-08 (`ef69a28`)**. → The project
+  is fully in the **pre-deploy phase**: (1) resolve PR #28 conflicts against `main`; (2) run the
+  **Phase-7 §5 governance panel** (batched full-tier audit over the whole branch — notes for the
+  panel: migration `0013`'s data-preserving backfill is verified by review since the `create_all`
+  test fixture precludes an alembic down/up test; the NSE mood provider + label-change alerts are
+  inert-but-safe until consent/data land); (3) close deploy gates — **B48** consent re-enforce (also
+  un-gates `cross_border_notify` so alerts actually deliver), **B2/B7/B8** billing plan-data seeding,
+  live **NAV** populated; (4) human go/no-go → merge → deploy.
+
+### Agent-utilization & routing-telemetry footer (B29+B42+B43 session, 2026-06-08)
+
+- **Opus** — orchestration; B29 NAV-signal design + wiring (load-bearing scoring seam, self-authored);
+  B42 focus-trap (scope collapsed to a ~20-line a11y fix, self-authored); B43 contract authoring +
+  full diff review + the non-neg-#3 source-level separation guard (the compliance check Opus owns);
+  all gate runs; doc edits.
+- **Sonnet** — 2 parallel B43 builders (backend onboarding module; frontend onboarding flow).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (no security-critical scoring-engine change this session; ChatGPT-account
+  entitlement still down regardless).
+- Per-delegation telemetry: `B43-backend-builder · Sonnet · reworked: N (mirrored consent house
+  pattern; gates green as-returned)` · `B43-frontend-builder · Sonnet · reworked: N (quiz +
+  AuthGuard cold-start + tests token-compliant, green as-returned)` · `warm-start ×3 (B29/B42/B43) ·
+  Sonnet · reworked: N` · B29 & B42 self-authored on Opus (load-bearing / sub-30-line, per the
+  don't-delegate-when-faster rule).
+
+## B44 consent writer + B42 responsive AppShell landed (2026-06-08, branch `hardening/launch-gate-blockers`)
+
+**B44 — DPDP consent grant/revoke writer + capture UI (`927f64f` backend, `4b40f83` frontend).**
+The fail-closed `RequireConsent` gate (B3) finally has a WRITER, so consent-gated routes can
+legally go live. Backend: `consent/` module — `GET /consent`, `POST /consent/grant`+`/revoke`
+(authed, anonymous→401-first, RFC7807, action-scoped `Idempotency-Key`, atomic per-purpose
+`jsonb_set`, single-commit append to new append-only `consent.consent_audit_log`, migration 0010).
+Revoke writes `{"granted":false}` — never a `revoked` key. Frontend: point-of-use `ConsentModal`
+(gates MF upload on `mf_analytics`) + `settings/privacy` panel (all 7 purposes). Tier-B adversarial
+sign-off: codex n/a → independent Sonnet takeover **ACCEPT-WITH-CONDITIONS**, all 3 applied (0-row
+UPDATE guard, ORM CheckConstraint, Redis graceful-degrade). 34 unit + 14 integration + 6 FE tests.
+Ledger `reviews/b44-consent-writer.md`; feature doc `docs/features/consent.md`; RCA 2026-06-08.
+B44 now ADDRESSED; **B48 (re-enforce the consent kill-switch at launch) remains the deploy gate**.
+
+**B42 — responsive AppShell + UI fixes (`725e3eb` + `588a719`).** Shared `SidebarContent`; desktop
+`<aside>` now `hidden md:flex`; topbar hamburger opens the same nav as a `role=dialog` slide-in
+drawer (backdrop/Escape/nav-click/route-change close; dynamic `aria-expanded`). Folded in: `Field`
+`aria-describedby`+`aria-invalid` wiring; `MoodGauge` hex→`var(--dr-*)` tokens. Independent UI
+review ACCEPT-WITH-CONDITIONS; high (hardcoded `aria-expanded`) + med test gaps fixed in `588a719`.
+Low findings logged (no focus-trap in nav drawer; Settings outside the Primary nav landmark
+[pre-existing]; no `--dr-muted` alias). 38 FE vitest pass.
+
+**Deferred (concurrent-session contention):** `BLOCKERS.md` rows B44/B42 were NOT updated to
+ADDRESSED this session — another session held the file across every write attempt. Authoritative
+status lives in the ledger + feature doc above; reconcile the BLOCKERS rows when the file is free.
+**No merge/deploy** (human-gated). Backend full unit suite: 388 pass, 2 pre-existing network-DNS
+failures in `test_market_data.py` (unrelated). Governance audit re-run: B44 Tier-B (Security+
+Compliance) and B42 Tier-A UI all signed off this session; the full Phase-7 §5 pre-deploy panel
+across the whole repo remains the gate before flipping PR #28 to ready.
+
+### Agent-utilization & routing-telemetry footer (B44 + B42 session, 2026-06-08)
+
+- **Opus** — orchestration; load-bearing Tier-B review of the consent writer (caught the
+  idempotency fail-open + 0-row false-audit before commit); Compliance sign-off; the small
+  load-bearing fixes + governance docs (ledger, RCA/SESSION_STATE edits) hand-finished.
+- **Sonnet** — 3 builder drafts (B44 backend; B44 frontend; B42) + 1 independent adversarial
+  Security takeover + 1 independent B42 UI review + 1 doc-draft agent (feature doc + RCA/session
+  blocks).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (ChatGPT-account entitlement error; no Codex model available) → Sonnet
+  takeover per the approved fallback ladder; verdict ACCEPT-WITH-CONDITIONS, all 3 conditions applied.
+- Per-delegation telemetry: B44-backend-builder · Sonnet · reworked: Y (Opus fixed action-scoped
+  idempotency key + 0-row guard + main.py import order) · B44-frontend-builder · Sonnet · reworked: Y
+  (timed out twice mid-run; Opus completed handlers + upload wiring + settings/privacy page + tests +
+  apostrophe syntax fix) · B42-builder · Sonnet · reworked: Y (UI-review high+med a11y conditions
+  fixed by Opus) · B44-adversarial · Sonnet · reworked: N · B42-UI-review · Sonnet · reworked: N ·
+  docs-draft · Sonnet · reworked: Y (Opus trimmed RCA/session blocks; ledger written Opus-direct).
+
+## Monetization model decided (2026-06-08) — implement at Phase 5
+
+MF launch = **freemium + Founding Access**, written into `DhanRadar_Implementation_Plan.md`
+**PHASE 5M** (ready to slot into Phase 5 execution; small `pro_access_until` add at Phase 2).
+Paid tier = **DhanRadar Plus** (₹149/mo · ₹1,199/yr; Founding ₹599/yr locked); paywall axis =
+tracking over time; AI commentary = Pro + one-time taster, metered. Free is **gateway-
+independent** — billing go-live is a data-only flip via the existing B7/B8 checkout fail-safe.
+Full contract + open-item-free decision log in PHASE 5M.
+
+## Working order reset (2026-06-08) — functionality-first
+
+Course-correction: stop the deploy-gate/audit/docs drift; build product + a minimum test per
+slice. See `BLOCKERS.md` → **Build sequence (functionality-first)**. **B29 CODE ADDRESSED
+2026-06-08 (58db876)** — `mf/signals.py` computes NAV-derived momentum/risk signals; a seeded fund
+now scores `on_track` (not `insufficient_data`); live-data populate is the remaining deploy-gate.
+**B42 DONE** (`9fe0a99`). **B43 DONE 2026-06-08 (`a9509fb`)** — `onboarding/` module is the sole
+writer of `users.risk_profile` via `POST /api/v1/onboarding/risk-quiz`; 5-Q cold-start quiz +
+`AuthGuard` redirect (null profile → `/onboarding`); non-neg #3 hardened with a source-level
+separation guard (scoring never names `risk_profile`). Build-sequence items 1–4 (B29, B42, B43,
+B44) all addressed. **Next action = item 5: AI MF commentary** (first AI consumer — wires the
+B20/B21/B22 gates; DhanRadar Plus differentiator, Implementation Plan PHASE 5M; touches the AI
+gateway = load-bearing, so the inline Security/Compliance review stays in-session). Min test:
+consent-gated call refused without grant + happy path returns commentary. Deploy/governance/billing/
+security-residual blockers stay PARKED until a pre-deploy phase.
+
+## Deploy-gate hardening + governance audit (2026-06-08, branch `hardening/launch-gate-blockers`)
+
+Concurrent-session note: this branch had 28 uncommitted frontend files from a parallel session.
+That session was confirmed not running; its work (auth/mood/settings/notifications screens +
+responsive-ish AppShell rework) was verified coherent (tsc + lint clean, but **no component tests**)
+and parked as one WIP commit (`868688c`) with explicit owner approval, then this session continued.
+
+**Blockers ADDRESSED this session (all on the branch / PR #28, none merged):**
+
+- **B36** (`7035400`, `71a3ed2`) — deploy/rollback automation (`scripts/deploy.sh`, `rollback.sh`) +
+  runbook. Fixed a **duplicate-`0008` Alembic branch** that broke `alembic upgrade head` (renumbered
+  mf_nav → `0008a`, single head `0009`; RCA logged). Pre-push adversarial review applied.
+- **B37** (`c93e387`, `71a3ed2`, `8e422af`) — `scripts/backup.sh` + `restore.sh`: nightly `pg_dump`
+  and Redis AOF → India-resident R2, checksum-verified, + runbook. Audit path-traversal fix applied.
+- **B40** (`ddc3f98`) — CI: backend→`timescaledb-ha:pg16`, NEW migrations job (alembic up→down→up on
+  the real image), ruff+mypy invoked (ADVISORY — see B40-followup), mocks-off build.
+- **B39** (`a152b2b`) — vitest + 17 tests, `--passWithNoTests` dropped, vitest global types fix.
+- **B45** (`a152b2b`, `ddc3f98`) — mocks-off CI build + Playwright smoke test.
+- **B46** (`c86c413`) — CAS error surfaces (no infinite spinner).
+- **Security (audit conditions)** (`8e422af`) — Sentry `_scrub_event` strips exception msgs +
+  `logentry` (DPDP leak); `restore.sh` MANIFEST filename allowlist. +2 tests; 26/26 observability green.
+
+**Governance audit (pre-deploy, 4 independent Sonnet reviewers) — verdict: NOT MERGEABLE.**
+Security ACCEPT-WITH-CONDITIONS (2 MAJOR fixed this session) · Compliance **REJECT** · UI **REJECT** ·
+Product **NO-GO**. Full verdict on **PR #28** (draft). Hard merge-blockers remaining:
+
+- **B44 (legal)** — DPDP consent-capture is genuinely unbuilt: **no grant/revoke writer endpoint, no
+  consent UI**. Consent is *enforced* (B48 default-true) but ungrantable → every consent-gated route
+  bricked + no lawful consent record. **Load-bearing Tier-B feature — not started.**
+- **B42** — AppShell still desktop-only (the WIP rework did not add responsive/hamburger/bottom-nav).
+- **B29** — MF NAV pipeline unseeded → every fund scores `insufficient_data` (core wedge void).
+- New follow-ups to file: **B40-followup** (promote ruff/mypy from advisory→blocking after a
+  lint-cleanup: ~361 ruff findings, never mypy-checked); admin routes lack `Idempotency-Key`;
+  `ADMIN_USER_IDS` must be real UUIDs pre-launch (currently non-UUID → admin module non-operational).
+
+**Merge / deploy:** NOT done, correctly. Merge blocked by Gate 0 (open Compliance BLOCKER B44);
+deploy additionally needs human PC5 + infra residuals. PR #28 stays a **draft**.
+
+**Next action:** fresh session for **B44** (consent table/writer endpoint + capture UI + inline
+Tier-B Security/Compliance review), then **B42**. Start prompt is in the handoff (below / chat).
+
+**Agent utilization (this session):**
+
+- **Opus** — orchestration, concurrency/parking judgment, alembic-branch fix, CI authoring + the
+  config-contract analysis, the 3 bounded fixes, audit adjudication, all commits.
+- **Sonnet** — B36/B37 script drafts (`reworked: Y`, health-gate container-id bug + 3 adversarial
+  conditions); B39/B45 frontend tests (`reworked: Y`, added vitest-env.d.ts — tests broke tsc);
+  governance audit ×4 Security/Compliance/UI/Product (`reworked: N`, findings adopted as-is).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a (companion unhealthy: `gpt-5` 400); adversarial + audit ran via Sonnet
+  takeover per the approved fallback.
+
+## DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+User decision: disable the fail-closed DPDP consent gate during pre-launch dev (no real
+user data; consent-capture UI B44 not built) and auto-re-enforce at the 2026-07-15 launch.
+Built as a fail-safe env kill-switch, NOT a hardcoded bypass:
+
+- `DPDP_CONSENT_ENFORCED` (default `true`) + `consent_bypassed` computed property; the bypass
+  takes effect at the single `_consent_granted` chokepoint (covers `RequireConsent` /
+  `consent_granted` / `assert_consent`) ONLY in an allowlisted `development/test/ci` ENV.
+- Setting it `false` in any other ENV is a **hard boot failure** (`config.model_post_init`) —
+  a leaked override cannot disable consent in prod/staging. One startup warning when active.
+- Dev `.env` set to `false`; `.env.example` documents the knob (default `true`).
+- Independent Security review (Sonnet takeover; codex n/a) ACCEPT-WITH-CONDITIONS — env-allowlist
+  invert + boot guard both applied in-session. 28 consent unit tests; runtime proofs captured
+  (dev bypass active, prod boot-crash). Ledger `reviews/b48-consent-killswitch.md`; **B48 filed (OPEN —
+  must re-enable before launch)**. Auth (anonymous→401) is untouched; only consent is relaxed.
+
+## Deploy-gate hardening: B36 + B37 (2026-06-07, historical — merged to `main` via worktrees)
 
 Worked in isolated `git worktree`s off `main` (the shared `hardening/launch-gate-blockers` checkout
 had a concurrent session's dirty tree — stayed out of its lane). Each slice: deterministic gates →
@@ -31,7 +319,7 @@ This session also confirmed the **MF AI-consumer (B20/B21/B22/B26) was already s
 concurrent session** (PR #23) — not duplicated. OpenRouter key wiring documented
 ([[ai-gateway-built-unconsumed]]): `OPENROUTER_API_KEY` + `AI_FREE_MODELS` go in the root `.env`.
 
-## First AI-gateway consumer — MF report portfolio commentary (2026-06-07, merged PR #23 `c085444`, branch `feat/ai-consumer`)
+## First AI-gateway consumer — MF report portfolio commentary (2026-06-07, historical — merged PR #23 `c085444`, branch `feat/ai-consumer`)
 
 The governed OpenRouter gateway now has its first end-to-end consumer. Built in an isolated
 worktree off `origin/main` (a concurrent session held `hardening/launch-gate-blockers`).
@@ -135,7 +423,8 @@ the production activation of v1 (real §8 backtest + human approver), a data/hum
   in-branch: `RequireConsent` anonymous→**401** safe-by-default (re-verified ACCEPT, RCA 2026-06-06);
   consented_purposes trap annotated. New **B33** (auth/session hygiene, low). Report:
   `PHASE7_VERIFICATION.md`. Merge-eligible; **NOT deploy-eligible** (deploy checklist: B26/B31/B6/B28/
-  B18/B2 + live-stack runtime proofs + PC4/PC5 human approval).
+  B18/B2 + **B48** (re-enforce DPDP consent: `ENV=production` and/or `DPDP_CONSENT_ENFORCED=true`,
+  then verify a gated route 403s without a grant) + live-stack runtime proofs + PC4/PC5 human approval).
 
 ## In flight
 
@@ -219,8 +508,9 @@ the production activation of v1 (real §8 backtest + human approver), a data/hum
   event consumers), then **Stock/Search**; OR close the MF data pipeline (**B29**: AMFI NAV + scheme
   metadata) so reports return real labels instead of `insufficient_data`.
 - Other deploy gates before KVM4: **B31** (notification cross-border consent), **B6/B28** (scoring
-  activation), **B18** (atomic AI budget), **B2/B7/B8** (Razorpay data-seeding) + the live-stack
-  runtime proofs + separate human approval (PC4/PC5).
+  activation), **B18** (atomic AI budget), **B2/B7/B8** (Razorpay data-seeding), **B48** (re-enforce
+  the DPDP consent gate — set `ENV=production` and/or `DPDP_CONSENT_ENFORCED=true`, then verify a
+  consent-gated route 403s without a grant) + the live-stack runtime proofs + separate human approval (PC4/PC5).
 - Before MF DEPLOY: **B26** `ai_recommendation_audit` write at the report serve seam; **B29** NAV
   pipeline; **B6/B28** scoring activation gates.
 
@@ -236,7 +526,51 @@ hygiene from the Phase-7 §5 gate, low).
 
 ## Agent-utilization & routing-telemetry footer
 
-### Deploy-gate hardening B36 + B37 (2026-06-07, worktrees off `main`)
+### B38 observability + deploy-gate checklist (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+User drove toward a full deploy; I built the one CRITICAL ops gate in my lane and held the line on
+the hard gates.
+
+- **B38 monitoring — DONE & pushed** (`efc6556`): `dhanradar/observability.py` — `init_sentry()`
+  (DPDP-safe `before_send` scrubber: cookies / auth+cookie+internal-token headers (dict AND list) /
+  body / query_string / env-`REMOTE_ADDR` / breadcrumbs / user; `send_default_pii=False`, traces off);
+  plus a Prometheus `/metrics` endpoint (method/route-TEMPLATE/status labels only — no raw paths/ids;
+  outside `/api/v1`, network-isolated, no bearer per non-neg #5). 24 DB-free tests.
+- **Deploy-gate checklist created**: `docs/project-state/DEPLOY_GATE_CHECKLIST.md` — 7 gate groups +
+  owner tags; the single path from this branch → a legitimate KVM4 deploy. B38 ticked (`67d5915`).
+- **B36 / B37 NOT done** — both need KVM4 box access (tested migration round-trip; backups verified
+  India-resident) that this session does not have; only draftable untested. Needs a box session.
+- **DEPLOY refused** — open Compliance BLOCKERs + unsigned audit + no backups/consent-UI/residency +
+  PC5 human approval. **MERGE refused** — `main` is PR-protected, needs the audit, and the branch
+  carries the concurrent session's load-bearing work. Owner consent does not waive legal (DPDP) /
+  integrity (two-person) / data / infra gates.
+- **Opus** — orchestration, infra-notes grounding, line-by-line review, the ci_guards/bearer
+  resolution, gating/commit/push. **Sonnet ×2** — B38 builder (reworked **Y**: adversarial round) +
+  adversarial reviewer (found **4 real DPDP PII leaks** the build missed — high value). **Haiku** —
+  n/a. **codex:rescue** — n/a (unavailable; Sonnet adversarial takeover per the approved ladder).
+- Gates: pytest 24 · ruff 0 · ci_guards 0 · anti-pattern 9/9 · markdownlint 0. Commits `efc6556`,
+  `67d5915` (latter has a cosmetic stray `@` in its message — bash/PowerShell heredoc mixup; not
+  force-fixing on a shared branch).
+
+### DPDP consent kill-switch B48 (2026-06-07, branch `hardening/launch-gate-blockers`)
+
+- **Opus** — Phase-0 status read; the kill-switch design (single `_consent_granted` chokepoint,
+  env-allowlist, boot guard); both edits (config.py / deps.py) hand-written (load-bearing
+  compliance path + small/hot-cache); the two adversarial-condition fixes (env allowlist invert,
+  `model_post_init` boot guard); the test additions; runtime proofs; B48 + the review ledger +
+  this footer.
+- **Sonnet** — 1 independent adversarial Security/Compliance sign-off (7 vectors; codex n/a →
+  takeover) → ACCEPT-WITH-CONDITIONS, both required conditions applied before commit.
+- **Haiku** — n/a (targeted greps run inline).
+- **codex:rescue** — n/a — account not entitled for Codex models; Sonnet takeover per the approved
+  fallback ladder.
+- Per-delegation (telemetry): b48-adversarial · Sonnet · reworked N (verdict + 3 conditions adopted
+  as-found; Opus implemented the fixes). Doc prose (B48 row / ledger / this footer) Opus-direct under
+  the load-bearing one-shot exemption (needed the precise adversarial-review context). Gates: 28
+  consent unit tests green; 350 unit pass (2 pre-existing network failures unrelated); ci_guards +
+  anti-pattern sweep PASS; markdownlint 0.
+
+### Deploy-gate hardening B36 + B37 (2026-06-07, historical — worktrees off `main`)
 
 - **Opus** — orchestration; Phase-0 reads (compose/cloudflared/Dockerfile/celery beat/storage); both
   build contracts; line-by-line review of both slices; the B36 robustness fixes (pipefail SIGPIPE,
@@ -355,3 +689,26 @@ Footer below is the prior Phase-7 work.
 - Verification note: 212 backend unit tests pass locally + ci_guards 0 + F-lint 0 + markdownlint 0;
   compose YAML valid + memory sum = 3072M; integration suite collects (63) and runs in CI (B1). Live-stack
   hops (E2E, NTP, R2 archival, measured box memory) are deploy-time — listed in the deploy checklist.
+
+### Agent-utilization footer — DEPLOY-READINESS session (2026-06-08)
+
+Headline: turned the CI-red launch branch GREEN (B54 consent jsonb_set double-encode, B55 pg_partman
+CI, 2 stale market_data tests) + added B48 prod-enforcement proof + emitted `docs/ops/LAUNCH_RUNBOOK.md`.
+Commits: `135ad63` (fixes + B48 tests), `be18200` (RFC7807 test-shape fix). CI HEAD `be18200`:
+backend ✅ migrations ✅ frontend ✅ guards ✅; lint ⚠ advisory. No KVM4 ssh, no `main` merge, no secret touched.
+
+- **Opus** — diagnosis (SQL-compilation double-encode proof, RFC7807 shape), all code/test edits
+  (small + hot-cache, self-executed per the tiny-edit rule), runbook authorship, doc updates, the
+  go/no-go reasoning, and the Tier-B review verdict adjudication.
+- **Sonnet** — warm-start brief (1) + the Tier-B consent adversarial review (1, ACCEPT). 2 calls.
+- **Haiku** — n/a (no bulk grep/log-triage sweep needed; CI logs read directly).
+- **codex:rescue** — n/a — ChatGPT account not entitled for any Codex model (`gpt-5*` 400s in job
+  logs); Tier-B consent sign-off ran as the Sonnet takeover fallback, verdict=ACCEPT.
+- **claude-mem** — recall via the read-first warm-start + memory index; no new corpus build.
+- Per-delegation (telemetry): warm-start · Sonnet · reworked: N (used as-returned for orientation) |
+  consent-jsonb-adversarial · Sonnet · reworked: N (ACCEPT, no changes — fix shipped as-reviewed).
+- Routing deviation logged: LAUNCH_RUNBOOK.md + the SESSION_STATE/BLOCKERS prose were drafted on
+  Opus, not delegated to Tier-4/Sonnet first (the doc-drafting nudge). Reason: a deploy runbook's
+  copy-paste commands are safety-critical and were derived from this turn's exact reads of the 4
+  scripts + verification doc (hot cache); a cheap-tier redraft risked inaccurate commands. One-shot
+  Opus exemption applied deliberately.

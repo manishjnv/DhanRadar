@@ -15,6 +15,65 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-08 — Consent grant/revoke stored a double-encoded JSON string scalar → every grant read back as not-granted (B54)
+
+- **Symptom:** CI `backend` job red — 5 `test_consent_writer` integration tests failed: a grant returned `consents.mf_analytics == false`, the raw `dpdp_consents` value was not a dict after grant/revoke, and siblings appeared clobbered. Only reproduced in CI (integration tests need a live Postgres; local `pytest` skips them), so B44's "tests pass" missed it.
+- **Root cause:** `apply_consent_change` built `payload_json = json.dumps(payload)` and wrote `cast(payload_json, JSONB)`. The cast bound the *string* through SQLAlchemy's JSONB bind type, whose serializer ran `json.dumps` a SECOND time — storing a JSONB *string* scalar (`"{\"granted\": true …}"`) instead of an object. The canonical reader `_consent_granted` requires `isinstance(value, dict) and value.get("granted") is True`; a string fails `isinstance(dict)` → fail-CLOSED (not-granted) for every purpose. (Fail-closed, so not a security breach — but it makes consent unusable.)
+- **Fix:** pass the dict so the JSONB bind type serialises exactly once — `cast(payload, JSONB)`; removed the now-unused `payload_json`/`import json` — `backend/dhanradar/consent/service.py:57,72`. Proven before the fix via a DB-free SQL-compilation diagnostic (the bound param was a str pre-fix, a dict post-fix). Tier-B adversarial review (Sonnet takeover, codex n/a — account lacks any Codex model entitlement) ACCEPT: no fail-open path across 6 vectors.
+- **Prevention:** never `json.dumps(...)` a value that is then bound through a JSONB/JSON column or `cast(..., JSONB)` — the type's bind processor already serialises; pre-serialising double-encodes. Integration tests for any JSONB writer must assert the RAW column shape (`isinstance(dict)`, key truthiness), not just the API echo, and must run in CI against Postgres (the `create_all`/SQLite-ish local path does not exercise `jsonb_set`). Related: CI is the authoritative gate, not local `pytest`.
+- **Phase/area:** Pre-deploy launch-gate / Consent (B44/B48) writer.
+
+### 2026-06-08 — Consent writer idempotency key shared across grant+revoke (review-found fail-open) + 0-row UPDATE false audit (B44)
+
+- **Symptom:** found in inline Opus review + the Tier-B Sonnet adversarial takeover (codex n/a)
+  BEFORE any commit — two defects in the B44 consent writer draft: (1) the Redis idempotency key
+  `consent:idem:{uid}:{key}` was not scoped by operation, so reusing one key value for a grant then
+  a revoke made the revoke look like a replay → silently skipped → consent stayed granted while the
+  caller received HTTP 200 (fail-open: user believes they revoked; the gate still passes them).
+  (2) a grant/revoke for a user whose row was deleted mid-session (DPDP-erasure race) matched 0 rows
+  on the `UPDATE` but still committed an audit row — a false forensic record of a consent change
+  that never happened.
+- **Root cause:** (1) the idempotency key was namespaced only by `uid` + client key, with no
+  operation dimension — same dedup-without-full-scope class as the auth refresh `GETDEL` RCA
+  (2026-05-19). (2) `result.rowcount` was not checked after the `UPDATE`; the audit append is only
+  meaningful if the data write actually changed a row.
+- **Fix:** (1) key namespaced per action — `consent:idem:grant:{uid}:{key}` /
+  `consent:idem:revoke:{uid}:{key}` (`backend/dhanradar/consent/router.py`). (2) `rowcount == 0` →
+  `await db.rollback()` + raise 401 `user_not_found` before any audit row is added
+  (`backend/dhanradar/consent/service.py`). Both applied before the first commit (`927f64f`).
+- **Prevention:** regression tests `test_same_idempotency_key_across_grant_then_revoke_still_revokes`
+  and `test_grant_for_deleted_user_fails_closed_no_audit`
+  (`backend/tests/integration/test_consent_writer.py`). Rule: an idempotency key that deduplicates
+  mutating operations MUST include the operation name in its namespace; a data write and its audit
+  append must be gated on `rowcount > 0`.
+- **Phase/area:** B44 consent writer (load-bearing) — caught at inline Tier-B review, not a field
+  incident.
+
+### 2026-06-07 — Duplicate alembic revision `0008` silently broke `alembic upgrade head` (B36)
+
+- **Symptom:** `alembic heads` warned `Revision 0008 is present more than once` and `alembic history`
+  errored `FAILED: Requested revision 0009 overlaps with other requested revisions 0008`. A real
+  deploy would have had no resolvable single head — `alembic upgrade head` is ambiguous/unrunnable.
+  Caught while building the B36 deploy runbook, not in the field (the stack has never been deployed).
+- **Root cause:** two migrations both declared `revision = "0008"` with `down_revision = "0007"` —
+  `0008_admin_compliance_tables.py` and `0008_mf_nav_monthly_agg.py` (B29, landed in a separate
+  slice). `0009` then set `down_revision = "0008"`, which no longer named a unique parent. The two
+  0008s were authored in different sessions/PRs that each picked the next integer independently;
+  nothing rejected the collision because the local test DB builds tables from ORM metadata
+  (`create_all`), never runs the migration chain (B40), so CI never exercised `upgrade head`.
+- **Fix:** linearized the chain — renumbered the independent mf_nav migration to `revision = "0008a"`,
+  `down_revision = "0008"` (file renamed `0008a_mf_nav_monthly_agg.py`), and repointed
+  `0009_engine_activation_unique.py` `down_revision` to `"0008a"`. Order is safe: 0009's real
+  dependency (`compliance.rating_engine_changelog`, created in admin 0008) stays upstream; mf_nav is
+  an independent `mf` schema continuous aggregate. Verified `alembic heads` → single `0009` and
+  `alembic history` resolves linearly. No production DB was stamped (pre-launch), so renumbering is
+  free. (`7035400`)
+- **Prevention:** B40 will run `alembic upgrade head` against the real TimescaleDB image in CI — that
+  turns this exact failure (duplicate/branched revision) into a red CI check instead of a deploy-time
+  surprise. Rule for authors: when adding a migration, run `alembic heads` and confirm a **single**
+  head before committing; never reuse an integer another in-flight branch may have taken.
+- **Phase/area:** Alembic migration chain (load-bearing) / B36 deploy gate.
+
 ### 2026-06-07 — Integration test awaited a SYNC `AsyncSession.expire_all()` — passed local collect, failed first CI run (B26-admin)
 
 - **Symptom:** the B26-admin PR (#22) backend CI job failed: `test_create_then_activate_disclaimer`

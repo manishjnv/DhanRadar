@@ -6,9 +6,16 @@ parse → upsert holdings → snapshot → score (via the engine interface) → 
 report → done. The raw CAS file is deleted immediately after parse; a daily
 `purge_cas_files` sweep is the 24h backstop (anti-pattern guard).
 
-The Celery task is sync; the async DB/Redis/engine pipeline runs under
-`asyncio.run`. The pure mapping (`parsed_to_snapshot_holdings`) is factored out so
-it is unit-testable without a worker.
+`nav_daily_fetch` pulls the current NAVAll.txt from AMFI, bulk-upserts
+mf_nav_history and mf_funds metadata (amfi_code, scheme_name, category only —
+other metadata columns such as expense_ratio/aum are not overwritten).
+
+`nav_backfill` bootstraps multi-year historical NAV data by iterating over
+<=90-day windows and upserting into mf_nav_history.  It is NOT in the beat
+schedule — invoke manually.
+
+All Celery tasks are sync; async DB/Redis/network pipelines run under asyncio.run.
+Pure mapping helpers are factored out for unit testing without a worker.
 """
 
 from __future__ import annotations
@@ -18,22 +25,26 @@ import json
 import logging
 import os
 import time
-from datetime import date, datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, date, datetime, timedelta, timezone
+from typing import Any
 
 from dhanradar.celery_app import celery_app
 from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
+from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
+from dhanradar.mf.signals import compute_fund_signals
+from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 logger = logging.getLogger(__name__)
-from dhanradar.mf.scoring_bridge import FundSignals, score_fund, upsert_user_fund_score
-from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 _UPLOAD_TTL_SECONDS = 24 * 3600
 
+# Batch size for bulk-upsert statements — bounds memory and statement size.
+_UPSERT_CHUNK = 2000
+
 
 def parsed_to_snapshot_holdings(
-    parsed: list[ParsedHolding], nav_map: Optional[dict[str, float]] = None
+    parsed: list[ParsedHolding], nav_map: dict[str, float] | None = None
 ) -> list[Holding]:
     """Map parsed CAS holdings → snapshot.Holding, applying the latest NAV when
     available (else falling back to the CAS-reported valuation). Pure + testable."""
@@ -59,12 +70,68 @@ def parsed_to_snapshot_holdings(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Pure mapping helpers — unit-testable without DB
+# ---------------------------------------------------------------------------
+
+def _navrows_to_nav_upserts(rows: Any) -> list[dict]:
+    """
+    Map a list of NavRow → list of dicts ready for mf_nav_history upsert.
+
+    Keying strategy: prefer isin_growth; fall back to isin_reinvest.
+    Rows where BOTH ISINs are None are silently skipped (cannot key the row).
+    Returns dicts with keys: isin, nav_date, nav, source.
+    """
+    out: list[dict] = []
+    for row in rows:
+        isin = row.isin_growth or row.isin_reinvest
+        if isin is None:
+            continue
+        out.append(
+            {
+                "isin": isin,
+                "nav_date": row.nav_date,
+                "nav": row.nav,
+                "source": "amfi",
+            }
+        )
+    return out
+
+
+def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
+    """
+    Map a list of NavRow → list of dicts ready for mf_funds upsert.
+
+    Only the three columns this feed owns are included: amfi_code, scheme_name,
+    category.  isin is the PK (isin_growth preferred, else isin_reinvest).
+    Rows without a keyable ISIN are skipped.
+    """
+    out: list[dict] = []
+    for row in rows:
+        isin = row.isin_growth or row.isin_reinvest
+        if isin is None:
+            continue
+        out.append(
+            {
+                "isin": isin,
+                "amfi_code": row.amfi_code,
+                "scheme_name": row.scheme_name,
+                "category": row.category,
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# CAS pipeline helpers (unchanged)
+# ---------------------------------------------------------------------------
+
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
-def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
+def parse_cas_job(self, job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
     """CAS→report worker. Always purges the raw file; marks the job failed with an
     OPAQUE code (never the raw exception, which could carry a path/PII)."""
     try:
-        return asyncio.run(_run_pipeline(job_id, path, user_id))
+        return asyncio.run(_run_pipeline(job_id, path, user_id, portfolio_id))
     except CasParseError:
         logger.warning("CAS parse failed job=%s", job_id)  # full detail not echoed to client
         asyncio.run(_mark_failed(job_id, "parse_failed"))
@@ -77,7 +144,7 @@ def parse_cas_job(self, job_id: str, path: str, user_id: str) -> str:
         _purge(path)
 
 
-async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
+async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -106,22 +173,45 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
         )
         await db.commit()
 
-        await _upsert_holdings(db, user_id, parsed)
+        await _upsert_holdings(db, user_id, parsed, portfolio_id)
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="scoring", progress_pct=70)
         )
         await db.commit()
 
-        snap = build_snapshot(parsed_to_snapshot_holdings(parsed))
+        # Resolve Plus status once — controls whether history rows are written.
+        from dhanradar.deps import is_plus
+        from dhanradar.mf import history as mf_history
+
+        plus = await is_plus(user_id, db)
+
+        # Load each holding's NAV history (mf schema, read-only) so the engine
+        # scores on real momentum/risk signals derived from NAV, and the snapshot
+        # values on the latest NAV (B29). A holding with no NAV history yields no
+        # axes → the engine refuses with insufficient_data (honest fail-safe).
+        nav_series, latest_nav = await _load_nav_series(db, [p.isin for p in parsed])
+
+        snap = build_snapshot(parsed_to_snapshot_holdings(parsed, nav_map=latest_nav))
 
         from dhanradar.compliance import service as compliance_service
 
         funds_payload: list[dict] = []
         for p in parsed:
-            # v1 signals are thin (NAV/fundamentals pipeline lands later); the
-            # engine refuses (insufficient_data) where coverage is too low.
-            result = await score_fund(rengine, FundSignals(isin=p.isin))
-            await upsert_user_fund_score(db, user_id, result)
+            # Signals are computed from the fund's own NAV series (momentum/risk);
+            # fundamentals-backed axes stay None → partial_coverage (≤ medium).
+            signals = compute_fund_signals(p.isin, nav_series.get(p.isin, []))
+            result = await score_fund(rengine, signals)
+            await upsert_user_fund_score(db, user_id, result, portfolio_id)
+            # Plus-only: retain label history per fund (no numeric persisted).
+            if plus:
+                await mf_history.append_score_history(
+                    db,
+                    user_id=user_id,
+                    result=result,
+                    snapshot_date=date.today(),
+                    source="cas_upload",
+                    portfolio_id=portfolio_id,
+                )
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
             # failure is logged and never breaks the report pipeline.
@@ -142,13 +232,15 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "contradicting_signals": result.contradicting_signals,
             })
 
-        from dhanradar.mf import commentary as mf_commentary
-
-        commentary_text = await mf_commentary.maybe_generate_commentary(
-            user_id=user_id, job_id=job_id, funds=funds_payload,
-            category_allocation=snap.category_allocation, db=db,
-            disclaimer_version=DISCLAIMER_VERSION,
-        )
+        # Plus-only: persist the portfolio-level snapshot (numbers stay server-side).
+        if plus:
+            await mf_history.persist_portfolio_snapshot(
+                db,
+                user_id=user_id,
+                snapshot_date=date.today(),
+                snap=snap,
+                portfolio_id=portfolio_id,
+            )
 
         report_payload = {
             "job_id": job_id, "status": "done",
@@ -157,25 +249,44 @@ async def _run_pipeline(job_id: str, path: str, user_id: str) -> str:
                 "xirr_pct": snap.xirr_pct, "category_allocation": snap.category_allocation,
                 "overlap_matrix": snap.overlap_matrix,
             },
-            "funds": funds_payload, "commentary": commentary_text, "model_version": rengine.model_version,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "funds": funds_payload, "model_version": rengine.model_version,
+            "generated_at": datetime.now(UTC).isoformat(),
             # Stamp the in-force disclaimer version on the served + cached report so
             # it matches the audit rows written above (B26 tie-to-version).
             "disclaimer_version": DISCLAIMER_VERSION,
         }
+        # First AI consumer — governed portfolio commentary (B20/B21/B22 gated).
+        # Best-effort: a commentary failure NEVER breaks the report (mirrors the
+        # fire-and-forget audit pattern above).
+        try:
+            from dhanradar.ai_gateway.gateway import OpenRouterGateway
+            from dhanradar.mf.commentary import generate_commentary, is_commentary_entitled
+
+            if await is_commentary_entitled(user_id, db):
+                report_payload["ai_commentary"] = await generate_commentary(
+                    OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
+                )
+            else:
+                report_payload["ai_commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
+        except Exception:  # noqa: BLE001 — commentary is best-effort; report still completes
+            logger.exception("AI commentary failed job=%s", job_id)
+            report_payload["ai_commentary"] = {"state": "unavailable", "reason": "internal_error"}
+
         await redis.set(
             f"{service._REPORT_PREFIX}{job_id}", json.dumps(report_payload), ex=service._REPORT_TTL
         )
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(
-                status="done", progress_pct=100, completed_at=datetime.now(timezone.utc)
+                status="done", progress_pct=100, completed_at=datetime.now(UTC)
             )
         )
         await db.commit()
     return f"done: {len(parsed)} schemes"
 
 
-async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -> None:
+async def _upsert_holdings(
+    db: Any, user_id: str, parsed: list[ParsedHolding], portfolio_id: str
+) -> None:
     from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
@@ -183,7 +294,8 @@ async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -
 
     for p in parsed:
         stmt = insert(MfUserHolding).values(
-            user_id=user_id, isin=p.isin, folio_number=p.folio_number, units=p.units,
+            user_id=user_id, portfolio_id=portfolio_id, isin=p.isin,
+            folio_number=p.folio_number, units=p.units,
             avg_cost_nav=p.nav, invested_amount=p.cost, source="cas", as_of_date=p.as_of_date,
         ).on_conflict_do_update(
             constraint="uq_mf_holding",
@@ -192,6 +304,34 @@ async def _upsert_holdings(db: Any, user_id: str, parsed: list[ParsedHolding]) -
         )
         await db.execute(stmt)
     await db.commit()
+
+
+async def _load_nav_series(
+    db: Any, isins: list[str], lookback_days: int = 400
+) -> tuple[dict[str, list[tuple[date, float]]], dict[str, float]]:
+    """Load recent NAV history for the given ISINs from mf_nav_history.
+
+    Returns (series, latest_nav) where series maps isin → [(nav_date, nav), …]
+    ascending, and latest_nav maps isin → its most recent NAV.  Read-only on the
+    MF module's own schema (no cross-module access).  Empty isins → ({}, {})."""
+    if not isins:
+        return {}, {}
+
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfNavHistory
+
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=lookback_days)  # noqa: UP017
+    result = await db.execute(
+        select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
+        .where(MfNavHistory.isin.in_(isins), MfNavHistory.nav_date >= cutoff)
+        .order_by(MfNavHistory.isin, MfNavHistory.nav_date)
+    )
+    series: dict[str, list[tuple[date, float]]] = {}
+    for isin, nav_date, nav in result.all():
+        series.setdefault(isin, []).append((nav_date, float(nav)))
+    latest_nav = {isin: pts[-1][1] for isin, pts in series.items()}
+    return series, latest_nav
 
 
 async def _mark_failed(job_id: str, message: str) -> None:
@@ -219,14 +359,337 @@ def _purge(path: str) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# NAV ingestion tasks
+# ---------------------------------------------------------------------------
+
 @celery_app.task(name="dhanradar.tasks.mf.nav_daily_fetch")
 def nav_daily_fetch() -> str:
-    """AMFI NAV daily refresh (Implementation Plan Phase 5 §2): fetch
-    portal.amfiindia.com/spages/NAVAll.txt → bulk-upsert mf_nav_history →
-    refresh Redis → emit mf.nav.refreshed → targeted invalidation via
-    mf:isin_users. STUB — the AMFI fetch + hypertable bulk-upsert is the data
-    pipeline, deferred (no scheme metadata/NAV feed wired yet). Tracked B-mf-nav."""
-    return "nav_daily_fetch: stub — AMFI fetch pipeline deferred"
+    """AMFI NAV daily refresh: fetch NAVAll.txt → bulk-upsert mf_nav_history +
+    mf_funds metadata (amfi_code, scheme_name, category only).  Real network call
+    via fetch_navall_rows_with_category.  Wired to the beat schedule."""
+    try:
+        return asyncio.run(_nav_daily_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("nav_daily_fetch pipeline error")
+        return "nav_daily_fetch: failed — see worker logs"
+
+
+async def _nav_daily_pipeline() -> str:
+    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine
+    from dhanradar.market_data import amfi
+    from dhanradar.models.mf import MfFund, MfNavHistory
+
+    logger.info("nav_daily_fetch: fetching NAVAll.txt from AMFI")
+    rows = await amfi.fetch_navall_rows_with_category()
+    logger.info("nav_daily_fetch: fetched %d rows", len(rows))
+
+    nav_dicts = _navrows_to_nav_upserts(rows)
+    fund_dicts = _navrows_to_fund_upserts(rows)
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as db:
+        # -- mf_nav_history bulk upsert in chunks ---------------------------------
+        n_nav = 0
+        for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
+            chunk = nav_dicts[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
+                constraint="uq_mf_nav_isin_date",
+                set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+            )
+            await db.execute(stmt)
+            n_nav += len(chunk)
+
+        # -- mf_funds upsert (only the 3 AMFI-owned columns) ---------------------
+        n_funds = 0
+        for i in range(0, len(fund_dicts), _UPSERT_CHUNK):
+            chunk = fund_dicts[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = insert(MfFund).values(chunk).on_conflict_do_update(
+                index_elements=["isin"],
+                set_={
+                    "amfi_code": insert(MfFund).excluded.amfi_code,
+                    "scheme_name": insert(MfFund).excluded.scheme_name,
+                    "category": insert(MfFund).excluded.category,
+                },
+            )
+            await db.execute(stmt)
+            n_funds += len(chunk)
+
+        await db.commit()
+
+    summary = f"nav_daily_fetch: {n_nav} navs, {n_funds} funds"
+    logger.info(summary)
+    return summary
+
+
+@celery_app.task(name="dhanradar.tasks.mf.nav_backfill")
+def nav_backfill(years: int = 3) -> str:
+    """Bootstrap multi-year historical NAV from AMFI history endpoint.
+
+    Iterates backwards in <=90-day windows from (today - years*365) to today.
+    Upserts nav rows only (no mf_funds update — history feed carries no category).
+    NOT in the beat schedule — invoke manually.
+    """
+    try:
+        return asyncio.run(_nav_backfill_pipeline(years))
+    except Exception:  # noqa: BLE001
+        logger.exception("nav_backfill pipeline error years=%d", years)
+        return f"nav_backfill: failed after error — see worker logs (years={years})"
+
+
+async def _nav_backfill_pipeline(years: int) -> str:
+    import asyncio as _asyncio
+
+    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine
+    from dhanradar.market_data import amfi
+    from dhanradar.market_data.exceptions import ProviderError
+    from dhanradar.models.mf import MfNavHistory
+
+    today = datetime.now(timezone.utc).date()  # noqa: UP017 — matches pre-existing style in this file
+    start = today - timedelta(days=years * 365)
+
+    # Build list of (frmdt, todt) windows of at most 90 days each, from
+    # start → today, non-overlapping.
+    _WINDOW_DAYS = 90
+    windows: list[tuple[date, date]] = []
+    cursor = start
+    while cursor < today:
+        end = min(cursor + timedelta(days=_WINDOW_DAYS - 1), today)
+        windows.append((cursor, end))
+        cursor = end + timedelta(days=1)
+
+    logger.info(
+        "nav_backfill: years=%d, windows=%d, start=%s, end=%s",
+        years, len(windows), start, today,
+    )
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    total_rows = 0
+    windows_fetched = 0
+
+    for idx, (frmdt, todt) in enumerate(windows, start=1):
+        try:
+            rows = await amfi.fetch_nav_history(frmdt, todt)
+        except ProviderError as exc:
+            logger.warning(
+                "nav_backfill: window %d/%d (%s–%s) fetch failed: %s",
+                idx, len(windows), frmdt, todt, exc,
+            )
+            await _asyncio.sleep(1)
+            continue
+
+        nav_dicts = _navrows_to_nav_upserts(rows)
+        if nav_dicts:
+            async with SessionLocal() as db:
+                for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
+                    chunk = nav_dicts[i : i + _UPSERT_CHUNK]
+                    if not chunk:
+                        continue
+                    stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
+                        constraint="uq_mf_nav_isin_date",
+                        set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+                    )
+                    await db.execute(stmt)
+                await db.commit()
+            total_rows += len(nav_dicts)
+
+        windows_fetched += 1
+        logger.info(
+            "nav_backfill: window %d/%d (%s–%s) → %d rows (total so far: %d)",
+            idx, len(windows), frmdt, todt, len(nav_dicts), total_rows,
+        )
+        await _asyncio.sleep(1)
+
+    summary = (
+        f"nav_backfill: {total_rows} rows upserted across {windows_fetched}/{len(windows)} windows"
+        f" (years={years})"
+    )
+    logger.info(summary)
+    return summary
+
+
+@celery_app.task(name="dhanradar.tasks.mf.monthly_rescore_plus_users")
+def monthly_rescore_plus_users() -> str:
+    """Re-score every Plus user's current holdings from the latest NAV without
+    requiring a re-upload.  Writes label history + portfolio snapshot (Plus only).
+    Free users are skipped — no history rows, no snapshot.  Wired to the beat
+    schedule (1st of month, 03:00 IST).
+    """
+    try:
+        return asyncio.run(_monthly_rescore())
+    except Exception:  # noqa: BLE001
+        logger.exception("monthly_rescore_plus_users pipeline error")
+        return "monthly_rescore: failed — see worker logs"
+
+
+async def _monthly_rescore() -> str:
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from dhanradar.db import engine as _engine
+    from dhanradar.deps import is_plus
+    from dhanradar.mf import history as mf_history
+    from dhanradar.mf.snapshot import CashFlow as _CashFlow
+    from dhanradar.mf.snapshot import Holding as _Holding
+    from dhanradar.models.mf import MfFund, MfPortfolio, MfUserHolding
+    from dhanradar.notifications import service as notif_service
+    from dhanradar.redis_client import get_redis
+    from dhanradar.scoring.engine import RatingEngine
+    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+
+    SessionLocal = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
+    rengine = RatingEngine()
+    today = date.today()
+    redis = get_redis()
+
+    async with SessionLocal() as db:
+        # All distinct portfolios that currently have holdings.
+        pid_rows = (
+            await db.execute(
+                select(MfUserHolding.portfolio_id).distinct()
+            )
+        ).all()
+        portfolio_ids = [str(row[0]) for row in pid_rows]
+
+    rescored = 0
+
+    for pid in portfolio_ids:
+        try:
+            async with SessionLocal() as db:
+                # Resolve the owning user_id + portfolio name for this portfolio.
+                port_row = (
+                    await db.execute(
+                        select(MfPortfolio.user_id, MfPortfolio.name).where(
+                            MfPortfolio.id == pid  # type: ignore[arg-type]
+                        )
+                    )
+                ).first()
+                if port_row is None:
+                    continue
+                uid = str(port_row[0])
+                portfolio_name: str = port_row[1] or ""
+
+                if not await is_plus(uid, db):
+                    continue  # Free users — no history/snapshot written.
+
+                # Load holding rows for this portfolio.
+                holding_rows = (
+                    await db.execute(
+                        select(MfUserHolding).where(
+                            MfUserHolding.portfolio_id == pid  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalars().all()
+
+                if not holding_rows:
+                    continue
+
+                isins = [h.isin for h in holding_rows]
+                nav_series, latest_nav = await _load_nav_series(db, isins)
+
+                # Batch-fetch scheme names for alert copy (never scores or numerics).
+                scheme_rows = await db.execute(
+                    select(MfFund.isin, MfFund.scheme_name).where(
+                        MfFund.isin.in_(isins)
+                    )
+                )
+                scheme_by_isin: dict[str, str] = {
+                    i: n for i, n in scheme_rows.all()
+                }
+
+                # Score each fund via the bridge (never recompute the engine directly).
+                for h_row in holding_rows:
+                    isin = h_row.isin
+                    signals = compute_fund_signals(isin, nav_series.get(isin, []))
+                    result = await score_fund(rengine, signals)
+                    await upsert_user_fund_score(db, uid, result, pid)
+
+                    new_label = result.verb_label.value
+                    prior_label = await mf_history.get_prior_label(db, pid, isin, today)
+
+                    inserted = await mf_history.append_score_history(
+                        db,
+                        user_id=uid,
+                        result=result,
+                        snapshot_date=today,
+                        source="monthly_rescore",
+                        portfolio_id=pid,
+                    )
+
+                    # Enqueue educational label-change alert (best-effort).
+                    # Guard: inserted=True (real new row) + prior exists + label changed.
+                    # The inserted guard makes alerts idempotent: a beat re-run on the
+                    # same day returns inserted=False and skips the enqueue entirely.
+                    if inserted and prior_label is not None and prior_label != new_label:
+                        payload = {
+                            "scheme_name": scheme_by_isin.get(isin, "A fund in your portfolio"),
+                            "portfolio_name": portfolio_name,
+                            "prior_label": prior_label,
+                            "new_label": new_label,
+                            "isin": isin,
+                            "confidence_band": result.confidence_band.value,
+                            # Stamp the in-force disclaimer version at GENERATION so the
+                            # B26 deliver-seam audit ties to what was served, not the live
+                            # constant at drain time (Tier-B audit-integrity fix).
+                            "disclaimer_version": DISCLAIMER_VERSION,
+                        }
+                        for ch in ("telegram", "email"):
+                            try:
+                                await notif_service.publish_notification(
+                                    redis, uid, ch, "mf_label_change", payload
+                                )
+                            except Exception:  # noqa: BLE001 — alert is best-effort; never abort rescore
+                                logger.warning(
+                                    "label-change alert enqueue failed user=%s isin=%s ch=%s",
+                                    uid, isin, ch,
+                                )
+
+                # Build snapshot from current holdings + latest NAV.
+                holdings: list[_Holding] = []
+                for h_row in holding_rows:
+                    nav = latest_nav.get(h_row.isin)
+                    current_value = (
+                        float(h_row.units) * nav if nav is not None else 0.0
+                    )
+                    invested = float(h_row.invested_amount) if h_row.invested_amount is not None else 0.0
+                    holdings.append(
+                        _Holding(
+                            isin=h_row.isin,
+                            units=float(h_row.units),
+                            invested_amount=invested,
+                            current_value=current_value,
+                            category="uncategorized",
+                            cashflows=[_CashFlow(when=today, amount=current_value)],
+                        )
+                    )
+
+                snap = build_snapshot(holdings)
+                await mf_history.persist_portfolio_snapshot(
+                    db,
+                    user_id=uid,
+                    snapshot_date=today,
+                    snap=snap,
+                    portfolio_id=pid,
+                )
+                rescored += 1
+
+        except Exception:  # noqa: BLE001 — one bad portfolio never aborts the beat
+            logger.exception("monthly_rescore: failed for portfolio_id=%s", pid)
+            continue
+
+    summary = f"monthly_rescore: rescored {rescored} Plus users"
+    logger.info(summary)
+    return summary
 
 
 @celery_app.task(name="dhanradar.tasks.mf.purge_cas_files")

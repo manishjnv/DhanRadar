@@ -7,10 +7,17 @@ Pydantic-settings v2 automatically validates types and raises on missing require
 
 from __future__ import annotations
 
-from typing import Optional
+from datetime import UTC, datetime
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Envs in which the B48 pre-launch consent kill-switch may take effect. This is an
+# ALLOWLIST, not a denylist: any other ENV — "production", "staging", "preview",
+# unset/unknown, mis-cased — keeps the DPDP gate ENFORCED (fail-closed). Inverting
+# the check this way means a leaked `DPDP_CONSENT_ENFORCED=false` cannot disable
+# consent anywhere except an explicit dev/test/ci box. (B48 Security condition.)
+_CONSENT_BYPASS_ALLOWED_ENVS: frozenset[str] = frozenset({"development", "test", "ci"})
 
 
 class Settings(BaseSettings):
@@ -79,7 +86,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Observability
     # ------------------------------------------------------------------
-    SENTRY_DSN: Optional[str] = None
+    SENTRY_DSN: str | None = None
 
     # ------------------------------------------------------------------
     # JWT (RS256 asymmetric)
@@ -130,6 +137,40 @@ class Settings(BaseSettings):
     # raw string. NOTE: read once at process start (pydantic-settings) — adding or
     # removing an admin requires a process restart to take effect.
     ADMIN_USER_IDS: str = ""
+
+    # ------------------------------------------------------------------
+    # DPDP consent gate — TEMPORARY pre-launch kill-switch (B48)
+    # ------------------------------------------------------------------
+    # The fail-closed RequireConsent / assert_consent / consent_granted gates
+    # (deps.py, B3) refuse any data-processing route/call site without a recorded
+    # DPDP grant. There is NO consent-capture UI yet (B44), and there is NO real
+    # user data pre-launch (dev runs on mocks/synthetic fixtures), so during
+    # development this gate blocks gated routes with no way to grant.
+    #
+    # Setting this False makes every purpose read as granted, so gated routes work
+    # in dev. It is DEFAULT TRUE (gate ENFORCED) and only takes effect in an
+    # allowlisted dev env (_CONSENT_BYPASS_ALLOWED_ENVS, via `consent_bypassed`).
+    # Setting it False in any other env is a hard BOOT FAILURE (model_post_init) —
+    # so a leaked override on a prod/staging box refuses to start rather than
+    # silently serving real users without consent. MUST be removed / verified True
+    # before the July-15 launch. Tracked: BLOCKERS B48.
+    DPDP_CONSENT_ENFORCED: bool = True
+
+    # ------------------------------------------------------------------
+    # DPDP consent version (B44 — consent grant/revoke writer)
+    # Bumped when the consent text/purposes change; stored on every
+    # grant/revoke row so the version in force at consent time is auditable.
+    # ------------------------------------------------------------------
+    DPDP_CONSENT_VERSION: str = "2026-06-01"
+
+    # ------------------------------------------------------------------
+    # PHASE 5M Founding Access window end (placeholder — reset to
+    # (billing_go_live + 30d) at go-live). Signup stamps pro_access_until
+    # to this while now < it.
+    # ------------------------------------------------------------------
+    FOUNDING_ACCESS_UNTIL: datetime | None = datetime(
+        2026, 12, 31, 23, 59, 59, tzinfo=UTC
+    )
 
     # ------------------------------------------------------------------
     # Runtime
@@ -183,6 +224,42 @@ class Settings(BaseSettings):
             except ValueError:
                 continue
         return frozenset(out)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def consent_bypassed(self) -> bool:
+        """True only when the B48 pre-launch consent kill-switch is ACTIVE:
+        enforcement explicitly disabled AND running in an allowlisted dev/test/ci
+        env. Any other env (production / staging / preview / unknown / mis-cased)
+        → False, i.e. the DPDP gate stays enforced. Single source of truth read by
+        ``deps._consent_granted``."""
+        return (
+            not self.DPDP_CONSENT_ENFORCED
+            and self.ENV.strip().lower() in _CONSENT_BYPASS_ALLOWED_ENVS
+        )
+
+    def model_post_init(self, __context: object) -> None:
+        """Fail-closed boot guard for the B48 consent kill-switch.
+
+        If consent enforcement is disabled but the env is NOT in the dev allowlist
+        (e.g. a dev `DPDP_CONSENT_ENFORCED=false` leaked onto a prod/staging box),
+        refuse to start — convert a silent consent bypass into a hard crash. When
+        the bypass is legitimately active, emit ONE startup warning (not per-call).
+        """
+        if not self.DPDP_CONSENT_ENFORCED and not self.consent_bypassed:
+            raise ValueError(
+                f"DPDP_CONSENT_ENFORCED=false is not permitted in ENV={self.ENV!r}. "
+                "Only development/test/ci may disable DPDP consent enforcement (B48)."
+            )
+        if self.consent_bypassed:
+            import logging
+
+            logging.getLogger("dhanradar.consent").warning(
+                "DPDP consent enforcement is DISABLED (B48 pre-launch bypass, "
+                "ENV=%r). Gated routes treat all purposes as granted. This MUST be "
+                "re-enabled before the launch deploy.",
+                self.ENV,
+            )
 
     @computed_field  # type: ignore[misc]
     @property

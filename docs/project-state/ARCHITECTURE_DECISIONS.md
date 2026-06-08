@@ -485,10 +485,10 @@ so callers can record `model_used` into `ai_recommendation_audit` (B21). No prod
 existed, so the blast radius was gateway tests only.
 
 **Consequences:** B20/B21/B22 call sites wired and B26 third audit seam opened
-(`surface=mf_report_ai`). B23 gains a second defense-in-depth net but its taxonomy stays open.
-Commentary is SEBI-disclaimer-postfixed. Mood Compass is the trivial fast-follow
-(`contains_personal_data=False`). In prod, commentary refuses until `cross_border_ai` consent
-capture lands — the correct fail-closed behaviour.
+(`surface=mf_commentary`, per HEAD's shipped `mf/commentary.py`). B23 gains a second
+defense-in-depth net but its taxonomy stays open. Commentary is SEBI-disclaimer-postfixed.
+Mood Compass is the trivial fast-follow (`contains_personal_data=False`). In prod, commentary
+refuses until `cross_border_ai` consent capture lands — the correct fail-closed behaviour.
 
 **Source:** `docs/project-state/reviews/ai-consumer-mf-commentary.md`; `BLOCKERS.md`
 B20/B21/B22/B23/B26; `docs/DhanRadar_Architecture_Final.md` §MF line 257.

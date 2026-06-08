@@ -32,6 +32,7 @@ from dhanradar.ai_gateway.schemas import AI_DISCLAIMER, AIOutputBase, Confidence
 __all__ = [
     "CompletionResult",
     "OpenRouterGateway",
+    "CompletionResult",
     "AIOutputBase",
     "ConfidenceBand",
     "AI_DISCLAIMER",

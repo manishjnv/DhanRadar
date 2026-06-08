@@ -76,6 +76,12 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mood.compute_mood_snapshot",
         "schedule": crontab(hour="9,16", minute=0),
     },
+    # Plus monthly re-score — 1st of each month, 03:00 IST. Re-scores every Plus
+    # user's current holdings from the latest NAV (no re-upload required).
+    "mf-monthly-rescore": {
+        "task": "dhanradar.tasks.mf.monthly_rescore_plus_users",
+        "schedule": crontab(day_of_month=1, hour=3, minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------

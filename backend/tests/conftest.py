@@ -278,6 +278,7 @@ async def db_tables(db_engine):
     import dhanradar.models.notifications  # noqa: F401 — registers notify.* tables
     import dhanradar.models.compliance  # noqa: F401 — registers compliance.* tables
     import dhanradar.models.mood  # noqa: F401 — registers mood.* tables
+    import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
@@ -287,6 +288,7 @@ async def db_tables(db_engine):
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS notify"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS compliance"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS mood"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS consent"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )
@@ -321,8 +323,15 @@ async def db_session(db_engine, db_tables):
     async with SessionLocal() as session:
         yield session
 
-    # Teardown: truncate tables so each test starts clean
+    # Teardown: truncate tables so each test starts clean.
+    # consent.consent_audit_log has no FK so CASCADE from auth.users won't reach it;
+    # truncate it explicitly (B44).
     async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE consent.consent_audit_log RESTART IDENTITY"
+            )
+        )
         await conn.execute(
             text(
                 "TRUNCATE TABLE auth.subscriptions, auth.users, billing.plans "

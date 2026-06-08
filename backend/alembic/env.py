@@ -44,6 +44,7 @@ import dhanradar.models.mf  # noqa: E402, F401  — registers the mf.* tables
 import dhanradar.models.notifications  # noqa: E402, F401  — registers notify.* tables
 import dhanradar.models.compliance  # noqa: E402, F401  — registers compliance.* tables
 import dhanradar.models.mood  # noqa: E402, F401  — registers mood.* tables
+import dhanradar.models.consent  # noqa: E402, F401  — registers consent.* tables (B44)
 
 target_metadata = Base.metadata
 

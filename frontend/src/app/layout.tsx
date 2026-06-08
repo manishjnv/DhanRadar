@@ -1,27 +1,31 @@
 /**
  * Root layout — DhanRadar
  *
- * Font: Geist via CSS font-family (tokens.css sets --dr-font-sans).
- * If Geist font files are not bundled, the fallback chain resolves to
- * ui-sans-serif / system-ui automatically.
+ * Brand fonts are self-hosted via next/font (no layout shift, no extra request,
+ * no Google round-trip for Geist): Geist Sans + Geist Mono from the official
+ * `geist` package, Instrument Serif (editorial accent) from next/font/google.
+ * Each exposes a CSS variable (--font-geist-sans / --font-geist-mono /
+ * --font-instrument-serif) that the token pipeline references as the FIRST
+ * family in tokens.json → tokens.css (--dr-font-*) + the Tailwind preset.
  *
- * @font-face placeholder — uncomment and provide woff2 paths when font
- * files are available under public/fonts/:
- *
- *   @font-face {
- *     font-family: 'Geist';
- *     src: url('/fonts/Geist-Regular.woff2') format('woff2');
- *     font-weight: 100 900;
- *     font-display: swap;
- *   }
- *
- * DO NOT switch to Manrope or Inter — Geist + warm palette is the
- * canonical brand font (tokens.json, architecture non-negotiable #8).
+ * DO NOT switch to Manrope or Inter — Geist + warm palette is the canonical
+ * brand identity (tokens.json, architecture non-negotiable #8).
  */
 import type { Metadata } from 'next';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
+import { Instrument_Serif } from 'next/font/google';
 import { Providers } from './providers';
 import './globals.css';
 import '@/styles/tokens.css';
+
+const instrumentSerif = Instrument_Serif({
+  subsets: ['latin'],
+  weight: '400',
+  style: ['normal', 'italic'],
+  variable: '--font-instrument-serif',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'DhanRadar',
@@ -34,8 +38,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      {/* font-sans resolves Geist → ui-sans-serif via tailwind.tokens.cjs */}
+    // Font variables scoped on <html> so --dr-font-* resolve to the self-hosted
+    // brand faces everywhere; `font-sans` applies Geist Sans by default.
+    <html
+      lang="en"
+      className={`${GeistSans.variable} ${GeistMono.variable} ${instrumentSerif.variable}`}
+    >
       <body className="font-sans bg-bg text-ink antialiased">
         <Providers>{children}</Providers>
       </body>

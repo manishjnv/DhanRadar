@@ -97,6 +97,15 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # PHASE 5M tiering — Plus time-window grant + one-time AI-commentary taster.
+    pro_access_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    pro_access_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_taster_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
