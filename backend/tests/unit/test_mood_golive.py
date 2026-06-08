@@ -130,6 +130,21 @@ def test_unavailable_public_no_numerics():
     assert "confidence_score" not in pub_dict, "confidence_score must not appear in public response"
 
 
+def test_why_today_unavailable_structured_200():
+    """/why-today must return a structured data_unavailable (not 404) when no
+    snapshot exists — consistent with /mood (Phase-7 Product finding fix). No
+    numeric leak; disclosure bundle present."""
+    from dhanradar.mood.service import why_today_unavailable
+
+    why = why_today_unavailable()
+    assert why.regime == "data_unavailable"
+    assert why.commentary is None
+    assert why.contributing_factors == [] and why.contradicting_factors == []
+    assert why.disclosure and why.not_advice and why.disclaimer_version
+    d = why.model_dump()
+    assert "mood_score" not in d and "confidence_score" not in d
+
+
 # ---------------------------------------------------------------------------
 # 3. _labelize — human-readable factor labels (GAP d)
 # ---------------------------------------------------------------------------

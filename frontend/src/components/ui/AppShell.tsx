@@ -25,7 +25,7 @@ const WORKSPACE: NavItem[] = [
 ];
 
 // Settings lives in the footer per the brand-mockup shell.
-const SETTINGS: NavItem = { href: '/settings/notifications', label: 'Settings', icon: Settings };
+const SETTINGS: NavItem = { href: '/settings/privacy', label: 'Settings', icon: Settings };
 
 // ---------------------------------------------------------------------------
 // NavLink — single source for active state, aria-current, focus ring.

@@ -213,6 +213,22 @@ def unavailable_public() -> MoodPublic:
     )
 
 
+def why_today_unavailable() -> WhyToday:
+    """Structured WhyToday for when no snapshot exists — returns
+    regime='data_unavailable' instead of 404 so the anon /why-today surface always
+    renders something compliant (mirrors unavailable_public for GAP c)."""
+    return WhyToday(
+        snapshot_date="",
+        regime="data_unavailable",
+        commentary=None,
+        contributing_factors=[],
+        contradicting_factors=[],
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+        disclaimer_version=DISCLAIMER_VERSION,
+    )
+
+
 async def _compute_trend(db: Any) -> str | None:
     """Derive a non-numeric trend label from the two most recent snapshots (GAP g / ADR-0023).
 

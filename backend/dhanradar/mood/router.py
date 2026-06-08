@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,7 +53,8 @@ async def market_mood_history(
 
 @router.get("/why-today", response_model=WhyToday)
 async def market_why_today(db: Annotated[AsyncSession, Depends(get_db)]) -> WhyToday:
+    """Always 200: when no snapshot exists, return a structured data_unavailable
+    body (not 404) so the anon acquisition surface never shows an error state —
+    consistent with GET /mood (B35 gap c)."""
     why = await service.get_why_today(db)
-    if why is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mood_unavailable")
-    return why
+    return why or service.why_today_unavailable()
