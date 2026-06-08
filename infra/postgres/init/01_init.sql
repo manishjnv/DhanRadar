@@ -19,8 +19,37 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS pg_partman;
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- pg_partman / pg_cron are OPTIONAL partition/scheduler helpers. Guard each in
+-- its OWN subtransaction so first-init never aborts (ON_ERROR_STOP) when either
+-- cannot be created. Two distinct failure modes are both handled here:
+--   * pg_partman is not bundled in timescale/timescaledb-ha:pg16 (absent as of
+--     the pg16 image, sha256:34fe4f…) → "extension is not available". A bare
+--     CREATE EXTENSION aborts even with IF NOT EXISTS (that only suppresses the
+--     already-installed case, not a missing control file).
+--   * pg_cron's control file IS present but it can only load when listed in
+--     shared_preload_libraries; a Postgres without that preload (e.g. a CI
+--     service container) errors "pg_cron can only be loaded via
+--     shared_preload_libraries" at CREATE EXTENSION time.
+-- EXCEPTION WHEN OTHERS catches both and RAISE NOTICE-skips, so the same init
+-- file runs verbatim on the prod box (pg_cron preloaded → created; pg_partman
+-- absent → skipped) AND in CI (both skipped) with no sed pre-processing.
+-- Skipping is safe: migration 0006 creates the audit table + DEFAULT partition
+-- and skips partman registration when absent; pg_cron jobs are non-critical.
+DO $$
+BEGIN
+  BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_partman;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pg_partman skipped (auto partition management disabled): %', SQLERRM;
+  END;
+  BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pg_cron skipped (scheduled jobs disabled): %', SQLERRM;
+  END;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Application role (non-superuser)

@@ -135,21 +135,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-      - name: Init schemas + extensions (01_init.sql, minus pg_cron/pg_partman)
+      - name: Init schemas + extensions (01_init.sql, verbatim)
         run: |
-          # Two extensions can't be created on the GH Actions service container
-          # and are stripped here ONLY for the CI exercise (production 01_init.sql
-          # keeps both, fail-loud if missing on KVM4):
-          #   - pg_cron    needs shared_preload_libraries a GH service can't set.
-          #   - pg_partman is not bundled in timescale/timescaledb-ha:pg16, so the
-          #     CREATE EXTENSION errors out. The only migration that uses partman
-          #     (0006_compliance_schema) already guards it behind
-          #     `IF EXISTS (... pg_extension WHERE extname='pg_partman')` and
-          #     RAISE NOTICE-skips when absent, so the alembic chain stays clean
-          #     without it. Everything else (timescaledb/vector/pg_trgm, the app
-          #     role, all schemas) runs verbatim so 01_init.sql itself is exercised.
-          sed -e '/pg_cron/d' -e '/pg_partman/d' infra/postgres/init/01_init.sql \
-            | psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1
+          # Run the production init file UNMODIFIED so CI exercises exactly what
+          # KVM4 runs. 01_init.sql now self-guards pg_partman/pg_cron in per-extension
+          # EXCEPTION blocks, so a GH Actions service container (pg_cron not
+          # preloadable; pg_partman absent in timescaledb-ha:pg16) skips both with a
+          # NOTICE instead of aborting — no sed pre-processing needed. ON_ERROR_STOP
+          # stays on so any OTHER error in the init still fails the job.
+          psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+            -f infra/postgres/init/01_init.sql
       - name: alembic upgrade head
         working-directory: backend
         run: python -m alembic upgrade head
