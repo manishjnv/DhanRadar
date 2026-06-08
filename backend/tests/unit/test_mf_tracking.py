@@ -32,6 +32,10 @@ class _FakeDB:
         self.executed: list[Any] = []
         self.committed = 0
         self._rows = rows or []
+        # append_score_history returns result_proxy.rowcount == 1; expose 1 so
+        # the existing tests that ignore the return value continue to pass, and
+        # the new bool-return contract resolves to True (inserted).
+        self.rowcount = 1
 
     async def execute(self, stmt: Any) -> _FakeDB:
         self.executed.append(stmt)

@@ -541,12 +541,16 @@ async def _monthly_rescore() -> str:
     from dhanradar.mf import history as mf_history
     from dhanradar.mf.snapshot import CashFlow as _CashFlow
     from dhanradar.mf.snapshot import Holding as _Holding
-    from dhanradar.models.mf import MfPortfolio, MfUserHolding
+    from dhanradar.models.mf import MfFund, MfPortfolio, MfUserHolding
+    from dhanradar.notifications import service as notif_service
+    from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
+    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
     SessionLocal = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
     rengine = RatingEngine()
     today = date.today()
+    redis = get_redis()
 
     async with SessionLocal() as db:
         # All distinct portfolios that currently have holdings.
@@ -562,17 +566,18 @@ async def _monthly_rescore() -> str:
     for pid in portfolio_ids:
         try:
             async with SessionLocal() as db:
-                # Resolve the owning user_id for this portfolio.
-                uid_row = (
+                # Resolve the owning user_id + portfolio name for this portfolio.
+                port_row = (
                     await db.execute(
-                        select(MfPortfolio.user_id).where(
+                        select(MfPortfolio.user_id, MfPortfolio.name).where(
                             MfPortfolio.id == pid  # type: ignore[arg-type]
                         )
                     )
-                ).scalar_one_or_none()
-                if uid_row is None:
+                ).first()
+                if port_row is None:
                     continue
-                uid = str(uid_row)
+                uid = str(port_row[0])
+                portfolio_name: str = port_row[1] or ""
 
                 if not await is_plus(uid, db):
                     continue  # Free users — no history/snapshot written.
@@ -592,13 +597,27 @@ async def _monthly_rescore() -> str:
                 isins = [h.isin for h in holding_rows]
                 nav_series, latest_nav = await _load_nav_series(db, isins)
 
+                # Batch-fetch scheme names for alert copy (never scores or numerics).
+                scheme_rows = await db.execute(
+                    select(MfFund.isin, MfFund.scheme_name).where(
+                        MfFund.isin.in_(isins)
+                    )
+                )
+                scheme_by_isin: dict[str, str] = {
+                    i: n for i, n in scheme_rows.all()
+                }
+
                 # Score each fund via the bridge (never recompute the engine directly).
                 for h_row in holding_rows:
                     isin = h_row.isin
                     signals = compute_fund_signals(isin, nav_series.get(isin, []))
                     result = await score_fund(rengine, signals)
                     await upsert_user_fund_score(db, uid, result, pid)
-                    await mf_history.append_score_history(
+
+                    new_label = result.verb_label.value
+                    prior_label = await mf_history.get_prior_label(db, pid, isin, today)
+
+                    inserted = await mf_history.append_score_history(
                         db,
                         user_id=uid,
                         result=result,
@@ -606,6 +625,34 @@ async def _monthly_rescore() -> str:
                         source="monthly_rescore",
                         portfolio_id=pid,
                     )
+
+                    # Enqueue educational label-change alert (best-effort).
+                    # Guard: inserted=True (real new row) + prior exists + label changed.
+                    # The inserted guard makes alerts idempotent: a beat re-run on the
+                    # same day returns inserted=False and skips the enqueue entirely.
+                    if inserted and prior_label is not None and prior_label != new_label:
+                        payload = {
+                            "scheme_name": scheme_by_isin.get(isin, "A fund in your portfolio"),
+                            "portfolio_name": portfolio_name,
+                            "prior_label": prior_label,
+                            "new_label": new_label,
+                            "isin": isin,
+                            "confidence_band": result.confidence_band.value,
+                            # Stamp the in-force disclaimer version at GENERATION so the
+                            # B26 deliver-seam audit ties to what was served, not the live
+                            # constant at drain time (Tier-B audit-integrity fix).
+                            "disclaimer_version": DISCLAIMER_VERSION,
+                        }
+                        for ch in ("telegram", "email"):
+                            try:
+                                await notif_service.publish_notification(
+                                    redis, uid, ch, "mf_label_change", payload
+                                )
+                            except Exception:  # noqa: BLE001 — alert is best-effort; never abort rescore
+                                logger.warning(
+                                    "label-change alert enqueue failed user=%s isin=%s ch=%s",
+                                    uid, isin, ch,
+                                )
 
                 # Build snapshot from current holdings + latest NAV.
                 holdings: list[_Holding] = []

@@ -30,12 +30,16 @@ async def append_score_history(
     snapshot_date: date,
     source: str,
     portfolio_id: str | UUID,
-) -> None:
+) -> bool:
     """INSERT a label-only history row for one fund.
 
     Public projection only: verb_label, confidence_band, model_version, isin.
     unified_score is NEVER written. Idempotent on the same day via ON CONFLICT
     DO NOTHING (uq_mf_score_history).
+
+    Returns True iff a row was actually inserted (rowcount == 1). Returns False
+    when the unique constraint fires (same portfolio/isin/date already exists),
+    which is the idempotency signal callers use to suppress duplicate alerts.
     """
     from dhanradar.models.mf import MfUserFundScoreHistory
 
@@ -53,8 +57,39 @@ async def append_score_history(
         )
         .on_conflict_do_nothing(constraint="uq_mf_score_history")
     )
-    await db.execute(stmt)
+    result_proxy = await db.execute(stmt)
     await db.commit()
+    return result_proxy.rowcount == 1
+
+
+async def get_prior_label(
+    db: Any,
+    portfolio_id: str | UUID,
+    isin: str,
+    before_date: date,
+) -> str | None:
+    """Return the most recent verb_label for (portfolio_id, isin) before before_date.
+
+    Used by the monthly re-score to detect label changes and enqueue educational
+    alerts (Plus users only). Returns None when no prior history row exists.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfUserFundScoreHistory
+
+    row = (
+        await db.execute(
+            select(MfUserFundScoreHistory.verb_label)
+            .where(
+                MfUserFundScoreHistory.portfolio_id == portfolio_id,
+                MfUserFundScoreHistory.isin == isin,
+                MfUserFundScoreHistory.snapshot_date < before_date,
+            )
+            .order_by(MfUserFundScoreHistory.snapshot_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return row
 
 
 async def persist_portfolio_snapshot(
