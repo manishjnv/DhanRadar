@@ -5,6 +5,51 @@ export interface CasUploadResponse {
   estimated_seconds: number;
 }
 
+// ---------------------------------------------------------------------------
+// Backend wire shapes (source of truth = deployed FastAPI; DO NOT change backend)
+// ---------------------------------------------------------------------------
+
+/** Status values the backend actually emits on GET /api/v1/mf/upload/cas/{job_id}/status */
+export type BackendCasStatus = 'queued' | 'parsing' | 'scoring' | 'done' | 'failed';
+
+export interface BackendCasJobStatus {
+  job_id: string;
+  status: BackendCasStatus;
+  progress_pct: number;
+  error_message: string | null;
+}
+
+export interface BackendFund {
+  isin: string;
+  scheme_name: string;
+  folio_number: string;
+  units: number;
+  invested_amount: number;
+  current_value: number;
+  verb_label: string;
+  confidence_band: string;
+  contributing_signals: string[];
+  contradicting_signals: string[];
+}
+
+/** Wire shape returned by GET /api/v1/mf/report/{job_id} */
+export interface BackendPortfolioReport {
+  job_id: string;
+  status: 'done';
+  total_invested: number;
+  current_value: number;
+  xirr_pct: number;
+  category_allocation: Record<string, number>;
+  overlap_matrix: Record<string, Record<string, number>>;
+  funds: BackendFund[];
+  commentary: string | null;
+  model_version: string | null;
+  generated_at: string | null;
+  disclosure: string;
+  not_advice: string;
+  disclaimer_version: string | null;
+}
+
 export interface CasStatusResponse {
   status: 'pending' | 'processing' | 'done' | 'error';
   progress_pct: number;
