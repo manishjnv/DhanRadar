@@ -48,8 +48,24 @@ async def dedup_record(redis: Any, user_id: str, portfolio_id: str, source_hash:
 
 async def dedup_clear(redis: Any, user_id: str, portfolio_id: str, source_hash: str) -> None:
     """Drop a stale dedup record so a re-upload reprocesses. Used when the prior
-    job for this statement did NOT complete successfully (failed / stuck)."""
+    job for this statement did NOT complete successfully (failed / stuck), OR when
+    it succeeded but its assembled report has since expired from the cache."""
     await redis.delete(dedup_key(user_id, portfolio_id, source_hash))
+
+
+async def can_return_existing(redis: Any, prior_status: Optional[str], job_id: str) -> bool:
+    """Whether a re-upload may short-circuit (dedup) to an existing job.
+
+    Returns True ONLY when the prior job COMPLETED *and* its assembled report is
+    still in the cache. The dedup key lives `_DEDUP_TTL` (24h) but the report cache
+    only `_REPORT_TTL` (2h); in that 22h gap a done job's report has expired, so
+    short-circuiting to it bounces the user to a GET /report 404 ('report_expired')
+    — the very 'dead job' failure the dedup self-heal exists to prevent. A non-done
+    status (failed/stuck/None) or a missing report both fall through to reprocess
+    the freshly-uploaded bytes."""
+    if prior_status != "done":
+        return False
+    return bool(await redis.exists(f"{_REPORT_PREFIX}{job_id}"))
 
 
 def assemble_report(
