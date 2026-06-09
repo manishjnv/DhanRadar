@@ -1,5 +1,11 @@
 # Analytics Event Catalog
 
+> ⛔ **DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY (B41).**
+> Part of the `docs/ui-system` kit, which **conflicts with the binding
+> architecture** and is **not** a source of truth. Do not implement from it.
+> Authority: `docs/DhanRadar_Architecture_Final.md`; apply only per
+> `docs/project-state/MIGRATION_STRATEGY_FINAL.md` (KEEP/MERGE/REPLACE/IGNORE).
+
 Convention: snake_case verb_noun; properties typed. Sink: PostHog. PII-free.
 
 | Event | Properties | Where |

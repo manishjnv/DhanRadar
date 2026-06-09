@@ -1,5 +1,16 @@
 # DhanRadar Score Model (v2.4) — exact spec
 
+> ⛔ **DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY (B41).**
+> This file is from the independently-produced `docs/ui-system` kit. It
+> **conflicts with the binding architecture** and is **not** a source of truth —
+> do not implement from it. Authority: `docs/DhanRadar_Architecture_Final.md` →
+> `docs/DhanRadar_Implementation_Plan.md` → existing code. Apply only per
+> `docs/project-state/MIGRATION_STRATEGY_FINAL.md` (KEEP/MERGE/REPLACE/IGNORE).
+> Violations in THIS file: SEBI-banned advisory verbs
+> (`strong_buy`/`buy`/`hold`/`caution`/`avoid` — non-negotiable #1) and a public
+> numeric score + `fair_value` (non-negotiable #2 = label + confidence band only,
+> numerics never reach the client). See `CLAUDE.md` non-negotiables.
+
 ## Pipeline
 1. **Per-factor raw metrics** (per instrument):
    - valuation: composite of PE, PB, EV/EBITDA vs sector (lower = better)
