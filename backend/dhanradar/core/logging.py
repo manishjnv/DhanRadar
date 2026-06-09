@@ -309,6 +309,19 @@ def configure_logging(*, level: str = "INFO") -> None:
         cache_logger_on_first_use=True,
     )
 
+    # Route uvicorn/gunicorn loggers through our root JSON handler. They install
+    # their OWN handlers with propagate=False at server boot (before this module
+    # is imported), so without this their access/error lines bypass structlog and
+    # print as PLAIN TEXT and UNREDACTED. Clearing their handlers + propagate=True
+    # sends them through the root ProcessorFormatter (JSON + redaction filter).
+    for _name in (
+        "uvicorn", "uvicorn.access", "uvicorn.error",
+        "gunicorn", "gunicorn.error", "gunicorn.access",
+    ):
+        _lg = logging.getLogger(_name)
+        _lg.handlers.clear()
+        _lg.propagate = True
+
     _configured = True
 
 

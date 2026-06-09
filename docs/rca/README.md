@@ -15,6 +15,30 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — Celery workers OOM-crash-looping (concurrency=4 vs cgroup limit) + fastapi logs not JSON (uvicorn bypass), both found on the P1 deploy
+
+- **Symptom:** post-deploy check of the live box (per the "read logs before fixing" rule) showed
+  `dhanradar-celery-mood` + `-misc` in `Restarting (137)` with `OOMKilled=true` and 20+ restarts
+  (`-beat` also churning); `dmesg` had repeated `CONSTRAINT_MEMCG … Killed process … task=celery`.
+  Separately, `docker logs dhanradar-fastapi` was uvicorn's PLAIN text (`INFO: … "GET /health"`),
+  NOT the structured JSON the P1 change emits on `celery-batch` — so fastapi-tier logs were neither
+  JSON nor redacted.
+- **Root cause:** (a) Celery prefork `--concurrency` defaults to the vCPU count (4); 4 child
+  processes × per-child RSS exceeded the worker containers' cgroup memory limits (mood/misc 192M,
+  beat 64M) → memcg OOM-kill → restart loop. Pre-existing, surfaced under image growth. (b) uvicorn
+  installs its own `uvicorn`/`uvicorn.access`/`uvicorn.error` loggers with `propagate=False` + their
+  own handlers at server boot, so they bypass the root JSON handler `configure_logging()` installs.
+- **Fix:** (a) pin `--concurrency=1` on the batch/mood/misc worker commands — `docker-compose.yml`
+  (one worker per low-volume queue fits the limit; no memory-limit change, so the compose-memory CI
+  guard stays green). (b) in `configure_logging()`, after configuring, clear the uvicorn/gunicorn
+  loggers' handlers and set `propagate=True` so their lines flow through the root ProcessorFormatter
+  (JSON + redaction) — `backend/dhanradar/core/logging.py`.
+- **Prevention:** test `test_uvicorn_loggers_rerouted_to_root` asserts the uvicorn loggers propagate
+  with no own handlers; the standing "read logs before fixing" memory ([[check-logs-before-fixing]])
+  is what surfaced both on the box. Follow-up: if `-beat` (64M, no `--concurrency` knob) keeps
+  OOMing once mood/misc stop thrashing, raise its limit (rebalance within the 3072M cap).
+- **Phase/area:** B57 P1 logging / deploy + Celery worker config.
+
 ### 2026-06-08 — P1 logging adversarial review: raw user_id in two log messages + Celery contextvar leak on revoke
 
 - **Symptom:** found by the independent Sonnet adversarial review of the P1 logging change
