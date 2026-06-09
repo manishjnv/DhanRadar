@@ -210,7 +210,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 192M
+          # concurrency=1 → ~96 MiB resident; 128M trimmed from 192M to fund beat.
+          memory: 128M
           cpus: "0.25"
 
   dhanradar-celery-misc:
@@ -231,7 +232,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 192M
+          # concurrency=1 → ~96 MiB resident; 128M trimmed from 192M to fund beat.
+          memory: 128M
           cpus: "0.25"
 
   dhanradar-celery-beat:
@@ -256,7 +258,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 64M
+          # beat imports the full app (sqlalchemy + all task modules) → ~88 MiB;
+          # 64M was too tight and OOM-crash-looped (RCA 2026-06-09). 128M funded by
+          # trimming mood+misc (now concurrency=1). Net compose memory unchanged-ish.
+          memory: 128M
           cpus: "0.10"
 
   # ---------------------------------------------------------------------------
