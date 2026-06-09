@@ -29,9 +29,31 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
   volume, NAV backfill (one-off, 2.1M rows), frontend↔backend report contract, status route,
   CAS password UX, and the dedup "bounce to dead job" bug. B34 archival gated OFF (DPDP); audit
   stays in the India-resident Mumbai Postgres. CAS upload→labelled report is functional.
-- **B56 `[backlog]` — Dashboard / Market-Mood endpoint drift.** The frontend calls
-  `/api/v1/instruments/top-scored`, `/news`, `/indices`, `/portfolio/summary` → all 404 (same
-  mocks-vs-backend drift the MF report had). Those pages need the same contract-alignment pass.
+- **B56 `[ADDRESSED — feat/b56-dashboard-endpoints]` 2026-06-09 — Dashboard endpoint drift fixed.**
+  New `backend/dhanradar/dashboard/` module (own router mounted in `main.py`) implements the three
+  real endpoints the home screen needs: `GET /api/v1/portfolio/summary` (authed; richer rollup —
+  `current_value`/`xirr_pct`/`fund_count`/`last_updated`/per-fund `funds[]` label+band; RFC7807 404
+  cold-start), `GET /api/v1/indices` (reuses the Yahoo provider, Redis-cached 60s — NSE geo-blocked
+  on KVM4), `GET /api/v1/instruments/top-scored?type=fund` (read-only consumer of persisted
+  `mf.user_fund_scores`, user-scoped, label+band only, ranked). **`/news` deferred** (no source —
+  widget stays on its empty state). FE wired (extended `PortfolioSummary` type + summary/top-scored
+  widgets render `DisclosureBundle`+NOT_ADVICE; MSW dev-only). No numeric reaches the client
+  (explicit allowlist schemas; integration test asserts `unified_score` absent from the body). No
+  migration. Gates: 566 backend unit + ruff + ci_guards; FE tsc/eslint + 70 vitest; 8 integration
+  tests (CI Postgres). Tier-A Builder+Architect+Compliance: **Compliance ACCEPT-WITH-CONDITIONS** —
+  the top-scored label surface lacked an adjacent disclosure (non-neg #9); FIXED inline (top-scored
+  now returns the disclosure envelope + the widget renders it). **Architect ACCEPT-WITH-CONDITIONS**
+  — `max().isoformat()` null-guard FIXED inline; coupling/index/perf items deferred below. Ledger
+  `reviews/b56-dashboard-endpoints.md`; feature doc `docs/features/dashboard.md`.
+  - **B56-f1 `[OPEN LOW]`** — `DISCLAIMER_VERSION`/`DISCLOSURE_BUNDLE`/`NOT_ADVICE` live in
+    `scoring/engine/schemas.py`; dashboard imports them read-only (as mood does). Move to a shared
+    `compliance`/`shared` constants module so non-scoring consumers don't reach into the engine
+    schema. Deferred — the move EDITS `scoring/engine/*` (a concurrent-session lane); coordinate.
+  - **B56-f2 `[OPEN LOW]`** — promote the reused Yahoo helpers `_quote_meta`/`_signal_value` to a
+    public interface (rename) instead of importing underscore-privates from the provider.
+  - **B56-f3 `[OPEN LOW]`** — add composite index `(user_id, isin, scored_at DESC)` on
+    `mf.user_fund_scores` (+ migration) before the dashboard sees real load; optional: parallelize
+    the 4 Yahoo index fetches with `asyncio.gather`. Latent perf only (~0 users today).
 - **B57 `[P1 DEPLOYED to prod; P2 next]` — Centralised log management.** Two-tier plan in
   `docs/project-state/LOGGING_PLAN.md`. **P1 MERGED (#38) + DEPLOYED to KVM4 (2026-06-09)**:
   structlog JSON on BOTH tiers (fastapi via uvicorn-reroute + Celery), one `request_id` correlating

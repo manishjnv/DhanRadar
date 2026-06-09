@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { LabelChip } from '@/components/ui/LabelChip';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import {
   useIndices,
   useTopScored,
@@ -110,28 +111,42 @@ function TopScoredTable() {
     return <ErrorCard title="Could not load top funds" onRetry={() => refetch()} />;
   }
 
+  const funds = data?.funds ?? [];
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-small">
-        <thead>
-          <tr className="border-b border-line text-caption text-ink-muted">
-            <th className="pb-2 text-left font-medium">Fund</th>
-            <th className="pb-2 text-left font-medium">Category</th>
-            <th className="pb-2 text-left font-medium">Assessment</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.map((fund) => (
-            <tr key={fund.isin} className="border-b border-line last:border-0">
-              <td className="py-2.5 pr-4 text-ink font-medium">{fund.scheme_name}</td>
-              <td className="py-2.5 pr-4 text-ink-secondary">{fund.category}</td>
-              <td className="py-2.5">
-                <LabelChip label={fund.label} confidenceBand={fund.confidence_band} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-3">
+      {funds.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-small">
+            <thead>
+              <tr className="border-b border-line text-caption text-ink-muted">
+                <th className="pb-2 text-left font-medium">Fund</th>
+                <th className="pb-2 text-left font-medium">Category</th>
+                <th className="pb-2 text-left font-medium">Assessment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {funds.map((fund) => (
+                <tr key={fund.isin} className="border-b border-line last:border-0">
+                  <td className="py-2.5 pr-4 text-ink font-medium">{fund.scheme_name}</td>
+                  <td className="py-2.5 pr-4 text-ink-secondary">{fund.category}</td>
+                  <td className="py-2.5">
+                    <LabelChip label={fund.label} confidenceBand={fund.confidence_band} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {/* Disclosure bundle — required adjacent to any label/AI surface (non-negotiable #9) */}
+      {data && (
+        <DisclosureBundle
+          disclosure={data.disclosure}
+          notAdvice={data.not_advice}
+          className="mt-1"
+        />
+      )}
     </div>
   );
 }
@@ -204,25 +219,77 @@ function PortfolioSnapshot() {
   }
 
   // Has portfolio
+  const summary = data!;
   return (
-    <Card className="flex flex-col gap-2 p-6 sm:flex-row sm:items-center sm:gap-8">
-      <div>
-        <p className="text-caption text-ink-muted uppercase tracking-wide">Current value</p>
-        <p className="text-h2 font-medium text-ink tabular-nums">
-          ₹{data!.current_value.toLocaleString('en-IN')}
-        </p>
+    <Card className="flex flex-col gap-4 p-6">
+      {/* KPI row */}
+      <div className="flex flex-wrap items-center gap-6 sm:gap-10">
+        <div>
+          <p className="text-caption text-ink-muted uppercase tracking-wide">Current value</p>
+          <p className="text-h2 font-medium text-ink tabular-nums">
+            {summary.current_value != null
+              ? `₹${summary.current_value.toLocaleString('en-IN')}`
+              : '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-caption text-ink-muted uppercase tracking-wide">XIRR</p>
+          <p
+            className={cn(
+              'text-h3 font-medium tabular-nums',
+              summary.xirr_pct == null
+                ? 'text-ink-muted'
+                : summary.xirr_pct >= 0
+                  ? 'text-emerald'
+                  : 'text-red',
+            )}
+          >
+            {summary.xirr_pct != null
+              ? `${summary.xirr_pct >= 0 ? '+' : ''}${summary.xirr_pct.toFixed(1)}%`
+              : '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-caption text-ink-muted uppercase tracking-wide">Funds</p>
+          <p className="text-h3 font-medium text-ink tabular-nums">{summary.fund_count}</p>
+        </div>
+        <div className="sm:ml-auto">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/mf/upload">View full report</Link>
+          </Button>
+        </div>
       </div>
-      <div>
-        <p className="text-caption text-ink-muted uppercase tracking-wide">XIRR</p>
-        <p className={cn('text-h3 font-medium tabular-nums', data!.xirr_pct >= 0 ? 'text-emerald' : 'text-red')}>
-          {data!.xirr_pct >= 0 ? '+' : ''}{data!.xirr_pct.toFixed(1)}%
-        </p>
-      </div>
-      <div className="sm:ml-auto">
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/mf/upload">View full report</Link>
-        </Button>
-      </div>
+
+      {/* Per-fund label list */}
+      {summary.funds.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-small">
+            <thead>
+              <tr className="border-b border-line text-caption text-ink-muted">
+                <th className="pb-2 text-left font-medium">Fund</th>
+                <th className="pb-2 text-left font-medium">Assessment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.funds.map((fund) => (
+                <tr key={fund.isin} className="border-b border-line last:border-0">
+                  <td className="py-2 pr-4 text-ink">{fund.scheme_name}</td>
+                  <td className="py-2">
+                    <LabelChip label={fund.label} confidenceBand={fund.confidence_band} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Disclosure bundle — required adjacent to any label/AI surface (non-negotiable #9) */}
+      <DisclosureBundle
+        disclosure={summary.disclosure}
+        notAdvice={summary.not_advice}
+        className="mt-1"
+      />
     </Card>
   );
 }
