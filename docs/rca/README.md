@@ -15,6 +15,26 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-10 — G8: CI frontend build failed (`fetch failed / ECONNREFUSED`) on new SSR pages
+
+- **Symptom:** the `frontend` CI job (`next build`, mocks-off) failed with
+  `TypeError: fetch failed … ECONNREFUSED` after adding the G8 `/learn/tax` Server-Component
+  pages. Backend unit + integration + migrations all passed; only the FE build broke.
+- **Root cause:** App-Router pages are **statically prerendered at build by default**. The new
+  `/learn/tax`, `/learn/tax/[slug]`, and `/learn/tax/calendar` pages are async Server Components
+  that `fetch()` the backend API during render — so Next.js ran those fetches at build time, when
+  no backend is reachable, and a failed fetch during static generation fails the whole build. (The
+  existing `/mood` page never hit this because it is `'use client'` — fetched in the browser, not
+  at build.)
+- **Fix:** `export const dynamic = 'force-dynamic'` on all three pages
+  (`frontend/src/app/learn/tax/{page,[slug]/page,calendar/page}.tsx`) → rendered per-request (SSR),
+  never prerendered → no build-time fetch. Crawlers still receive fully server-rendered HTML (SEO
+  intact). Verified `next build` marks them `ƒ (Dynamic)`. (`5e3dbf4`)
+- **Prevention:** any NEW server-rendered page that fetches a runtime API must set
+  `export const dynamic = 'force-dynamic'` (or be otherwise excluded from static generation), or
+  the mocks-off `next build` CI job will fail with ECONNREFUSED. Captured in memory
+  [[ssr-page-build-time-fetch-econnrefused]].
+
 ### 2026-06-09 — B58: every fund receives only `on_track` or `insufficient_data` — differentiating labels never emitted
 
 - **Symptom:** every mutual fund a user uploaded received an identical label — either `on_track`

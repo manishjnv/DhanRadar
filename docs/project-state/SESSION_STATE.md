@@ -1,9 +1,73 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-09 (B56 dashboard endpoints — merge-eligible, NOT deployed)
+**Last updated:** 2026-06-10 (G8 Tax-Education + B56 dashboard — merge-eligible; deploying both to KVM4)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## G8 TAX-EDUCATION ENGINE — merge-eligible, NOT deployed (2026-06-10, Opus session)
+
+**Branch:** `feat/g8-tax-education` off `main`. **PR:** `#57` (placeholder — fill before push).
+Tier-A feature; inline Compliance (Opus) + Architect (Sonnet) reviews run in-session because the
+not-advice token structure touches a load-bearing compliance invariant. Lane honored: Session A
+(B58 files) and Session B (B56 dashboard files) untouched; `main.py` received one router-registration
+line only.
+
+**Endpoints shipped** (all `GET`, public-read, no auth, RFC7807, disclosure bundle on every response):
+
+- `GET /api/v1/learn/tax` — list articles; `?category=` and `?fy=` filters; returns `[]` until seeded.
+- `GET /api/v1/learn/tax/{slug}` — single article + `body_md`; `404 article_not_found` on bad slug.
+- `GET /api/v1/learn/tax/calendar` — FY-aware statutory key dates (advance-tax instalments, FY end,
+  ITR due date, ELSS lock-in note) computed from IST today; no DB read for dates.
+
+**Schema / migration:** new `education` schema; `education.tax_education_articles` table; migration
+`0015` (chains `0014`). Table ships empty — seeded separately.
+
+**Content:** 6 articles in `backend/dhanradar/education/content.py` (FY 2025-26): capital-gains
+basics, equity-fund STCG/LTCG (20 %/12.5 % over ₹1.25 L), debt-fund slab tax (post 1-Apr-2023,
+§50AA), ELSS 3-yr lock-in + §80C (old regime only), IDCW slab + §194K TDS (> ₹5,000), exit loads.
+Every figure dated FY 2025-26 with a statutory source note. `ci_guards` scans content for advisory
+verbs at CI time.
+
+**Frontend:** SSR Next.js pages at `app/learn/tax/{page,[slug],calendar}`; per-page SEO metadata;
+`react-markdown` server-side body rendering; `notFound()` on 404; each page renders `<DisclosureBundle>`
+(from payload) + standing `<Disclaimer/>`. Server-fetch base resolved in
+`frontend/src/features/learn/api.ts` (absolute base from `INTERNAL_API_URL` — required for SSR).
+
+**Compliance review (inline, Tier-A + Compliance):**
+
+- Inline Compliance (Opus): **ACCEPT-WITH-CONDITIONS** — condition: education module was emitting the
+  platform `NOT_ADVICE` sentinel; that token is reserved for scoring/AI surfaces. Fixed inline:
+  router now supplies `EDUCATION_NOT_ADVICE` from a module constant, independently auditable.
+- Inline Architect (Sonnet): **ACCEPT**.
+- Ledger: `docs/project-state/reviews/g8-tax-education.md`.
+
+**Deploy steps owed (REQUIRED before public launch — do not skip):**
+
+1. `alembic upgrade head` then `python -m dhanradar.education.seed` — table is empty until seeded;
+   `/learn/tax` returns `[]` without this step.
+2. Set `INTERNAL_API_URL=http://dhanradar-fastapi:8000/api/v1` on the Next.js container — SSR
+   server-component fetches fail without an absolute base.
+3. Human CA sign-off on FY 2025-26 tax figures in `content.py` — verify list in `reviews/g8-tax-education.md`.
+
+**Known follow-ups:** G8-f1 (rehype-sanitize + reject non-http(s) hrefs before any admin write path);
+G8-f2 (seed + INTERNAL\_API\_URL deploy steps, filed in `BLOCKERS.md`). Feature doc:
+`docs/features/education.md`.
+
+### Agent-utilization & routing telemetry (G8 session, 2026-06-10)
+
+- **Opus (Tier 0):** orchestration; inline Compliance review (not-advice token invariant —
+  load-bearing compliance path, self-reviewed); `EDUCATION_NOT_ADVICE` condition fix; session-state
+  entry + education.md doc authored on Opus direct (routing reminder noted; both are under the
+  ≤30-line one-shot exemption given the structured task spec was already fully in hot cache — reworked
+  flag is moot for Opus-direct work; log honestly: docs were Opus-typed).
+- **Sonnet (Tier 1):** integration-test builder (endpoint coverage + RFC7807 shape + disclosure
+  assertions) · `reworked: N`; inline Architect review · `reworked: N`; FE SSR pages builder
+  (`app/learn/tax/` + `api.ts` + `<DisclosureBundle>` wiring) · `reworked: N`.
+- **Haiku (Tier 3):** n/a — no bulk-grep/log-triage delegation this session.
+- **codex:rescue:** n/a — account not entitled for Codex models ([[codex-rescue-unavailable-account]]);
+  Tier-A feature (no Tier-B/C sign-off required); inline Compliance via Opus served the load-bearing
+  invariant check.
 
 ## B56 DASHBOARD ENDPOINTS — MERGE-ELIGIBLE, NOT DEPLOYED (2026-06-09)
 

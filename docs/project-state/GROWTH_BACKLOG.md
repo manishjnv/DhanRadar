@@ -35,8 +35,17 @@ A second track can build these while Tier 0 lands. All are SEO/acquisition asset
 - **C1 — Concept-Explainer "Learn" library (static half).** Build the `concept_explainers`
   content table + fixed approach-card template as anonymous-first crawlable pages now. Contextual
   surfacing (by holdings) waits for data. **Build now.**
-- **G8 — Tax-education engine.** Static, calendar-driven, zero AI cost, SEBI-safe, seasonally
-  viral. **Build now**; time the push for Feb–Jun.
+- **G8 — Tax-education engine. `[DONE — feat/g8-tax-education, 2026-06-09]`** Static,
+  calendar-driven, zero AI cost, SEBI-safe, seasonally viral. Built: new `education` schema
+  (migration 0015) + `tax_education_articles`, `dhanradar/education/` module with 3 public-read
+  endpoints (`/learn/tax`, `/learn/tax/{slug}`, `/learn/tax/calendar`), 6 FY 2025-26 articles
+  (LTCG/STCG, ₹1.25L exemption, ELSS+80C, IDCW, exit loads) + an IST FY-aware key-date calendar,
+  and server-rendered crawlable `/learn/tax` pages with the not-advice disclosure on every page.
+  No AI / no live data / no scoring. Inline Compliance (Opus) + Architect ACCEPT-WITH-CONDITIONS
+  (blocker + conds fixed inline). Ledger `reviews/g8-tax-education.md`; feature doc
+  `docs/features/education.md`. **Before deploy:** run `python -m dhanradar.education.seed`, set
+  the nextjs `INTERNAL_API_URL`, and get a human CA tax-figure sign-off (G8-f1/f2). Time the push
+  for Feb–Jun.
 - **G7 — Beginner funnel / vernacular onboarding.** Fold into the Tier-0 onboarding screen.
   **Build with onboarding.** Gate: the Hindi/regional advisory filter (B23) must exist first.
 - **G2 design ethos (calm palette, dark mode, de-emphasised red, less clutter)** — adopt as a
