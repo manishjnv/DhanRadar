@@ -1,9 +1,52 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-09 (CAS re-upload report-expiry 404 fixed + DEPLOYED to production)
+**Last updated:** 2026-06-09 (UI/UX + Market-Mood-data session — 5 fixes DEPLOYED; box on `94c16b9`/#50)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## UI/UX + MARKET MOOD DATA — 5 FIXES DEPLOYED (2026-06-09, Opus session)
+
+All merged to `main`, deployed to KVM4, verified live. Box brought to `94c16b9` (#50, latest main)
+and redeployed at session end (smoke 200, site 200, mood-api 200). RCA for each in
+`docs/rca/README.md`.
+
+- **PR #36 — Disclaimer consolidation.** The SEBI/educational line was sprinkled across 8 pages in
+  random spots. Now: one standing-disclaimer footer in `AppShell` (+ auth/public layouts); a new
+  `DisclosureBundle` renders the contextual #9 disclosure next to labels (report + mood — also
+  closed a gap where the report fetched but never rendered `disclosure`/`not_advice`); sidebar
+  "Educational use only" chip removed so the footer is the single educational line.
+- **PR #39 — `/mood` client-side crash.** Backend `regime:"data_unavailable"` was outside the FE
+  `Regime` enum → `MoodGauge` did `undefined.toUpperCase()` → blank page. Added the enum value +
+  fail-safe lookups; page shows the "being computed" empty state for an unavailable snapshot.
+- **PR #44 — CAS `parse_failed` (casparser 1.0).** `requirements.txt` `casparser>=0.7.0` pulled a
+  breaking 1.0 (returns a `CASData` model for `output="dict"`, not a dict). `parse_cas` now
+  `model_dump()`s it; the swallowed casparser reason is now logged server-side (PII-safe: message
+  dropped for password-class errors). Sonnet adversarial review (PII finding fixed).
+- **PR #45 — Onboarding page shows twice.** Post-submit refetch race (`useSubmitRiskQuiz` only
+  invalidated `auth.me`) + missing "completed user away from /onboarding" guard. Seed the cache
+  from the response + add the guard.
+- **PR #49 — Market Mood had no data.** NSE macro endpoints **403 from the prod server** → 0
+  snapshots ever stored → permanent "being computed". New `YahooMacroProvider` (6 server-reachable
+  signals) → a real **degraded/medium** regime; ladder `MACRO_SIGNAL=[yahoo_macro,nse_macro]`.
+  First snapshot triggered manually (`neutral`, 6/11 inputs); beat refreshes 09:00/16:00 IST.
+  Sonnet adversarial review (empty-result false-success bug fixed).
+- **Disclosure "mojibake"** — investigated, **NOT a bug**: correct UTF-8 in prod; the `â€"` was a
+  local Windows `json.tool` cp1252 display artifact. No change. (Memory saved.)
+- **Open loop:** the user's specific CAS upload — casparser-1.0 fix is live; the per-file
+  `parse_failed` reason is now logged, awaiting a re-upload to read it and fix precisely.
+
+**Agent-utilization & routing telemetry (this session):**
+
+- **Opus:** all root-cause debugging (evidence-first; disproved 2 wrong CAS hypotheses + the mojibake
+  false alarm before acting), all fixes, deploys, live verification. Compliance/load-bearing paths
+  kept on Opus.
+- **Sonnet:** Explore disclaimer inventory · `reworked: N`. Adversarial review of CAS fix ·
+  `reworked: Y` (added password-message strip + invariant comment). Adversarial review of mood
+  provider · `reworked: Y` (added empty-result `ProviderError`).
+- **Haiku:** n/a — no bulk-grep/log-triage delegation this session.
+- **codex:rescue:** n/a — unavailable on this account ([[codex-rescue-unavailable-account]]); Sonnet
+  adversarial takeover served as the Tier-C compliance gate (mood public surface, CAS PII).
 
 ## CAS RE-UPLOAD REPORT-EXPIRY FIX — DEPLOYED (2026-06-09)
 
