@@ -15,6 +15,32 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — Market Mood never shows: NSE macro endpoints 403-block the prod server → 0 snapshots ever stored
+
+- **Symptom:** the public `/mood` page is permanently "Market mood is being computed". `mood.market_mood`
+  has 0 rows; a manual `compute_mood_snapshot` returns `mood: skipped (all inputs missing)`.
+- **Root cause:** the only macro provider (`NseMacroProvider`) fetches NSE public JSON endpoints, which
+  **403 from datacenter IPs** (confirmed: warmup + every endpoint returns HTTP 403, 0 cookies, from the
+  KVM4 box). With all 11 signals None, `compute_mood` returns None and `compute_and_store` stores
+  **nothing** — so `get_latest` has no row and the API serves `data_unavailable` forever. The
+  "always serve the last snapshot + twice-daily background refresh" was already built; it just never had
+  a snapshot to serve.
+- **Fix:** new `YahooMacroProvider` (`backend/dhanradar/market_data/providers/yahoo.py`) sourcing 6
+  signals from Yahoo Finance's public chart API — server-reachable (verified HTTP 200): nifty_trend
+  (^NSEI %), india_vix (^INDIAVIX), global_indices (^GSPC %), us_bond_10y (^TNX), oil_brent (BZ=F),
+  usd_inr (INR=X %). Four new normalizers added to `mood/signals.py` (+ wired into `_NORMALIZERS`).
+  Ladder `MACRO_SIGNAL` → `["yahoo_macro","nse_macro"]` (Yahoo primary, NSE fallback);
+  `tasks/mood.py` registers both. 6 signals (weight 0.57, <7 inputs) → a real **degraded / medium**
+  regime, not the all-missing skip. Adversarial review (Sonnet) MUST-FIX applied: an empty Yahoo result
+  now raises `ProviderError` so the ladder falls through instead of recording a false success (which
+  would silently re-create this bug).
+- **Prevention:** `backend/tests/unit/test_mood_yahoo.py` pins the normalizers, the raw→signal
+  derivation, the empty-result `ProviderError`, and that 6 signals yield a real medium regime. Lesson:
+  a provider that returns an empty-but-valid payload must signal failure, or a degraded source masks a
+  total outage. Compliance verified by review: no numeric leak (#2), refuse floor preserved (#4),
+  no advisory copy (#1).
+- **Phase/area:** Mood Compass — market-data sourcing (public educational surface).
+
 ### 2026-06-09 — CAS re-upload bounces to a done job whose report expired → /report 404 ("same error from mobile")
 
 - **Symptom:** user re-uploads the same CAS (from mobile) and the report page shows "Could not load
