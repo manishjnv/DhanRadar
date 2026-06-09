@@ -42,23 +42,33 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(autouse=True)
 async def _truncate_audit(db_session):
-    """Truncate audit tables after each test so rows don't bleed across.
+    """Truncate audit tables BEFORE and after each test.
+
+    Before: other integration tests (admin/auth/subscriptions) now emit audit
+    rows via the fire-and-forget helpers' OWN committed session, which escapes
+    the per-test transaction rollback — those rows leak into this DB and would
+    inflate our row counts. Truncating on setup makes each audit test start
+    from a known-empty ledger regardless of prior pollution.
 
     Must use the SAME connection as db_session (see test_compliance for the
     ACCESS SHARE / ACCESS EXCLUSIVE deadlock explanation).
     """
-    yield
     from sqlalchemy import text
 
-    await db_session.rollback()
-    await db_session.execute(
-        text(
-            "TRUNCATE TABLE audit.admin_actions, "
-            "audit.payment_events, "
-            "audit.security_events RESTART IDENTITY CASCADE"
+    async def _truncate() -> None:
+        await db_session.rollback()
+        await db_session.execute(
+            text(
+                "TRUNCATE TABLE audit.admin_actions, "
+                "audit.payment_events, "
+                "audit.security_events RESTART IDENTITY CASCADE"
+            )
         )
-    )
-    await db_session.commit()
+        await db_session.commit()
+
+    await _truncate()
+    yield
+    await _truncate()
 
 
 # ---------------------------------------------------------------------------
