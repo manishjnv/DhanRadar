@@ -22,6 +22,7 @@ from dhanradar.consent.router import router as consent_router
 from dhanradar.core.logging import configure_logging
 from dhanradar.dashboard.router import router as dashboard_router
 from dhanradar.db import engine
+from dhanradar.education.router import router as education_router
 from dhanradar.errors import (
     http_exception_handler,
     unhandled_exception_handler,
@@ -120,6 +121,7 @@ app.include_router(mood_router, prefix="/api/v1")  # Mood Compass — anon marke
 app.include_router(consent_router, prefix="/api/v1")  # B44 — DPDP consent grant/revoke writer
 app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile quiz (sole writer of users.risk_profile)
 app.include_router(dashboard_router, prefix="/api/v1")  # B56 — home dashboard reads (portfolio summary / indices / top-scored)
+app.include_router(education_router, prefix="/api/v1")  # G8 — public tax-education (anonymous-read, crawlable)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).
