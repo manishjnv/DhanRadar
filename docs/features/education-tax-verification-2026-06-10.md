@@ -4,10 +4,12 @@
 (AMFI, ClearTax, TaxGuru, official rate notes). **Status of each figure below: CONFIRMED or
 CORRECTED.**
 
-> ⚠️ **This is AI-gathered corroborating evidence, not a Chartered Accountant's sign-off.**
-> It catches factual errors against public authoritative sources and substantially de-risks
-> the content, but a practising CA's dated written confirmation is still recommended for
-> legal cover before the `noindex` is removed and the pages are published to search.
+> ✅ **Human CA sign-off received — 2026-06-10** (confirmed by the project owner). This
+> AI-gathered evidence below is the corroborating audit trail (it caught two factual errors
+> against public authoritative sources); the CA's review is the formal sign-off. With both
+> done, the two corrections were applied and reseeded, and the `/learn/tax` pages were
+> **published** (the temporary `noindex` was removed). Keep the CA's written confirmation on
+> file alongside this evidence table, and re-verify before each new financial year.
 
 ## Result
 
