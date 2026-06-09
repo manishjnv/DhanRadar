@@ -74,3 +74,6 @@ next-env.d.ts
 # Personal Claude Code routing config (user-specific or.mjs path; do not commit)
 .claude/settings.local.json
 .claude/hooks/
+# Local-only Claude skills — may hold proprietary methodology (e.g. the scoring
+# engine). The repo is PUBLIC, so never push skill folders.
+.claude/skills/
