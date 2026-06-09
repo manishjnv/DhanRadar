@@ -1,9 +1,57 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-09 (UI/UX + Market-Mood-data session — 5 fixes DEPLOYED; box on `94c16b9`/#50)
+**Last updated:** 2026-06-09 (B56 dashboard endpoints — merge-eligible, NOT deployed)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B56 DASHBOARD ENDPOINTS — MERGE-ELIGIBLE, NOT DEPLOYED (2026-06-09)
+
+Branch: `feat/b56-dashboard` (fresh off `main`; concurrent B58 lane files not touched).
+Branch: `feat/b56-dashboard-endpoints` · PR: `#56` (merge-eligible, NOT deployed)
+
+Replaced the 404 mock-only dashboard stub with three live read-only aggregation endpoints. The
+post-login home screen now has real data. No migration; no writes; reads only the `mf` schema +
+shared Yahoo/Redis helpers.
+
+- **`GET /api/v1/portfolio/summary`** — user's own MF rollup: current value, XIRR (null until B29
+  NAV seeded), fund count, per-fund `{label, confidence_band}`. RFC7807 404 on cold-start; FE hook
+  treats it as the empty state. Disclosure bundle + NOT_ADVICE on every response (non-neg #9).
+- **`GET /api/v1/indices`** — NIFTY 50 / SENSEX / NIFTY Bank / NIFTY Midcap 150 via existing Yahoo
+  helpers (NSE geo-blocked on KVM4). Redis-cached 60 s under `dashboard:indices`; degrades to `[]`
+  on outage.
+- **`GET /api/v1/instruments/top-scored?type=fund`** — user's own funds ranked by label severity
+  (reads `mf.user_fund_scores`). NOT a platform recommendation. Label + band only; `unified_score`
+  never serialized (explicit Pydantic allowlist, non-neg #2). Disclosure bundle injected.
+- **`/news`** — DEFERRED; no source wired; widget stays on its empty state.
+
+Compliance: no numeric in DOM; all label surfaces carry the disclosure bundle; cookie-only auth
+(anon → 401); RFC7807 errors throughout.
+
+Files: `backend/dhanradar/dashboard/{schemas,service,indices,router}.py` + `main.py` mount;
+`frontend/src/features/dashboard/api.ts` + `app/(app)/dashboard/page.tsx` + `mocks/handlers.ts`.
+Tests: `tests/unit/test_dashboard.py`, `tests/integration/test_dashboard.py`,
+`frontend/.../api.test.ts`. Feature doc: `docs/features/dashboard.md`.
+
+Follow-ups filed: B56-f1 (shared disclosure constants), B56-f2 (public Yahoo helpers), B56-f3
+(parallel index fetch). Review ledger: `docs/project-state/reviews/b56-dashboard-endpoints.md`.
+
+**NOT deployed** — KVM4 deploy is human-gated. No open Security or Compliance BLOCKER on this
+change; deterministic gates (tests · secrets · anti-pattern · ruff/mypy/tsc) must be confirmed
+green in CI before merge-ready flip.
+
+### Agent-utilization & routing telemetry (B56 session)
+
+- **Opus (Tier 0):** orchestration; Compliance review (no-numeric + disclosure bundle verified on
+  all label surfaces, non-neg #1/#2/#5/#9 all hold); all load-bearing diff review; session-exit docs.
+- **Sonnet (Tier 1):** integration-test builder · `reworked: N`; frontend wiring + disclosure
+  follow-up · `reworked: N`; Architect review · `reworked: N`.
+- **Sonnet (doc draft):** this session-state entry + `docs/features/dashboard.md` · `reworked: N/A`
+  — caller-specified content, one-shot Opus transcription; doc-drafting nudge noted, exemption
+  taken (no drafting judgment; full content pre-specified by orchestrator).
+- **Haiku (Tier 3):** n/a — no bulk grep or log-triage sweep this session.
+- **codex:rescue:** n/a — account not entitled for Codex models; Tier-A change with no
+  auth/scoring/billing/AI path touched, so no adversarial gate required.
 
 ## UI/UX + MARKET MOOD DATA — 5 FIXES DEPLOYED (2026-06-09, Opus session)
 
