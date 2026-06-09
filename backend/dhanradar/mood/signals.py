@@ -81,6 +81,58 @@ def norm_put_call_ratio(pcr: float) -> float:
     return _clamp((1.3 - pcr) / 0.6)
 
 
+def norm_global_indices(pct_change: float) -> float:
+    """
+    Map a global benchmark's (S&P 500) % daily change to [0, 1] — same
+    risk-on/off convention as NIFTY: global strength lifts EM sentiment.
+
+    Formula: clamp((pct + 3) / 6, 0, 1)  (+3 % → 1.0, −3 % → 0.0, 0 → 0.5)
+    """
+    return _clamp((pct_change + 3.0) / 6.0)
+
+
+def norm_us_bond_10y(yield_pct: float) -> float:
+    """
+    Map the US 10-year Treasury yield LEVEL (in %, e.g. 4.55) to [0, 1].
+    Higher US yields tighten global liquidity and pull capital from EM
+    equities → risk-off (fear); lower yields → risk-on (greed).
+
+    Formula: clamp((5.0 − yield) / 2.0, 0, 1)
+    - 3.0 % → 1.0 (easy liquidity = greed)
+    - 5.0 % → 0.0 (tight liquidity = fear)
+    - 4.0 % → 0.5
+    """
+    return _clamp((5.0 - yield_pct) / 2.0)
+
+
+def norm_oil_brent(price_usd: float) -> float:
+    """
+    Map Brent crude price LEVEL (USD/bbl) to [0, 1].  India is a large net
+    oil importer, so high oil = trade-deficit / inflation pressure (fear);
+    low oil = tailwind (greed).
+
+    Formula: clamp((100 − price) / 40, 0, 1)
+    - $60 → 1.0 (cheap oil = greed)
+    - $100 → 0.0 (expensive oil = fear)
+    - $80 → 0.5
+    """
+    return _clamp((100.0 - price_usd) / 40.0)
+
+
+def norm_usd_inr(pct_change: float) -> float:
+    """
+    Map the USD/INR pair's % daily change to [0, 1].  INR appreciation
+    (USD/INR falling → negative %) signals capital inflows / risk-on (greed);
+    INR depreciation (USD/INR rising → positive %) signals outflows (fear).
+
+    Formula: clamp((−pct + 1.0) / 2.0, 0, 1)
+    - USD/INR −1 % (INR strengthens) → 1.0 (greed)
+    - USD/INR +1 % (INR weakens)    → 0.0 (fear)
+    - 0 % → 0.5
+    """
+    return _clamp((-pct_change + 1.0) / 2.0)
+
+
 # ---------------------------------------------------------------------------
 # Adapter-based fetch
 # ---------------------------------------------------------------------------
@@ -90,6 +142,10 @@ _NORMALIZERS: dict[str, object] = {
     "india_vix": norm_india_vix,
     "market_breadth": norm_market_breadth,
     "put_call_ratio": norm_put_call_ratio,
+    "global_indices": norm_global_indices,
+    "us_bond_10y": norm_us_bond_10y,
+    "oil_brent": norm_oil_brent,
+    "usd_inr": norm_usd_inr,
 }
 
 
@@ -98,8 +154,11 @@ async def fetch_mood_inputs(adapter: object) -> dict[str, float | None]:
     Fetch macro signals via the adapter and normalise them into the 11-key
     dict expected by ``compute_mood``.
 
-    The four signals fetched (nifty_trend, india_vix, market_breadth,
-    put_call_ratio) are normalised to [0, 1]; the remaining 7 keys stay None.
+    Whichever of the normalisable signals the active provider returns are mapped
+    to [0, 1] (Yahoo primary supplies nifty_trend, india_vix, global_indices,
+    us_bond_10y, oil_brent, usd_inr; the NSE fallback supplies nifty_trend,
+    india_vix, market_breadth, put_call_ratio). Any signal the provider omits
+    stays None and is dropped by compute_mood (never imputed).
 
     On AllProvidersFailedError or any unexpected error the all-None dict is
     returned — compute_and_store handles this as the data_unavailable path
@@ -134,7 +193,8 @@ async def fetch_mood_inputs(adapter: object) -> dict[str, float | None]:
                 logger.warning("mood signals: normalisation failed for %s: %s", key, exc)
 
     logger.info(
-        "mood signals: normalised %d/4 macro signals",
+        "mood signals: normalised %d/%d macro signals",
         sum(1 for k in _NORMALIZERS if inputs.get(k) is not None),
+        len(_NORMALIZERS),
     )
     return inputs

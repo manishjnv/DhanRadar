@@ -1,0 +1,130 @@
+"""
+DhanRadar — Yahoo Finance Macro Signal Provider (best-effort, server-reachable).
+
+NSE's public JSON endpoints geo-/bot-block datacenter IPs (they return HTTP 403
+from the KVM4 server), so the Mood Compass got zero signals and never stored a
+snapshot. Yahoo Finance's public chart API is reachable from servers worldwide
+with no auth and serves the India symbols we need, so it is the Mood Compass's
+primary macro source.
+
+Signals fetched (raw values; normalisation lives in mood/signals.py):
+  - nifty_trend    : NIFTY 50 (^NSEI)   — % daily change
+  - india_vix      : India VIX (^INDIAVIX) — level
+  - global_indices : S&P 500 (^GSPC)    — % daily change
+  - us_bond_10y    : US 10Y yield (^TNX) — level, in percent
+  - oil_brent      : Brent crude (BZ=F)  — price level, USD/bbl
+  - usd_inr        : USD/INR (INR=X)     — % daily change
+
+Each symbol is fetched independently — a per-symbol failure yields None for that
+signal (omitted from the payload); the rest proceed. ProviderError is raised only
+on a catastrophic structural failure (httpx unavailable). The Mood Compass
+degrades gracefully to 'data_unavailable' when all signals are None.
+"""
+
+from __future__ import annotations
+
+import datetime
+import logging
+from urllib.parse import quote
+
+import httpx
+
+from dhanradar.market_data.config import DataKind, DataRequest
+from dhanradar.market_data.events import MacroSignalReceived
+from dhanradar.market_data.exceptions import ProviderError
+from dhanradar.market_data.providers.base import MarketDataProvider
+
+logger = logging.getLogger(__name__)
+
+_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+# Yahoo rejects an empty/unknown User-Agent; any browser-ish UA is accepted.
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DhanRadar/1.0; +https://dhanradar.com)"}
+_TIMEOUT = httpx.Timeout(15.0, connect=8.0)
+
+# signal-key → (yahoo symbol, mode) where mode is "pct" (daily % change) or
+# "level" (the latest price/level as-is).
+_SYMBOLS: dict[str, tuple[str, str]] = {
+    "nifty_trend": ("^NSEI", "pct"),
+    "india_vix": ("^INDIAVIX", "level"),
+    "global_indices": ("^GSPC", "pct"),
+    "us_bond_10y": ("^TNX", "level"),
+    "oil_brent": ("BZ=F", "level"),
+    "usd_inr": ("INR=X", "pct"),
+}
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+async def _quote_meta(client: httpx.AsyncClient, symbol: str) -> dict | None:
+    """Return the Yahoo chart 'meta' block for a symbol, or None on any error."""
+    url = _CHART_URL.format(symbol=quote(symbol))
+    try:
+        resp = await client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        if resp.status_code != 200:
+            logger.debug("yahoo_macro: HTTP %s for %s", resp.status_code, symbol)
+            return None
+        result = resp.json().get("chart", {}).get("result") or []
+        if not result:
+            return None
+        meta = result[0].get("meta")
+        return meta if isinstance(meta, dict) else None
+    except Exception as exc:  # noqa: BLE001 — each symbol is independent best-effort
+        logger.debug("yahoo_macro: fetch failed for %s: %s", symbol, exc)
+        return None
+
+
+def _signal_value(meta: dict, mode: str) -> float | None:
+    """Derive the raw signal from a chart meta block: a % daily change or a level."""
+    price = meta.get("regularMarketPrice")
+    if not price:  # None or 0 — a 0 price/level is meaningless, treat as missing
+        return None
+    if mode == "level":
+        return float(price)
+    # mode == "pct": percent change vs the previous close.
+    prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+    if not prev:  # None or 0 → can't compute a % change
+        return None
+    return (float(price) - float(prev)) / float(prev) * 100.0
+
+
+class YahooMacroProvider(MarketDataProvider):
+    """Best-effort macro signals for the Mood Compass via Yahoo Finance's public
+    chart API. Server-reachable (unlike NSE). Per-symbol failures degrade to None;
+    only a missing httpx raises ProviderError."""
+
+    name = "yahoo_macro"
+
+    def supports(self, kind: DataKind) -> bool:
+        return kind == DataKind.MACRO_SIGNAL
+
+    async def fetch(self, request: DataRequest) -> MacroSignalReceived:
+        signals: dict[str, float] = {}
+        try:
+            async with httpx.AsyncClient() as client:
+                for key, (symbol, mode) in _SYMBOLS.items():
+                    meta = await _quote_meta(client, symbol)
+                    if meta is None:
+                        continue
+                    value = _signal_value(meta, mode)
+                    if value is not None:
+                        signals[key] = value
+        except ImportError as exc:  # pragma: no cover — httpx is a hard dep
+            raise ProviderError(self.name, f"httpx not available: {exc}") from exc
+
+        # An empty result (every symbol blank — e.g. a Yahoo outage / layout
+        # change) MUST raise so the adapter ladder falls through to the fallback
+        # provider instead of recording a false "success". A success with an
+        # empty signals dict would otherwise silently reproduce the original
+        # no-snapshot bug (compute_mood would skip on all-None inputs).
+        if not signals:
+            raise ProviderError(self.name, "no macro signals resolved from Yahoo")
+
+        logger.info(
+            "yahoo_macro: fetched %d/%d signals: %s",
+            len(signals),
+            len(_SYMBOLS),
+            list(signals.keys()),
+        )
+        return MacroSignalReceived(source=self.name, signals=signals, fetched_at=_now_iso())
