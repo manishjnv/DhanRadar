@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Upload, Compass, Settings, Menu, X, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Upload, Compass, BookOpen, Settings, Menu, X, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 
@@ -23,6 +23,7 @@ const WORKSPACE: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/mf/upload', label: 'Upload CAS', icon: Upload },
   { href: '/mood', label: 'Market Mood', icon: Compass },
+  { href: '/learn/tax', label: 'Tax Guides', icon: BookOpen },
 ];
 
 // Settings lives in the footer per the brand-mockup shell.
