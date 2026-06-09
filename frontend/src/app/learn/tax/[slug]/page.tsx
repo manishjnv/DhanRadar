@@ -19,6 +19,11 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { fetchTaxArticle } from '@/features/learn/api';
 import { ChevronLeft }     from 'lucide-react';
 
+// Render per-request (SSR), never statically prerendered at build — the page
+// fetches the backend, which is not reachable during `next build`. Still fully
+// server-rendered HTML for crawlers (SEO intact).
+export const dynamic = 'force-dynamic';
+
 // ---------------------------------------------------------------------------
 // Per-article SEO metadata
 // ---------------------------------------------------------------------------

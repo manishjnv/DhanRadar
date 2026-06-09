@@ -17,6 +17,11 @@ import { fetchTaxArticles } from '@/features/learn/api';
 import type { TaxArticleSummary } from '@/features/learn/api';
 import { CalendarDays }    from 'lucide-react';
 
+// Render per-request (SSR), never statically prerendered at build — the page
+// fetches the backend, which is not reachable during `next build`. Still fully
+// server-rendered HTML for crawlers (SEO intact).
+export const dynamic = 'force-dynamic';
+
 // ---------------------------------------------------------------------------
 // Static SEO metadata
 // ---------------------------------------------------------------------------
