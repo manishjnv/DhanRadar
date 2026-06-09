@@ -15,6 +15,29 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — Onboarding/risk-profile page shows twice (post-submit bounce back to /onboarding)
+
+- **Symptom:** a new user completes the 5-question risk quiz, but the "Set your risk profile" page
+  appears a **second** time and sticks there instead of landing on the dashboard.
+- **Root cause:** two compounding defects. (a) **Refetch race:** `useSubmitRiskQuiz` only
+  `invalidateQueries(auth.me)` on success and discarded the response's `risk_profile`; the page's
+  `onComplete` then `router.replace('/dashboard')` runs immediately, so `AuthGuard` on `/dashboard`
+  reads the **stale** cached `risk_profile: null` (the invalidated refetch is still in flight) and
+  bounces the user back to `/onboarding`. (b) **Missing guard:** `AuthGuard` only redirected *to*
+  `/onboarding` when `risk_profile == null`; it never redirected a **completed** user *away* from
+  `/onboarding` — despite the onboarding page's own comment claiming it did — so once bounced there
+  the user was stuck re-seeing the quiz.
+- **Fix:** (a) `useSubmitRiskQuiz` now `setQueryData(auth.me, …risk_profile)` from the (authoritative,
+  normalised) response **before** invalidating — mirrors `useLogin`/`useSignup` — so the guard sees
+  the set profile synchronously and never bounces (`frontend/src/features/onboarding/api.ts`).
+  (b) `AuthGuard` redirects a `risk_profile != null` user sitting on `/onboarding` → `/dashboard`,
+  with a matching render guard (`frontend/src/features/auth/AuthGuard.tsx`).
+- **Prevention:** `AuthGuard.cold-start.test.tsx` gains "redirects a COMPLETED user away from
+  /onboarding". Lesson: a mutation whose result drives a routing guard must SEED the guard's cache
+  from the response, not just invalidate — an in-flight refetch serves stale data to a synchronous
+  redirect.
+- **Phase/area:** Onboarding cold-start gate + AuthGuard routing, frontend.
+
 ### 2026-06-09 — CAS upload always fails (`parse_failed`): casparser pinned `>=0.7.0` pulled breaking 1.0
 
 - **Symptom:** every CAS upload ends on the report page with "We couldn't process this statement".

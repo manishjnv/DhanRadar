@@ -33,6 +33,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     //    Guard against redirect loops: skip when already on /onboarding.
     if (user.risk_profile == null && pathname !== '/onboarding') {
       router.replace('/onboarding');
+      return;
+    }
+
+    // 3. Completed: risk_profile IS set but the user is sitting on /onboarding
+    //    (post-submit refetch race, back-button, or a bookmark) → /dashboard.
+    //    Without this the onboarding quiz shows a second time and sticks.
+    if (user.risk_profile != null && pathname === '/onboarding') {
+      router.replace('/dashboard');
     }
   }, [isLoading, isError, user, pathname, router]);
 
@@ -53,6 +61,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Redirecting to /onboarding — suppress children until navigation fires.
   if (user.risk_profile == null && pathname !== '/onboarding') return null;
+
+  // Redirecting a completed user off /onboarding — suppress the quiz flash.
+  if (user.risk_profile != null && pathname === '/onboarding') return null;
 
   return <>{children}</>;
 }
