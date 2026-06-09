@@ -139,8 +139,15 @@ def parse_cas_job(
     OPAQUE code (never the raw exception, which could carry a path/PII)."""
     try:
         return asyncio.run(_run_pipeline(job_id, path, user_id, portfolio_id, request_id))
-    except CasParseError:
-        logger.warning("CAS parse failed job=%s", job_id)  # full detail not echoed to client
+    except CasParseError as exc:
+        # Log the underlying reason SERVER-SIDE for diagnosis — it is never sent
+        # to the client. casparser raises short reason strings (incorrect
+        # password / unsupported format / header parse error), not PII, and the
+        # CAS password is never part of these messages. Without this, every CAS
+        # failure is an undiagnosable opaque "parse_failed".
+        logger.warning("CAS parse failed job=%s reason=%s", job_id, exc)
+        # error_message is served to the client (CasJobStatus) — keep it OPAQUE:
+        # only the fixed code, NEVER exc / str(exc).
         asyncio.run(_mark_failed(job_id, "parse_failed"))
         return "failed: parse_failed"
     except Exception:  # noqa: BLE001 — record opaque code + purge, never leak detail

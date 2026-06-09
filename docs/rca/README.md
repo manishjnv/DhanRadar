@@ -15,6 +15,54 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — CAS upload always fails (`parse_failed`): casparser pinned `>=0.7.0` pulled breaking 1.0
+
+- **Symptom:** every CAS upload ends on the report page with "We couldn't process this statement".
+  `dhanradar-celery-batch` logs: `parse_cas_job[...] received` → `CAS parse failed job=<id>` →
+  `succeeded in 0.59s: 'failed: parse_failed'`. The celery task itself runs (the earlier
+  task-registration + shared-volume fixes worked); the parse is what fails, fast and consistently.
+- **Root cause:** `backend/requirements.txt` pinned `casparser>=0.7.0`; the worker image built with
+  **casparser 1.0.0**, a breaking major bump. (a) `read_cas_pdf(..., output="dict")` now returns a
+  typed `CASData` **pydantic model**, not a plain dict — but `parse_cas` walks dict-shaped output
+  (`raw.get("folios")`), and a model has no `.get()` → every *successful* parse would 500
+  (`internal_error`). (b) The user's specific upload failed earlier still, inside `read_cas_pdf`
+  itself (→ `parse_failed`), and the underlying casparser exception was **swallowed** — `parse_cas`
+  wrapped it as a bare `CasParseError` and `tasks/mf.py` logged only "CAS parse failed" with no
+  reason, making it undiagnosable.
+- **Fix:** (a) `parse_cas` normalises a pydantic-model reader result to a dict via `model_dump()`
+  before the walk — the 1.0 model field names line up 1:1 with the 0.7 dict keys, so it is a drop-in
+  that works on both majors — `backend/dhanradar/mf/cas.py`. (b) the `CasParseError` wrap now carries
+  the original casparser exception class (`IncorrectPasswordError` / `HeaderParseError` / …) in its
+  message, and `tasks/mf.py` logs `reason=%s` server-side (never to the client; no PII/password) so
+  the real failure mode is visible — `backend/dhanradar/mf/cas.py`, `backend/dhanradar/tasks/mf.py:142`.
+- **Prevention:** `test_parse_cas_normalises_pydantic_model_output` locks in the model→dict path
+  (`backend/tests/unit/test_mf_module.py`). Dependency lesson: a `>=X` floor on a load-bearing
+  parser silently absorbs the next breaking major — opaque `except`-and-mark-failed paths must log
+  the underlying reason or the failure is undiagnosable in prod.
+- **Phase/area:** Phase 5 MF module — CAS pipeline (Tier-C). NOTE: the *user's* `parse_failed`
+  (the `read_cas_pdf` throw) is now logged but its exact cause is confirmed on the next re-upload.
+
+### 2026-06-09 — Public `/mood` page crash (blank "client-side exception") on an out-of-enum regime
+
+- **Symptom:** `https://dhanradar.com/mood` rendered "Application error: a client-side exception has
+  occurred" (blank page) after hydration. HTTP 200 on the shell, so it passed a naive curl check.
+- **Root cause:** the backend returns `regime:"data_unavailable"` / `data_quality:"unavailable"`
+  when no snapshot has been computed. `data_unavailable` is outside the frontend `Regime` enum, so in
+  `MoodGauge` `REGIME_DISPLAY[regime]` was `undefined` and line ~223 called
+  `displayWord.toUpperCase()` → uncaught `TypeError` → the whole page died via the Next.js error
+  boundary. Latent contract gap, triggered by the current no-snapshot data state (not the disclaimer
+  deploy — `MoodGauge` was unchanged by it).
+- **Fix:** added `data_unavailable` to the `Regime` enum + all lookup maps and made every regime
+  lookup fail-safe (`?? fallback`) so any out-of-enum value degrades to the muted "insufficient"
+  presentation instead of throwing (`frontend/src/components/mood/MoodGauge.tsx`); the page now shows
+  the existing "being computed" empty state when `data_quality === "unavailable"`
+  (`frontend/src/app/mood/page.tsx`); `DataQuality` gained `'unavailable'`
+  (`frontend/src/features/mood/types.ts`). Shipped in PR #39.
+- **Prevention:** `frontend/src/components/mood/MoodGauge.test.tsx` asserts no-throw on known +
+  sentinel + arbitrary-unknown regimes. Lesson: a compliance-critical render component must never be
+  able to crash the page on an unexpected enum value; lookups into `Record<Enum, …>` need a fallback.
+- **Phase/area:** Mood module (public surface), frontend.
+
 ### 2026-06-09 — Celery workers OOM-crash-looping (concurrency=4 vs cgroup limit) + fastapi logs not JSON (uvicorn bypass), both found on the P1 deploy
 
 - **Symptom:** post-deploy check of the live box (per the "read logs before fixing" rule) showed
