@@ -32,18 +32,18 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
 - **B56 `[backlog]` — Dashboard / Market-Mood endpoint drift.** The frontend calls
   `/api/v1/instruments/top-scored`, `/news`, `/indices`, `/portfolio/summary` → all 404 (same
   mocks-vs-backend drift the MF report had). Those pages need the same contract-alignment pass.
-- **B57 `[P1 done on branch — pending deploy; P2 next]` — Centralised log management.** Two-tier
-  plan in `docs/project-state/LOGGING_PLAN.md`. **P1 BUILT** on `fix/cas-dedup-and-logging-plan`
-  (2026-06-08): structlog JSON for FastAPI + Celery, one `request_id` correlating
+- **B57 `[P1 DEPLOYED to prod; P2 next]` — Centralised log management.** Two-tier plan in
+  `docs/project-state/LOGGING_PLAN.md`. **P1 MERGED (#38) + DEPLOYED to KVM4 (2026-06-09)**:
+  structlog JSON on BOTH tiers (fastapi via uvicorn-reroute + Celery), one `request_id` correlating
   HTTP→Celery→AI→`ai_recommendation_audit`, hashed `user_ref` (never raw), a test-enforced DPDP
-  redaction filter (16 tests), and Docker `json-file` 50m×5 per service. Tier-B Sonnet adversarial
-  sign-off ACCEPT-WITH-CONDITIONS (all applied in-session). See `ADR-0028`,
-  `docs/features/logging.md`, `docs/project-state/reviews/b57-p1-logging.md`. **Open:** (a) deploy
-  fastapi + Celery workers to KVM4 and verify the correlated CAS trace on the box (load-bearing
-  infra → human approval); (b) **P2** — Alembic migration adding `audit.admin_actions`,
-  `audit.payment_events`, `audit.security_events` ledger tables (LOGGING_PLAN §8 P2). P3 = Loki;
-  P4 = alerting + retention automation. Residual risks (UUID-in-message, traceback PII, base64
-  bytes) are documented in the feature doc, accepted for P1.
+  redaction filter (17 tests), Docker `json-file` 50m×5 per service. Tier-B Sonnet adversarial
+  sign-off ACCEPT-WITH-CONDITIONS (all applied). See `ADR-0028`, `docs/features/logging.md`,
+  `docs/project-state/reviews/b57-p1-logging.md`. Deploy also fixed a pre-existing worker
+  OOM-crash-loop (#40/#41/#42: `--concurrency=1` + memory rebalance; RCA 2026-06-09). **Open:**
+  (a) the live single-id CAS trace shows on the next real CAS upload (wiring unit-proven);
+  (b) **P2** — Alembic migration adding `audit.admin_actions`, `audit.payment_events`,
+  `audit.security_events` ledger tables (LOGGING_PLAN §8 P2). P3 = Loki; P4 = alerting + retention.
+  Residual risks (UUID-in-message, traceback PII, base64 bytes) documented, accepted for P1.
 
 ## ⏱ PRE-DEPLOY GATE RUN — 2026-06-08 (the parked pre-deploy phase is now ACTIVE)
 
