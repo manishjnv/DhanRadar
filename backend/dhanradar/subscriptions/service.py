@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.audit.service import record_payment_event
 from dhanradar.auth.service import flush_tier_cache
 from dhanradar.models.auth import Subscription, User, UserTierEnum
 
@@ -176,6 +177,16 @@ async def handle_subscription_event(
 
     user.tier = new_tier
     await db.commit()
+
+    # --- Fire-and-forget payment audit (B57) ---
+    # request_id is not in scope at the webhook processing layer; pass None.
+    await record_payment_event(
+        user_id=str(user_uuid),
+        order_id=rzp_sub_id,
+        razorpay_payment_id=None,
+        status=sub_status,
+        request_id=None,
+    )
 
     # --- Flush Redis tier cache so next request sees new tier immediately ---
     await flush_tier_cache(str(user_uuid))

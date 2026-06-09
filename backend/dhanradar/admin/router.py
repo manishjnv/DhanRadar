@@ -18,9 +18,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.audit.service import record_admin_action
 from dhanradar.compliance import service
 from dhanradar.compliance.service import (
     ActivationConflictError,
@@ -83,6 +84,7 @@ async def create_disclaimer(
 )
 async def activate_disclaimer(
     version: str,
+    request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ActivateDisclaimerResponse:
@@ -103,6 +105,15 @@ async def activate_disclaimer(
             status_code=status.HTTP_409_CONFLICT,
             detail="activation_conflict",
         ) from exc
+    # Fire-and-forget audit — failure MUST NOT break the handler.
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="activate_disclaimer",
+        target_type="disclaimer",
+        target_id=version,
+        result="success",
+        request_id=getattr(request.state, "request_id", None),
+    )
     return ActivateDisclaimerResponse(**result)
 
 
@@ -120,6 +131,7 @@ async def activate_disclaimer(
 async def activate_scoring_model(
     model_version: str,
     body: ActivateModelRequest,
+    request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ActivateModelResponse:
@@ -164,6 +176,15 @@ async def activate_scoring_model(
             detail="model_already_activated",
         ) from exc
 
+    # Fire-and-forget audit — failure MUST NOT break the handler.
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="activate_scoring_model",
+        target_type="scoring_model",
+        target_id=model_version,
+        result="success",
+        request_id=getattr(request.state, "request_id", None),
+    )
     return ActivateModelResponse(
         model_version=entry["model_version"],
         created_by=entry["created_by"],

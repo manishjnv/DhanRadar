@@ -35,6 +35,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.audit.service import record_security_event
 from dhanradar.auth.security import (
     create_access_token,
     create_refresh_token,
@@ -224,6 +225,12 @@ async def rotate_refresh_token(
 
     if stored_uid is None:
         # Token reuse detected — old jti already consumed or never existed.
+        # Fire-and-forget security audit before raising (user_id from JWT sub).
+        await record_security_event(
+            event_type="refresh_reuse_detected",
+            user_id=user_id,
+            request_id=None,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="token_reuse_detected",
@@ -342,6 +349,11 @@ async def totp_verify(user_id: UUID, code: str, db: AsyncSession) -> None:
     # Check brute-force counter before attempting verify.
     current_attempts = await redis.get(attempts_key)
     if current_attempts is not None and int(current_attempts) >= TOTP_LOCK_LIMIT:
+        # Fire-and-forget security audit before raising.
+        await record_security_event(
+            event_type="totp_locked",
+            user_id=str(user_id),
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="totp_locked",

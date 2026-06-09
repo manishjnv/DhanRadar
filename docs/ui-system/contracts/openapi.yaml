@@ -1,3 +1,16 @@
+# =====================================================================
+# ⛔ DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY (B41)
+# This spec is from the docs/ui-system kit and CONFLICTS with the binding
+# architecture. It is NOT a source of truth; do not generate code or routes
+# from it. Violations present below:
+#   - bearer-token auth (non-neg #5: auth is RS256 JWT in __Host- cookies only)
+#   - SEBI-banned advisory Signal enum strong_buy/buy/hold/caution/avoid (#1)
+#   - public numeric score + factors (#2: label + confidence band only)
+#   - /v1 base path (canonical is /api/v1, non-neg #6)
+# Authority: docs/DhanRadar_Architecture_Final.md +
+# docs/project-state/CANONICAL_OPENAPI_ALIGNMENT.md. Apply only per
+# docs/project-state/MIGRATION_STRATEGY_FINAL.md (KEEP/MERGE/REPLACE/IGNORE).
+# =====================================================================
 openapi: 3.1.0
 info:
   title: DhanRadar API
