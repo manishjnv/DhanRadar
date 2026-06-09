@@ -3,7 +3,7 @@
  *
  * Server Component (no 'use client').
  * Compliance checklist (self-verified):
- *  #1  No advisory copy/labels. Labels: in_form / on_track / off_track only.
+ *  #1  No advisory copy/labels. Labels: In Form / On Track / Off Track only.
  *  #2  No numeric score, percentage-as-score, fair value, or price target in DOM.
  *  #9  <Disclaimer /> rendered at the bottom of every visible surface.
  *
@@ -239,7 +239,7 @@ function HowItWorks() {
     {
       n: 2,
       title: 'Get labelled funds',
-      desc: 'Each fund gets a category-relative label (in_form / on_track / off_track) with the reasons.',
+      desc: 'Each fund gets a category-relative label (In Form / On Track / Off Track) with the reasons.',
     },
     {
       n: 3,
@@ -287,7 +287,7 @@ function Features() {
     {
       icon: <Tag size={20} strokeWidth={1.75} aria-hidden="true" />,
       title: 'Explainable labels',
-      desc: 'Category-relative form (in_form / on_track / off_track), with the contributing reasons. Never a tip.',
+      desc: 'Category-relative form (In Form / On Track / Off Track), with the contributing reasons. Never a tip.',
     },
     {
       icon: <BarChart2 size={20} strokeWidth={1.75} aria-hidden="true" />,
