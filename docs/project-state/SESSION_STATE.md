@@ -1,6 +1,6 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-08 (DEPLOYED to production)
+**Last updated:** 2026-06-09 (B57 P2 audit ledger + B41 banners DEPLOYED to production)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -61,6 +61,53 @@ ledger `docs/project-state/reviews/b57-p1-logging.md`. Main HEAD `beb89a0`.
   (integration and migrations run CI-only) — check `gh pr checks` before merge.
 - **Next:** deploy fastapi + Celery workers to KVM4 (compose + middleware = load-bearing infra →
   redeploy), verify the correlated CAS-upload trace on the box, then P2 (audit-schema tables).
+
+## B57 P2 AUDIT LEDGER + B41 BANNERS — DEPLOYED to production (2026-06-09)
+
+Merged (PR #46, squash `fcbd0e4`) + DEPLOYED to KVM4 via canonical `scripts/deploy.sh`. Main HEAD
+`fcbd0e4`.
+
+- **B41 (HIGH compliance) — RESOLVED.** Visible "⛔ DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY
+  (B41)" banner on all 6 `docs/ui-system/contracts` text files (3 flagged + 3 catalog), each naming
+  the specific violations + authority pointer. `seed-data.json` skipped (JSON, PII-free). Zero new
+  markdownlint errors. Also gitignored `scripts/_deploy_tmp/` (was untracked, not ignored — corrects
+  stale obs 5946).
+- **B57 P2 — IMPLEMENTED + DEPLOYED.** New `audit` schema + 3 monthly RANGE-partitioned tables
+  (`admin_actions`/`payment_events`/`security_events`), DEFAULT partitions + guarded pg_partman 84mo
+  (mirrors 0006). Per-row SHA-256 tamper hash (isoformat-normalised). Standalone `audit` module
+  (isolation #7), fire-and-forget emit helpers. Wired: admin activate disclaimer/model, Razorpay
+  webhook (post-commit), auth refresh-reuse + TOTP lockout. Migration `0014`.
+- **On-box proof (2026-06-09):** `alembic current` = `0014 (head)`; `\dt audit.*` shows all 3
+  partitioned tables + 3 DEFAULT partitions; deploy.sh ran `0013 → 0014` then smoke-tested
+  `/api/v1/health` = 200; postgres/redis/cloudflared NOT recreated (data + tunnel intact); host
+  etip-ssh lifeline active + 32 etip untouched; site 200.
+- **Reviews:** Tier-C Compliance (Opus) ACCEPT; Tier-B Security (independent Sonnet adversarial,
+  codex n/a) ACCEPT-WITH-CONDITIONS → both conditions applied in-session (raw `user_id` in the
+  payment failure log → hashed; `_row_hash` `str(ts)` → `.isoformat()` for stable timestamptz
+  round-trip). Ledger: `docs/project-state/reviews/b57-p2-audit-ledger.md`.
+- **CI caught a real bug pre-merge:** the admin/auth/subscription integration tests now trigger the
+  audit helpers, whose own committed session escapes the per-test rollback → leaked rows inflated
+  `select(AdminAction)` (expected 1, got 4). Fixed by truncating audit tables BEFORE each audit test
+  too (commit on branch). Re-run green: `backend`/`migrations`/`frontend`/`guards` PASS; `lint`
+  advisory-red (pre-existing B40 backlog, zero new errors from this diff — verified vs baseline).
+- **P1 logging verification (earlier this session):** the P1 deploy was independently re-verified on
+  the box (redaction filter exercised in the running image — all PII scrubbed, `user_id`→hash;
+  request_id honoured + injected into app logs + cleared between requests; rotation 50m×5). The one
+  remaining seam is the live HTTP→Celery same-id trace on a real authenticated CAS upload.
+- **Next:** P3 (Loki) / P4 (alerting + retention); the live CAS same-id trace; remaining launch
+  blockers (B34 R2 residency, B37 live backup run, B38 Prometheus scrape).
+
+### Agent-utilization & routing telemetry (2026-06-09 session)
+
+- **Opus (Tier 0):** orchestration, load-bearing diff review, Tier-C compliance review, all
+  governance docs, prod deploy driving + verification, P1 re-verification design.
+- **Sonnet (Tier 1):** B57 P2 build (migration + models + service + call sites + tests) ·
+  `reworked: Y` (Opus applied the 2 Tier-B conditions + the test-isolation truncate-before fix);
+  Explore agent — codebase pattern map · `reworked: N`; 2× independent adversarial reviewers (P1
+  evidence verdict; B57 Tier-B security) · `reworked: N` (verdicts used as-is, drove fixes).
+- **Haiku (Tier 3):** n/a — no bulk-grep/log-triage delegations this session.
+- **codex:rescue:** n/a — unavailable on this account; Tier-B sign-off via Sonnet adversarial takeover
+  (ACCEPT-WITH-CONDITIONS).
 
 ## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
 
