@@ -20,6 +20,13 @@ export default function HomePage() {
         </Button>
       </div>
 
+      <Link
+        href="/learn/tax"
+        className="mt-6 rounded text-small text-ink-secondary underline underline-offset-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+      >
+        Or explore our free Tax Education guides →
+      </Link>
+
       <Disclaimer className="mt-10 max-w-md" />
     </main>
   );
