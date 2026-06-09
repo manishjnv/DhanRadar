@@ -35,7 +35,11 @@ export type Regime =
   | 'neutral'
   | 'greed'
   | 'extreme_greed'
-  | 'insufficient_data';
+  | 'insufficient_data'
+  // Backend sentinel emitted when no snapshot has been computed (data_quality
+  // 'unavailable'). The page short-circuits this to a "being computed" empty
+  // state, but the gauge must still render it safely if ever passed.
+  | 'data_unavailable';
 
 // ---------------------------------------------------------------------------
 // Color map — exported for reuse in the history strip on the page
@@ -54,6 +58,7 @@ export const REGIME_COLOR: Record<Regime, string> = {
   greed:             'var(--dr-amber)',  // #F5A623 — warning/attention token (symmetric)
   extreme_greed:     'var(--dr-red)',    // #E5484D — danger/negative token (symmetric)
   insufficient_data: 'var(--text-muted)', // #6B7280 light / #7E8699 dark — muted neutral
+  data_unavailable:  'var(--text-muted)', // no snapshot computed — muted neutral
 };
 
 export const REGIME_DISPLAY: Record<Regime, string> = {
@@ -63,6 +68,7 @@ export const REGIME_DISPLAY: Record<Regime, string> = {
   greed:             'Greed',
   extreme_greed:     'Extreme Greed',
   insufficient_data: 'Insufficient Data',
+  data_unavailable:  'Data Unavailable',
 };
 
 // Ordinal position of each regime on the 5-segment arc (left → right).
@@ -74,6 +80,7 @@ const REGIME_ORDINAL: Record<Regime, number | null> = {
   greed:             3,
   extreme_greed:     4,
   insufficient_data: null,
+  data_unavailable:  null,
 };
 
 const BAND_DISPLAY: Record<string, string> = {
@@ -130,11 +137,15 @@ export interface MoodGaugeProps {
 // Component
 // ---------------------------------------------------------------------------
 export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps) {
-  const color        = REGIME_COLOR[regime];
-  const displayWord  = REGIME_DISPLAY[regime];
+  // Fail safe on any out-of-enum regime (e.g. a future backend value): fall back
+  // to the muted "insufficient" presentation rather than throwing. A thrown
+  // error here takes down the whole public /mood page (Next.js error boundary).
+  const color        = REGIME_COLOR[regime] ?? REGIME_COLOR.insufficient_data;
+  const displayWord  = REGIME_DISPLAY[regime] ?? REGIME_DISPLAY.insufficient_data;
   const bandWord     = BAND_DISPLAY[confidenceBand] ?? confidenceBand;
-  const ordinal      = REGIME_ORDINAL[regime];
-  const isInsufficient = regime === 'insufficient_data';
+  // `?? null` (not `|| null`) so ordinal 0 (extreme_fear) is preserved.
+  const ordinal      = REGIME_ORDINAL[regime] ?? null;
+  const isInsufficient = ordinal === null;
   const trackColor   = isInsufficient ? 'var(--text-muted)' : 'var(--border)';
 
   const accessibleLabel = `${displayWord} — ${bandWord}`;

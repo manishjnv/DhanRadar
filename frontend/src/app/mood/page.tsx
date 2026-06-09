@@ -95,6 +95,13 @@ export default function MoodPage() {
   const is404 =
     isError && error instanceof ApiError && error.problem.status === 404;
 
+  // The endpoint can return 200 with data_quality "unavailable" (regime
+  // "data_unavailable") when no snapshot has been computed yet. Treat that the
+  // same as a 404 "being computed" — rendering the gauge for it is meaningless.
+  const unavailable =
+    !!data &&
+    (data.data_quality === 'unavailable' || data.regime === 'data_unavailable');
+
   return (
     <div className="min-h-screen bg-bg">
       {/* ------------------------------------------------------------------ */}
@@ -142,7 +149,7 @@ export default function MoodPage() {
         {/* ---------------------------------------------------------------- */}
         {/* 404 — snapshot not yet computed                                   */}
         {/* ---------------------------------------------------------------- */}
-        {is404 && (
+        {(is404 || unavailable) && (
           <EmptyState
             icon={<Compass size={28} aria-hidden="true" />}
             title="Market mood is being computed"
@@ -163,7 +170,7 @@ export default function MoodPage() {
         {/* ---------------------------------------------------------------- */}
         {/* Success — render mood card                                         */}
         {/* ---------------------------------------------------------------- */}
-        {data && (
+        {data && !unavailable && (
           <div className="space-y-6">
             {/* Primary mood card */}
             <Card>

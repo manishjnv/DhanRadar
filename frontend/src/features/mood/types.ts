@@ -12,7 +12,7 @@ export type { Regime };
 
 export type ConfidenceBand = 'high' | 'medium' | 'low' | 'insufficient_data';
 
-export type DataQuality = 'ok' | 'degraded';
+export type DataQuality = 'ok' | 'degraded' | 'unavailable';
 
 // ---------------------------------------------------------------------------
 // GET /market/mood

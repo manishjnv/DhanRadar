@@ -127,8 +127,8 @@ export default function UploadCasPage() {
 
       <div className="mt-6 rounded-lg border border-line bg-surface-2 p-4">
         <p className="text-small text-ink-secondary">
-          We process your statement to produce an educational analysis. Your raw file
-          is not stored long-term and is deleted after processing.
+          We process your statement to generate your portfolio analysis. Your raw
+          file is not stored long-term and is deleted after processing.
         </p>
       </div>
 
