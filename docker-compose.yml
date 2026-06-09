@@ -232,8 +232,10 @@ services:
     deploy:
       resources:
         limits:
-          # concurrency=1 → ~96 MiB resident; 128M trimmed from 192M to fund beat.
-          memory: 128M
+          # misc renders Pillow share-cards (1200x630) on send_notification — spiky.
+          # 128M sat at ~95% idle and would OOM under that load; keep 192M. beat's
+          # +64M is funded entirely by mood's slack (192→128), so total stays 3072M.
+          memory: 192M
           cpus: "0.25"
 
   dhanradar-celery-beat:
