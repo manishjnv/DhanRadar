@@ -35,8 +35,10 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
   (JSON + redaction) — `backend/dhanradar/core/logging.py`.
 - **Prevention:** test `test_uvicorn_loggers_rerouted_to_root` asserts the uvicorn loggers propagate
   with no own handlers; the standing "read logs before fixing" memory ([[check-logs-before-fixing]])
-  is what surfaced both on the box. Follow-up: if `-beat` (64M, no `--concurrency` knob) keeps
-  OOMing once mood/misc stop thrashing, raise its limit (rebalance within the 3072M cap).
+  is what surfaced both on the box. Follow-up DONE: `--concurrency=1` stabilised mood/misc, but
+  `-beat` (no `--concurrency` knob) kept OOMing at 64M (~88 MiB needed) — raised beat 64M→128M,
+  funded by trimming the now-lean mood+misc 192M→128M each (compose total 3008M, within the 3072M
+  cap; guard green).
 - **Phase/area:** B57 P1 logging / deploy + Celery worker config.
 
 ### 2026-06-08 — P1 logging adversarial review: raw user_id in two log messages + Celery contextvar leak on revoke
