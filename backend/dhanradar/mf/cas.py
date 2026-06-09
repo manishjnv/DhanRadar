@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Callable, Optional
 
-# A reader takes (path, password) and returns the casparser dict structure.
-CasReader = Callable[[str, Optional[str]], dict[str, Any]]
+# A reader takes (path, password) and returns the casparser output — a dict
+# (casparser 0.7.x) or a CASData pydantic model (>=1.0); parse_cas normalises both.
+CasReader = Callable[[str, Optional[str]], Any]
 
 
 class CasParseError(Exception):
@@ -44,7 +45,7 @@ class ParsedHolding:
     txns: list[ParsedTxn]
 
 
-def _default_reader(path: str, password: Optional[str]) -> dict[str, Any]:  # pragma: no cover
+def _default_reader(path: str, password: Optional[str]) -> Any:  # pragma: no cover
     import casparser  # imported lazily; only present in the worker image
 
     return casparser.read_cas_pdf(path, password)
@@ -76,7 +77,23 @@ def parse_cas(
     try:
         raw = read(path, password)
     except Exception as exc:  # noqa: BLE001 - any reader failure is a parse failure
-        raise CasParseError(str(exc)) from exc
+        # Preserve the underlying casparser exception CLASS (e.g.
+        # IncorrectPasswordError / HeaderParseError / ParserException) so server
+        # logs name the failure mode. NEVER include the exception MESSAGE for a
+        # password failure: a PDF backend can embed the attempted password (the
+        # user's PAN — DPDP-sensitive) in it. The class name alone is the
+        # diagnosis for the password case; other errors keep their PII-free text.
+        name = type(exc).__name__
+        safe_detail = "" if "Password" in name else f": {exc}"
+        raise CasParseError(f"{name}{safe_detail}") from exc
+
+    # casparser >= 1.0 returns a typed `CASData` pydantic MODEL for output="dict"
+    # (0.7.x returned a plain dict). The walk below is dict-shaped
+    # (`raw.get("folios")` …) and a pydantic model has no `.get()`, so without
+    # this every successful parse would 500. The 1.0 model field names line up
+    # 1:1 with the 0.7 dict keys, so model_dump() is a drop-in normalisation.
+    if hasattr(raw, "model_dump"):
+        raw = raw.model_dump(mode="python")
 
     holdings: list[ParsedHolding] = []
     for folio in raw.get("folios", []) or []:

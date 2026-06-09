@@ -55,6 +55,20 @@ def test_parse_cas_failure_raises():
         parse_cas("x.pdf", "wrong", reader=_boom)
 
 
+def test_parse_cas_normalises_pydantic_model_output():
+    """casparser >= 1.0 returns a CASData pydantic MODEL for output="dict"
+    (0.7.x returned a dict). parse_cas must model_dump() it before the dict-walk,
+    else every successful parse 500s on `model.get(...)`. Regression guard."""
+
+    class _FakeCasData:
+        def model_dump(self, mode="python"):
+            return _fake_cas("x.pdf", "pw")
+
+    holdings = parse_cas("x.pdf", "pw", reader=lambda _p, _pw: _FakeCasData())
+    assert len(holdings) == 1  # walked the model_dump() output, not crashed
+    assert holdings[0].isin == "INF001" and holdings[0].value == 5000.0
+
+
 # --- dedup hash --------------------------------------------------------------
 def test_cas_sha256_is_deterministic():
     assert cas_sha256(b"abc") == cas_sha256(b"abc")
