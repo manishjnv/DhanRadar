@@ -28,15 +28,20 @@ def compute_mood_snapshot() -> str:
     from dhanradar.market_data.adapter import MarketDataAdapter
     from dhanradar.market_data.config import load_ladders
     from dhanradar.market_data.providers.macro import NseMacroProvider
+    from dhanradar.market_data.providers.yahoo import YahooMacroProvider
     from dhanradar.mood import service
     from dhanradar.mood.signals import fetch_mood_inputs
 
     async def _go() -> str:
         now_ist = datetime.now(_IST)
 
-        # Build a minimal adapter carrying only the macro provider.
+        # Build the macro adapter: Yahoo primary (server-reachable), NSE fallback.
+        # Ladder order lives in market_data config (MACRO_SIGNAL).
         adapter = MarketDataAdapter(
-            providers={"nse_macro": NseMacroProvider()},
+            providers={
+                "yahoo_macro": YahooMacroProvider(),
+                "nse_macro": NseMacroProvider(),
+            },
             ladders=load_ladders(),
         )
 

@@ -57,8 +57,10 @@ DEFAULT_LADDERS: dict[DataKind, list[str]] = {
     # Equities/ETF: upstox → kite → twelvedata → nse_dump
     DataKind.EQUITY_PRICE: ["upstox", "kite", "twelvedata", "nse_dump"],
     DataKind.EQUITY_HOLDINGS: ["upstox", "kite", "twelvedata", "nse_dump"],
-    # Macro signals for Mood Compass (best-effort, NSE public JSON)
-    DataKind.MACRO_SIGNAL: ["nse_macro"],
+    # Macro signals for Mood Compass: Yahoo Finance is primary (server-reachable);
+    # NSE public JSON is the fallback (it 403s from datacenter IPs — kept for
+    # environments where it works, e.g. an India-resident proxy).
+    DataKind.MACRO_SIGNAL: ["yahoo_macro", "nse_macro"],
 }
 
 
