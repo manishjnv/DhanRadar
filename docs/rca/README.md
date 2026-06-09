@@ -15,6 +15,35 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — B58: every fund receives only `on_track` or `insufficient_data` — differentiating labels never emitted
+
+- **Symptom:** every mutual fund a user uploaded received an identical label — either `on_track`
+  (NAV present) or `insufficient_data` (no NAV). The labels `in_form`, `off_track`, and
+  `out_of_form` were never emitted. The "explainable, differentiated labels" product value
+  proposition was inert. Found by the 2026-06-09 progress audit, filed as B58.
+- **Root cause:** the category-relative inputs to the deterministic rule table
+  (`outperform_1y`, `outperform_3y`, `underperform_12m`, `drawdown_controlled`,
+  `sustained_underperformance`) defaulted to `False` in `FundSignals` and were never set.
+  No peer-cohort benchmark query existed — `dhanradar/mf/signals.py` only computed
+  own-series momentum/risk axes. With all category-relative booleans `False`, the rule table
+  in `dhanradar/scoring/engine/labels.py` could only fall through to `on_track`.
+- **Fix:** added a peer-cohort benchmark computed from existing AMFI NAV data (no new external
+  source, no migration). New pure module `dhanradar/mf/cohort.py` builds a per-category MEDIAN
+  benchmark (1Y/3Y return + max-drawdown) over same-category funds and compares each fund
+  (must beat/trail the median by > 2.0 pp). `dhanradar/mf/signals.py:long_horizon_stats`
+  computes the 1Y/3Y/drawdown inputs; `compute_fund_signals` gained a `category_relative`
+  param. `dhanradar/tasks/mf.py:_compute_cohort` loads peer NAV (≥1200-day history) and is
+  wired at both scoring call sites (CAS report + monthly rescore). `out_of_form` remains
+  intentionally unreachable — it requires a `structural_concern` fundamentals signal not yet
+  ingested.
+- **Prevention:** `tests/unit/test_mf_cohort.py` asserts real label flips to `in_form` and
+  `off_track` (not just "a label exists"), plus a regression test confirming the no-benchmark
+  path still yields `on_track`. Thresholds are tagged `provisional_model` pending the B6/B28
+  activation gate. Lesson: boolean inputs with default `False` that feed a rule table will
+  silently produce the base case forever — stub inputs must either assert a live writer or
+  be guarded by a test that exercises the non-default branch.
+- **Phase/area:** Phase 5 / MF scoring — category-relative labelling (Tier-C scoring engine).
+
 ### 2026-06-09 — Market Mood never shows: NSE macro endpoints 403-block the prod server → 0 snapshots ever stored
 
 - **Symptom:** the public `/mood` page is permanently "Market mood is being computed". `mood.market_mood`

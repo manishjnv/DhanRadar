@@ -41,6 +41,27 @@ Schema (`mf`): `mf_funds`, `mf_nav_history` (TimescaleDB hypertable, 1-month chu
 - TimescaleDB continuous aggregate `mf_nav_monthly_agg` is named but not materialized in 0004 (created with the NAV pipeline).
 - **B20** consent gate is enforced here; the **cross-border** check applies only when user data is sent to a non-Indian LLM — the CAS report core uses no LLM, so N/A for this path (a later "3-line why" enhancement would gate it).
 
+### Category-relative labelling (peer-cohort benchmark)
+
+The peer-cohort benchmark is the per-category MEDIAN of 1Y/3Y return and max-drawdown computed
+from existing AMFI NAV data in `mf_nav_history` — no new external source, no migration. New
+pure module `dhanradar/mf/cohort.py` builds the benchmark; `dhanradar/mf/signals.py:long_horizon_stats`
+derives the 1Y/3Y/drawdown inputs, and `compute_fund_signals` gained a `category_relative` param.
+A fund maps to `in_form` when it beats the category median by >2 pp on both 1Y and 3Y return and
+`drawdown_controlled=True`; it maps to `off_track` when it trails the median by >2 pp on 1Y
+return (`underperform_12m`); all other cases remain `on_track`. The deterministic rule table lives
+in `dhanradar/scoring/engine/labels.py`. A category needs ≥5 peers (each with a usable 1Y return)
+or the benchmark is withheld and the fund stays `on_track` with an explainability note ("category
+peer benchmark unavailable") — it does NOT become `insufficient_data` (that floor is reserved for a
+fund whose own NAV history is too sparse to score). The 3Y return input additionally needs ≥~2.5
+years of the fund's own NAV history, else it is omitted (a young fund can never reach `in_form`).
+The `out_of_form` label requires a `structural_concern` fundamentals signal not yet ingested and is
+intentionally unreachable at this stage. Benchmark quality depends on AMFI category taxonomy consistency —
+miscategorised funds upstream silently distort the peer median (a known dependency). All
+thresholds are tagged `provisional_model` and are subject to the B6/B28 activation gate before
+production use. No numeric score or factor weight reaches the client; labels remain non-advisory
+(educational only, non-neg #1 and #2).
+
 ## Changelog
 
 - 2026-06-06 — CAS→report slice built (Phase 5): consent-gated upload + SHA-256 dedup + <200ms enqueue; casparser-injectable parse; XIRR/allocation/overlap snapshot; Rating-Engine bridge → `user_fund_scores`; disclosure-injected, no-numeric report; 24h raw-file purge; Alembic 0004 mf schema. Snapshot math delegated to Sonnet (Opus-reviewed); compliance core + router on Opus (Tier-B).
