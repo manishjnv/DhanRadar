@@ -28,7 +28,18 @@ import tempfile
 import uuid
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,6 +191,7 @@ async def delete_portfolio(
 
 @router.post("/upload/cas", response_model=CasUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_cas(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     file: Annotated[UploadFile, File()],
@@ -274,7 +286,8 @@ async def upload_cas(
 
     from dhanradar.tasks.mf import parse_cas_job
 
-    parse_cas_job.delay(job_id, path, user.user_id, resolved_portfolio_id)
+    request_id: str | None = getattr(request.state, "request_id", None)
+    parse_cas_job.delay(job_id, path, user.user_id, resolved_portfolio_id, request_id=request_id)
     return CasUploadResponse(job_id=job_id, estimated_seconds=60)
 
 

@@ -27,6 +27,28 @@ lives in the linked docs.
   absent (auto-partition rollover off; table exists); B38 Sentry/Prometheus not wired; B29 NAV
   backfill not yet run (funds read `insufficient_data` until seeded).
 
+## P1 CENTRALISED LOGGING — landed on branch (2026-06-08, NOT yet deployed)
+
+Branch `fix/cas-dedup-and-logging-plan`. B57 P1 built per `docs/project-state/LOGGING_PLAN.md` §8.
+Feature doc `docs/features/logging.md`; decision `ADR-0028`; review ledger
+`docs/project-state/reviews/b57-p1-logging.md`.
+
+- **Delivered:** structlog JSON to stdout for FastAPI + Celery (new `dhanradar/core/logging.py`,
+  imports stdlib+structlog only); stdlib `logging` routed through the same chain so all ~19 legacy
+  callers emit redacted JSON unchanged. One `request_id` (UUID4) correlates HTTP → Celery → AI
+  gateway → `ai_recommendation_audit`; `user_ref` is `sha256(user_id)[:16]`, never raw. Two-layer
+  compliance redaction filter (key + value-regex), 16 test cases. Docker `json-file` 50m×5 per
+  service (9) via an `x-logging` anchor — debug stream volume-capped within the 3 GB cap.
+- **Tier-B sign-off:** Sonnet adversarial takeover (codex n/a) — ACCEPT-WITH-CONDITIONS; 2 MUST-FIX
+  applied in-session (raw user UUID hashed in `tasks/mf.py` + `billing/service.py`; `task_revoked`
+  contextvar clear) + 3 SHOULD-FIX (phone backstop, tuple/set recursion, safe error sentinel). RCA
+  logged. Residual risks accepted (UUID-in-message, traceback PII, base64 bytes — P2).
+- **Gates:** redaction + relevant suites green locally; ruff adds no NEW violations (the pre-existing
+  B40 backlog is untouched); secrets/anti-pattern clean; compose validated. **CI is the gate**
+  (integration and migrations run CI-only) — check `gh pr checks` before merge.
+- **Next:** deploy fastapi + Celery workers to KVM4 (compose + middleware = load-bearing infra →
+  redeploy), verify the correlated CAS-upload trace on the box, then P2 (audit-schema tables).
+
 ## PRE-DEPLOY GATE — launch-readiness verdict (2026-06-08)
 
 **Verdict: MERGE-ELIGIBLE (CI green on the blocking checks) — DEPLOY-ELIGIBLE pending the operator
@@ -753,3 +775,35 @@ cloudflared creds chown. Deploy log: `docs/ops/DEPLOY_LOG_2026-06-08.md`.
   not delegated (doc-drafting nudge). Reason: a production deploy record's exact commit SHAs, PR
   numbers, and verification outputs were all in Opus's hot cache this turn; accuracy of the
   permanent record outweighed the cheap-tier draft. One-shot exemption applied.
+
+### Agent-utilization footer — P1 CENTRALISED LOGGING session (2026-06-08)
+
+Headline: built B57 P1 — structlog JSON + one-`request_id` correlation (HTTP→Celery→AI→DB) + a
+test-enforced DPDP redaction filter + Docker `json-file` rotation. Tier-B Sonnet adversarial
+takeover (codex n/a): ACCEPT-WITH-CONDITIONS, 2 MUST-FIX + 3 SHOULD-FIX applied in-session.
+Branch `fix/cas-dedup-and-logging-plan`. Not yet deployed (load-bearing infra → human-gated).
+
+- **Opus** — Phase-0 plan adjudication; all seam reads; full Phase-3 line-by-line diff review of
+  the load-bearing diffs (middleware/celery/gateway/deps/compose); the `docker-compose.yml`
+  `x-logging` anchor edit; triage of the adversarial findings + the M1/M2/SHOULD-FIX revisions to
+  `core/logging.py`, `celery_app.py`, `tasks/mf.py`, `billing/service.py` (self-executed — small,
+  hot-cache); every gate run; the SESSION_STATE/BLOCKERS prose.
+- **Sonnet** — 5 calls: warm-start brief (1); logging core + redaction + TDD test (1); request_id
+  correlation wiring (1); Tier-B adversarial review (1, ACCEPT-WITH-CONDITIONS); doc drafting (1,
+  ADR-0028 + feature doc + RCA + review ledger).
+- **Haiku** — n/a (no bulk grep/log-triage sweep; targeted Grep run directly).
+- **codex:rescue** — n/a — account not entitled for any Codex model; the Tier-B compliance/security
+  sign-off ran as the Sonnet adversarial takeover, verdict=ACCEPT-WITH-CONDITIONS.
+- **claude-mem** — recall via the warm-start brief + memory index (codex-unavailable, CI-is-the-gate,
+  concurrent-session-stay-in-lane, markdownlint-plus-wrap-trap all honored); no new corpus build.
+- Per-delegation (telemetry): warm-start · Sonnet · reworked: N (orientation, as-returned) |
+  logging-core+redaction+TDD · Sonnet · reworked: Y (Opus added the phone value-regex, tuple/set
+  recursion, safe-error sentinel preserving correlation keys, identity-key triggers, and key-order
+  comment after the adversarial review) | correlation-wiring · Sonnet · reworked: Y (Opus added the
+  `task_revoked` contextvar clear — M2) | tier-b-adversarial · Sonnet · reworked: N (findings acted
+  on; verdict consumed as-issued) | doc-drafting · Sonnet · reworked: N (4 files shipped as-written,
+  markdownlint-clean).
+- Routing deviation: the SESSION_STATE + BLOCKERS prose was typed on Opus (doc-drafting nudge). The
+  four standalone docs WERE delegated to Sonnet (nudge honored). Reason for the two status docs:
+  short pointers derived from this turn's exact gate/commit/verdict state (hot cache); accuracy of
+  the living record outweighed a cheap-tier redraft round-trip. One-shot exemption applied.

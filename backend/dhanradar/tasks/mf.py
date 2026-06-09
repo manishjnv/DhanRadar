@@ -28,7 +28,10 @@ import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
+from structlog.contextvars import bind_contextvars
+
 from dhanradar.celery_app import celery_app
+from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
@@ -36,6 +39,7 @@ from dhanradar.mf.signals import compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 logger = logging.getLogger(__name__)
+_slog = get_logger(__name__)
 
 _UPLOAD_TTL_SECONDS = 24 * 3600
 
@@ -127,11 +131,14 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
-def parse_cas_job(self, job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
+def parse_cas_job(
+    self, job_id: str, path: str, user_id: str, portfolio_id: str,
+    request_id: str | None = None,
+) -> str:
     """CAS→report worker. Always purges the raw file; marks the job failed with an
     OPAQUE code (never the raw exception, which could carry a path/PII)."""
     try:
-        return asyncio.run(_run_pipeline(job_id, path, user_id, portfolio_id))
+        return asyncio.run(_run_pipeline(job_id, path, user_id, portfolio_id, request_id))
     except CasParseError:
         logger.warning("CAS parse failed job=%s", job_id)  # full detail not echoed to client
         asyncio.run(_mark_failed(job_id, "parse_failed"))
@@ -144,7 +151,10 @@ def parse_cas_job(self, job_id: str, path: str, user_id: str, portfolio_id: str)
         _purge(path)
 
 
-async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str) -> str:
+async def _run_pipeline(
+    job_id: str, path: str, user_id: str, portfolio_id: str,
+    request_id: str | None = None,
+) -> str:
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -153,6 +163,10 @@ async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str)
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
     from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+
+    # Bind correlation context for all structured log lines in this pipeline run.
+    bind_contextvars(job_id=job_id, request_id=request_id, user_ref=hash_user_ref(user_id))
+    _slog.info("cas_pipeline_start", job_id=job_id)
 
     redis = get_redis()
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -223,6 +237,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str)
                 user_id=user_id,
                 identifier=p.isin,
                 confidence_band=result.confidence_band.value,
+                request_id=request_id,
             )
             funds_payload.append({
                 "isin": p.isin, "scheme_name": p.scheme_name, "folio_number": p.folio_number,
@@ -265,6 +280,7 @@ async def _run_pipeline(job_id: str, path: str, user_id: str, portfolio_id: str)
             if await is_commentary_entitled(user_id, db):
                 report_payload["ai_commentary"] = await generate_commentary(
                     OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
+                    request_id=request_id,
                 )
             else:
                 report_payload["ai_commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
@@ -649,9 +665,12 @@ async def _monthly_rescore() -> str:
                                     redis, uid, ch, "mf_label_change", payload
                                 )
                             except Exception:  # noqa: BLE001 — alert is best-effort; never abort rescore
-                                logger.warning(
-                                    "label-change alert enqueue failed user=%s isin=%s ch=%s",
-                                    uid, isin, ch,
+                                # user_ref is hashed (never the raw uid in logs).
+                                _slog.warning(
+                                    "label_change_alert_enqueue_failed",
+                                    user_ref=hash_user_ref(str(uid)),
+                                    isin=isin,
+                                    ch=ch,
                                 )
 
                 # Build snapshot from current holdings + latest NAV.
