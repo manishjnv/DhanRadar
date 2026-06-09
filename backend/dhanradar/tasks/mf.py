@@ -35,7 +35,7 @@ from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
-from dhanradar.mf.signals import compute_fund_signals
+from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 
 logger = logging.getLogger(__name__)
@@ -211,6 +211,9 @@ async def _run_pipeline(
         # values on the latest NAV (B29). A holding with no NAV history yields no
         # axes → the engine refuses with insufficient_data (honest fail-safe).
         nav_series, latest_nav = await _load_nav_series(db, [p.isin for p in parsed])
+        # Peer-cohort benchmark (B58): category-relative label inputs so the rule
+        # table can emit in_form/off_track, not only on_track/insufficient_data.
+        cohort = await _compute_cohort(db, [p.isin for p in parsed])
 
         snap = build_snapshot(parsed_to_snapshot_holdings(parsed, nav_map=latest_nav))
 
@@ -220,7 +223,10 @@ async def _run_pipeline(
         for p in parsed:
             # Signals are computed from the fund's own NAV series (momentum/risk);
             # fundamentals-backed axes stay None → partial_coverage (≤ medium).
-            signals = compute_fund_signals(p.isin, nav_series.get(p.isin, []))
+            # category_relative carries the peer-cohort comparison (B58).
+            signals = compute_fund_signals(
+                p.isin, nav_series.get(p.isin, []), category_relative=cohort.get(p.isin)
+            )
             result = await score_fund(rengine, signals)
             await upsert_user_fund_score(db, user_id, result, portfolio_id)
             # Plus-only: retain label history per fund (no numeric persisted).
@@ -355,6 +361,79 @@ async def _load_nav_series(
         series.setdefault(isin, []).append((nav_date, float(nav)))
     latest_nav = {isin: pts[-1][1] for isin, pts in series.items()}
     return series, latest_nav
+
+
+# Long-range lookback for the peer-cohort benchmark (B58): the 3Y comparison needs
+# > 3 years of NAV, unlike the 400-day momentum/risk load.
+_COHORT_LOOKBACK_DAYS = 1200
+
+
+async def _compute_cohort(
+    db: Any, target_isins: list[str], *, as_of: date | None = None
+) -> dict[str, CategoryRelative]:
+    """Build category peer-cohort benchmarks and return each target fund's
+    category-relative LABEL inputs (B58).  Returns {isin: CategoryRelative}; a fund
+    absent from the map (no category, thin cohort, or no NAV) is scored with no
+    category red flag → on_track, the honest fail-safe.
+
+    Read-only on the mf schema (MfFund + mf_nav_history) — no cross-module access.
+    The peer set for a category is every fund AMFI tags in that category; the fund
+    itself is included (negligible self-bias on a ≥5-peer median).
+    """
+    from sqlalchemy import select
+
+    from dhanradar.mf.cohort import build_benchmark, compare_to_cohort
+    from dhanradar.mf.signals import long_horizon_stats
+    from dhanradar.models.mf import MfFund
+
+    if not target_isins:
+        return {}
+    as_of = as_of or date.today()
+
+    # 1. Resolve each target's category; keep only real categories.
+    cat_rows = (
+        await db.execute(
+            select(MfFund.isin, MfFund.category).where(MfFund.isin.in_(target_isins))
+        )
+    ).all()
+    target_category: dict[str, str] = {
+        i: c for i, c in cat_rows if c and c != "uncategorized"
+    }
+    categories = set(target_category.values())
+    if not categories:
+        return {}
+
+    # 2. All peers in those categories.
+    peer_rows = (
+        await db.execute(
+            select(MfFund.isin, MfFund.category).where(MfFund.category.in_(categories))
+        )
+    ).all()
+    peers_by_cat: dict[str, list[str]] = {}
+    all_peer_isins: list[str] = []
+    for i, c in peer_rows:
+        peers_by_cat.setdefault(c, []).append(i)
+        all_peer_isins.append(i)
+
+    # 3. Long NAV series for every peer (≥3y); compute each peer's long-horizon
+    #    stats ONCE (targets are peers too), then the per-category median benchmark.
+    series, _ = await _load_nav_series(db, all_peer_isins, lookback_days=_COHORT_LOOKBACK_DAYS)
+    stats_by_isin = {
+        i: long_horizon_stats(series.get(i, []), as_of=as_of) for i in set(all_peer_isins)
+    }
+    benchmarks = {
+        cat: build_benchmark(cat, [stats_by_isin[i] for i in cat_isins])
+        for cat, cat_isins in peers_by_cat.items()
+    }
+
+    # 4. Each target's own stats (reused from the cache) vs its category benchmark.
+    out: dict[str, CategoryRelative] = {}
+    for i in target_isins:
+        c = target_category.get(i)
+        if c is None:
+            continue
+        out[i] = compare_to_cohort(stats_by_isin.get(i, (None, None, None)), benchmarks.get(c))
+    return out
 
 
 async def _mark_failed(job_id: str, message: str) -> None:
@@ -619,6 +698,8 @@ async def _monthly_rescore() -> str:
 
                 isins = [h.isin for h in holding_rows]
                 nav_series, latest_nav = await _load_nav_series(db, isins)
+                # Peer-cohort benchmark for category-relative labels (B58).
+                cohort = await _compute_cohort(db, isins)
 
                 # Batch-fetch scheme names for alert copy (never scores or numerics).
                 scheme_rows = await db.execute(
@@ -633,7 +714,9 @@ async def _monthly_rescore() -> str:
                 # Score each fund via the bridge (never recompute the engine directly).
                 for h_row in holding_rows:
                     isin = h_row.isin
-                    signals = compute_fund_signals(isin, nav_series.get(isin, []))
+                    signals = compute_fund_signals(
+                        isin, nav_series.get(isin, []), category_relative=cohort.get(isin)
+                    )
                     result = await score_fund(rengine, signals)
                     await upsert_user_fund_score(db, uid, result, pid)
 
