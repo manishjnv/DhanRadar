@@ -88,8 +88,55 @@ Unlock once Tier 0 #1 lands and real history accrues.
 3. **G7 vernacular AI** requires the Hindi/regional advisory filter (B23) first, or you ship
    advice in a language the guard does not read.
 
+## Tier 3 (addendum) — PowerUp-gap differentiation additions (end-of-project improvements)
+
+Source: PowerUp Money feature-gap analysis (`Feature Improvement Plan.md`), reviewed through the
+competitive-intelligence governance skill on 2026-06-09. **Rule applied:** the PowerUp plan is
+mostly parity-minus-advice; only items that lean on a DhanRadar moat (trust, explainability,
+compliance-as-asset, CAS wedge, owned Mood IP) and pass an educational, non-advisory value test
+are tracked. **Status: deferred — schedule towards end of project as improvements.** Sequence by
+moat, not by PowerUp's feature order.
+
+Most of the PowerUp plan is **already covered** — tracked, not re-added:
+
+- Tax-exposure education (LTCG/STCG, ELSS lock-in, exit-load windows) → **already G8** (build now,
+  seasonal). The PowerUp framing adds nothing new.
+- Benchmark + expense/cost-drag transparency → **already B1 + G3** (data-gated). No new item.
+- Show-your-working / per-score inputs, weights, freshness → **already G10**. No new item.
+- Grounded AI chat over real holdings → **already G5**. The citation enhancement below (PU3)
+  extends it rather than duplicating it.
+- CAS-driven overlap / deep MF analytics → **already G3** (overlap + expense-drag math partly
+  exist). PU-CAS framing folds into G3.
+
+Genuinely **net-new** differentiators (verdict = Differentiate; each passes the value test on a
+moat dimension, none recommended merely because PowerUp has it):
+
+- **PU1 — Mood Compass × Portfolio tie-in.** Read a portfolio's risk balance against current
+  market mood ("your concentration, in this mood regime"). Uses owned Mood IP — not copyable.
+  **Compliance watch:** mood *describes* conditions; never predicts direction or implies a
+  buy/sell window (defer phrasing to the compliance guardrail). Data-gated: needs G3 + real Mood
+  signals (B35). Defer to the portfolio phase.
+- **PU2 — "We refuse to score" as a visible trust feature.** Surface the `insufficient_data`
+  refusal openly as an honesty signal instead of a silent fallback. No competitor shows its own
+  uncertainty — pure trust moat. This is **presentation of an existing engine rule**, not new
+  scoring logic. Pairs with G10. Buildable once labels are real (B29). Low cost; high trust ROI.
+- **PU3 — Audit-grounded AI answers (cite data point + freshness per answer).** Every AI
+  explanation cites the input and as-of date it used ("rolling-return rank dropped; data as of
+  <date>"). Extends **G5/G10**; the citation-per-answer is the enhancement. Wire through the
+  existing grounded AI gateway after AI hardening (B20/B21/B23).
+
+**Addendum compliance flags (verify before building):**
+
+1. PU1 mood-context copy must stay descriptive — no "de-risk now" / market-timing tilt.
+2. PU3 must not let a cited number become the public per-instrument numeric score in the DOM
+   (non-neg #2) — cite the *factor/input and freshness*, keep the number server-side.
+3. Family / household views from the PowerUp plan remain **Tier 3 defer** and are blocked on DPDP
+   consent enforcement (`RequireConsent` stub) — do not build until consent is wired.
+
 ## Sequencing IDs
 
 v2.4 items keep their own IDs (G1–G10, B1, C1) — they are tracked here, not given B-numbers.
+PowerUp-gap additions are tracked as **PU1–PU3** (this file only; net-new differentiators —
+overlapping PowerUp items fold into existing G/B IDs and are not re-numbered).
 The core launch gaps are tracked as **B36–B46** in `BLOCKERS.md`. Data gates are **B29** (MF NAV
 pipeline) and **B35** (Mood signals).
