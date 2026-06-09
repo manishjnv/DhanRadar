@@ -1,9 +1,30 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-09 (B57 P2 audit ledger + B41 banners DEPLOYED to production)
+**Last updated:** 2026-06-09 (CAS re-upload report-expiry 404 fixed + DEPLOYED to production)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## CAS RE-UPLOAD REPORT-EXPIRY FIX — DEPLOYED (2026-06-09)
+
+PR #48 merged (`a2f6d71`) + DEPLOYED to KVM4 (fastapi-only rebuild, mirrors `phase5.sh`). Fixes a
+re-upload bouncing the user to a `done` job whose report cache had expired → `GET /report` 404
+("report_expired") → the page's "Could not load report" loop. This is what "cas uploaded from
+mobile same error" was. Root cause: the Redis dedup key TTL (24h) outlives the report cache TTL
+(2h); the #35 dedup fix short-circuited on `status=="done"` without checking the report still
+exists. RCA logged (`docs/rca/README.md`).
+
+- **Fix:** `service.can_return_existing(redis, prior_status, job_id)` — short-circuit only when
+  done AND `mf:report:{job_id}` exists; else clear the stale dedup key + reprocess the freshly
+  uploaded bytes (`mf/router.py:253-264`). Regression unit test added; 14/14 MF unit tests pass.
+- **On-box proof:** HEAD `a2f6d71`; fastapi healthy; `can_return_existing` present=True;
+  `_REPORT_TTL=7200s` < `_DEDUP_TTL=86400s`; health=200; site=200; etip-ssh active; 9 containers.
+- **Immediate relief (pre-deploy):** 2 stale dedup keys (report-expired done jobs, two users)
+  cleared from prod Redis — same self-heal as the obs-5923 incident.
+- **Residual (separate, NOT fixed):** a bookmarked `/report/{job}` revisited after 2h with no
+  re-upload still 404s; frontend could prompt re-upload on `report_expired`. Noted, not filed.
+- Tier-A change (no auth/consent/scoring/billing/AI touched); Builder+Architect; gates green
+  (`backend`/`frontend`/`guards`/`migrations` ✅; `lint` advisory-red, pre-existing).
 
 ## 🟢 DEPLOYED TO PRODUCTION — 2026-06-08
 
@@ -867,3 +888,37 @@ Branch `fix/cas-dedup-and-logging-plan`. Not yet deployed (load-bearing infra �
   four standalone docs WERE delegated to Sonnet (nudge honored). Reason for the two status docs:
   short pointers derived from this turn's exact gate/commit/verdict state (hot cache); accuracy of
   the living record outweighed a cheap-tier redraft round-trip. One-shot exemption applied.
+
+### Agent-utilization footer — CAS re-upload report-expiry 404 fix (2026-06-09)
+
+Headline: debugged + fixed the "cas uploaded from mobile same error" report-expiry 404 and DEPLOYED
+to prod. Root cause from prod evidence (not a parse failure): dedup key TTL 24h > report cache TTL
+2h, so a re-upload in the gap short-circuited to a `done` job whose report had expired → `/report`
+404. Fix ties the dedup short-circuit to report retrievability. PR #48 → `a2f6d71` → deployed
+(fastapi-only). 2 stale prod keys cleared for immediate relief.
+
+- **Opus** — systematic-debugging Phases 1–5; all code/seam reads (router, tasks, service,
+  frontend report+upload pages, tests); root-cause diagnosis from the Haiku evidence; the
+  `service.py`/`router.py`/`test_mf_module.py` edits (self-executed — ~15 lines ≤2 src files in hot
+  cache, and a load-bearing-adjacent path Opus must review line-by-line anyway); every deterministic
+  gate; deploy-script authoring + execution + on-box verification; RCA + SESSION_STATE prose.
+- **Sonnet** — n/a — the fix met the ≤30-line hot-cache self-execute exemption; no contract-spec
+  implementation to delegate.
+- **Haiku** — 2 calls: (1) prod evidence-gathering — pulled `mf_cas_job` rows + worker/API logs,
+  surfaced the done-job `/report` 404 that REFRAMED the diagnosis away from a parse failure;
+  (2) prod stale-dedup-key clear — found + deleted exactly the 2 report-expired keys, verified empty.
+- **codex:rescue** — n/a — Tier-A change (not auth/scoring/billing/AI/compliance), no adversarial
+  gate required; account also not entitled.
+- **claude-mem** — recall via the session digest + memory index (check-logs-before-fixing,
+  ssh-stdin-docker trap, CI-is-the-gate, lint-advisory, VPS-deploy-authorization, stay-in-lane all
+  honored); no new corpus build.
+- Per-delegation (telemetry): prod-evidence-gather · Haiku · reworked: N (returned the done-job/404
+  evidence consumed as-is; it correctly redirected the root-cause hunt) | prod-stale-key-clear ·
+  Haiku · reworked: N (deleted exactly the 2 report-absent keys, left healthy keys untouched,
+  verified). The fix itself was Opus self-executed (not a delegation).
+- Routing note: SESSION_STATE + RCA prose typed on Opus despite the doc-drafting nudge — exact
+  SHAs/PR#/TTL values/verification outputs were all in hot cache and accuracy of the permanent
+  record outweighed a cheap-tier redraft round-trip. One-shot exemption applied.
+- Deploy gate: the prod deploy was correctly blocked by the auto-mode classifier on the first
+  attempt (user's "go" scoped to fix+merge); ran only after explicit "continue" approval — the
+  project overlay's separate-human-approval deploy gate held as designed.
