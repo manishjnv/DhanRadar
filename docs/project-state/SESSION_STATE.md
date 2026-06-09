@@ -27,11 +27,24 @@ lives in the linked docs.
   absent (auto-partition rollover off; table exists); B38 Sentry/Prometheus not wired; B29 NAV
   backfill not yet run (funds read `insufficient_data` until seeded).
 
-## P1 CENTRALISED LOGGING — landed on branch (2026-06-08, NOT yet deployed)
+## P1 CENTRALISED LOGGING — DEPLOYED to production (2026-06-09)
 
-Branch `fix/cas-dedup-and-logging-plan`. B57 P1 built per `docs/project-state/LOGGING_PLAN.md` §8.
-Feature doc `docs/features/logging.md`; decision `ADR-0028`; review ledger
-`docs/project-state/reviews/b57-p1-logging.md`.
+Merged (#38) + DEPLOYED to KVM4. Structured JSON live on BOTH tiers (fastapi + celery), rotation
+applied, all workers stable. Feature doc `docs/features/logging.md`; decision `ADR-0028`; review
+ledger `docs/project-state/reviews/b57-p1-logging.md`. Main HEAD `beb89a0`.
+
+- **On-box proof:** `docker inspect` shows `json-file 50m×5` on the recreated backend services;
+  fastapi now emits JSON (`{"event":"...GET /api/v1/health...","level":"info",...}`) — was uvicorn
+  plain text until the uvicorn-reroute fix; celery-batch emits JSON; `X-Request-ID` round-trips.
+  Full single-id CAS trace (HTTP→worker→gateway) is wired + unit-proven; the live end-to-end shows
+  on the next real CAS upload.
+- **Deploy-found incident (fixed, RCA 2026-06-09):** the live box had `celery-mood`/`-misc`/`-beat`
+  OOM-crash-looping (`Restarting 137`, pre-existing at #39) — Celery prefork `--concurrency=4` ×
+  RSS over the cgroup limits. Fixed across #40/#41/#42: `--concurrency=1` on batch/mood/misc;
+  rebalanced worker memory (batch 256 / mood 128 / misc 192 / beat 128 — total stays 3072M, guard
+  green). Also #40 fixed fastapi not emitting JSON (uvicorn installs own non-propagating loggers).
+  All 4 workers now `running oom=false restarts=0`; beat scheduling; host etip-ssh lifeline + 32
+  etip untouched; site 200.
 
 - **Delivered:** structlog JSON to stdout for FastAPI + Celery (new `dhanradar/core/logging.py`,
   imports stdlib+structlog only); stdlib `logging` routed through the same chain so all ~19 legacy
