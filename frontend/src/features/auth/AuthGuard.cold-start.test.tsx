@@ -86,6 +86,23 @@ describe('AuthGuard — cold-start routing', () => {
     expect(mockReplace).not.toHaveBeenCalledWith('/onboarding');
   });
 
+  it('redirects a COMPLETED user (risk_profile set) away from /onboarding to /dashboard', async () => {
+    // The post-submit double-visit bug: a user whose profile is already set must
+    // never sit on /onboarding (no re-entry / no second showing of the quiz).
+    mockPathname = '/onboarding';
+    mockUseMe.mockReturnValue({
+      data: { id: '1', email: 'a@b.com', tier: 'free', totp_verified: false, risk_profile: 'aggressive', dpdp_consent_version: null },
+      isLoading: false,
+      isError: false,
+    });
+
+    renderGuard();
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/dashboard'),
+    );
+  });
+
   it('does NOT redirect when already on /onboarding (no loop)', async () => {
     mockPathname = '/onboarding';
     mockUseMe.mockReturnValue({
