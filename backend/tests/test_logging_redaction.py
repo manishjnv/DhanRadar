@@ -323,6 +323,25 @@ class TestIdempotency:
             f"Expected 1 line, got {len(lines)} (possible double-emit)"
         )
 
+    def test_uvicorn_loggers_rerouted_to_root(self):
+        """uvicorn/gunicorn loggers must propagate to the root JSON handler (no own
+        handlers), else their access/error lines print as plain text + unredacted."""
+        # Simulate uvicorn having installed its own non-propagating handler at boot.
+        acc = logging.getLogger("uvicorn.access")
+        acc.handlers = [logging.StreamHandler()]
+        acc.propagate = False
+
+        # Force a real (re)configure — the module-level _configured guard would
+        # otherwise no-op this call (prod runs configure once, at app import).
+        import dhanradar.core.logging as _logmod
+        _logmod._configured = False
+        configure_logging(level="INFO")
+
+        for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+            lg = logging.getLogger(name)
+            assert lg.handlers == [], f"{name} still has its own handler (bypasses JSON)"
+            assert lg.propagate is True, f"{name} does not propagate to the root JSON handler"
+
 
 # ---------------------------------------------------------------------------
 # Contextvar propagation test

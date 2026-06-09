@@ -172,7 +172,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
-    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "batch", "--loglevel=info"]
+    # --concurrency=1: prefork default (= vCPU count = 4) × per-child RSS blew past
+    # the cgroup memory limit → OOM-kill loop (RCA 2026-06-09). CAS parse is heavy
+    # (casparser+scipy) and infrequent; one worker per queue fits the limit safely.
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "batch", "--concurrency=1", "--loglevel=info"]
     volumes:
       # Reader/purger side of the CAS hand-off (written by dhanradar-fastapi).
       - dhanradar_cas_tmp:/tmp/dhanradar_cas
@@ -196,7 +199,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
-    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "mood", "--loglevel=info"]
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "mood", "--concurrency=1", "--loglevel=info"]
     networks:
       - dhanradar
     depends_on:
@@ -217,7 +220,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
-    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "misc", "--loglevel=info"]
+    command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "misc", "--concurrency=1", "--loglevel=info"]
     networks:
       - dhanradar
     depends_on:
