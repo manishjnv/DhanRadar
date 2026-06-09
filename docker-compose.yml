@@ -2,6 +2,18 @@
 # NO host port bindings on any service. cloudflared reaches web/api over the docker network.
 # All services read secrets from the single .env file at project root.
 
+# ---------------------------------------------------------------------------
+# Logging — volume-capped json-file rotation per service (LOGGING_PLAN.md §4).
+# 50 MB × 5 files = ~250 MB ceiling per container; the verbose-but-redacted
+# debug stream stays bounded on the 3 GB box with zero extra infra. Applied to
+# every service via the `*default-logging` anchor below.
+# ---------------------------------------------------------------------------
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 networks:
   dhanradar:
     driver: bridge
@@ -25,6 +37,7 @@ services:
   dhanradar-postgres:
     image: timescale/timescaledb-ha:pg16
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       POSTGRES_USER: dhanradar
@@ -59,6 +72,7 @@ services:
   dhanradar-redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     command: >
       redis-server
@@ -85,6 +99,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     volumes:
       # Writer side of the CAS hand-off (read + purged by dhanradar-celery-batch).
@@ -119,6 +134,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       # Next.js standalone server.js binds to $HOSTNAME, which Docker sets to the
@@ -154,6 +170,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "batch", "--loglevel=info"]
     volumes:
@@ -177,6 +194,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "mood", "--loglevel=info"]
     networks:
@@ -197,6 +215,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "misc", "--loglevel=info"]
     networks:
@@ -217,6 +236,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     # --schedule in /tmp: the image runs as non-root (appuser) and /app is
     # root-owned, so the default ./celerybeat-schedule write fails with EACCES
@@ -248,6 +268,7 @@ services:
   dhanradar-cloudflared:
     image: cloudflare/cloudflared:2026.5.0
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "--no-autoupdate", "run"]
     volumes:

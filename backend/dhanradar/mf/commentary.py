@@ -234,6 +234,7 @@ async def generate_commentary(
             schema=MFCommentary,
             contains_personal_data=True,
             cross_border_consent_verified=True,
+            request_id=request_id,
         )
     # CreditExhaustedError, AllFreeModelsFailedError, QualityValidationError and
     # ThreeStrikeSkipError all subclass GatewayError, so the 402/credit, empty-pool

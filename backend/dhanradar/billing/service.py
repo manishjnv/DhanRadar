@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.config import settings
+from dhanradar.core.logging import hash_user_ref
 from dhanradar.models.billing import Plan
 from dhanradar.redis_client import get_redis
 
@@ -153,7 +154,12 @@ async def create_checkout(
     except (Exception, asyncio.TimeoutError) as exc:  # gateway error or timeout
         # Lock is intentionally NOT released here: it expires with _LOCK_TTL so
         # an immediate retry is blocked (409) rather than risking a duplicate.
-        logger.error("Razorpay subscription.create failed for user=%s: %s", user_id, exc)
+        # user_ref hashed (never the raw user_id in logs); exc is regex-scrubbed
+        # by the redaction processor for any embedded key/email/PAN.
+        logger.error(
+            "Razorpay subscription.create failed for user_ref=%s: %s",
+            hash_user_ref(str(user_id)), exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="payment_gateway_unavailable",
