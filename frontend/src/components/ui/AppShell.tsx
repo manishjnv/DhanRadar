@@ -88,10 +88,10 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
         ))}
       </nav>
 
-      {/* Footer — Settings + educational note */}
+      {/* Footer — Settings. The educational/not-advice line lives once in the
+          page footer (added in <main>), so it is not repeated here. */}
       <div className="flex flex-col gap-2 border-t border-line p-3">
         <NavLink item={SETTINGS} onClick={onNavClick} />
-        <p className="px-3 text-caption text-ink-muted">Educational use only</p>
       </div>
     </>
   );
