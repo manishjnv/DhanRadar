@@ -25,6 +25,15 @@ export interface TopScoredFund {
   confidence_band: ConfidenceBand;
 }
 
+export interface TopScoredResponse {
+  funds: TopScoredFund[];
+  /** Backend-supplied disclosure string (must be rendered adjacent to labels) */
+  disclosure: string;
+  /** Backend-supplied not_advice string */
+  not_advice: string;
+  disclaimer_version: string;
+}
+
 export interface NewsItem {
   id: string;
   title: string;
@@ -32,10 +41,26 @@ export interface NewsItem {
   freshness: string;
 }
 
+export interface PortfolioFund {
+  isin: string;
+  scheme_name: string;
+  /** Non-advisory label */
+  label: Label;
+  confidence_band: ConfidenceBand;
+}
+
 export interface PortfolioSummary {
-  /** User's own money figures — allowed in DOM */
-  current_value: number;
-  xirr_pct: number;
+  /** User's own money — allowed in DOM */
+  current_value: number | null;
+  xirr_pct: number | null;
+  fund_count: number;
+  last_updated: string | null;
+  funds: PortfolioFund[];
+  /** Backend-supplied disclosure string (must be rendered adjacent to labels) */
+  disclosure: string;
+  /** Backend-supplied not_advice string */
+  not_advice: string;
+  disclaimer_version: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +77,7 @@ export function useIndices() {
 export function useTopScored() {
   return useQuery({
     queryKey: queryKeys.instruments.topScored('fund'),
-    queryFn: () => api.get<TopScoredFund[]>('/instruments/top-scored?type=fund'),
+    queryFn: () => api.get<TopScoredResponse>('/instruments/top-scored?type=fund'),
     staleTime: 5 * 60 * 1000,
   });
 }
