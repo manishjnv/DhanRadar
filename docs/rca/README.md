@@ -15,6 +15,35 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-09 — CAS re-upload bounces to a done job whose report expired → /report 404 ("same error from mobile")
+
+- **Symptom:** user re-uploads the same CAS (from mobile) and the report page shows "Could not load
+  report" forever. Prod evidence: `POST /mf/upload/cas → 202`, `…/status → 200 (done)`, then
+  `GET /mf/report/{job} → 404` repeated. The `mf_cas_job` row was `status=done`, `progress_pct=100`,
+  empty `error_message` — so the job genuinely succeeded; only the report fetch 404s.
+- **Root cause:** a **TTL mismatch**, not a parse failure. The Redis dedup key lives
+  `_DEDUP_TTL = 24h` (`mf/service.py:24`) but the assembled report cache only `_REPORT_TTL = 2h`
+  (`mf/service.py:26`). The prior dedup fix (#35) short-circuited a re-upload whenever the prior job
+  `status == "done"` — but did **not** check the report still exists. In the 22h gap after the 2h
+  report cache expires (job at 03:08 → re-upload at 05:51, evidence), a re-upload hits the still-live
+  dedup key, returns the old done `job_id`, and `cas_report` then raises `404 report_expired`
+  (`mf/router.py:333`) because the cache is gone. This is the *same* "re-upload → dead job" class the
+  #35 fix targeted, re-triggered by **cache expiry** instead of job failure. "From mobile" was
+  incidental (re-upload simply happened after the 2h window). Frontend was already correct — it
+  navigates to the POST response's `job_id` (`upload/page.tsx:33`).
+- **Fix:** the dedup short-circuit now requires the report to be **retrievable**, not just the job
+  done. New `service.can_return_existing(redis, prior_status, job_id)` returns True only when
+  `prior_status == "done"` AND `redis.exists("mf:report:{job_id}")` (`mf/service.py`); the upload
+  route calls it and, on False, drops the stale dedup key and reprocesses the freshly-uploaded bytes
+  (`mf/router.py:253-264`). A done-but-expired job now self-heals exactly like a failed one.
+- **Prevention:** unit test `test_can_return_existing_requires_done_and_cached_report`
+  (`tests/unit/test_mf_module.py`) pins the rule: done + cached → dedup; done + expired → reprocess;
+  non-done → reprocess. Standing invariant: **dedup may only short-circuit to a still-serveable
+  report** — never tie a 24h dedup key to a 2h cache without checking the cache. (Residual, separate:
+  a bookmarked `/report/{job}` revisited after 2h with no re-upload still 404s; frontend could prompt
+  re-upload on `report_expired` — noted, not fixed here.)
+- **Phase/area:** Phase 5 / MF CAS upload + dedup.
+
 ### 2026-06-09 — Onboarding/risk-profile page shows twice (post-submit bounce back to /onboarding)
 
 - **Symptom:** a new user completes the 5-question risk quiz, but the "Set your risk profile" page

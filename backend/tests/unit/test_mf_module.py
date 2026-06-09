@@ -99,6 +99,9 @@ class _FakeRedis:
     async def delete(self, k):
         self._d.pop(k, None)
 
+    async def exists(self, k):
+        return 1 if k in self._d else 0
+
 
 async def test_dedup_clear_removes_record_so_reupload_reprocesses():
     """A re-upload after a failed/stuck job must NOT be deduped to the dead job:
@@ -111,6 +114,28 @@ async def test_dedup_clear_removes_record_so_reupload_reprocesses():
     assert await service.dedup_lookup(r, "u1", "pf1", "hash1") == "job-old"
     await service.dedup_clear(r, "u1", "pf1", "hash1")
     assert await service.dedup_lookup(r, "u1", "pf1", "hash1") is None
+
+
+async def test_can_return_existing_requires_done_and_cached_report():
+    """Regression (TTL gap): the dedup key lives 24h (`_DEDUP_TTL`) but the report
+    cache only 2h (`_REPORT_TTL`). A re-upload in that 22h gap must NOT short-circuit
+    to the done job whose report has EXPIRED — doing so bounced the user to a
+    GET /report 404 ('report_expired'), the very 'dead job' the dedup self-heal was
+    meant to prevent. Short-circuit ONLY when the job is done AND its report is still
+    cached; otherwise fall through to reprocess the freshly-uploaded bytes."""
+    from dhanradar.mf import service
+
+    r = _FakeRedis()
+    job = "job-done-1"
+    # done, but report cache has expired (absent) → must NOT short-circuit.
+    assert await service.can_return_existing(r, "done", job) is False
+    # report still cached → short-circuit is allowed.
+    await r.set(f"{service._REPORT_PREFIX}{job}", "{}")
+    assert await service.can_return_existing(r, "done", job) is True
+    # non-done statuses never short-circuit, even if some report key exists.
+    await r.set(f"{service._REPORT_PREFIX}job-x", "{}")
+    assert await service.can_return_existing(r, "failed", "job-x") is False
+    assert await service.can_return_existing(r, None, "job-x") is False
 
 
 # --- report assembly: disclosure injected, NO numeric score ------------------
