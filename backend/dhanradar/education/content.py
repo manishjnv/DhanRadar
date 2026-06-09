@@ -31,8 +31,9 @@ EDUCATION_NOT_ADVICE = "Not tax or investment advice."
 
 _FY = "FY 2025-26 (AY 2026-27)"
 _SRC = (
-    "Based on the Income-tax Act as amended by the Finance Act 2024 "
-    "(effective for transfers on or after 23 July 2024); applicable FY 2025-26."
+    "Based on the Income-tax Act as amended by the Finance Act 2024 (capital-gains "
+    "changes effective for transfers on or after 23 July 2024) and the Finance Act 2025; "
+    "applicable FY 2025-26."
 )
 
 
@@ -62,8 +63,10 @@ ARTICLES: list[dict] = [
             "For units acquired on or after **1 April 2023**, the whole gain is taxed at the "
             "investor's **income-tax slab rate**, regardless of holding period.\n\n"
             "## Hybrid funds\n\n"
-            "A hybrid scheme is taxed by its equity content: **65% or more** in domestic "
-            "equity is taxed like an equity fund; otherwise like a specified/debt fund.\n\n"
+            "A hybrid scheme is taxed by its equity content: **65% or more** in domestic equity "
+            "is taxed like an equity fund; a debt-oriented hybrid (over **65%** in debt/money-"
+            "market) is taxed at slab rates as a specified fund; a fund in between follows the "
+            "residual capital-gains rules.\n\n"
             "This overview is general and applies to FY 2025-26; see the linked topics for detail."
         ),
     },
@@ -105,11 +108,17 @@ ARTICLES: list[dict] = [
         "source_note": _SRC,
         "body_md": (
             "## The April 2023 cut-off\n\n"
-            "For units of a **specified mutual fund** (broadly, a fund with **35% or less** in "
-            "domestic equity) **acquired on or after 1 April 2023**, the entire capital gain is "
-            "treated as **short-term** and taxed at the investor's **income-tax slab rate**, "
-            "regardless of how long the units are held (Section 50AA). There is no separate "
-            "long-term rate and no indexation for these units.\n\n"
+            "For units of a **specified mutual fund** — for FY 2025-26 (AY 2026-27), a fund that "
+            "invests **more than 65% of its assets in debt and money-market instruments** — that "
+            "were **acquired on or after 1 April 2023**, the entire capital gain is treated as "
+            "**short-term** and taxed at the investor's **income-tax slab rate**, regardless of "
+            "how long the units are held (Section 50AA). There is no separate long-term rate and "
+            "no indexation for these units.\n\n"
+            "The Finance Act 2024 narrowed this definition (from AY 2026-27): it now targets "
+            "debt-oriented funds (over 65% in debt/money-market). Some funds caught by the older "
+            "'not more than 35% equity' test — such as certain ETFs, gold funds, and 35–65% "
+            "hybrids — are no longer specified funds and follow the residual capital-gains "
+            "rules instead.\n\n"
             "## Units acquired before 1 April 2023\n\n"
             "Older units follow the earlier rules. After the Finance Act 2024, long-term gains "
             "(units held more than 36 months) on transfers made on or after 23 July 2024 are "
@@ -150,7 +159,7 @@ ARTICLES: list[dict] = [
     {
         "slug": "idcw-dividend-taxation",
         "title": "How IDCW (dividend) payouts are taxed",
-        "summary": "IDCW is added to total income and taxed at the slab rate, with TDS once it crosses ₹5,000 in a year.",
+        "summary": "IDCW is added to total income and taxed at the slab rate, with TDS once it crosses ₹10,000 in a year.",
         "category": "Income",
         "fy_label": _FY,
         "sort_order": 50,
@@ -163,8 +172,9 @@ ARTICLES: list[dict] = [
             "**slab rate** — there is no separate concessional rate.\n\n"
             "## TDS under Section 194K\n\n"
             "The fund house deducts **TDS at 10%** on IDCW paid to a resident investor when the "
-            "total IDCW from that fund exceeds **₹5,000** in a financial year. The TDS is "
-            "adjusted against the final tax liability when the return is filed.\n\n"
+            "total IDCW from that fund exceeds **₹10,000** in a financial year (the threshold was "
+            "raised from ₹5,000 with effect from 1 April 2025). The TDS is adjusted against the "
+            "final tax liability when the return is filed.\n\n"
             "## Growth vs IDCW\n\n"
             "Under the **Growth** option no payout is made, so there is no annual IDCW to tax; "
             "gains are then taxed only on redemption under the capital-gains rules. The "
