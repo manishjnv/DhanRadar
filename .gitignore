@@ -49,6 +49,8 @@ postgres-data/
 redis-data/
 # Deploy state (last-good SHA + alembic rev recorded by scripts/deploy.sh)
 .deploy/
+# Local phased deploy/verify scripts — run on the box, never committed
+scripts/_deploy_tmp/
 
 # ── OS / editor ───────────────────────────────────────────────────────
 .DS_Store

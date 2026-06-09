@@ -279,6 +279,7 @@ async def db_tables(db_engine):
     import dhanradar.models.compliance  # noqa: F401 — registers compliance.* tables
     import dhanradar.models.mood  # noqa: F401 — registers mood.* tables
     import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
+    import dhanradar.models.audit  # noqa: F401 — registers audit.* tables (B57)
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
@@ -289,6 +290,7 @@ async def db_tables(db_engine):
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS compliance"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS mood"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS consent"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )
