@@ -28,6 +28,8 @@ export const metadata: Metadata = {
   title: 'FY Tax Calendar & Key Deadlines — DhanRadar Tax Education',
   description:
     'Key income-tax dates for the current financial year: ITR filing deadlines, ELSS lock-in reminders, advance tax dates, and more. Educational content only.',
+  // TEMPORARY: noindex until a human CA signs off the tax figures (G8-f2).
+  robots: { index: false, follow: false },
   openGraph: {
     title:       'FY Tax Calendar & Key Deadlines — DhanRadar Tax Education',
     description: 'Key income-tax dates for the current financial year.',

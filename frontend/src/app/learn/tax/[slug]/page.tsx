@@ -41,6 +41,8 @@ export async function generateMetadata({
   return {
     title:       `${article.title} — DhanRadar Tax Education`,
     description: article.summary,
+    // TEMPORARY: noindex until a human CA signs off the tax figures (G8-f2).
+    robots: { index: false, follow: false },
     openGraph: {
       title:       `${article.title} — DhanRadar Tax Education`,
       description: article.summary,

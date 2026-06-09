@@ -29,6 +29,9 @@ export const metadata: Metadata = {
   title: 'Tax Education — DhanRadar',
   description:
     'Plain-language guides on Indian income-tax rules, ELSS, capital gains, and key FY deadlines. Educational content only — not investment advice.',
+  // TEMPORARY: noindex until a human CA signs off the tax figures (G8-f2). Pages
+  // stay reachable by direct URL for testing on the live site; remove to publish.
+  robots: { index: false, follow: false },
   openGraph: {
     title:       'Tax Education — DhanRadar',
     description: 'Plain-language guides on Indian income-tax rules, ELSS, capital gains, and key FY deadlines.',
