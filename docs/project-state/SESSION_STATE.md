@@ -1,11 +1,61 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-10 (G8 Tax-Education + B56 dashboard — merge-eligible; deploying both to KVM4)
+**Last updated:** 2026-06-10 (Plan Group 3 — Portfolio Intelligence: overlap + concentration — merge-eligible, NOT deployed)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## B56 NEWS ENDPOINT + DASHBOARD NEWS WIDGET — merge-eligible, NOT deployed (2026-06-10)
+## PLAN GROUP 3 — PORTFOLIO INTELLIGENCE — merge-eligible, NOT deployed (2026-06-10)
+
+Branch: `feat/portfolio-intelligence-overlap-concentration`. Two commits off latest `main`.
+
+Plan Group 3 MF-first wedge: factual portfolio composition analysis — no advisory verbs, no
+numeric DhanRadar score in DOM.
+
+**Backend: `backend/dhanradar/insights/` (new module)**
+- `GET /api/v1/portfolio/{portfolio_id}/overlap` — factual fund-pair overlap by shared category
+  allocation; category distribution breakdown. Empty portfolio → 200 with empty lists. IDOR guard:
+  `portfolio_id + user_id` check → 404 on mismatch. Reuses `mf.snapshot.category_allocation`.
+- `GET /api/v1/portfolio/{portfolio_id}/concentration` — factual by-category / by-AMC / by-fund
+  allocation percentages with educational context lines. Same IDOR pattern.
+- Both endpoints: auth required (anonymous → 401); disclosure bundle + `NOT_ADVICE` on every
+  response; `unified_score` never in any response field (explicit allowlist schemas).
+- Wired into `main.py` with one `include_router` line.
+
+**Tests (backend):** 22 unit tests (advisory-verb scan, no-unified-score guard, disclosure present,
+  empty portfolio valid shape, IDOR ValueError, malformed uid/pid); integration tests (anon 401,
+  wrong portfolio 404, empty portfolio 200 + disclosure).
+
+**Frontend:**
+- `frontend/src/features/portfolio/api.ts`: `usePortfolioOverlap` + `usePortfolioConcentration`
+  hooks; explicit allowlist types; retry: never on 401/404.
+- `frontend/src/lib/queryKeys.ts`: added `portfolio.overlap(id)` + `portfolio.concentration(id)`.
+- `OverlapSection.tsx`: fund-pair list + category distribution; `<DisclosureBundle>`; empty/error state.
+- `ConcentrationSection.tsx`: by-category/AMC/fund with `AllocationBar`; `<DisclosureBundle>`.
+- `app/(app)/portfolio/[portfolioId]/intelligence/page.tsx`: route; `force-dynamic` (RCA G8).
+- 15 vitest tests covering renders, empty state, disclosure present, advisory-verb scan (word-boundary).
+
+**Gates all green:** pytest 22/22, ruff clean, ci_guards PASS, anti_pattern PASS, vitest 15/15,
+  tsc clean, eslint clean.
+
+**Compliance review (inline, Tier-A + Compliance — Opus):** ACCEPT. Advisory verbs absent (CI guards
+  + 22 unit verb scans); no numeric DhanRadar score in DOM; disclosure on every response; IDOR guard
+  confirmed; cold-start 200 confirmed. No advisory text produced by frontend — all framing copy is
+  backend-authored observational strings rendered verbatim.
+
+**NOT deployed** — KVM4 deploy is human-gated. No open Security or Compliance BLOCKER.
+
+### Agent-utilization & routing telemetry (Plan Group 3 session)
+
+- **Opus (Tier 0):** all implementation (Sonnet subagent delegation failed: "agent not found" for
+  `Claude Sonnet 4.6 (copilot)`); inline Compliance review (advisory-verb + no-score-leak surface
+  adjacent to user data — Tier-A but observational text path warrants inline check); all gates;
+  session-state update.
+- **Sonnet (Tier 1):** n/a — subagent invocation failed; Opus self-executed.
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — account not entitled; Tier-A change; no auth/scoring/billing/AI path.
+
+
 
 Closed the B56 `/news` deferral by implementing the backend endpoint and wiring the dashboard widget
 to the real contract shape.
