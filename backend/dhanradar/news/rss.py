@@ -9,6 +9,12 @@ Governance:
     Article body/excerpt is NEVER fetched or stored (copyright compliance).
   - URL LIVENESS: each item's canonical_url is HEAD-checked before it is accepted.
     Non-2xx responses are skipped at ingest, so dead links never reach the UI.
+  - MF RELEVANCE FILTER: DhanRadar is MF-first. Each feed entry in _FEED_REGISTRY
+    may carry a `keywords` list; when set, only items whose title contains at least
+    one keyword (case-insensitive) are accepted. Items with no keyword match are
+    silently dropped — they are not MF-relevant for this platform.
+    For RBI feeds, monetary-policy items (repo rate, CPI, inflation) are included
+    because they directly affect debt-fund and liquid-fund performance.
   - GRACEFUL DEGRADE: any feed-level fetch failure returns [] and is logged; caller
     (tasks/news.py) falls back to curated seed. No task crash, no 500 on the endpoint.
   - PROVENANCE: provenance_source is set to the feed URL so every DB row is traceable.
@@ -18,6 +24,9 @@ Source registry rationale:
   for syndication (rbi.org.in/Scripts/rss.aspx); content is factual regulatory
   announcements (informational, not advisory); SEBI educational boundary satisfied.
   Headline + link only = standard RSS aggregation.
+  MF relevance gate: RBI publishes mostly banking/forex/G-Sec content. Only items
+  matching `_RBI_MF_KEYWORDS` (mutual funds, AMFI, SIP, NAV, monetary policy) are
+  retained; pure-banking items are dropped.
 
   SEBI: sebi.gov.in RSS URL was 404 on 2026-06-10 fetch — DISABLED in registry.
   AMFI: no public RSS feed located — SKIP.
@@ -38,6 +47,121 @@ from dhanradar.config import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# MF-relevance keyword filter
+# ---------------------------------------------------------------------------
+# DhanRadar is an MF-first platform. RBI publishes broad regulatory/macro content
+# (banking, forex, G-Secs, T-bills, NBFCs) that is NOT relevant to mutual fund
+# investors. Only items matching at least one keyword below pass the relevance gate.
+#
+# Two groups:
+#   _MF_KEYWORDS  — direct MF-specific terms → category promoted to "mutual_funds"
+#   _MACRO_KEYWORDS — monetary-policy terms relevant to debt/liquid fund investors
+#                     → category stays "macro" (as-configured in registry)
+#
+# Items matching neither group are dropped silently (not stored, not served).
+# ---------------------------------------------------------------------------
+_MF_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "mutual fund",
+        "mutual funds",
+        "amfi",
+        "scheme",
+        "sip",
+        "nav",
+        "systematic investment",
+        "open-ended",
+        "closed-ended",
+        "fund of funds",
+        "fund manager",
+        "aum",
+        "asset management",
+        "sebi/mutual",
+        "category iii",
+        "alternative investment fund",
+        "aif",
+        "portfolio management",
+        "pms",
+        "etf",
+        "exchange traded fund",
+        "index fund",
+        "hybrid fund",
+        "debt fund",
+        "liquid fund",
+        "overnight fund",
+        "gilt fund",
+        "equity fund",
+        "balanced fund",
+        "folio",
+        "redemption",       # MF redemption (vs SGB premature redemption — filtered below)
+        "new fund offer",
+        "nfo",
+        "dividend",         # MF dividend re-categorisation
+        "growth option",
+        "direct plan",
+        "regular plan",
+        "expense ratio",
+        "ter",
+        "total expense ratio",
+        "sebi (mutual fund",
+        "sebi (mf)",
+    }
+)
+
+_MACRO_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "repo rate",
+        "reverse repo",
+        "monetary policy",
+        "mpc",
+        "monetary policy committee",
+        "inflation",
+        "cpi",
+        "wpi",
+        "interest rate",
+        "rate cut",
+        "rate hike",
+        "liquidity",
+        "overnight rate",
+        "crr",
+        "slr",
+        "cash reserve ratio",
+        "statutory liquidity ratio",
+        "rbi policy",
+        "policy statement",
+        "policy rate",
+    }
+)
+
+
+def _is_mf_relevant(title: str) -> tuple[bool, str | None]:
+    """Return (True, override_category) when the title passes the MF relevance gate.
+
+    Returns (False, None) for items that should be dropped.
+
+    override_category is "mutual_funds" when direct MF keywords match, else None
+    (caller keeps the registry-configured category, e.g. "macro").
+
+    Exclusion guard: titles that contain SGB (Sovereign Gold Bond) are excluded
+    even if they also contain "redemption" — SGB is not a mutual fund product.
+    """
+    lower = title.lower()
+
+    # Hard exclusion: SGB premature-redemption items are RBI sovereign-bond items
+    # and should not surface on a MF platform even if they contain "redemption".
+    if "sovereign gold bond" in lower or " sgb " in lower or lower.startswith("sgb "):
+        return False, None
+
+    for kw in _MF_KEYWORDS:
+        if kw in lower:
+            return True, "mutual_funds"
+
+    for kw in _MACRO_KEYWORDS:
+        if kw in lower:
+            return True, None  # keep registry category ("macro")
+
+    return False, None
+
+# ---------------------------------------------------------------------------
 # Sanctioned-source registry
 # ---------------------------------------------------------------------------
 # Each entry:
@@ -54,6 +178,7 @@ _FEED_REGISTRY: list[dict] = [
         "category": "macro",
         "scope": "market",
         "enabled": True,
+        # MF relevance filter applied at item level via _is_mf_relevant().
     },
     {
         "url": "https://rbi.org.in/notifications_rss.xml",
@@ -61,6 +186,7 @@ _FEED_REGISTRY: list[dict] = [
         "category": "regulation",
         "scope": "market",
         "enabled": True,
+        # MF relevance filter applied at item level via _is_mf_relevant().
     },
     # SEBI RSS — 404 confirmed 2026-06-10; disabled until URL is re-verified live.
     {
@@ -187,6 +313,18 @@ async def fetch_feed(feed_meta: dict) -> list[dict]:
                 if link.startswith("http://www.rbi.org.in/"):
                     link = "https://www.rbi.org.in/" + link[len("http://www.rbi.org.in/"):]
 
+                # MF relevance gate — applied BEFORE HEAD check to avoid network
+                # round-trips for items we will discard regardless.
+                relevant, override_category = _is_mf_relevant(title)
+                if not relevant:
+                    logger.debug(
+                        "news.rss.relevance: '%s' — not MF relevant, skipped", title[:80]
+                    )
+                    continue
+
+                # Use overridden category when the item directly matches MF keywords.
+                effective_category = override_category if override_category else category
+
                 # URL liveness check — dead links are skipped at ingest.
                 if not await _head_check(head_client, link):
                     logger.info(
@@ -197,7 +335,7 @@ async def fetch_feed(feed_meta: dict) -> list[dict]:
                 items.append(
                     {
                         "scope": scope,
-                        "category": category,
+                        "category": effective_category,
                         "title": title,
                         "source": source,
                         "canonical_url": link,
