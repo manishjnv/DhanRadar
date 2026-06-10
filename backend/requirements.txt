@@ -29,4 +29,6 @@ scipy>=1.11.0          # XIRR via brentq
 Pillow>=10.3.0         # 1200x630 share-card PNG render (worker; lazily imported)
 # --- Logging: structured JSON + redaction (P1) ---
 structlog>=24.1.0
+# --- News RSS ingestion (B56) ---
+feedparser>=6.0.10
 
