@@ -1,13 +1,39 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-10 (Plan Group 3 — Portfolio Intelligence: overlap + concentration — merge-eligible, NOT deployed)
+**Last updated:** 2026-06-10 (fix/cdsl-cas — CDSL CAS parsing gap fixed, PR #67 squash-merged, deployed to KVM4 at `f9d96b7`)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## PLAN GROUP 3 — PORTFOLIO INTELLIGENCE — merge-eligible, NOT deployed (2026-06-10)
+## FIX/CDSL-CAS — DEPLOYED (2026-06-10, `f9d96b7`, PR #67)
 
-Branch: `feat/portfolio-intelligence-overlap-concentration`. Two commits off latest `main`.
+**Root cause:** `parse_cas` walked `folios[].schemes[]` (CAMS/KFintech shape). casparser 1.1.0
+changed the CDSL CAS schema: CDSL files now use `accounts[].mutual_funds[]` with no `folios` key.
+Real user's CDSL CAS returned 0 holdings (silent, not an error).
+
+**Fix (`backend/dhanradar/mf/cas.py`):** After the existing `folios` walk, if `holdings` is empty
+AND `raw.get("accounts")` exists, walks `accounts[].mutual_funds[]`. Name cleaning: if `#` in raw
+AMC name, take after last `#`; if result has a `-`, strip short AMC prefix (≤20 chars, no spaces).
+CAMS/KFintech path completely unaffected.
+
+**Tested against real CDSL CAS (`docs/cas.pdf`):** 10 MF holdings, ₹1,98,065 total value. XIRR
+stays null for CDSL holdings (no transaction history in CDSL MF format — by design). CAMS 14
+existing tests pass.
+
+**New test:** `test_parse_cas_handles_cdsl_accounts_structure` (fake CDSL reader fixture); 15/15
+pass. Gates: pytest 15/15, ruff clean, ci_guards PASS, anti_pattern PASS.
+
+### Agent-utilization & routing telemetry (CDSL fix session)
+
+- **Opus (Tier 0):** root-cause diagnosis (casparser 1.1.0 schema change); fix implementation;
+  test authoring; all gates; PR + deploy.
+- **Sonnet (Tier 1):** n/a.
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — minor bug fix, no auth/billing/AI/scoring path touched.
+
+## PLAN GROUP 3 — PORTFOLIO INTELLIGENCE — DEPLOYED (2026-06-10, `b75ffd4`, PR #65)
+
+Branch: `feat/portfolio-intelligence-overlap-concentration` (squash-merged via PR #65).
 
 Plan Group 3 MF-first wedge: factual portfolio composition analysis — no advisory verbs, no
 numeric DhanRadar score in DOM.
@@ -43,7 +69,7 @@ numeric DhanRadar score in DOM.
   confirmed; cold-start 200 confirmed. No advisory text produced by frontend — all framing copy is
   backend-authored observational strings rendered verbatim.
 
-**NOT deployed** — KVM4 deploy is human-gated. No open Security or Compliance BLOCKER.
+**DEPLOYED** — KVM4 at `b75ffd4` (PR #65 squash-merged). All 9 containers healthy post-deploy.
 
 ### Agent-utilization & routing telemetry (Plan Group 3 session)
 
