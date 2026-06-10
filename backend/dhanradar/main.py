@@ -31,6 +31,7 @@ from dhanradar.errors import (
 from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
+from dhanradar.insights.router import router as insights_router
 from dhanradar.news.router import router as news_router
 from dhanradar.notifications.router import router as notifications_router
 from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
@@ -124,6 +125,7 @@ app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile 
 app.include_router(dashboard_router, prefix="/api/v1")  # B56 — home dashboard reads (portfolio summary / indices / top-scored)
 app.include_router(education_router, prefix="/api/v1")  # G8 — public tax-education (anonymous-read, crawlable)
 app.include_router(news_router, prefix="/api/v1")  # B56 — curated headline metadata (anonymous-read)
+app.include_router(insights_router, prefix="/api/v1")  # Plan Group 3 — portfolio intelligence (overlap + concentration)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).

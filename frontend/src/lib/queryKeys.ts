@@ -18,9 +18,11 @@ export const queryKeys = {
     detail: (symbol: string) => ['scores', symbol] as const,
   },
   portfolio: {
-    all:     () => ['portfolio'] as const,
-    detail:  (id: string) => ['portfolio', id] as const,
-    summary: () => ['portfolio', 'summary'] as const,
+    all:          () => ['portfolio'] as const,
+    detail:       (id: string) => ['portfolio', id] as const,
+    summary:      () => ['portfolio', 'summary'] as const,
+    overlap:      (portfolioId: string) => ['portfolio', portfolioId, 'overlap'] as const,
+    concentration: (portfolioId: string) => ['portfolio', portfolioId, 'concentration'] as const,
   },
   watchlists: {
     all:    () => ['watchlists'] as const,
