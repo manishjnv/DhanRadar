@@ -13,6 +13,7 @@ Guards:
   3. No Manrope/Inter fonts in the generated token files (D1 — Geist only).
   4. No advisory verbs as usage in code (non-neg #2 — educational labels only).
   5. No obvious committed secrets.
+  6. No pooled-engine session creation outside db.py (SEV2 NullPool invariant).
 """
 
 from __future__ import annotations
@@ -144,6 +145,31 @@ for p in _advisory_scan_files():
         if _ADV_HARD.search(line) or _ADV_QUOTED.search(line) or _ADV_KEY.search(line):
             rel = p.relative_to(ROOT)
             fails.append(f"{rel}:{i}: advisory verb usage (non-neg #2: educational labels only)")
+
+# 6. Pooled-engine session creation outside db.py (SEV2 NullPool invariant) ------
+# Only db.py is allowed to bind `async_sessionmaker(engine, ...)` to the pooled
+# QueuePool engine. Every other module must use TaskSessionLocal (backed by the
+# NullPool task_engine) or receive a session via get_db / task_session. A module
+# that creates its OWN async_sessionmaker(engine, ...) at call time drags the
+# pooled engine into Celery asyncio.run() calls and reproduces the InterfaceError
+# SEV2 (docs/rca/README.md 2026-06-10). The pattern `async_sessionmaker(engine`
+# is the literal trigger — TaskSessionLocal/task_engine are explicitly exempted
+# (they are fine; the guard does not flag them).
+_DB_PY = ROOT / "backend" / "dhanradar" / "db.py"
+for p in code_files():
+    if p.resolve() == _DB_PY.resolve():
+        continue  # db.py owns the pooled-engine binding — always allowed
+    t = read(p)
+    for i, line in enumerate(t.splitlines(), 1):
+        # Flag any line that creates a session from the pooled `engine` directly.
+        # Exempt the NullPool task_engine binding (it's always safe) and any
+        # comment/string that merely references the pattern.
+        if re.search(r"async_sessionmaker\(engine\b", line):
+            rel = p.relative_to(ROOT)
+            fails.append(
+                f"{rel}:{i}: async_sessionmaker(engine) outside db.py "
+                "(SEV2 guard #6 — use TaskSessionLocal instead)"
+            )
 
 # 5. Secret scan (scoped) ---------------------------------------------------
 SECRET_RES = [

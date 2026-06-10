@@ -1,4 +1,4 @@
-"""Self-test for scripts/ci_guards.py advisory coverage (B13).
+"""Self-test for scripts/ci_guards.py advisory coverage (B13) and NullPool guard (SEV2).
 
 Runs the real guard script as a subprocess (exactly as CI invokes it) against a
 temporary non-code asset planted in the frontend tree, proving that:
@@ -7,7 +7,11 @@ temporary non-code asset planted in the frontend tree, proving that:
     (the gap that let an advisory ``signal`` block ship in tokens.json), and
   * camelCase advisory keys (``strongBuy``) are caught, not only snake_case.
 
-The fixture is written under ``frontend/`` and always removed in ``finally`` so
+Also tests Guard #6 (pooled-engine session outside db.py) by planting a fixture
+Python file under ``backend/dhanradar/`` with ``async_sessionmaker(engine`` and
+asserting the guard flags it (SEV2 prevention).
+
+The fixture is written under its target tree and always removed in ``finally`` so
 the working tree is left clean even if an assertion fails.
 """
 
@@ -22,6 +26,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GUARD = REPO_ROOT / "scripts" / "ci_guards.py"
 FRONTEND = REPO_ROOT / "frontend"
+BACKEND_DHANRADAR = REPO_ROOT / "backend" / "dhanradar"
 
 
 def _run_guard() -> subprocess.CompletedProcess[str]:
@@ -91,3 +96,41 @@ def test_standalone_switch_value_still_flagged() -> None:
         assert "__ci_guard_selftest_switch__" in result.stdout
     finally:
         fixture.unlink(missing_ok=True)
+
+
+def test_pooled_engine_session_outside_db_py_is_caught() -> None:
+    """Guard #6 (SEV2 NullPool invariant): any file under backend/dhanradar/ other
+    than db.py that contains ``async_sessionmaker(engine`` must be flagged.
+
+    Regression: the original #69 fix migrated tasks/* but left service files
+    open-coding their own pooled-engine sessions; Guard #6 ensures that pattern
+    can never re-enter the tree undetected.
+    """
+    fixture = BACKEND_DHANRADAR / "__ci_guard_nullpool_test__.py"
+    fixture.write_text(
+        "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker\n"
+        "from dhanradar.db import engine\n"
+        "SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)\n",
+        encoding="utf-8",
+    )
+    try:
+        result = _run_guard()
+        assert result.returncode == 1, (
+            "guard must FAIL when async_sessionmaker(engine) appears outside db.py, "
+            f"but passed:\n{result.stdout}"
+        )
+        assert "SEV2 guard #6" in result.stdout
+        assert "__ci_guard_nullpool_test__" in result.stdout
+    finally:
+        fixture.unlink(missing_ok=True)
+
+
+def test_db_py_pooled_engine_not_flagged() -> None:
+    """Guard #6 must NOT flag db.py itself — it is the one allowed owner of the
+    pooled-engine binding."""
+    # The committed db.py already contains async_sessionmaker(engine).
+    # If the guard is clean on the real tree, this invariant holds.
+    result = _run_guard()
+    assert result.returncode == 0, (
+        f"db.py's own async_sessionmaker(engine) must not be flagged:\n{result.stdout}"
+    )
