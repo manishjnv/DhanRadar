@@ -1,9 +1,57 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-10 (fix/cdsl-cas — CDSL CAS parsing gap fixed, PR #67 squash-merged, deployed to KVM4 at `f9d96b7`)
+**Last updated:** 2026-06-10 (fix/b56-live-news-rss — B56 stale news feed fixed; live RBI RSS ingestion; merge-eligible, NOT deployed)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## FIX/B56-LIVE-NEWS-RSS — merge-eligible, NOT deployed (2026-06-10)
+
+Branch: `fix/b56-live-news-rss`. One commit (`0b91826`) off latest `main` (`670bc1a`).
+
+**Problem:** `/news` endpoint served hardcoded 2024 headlines with dead (404) URLs.
+`refresh_market_news` beat task re-upserted the same 3-item static seed every 30 min.
+No live fetch ever existed.
+
+**Fix:**
+- `news/rss.py` (NEW): sanctioned-feed registry (RBI press releases + notifications); httpx async
+  fetch + feedparser; per-item HEAD liveness check at ingest (non-2xx → skip); graceful degrade
+  (any error returns []). ToS confirmed live 2026-06-10 from rbi.org.in/Scripts/rss.aspx. SEBI
+  feed disabled (URL 404). Provenance stamped per row.
+- `config.py`: `NEWS_MAX_AGE_DAYS=30`, `NEWS_STALENESS_WARN_HOURS=24`,
+  `NEWS_URL_HEAD_TIMEOUT_S=8`, `NEWS_FEED_FETCH_TIMEOUT_S=15`.
+- `news/service.py`: `fetch_and_upsert_rss_news()` (primary); `list_news` gains recency filter
+  (`published_at >= now − NEWS_MAX_AGE_DAYS`) + staleness WARNING log.
+- `tasks/news.py`: call `fetch_and_upsert_rss_news` first; fall back to curated seed when RSS
+  returns 0 items; uses `TaskSessionLocal` (NullPool — safe for Celery asyncio.run()).
+- `requirements.txt`: +feedparser>=6.0.10.
+- No DB migration (schema unchanged; `is_active` + `provenance_source` in migration 0016).
+
+**Prevention closed (all 4 from RCA):** URL liveness check · recency guard · staleness log ·
+regression tests (8 new unit in test_news_rss.py + 3 new in test_news_service.py + 1 integration).
+
+**Also on branch:** `b713ecb` — NullPool TaskSessionLocal SEV2 fix for Celery (already merged to
+main as origin/main `670bc1a` PR #69; that commit is NOT in this PR — branch is clean 1-commit
+delta from main).
+
+**Gates all green:** pytest 15/15 new news unit tests (596 total, 16 pre-existing unrelated fails),
+ruff clean, ci_guards PASS, anti_pattern PASS, tsc clean, vitest 104/104.
+
+**Compliance review (inline, Tier-A + Compliance):** ACCEPT. Headlines are informational regulatory
+announcements from RBI (not advisory). `NOT_ADVICE` note already on widget. No advisory verbs;
+content is source titles rendered verbatim; ci_guards PASS. SEBI educational boundary satisfied.
+
+**Closes:** B56-f5 (RSS ToS registry evidence confirmed and in source registry).
+**RCA:** `docs/rca/README.md` B56 entry updated with commit ref `0b91826`.
+**NOT deployed** — KVM4 deploy is human-gated. No open Security or Compliance BLOCKER.
+
+### Agent-utilization & routing telemetry (B56 news RSS session)
+
+- **Opus (Tier 0):** Phase 0 warm-start + plan, all implementation, inline Compliance review,
+  all gates, SESSION_STATE update.
+- **Sonnet / Haiku:** n/a — subagent delegation not required for this scope.
+
+---
 
 ## FIX/CDSL-CAS — DEPLOYED (2026-06-10, `f9d96b7`, PR #67)
 
