@@ -14,7 +14,7 @@ Acting as Claude Code receiving only the ZIP, these artifacts were missing for z
 | Dependency manifests | `project-config/package.json`, `pyproject.toml` |
 | Local infra | `project-config/docker-compose.yml` |
 | CI as a file | `project-config/github-actions-ci.yml` |
-| Reference code (token→component) | `frontend/src/components/` + `frontend/src/lib/` (note: superseded the old reference-impl) |
+| Reference code (token→component) | `reference-impl/*` (cn, apiClient, queryKeys, tailwind preset, Button, Card, ScoreRing) |
 | Run instructions | `GETTING_STARTED.md` |
 
 ## Verdict

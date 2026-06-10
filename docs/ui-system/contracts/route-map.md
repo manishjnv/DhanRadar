@@ -1,11 +1,5 @@
 # Route Map (URL ↔ page ↔ API ↔ auth)
 
-> ⛔ **DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY (B41).**
-> Part of the `docs/ui-system` kit, which **conflicts with the binding
-> architecture** and is **not** a source of truth. Do not implement from it.
-> Authority: `docs/DhanRadar_Architecture_Final.md`; apply only per
-> `docs/project-state/MIGRATION_STRATEGY_FINAL.md` (KEEP/MERGE/REPLACE/IGNORE).
-
 | Route | Page component | Primary API | Group | Auth | Render |
 |---|---|---|---|---|---|
 | / | MarketingHome | /billing/plans | (marketing) | public | static |

@@ -2,10 +2,6 @@
 
 Wealth, scanned. Spot better investments before the crowd.
 
-> **This is the brand guide (reference).** The canonical design **tokens** live in `frontend/`
-> (`frontend/styles/tokens.json` → `gen-tokens.mjs`), and the **logo/favicon source files** listed
-> below live in `frontend/public/brand/`. This folder holds only this guide + `mockups/`.
-
 ---
 
 ## Logo files
@@ -101,13 +97,21 @@ Minimum clear space around the lockup = the height of the **D** glyph on all sid
 ## Files in this kit
 
 ```
-docs/ui-system/brand/
-├── README.md      ← you are here (brand guide)
-└── mockups/       ← .jsx design mockups (reference)
-
-Logo / favicon source files  →  frontend/public/brand/  (served at /brand/*)
-Design tokens (canonical)    →  frontend/styles/tokens.json → gen-tokens.mjs →
-                                frontend/src/styles/tokens.css, frontend/tailwind.config.js
+brand/
+├── README.md                     ← you are here
+├── logo-primary.svg              ← default lockup
+├── logo-mono-light.svg
+├── logo-mono-dark.svg
+├── icon.svg                      ← mark only
+├── favicon.svg
+├── favicon-16.png · -32 · -48
+├── apple-touch-icon.png          ← 180×180
+├── android-chrome-192.png · -512
+├── app-icon-1024.png             ← App Store
+├── og-image.png                  ← 1200×630 social share
+├── tokens.json                   ← all tokens, framework-agnostic
+├── tokens.css                    ← CSS custom properties
+└── tailwind.config.js            ← Tailwind preset
 ```
 
 ---
