@@ -401,6 +401,16 @@ def test_is_mf_relevant_unrelated_returns_false():
     assert _is_mf_relevant(
         "RBI releases information on reserve money for the week ending June 2026"
     )[0] is False
+    # 'cash reserve ratio'/'statutory liquidity ratio' in bank amendment directions
+    # must NOT be treated as MF-relevant (they're bank-specific regulations)
+    assert _is_mf_relevant(
+        "Reserve Bank of India (Regional Rural Banks – Cash Reserve Ratio and "
+        "Statutory Liquidity Ratio) Second Amendment Directions, 2026"
+    )[0] is False
+    assert _is_mf_relevant(
+        "Reserve Bank of India (Urban Co-operative Banks – Cash Reserve Ratio and "
+        "Statutory Liquidity Ratio) Second Amendment Directions, 2026"
+    )[0] is False
 
 
 # ---------------------------------------------------------------------------
