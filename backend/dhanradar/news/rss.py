@@ -118,15 +118,16 @@ _MACRO_KEYWORDS: frozenset[str] = frozenset(
         "interest rate",
         "rate cut",
         "rate hike",
-        "liquidity",
         "overnight rate",
-        "crr",
-        "slr",
-        "cash reserve ratio",
-        "statutory liquidity ratio",
         "rbi policy",
         "policy statement",
         "policy rate",
+        # NOTE: 'crr', 'slr', 'cash reserve ratio', 'statutory liquidity ratio',
+        # and 'liquidity' are deliberately excluded — they appear in hundreds of
+        # bank-specific amendment directions (rural/urban/co-op banks) and are
+        # NOT relevant to MF investors. Actual system-wide CRR/SLR changes are
+        # always announced via monetary policy statements (caught by "monetary
+        # policy", "mpc", "rate cut", "rate hike" above).
     }
 )
 
