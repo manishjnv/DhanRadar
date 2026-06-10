@@ -59,17 +59,14 @@ def drain_notifications() -> str:
 
 
 async def _drain() -> str:
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.redis_client import get_redis
 
     redis = get_redis()
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     now = service.now_ist_time()
     delivered = 0
 
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         for channel in _DELIVER_CHANNELS:
             qkey = service.queue_key(channel)
             pending = min(await redis.llen(qkey), _MAX_PER_TICK)

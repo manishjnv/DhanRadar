@@ -163,9 +163,8 @@ async def _run_pipeline(
     request_id: str | None = None,
 ) -> str:
     from sqlalchemy import update
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
@@ -176,7 +175,6 @@ async def _run_pipeline(
     _slog.info("cas_pipeline_start", job_id=job_id)
 
     redis = get_redis()
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     # Consume-and-delete the CAS password from its short-lived Redis key (it was
     # never put on the broker). Missing → None (an unprotected CAS still parses).
@@ -188,7 +186,7 @@ async def _run_pipeline(
     parsed = parse_cas(path, password)  # raises CasParseError on bad password/format
     rengine = RatingEngine()
 
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="parsing", progress_pct=40)
         )
@@ -438,13 +436,11 @@ async def _compute_cohort(
 
 async def _mark_failed(job_id: str, message: str) -> None:
     from sqlalchemy import update
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfCasJob
 
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(
                 status="failed", error_message=message[:500]
@@ -479,9 +475,8 @@ def nav_daily_fetch() -> str:
 
 async def _nav_daily_pipeline() -> str:
     from sqlalchemy.dialects.postgresql import insert
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.market_data import amfi
     from dhanradar.models.mf import MfFund, MfNavHistory
 
@@ -492,8 +487,7 @@ async def _nav_daily_pipeline() -> str:
     nav_dicts = _navrows_to_nav_upserts(rows)
     fund_dicts = _navrows_to_fund_upserts(rows)
 
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         # -- mf_nav_history bulk upsert in chunks ---------------------------------
         n_nav = 0
         for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
@@ -550,9 +544,8 @@ async def _nav_backfill_pipeline(years: int) -> str:
     import asyncio as _asyncio
 
     from sqlalchemy.dialects.postgresql import insert
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.market_data import amfi
     from dhanradar.market_data.exceptions import ProviderError
     from dhanradar.models.mf import MfNavHistory
@@ -575,7 +568,6 @@ async def _nav_backfill_pipeline(years: int) -> str:
         years, len(windows), start, today,
     )
 
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     total_rows = 0
     windows_fetched = 0
 
@@ -592,7 +584,7 @@ async def _nav_backfill_pipeline(years: int) -> str:
 
         nav_dicts = _navrows_to_nav_upserts(rows)
         if nav_dicts:
-            async with SessionLocal() as db:
+            async with TaskSessionLocal() as db:
                 for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
                     chunk = nav_dicts[i : i + _UPSERT_CHUNK]
                     if not chunk:
@@ -636,9 +628,8 @@ def monthly_rescore_plus_users() -> str:
 
 async def _monthly_rescore() -> str:
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine as _engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.deps import is_plus
     from dhanradar.mf import history as mf_history
     from dhanradar.mf.snapshot import CashFlow as _CashFlow
@@ -649,12 +640,11 @@ async def _monthly_rescore() -> str:
     from dhanradar.scoring.engine import RatingEngine
     from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
-    SessionLocal = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
     rengine = RatingEngine()
     today = date.today()
     redis = get_redis()
 
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         # All distinct portfolios that currently have holdings.
         pid_rows = (
             await db.execute(
@@ -667,7 +657,7 @@ async def _monthly_rescore() -> str:
 
     for pid in portfolio_ids:
         try:
-            async with SessionLocal() as db:
+            async with TaskSessionLocal() as db:
                 # Resolve the owning user_id + portfolio name for this portfolio.
                 port_row = (
                     await db.execute(
