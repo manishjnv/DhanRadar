@@ -94,13 +94,11 @@ _MF_KEYWORDS: frozenset[str] = frozenset(
         "folio",
         "redemption",       # MF redemption (vs SGB premature redemption — filtered below)
         "new fund offer",
-        "nfo",
         "dividend",         # MF dividend re-categorisation
         "growth option",
         "direct plan",
         "regular plan",
         "expense ratio",
-        "ter",
         "total expense ratio",
         "sebi (mutual fund",
         "sebi (mf)",
