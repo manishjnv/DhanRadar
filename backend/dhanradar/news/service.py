@@ -29,34 +29,35 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Admin-curated seed source (no external fetch; update out-of-band)
 # ---------------------------------------------------------------------------
-# Each entry: scope, category, title, source, canonical_url, published_at
-# The beat task upserts these every 30 min best-effort.  Only headline + link
-# are stored; article body/excerpt is never persisted.
+# Curated items are MF-relevant reference links shown as a fallback when all
+# RSS feeds return zero MF-relevant items.
+#
+# Design: `published_at` is intentionally NOT in the dict — it is set to
+# `datetime.now(UTC)` at each upsert so these items always pass the 30-day
+# recency filter (they are "always-fresh" featured content, not dated news).
+# Update the URLs below whenever more-current content is available.
 # ---------------------------------------------------------------------------
 _CURATED_ITEMS: list[dict] = [
     {
         "scope": "market",
-        "category": "regulation",
-        "title": "SEBI circular on mutual fund categorisation — March 2024",
-        "source": "SEBI",
-        "canonical_url": "https://www.sebi.gov.in/legal/circulars/mar-2024/circulars.html",
-        "published_at": datetime(2024, 3, 1, tzinfo=UTC),
+        "category": "mutual_funds",
+        "title": "AMFI monthly SIP data — industry inflow statistics",
+        "source": "AMFI",
+        "canonical_url": "https://www.amfiindia.com/research-information/other-data/sip-data",
     },
     {
         "scope": "market",
         "category": "mutual_funds",
-        "title": "AMFI monthly data: SIP inflows update — April 2024",
+        "title": "AMFI AUM data — total assets under management by category",
         "source": "AMFI",
-        "canonical_url": "https://www.amfiindia.com/research-information/other-data/sip-data",
-        "published_at": datetime(2024, 4, 9, tzinfo=UTC),
+        "canonical_url": "https://www.amfiindia.com/research-information/other-data/mf-data",
     },
     {
         "scope": "market",
-        "category": "macro",
-        "title": "RBI monetary policy April 2024 — repo rate decision",
-        "source": "RBI",
-        "canonical_url": "https://www.rbi.org.in/scripts/bs_pressreleasedisplay.aspx?prid=57558",
-        "published_at": datetime(2024, 4, 5, tzinfo=UTC),
+        "category": "regulation",
+        "title": "SEBI Master Circular for Mutual Funds (latest)",
+        "source": "SEBI",
+        "canonical_url": "https://www.sebi.gov.in/legal/master-circulars/may-2024/master-circular-for-mutual-funds_83391.html",
     },
 ]
 
@@ -74,6 +75,10 @@ async def upsert_curated_news(db: AsyncSession) -> int:
     that fails validation is skipped (malformed items never crash the task).
     Exceptions from get_curated_seed() propagate to the caller (task catches
     them so the endpoint always reads last persisted rows).
+
+    `published_at` is set to `datetime.now(UTC)` on each upsert so curated
+    items always pass the 30-day recency filter and are visible as "featured"
+    reference links even when no live RSS news is available.
     """
     items = get_curated_seed()
     now = datetime.now(UTC)
@@ -86,7 +91,8 @@ async def upsert_curated_news(db: AsyncSession) -> int:
             canonical_url = str(raw["canonical_url"]).strip()
             scope = str(raw.get("scope", "market")).strip()
             category = str(raw.get("category", "market")).strip()
-            published_at = raw["published_at"]
+            # published_at is always now — curated items are always-fresh featured links.
+            published_at = now
             if not title or not source or not canonical_url:
                 logger.warning(
                     "news.upsert: skipping malformed item url=%r", canonical_url

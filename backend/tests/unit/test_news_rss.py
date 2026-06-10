@@ -10,6 +10,11 @@ Covered:
   6. fetch-http-error: feed URL returns 5xx → [] (graceful degrade).
   7. fetch-network-error: httpx raises ConnectError → [] (graceful degrade).
   8. fetch_all_feeds: enabled feeds are fetched; disabled ones are skipped.
+  9. is_mf_relevant: MF keyword → True + "mutual_funds" override category.
+  10. is_mf_relevant: macro keyword → True + None override (keep registry category).
+  11. is_mf_relevant: unrelated title → False (item dropped).
+  12. is_mf_relevant: SGB hard exclusion → False even when "redemption" present.
+  13. non-mf-item-dropped: non-MF item excluded by relevance filter (no HEAD call).
 
 asyncio_mode = "auto" (pyproject.toml).
 """
@@ -82,16 +87,17 @@ def _make_head_response(status_code: int = 200):
 
 async def test_fetch_feed_dedup_same_url():
     """Two RSS entries sharing a URL → only the first appears (URL is the key)."""
+    # Use MF-relevant titles so the relevance filter passes.
     xml = """\
 <?xml version="1.0"?>
 <rss version="2.0"><channel>
   <item>
-    <title>Item A</title>
+    <title>SEBI circular on mutual fund scheme categorisation</title>
     <link>https://rbi.org.in/same</link>
     <pubDate>Tue, 10 Jun 2026 10:00:00 +0000</pubDate>
   </item>
   <item>
-    <title>Item A duplicate</title>
+    <title>SEBI circular on mutual fund scheme categorisation (duplicate)</title>
     <link>https://rbi.org.in/same</link>
     <pubDate>Tue, 10 Jun 2026 11:00:00 +0000</pubDate>
   </item>
@@ -210,7 +216,7 @@ async def test_fetch_feed_no_date_skipped():
 <?xml version="1.0"?>
 <rss version="2.0"><channel>
   <item>
-    <title>Dateless item</title>
+    <title>AMFI monthly SIP data update</title>
     <link>https://rbi.org.in/nodatearticle</link>
   </item>
 </channel></rss>"""
@@ -331,3 +337,111 @@ async def test_fetch_all_feeds_only_enabled():
 
     assert len(items) == 1
     assert items[0]["source"] == "ENABLED"
+
+
+# ---------------------------------------------------------------------------
+# 9. _is_mf_relevant: direct MF keyword → True + "mutual_funds" override
+# ---------------------------------------------------------------------------
+
+
+def test_is_mf_relevant_mf_keyword():
+    """Title containing a direct MF keyword → relevant=True, category='mutual_funds'."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    relevant, cat = _is_mf_relevant("SEBI circular on mutual fund scheme categorisation")
+    assert relevant is True
+    assert cat == "mutual_funds"
+
+    relevant2, cat2 = _is_mf_relevant("AMFI monthly SIP inflow data for May 2026")
+    assert relevant2 is True
+    assert cat2 == "mutual_funds"
+
+    relevant3, cat3 = _is_mf_relevant("RBI circular on NAV computation for liquid funds")
+    assert relevant3 is True
+    assert cat3 == "mutual_funds"
+
+
+# ---------------------------------------------------------------------------
+# 10. _is_mf_relevant: macro keyword → True + None override
+# ---------------------------------------------------------------------------
+
+
+def test_is_mf_relevant_macro_keyword():
+    """Title with a monetary-policy keyword → relevant=True, override_category=None."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    relevant, cat = _is_mf_relevant("RBI Monetary Policy Committee — repo rate unchanged")
+    assert relevant is True
+    assert cat is None  # keep registry category ("macro")
+
+    relevant2, cat2 = _is_mf_relevant("RBI keeps repo rate at 6.5% — monetary policy")
+    assert relevant2 is True
+    assert cat2 is None
+
+
+# ---------------------------------------------------------------------------
+# 11. _is_mf_relevant: unrelated banking title → False
+# ---------------------------------------------------------------------------
+
+
+def test_is_mf_relevant_unrelated_returns_false():
+    """Pure banking/forex titles are not MF-relevant and are dropped."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    assert _is_mf_relevant("Withdrawal of Rs 2000 denomination banknotes — status")[0] is False
+    assert _is_mf_relevant("Auction of 91-Day Treasury Bills")[0] is False
+    assert _is_mf_relevant("Lending and Deposit Rates of Scheduled Commercial Banks")[0] is False
+    assert _is_mf_relevant("RBI approves amalgamation of cooperative bank")[0] is False
+    assert _is_mf_relevant("Sectoral Deployment of Bank Credit March 2026")[0] is False
+
+
+# ---------------------------------------------------------------------------
+# 12. _is_mf_relevant: SGB hard exclusion
+# ---------------------------------------------------------------------------
+
+
+def test_is_mf_relevant_sgb_hard_exclusion():
+    """SGB items are excluded even when they contain 'redemption'."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    sgb_title = "Premature redemption under Sovereign Gold Bond (SGB) Scheme"
+    relevant, cat = _is_mf_relevant(sgb_title)
+    assert relevant is False
+    assert cat is None
+
+
+# ---------------------------------------------------------------------------
+# 13. non-mf-item-dropped: MF filter runs before HEAD check
+# ---------------------------------------------------------------------------
+
+
+async def test_non_mf_item_not_head_checked():
+    """Non-MF items are dropped by the relevance filter before HEAD is called."""
+    xml = """\
+<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item>
+    <title>Auction of State Government Securities 2026</title>
+    <link>https://rbi.org.in/g-sec-auction</link>
+    <pubDate>Tue, 10 Jun 2026 10:00:00 +0000</pubDate>
+  </item>
+</channel></rss>"""
+
+    mock_get = AsyncMock(return_value=_make_mock_response(200, xml))
+    mock_head = AsyncMock(return_value=_make_head_response(200))
+
+    with patch("dhanradar.news.rss.httpx.AsyncClient") as MockClient:
+        inst = AsyncMock()
+        inst.get = mock_get
+        inst.head = mock_head
+        inst.__aenter__ = AsyncMock(return_value=inst)
+        inst.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = inst
+
+        from dhanradar.news.rss import fetch_feed
+
+        items = await fetch_feed(_FEED_META)
+
+    # Item is dropped by relevance filter — HEAD should never be called for it.
+    mock_head.assert_not_called()
+    assert items == []
