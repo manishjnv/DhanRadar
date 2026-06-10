@@ -1,6 +1,6 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (feat/data-transparency-layer — Plan Group 9 / PU2 data transparency surface; pending Opus compliance gate)
+**Last updated:** 2026-06-11 (feat/data-transparency-layer — Plan Group 9 / PU2 data transparency surface; pending Opus compliance gate; SEV2 NullPool completion DEPLOYED `42c96db` PR #74; NAV backfilled 2.0 M rows; docs PR open)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -52,6 +52,48 @@ Hand diff to Opus session for final review. Do NOT self-merge.
 - **Sonnet (builder):** Phase 0 warm-start (subagent), plan, all implementation slices, gate runs,
   independent reviewer spawn (subagent), reviewer-findings fixes, doc updates.
 - **Opus gate:** REQUIRED — not yet requested. Hand to Opus for compliance + load-bearing-seam review.
+
+---
+
+## SEV2 NullPool migration completion — DEPLOYED to KVM4 (2026-06-10, `42c96db`, PR #74)
+
+PR #69 (`670bc1a`) introduced `TaskSessionLocal` / `task_engine` (NullPool) for Celery tasks but
+missed the service files those tasks call. CAS jobs were orphaned in `queued` forever in prod.
+
+**Fix (PR #74, `42c96db`, merged + deployed):**
+
+- Completed NullPool migration in `compliance/service.py`, `audit/service.py`,
+  `mood/service.py`, `tasks/compliance.py`.
+- Added `scripts/ci_guards.py` Guard #6 (bans pooled engine outside `db.py`) + regression tests.
+- New `reap_stuck_cas_jobs` Celery beat (every 5 min) — marks orphaned jobs `stuck_timeout`.
+- Frontend CAS status poll times out after 150 s → re-upload prompt (no infinite spinner).
+- Repaired 3 `test_audit_ledger.py` integration tests broken by the engine-injection change.
+- Prod: 2 orphaned jobs cleared; `nav_backfill` (one-off docker run -m 2g) populated
+  `mf.mf_nav_history` → 2,027,380 rows / 9,401 funds (2023-06-11 → 2026-06-10).
+  Resolves B29 deploy-gate and the long-standing empty-NAV blocker (prod-nav-history-empty).
+
+**Reviews:** Opus diff review + independent Sonnet adversarial pass (ACCEPT-with-conditions;
+both conditions assessed — C1 FastAPI-NullPool accepted as documented trade-off, C2 reaper-retouch
+was an incorrect premise). CI green (backend / frontend / migrations / guards).
+
+**RCA:** `docs/rca/README.md` — new SEV2 entry at top.
+
+**Open (found in post-deploy verification, 2026-06-11):** B61 — daily NAV upsert fails with
+`CardinalityViolationError`; `nav_daily_fetch` has never written a row. Dedup fix ready to
+implement in `backend/dhanradar/tasks/mf.py` ~lines 81–126. See `BLOCKERS.md` B61.
+
+### Agent-utilization & routing telemetry (SEV2 NullPool completion + docs session)
+
+- **Opus (Tier 0):** diff review, inline adversarial assessment, all gates, docs authoring
+  (RCA entry self-authored — delegation reminder fired after first edit; SESSION_STATE +
+  BLOCKERS drafted on Opus as within-session edits ≤30 lines in hot cache).
+- **Sonnet (Tier 1):** ~8 subagents across the underlying PR #74 work — 2 evidence pulls,
+  3 implementation, 1 adversarial sign-off, 1 deploy verification, 1 nav_backfill, 1 docs PR.
+  Reworked: N (adversarial ACCEPT-with-conditions assessed by Opus; both conditions cleared
+  without code change).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — account not entitled to GPT-5; Sonnet adversarial takeover per
+  standing memory entry.
 
 ---
 

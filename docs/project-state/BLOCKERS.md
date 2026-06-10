@@ -20,8 +20,12 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
 - **B34 — PARTIAL (infra/human).** R2 archival code live but bucket **India-residency NOT verified**;
   archival + backups stay best-effort/skipped until confirmed. Do not rely on the 7-yr archive yet.
 - **Also open:** `ADMIN_USER_IDS` unset (admin endpoints fail-closed 404); pg_partman absent →
-  auto monthly-partition rollover off (table + DEFAULT partition exist); **B29** first live NAV
-  backfill not yet run (funds read `insufficient_data` until seeded).
+  auto monthly-partition rollover off (table + DEFAULT partition exist).
+- **B29 NAV backfill — RESOLVED 2026-06-10 (`42c96db`, PR #74 deploy).** `nav_backfill`
+  (docker run -m 2g, one-off) populated `mf.mf_nav_history` with 2,027,380 rows / 9,401 funds
+  (range 2023-06-11 → 2026-06-10). Scoring now returns real labels (`on_track`/`in_form`/
+  `off_track`) instead of universal `insufficient_data`. See RCA entry SEV2 NullPool for context
+  on why the prior 2026-06-08 backfill was lost (migrations #67–#74 recreated the table).
 
 ## 📋 POST-LAUNCH BACKLOG — 2026-06-08 (after go-live)
 

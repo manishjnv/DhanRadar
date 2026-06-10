@@ -15,6 +15,55 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-10 — SEV2 NullPool migration completion: CAS jobs stuck in `queued` forever + empty-NAV blocker
+
+- **Symptom:** eCAS upload stalls — CAS jobs created with `status='queued'` and never advance.
+  UI spins on "Analysing…" indefinitely. Live prod reproduce confirmed: job failed 342 ms after
+  creation, `error_message` was NULL, job orphaned in `queued`. The `news` Celery task on the same
+  worker also hit the same error. PR #69 (`670bc1a`) had attempted a partial fix (NullPool
+  `task_engine` / `TaskSessionLocal`) but the task-aware service files were missed and prod was
+  never deployed with even that partial fix.
+- **Root cause (code — async DB connection lifecycle):** the pooled SQLAlchemy async engine,
+  reused across Celery `asyncio.run()` event loops, hands the next task an asyncpg connection
+  bound to a dead (previous-loop) event loop → `asyncpg InterfaceError: cannot perform
+  operation: another operation is in progress`. The failure handler `_mark_failed` used the same
+  poisoned pooled engine and also raised, so the job was never marked failed and was orphaned in
+  `queued`. PR #69 added `task_engine` / `TaskSessionLocal` (NullPool) and migrated
+  `tasks/mf.py`, `tasks/news.py`, `tasks/misc.py` — but the call sites inside the service files
+  reachable from those tasks still used the pooled engine:
+  `compliance/service.py` (`record_served_label`, `log_low_confidence`),
+  `audit/service.py` (3 writers), `mood/service.py` (`_persist`),
+  `tasks/compliance.py`.
+- **Fix (PR #74, `42c96db`):**
+  1. **NullPool migration completed** — all service-file call sites ported to `TaskSessionLocal`:
+     `backend/dhanradar/compliance/service.py` (lines ~35, ~70),
+     `backend/dhanradar/audit/service.py` (3 writers),
+     `backend/dhanradar/mood/service.py` (`_persist`),
+     `backend/dhanradar/tasks/compliance.py`.
+  2. **CI guard added** — `scripts/ci_guards.py` Guard #6 bans `async_sessionmaker(engine`
+     outside `db.py`; regression tests in `tests/unit/test_ci_guards.py` prevent recurrence.
+  3. **Stuck-job reaper** — new Celery beat task `reap_stuck_cas_jobs` (every 5 min) marks any
+     `queued`/`parsing`/`scoring` job older than 10 min as `failed='stuck_timeout'` and clears
+     its dedup key (`backend/dhanradar/tasks/mf.py`).
+  4. **Frontend timeout** — CAS status poll now times out after 150 s and renders a re-upload
+     prompt instead of spinning forever (`frontend/src/features/mf/`).
+  5. **Test-coupling repair** — 3 `test_audit_ledger.py` integration tests injected the DB error
+     at the old pooled `engine`; patched to inject at `TaskSessionLocal`
+     (`backend/tests/integration/test_audit_ledger.py`).
+  6. **Prod remediation** — the 2 orphaned jobs were cleared; `nav_backfill` (docker run -m 2g,
+     one-off) populated `mf.mf_nav_history` with 2,027,380 rows / 9,401 funds
+     (2023-06-11 → 2026-06-10), resolving the long-standing empty-NAV / B29 deploy-gate blocker.
+     Likely cause of prior empty NAV: migrations #67–#74 catching prod up to head recreated
+     `mf_nav_history` and dropped the 2026-06-08 backfill.
+- **Prevention:** (1) CI Guard #6 (`scripts/ci_guards.py`) — static ban on
+  `async_sessionmaker(engine` outside `db.py`; fires on every CI run and pre-commit hook.
+  (2) Stuck-job reaper as a safety net — even if a future regression orphans a job it will
+  surface as `failed='stuck_timeout'` within 10 min rather than spinning forever.
+  (3) Standing rule: **all Celery task DB access MUST use `TaskSessionLocal` (NullPool) —
+  never the pooled `async_engine`.** Captured here and in `docs/features/mf.md`.
+- **Phase/area:** SEV2 / Celery async DB lifecycle — `backend/dhanradar/tasks/`,
+  `compliance/service.py`, `audit/service.py`, `mood/service.py`. Deploy: KVM4 `42c96db`.
+
 ### 2026-06-10 — B56 news: feed shows 2-year-old headlines + dead (404) links
 
 - **Symptom:** the dashboard Market News widget shows stale 2024 items ("SEBI circular … March
