@@ -3,37 +3,95 @@ Integration tests for Portfolio Intelligence endpoints (Plan Group 3).
 
 Test contract:
   - Anonymous requests → 401 (not_authenticated)
-  - Wrong / other-user portfolio_id → 404 (portfolio_not_found)
+  - Wrong / other-user / non-existent portfolio_id → 404 (portfolio_not_found)
   - Empty portfolio (exists, zero holdings) → 200 with valid shape + disclosure
   - Disclosure bundle present on every 200 response
   - `unified_score` must NEVER appear in any JSON response body (non-neg #2)
-  - Overlap_pct and allocation_pct must be numeric (not strings)
 
-NOTE: These tests require a running DB (`dhanradar-postgres` inside Docker).
-They are skipped automatically when the DB is not reachable (CI-only environment).
+Infrastructure contract (same as test_dashboard / test_mood):
+  - async_client      — httpx.AsyncClient over ASGITransport(app); no lifespan.
+  - db_session        — function-scoped AsyncSession; conftest truncates auth/billing.
+  - patch_redis       — fakeredis.aioredis.FakeRedis; flushed between tests.
+
+AUTH strategy: override `current_user_or_anonymous` via
+`app.dependency_overrides[current_user_or_anonymous]` to return a UserContext for
+the seeded user; always pop the override in teardown. For the 401 guard tests the
+override is NOT installed — the real dep returns anonymous → `_require_auth` → 401.
 """
 
 from __future__ import annotations
 
 import json
-import uuid
+import uuid as _uuid
 from typing import Any
 
-import httpx
 import pytest
-from fastapi.testclient import TestClient
+from sqlalchemy import text
 
-# DB reachability guard — skip on Windows host where Docker hostname won't resolve
+from dhanradar.deps import UserContext, current_user_or_anonymous
+from dhanradar.main import app
+from dhanradar.models.auth import User, UserTierEnum
+from dhanradar.models.mf import MfPortfolio
+
 pytestmark = pytest.mark.integration
+
+
+# ---------------------------------------------------------------------------
+# Teardown: truncate mf.* tables between tests (conftest only handles auth/billing).
+# Same-connection pattern (avoids TRUNCATE deadlock in CI — see test_dashboard).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+async def _truncate_mf(db_session):
+    yield
+    await db_session.rollback()
+    await db_session.execute(
+        text(
+            "TRUNCATE TABLE "
+            "mf.user_fund_scores, "
+            "mf.mf_user_holdings, "
+            "mf.mf_portfolio_snapshots, "
+            "mf.mf_portfolios, "
+            "mf.mf_funds "
+            "RESTART IDENTITY CASCADE"
+        )
+    )
+    await db_session.commit()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _auth_headers(token: str) -> dict[str, str]:
-    # Endpoints use HttpOnly cookie — TestClient fixture handles cookie injection
-    return {}
+
+async def _seed_user(db_session) -> str:
+    """Insert a free-tier User and return its id as a str UUID."""
+    uid = _uuid.uuid4()
+    user = User(
+        id=uid,
+        email=f"insights_{uid.hex[:8]}@example.com",
+        hashed_password="$2b$12$placeholder_hash_for_testing_only",
+        tier=UserTierEnum.free,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    return str(uid)
+
+
+async def _seed_empty_portfolio(db_session, user_id: str) -> str:
+    """Insert a portfolio (zero holdings) owned by user_id; return its id as str."""
+    portfolio = MfPortfolio(user_id=_uuid.UUID(user_id), name="Empty Portfolio")
+    db_session.add(portfolio)
+    await db_session.commit()
+    return str(portfolio.id)
+
+
+def _auth_override(user_id: str):
+    def _dep() -> UserContext:
+        return UserContext(user_id=user_id, tier="free", is_anonymous=False)
+
+    return _dep
 
 
 def _assert_disclosure_present(body: dict[str, Any]) -> None:
@@ -45,8 +103,7 @@ def _assert_disclosure_present(body: dict[str, Any]) -> None:
 
 def _assert_no_unified_score(body: dict[str, Any]) -> None:
     """unified_score must NEVER appear in any client-facing response (non-neg #2)."""
-    body_str = json.dumps(body)
-    assert "unified_score" not in body_str, (
+    assert "unified_score" not in json.dumps(body), (
         "unified_score leaked into client-facing insights response (non-neg #2 violation)"
     )
 
@@ -55,62 +112,70 @@ def _assert_no_unified_score(body: dict[str, Any]) -> None:
 # Anonymous access → 401
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_overlap_anonymous_401(test_client: Any) -> None:
+
+async def test_overlap_anonymous_401(async_client, patch_redis) -> None:
     """Anonymous (no cookie) → 401 not_authenticated."""
-    pid = str(uuid.uuid4())
-    resp = test_client.get(f"/api/v1/portfolio/{pid}/overlap")
-    assert resp.status_code == 401
-    body = resp.json()
-    assert body.get("detail") == "not_authenticated"
+    pid = str(_uuid.uuid4())
+    resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
+    assert resp.status_code == 401, resp.text
+    assert resp.json().get("detail") == "not_authenticated"
 
 
-@pytest.mark.asyncio
-async def test_concentration_anonymous_401(test_client: Any) -> None:
-    pid = str(uuid.uuid4())
-    resp = test_client.get(f"/api/v1/portfolio/{pid}/concentration")
-    assert resp.status_code == 401
-    body = resp.json()
-    assert body.get("detail") == "not_authenticated"
+async def test_concentration_anonymous_401(async_client, patch_redis) -> None:
+    pid = str(_uuid.uuid4())
+    resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
+    assert resp.status_code == 401, resp.text
+    assert resp.json().get("detail") == "not_authenticated"
 
 
 # ---------------------------------------------------------------------------
-# Wrong portfolio → 404
+# Wrong / non-existent portfolio → 404
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_overlap_wrong_portfolio_404(auth_test_client: Any) -> None:
-    """Authenticated user requesting a portfolio that doesn't belong to them → 404."""
-    pid = str(uuid.uuid4())  # non-existent UUID
-    resp = auth_test_client.get(f"/api/v1/portfolio/{pid}/overlap")
-    assert resp.status_code == 404
-    body = resp.json()
-    assert body.get("detail") == "portfolio_not_found"
+
+async def test_overlap_wrong_portfolio_404(async_client, db_session, patch_redis) -> None:
+    """Authenticated user requesting a portfolio that isn't theirs → 404."""
+    user_id = await _seed_user(db_session)
+    pid = str(_uuid.uuid4())  # non-existent UUID
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 404, resp.text
+    assert resp.json().get("detail") == "portfolio_not_found"
 
 
-@pytest.mark.asyncio
-async def test_concentration_wrong_portfolio_404(auth_test_client: Any) -> None:
-    pid = str(uuid.uuid4())
-    resp = auth_test_client.get(f"/api/v1/portfolio/{pid}/concentration")
-    assert resp.status_code == 404
-    body = resp.json()
-    assert body.get("detail") == "portfolio_not_found"
+async def test_concentration_wrong_portfolio_404(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = str(_uuid.uuid4())
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 404, resp.text
+    assert resp.json().get("detail") == "portfolio_not_found"
 
 
 # ---------------------------------------------------------------------------
-# Empty portfolio → 200 with valid shape + disclosure
+# Empty portfolio (exists, zero holdings) → 200 with valid shape + disclosure
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_overlap_empty_portfolio_200(
-    auth_test_client: Any, empty_portfolio_id: str
-) -> None:
-    """Empty portfolio (portfolio exists, zero holdings) → 200 with empty lists."""
-    resp = auth_test_client.get(f"/api/v1/portfolio/{empty_portfolio_id}/overlap")
-    assert resp.status_code == 200
-    body = resp.json()
 
-    assert body["portfolio_id"] == empty_portfolio_id
+async def test_overlap_empty_portfolio_200(async_client, db_session, patch_redis) -> None:
+    """Empty portfolio (exists, zero holdings) → 200 with empty lists."""
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["portfolio_id"] == pid
     assert body["fund_pairs"] == []
     assert body["category_distribution"] == []
     assert body["data_completeness"] == "empty"
@@ -118,15 +183,18 @@ async def test_overlap_empty_portfolio_200(
     _assert_no_unified_score(body)
 
 
-@pytest.mark.asyncio
-async def test_concentration_empty_portfolio_200(
-    auth_test_client: Any, empty_portfolio_id: str
-) -> None:
-    resp = auth_test_client.get(f"/api/v1/portfolio/{empty_portfolio_id}/concentration")
-    assert resp.status_code == 200
-    body = resp.json()
+async def test_concentration_empty_portfolio_200(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
 
-    assert body["portfolio_id"] == empty_portfolio_id
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["portfolio_id"] == pid
     assert body["by_category"] == []
     assert body["by_amc"] == []
     assert body["by_fund"] == []
@@ -139,19 +207,26 @@ async def test_concentration_empty_portfolio_200(
 # Disclosure present on every 200
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_overlap_disclosure_always_present(
-    auth_test_client: Any, empty_portfolio_id: str
-) -> None:
-    resp = auth_test_client.get(f"/api/v1/portfolio/{empty_portfolio_id}/overlap")
-    assert resp.status_code == 200
+
+async def test_overlap_disclosure_always_present(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 200, resp.text
     _assert_disclosure_present(resp.json())
 
 
-@pytest.mark.asyncio
-async def test_concentration_disclosure_always_present(
-    auth_test_client: Any, empty_portfolio_id: str
-) -> None:
-    resp = auth_test_client.get(f"/api/v1/portfolio/{empty_portfolio_id}/concentration")
-    assert resp.status_code == 200
+async def test_concentration_disclosure_always_present(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 200, resp.text
     _assert_disclosure_present(resp.json())

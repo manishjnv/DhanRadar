@@ -182,6 +182,11 @@ async def fetch_feed(feed_meta: dict) -> list[dict]:
                     )
                     continue
 
+                # Normalise RBI http:// → https:// (feed publishes http links but
+                # the server only responds on HTTPS; http returns 404 universally).
+                if link.startswith("http://www.rbi.org.in/"):
+                    link = "https://www.rbi.org.in/" + link[len("http://www.rbi.org.in/"):]
+
                 # URL liveness check — dead links are skipped at ingest.
                 if not await _head_check(head_client, link):
                     logger.info(
