@@ -15,6 +15,31 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-10 — B56 news: feed shows 2-year-old headlines + dead (404) links
+
+- **Symptom:** the dashboard Market News widget shows stale 2024 items ("SEBI circular … March
+  2024", "AMFI … April 2024", "RBI … April 2024" — rendered "792d ago" etc.) and the headline
+  links 404. (SEV3 — degraded, user-visible trust issue; wedge unaffected.)
+- **Root cause (design/data, not a code bug):** the `/news` feature shipped only the *admin-curated
+  fallback* — a **hardcoded static list of 3 sample 2024 headlines** in `news/service.py:34-59`
+  (`_CURATED_ITEMS`) with **fixed 2024 `published_at`** and **unverified placeholder URLs**. The
+  beat task `tasks/news.py::refresh_market_news` re-upserts those same 3 rows every 30 min, so the
+  feed never advances and never carries recent items. The PRIMARY live-source path (RSS / a real
+  feed with feed-supplied dates + real URLs) was **never built** (no `rss/httpx/fetch` anywhere in
+  `news/`). Reproduced: HEAD-checking the 3 URLs → SEBI **404**, AMFI **404**, RBI 200. So "old
+  news" = frozen seed dates; "404 links" = placeholder URLs that were never liveness-checked.
+- **Fix:** NOT YET APPLIED — tracked as a build task (see below). Corrective = replace the static
+  seed with a real recent-news source (sanctioned RSS: RBI press / SEBI circulars / AMFI, or a
+  vetted financial RSS) surfacing feed-supplied recent `published_at` + real item URLs.
+- **Prevention (the class, not the instance):** (1) **URL liveness check at ingest** — HEAD each
+  `canonical_url`, skip/deactivate non-200 so a dead link can never reach the UI; (2) **recency
+  guard** — don't serve items older than N days and/or show an "as of" freshness label; (3)
+  **staleness observability** — log/metric + alert when the newest served item is older than a
+  threshold (today there is no signal that the feed has gone stale); (4) a regression test asserting
+  served items are within the recency window and URLs were liveness-checked. Captured in memory
+  [[news-feed-stale-hardcoded-seed]].
+- **Phase/area:** B56 / `backend/dhanradar/news/`.
+
 ### 2026-06-10 — G8: CI frontend build failed (`fetch failed / ECONNREFUSED`) on new SSR pages
 
 - **Symptom:** the `frontend` CI job (`next build`, mocks-off) failed with
