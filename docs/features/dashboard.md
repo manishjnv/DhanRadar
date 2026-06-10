@@ -1,7 +1,7 @@
 # Feature — Dashboard (Post-Login Home Screen)
 
-**Status:** B56 built (read-only aggregation, 3 live endpoints, 1 deferred); merge-eligible, NOT
-deployed · **Phase:** B56 · **Last updated:** 2026-06-09
+**Status:** B56 built (read-only aggregation + news endpoint/widget live); merge-eligible, NOT
+deployed · **Phase:** B56 · **Last updated:** 2026-06-10
 
 ## Purpose & scope
 
@@ -18,11 +18,13 @@ the data (`mf` schema, Yahoo Finance helpers, Redis).
 - Does not re-compute scores, signals, or labels (those are the scoring engine's and MF module's
   domain).
 - Does not render a numeric score, factor weight, or fair value to the client (non-neg #2).
-- Does not serve a news feed (the `/news` widget is deferred — no source wired; widget stays on its
-  empty state).
+- Does not serve article body/excerpt text from external publishers (headline + attribution +
+  canonical link only).
 - Risk profile never feeds any dashboard output (non-neg #3).
 
-## Public interface (all under `/api/v1`, all authenticated — anonymous → 401)
+## Public interface
+
+Authenticated-only endpoints (anonymous → 401):
 
 ### `GET /portfolio/summary`
 
@@ -91,10 +93,30 @@ severity. `type != fund` returns an empty `funds` list.
 **Quality note:** results improve automatically once NAV data (B29) and B58 cohort labels populate.
 Until then, most entries will carry `insufficient_data`.
 
-### `/news` (widget only — DEFERRED)
+Anonymous-read endpoint:
 
-No news source is wired. The frontend widget renders its built-in empty state. No backend route is
-mounted for this path.
+### `GET /news`
+
+Query params: `scope` (default `market`), `limit` (`1..50`, default `20`).
+
+Returns `200` list of:
+
+`{title, source, url, published_at, category}`
+
+Design/Compliance contract:
+
+- Headline + attribution + canonical link only; no article body/excerpt storage or render.
+- Informational only (no advisory verbs, no signal framing).
+- Empty source returns `200 []` (never 404).
+
+Data source and ingestion:
+
+- Source mode is **admin-curated fallback** (redistribution-safe) pending any formally-vetted
+  RSS ToS approval.
+- Curated rows are persisted in `news.news_items` with provenance (`provenance_source`) and
+  freshness (`fetched_at`).
+- Celery beat refreshes curated rows every 30 minutes via
+  `dhanradar.tasks.news.refresh_market_news` (best-effort; failure never breaks reads).
 
 ## Module isolation
 
@@ -104,8 +126,8 @@ The dashboard module reads ONLY:
   `mf_user_fund_scores`, `mf_funds`.
 - Shared helpers: `dhanradar/market/yahoo.py` (Yahoo Finance provider) and Redis (indices cache).
 
-No reach-in to the scoring engine, billing, consent, notifications, or any other module. No writes.
-No Alembic migration (schema-free consumer).
+No reach-in to the scoring engine, billing, consent, notifications, or any other module.
+Dashboard endpoints remain read-only; news ingestion writes only `news.news_items`.
 
 ## Compliance
 
@@ -131,6 +153,10 @@ No Alembic migration (schema-free consumer).
 | `backend/dhanradar/dashboard/indices.py` | Yahoo Finance fetch + Redis cache logic |
 | `backend/dhanradar/dashboard/router.py` | FastAPI router — mounts the 3 endpoints |
 | `backend/dhanradar/main.py` | `app.include_router(dashboard_router, prefix="/api/v1")` mount |
+| `backend/dhanradar/news/{router,service,schemas}.py` | Anonymous `/news` API + curated upsert/list logic |
+| `backend/dhanradar/models/news.py` | `news.news_items` ORM model |
+| `backend/alembic/versions/0016_news_items.py` | Alembic DDL for `news` schema/table/indexes |
+| `backend/dhanradar/tasks/news.py` | Celery beat task to refresh curated rows |
 
 ### Frontend
 
@@ -138,6 +164,7 @@ No Alembic migration (schema-free consumer).
 |---|---|
 | `frontend/src/features/dashboard/api.ts` | TanStack Query hooks for the 3 endpoints; treats 404 as empty state |
 | `frontend/src/app/(app)/dashboard/page.tsx` | Dashboard page — orchestrates portfolio, indices, top-scored widgets |
+| `frontend/src/features/dashboard/components/MarketNewsWidget.tsx` | Link-out news cards + informational note |
 | `frontend/src/mocks/handlers.ts` | MSW handlers for all 3 endpoints (dev + test) |
 
 ### Tests
@@ -146,7 +173,10 @@ No Alembic migration (schema-free consumer).
 |---|---|
 | `backend/tests/unit/test_dashboard.py` | Unit: schema no-numeric assertion, 404 cold-start, indices cache hit/miss, top-scored user-scoping, type filter |
 | `backend/tests/integration/test_dashboard.py` | Integration: auth gate (401), portfolio summary round-trip, indices degraded path |
+| `backend/tests/unit/test_news_service.py` | Unit: curated upsert dedup, malformed skip, fetch-failure no-write |
+| `backend/tests/integration/test_news.py` | Integration: `/news` happy/empty/param validation + refresh-failure cached-read |
 | `frontend/src/features/dashboard/api.test.ts` | FE: hook renders empty state on 404; MSW happy paths |
+| `frontend/src/features/dashboard/components/MarketNewsWidget.test.tsx` | FE: cards render from contract shape + empty state + informational note |
 
 ## Known follow-ups (filed)
 
@@ -168,3 +198,8 @@ No Alembic migration (schema-free consumer).
   state). Module isolation: `mf` schema + Yahoo/Redis; no writes; no migration. Tier-A change;
   Builder + Architect + UI reviews; Compliance inline (no numeric/advisory on any surface). Commit
   branch `feat/b56-dashboard-endpoints`; PR `#56`. Ledger: `reviews/b56-dashboard-endpoints.md`.
+- 2026-06-10 — B56 deferral closed: `GET /news` implemented as anonymous-read curated headline
+  metadata (`title/source/url/published_at/category`) backed by `news.news_items` (migration `0016`),
+  with 30-min best-effort Celery refresh and graceful-degrade read path (refresh failure preserves
+  cached rows). Dashboard widget now renders link-out cards from the real contract shape + explicit
+  informational/not-advice note. No article body/excerpt stored or rendered.

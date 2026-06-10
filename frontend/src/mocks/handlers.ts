@@ -331,11 +331,11 @@ export const handlers = [
   // GET /api/v1/news
   http.get('/api/v1/news', () => {
     return HttpResponse.json([
-      { id: 'n1', title: 'RBI holds repo rate; MPC signals cautious outlook for FY27', source: 'Economic Times', freshness: '2h ago' },
-      { id: 'n2', title: 'Midcap funds see record inflows in May 2026 at ₹9,200 Cr', source: 'Mint', freshness: '4h ago' },
-      { id: 'n3', title: 'SEBI proposes stricter T+0 settlement norms for equity derivatives', source: 'Business Standard', freshness: '6h ago' },
-      { id: 'n4', title: 'Flexi Cap category beats benchmark for 8th consecutive quarter', source: 'Value Research', freshness: '1d ago' },
-      { id: 'n5', title: 'Foreign portfolio investors buy ₹14,000 Cr in Indian equities in June', source: 'NDTV Profit', freshness: '1d ago' },
+      { title: 'RBI holds repo rate; MPC signals cautious outlook for FY27', source: 'Economic Times', url: 'https://economictimes.indiatimes.com/rbi-holds-repo-rate', published_at: new Date(Date.now() - 2 * 3600_000).toISOString(), category: 'monetary_policy' },
+      { title: 'Midcap funds see record inflows in May 2026 at ₹9,200 Cr', source: 'Mint', url: 'https://livemint.com/midcap-inflows-may-2026', published_at: new Date(Date.now() - 4 * 3600_000).toISOString(), category: 'mutual_funds' },
+      { title: 'SEBI proposes stricter T+0 settlement norms for equity derivatives', source: 'Business Standard', url: 'https://business-standard.com/sebi-t0-settlement', published_at: new Date(Date.now() - 6 * 3600_000).toISOString(), category: 'regulation' },
+      { title: 'Flexi Cap category beats benchmark for 8th consecutive quarter', source: 'Value Research', url: 'https://valueresearchonline.com/flexi-cap-benchmark', published_at: new Date(Date.now() - 24 * 3600_000).toISOString(), category: 'mutual_funds' },
+      { title: 'Foreign portfolio investors buy ₹14,000 Cr in Indian equities in June', source: 'NDTV Profit', url: 'https://ndtvprofit.com/fpi-june-inflows', published_at: new Date(Date.now() - 26 * 3600_000).toISOString(), category: 'flows' },
     ]);
   }),
 

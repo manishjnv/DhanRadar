@@ -30,6 +30,7 @@ EXPECTED_TASKS = {
     "dhanradar.tasks.misc.drain_notifications",
     "dhanradar.tasks.misc.send_notification",
     "dhanradar.tasks.mood.compute_mood_snapshot",
+    "dhanradar.tasks.news.refresh_market_news",
 }
 
 

@@ -5,6 +5,29 @@
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## B56 NEWS ENDPOINT + DASHBOARD NEWS WIDGET — merge-eligible, NOT deployed (2026-06-10)
+
+Closed the B56 `/news` deferral by implementing the backend endpoint and wiring the dashboard widget
+to the real contract shape.
+
+- **Backend:** new anonymous-read `GET /api/v1/news?scope=market&limit=N` (default scope=`market`,
+  `limit` validated `1..50`) returning headline metadata only:
+  `{title, source, url, published_at, category}`. Empty source returns `200 []`.
+- **Data source decision:** fallback **admin-curated** source implemented (redistribution-safe while
+  external RSS ToS is unverified). New `news.news_items` table (migration `0016`) stores only
+  headline attribution + link + provenance/freshness (`provenance_source`, `fetched_at`); no article
+  body/excerpt persisted.
+- **Ingestion:** new Celery task `dhanradar.tasks.news.refresh_market_news` scheduled every 30 min.
+  Best-effort failure path is graceful: refresh errors are logged and endpoint continues serving
+  last-persisted rows (no 500).
+- **Frontend:** dashboard news widget now consumes `/news?scope=market&limit=5`, renders link-out
+  cards (`target="_blank"`, `rel="noopener noreferrer"`) with relative time and an informational
+  not-advice note; MSW remains dev convenience only.
+- **Tests:** backend `test_news_service.py` + `test_news.py` (happy/empty/bad params + refresh-fail
+  cached-read), frontend `MarketNewsWidget.test.tsx` (cards/empty/note).
+- **Docs:** `docs/features/dashboard.md` updated as-built; `BLOCKERS.md` B56 updated to resolved with
+  follow-ups B56-f4/B56-f5.
+
 ## G8 TAX-EDUCATION ENGINE — merge-eligible, NOT deployed (2026-06-10, Opus session)
 
 **Branch:** `feat/g8-tax-education` off `main`. **PR:** `#57` (placeholder — fill before push).

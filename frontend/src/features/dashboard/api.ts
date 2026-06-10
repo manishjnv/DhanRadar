@@ -35,10 +35,11 @@ export interface TopScoredResponse {
 }
 
 export interface NewsItem {
-  id: string;
   title: string;
   source: string;
-  freshness: string;
+  url: string;
+  published_at: string;
+  category: string;
 }
 
 export interface PortfolioFund {
@@ -85,7 +86,7 @@ export function useTopScored() {
 export function useMarketNews() {
   return useQuery({
     queryKey: queryKeys.news.feed({ scope: 'market' }),
-    queryFn: () => api.get<NewsItem[]>('/news?scope=market'),
+    queryFn: () => api.get<NewsItem[]>('/news?scope=market&limit=5'),
     staleTime: 5 * 60 * 1000,
   });
 }
