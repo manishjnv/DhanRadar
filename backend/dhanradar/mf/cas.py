@@ -12,13 +12,14 @@ a real PDF; production passes the real `casparser.read_cas_pdf`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 # A reader takes (path, password) and returns the casparser output — a dict
 # (casparser 0.7.x) or a CASData pydantic model (>=1.0); parse_cas normalises both.
-CasReader = Callable[[str, Optional[str]], Any]
+CasReader = Callable[[str, str | None], Any]
 
 
 class CasParseError(Exception):
@@ -34,24 +35,24 @@ class ParsedTxn:
 @dataclass(frozen=True)
 class ParsedHolding:
     isin: str
-    amfi_code: Optional[str]
+    amfi_code: str | None
     scheme_name: str
     folio_number: str
     units: float
-    nav: Optional[float]
-    value: Optional[float]
-    cost: Optional[float]
-    as_of_date: Optional[date]
+    nav: float | None
+    value: float | None
+    cost: float | None
+    as_of_date: date | None
     txns: list[ParsedTxn]
 
 
-def _default_reader(path: str, password: Optional[str]) -> Any:  # pragma: no cover
+def _default_reader(path: str, password: str | None) -> Any:  # pragma: no cover
     import casparser  # imported lazily; only present in the worker image
 
     return casparser.read_cas_pdf(path, password)
 
 
-def _to_date(value: Any) -> Optional[date]:
+def _to_date(value: Any) -> date | None:
     if isinstance(value, date):
         return value
     if isinstance(value, str) and value:
@@ -64,9 +65,9 @@ def _to_date(value: Any) -> Optional[date]:
 
 def parse_cas(
     path: str,
-    password: Optional[str],
+    password: str | None,
     *,
-    reader: Optional[CasReader] = None,
+    reader: CasReader | None = None,
 ) -> list[ParsedHolding]:
     """Parse a CAMS/KFintech CAS PDF into normalized holdings.
 
@@ -124,10 +125,60 @@ def parse_cas(
                     txns=txns,
                 )
             )
+
+    # casparser 1.1.0 CDSL CAS: holdings are under accounts[].mutual_funds[]
+    # (distinct from the folios[] structure used by CAMS/KFintech CAS).
+    # CDSL MF entries have no transaction history → txns=[], xirr=None.
+    # Only parse accounts that were not already covered by the folios walk above.
+    if not holdings and raw.get("accounts"):
+        for account in raw.get("accounts", []) or []:
+            mf_list = account.get("mutual_funds", []) if isinstance(account, dict) else []
+            if not isinstance(mf_list, list):
+                continue
+            for entry in mf_list:
+                if not isinstance(entry, dict):
+                    continue
+                isin = (entry.get("isin") or "").strip()
+                if not isin:
+                    continue
+                raw_name = str(entry.get("name") or "")
+                # CDSL names embed "AMC_NAME#FUND_HOUSE#SCHEME_NAME" or
+                # "AMC_NAME#FUND_HOUSE-SCHEME_NAME" prefixes.
+                # Strategy: take everything after the LAST "#" when "#" is present,
+                # which is consistently the scheme name portion in CDSL format.
+                # Fall back to the full name when no "#" is present.
+                if "#" in raw_name:
+                    scheme_name = raw_name.rsplit("#", 1)[-1].strip()
+                    # Strip a remaining "FUND_HOUSE-" prefix if present
+                    # e.g. "AXIS MF-AXIS SMALL CAP FUND" → "AXIS SMALL CAP FUND"
+                    if "-" in scheme_name:
+                        parts = scheme_name.split("-", 1)
+                        # Only strip if the prefix looks like a fund-house abbreviation
+                        # (short, all-caps, no spaces or just one word)
+                        prefix = parts[0].strip()
+                        if len(prefix) <= 20 and " " not in prefix.replace("  ", ""):
+                            scheme_name = parts[1].strip()
+                else:
+                    scheme_name = raw_name
+                holdings.append(
+                    ParsedHolding(
+                        isin=isin,
+                        amfi_code=(str(entry["amfi"]) if entry.get("amfi") else None),
+                        scheme_name=scheme_name,
+                        folio_number=str(entry.get("folio") or ""),
+                        units=float(entry.get("balance") or entry.get("units") or 0.0),
+                        nav=_opt_float(entry.get("nav")),
+                        value=_opt_float(entry.get("value")),
+                        cost=_opt_float(entry.get("total_cost")),
+                        as_of_date=None,  # CDSL CAS has no per-holding date field
+                        txns=[],  # CDSL CAS has no transaction history
+                    )
+                )
+
     return holdings
 
 
-def _opt_float(v: Any) -> Optional[float]:
+def _opt_float(v: Any) -> float | None:
     if v is None:
         return None
     try:
