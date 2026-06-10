@@ -12,8 +12,6 @@ serializer (anti-pattern guard).
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -43,7 +41,7 @@ class CasJobStatus(BaseModel):
     job_id: str
     status: str  # queued | parsing | scoring | done | failed
     progress_pct: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class FundReportItem(BaseModel):
@@ -51,11 +49,11 @@ class FundReportItem(BaseModel):
     scheme_name: str
     folio_number: str
     units: float
-    invested_amount: Optional[float] = None
-    current_value: Optional[float] = None
+    invested_amount: float | None = None
+    current_value: float | None = None
     # Verdict — label + band ONLY. No unified_score / weights (non-neg #2).
-    verb_label: Optional[str] = None
-    confidence_band: Optional[str] = None
+    verb_label: str | None = None
+    confidence_band: str | None = None
     contributing_signals: list[str] = []
     contradicting_signals: list[str] = []
 
@@ -84,25 +82,26 @@ class PortfolioHistoryResponse(BaseModel):
     snapshots: list[SnapshotHistoryItem]
     disclosure: str
     not_advice: str
-    disclaimer_version: Optional[str] = None
+    disclaimer_version: str | None = None
 
 
 class PortfolioReport(BaseModel):
     job_id: str
     status: str
-    total_invested: Optional[float] = None
-    current_value: Optional[float] = None
-    xirr_pct: Optional[float] = None
+    total_invested: float | None = None
+    current_value: float | None = None
+    xirr_pct: float | None = None
     category_allocation: dict[str, float] = {}
     overlap_matrix: dict[str, dict[str, float]] = {}
     funds: list[FundReportItem] = []
     # Optional non-blocking AI portfolio commentary (omitted/None on refusal or failure).
-    commentary: Optional[str] = None
-    model_version: Optional[str] = None
-    generated_at: Optional[str] = None
+    # generate_commentary() returns a dict with a `state` key; never a plain string.
+    commentary: dict | None = None
+    model_version: str | None = None
+    generated_at: str | None = None
     # Mandatory disclosure bundle (non-neg #9) — injected at serialization. The
     # in-force `disclaimer_version` is stamped on the SERVED surface so it matches
     # the `ai_recommendation_audit` row for this report (B26 / §4 tie-to-version).
     disclosure: str
     not_advice: str
-    disclaimer_version: Optional[str] = None
+    disclaimer_version: str | None = None

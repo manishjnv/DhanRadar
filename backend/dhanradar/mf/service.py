@@ -11,7 +11,7 @@ Owns the non-pipeline glue:
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional
+from typing import Any
 
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.scoring.engine.schemas import (
@@ -37,7 +37,7 @@ def dedup_key(user_id: str, portfolio_id: str, source_hash: str) -> str:
     return f"{_DEDUP_PREFIX}{user_id}:{portfolio_id}:{source_hash}"
 
 
-async def dedup_lookup(redis: Any, user_id: str, portfolio_id: str, source_hash: str) -> Optional[str]:
+async def dedup_lookup(redis: Any, user_id: str, portfolio_id: str, source_hash: str) -> str | None:
     """Return an existing job_id for this (user, portfolio, CAS hash), or None."""
     return await redis.get(dedup_key(user_id, portfolio_id, source_hash))
 
@@ -53,7 +53,7 @@ async def dedup_clear(redis: Any, user_id: str, portfolio_id: str, source_hash: 
     await redis.delete(dedup_key(user_id, portfolio_id, source_hash))
 
 
-async def can_return_existing(redis: Any, prior_status: Optional[str], job_id: str) -> bool:
+async def can_return_existing(redis: Any, prior_status: str | None, job_id: str) -> bool:
     """Whether a re-upload may short-circuit (dedup) to an existing job.
 
     Returns True ONLY when the prior job COMPLETED *and* its assembled report is
@@ -72,12 +72,12 @@ def assemble_report(
     *,
     job_id: str,
     status: str,
-    snapshot: Optional[dict],
+    snapshot: dict | None,
     funds: list[dict],
-    model_version: Optional[str] = None,
-    generated_at: Optional[str] = None,
-    disclaimer_version: Optional[str] = None,
-    commentary: Optional[str] = None,
+    model_version: str | None = None,
+    generated_at: str | None = None,
+    disclaimer_version: str | None = None,
+    commentary: dict | None = None,
 ) -> PortfolioReport:
     """Build the client report. The disclosure bundle + NOT_ADVICE are ALWAYS
     injected here; `unified_score` is never included (each fund carries only

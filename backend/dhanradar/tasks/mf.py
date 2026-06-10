@@ -289,15 +289,15 @@ async def _run_pipeline(
             from dhanradar.mf.commentary import generate_commentary, is_commentary_entitled
 
             if await is_commentary_entitled(user_id, db):
-                report_payload["ai_commentary"] = await generate_commentary(
+                report_payload["commentary"] = await generate_commentary(
                     OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
                     request_id=request_id,
                 )
             else:
-                report_payload["ai_commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
+                report_payload["commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
         except Exception:  # noqa: BLE001 — commentary is best-effort; report still completes
             logger.exception("AI commentary failed job=%s", job_id)
-            report_payload["ai_commentary"] = {"state": "unavailable", "reason": "internal_error"}
+            report_payload["commentary"] = {"state": "unavailable", "reason": "internal_error"}
 
         await redis.set(
             f"{service._REPORT_PREFIX}{job_id}", json.dumps(report_payload), ex=service._REPORT_TTL
