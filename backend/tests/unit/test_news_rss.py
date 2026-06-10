@@ -393,6 +393,14 @@ def test_is_mf_relevant_unrelated_returns_false():
     assert _is_mf_relevant("Lending and Deposit Rates of Scheduled Commercial Banks")[0] is False
     assert _is_mf_relevant("RBI approves amalgamation of cooperative bank")[0] is False
     assert _is_mf_relevant("Sectoral Deployment of Bank Credit March 2026")[0] is False
+    # 'ter' in 'counterparty' must NOT trigger the MF keyword (false-positive guard)
+    assert _is_mf_relevant(
+        "Standardised Approach for Counterparty Credit Risk (SA-CCR)"
+    )[0] is False
+    # 'nfo' in 'information' must NOT trigger the MF keyword
+    assert _is_mf_relevant(
+        "RBI releases information on reserve money for the week ending June 2026"
+    )[0] is False
 
 
 # ---------------------------------------------------------------------------
