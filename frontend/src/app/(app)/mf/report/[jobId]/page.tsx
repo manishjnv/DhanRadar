@@ -250,9 +250,13 @@ function ReportView({ jobId }: { jobId: string }) {
 // ---------------------------------------------------------------------------
 export default function ReportPage({ params }: { params: { jobId: string } }) {
   const { jobId } = params;
-  const { data: statusData } = useCasStatus(jobId);
+  const { data: statusData, timedOut } = useCasStatus(jobId);
   const isDone = statusData?.status === 'done';
-  const isError = statusData?.status === 'error';
+  const isFailed = statusData?.status === 'error';
+
+  // Show an error card whenever the job explicitly failed OR the client-side
+  // timeout fired (job is stuck and still not terminal after 150 s).
+  const showError = isFailed || timedOut;
 
   return (
     <div className="flex flex-col gap-6">
@@ -263,14 +267,17 @@ export default function ReportPage({ params }: { params: { jobId: string } }) {
         </p>
       </div>
 
-      {isError ? (
+      {showError ? (
         <div className="rounded-lg border p-6">
           <h2 className="text-base font-medium text-ink">
-            We couldn&rsquo;t process this statement
+            {timedOut
+              ? 'This is taking longer than expected'
+              : "We couldn't process this statement"}
           </h2>
           <p className="mt-2 text-small text-ink-secondary">
-            The upload failed — the CAS PDF may be password-protected, not a CAS
-            statement, or corrupted. Nothing was saved.
+            {timedOut
+              ? 'Processing is taking longer than usual. Please try uploading your statement again.'
+              : "The upload failed - the CAS PDF may be password-protected, not a CAS statement, or corrupted. Nothing was saved."}
           </p>
           <a
             href="/mf/upload"
