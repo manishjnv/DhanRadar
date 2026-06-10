@@ -34,11 +34,10 @@ def archive_audit_daily() -> str:
 
 async def _archive() -> str:
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from dhanradar import storage
     from dhanradar.config import settings
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.models.compliance import AiRecommendationAudit
 
     # DPDP / ADR-0022 fail-safe: do NOT export user_id-bearing audit rows to the
@@ -55,8 +54,7 @@ async def _archive() -> str:
     end_utc = day_end_ist.astimezone(timezone.utc)
     key = f"{_ARCHIVE_PREFIX}{day_start_ist:%Y/%m/%d}.jsonl.gz"
 
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         rows = (
             await db.scalars(
                 select(AiRecommendationAudit)
@@ -106,14 +104,12 @@ def reconcile_audit_disclaimers() -> str:
 
 async def _reconcile_disclaimers() -> str:
     from sqlalchemy import distinct, select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from dhanradar.compliance.service import bump_audit_metric
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.models.compliance import AiRecommendationAudit, Disclaimer
 
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         audited = set(
             (
                 await db.scalars(

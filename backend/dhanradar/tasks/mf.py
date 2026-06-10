@@ -791,6 +791,79 @@ async def _monthly_rescore() -> str:
     return summary
 
 
+@celery_app.task(name="dhanradar.tasks.mf.reap_stuck_cas_jobs")
+def reap_stuck_cas_jobs() -> str:
+    """Beat task: mark CAS jobs that have been in a non-terminal status for more
+    than 10 minutes as failed with the opaque code 'stuck_timeout'.
+
+    Safe to run every few minutes — idempotent (WHERE completed_at IS NULL guards
+    against re-touching already-terminal rows).  Also clears each reaped job's Redis
+    dedup key so a clean re-upload reprocesses (uses the existing service.dedup_clear
+    helper, which expects (user_id, portfolio_id, source_hash) — all present on the
+    MfCasJob row).
+    """
+    try:
+        return asyncio.run(_reap_stuck_cas_jobs())
+    except Exception:  # noqa: BLE001
+        logger.exception("reap_stuck_cas_jobs pipeline error")
+        return "reap_stuck_cas_jobs: failed — see worker logs"
+
+
+async def _reap_stuck_cas_jobs() -> str:
+    from sqlalchemy import select, update
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfCasJob
+    from dhanradar.redis_client import get_redis
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)  # noqa: UP017 — matches pre-existing style
+
+    async with TaskSessionLocal() as db:
+        # SELECT the rows we are about to reap so we can clear their dedup keys.
+        result = await db.execute(
+            select(MfCasJob.job_id, MfCasJob.user_id, MfCasJob.portfolio_id, MfCasJob.source_hash)
+            .where(
+                MfCasJob.status.in_(["queued", "parsing", "scoring"]),
+                MfCasJob.created_at < cutoff,
+                MfCasJob.completed_at.is_(None),
+            )
+        )
+        rows = result.all()
+
+        if not rows:
+            _slog.debug("reap_stuck_cas_jobs: nothing to reap")
+            return "reaped 0 stuck jobs"
+
+        job_ids = [str(r.job_id) for r in rows]
+
+        # Bulk UPDATE to 'failed' / 'stuck_timeout' in one statement.
+        await db.execute(
+            update(MfCasJob)
+            .where(MfCasJob.job_id.in_(job_ids))  # type: ignore[arg-type]
+            .values(status="failed", error_message="stuck_timeout")
+        )
+        await db.commit()
+
+    # Best-effort: clear Redis dedup keys so re-upload reprocesses cleanly.
+    # Runs OUTSIDE the DB session (Redis is independent; a failure here is non-fatal).
+    try:
+        redis = get_redis()
+        for r in rows:
+            if r.portfolio_id is not None:
+                await service.dedup_clear(
+                    redis,
+                    str(r.user_id),
+                    str(r.portfolio_id),
+                    r.source_hash,
+                )
+    except Exception:  # noqa: BLE001 — dedup clear is best-effort; reaper result is already committed
+        logger.warning("reap_stuck_cas_jobs: Redis dedup_clear failed (non-fatal)", exc_info=True)
+
+    n = len(rows)
+    _slog.info("reap_stuck_cas_jobs: reaped", count=n, job_ids=job_ids)
+    return f"reaped {n} stuck jobs"
+
+
 @celery_app.task(name="dhanradar.tasks.mf.purge_cas_files")
 def purge_cas_files() -> str:
     """24h backstop: delete any raw CAS file older than the TTL (anti-pattern guard)."""

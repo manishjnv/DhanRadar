@@ -111,9 +111,7 @@ async def record_admin_action(
     Returns True iff written.  NEVER raises.
     """
     try:
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.audit import AdminAction
 
         ts = datetime.now(UTC)
@@ -126,8 +124,7 @@ async def record_admin_action(
             "result": result,
             "request_id": request_id,
         }
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             db.add(
                 AdminAction(
                     ts=ts,
@@ -166,9 +163,7 @@ async def record_payment_event(
     Returns True iff written.  NEVER raises.
     """
     try:
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.audit import PaymentEvent
 
         ts = datetime.now(UTC)
@@ -180,8 +175,7 @@ async def record_payment_event(
             "status": status,
             "request_id": request_id,
         }
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             db.add(
                 PaymentEvent(
                     ts=ts,
@@ -221,9 +215,7 @@ async def record_security_event(
     Returns True iff written.  NEVER raises.
     """
     try:
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.audit import SecurityEvent
 
         ts = datetime.now(UTC)
@@ -234,8 +226,7 @@ async def record_security_event(
             "user_ref": user_ref,
             "request_id": request_id,
         }
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             db.add(
                 SecurityEvent(
                     ts=ts,

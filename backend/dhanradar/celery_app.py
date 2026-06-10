@@ -166,6 +166,14 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.news.refresh_market_news",
         "schedule": crontab(minute="*/30"),
     },
+    # Stuck-job reaper — every 5 min. Marks CAS jobs orphaned at a non-terminal
+    # status (queued/parsing/scoring) for more than 10 min as failed='stuck_timeout'
+    # so the frontend stops spinning indefinitely.  Also clears Redis dedup keys so a
+    # clean re-upload reprocesses.  Idempotent (completed_at IS NULL guard).
+    "mf-reap-stuck-cas": {
+        "task": "dhanradar.tasks.mf.reap_stuck_cas_jobs",
+        "schedule": crontab(minute="*/5"),
+    },
 }
 
 # ---------------------------------------------------------------------------

@@ -252,3 +252,109 @@ def test_upload_route_is_consent_gated_for_mf_analytics():
     from dhanradar.mf import router as mf_router
 
     assert mf_router._require_mf_consent.purpose == "mf_analytics"
+
+
+# --- reap_stuck_cas_jobs unit tests -----------------------------------------
+# Helpers shared across the three reaper tests.
+
+class _ReaperRow:
+    """Mimics a SQLAlchemy Row returned by the reaper SELECT."""
+
+    def __init__(self, job_id, user_id, portfolio_id, source_hash):
+        self.job_id = job_id
+        self.user_id = user_id
+        self.portfolio_id = portfolio_id
+        self.source_hash = source_hash
+
+
+class _ReaperResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+def _make_reaper_session(rows):
+    """Return an async context-manager session that yields `rows` on every execute."""
+    execute_calls: list = []
+
+    class _Sess:
+        async def execute(self, stmt):
+            execute_calls.append(stmt)
+            return _ReaperResult(rows)
+
+        async def commit(self):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+    return _Sess(), execute_calls
+
+
+async def test_reap_stuck_cas_jobs_marks_old_queued_job_failed():
+    """An old queued job (> 10 min, completed_at IS NULL) must be reaped and the
+    summary must report count=1.  The session must receive both a SELECT and an
+    UPDATE (two execute calls)."""
+    import uuid
+    from unittest.mock import AsyncMock, patch
+
+    from dhanradar.tasks.mf import _reap_stuck_cas_jobs
+
+    old_row = _ReaperRow(
+        job_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        portfolio_id=uuid.uuid4(),
+        source_hash="deadbeef",
+    )
+    sess, calls = _make_reaper_session([old_row])
+    dedup_clear_mock = AsyncMock()
+
+    with (
+        patch("dhanradar.db.TaskSessionLocal", return_value=sess),
+        patch("dhanradar.redis_client.get_redis", return_value=AsyncMock()),
+        patch("dhanradar.mf.service.dedup_clear", dedup_clear_mock),
+    ):
+        summary = await _reap_stuck_cas_jobs()
+
+    assert "1" in summary and "stuck" in summary
+    # SELECT + UPDATE = at least 2 execute calls.
+    assert len(calls) >= 2
+
+
+async def test_reap_stuck_cas_jobs_does_not_touch_recent_job():
+    """When the DB returns no rows (recent job does not cross the cutoff), the reaper
+    must return a zero-count summary and must NOT issue an UPDATE."""
+    from unittest.mock import patch
+
+    from dhanradar.tasks.mf import _reap_stuck_cas_jobs
+
+    sess, calls = _make_reaper_session([])  # empty → nothing to reap
+
+    with patch("dhanradar.db.TaskSessionLocal", return_value=sess):
+        summary = await _reap_stuck_cas_jobs()
+
+    assert "0" in summary
+    # Only the SELECT should have been issued (early return after empty rows check).
+    assert len(calls) == 1
+
+
+async def test_reap_stuck_cas_jobs_does_not_touch_done_job():
+    """A 'done' job is excluded by the WHERE status IN (...) predicate; the DB
+    returns zero rows, so the reaper produces a zero-count summary."""
+    from unittest.mock import patch
+
+    from dhanradar.tasks.mf import _reap_stuck_cas_jobs
+
+    # Simulate DB correctly excluding 'done' jobs → empty result set.
+    sess, calls = _make_reaper_session([])
+
+    with patch("dhanradar.db.TaskSessionLocal", return_value=sess):
+        summary = await _reap_stuck_cas_jobs()
+
+    assert "0" in summary
+    assert len(calls) == 1

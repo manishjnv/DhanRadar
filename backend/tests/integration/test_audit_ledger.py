@@ -220,23 +220,23 @@ async def test_record_security_event_writes_row_and_hashes_user(db_session, monk
 
 
 # ---------------------------------------------------------------------------
-# 4. Fire-and-forget safety — engine raises → helper returns False, never raises
+# 4. Fire-and-forget safety — TaskSessionLocal raises → helper returns False, never raises
 # ---------------------------------------------------------------------------
 
 
-class _BrokenEngine:
-    """Stand-in for dhanradar.db.engine that always raises on use."""
+class _BrokenSessionMaker:
+    """Stand-in for dhanradar.db.TaskSessionLocal that raises when a session is
+    opened — proves each helper swallows DB errors and returns False. The audit
+    helpers use TaskSessionLocal (NullPool) after the SEV2 migration, not the
+    pooled engine, so the failure must be injected at TaskSessionLocal."""
 
-    def connect(self, *_a, **_kw):  # noqa: ANN001
+    def __call__(self, *_a, **_kw):  # noqa: ANN001, ANN204
         raise RuntimeError("injected DB failure")
-
-    def dispose(self, *_a, **_kw) -> None:  # noqa: ANN001
-        pass
 
 
 async def test_record_admin_action_returns_false_on_db_error(db_session, monkeypatch):
     """record_admin_action returns False (never raises) when the DB is broken."""
-    monkeypatch.setattr(_db_mod, "engine", _BrokenEngine())
+    monkeypatch.setattr(_db_mod, "TaskSessionLocal", _BrokenSessionMaker())
     result = await record_admin_action(
         admin_id="a",
         action="test",
@@ -249,7 +249,7 @@ async def test_record_admin_action_returns_false_on_db_error(db_session, monkeyp
 
 async def test_record_payment_event_returns_false_on_db_error(db_session, monkeypatch):
     """record_payment_event returns False (never raises) when the DB is broken."""
-    monkeypatch.setattr(_db_mod, "engine", _BrokenEngine())
+    monkeypatch.setattr(_db_mod, "TaskSessionLocal", _BrokenSessionMaker())
     result = await record_payment_event(
         user_id="u",
         order_id=None,
@@ -261,7 +261,7 @@ async def test_record_payment_event_returns_false_on_db_error(db_session, monkey
 
 async def test_record_security_event_returns_false_on_db_error(db_session, monkeypatch):
     """record_security_event returns False (never raises) when the DB is broken."""
-    monkeypatch.setattr(_db_mod, "engine", _BrokenEngine())
+    monkeypatch.setattr(_db_mod, "TaskSessionLocal", _BrokenSessionMaker())
     result = await record_security_event(
         event_type="totp_locked",
         user_id="u",

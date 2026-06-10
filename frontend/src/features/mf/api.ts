@@ -2,6 +2,7 @@
  * MF feature — TanStack Query hooks.
  * All calls go through apiClient (cookie auth, /api/v1 base, RFC7807 errors).
  */
+import * as React from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
@@ -50,6 +51,13 @@ export function useUploadCas() {
 // Poll job status
 // ---------------------------------------------------------------------------
 
+/**
+ * How long (ms) the CAS status poller will wait before giving up on a stuck job.
+ * The expected p95 processing time is ~60 s; 150 s gives 2.5× headroom before
+ * surfacing the re-upload prompt.
+ */
+export const CAS_POLL_TIMEOUT_MS = 150_000;
+
 /** Map backend status values → the frontend CasStatusResponse enum the page expects. */
 function mapBackendStatus(raw: BackendCasJobStatus): CasStatusResponse {
   let status: CasStatusResponse['status'];
@@ -72,24 +80,45 @@ function mapBackendStatus(raw: BackendCasJobStatus): CasStatusResponse {
   return { status, progress_pct: raw.progress_pct };
 }
 
-export function useCasStatus(jobId: string | null) {
-  return useQuery({
+export interface UseCasStatusResult {
+  data: CasStatusResponse | undefined;
+  isLoading: boolean;
+  timedOut: boolean;
+}
+
+export function useCasStatus(jobId: string | null): UseCasStatusResult {
+  // Record the moment polling begins (reset when jobId changes).
+  const startTimeRef = React.useRef<number>(Date.now());
+  React.useEffect(() => {
+    startTimeRef.current = Date.now();
+  }, [jobId]);
+
+  const query = useQuery({
     queryKey: queryKeys.mf.casStatus(jobId ?? ''),
     queryFn: async () => {
       const raw = await api.get<BackendCasJobStatus>(`/mf/upload/cas/${jobId}/status`);
       return mapBackendStatus(raw);
     },
     enabled: !!jobId,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data) return 1500;
-      // B46: stop polling on ANY terminal state. 'error' previously fell
-      // through to 1500ms forever, leaving the report page spinning with no
-      // way for the user to learn the job failed.
-      return data.status === 'done' || data.status === 'error' ? false : 1500;
+    refetchInterval: (q) => {
+      const data = q.state.data;
+      // B46: stop polling on ANY terminal state.
+      if (data?.status === 'done' || data?.status === 'error') return false;
+      // Client-side timeout: stop polling once the deadline has passed.
+      if (Date.now() - startTimeRef.current >= CAS_POLL_TIMEOUT_MS) return false;
+      return 1500;
     },
     staleTime: 0,
   });
+
+  // timedOut is true when polling has stopped due to the deadline, i.e. the job
+  // is still in a non-terminal state but we have been waiting too long.
+  const isTerminal =
+    query.data?.status === 'done' || query.data?.status === 'error';
+  const deadlinePassed = Date.now() - startTimeRef.current >= CAS_POLL_TIMEOUT_MS;
+  const timedOut = !isTerminal && deadlinePassed && !query.isFetching;
+
+  return { data: query.data, isLoading: query.isLoading, timedOut };
 }
 
 // ---------------------------------------------------------------------------

@@ -100,9 +100,8 @@ class AMFINavProvider(MarketDataProvider):
 
     async def fetch(self, request: DataRequest) -> object:
         from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.mf import MfFund, MfNavHistory
 
         isin: str | None = request.params.get("isin")
@@ -111,8 +110,7 @@ class AMFINavProvider(MarketDataProvider):
         if not isin and not scheme_code:
             raise ProviderError(self.name, "request must include 'isin' or 'scheme_code'")
 
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             if isin:
                 # Direct lookup by ISIN.
                 stmt = (

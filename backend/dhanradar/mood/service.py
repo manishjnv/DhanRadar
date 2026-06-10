@@ -107,9 +107,8 @@ async def compute_and_store(
 
 async def _persist(result: MoodResult, snapshot_date: date, snapshot_time: datetime, commentary: str | None) -> None:
     from sqlalchemy.dialects.postgresql import insert
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from dhanradar.db import engine
+    from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mood import MarketMood
 
     values = dict(
@@ -121,8 +120,7 @@ async def _persist(result: MoodResult, snapshot_date: date, snapshot_time: datet
         contradicting_factors=result.contradicting_factors,
         ai_commentary=commentary, model_used=MODEL_VERSION, data_quality=result.data_quality,
     )
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with SessionLocal() as db:
+    async with TaskSessionLocal() as db:
         stmt = insert(MarketMood).values(**values).on_conflict_do_update(
             index_elements=["snapshot_date"],
             set_={k: values[k] for k in values if k != "snapshot_date"},
