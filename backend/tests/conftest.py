@@ -281,6 +281,7 @@ async def db_tables(db_engine):
     import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
     import dhanradar.models.audit  # noqa: F401 — registers audit.* tables (B57)
     import dhanradar.models.education  # noqa: F401 — registers education.* tables (G8)
+    import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
@@ -293,6 +294,7 @@ async def db_tables(db_engine):
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS consent"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS education"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS news"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )
@@ -339,6 +341,10 @@ async def db_session(db_engine, db_tables):
         # education.* holds no FK to auth.users, so CASCADE won't reach it (B-G8).
         await conn.execute(
             text("TRUNCATE TABLE education.tax_education_articles RESTART IDENTITY")
+        )
+        # news.* holds no FK to auth.users (B56).
+        await conn.execute(
+            text("TRUNCATE TABLE news.news_items RESTART IDENTITY")
         )
         await conn.execute(
             text(

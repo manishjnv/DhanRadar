@@ -47,6 +47,7 @@ import dhanradar.models.mood  # noqa: E402, F401  — registers mood.* tables
 import dhanradar.models.consent  # noqa: E402, F401  — registers consent.* tables (B44)
 import dhanradar.models.audit  # noqa: E402, F401  — registers audit.* tables (B57)
 import dhanradar.models.education  # noqa: E402, F401  — registers education.* tables (G8)
+import dhanradar.models.news  # noqa: E402, F401  — registers news.* tables (B56)
 
 target_metadata = Base.metadata
 

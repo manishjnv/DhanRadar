@@ -22,6 +22,7 @@ import {
   useMarketNews,
   usePortfolioSummary,
 } from '@/features/dashboard/api';
+import { MarketNewsWidget } from '@/features/dashboard/components/MarketNewsWidget';
 import { ApiError } from '@/lib/apiClient';
 import { cn } from '@/lib/cn';
 
@@ -169,18 +170,7 @@ function NewsList() {
     return <ErrorCard title="Could not load news" onRetry={() => refetch()} />;
   }
 
-  return (
-    <ul className="flex flex-col gap-3">
-      {data?.map((item) => (
-        <li key={item.id} className="flex flex-col gap-0.5 border-b border-line pb-3 last:border-0 last:pb-0">
-          <span className="text-small text-ink leading-snug">{item.title}</span>
-          <span className="text-caption text-ink-muted">
-            {item.source} · {item.freshness}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
+  return <MarketNewsWidget items={data ?? []} />;
 }
 
 // ---------------------------------------------------------------------------

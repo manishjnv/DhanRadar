@@ -40,6 +40,7 @@ celery_app = Celery(
         "dhanradar.tasks.mood",
         "dhanradar.tasks.misc",
         "dhanradar.tasks.compliance",
+        "dhanradar.tasks.news",
     ],
 )
 
@@ -110,6 +111,8 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.misc.*":  {"queue": "misc"},
     "dhanradar.tasks.mf.*":    {"queue": "batch"},
     "dhanradar.tasks.compliance.*": {"queue": "batch"},
+    # Route news refresh to the existing batch worker (no dedicated news worker).
+    "dhanradar.tasks.news.*": {"queue": "batch"},
 }
 
 # ---------------------------------------------------------------------------
@@ -156,6 +159,12 @@ celery_app.conf.beat_schedule = {
     "mf-monthly-rescore": {
         "task": "dhanradar.tasks.mf.monthly_rescore_plus_users",
         "schedule": crontab(day_of_month=1, hour=3, minute=0),
+    },
+    # News curated refresh — every 30 min best-effort (B56). Upserts admin-curated
+    # headline rows; failures are caught so the endpoint always reads cached rows.
+    "news-refresh-market": {
+        "task": "dhanradar.tasks.news.refresh_market_news",
+        "schedule": crontab(minute="*/30"),
     },
 }
 
