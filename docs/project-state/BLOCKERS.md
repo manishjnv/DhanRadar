@@ -60,8 +60,10 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
     the 4 Yahoo index fetches with `asyncio.gather`. Latent perf only (~0 users today).
   - **B56-f4 `[OPEN LOW]`** — replace static curated seed rows with admin-managed CRUD for
     `news.news_items` (operations workflow + reviewer gate).
-  - **B56-f5 `[OPEN LOW]`** — if/when moving to RSS ingestion, add source ToS registry evidence and
-    sanctioned-source checks before enabling any external fetch adapter.
+  - **B56-f5 `[RESOLVED — 0b91826]`** — RSS ingestion live; RBI press releases + notifications
+    sanctioned (ToS confirmed 2026-06-10 from rbi.org.in/Scripts/rss.aspx); `news/rss.py` has
+    source registry with `enabled` flag; SEBI feed disabled (URL 404 confirmed); provenance stamped.
+    Branch: `fix/b56-live-news-rss`. Closes B56-f5.
 - **B57 `[P1 DEPLOYED to prod; P2 next]` — Centralised log management.** Two-tier plan in
   `docs/project-state/LOGGING_PLAN.md`. **P1 MERGED (#38) + DEPLOYED to KVM4 (2026-06-09)**:
   structlog JSON on BOTH tiers (fastapi via uvicorn-reroute + Celery), one `request_id` correlating

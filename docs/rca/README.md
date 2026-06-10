@@ -15,6 +15,30 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-10 — B56 news: feed shows 2-year-old headlines + dead (404) links
+
+- **Symptom:** the dashboard Market News widget shows stale 2024 items ("SEBI circular … March
+  2024", "AMFI … April 2024", "RBI … April 2024" — rendered "792d ago" etc.) and the headline
+  links 404. (SEV3 — degraded, user-visible trust issue; wedge unaffected.)
+- **Root cause (design/data):** `news/service.py` shipped only a hardcoded static list of 3 sample
+  2024 headlines (`_CURATED_ITEMS`) with fixed 2024 `published_at` and unverified placeholder URLs.
+  `tasks/news.py::refresh_market_news` re-upserted those same 3 rows every 30 min, so the feed never
+  advanced. The primary live-source path (RSS fetch) was never built. HEAD-checking the 3 URLs:
+  SEBI → 404, AMFI → 404, RBI → 200 (but date frozen at 2024).
+- **Fix:** `0b91826` (`fix/b56-live-news-rss`). New `news/rss.py` — sanctioned-feed registry (RBI
+  press releases + notifications; ToS confirmed live 2026-06-10 from rbi.org.in/Scripts/rss.aspx);
+  httpx async fetch + feedparser; per-item HEAD liveness check (non-2xx → skip). `list_news` gains
+  `published_at >= now − NEWS_MAX_AGE_DAYS` recency filter + staleness WARNING log. `tasks/news.py`
+  calls `fetch_and_upsert_rss_news` first; falls back to curated seed when RSS returns 0 items. No
+  DB migration (schema unchanged; `is_active` + `provenance_source` already present in 0016).
+  Config: `NEWS_MAX_AGE_DAYS=30`, `NEWS_STALENESS_WARN_HOURS=24`. Closes B56-f5.
+- **Prevention:** (1) URL liveness HEAD check at ingest — dead links can never reach the UI;
+  (2) recency guard (`NEWS_MAX_AGE_DAYS`) — old items dropped from `list_news`; (3) staleness
+  observability — WARNING log when newest served item > `NEWS_STALENESS_WARN_HOURS` old; (4)
+  regression tests in `test_news_rss.py` (8) + `test_news_service.py` (recency/staleness/rss-dedup)
+  + `test_news.py` integration recency test.
+- **Phase/area:** B56 / `backend/dhanradar/news/`.
+
 ### 2026-06-10 — G8: CI frontend build failed (`fetch failed / ECONNREFUSED`) on new SSR pages
 
 - **Symptom:** the `frontend` CI job (`next build`, mocks-off) failed with

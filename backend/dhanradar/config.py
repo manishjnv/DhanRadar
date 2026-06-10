@@ -178,6 +178,19 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
+    # News RSS ingestion (B56)
+    # ------------------------------------------------------------------
+    # Drop items older than this from list_news results (recency guard).
+    NEWS_MAX_AGE_DAYS: int = 30
+    # Emit a staleness warning log when the newest served item is older than
+    # this many hours (observability — lets us catch feed outages early).
+    NEWS_STALENESS_WARN_HOURS: int = 24
+    # Per-URL HEAD liveness check timeout in seconds.
+    NEWS_URL_HEAD_TIMEOUT_S: int = 8
+    # Overall per-feed fetch timeout in seconds.
+    NEWS_FEED_FETCH_TIMEOUT_S: int = 15
+
+    # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------
     ENV: str = "development"
