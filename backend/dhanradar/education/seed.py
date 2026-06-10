@@ -41,12 +41,9 @@ async def seed_articles(db: Any) -> int:
 
 
 async def _run() -> None:
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from dhanradar.db import TaskSessionLocal
 
-    from dhanradar.db import engine
-
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with session_factory() as db:
+    async with TaskSessionLocal() as db:
         count = await seed_articles(db)
     logger.info("education: seeded %d tax articles", count)
     print(f"education: seeded {count} tax articles")  # noqa: T201 — CLI feedback

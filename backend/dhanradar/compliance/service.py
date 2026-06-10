@@ -117,9 +117,7 @@ async def record_served_label(
         return False
 
     try:
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.compliance import AiRecommendationAudit
 
         payload = {
@@ -127,8 +125,7 @@ async def record_served_label(
             "disclaimer_version": disclaimer_version, "identifier": identifier,
             "recommendation_type": recommendation_type,
         }
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             db.add(
                 AiRecommendationAudit(
                     served_at=datetime.now(timezone.utc),  # server-set, never caller-supplied
@@ -439,13 +436,10 @@ async def log_low_confidence(
     raises — on any failure, logs and returns False.
     """
     try:
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-        from dhanradar.db import engine
+        from dhanradar.db import TaskSessionLocal
         from dhanradar.models.compliance import AiLowConfidenceLog
 
-        SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with SessionLocal() as db:
+        async with TaskSessionLocal() as db:
             db.add(
                 AiLowConfidenceLog(
                     surface=surface,
