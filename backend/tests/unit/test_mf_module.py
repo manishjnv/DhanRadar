@@ -13,9 +13,9 @@ from dataclasses import fields
 from datetime import date
 
 from dhanradar.mf.cas import parse_cas
+from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
 from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
-from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.tasks.mf import parsed_to_snapshot_holdings
 
 
@@ -30,6 +30,36 @@ def _fake_cas(_path, _password):
                 {"isin": "", "scheme": "Not an MF row"},  # no ISIN → skipped
             ]},
         ]
+    }
+
+
+def _fake_cdsl_cas(_path, _password):
+    """Simulates casparser 1.1.0 CDSL CAS output (accounts structure)."""
+    return {
+        "file_type": "CDSL",
+        "accounts": [
+            {
+                "name": "Test Account", "type": "CDSL Demat Account",
+                "mutual_funds": [
+                    {
+                        "isin": "INF846K01K35",
+                        "amfi": "120505",
+                        "name": "AXIS AMC LTD#AXIS MF-AXIS SMALL CAP FUND-DIRECT GROWTH",
+                        "balance": 214.1,
+                        "nav": 123.36,
+                        "value": 26411.38,
+                        "total_cost": 20000.0,
+                        "folio": "12345678",
+                    },
+                    {
+                        "isin": "",  # no ISIN — skipped
+                        "name": "EQUITY SHARES",
+                        "balance": 100,
+                        "amfi": None,
+                    },
+                ],
+            }
+        ],
     }
 
 
@@ -67,6 +97,25 @@ def test_parse_cas_normalises_pydantic_model_output():
     holdings = parse_cas("x.pdf", "pw", reader=lambda _p, _pw: _FakeCasData())
     assert len(holdings) == 1  # walked the model_dump() output, not crashed
     assert holdings[0].isin == "INF001" and holdings[0].value == 5000.0
+
+
+def test_parse_cas_handles_cdsl_accounts_structure():
+    """casparser 1.1.0 CDSL CAS uses accounts[].mutual_funds[] not folios[].
+    parse_cas must walk the accounts path when folios is absent/empty."""
+    holdings = parse_cas("x.pdf", "pw", reader=_fake_cdsl_cas)
+    assert len(holdings) == 1  # the no-ISIN entry was skipped
+    h = holdings[0]
+    assert h.isin == "INF846K01K35"
+    assert h.amfi_code == "120505"
+    assert h.units == 214.1
+    assert h.nav == 123.36
+    assert h.value == 26411.38
+    assert h.cost == 20000.0
+    assert h.folio_number == "12345678"
+    assert h.txns == []  # CDSL has no transaction history
+    # Scheme name should not contain the "AXIS AMC LTD#" prefix
+    assert "AXIS AMC LTD" not in h.scheme_name
+    assert "AXIS" in h.scheme_name  # still mentions AXIS fund
 
 
 # --- dedup hash --------------------------------------------------------------
