@@ -197,3 +197,46 @@ async def test_refresh_failure_preserves_cached_rows(async_client, db_session, m
     items = r.json()
     assert len(items) == 1
     assert items[0]["title"] == "Cached row"
+
+
+# ---------------------------------------------------------------------------
+# 6. recency filter: item older than NEWS_MAX_AGE_DAYS is excluded from list
+# ---------------------------------------------------------------------------
+
+
+async def test_get_news_recency_filter_excludes_old_items(async_client, db_session):
+    """Items with published_at older than NEWS_MAX_AGE_DAYS are excluded from results.
+
+    Seeds one fresh item (today) and one stale item (1 year ago).  Only the
+    fresh item should appear in the response.
+    """
+    from datetime import timedelta
+
+    from dhanradar.config import settings
+
+    now = datetime.now(UTC)
+    fresh_time = now - timedelta(days=1)
+    stale_time = now - timedelta(days=settings.NEWS_MAX_AGE_DAYS + 10)
+
+    db_session.add(
+        _make_row(
+            title="Fresh item",
+            canonical_url="https://rbi.org.in/fresh",
+            published_at=fresh_time,
+        )
+    )
+    db_session.add(
+        _make_row(
+            title="Stale item",
+            canonical_url="https://rbi.org.in/stale",
+            published_at=stale_time,
+        )
+    )
+    await db_session.commit()
+
+    r = await async_client.get("/api/v1/news?scope=market&limit=10")
+    assert r.status_code == 200, r.text
+
+    titles = [item["title"] for item in r.json()]
+    assert "Fresh item" in titles, "Fresh item must be served"
+    assert "Stale item" not in titles, "Stale item must be excluded by recency filter"

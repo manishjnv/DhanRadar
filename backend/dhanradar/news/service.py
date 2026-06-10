@@ -1,24 +1,26 @@
 """
-DhanRadar — News service: list and upsert admin-curated news items (B56).
+DhanRadar — News service: list, upsert, and ingest news items (B56).
 
-No external RSS fetch — redistribution terms are unverified.  All content is
-admin-curated headline + canonical link only.  Article body/excerpt is NEVER
-stored (copyright compliance).
+Two ingestion paths:
+1. RSS ingestion (primary): `fetch_and_upsert_rss_news` fetches sanctioned RSS
+   feeds via `news.rss`, HEAD-checks each URL, and upserts headline metadata only.
+2. Admin-curated fallback: `get_curated_seed` / `upsert_curated_news` are
+   retained as a belt-and-suspenders fallback when all RSS feeds fail.
 
-`get_curated_seed()` is the sole data-provider for the beat task; it returns a
-small set of representative headline-and-link entries that operators update
-out-of-band.  The endpoint degrades gracefully to 200 [] when the table is empty.
+Article body/excerpt is NEVER stored (copyright compliance, SEBI-safe).
+The endpoint always degrades gracefully to 200 [] (never 500).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.config import settings
 from dhanradar.models.news import NewsItem as NewsItemModel
 from dhanradar.news.schemas import NewsItem
 
@@ -133,20 +135,38 @@ async def list_news(
     scope: str = "market",
     limit: int = 20,
 ) -> list[NewsItem]:
-    """Return active news items ordered by published_at DESC.
+    """Return active news items within the recency window, ordered by published_at DESC.
 
+    Recency window: NEWS_MAX_AGE_DAYS (default 30) from config.
+    Staleness warning: logs when the newest served item is older than
+    NEWS_STALENESS_WARN_HOURS — observable signal for feed health.
     Always returns 200 [] when no rows exist — never 404.
     """
+    cutoff = datetime.now(UTC) - timedelta(days=settings.NEWS_MAX_AGE_DAYS)
+
     result = await db.execute(
         select(NewsItemModel)
         .where(
             NewsItemModel.scope == scope,
             NewsItemModel.is_active.is_(True),
+            NewsItemModel.published_at >= cutoff,
         )
         .order_by(NewsItemModel.published_at.desc())
         .limit(limit)
     )
     rows = result.scalars().all()
+
+    # Staleness observability — warn when the freshest served item is old.
+    if rows:
+        newest_age_h = (datetime.now(UTC) - rows[0].published_at).total_seconds() / 3600
+        if newest_age_h > settings.NEWS_STALENESS_WARN_HOURS:
+            logger.warning(
+                "news.staleness: newest served item is %.1fh old (threshold=%dh) — "
+                "RSS feed may be stale or all ingest cycles failed",
+                newest_age_h,
+                settings.NEWS_STALENESS_WARN_HOURS,
+            )
+
     return [
         NewsItem(
             title=row.title,
@@ -157,3 +177,78 @@ async def list_news(
         )
         for row in rows
     ]
+
+
+async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
+    """Fetch sanctioned RSS feeds and upsert live headline items into news.news_items.
+
+    Primary ingestion path (replaces admin-curated seed).  Returns the count of
+    items upserted.  Any feed failure is gracefully isolated (fetch_all_feeds
+    returns [] for a bad feed, never raises).  Returns 0 when all feeds fail
+    so the caller can fall back to the curated seed.
+
+    Dedup is enforced at the DB level via ON CONFLICT (canonical_url) DO UPDATE.
+    URL liveness was already checked by rss.fetch_feed before items reach here.
+    """
+    from dhanradar.news.rss import fetch_all_feeds
+
+    items = await fetch_all_feeds()
+    if not items:
+        logger.warning("news.service: all RSS feeds returned 0 items")
+        return 0
+
+    now = datetime.now(UTC)
+    upserted = 0
+
+    for raw in items:
+        try:
+            title = str(raw["title"]).strip()
+            source = str(raw["source"]).strip()
+            canonical_url = str(raw["canonical_url"]).strip()
+            scope = str(raw.get("scope", "market")).strip()
+            category = str(raw.get("category", "market")).strip()
+            published_at: datetime = raw["published_at"]
+            provenance_source = str(raw.get("provenance_source", "rss")).strip()
+
+            if not title or not source or not canonical_url:
+                logger.warning(
+                    "news.service.rss: skipping malformed item url=%r", canonical_url
+                )
+                continue
+        except (KeyError, TypeError, ValueError):
+            logger.warning("news.service.rss: skipping malformed item", exc_info=True)
+            continue
+
+        stmt = (
+            pg_insert(NewsItemModel)
+            .values(
+                scope=scope,
+                category=category,
+                title=title,
+                source=source,
+                canonical_url=canonical_url,
+                published_at=published_at,
+                provenance_source=provenance_source,
+                fetched_at=now,
+                is_active=True,
+            )
+            .on_conflict_do_update(
+                index_elements=["canonical_url"],
+                set_={
+                    "title": title,
+                    "source": source,
+                    "scope": scope,
+                    "category": category,
+                    "published_at": published_at,
+                    "provenance_source": provenance_source,
+                    "fetched_at": now,
+                    "is_active": True,
+                },
+            )
+        )
+        await db.execute(stmt)
+        upserted += 1
+
+    await db.commit()
+    logger.info("news.service.rss: upserted %d items", upserted)
+    return upserted
