@@ -162,7 +162,7 @@ function FreshnessRow({ freshness }: { freshness: FreshnessMeta }) {
       </span>
       <span>
         {freshness.is_stale
-          ? `NAV data is ${freshness.nav_days_ago} day(s) old — freshness check recommended`
+          ? `NAV data is ${freshness.nav_days_ago} day(s) old \u2014 this label uses older price data`
           : `NAV updated ${freshness.nav_days_ago === 0 ? 'today' : `${freshness.nav_days_ago} day(s) ago`} (${freshness.nav_as_of})`}
       </span>
     </div>

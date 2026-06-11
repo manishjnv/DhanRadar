@@ -263,8 +263,11 @@ async def test_transparency_insufficient_data_refusal(async_client, db_session, 
     assert refusal["reason"], "refusal.reason must be non-empty"
     assert refusal["detail"], "refusal.detail must be non-empty"
 
-    # Verify educational framing — no advisory verbs
-    for advisory_verb in ("buy", "sell", "hold", "switch", "invest", "redeem"):
+    # Verify educational framing — no advisory verbs (full SEBI non-neg list)
+    _advisory_verbs = (
+        "buy", "sell", "hold", "switch", "invest", "redeem", "avoid", "consider", "suggest"
+    )
+    for advisory_verb in _advisory_verbs:
         assert advisory_verb not in refusal["reason"].lower(), (
             f"Advisory verb '{advisory_verb}' found in refusal.reason"
         )
@@ -331,7 +334,13 @@ async def test_transparency_no_numeric_leak(async_client, db_session, patch_redi
     assert "unified_score" not in raw, "unified_score must not appear in transparency response"
     # Also assert raw confidence float doesn't appear (only band strings allowed)
     assert "0.87" not in raw, "Raw numeric confidence float must not appear in response"
-    assert '"87"' not in raw, "Raw numeric score must not appear as string in response"
+    # Check bare integer form too; nav_days_ago is None in this fixture so 87 cannot
+    # appear via any other path. Pydantic allowlist is the structural guard; this is
+    # defense-in-depth.
+    # Check bare integer form too; nav_days_ago is None in this fixture so
+    # 87 cannot appear via any other path.
+    assert '"87"' not in raw, "Numeric score must not appear as JSON string"
+    assert " 87," not in raw and " 87}" not in raw, "Numeric score must not appear as JSON int"
 
 
 # ---------------------------------------------------------------------------

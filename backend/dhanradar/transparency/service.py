@@ -88,7 +88,7 @@ def _derive_drivers(confidence_band: str, nav_days_ago: int | None) -> list[str]
 
     if nav_days_ago is not None and nav_days_ago > _STALE_THRESHOLD_DAYS:
         drivers.append(
-            f"NAV data is {nav_days_ago} day(s) old — freshness check recommended"
+            f"NAV data is {nav_days_ago} day(s) old — this label uses older price data"
         )
 
     return drivers
@@ -288,6 +288,9 @@ async def get_portfolio_transparency(
         )
 
     # Import disclosure constants read-only (B56-f1: same source as dashboard).
+    # Late import to avoid circular: transparency → scoring/engine → (anything
+    # that imports transparency). Same pattern as dashboard/service.py (B56-f1).
+    # Read-only: DISCLOSURE_BUNDLE / NOT_ADVICE / DISCLAIMER_VERSION only.
     from dhanradar.scoring.engine.schemas import (  # noqa: PLC0415
         DISCLAIMER_VERSION,
         DISCLOSURE_BUNDLE,
