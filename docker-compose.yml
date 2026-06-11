@@ -200,7 +200,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          # 256M OOM-killed (SIGKILL) the scoring step on 2026-06-11 once the NAV
+          # backfill became COMPLETE (5.94M rows vs the prior partial 2.03M — the
+          # pre-B61 backfill silently lost windows): the cohort benchmark loads
+          # peer NAV series in-process. 768M is sized for that dataset; stack
+          # total 3072M → 3584M, inside the box's documented ~6 GB headroom.
+          # Long-term fix = push cohort aggregation into SQL (B63).
+          memory: 768M
           cpus: "0.50"
 
   dhanradar-celery-mood:
