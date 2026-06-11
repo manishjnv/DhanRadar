@@ -1,11 +1,49 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (feat/data-transparency-layer — Plan Group 9 / PU2 data transparency surface; pending Opus compliance gate; SEV2 NullPool completion DEPLOYED `42c96db` PR #74; NAV backfilled 2.0 M rows; docs PR open)
+**Last updated:** 2026-06-11 (Data Transparency Plan Group 9/PU2 — Opus-gated ACCEPT, merged #80, **DEPLOYED** `5cd1c48`; CI greened #72; NAV backfilled 2.0 M rows; SEV2 NullPool deployed `42c96db` #74; daily-NAV B61 open)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## FEAT/DATA-TRANSPARENCY-LAYER — merge-eligible pending Opus gate (2026-06-11)
+## CI UNBLOCK — main backend CI greened (2026-06-11, Opus session)
+
+`main` backend CI had been **red across multiple pushes**, blocking every PR. Two stale-test
+causes (production code was fine in both — test-only drift):
+
+- **Insights tests** (`test_insights.py`) referenced undefined fixtures
+  (`test_client`/`auth_test_client`/`empty_portfolio_id`) → 8 setup errors. Rewrote to the
+  canonical `async_client` + `app.dependency_overrides[current_user_or_anonymous]` pattern
+  (mirrors `test_dashboard.py`); seeds a real owned `MfPortfolio` for the empty-portfolio 200s.
+- **mf_alerts test** (`test_mf_alerts.py`) patched `async_sessionmaker`, but the SEV2 NullPool fix
+  (#69) moved Celery tasks to a pre-built `dhanradar.db.TaskSessionLocal`; the mock missed so the
+  label-change alert never fired. Repointed the patch (verified locally 19/19 pass).
+
+Both landed in **PR #72** (`a4fc475`) → backend/frontend/guards/migrations green (`lint`
+advisory-red as usual) → **merged to `main`**, which unblocked the merge queue. RCA PR #66
+(news stale-feed) **closed as superseded** — the live fix (`0b91826`) + a fuller RCA entry already
+landed on `main`.
+
+**Deploy status (at the time of this CI-unblock):** prod was current at `74d1eb8`/`0016`; `/news`
+served today's items (stale-feed/404 fixed via live RSS); host etip lifeline untouched. **Prod has
+since advanced to `5cd1c48`** — see the Data Transparency section above for the latest deploy.
+
+**Open follow-ups (not deploy-blocking):** PR #76 (SEV2 NullPool/deploy/NAV-backfill RCA, docs),
+PR #64 (ui-system restore — should NOT merge; harvest-not-adopt), PR #19 (B31 consent gate). Known
+CI flake: the `migrations` job intermittently reds on the TimescaleDB CAGG downgrade
+(`DROP MATERIALIZED VIEW mf.mf_nav_monthly_agg` → "tuple concurrently deleted") — re-run, don't
+bypass; worth filing as a CI-reliability item.
+
+### Agent-utilization & routing telemetry (2026-06-11 CI-unblock session)
+
+- **Opus (Tier 0):** RCA of the red CI (two independent causes), both test fixes (load-bearing test
+  correctness, self-authored), local verification of mf_alerts (19/19), prod deploy verification via
+  SSH, branch/PR hygiene, this handoff. Stayed in lane vs concurrent sessions (staged only own files).
+- **Sonnet (Tier 1):** n/a this session (fixes were small + judgment-bound; self-authored per the
+  don't-delegate-when-faster rule).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; no security-critical change to gate.
+
+## DATA TRANSPARENCY (Plan Group 9 / PU2) — Opus-gated ACCEPT · MERGED #80 · DEPLOYED (2026-06-11)
 
 Branch: `feat/data-transparency-layer`. 5 commits off `main` (`74d1eb8`).
 
@@ -40,18 +78,22 @@ Integration tests require CI Postgres (local DB DNS unavailable). Unit test suit
 **Independent reviewer:** CONDITIONAL → all findings actioned (B2 fixed, B1/B3 expanded, A1/A2
 strengthened, D commented). Post-fix verdict: PASS on C and D; CONDITIONAL on A/B fully resolved.
 
-**STOP BEFORE MERGE:** Opus compliance gate required (numeric-boundary + advisory-boundary surface).
-Hand diff to Opus session for final review. Do NOT self-merge.
+**Opus compliance gate: ACCEPT** (2026-06-11) — verified no numeric score/weights/raw confidence in
+the DOM (allowlist schema), all driver + PU2-refusal copy descriptive (zero advisory verbs),
+disclosure rendered (non-neg #9), auth 401 / IDOR 404, owned-empty → 200, lane-isolated. Closed the
+B60 coverage gap (added the owned-empty→200 integration test; 7 tests). CI green on all blocking
+jobs → **merged #80 (`5cd1c48`) → DEPLOYED to KVM4** (no migration; alembic 0016 unchanged).
+Verified live: `/portfolio/{id}/transparency` → 401 anon (route live + auth-gated); site / health /
+`/learn/tax` → 200; postgres/redis/cloudflared not recreated; host etip lifeline intact.
 
-**Registered:** `BLOCKERS.md` B60 · `GROWTH_BACKLOG.md` PU2 marked IMPLEMENTED.
-**Feature doc:** `docs/features/transparency.md` (as-built).
-**No deploy** (human-gated; no migration required).
+**Registered:** `BLOCKERS.md` B60 (closed) · `GROWTH_BACKLOG.md` PU2 IMPLEMENTED ·
+`docs/features/transparency.md` (as-built).
 
 ### Agent-utilization & routing telemetry (transparency session)
 
 - **Sonnet (builder):** Phase 0 warm-start (subagent), plan, all implementation slices, gate runs,
   independent reviewer spawn (subagent), reviewer-findings fixes, doc updates.
-- **Opus gate:** REQUIRED — not yet requested. Hand to Opus for compliance + load-bearing-seam review.
+- **Opus gate (Tier 0):** compliance + numeric/advisory-boundary diff review → ACCEPT; added the B60 owned-empty test; pushed branch; drove CI green; merged #80; deployed to KVM4 + live verification.
 
 ---
 
