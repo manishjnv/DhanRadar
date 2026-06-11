@@ -39,12 +39,19 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
 
 
 def get_redis() -> aioredis.Redis:
-    """Return the shared async Redis client for the CURRENT event loop,
-    creating a fresh one when the cached client belongs to another (closed)
-    loop. No-loop callers reuse whatever is cached (legacy behaviour)."""
+    """Return the shared async Redis client for the CURRENT event loop.
+
+    Recreates the client ONLY when the cached one is loop-BOUND to a different
+    (closed) loop — i.e. it was created inside some earlier ``asyncio.run()``.
+    A cached client with no recorded loop is reused as-is: that preserves both
+    the no-loop legacy path and test fixtures that inject a fake by assigning
+    ``_client`` directly (their ``_client_loop`` stays None)."""
     global _client, _client_loop
     loop = _running_loop()
-    if _client is None or (loop is not None and _client_loop is not loop):
+    stale = (
+        _client_loop is not None and loop is not None and _client_loop is not loop
+    )
+    if _client is None or stale:
         _client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",

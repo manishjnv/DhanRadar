@@ -40,3 +40,18 @@ def test_no_loop_caller_reuses_cached_client():
     c2 = rc.get_redis()
     assert c1 is c2
     _reset()
+
+
+def test_injected_fake_client_is_never_replaced():
+    # conftest's patch_redis assigns _client directly (loop None); a loop-bound
+    # caller must NOT evict it (CI broke on exactly this before the narrow rule).
+    _reset()
+    sentinel = object()
+    rc._client = sentinel
+
+    async def _grab():
+        return rc.get_redis()
+
+    assert asyncio.run(_grab()) is sentinel
+    assert asyncio.run(_grab()) is sentinel  # across loops too
+    _reset()
