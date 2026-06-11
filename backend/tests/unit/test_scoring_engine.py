@@ -85,6 +85,7 @@ def _inputs(score=60.0, *, signals=_IN_FORM, identifier="HDFC500", axes=None, **
 
 def _engine(**kw):
     return RatingEngine(
+        config=kw.get("config"),
         hysteresis_store=kw.get("hyst", _FakeHystStore()),
         result_store=kw.get("result_store", _FakeResultStore()),  # avoid real Redis
         event_sink=kw.get("event_sink"),
@@ -246,9 +247,20 @@ def test_canonical_config_is_valid():
 
 # --- publish: event carries public projection; cache carries full result -----
 async def test_provisional_model_flag_when_not_activated():
-    # ranking_configs_v1 is activated:false → every result is tagged provisional.
-    res = await _engine().score(_inputs())
+    # A non-activated config tags every result provisional (the mechanism, pinned
+    # explicitly — the SHIPPED config is activated since 2026-06-11, B6/B28).
+    import dataclasses
+
+    cfg = dataclasses.replace(load_config(), activated=False)
+    res = await _engine(config=cfg).score(_inputs())
     assert "provisional_model" in res.flags
+
+
+async def test_shipped_config_activated_no_provisional_flag():
+    # B6/B28 v1 activation (2026-06-11, registry row e1d46e5d…): the shipped
+    # ranking_configs_v1.json carries activated:true → no provisional tag.
+    res = await _engine().score(_inputs())
+    assert "provisional_model" not in res.flags
 
 
 async def test_prior_label_surfaced_on_refusal():
