@@ -1,13 +1,3 @@
--- =====================================================================
--- ⛔ DO NOT ADOPT — HARVEST-NOT-ADOPT REFERENCE ONLY (B41)
--- This schema is from the docs/ui-system kit and CONFLICTS with the binding
--- architecture. It is NOT a source of truth; do NOT run it or migrate from it.
--- Violations: flat `public` schema (non-neg #7 = schema-per-concern, no flat
--- public), an auth/users model that diverges from the live backend, and a
--- stack that conflicts with the locks (#8). The real schema is the live
--- backend/alembic migrations. Authority: docs/DhanRadar_Architecture_Final.md;
--- apply only per docs/project-state/MIGRATION_STRATEGY_FINAL.md.
--- =====================================================================
 -- DhanRadar — PostgreSQL schema (runnable). Requires: pgcrypto, citext, (optional) timescaledb, vector.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;

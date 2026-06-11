@@ -27,7 +27,7 @@ uv run uvicorn app.main:app --reload --port 8000
 ```
 cd web && npm ci
 npm run gen:api            # generates src/types/api.ts from contracts/openapi.yaml
-# tokens come from the canonical frontend/ pipeline (gen-tokens.mjs) — no ../tokens/ copy
+# copy tokens: cp ../tokens/css-variables.css src/styles/tokens.css
 npm run dev                # http://localhost:3000
 ```
 

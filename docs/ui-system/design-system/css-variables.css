@@ -1,0 +1,99 @@
+/* DhanRadar Website — Design Tokens v1.0
+ * Drop into your global stylesheet. */
+
+:root {
+  /* Brand */
+  --dr-navy:     #0B1F3A;
+  --dr-blue:     #2563EB;
+  --dr-emerald:  #10B981;
+  --dr-cyan:     #06B6D4;
+  --dr-amber:    #F59E0B;
+  --dr-red:      #EF4444;
+
+  /* Type */
+  --dr-font-display: 'Manrope', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --dr-font-body:    'Inter',   ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --dr-font-mono:    ui-monospace, 'SF Mono', 'JetBrains Mono', monospace;
+
+  /* Spacing (4px grid) */
+  --dr-space-0: 0;       --dr-space-1: 4px;   --dr-space-2: 8px;   --dr-space-3: 12px;
+  --dr-space-4: 16px;    --dr-space-5: 20px;  --dr-space-6: 24px;  --dr-space-8: 32px;
+  --dr-space-10: 40px;   --dr-space-12: 48px; --dr-space-16: 64px; --dr-space-20: 80px;
+  --dr-space-24: 96px;   --dr-space-32: 128px;
+
+  /* Radii */
+  --dr-r-sm:   6px;
+  --dr-r-md:   8px;
+  --dr-r-lg:   12px;
+  --dr-r-xl:   16px;
+  --dr-r-2xl:  20px;
+  --dr-r-full: 9999px;
+
+  /* Motion */
+  --dr-ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dr-ease-in-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dr-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --dr-dur-fast: 120ms;
+  --dr-dur-base: 200ms;
+  --dr-dur-slow: 320ms;
+
+  /* z-index */
+  --z-dropdown: 100;
+  --z-sticky:   200;
+  --z-drawer:   300;
+  --z-modal:    400;
+  --z-toast:    500;
+}
+
+/* Light theme */
+.theme-light, [data-theme="light"] {
+  --bg:             #FFFFFF;
+  --bg-alt:         #F8FAFC;
+  --surface:        #FFFFFF;
+  --surface-2:      #F1F5F9;
+  --surface-3:      #E2E8F0;
+  --border:         #E5E7EB;
+  --border-strong:  #CBD5E1;
+  --text:           #0F172A;
+  --text-secondary: #334155;
+  --text-muted:     #64748B;
+  --text-faint:     #94A3B8;
+  --positive:       #10B981;
+  --negative:       #EF4444;
+  --warn:           #F59E0B;
+  --shadow-xs: 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-sm: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md: 0 4px 12px rgba(15,23,42,0.06), 0 2px 4px rgba(15,23,42,0.04);
+  --shadow-lg: 0 16px 40px -12px rgba(15,23,42,0.12);
+  --shadow-xl: 0 28px 60px -20px rgba(15,23,42,0.18);
+}
+
+/* Dark theme */
+.theme-dark, [data-theme="dark"] {
+  --bg:             #020617;
+  --bg-alt:         #0F172A;
+  --surface:        #0F172A;
+  --surface-2:      #1E293B;
+  --surface-3:      #293548;
+  --border:         rgba(255,255,255,0.08);
+  --border-strong:  rgba(255,255,255,0.14);
+  --text:           #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --text-muted:     #94A3B8;
+  --text-faint:     #64748B;
+  --positive:       #22D3A6;
+  --negative:       #F87171;
+  --warn:           #FBBF24;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.45);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.45);
+  --shadow-lg: 0 24px 60px -18px rgba(0,0,0,0.6);
+  --shadow-xl: 0 36px 80px -20px rgba(0,0,0,0.7);
+}
+
+/* Focus ring (use this everywhere) */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.32);
+  border-radius: var(--dr-r-md);
+}
