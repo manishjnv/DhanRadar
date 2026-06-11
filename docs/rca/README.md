@@ -15,6 +15,31 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-11 — Shared-checkout co-edit: concurrent session's in-flight hunk silently carried into PR #93
+
+- **Symptom:** PR #93's first CI run failed on two jobs (`guards` + `backend`): the compose
+  memory budget guard reported a total of 3584 M, exceeding the 3072 M cap. The diff that
+  was reviewed and intended contained only an 11-line network change to `docker-compose.yml`
+  with no memory edits. No memory change appeared in the pre-commit `git diff` scan.
+- **Root cause:** a concurrent session working on the same shared checkout (`E:\code\DhanRadar`)
+  had edited `docker-compose.yml` in the working tree (celery-batch limit raised 256 M → 768 M
+  as their B63 OOM fix) BETWEEN the pre-commit `git diff` gate and the `git add` + `git commit`
+  step. The `git add docker-compose.yml` picked up the full working-tree file — including their
+  un-staged hunk — and the commit silently carried both changes. The `git diff` gate ran clean
+  because the concurrent edits were not yet staged at that moment; `git diff --staged` was not
+  run immediately before `git commit`, so the final staged content was never verified.
+- **Fix:** branch (`feat/b38-metrics-scrape-network`) rebuilt in an isolated git worktree
+  (`E:\code\DhanRadar-wt-b38`) containing only the intended 11-line compose hunk; commit
+  amended `490d026` → `1dd3e56`, force-pushed with lease; CI green on the rebuilt branch;
+  squash-merged to main as `adf73de` (PR #93).
+- **Prevention:** (a) always run `git diff --staged` IMMEDIATELY before `git commit` on a
+  shared checkout and compare the staged hunks against the intended change — a gap between
+  `git add` and `git commit` is enough for a concurrent session to contaminate the index;
+  (b) prefer doing branch work in a dedicated git worktree (`git worktree add`) whenever
+  another session is known to be active on the same checkout — isolation is free and
+  eliminates the contamination vector by construction.
+- **Phase/area:** infra / git workflow — shared checkout + concurrent sessions.
+
 ### 2026-06-11 — SEV1: production database destroyed on postgres container recreate (PGDATA volume-path mismatch)
 
 - **Symptom:** `auth.users` and `alembic_version` "do not exist" on prod minutes after an
