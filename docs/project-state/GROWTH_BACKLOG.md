@@ -134,6 +134,14 @@ moat dimension, none recommended merely because PowerUp has it):
   explanation cites the input and as-of date it used ("rolling-return rank dropped; data as of
   <date>"). Extends **G5/G10**; the citation-per-answer is the enhancement. Wire through the
   existing grounded AI gateway after AI hardening (B20/B21/B23).
+- **PU4 — "What Changed" label-movement explainer (Plan Group 2).** For a user's own portfolio,
+  surface how each fund's label and band moved between its two most-recent score snapshots, in
+  plain educational language (improved / weakened / unchanged / new / insufficient_data) —
+  observation only, never a buy/sell/switch nudge. This is **presentation of an existing engine
+  output** (the score-history table), not new scoring logic. **IMPLEMENTED 2026-06-11**
+  (`feat/what-changed-engine`, B62) — `GET /api/v1/portfolio/{id}/changes` + `WhatChangedPanel`.
+  Independent Compliance ACCEPT + Architect ACCEPT-WITH-CONDITIONS (closed) + Opus gate ACCEPT;
+  CI + human deploy pending.
 
 **Addendum compliance flags (verify before building):**
 
