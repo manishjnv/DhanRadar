@@ -113,8 +113,10 @@ function ChangeKindChip({ kind }: { kind: ChangeKind }) {
         alignItems: 'center',
         padding: '2px 10px',
         borderRadius: 'var(--dr-r-full)',
-        background: `${color}22`,
-        border: `1px solid ${color}55`,
+        // token color at low alpha — color-mix keeps the CSS var valid (a bare
+        // `${color}22` hex-suffix on a var() is invalid CSS and renders no tint).
+        background: `color-mix(in srgb, ${color} 13%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 33%, transparent)`,
         color,
         fontSize: 12,
         fontFamily: 'var(--dr-font-sans)',
