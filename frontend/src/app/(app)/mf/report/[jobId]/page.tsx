@@ -22,6 +22,28 @@ import { cn } from '@/lib/cn';
 import type { MfScheme, OverlapPair } from '@/features/mf/types';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a UTC ISO-8601 string to a readable IST datetime, e.g. "11 Jun 2026, 8:41 AM".
+ * Returns "—" when the input is absent or unparseable.
+ */
+const IST_FORMAT = new Intl.DateTimeFormat('en-IN', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Asia/Kolkata',
+});
+
+function formatIstDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  // isNaN check: invalid ISO strings produce an invalid Date whose getTime() is NaN.
+  if (isNaN(d.getTime())) return '—';
+  return IST_FORMAT.format(d);
+}
+
+// ---------------------------------------------------------------------------
 // Progress view
 // ---------------------------------------------------------------------------
 function ProgressView({ progress }: { progress: number }) {
@@ -84,7 +106,7 @@ function SummaryRow({
         <p className={cn('mt-1 text-h3 font-medium tabular-nums', xirrPct >= 0 ? 'text-emerald' : 'text-red')}>
           {xirrPct >= 0 ? '+' : ''}{xirrPct.toFixed(1)}%
         </p>
-        <p className="text-caption text-ink-muted">{schemeCount} schemes · as of {asOf}</p>
+        <p className="text-caption text-ink-muted">{schemeCount} schemes · as of {formatIstDateTime(asOf)}</p>
       </Card>
     </div>
   );
@@ -116,7 +138,7 @@ function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
               </td>
               <td className="py-2.5 pr-3 text-ink-secondary hidden sm:table-cell">{s.category}</td>
               <td className="py-2.5 pr-3 text-right text-ink-secondary tabular-nums hidden md:table-cell">
-                ₹{s.invested.toLocaleString('en-IN')}
+                {s.invested == null ? '—' : `₹${s.invested.toLocaleString('en-IN')}`}
               </td>
               <td className="py-2.5 pr-3 text-right text-ink tabular-nums">
                 ₹{s.current_value.toLocaleString('en-IN')}
