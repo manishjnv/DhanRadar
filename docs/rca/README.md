@@ -15,6 +15,32 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-11 — Daily NAV refresh has never worked: duplicate (isin, nav_date) pairs abort bulk upsert (B61)
+
+- **Symptom:** `nav_daily_fetch` triggered manually on prod (post-PR #74 deploy verification)
+  returns HTTP 200 from AMFI (~14,208 rows), but the bulk upsert fails immediately with
+  `asyncpg.exceptions.CardinalityViolationError: ON CONFLICT DO UPDATE command cannot affect
+  row a second time` → task returns `"nav_daily_fetch: failed"`, 0 rows written.
+  The daily beat has been running since launch and silently failing every time.
+  This is DISTINCT from the asyncpg InterfaceError fixed in PR #74 — the task now successfully
+  reaches AMFI (PR #74 confirmed working), but dies at the upsert stage.
+- **Root cause (data/ingestion):** `_navrows_to_nav_upserts` in `backend/dhanradar/tasks/mf.py`
+  (~lines 81–107) keys each row on `isin_growth or isin_reinvest`. AMFI NAVAll.txt lists both
+  the growth and reinvest variants of the same fund scheme, which collapse to the same ISIN.
+  Both variants appear in a single batch → two rows with identical `(isin, nav_date)` enter the
+  same `INSERT … ON CONFLICT DO UPDATE` statement → Postgres rejects any single statement that
+  would update the same physical row twice. `_navrows_to_fund_upserts` (~lines 109–126) has the
+  same gap (keyed on `isin` alone). Found during post-deploy verification of PR #74.
+- **Fix (NOT YET APPLIED — tracked as B61):** deduplicate parsed rows before the upsert, keeping
+  last-seen per `(isin, nav_date)` in `_navrows_to_nav_upserts` and last-seen per `isin` in
+  `_navrows_to_fund_upserts`. Add a unit test feeding duplicate `(isin, nav_date)` pairs and
+  asserting one deduped output row. Both `nav_daily_fetch` and `nav_backfill` share these helpers
+  and will benefit from the fix.
+- **Prevention (once fixed):** the unit test for the dedup helpers; a post-fix prod smoke trigger
+  of `nav_daily_fetch` to confirm non-zero rows written.
+- **Phase/area:** MF data ingestion — `backend/dhanradar/tasks/mf.py`
+  (`_navrows_to_nav_upserts`, `_navrows_to_fund_upserts`). Status: NOT-YET-FIXED, tracked as B61.
+
 ### 2026-06-10 — SEV2 NullPool migration completion: CAS jobs stuck in `queued` forever + empty-NAV blocker
 
 - **Symptom:** eCAS upload stalls — CAS jobs created with `status='queued'` and never advance.
