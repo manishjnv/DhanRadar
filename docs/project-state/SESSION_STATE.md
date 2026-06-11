@@ -1,11 +1,43 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (scoring v1 ACTIVATED — B6/B28 human gate cleared, registry row
-written in prod, file-flag flip PR; earlier today: C1 explainers deployed `4e121e4`; What Changed
-engine deployed `e7e416e`)
+**Last updated:** 2026-06-11 (🚨 SEV1: prod DB destroyed by PGDATA volume-path mismatch on
+postgres recreate — fixed + rebuilt, see below; scoring v1 activated earlier the same day)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## 🚨 SEV1 — PROD DATABASE LOST ON POSTGRES RECREATE + RECOVERY (2026-06-11)
+
+Full RCA at the top of `docs/rca/README.md`. Short version:
+
+- **What happened:** an `ADMIN_USER_IDS` env change + `up -d dhanradar-fastapi` recreated the
+  env-changed dependencies (postgres, redis). `docker-compose.yml` mounted the pg named volume
+  at `/var/lib/postgresql/data`, but timescaledb-ha keeps PGDATA at `/home/postgres/pgdata/data`
+  → ALL data had been living in the container's writable layer since first deploy (2026-06-08)
+  and was destroyed with the old container. No backup existed (B37). Redis survived (anonymous
+  volume reused).
+- **Lost:** 2 user accounts + consents + portfolios/holdings + score history + ~2 days of
+  `ai_recommendation_audit`/`audit.*` rows + the v1 activation registry row.
+  **Re-created by rerun:** schema (alembic 0001→0017), seeds (education + concepts),
+  NAV backfill, scoring v1 activation (same gated script — original founder approval stands),
+  news (auto), mood (beat). **Founder must re-signup + re-upload CAS; ADMIN_USER_IDS re-set to
+  the NEW user UUID.**
+- **Fix shipped (this PR):** pg volume now mounts at `/home/postgres/pgdata`; redis got a named
+  `dhanradar_redis_data` volume; `deploy.sh` fresh-DB tripwire (aborts if `alembic_version` is
+  missing unless `DHANRADAR_ALLOW_FRESH_DB=1`).
+- **B37 escalated to URGENT** — nightly backup cron + quarterly restore drill; R2 secrets are
+  complete in the local `.env`.
+- **Also recorded this session:** human CA sign-off on G8 FY 2025-26 tax figures
+  (`reviews/g8-tax-education.md` addendum); B23 advisory-taxonomy expert sign-off (BLOCKERS B23
+  → RESOLVED, git-versioned as of `502ee58`).
+
+### Agent-utilization & routing telemetry (SEV1 session)
+
+- **Opus (Tier 0):** incident detection (evidence-first: container uptimes, volume inventory,
+  initdb logs, PGDATA env proof), compose + deploy.sh fixes (load-bearing, self-authored), RCA,
+  recovery orchestration, docs. Doc/RCA prose self-authored — incident facts only verifiable
+  in-session (hook reminders fired ×4, logged; exemption: content not draftable externally).
+- **Sonnet/Haiku/codex:rescue:** n/a — incident response on load-bearing infra, judgment-bound.
 
 ## SCORING ENGINE v1 ACTIVATION (B6/B28) — DONE IN PROD (2026-06-11)
 

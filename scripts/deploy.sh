@@ -39,6 +39,7 @@ RESET='\033[0m'
 
 info()  { echo -e "${GREEN}[deploy]${RESET} $*"; }
 warn()  { echo -e "${YELLOW}[warn]${RESET}  $*" >&2; }
+fail()  { echo -e "${RED}[FATAL]${RESET} $*" >&2; exit 1; }
 abort() { echo -e "${RED}[abort]${RESET} $*" >&2; exit 1; }
 
 # wait_healthy <service-name> <timeout-secs>
@@ -167,6 +168,22 @@ cmd_deploy() {
     # 3. Wait for data tier to be healthy
     wait_healthy dhanradar-postgres "${DB_TIMEOUT}"
     wait_healthy dhanradar-redis    "${DB_TIMEOUT}"
+
+    # 3b. Fresh-DB tripwire (SEV1 2026-06-11): if the database has no
+    #     alembic_version table, either this is a genuinely fresh install OR the
+    #     data volume was silently lost (the postgres recreate data-loss class).
+    #     Refuse to migrate-over-the-top unless the operator explicitly says
+    #     this fresh state is expected (DHANRADAR_ALLOW_FRESH_DB=1).
+    if ! $COMPOSE exec -T dhanradar-postgres \
+        psql -U dhanradar -d dhanradar -tAc \
+        "SELECT 1 FROM information_schema.tables WHERE table_name='alembic_version'" \
+        | grep -q 1; then
+      if [ "${DHANRADAR_ALLOW_FRESH_DB:-0}" != "1" ]; then
+        fail "DB has NO alembic_version table — possible DATA-VOLUME LOSS. \
+If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
+      fi
+      info "Fresh database explicitly allowed (DHANRADAR_ALLOW_FRESH_DB=1)."
+    fi
 
     # 4. Run migrations on the NEW image before serving traffic.
     #    Pre-serve ordering: the new code must never run against the old schema.
