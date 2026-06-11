@@ -15,6 +15,38 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-11 — SEV1: production database destroyed on postgres container recreate (PGDATA volume-path mismatch)
+
+- **Symptom:** `auth.users` and `alembic_version` "do not exist" on prod minutes after an
+  `ADMIN_USER_IDS` env change + `docker compose up -d dhanradar-fastapi`. Postgres logs show
+  full `initdb` ran. All production data (2 users, consents, portfolios, CAS holdings, score
+  history, 2.03M-row NAV history, ~2 days of `ai_recommendation_audit`/`audit.*` rows, the
+  scoring v1 activation registry row) was gone. No backup existed (B37 never run live).
+- **Root cause (proven):** `docker-compose.yml` mounted the named volume at
+  `/var/lib/postgresql/data` (vanilla-postgres path), but `timescale/timescaledb-ha` keeps
+  `PGDATA=/home/postgres/pgdata/data` (verified via container env). The named volume was
+  empty since 2026-06-08; ALL data lived in the container's **writable layer**, and the image
+  declares no VOLUME for that path (verified: no anonymous pg volume exists; redis's anonymous
+  `/data` volume DID survive the same recreate). The env-file change marked
+  postgres/redis as config-changed dependencies, so `up -d dhanradar-fastapi` recreated them;
+  removing the old postgres container deleted the writable layer = the database. Every prior
+  deploy "survived" only because postgres was never recreated — an unenforced invariant.
+  Contributing: the operator command piped through `tail -2`, truncating the compose output
+  lines that showed postgres/redis being recreated; obs 5712 (2026-06-07) had flagged the same
+  bug class for redis (anonymous `/data`) and was never actioned.
+- **Fix:** `docker-compose.yml` — pg volume now mounts at `/home/postgres/pgdata` (parent
+  of PGDATA, per timescaledb-ha docs); redis gains named `dhanradar_redis_data:/data`.
+  Recovery: fresh DB rebuilt via `01_init.sql` + alembic `0001→0017` + seeds (education,
+  concepts) + `nav_backfill` re-run + scoring v1 re-activation (same gated script; the original
+  human approval stands); founder must re-signup (new user UUID → `ADMIN_USER_IDS` updated again).
+- **Prevention:** (1) the volume-path fix itself — recreates now preserve data by
+  construction; (2) `scripts/deploy.sh` fresh-DB tripwire — aborts before migrating when
+  `alembic_version` is missing unless `DHANRADAR_ALLOW_FRESH_DB=1` (catches silent
+  volume-loss before it is papered over); (3) B37 backups escalated from "deploy-gate owed"
+  to URGENT — this incident is exactly the loss a nightly `pg_dump` would have bounded to 24h;
+  (4) standing rule: never pipe deploy/compose output through `tail`/`head` — read it whole.
+- **Phase/area:** infra / docker-compose / deploy.
+
 ### 2026-06-11 — MF report data quality: four live-report defects (B61 + parse + UI) — PR #81
 
 - **Symptom:** a live CAS report (post-deploy, 2026-06-11) exhibited four distinct problems:

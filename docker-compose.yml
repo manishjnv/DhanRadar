@@ -20,6 +20,9 @@ networks:
 
 volumes:
   dhanradar_pgdata:
+  # Redis AOF/RDB persistence. MUST be a named volume: without it the data sits
+  # in an anonymous volume that `down`/`-v` orphans or deletes (SEV1 2026-06-11).
+  dhanradar_redis_data:
   # Shared scratch for CAS uploads: the API (dhanradar-fastapi) writes the PDF
   # and the dhanradar-celery-batch worker reads + purges it. Without a shared
   # volume the worker's container can't see the API's /tmp file (job → failed).
@@ -50,7 +53,13 @@ services:
       - "-c"
       - "cron.database_name=dhanradar"
     volumes:
-      - dhanradar_pgdata:/var/lib/postgresql/data
+      # timescale/timescaledb-ha keeps PGDATA at /home/postgres/pgdata/data —
+      # NOT the vanilla /var/lib/postgresql/data. Mounting the volume at the
+      # wrong path left ALL data in the container's writable layer, destroyed
+      # on the first recreate (SEV1 data loss, 2026-06-11 — see RCA). The
+      # volume MUST be mounted at /home/postgres/pgdata (parent of PGDATA,
+      # also covers the image's socket + backup dirs).
+      - dhanradar_pgdata:/home/postgres/pgdata
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
       - dhanradar
@@ -78,6 +87,8 @@ services:
       redis-server
       --maxmemory-policy noeviction
       --appendonly yes
+    volumes:
+      - dhanradar_redis_data:/data
     networks:
       - dhanradar
     deploy:
