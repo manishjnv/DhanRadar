@@ -282,6 +282,7 @@ async def db_tables(db_engine):
     import dhanradar.models.audit  # noqa: F401 — registers audit.* tables (B57)
     import dhanradar.models.education  # noqa: F401 — registers education.* tables (G8)
     import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
+    import dhanradar.models.concepts  # noqa: F401 — registers concepts.* tables (C1)
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
@@ -295,6 +296,7 @@ async def db_tables(db_engine):
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS audit"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS education"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS news"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS concepts"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )

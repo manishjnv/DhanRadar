@@ -5,7 +5,8 @@
  * (left sidebar) for logged-in users, and as a STANDALONE public page (own
  * header + footer, no sidebar) for anonymous visitors and crawlers.
  *
- * Why: the public, crawlable pages (`/mood`, `/learn/tax/*`) live outside the
+ * Why: the public, crawlable pages (`/mood`, `/learn/tax/*`, `/learn/concepts/*`)
+ * live outside the
  * `(app)` route group, so a logged-in user clicking them in the sidebar would
  * lose the nav. This keeps the shell consistent in-app WITHOUT auth-gating the
  * page — SSR / first render is always the standalone branch (useMe has no data

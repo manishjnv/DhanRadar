@@ -1,9 +1,53 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (What Changed engine Opus-gated + merged #82 + **DEPLOYED** `e7e416e`; B62 resolved; prod current)
+**Last updated:** 2026-06-11 (C1 concept explainers built — PR open, awaiting Opus compliance
+gate; What Changed engine Opus-gated + merged #82 + **DEPLOYED** `e7e416e`; B62 resolved; prod
+current)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## C1 CONCEPT-EXPLAINER LEARN LIBRARY — built · PR open · AWAITING OPUS COMPLIANCE GATE (2026-06-11)
+
+Branch `feat/c1-concept-explainers` (isolated worktree `e:\code\DhanRadar-c1`, branched off
+`origin/main` `e8d8463`, rebased onto `56f566a` after What-Changed merged mid-build). Commits:
+backend `4295a51` (concepts schema 0017 + module + seed + tests), frontend `c47f153` (crawlable
+`/learn/concepts` SSR pages force-dynamic + nav + vitest), plus this docs commit. As-built doc:
+`docs/features/concepts.md`; GROWTH_BACKLOG C1 → DONE (static half; contextual surfacing waits
+for data).
+
+**Gates (local):** ci_guards PASS (advisory-verb scan clean incl. seed copy) · backend unit 5/5 +
+guard-adjacent 21/21 · ruff clean on new files (main.py/conftest I001/UP035 pre-existing on main,
+verified vs origin) · tsc 0 · eslint 0 · vitest 13/13 new + 13/13 AppShell. Integration +
+migrations run CI-only — check `gh pr checks` (known CAGG-downgrade flake: re-run, don't bypass).
+
+**Independent reviewer (Sonnet, not the builder): ACCEPT-WITH-CONDITIONS →
+conditions resolved.** Dimensions clean: (a) copy 100% educational, zero advisory framing;
+(b) disclosure bundle wired on both pages + both response schemas; (c) every ₹ figure labelled
+"hypothetical illustration" (unit-test enforced). Its (d) lane findings (changes/ "deletions",
+queryKeys edit, 4-line main.py) were a **two-dot-diff artifact** against the advanced origin/main
+— the three-dot merge-base diff shows 22 files/1681 insertions, all C1-lane; resolved by rebasing
+onto `56f566a` (one expected main.py include-block conflict, both router lines kept).
+
+**NOT MERGED — handoff:** Opus session must run the inline Compliance review (Tier-A +
+compliance, public financial-education copy) on the PR before merge. Deploy (later, human-gated):
+`alembic upgrade head` (0017) + `python -m dhanradar.concepts.seed` + `INTERNAL_API_URL` on
+nextjs (shared G8 prerequisite).
+
+### Agent-utilization & routing telemetry (2026-06-11 C1 session)
+
+- **Opus (Tier 0):** n/a — builder session ran on Fable 5 (1M); judgment work (concept copy,
+  compliance seams, migration, conflict resolution) self-authored in-session; Opus reserved for
+  the pending compliance gate.
+- **Sonnet (Tier 1):** independent C1 reviewer · reworked: N (verdict honored; its lane findings
+  re-verified as a stale-base artifact, not dismissed) · warm-start subagent · Phase-0 brief ·
+  reworked: N (one stale fact: pointed at test_education_endpoints.py which doesn't exist —
+  actual file is test_education.py).
+- **Haiku (Tier 3):** n/a — no bulk sweeps this session.
+- **codex:rescue:** n/a — unavailable on this account; Tier-A change, no security surface.
+- Doc drafting: feature doc/backlog/this entry drafted in-session by the builder (not on Opus);
+  Tier-4 free-chain skipped — copy is compliance-adjacent (educational financial copy stays off
+  provider-logged free models).
 
 ## WHAT CHANGED ENGINE (Plan Group 2) — Opus-gated · MERGED #82 · DEPLOYED (2026-06-11, `e7e416e`)
 

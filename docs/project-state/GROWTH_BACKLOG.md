@@ -32,9 +32,15 @@ These are the product, not growth. Blockers: B29, B35 (data) + B36–B46 (audit)
 
 A second track can build these while Tier 0 lands. All are SEO/acquisition assets.
 
-- **C1 — Concept-Explainer "Learn" library (static half).** Build the `concept_explainers`
-  content table + fixed approach-card template as anonymous-first crawlable pages now. Contextual
-  surfacing (by holdings) waits for data. **Build now.**
+- **C1 — Concept-Explainer "Learn" library (static half).
+  `[DONE — feat/c1-concept-explainers, 2026-06-11]`** Built: new `concepts` schema
+  (migration 0017) + `concept_explainers`, `dhanradar/concepts/` module with 2 public-read
+  endpoints (`/learn/concepts`, `/learn/concepts/{slug}`), 8 evergreen explainers (risk,
+  volatility, drawdown, diversification, asset allocation, TER, SIP/rupee-cost averaging,
+  compounding), idempotent seed (`python -m dhanradar.concepts.seed`), crawlable SSR pages at
+  `/learn/concepts` + `/learn/concepts/[slug]` (force-dynamic per the SSR RCA), AppShell nav
+  entry. Backend `4295a51`, frontend `c47f153`; as-built doc `docs/features/concepts.md`.
+  Contextual surfacing (by holdings) still waits for data — that dynamic half stays open.
 - **G8 — Tax-education engine. `[DONE — feat/g8-tax-education, 2026-06-09]`** Static,
   calendar-driven, zero AI cost, SEBI-safe, seasonally viral. Built: new `education` schema
   (migration 0015) + `tax_education_articles`, `dhanradar/education/` module with 3 public-read
