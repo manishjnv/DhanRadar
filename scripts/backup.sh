@@ -35,11 +35,19 @@ log "=== DhanRadar backup started ==="
 [[ -f ".env" ]] \
   || die ".env not found at repo root."
 
-# Load .env into the current shell (values are NOT echoed).
-set -a
-# shellcheck source=/dev/null
-source .env
-set +a
+# Load ONLY the variables this script needs from .env. Do NOT `source` the
+# whole file: docker-compose env_file tolerates values bash cannot (e.g. the
+# multi-line JWT_PRIVATE_KEY PEM), and sourcing it aborts the backup
+# ("PRIVATE: command not found" — found on the first live run, 2026-06-11).
+_env_get() { grep -E "^$1=" .env | head -1 | cut -d= -f2-; }
+POSTGRES_PASSWORD="$(_env_get POSTGRES_PASSWORD)"
+R2_ACCOUNT_ID="$(_env_get R2_ACCOUNT_ID)"
+R2_ACCESS_KEY_ID="$(_env_get R2_ACCESS_KEY_ID)"
+R2_SECRET_ACCESS_KEY="$(_env_get R2_SECRET_ACCESS_KEY)"
+R2_BACKUP_BUCKET="$(_env_get R2_BACKUP_BUCKET)"
+R2_ENDPOINT="$(_env_get R2_ENDPOINT)"
+export POSTGRES_PASSWORD R2_ACCOUNT_ID R2_ACCESS_KEY_ID \
+       R2_SECRET_ACCESS_KEY R2_BACKUP_BUCKET R2_ENDPOINT
 
 # Assert required R2 variables are present and non-empty (no values printed).
 _assert_var() {
