@@ -15,6 +15,54 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-11 — MF report data quality: four live-report defects (B61 + parse + UI) — PR #81
+
+- **Symptom:** a live CAS report (post-deploy, 2026-06-11) exhibited four distinct problems:
+  (1) every fund labelled `insufficient_data`; (2) "Invested" showed ₹0 for several funds;
+  (3) stray `▯` (U+0002 STX) characters appeared in scheme names; (4) the report timestamp
+  rendered as a raw ISO string (`2026-06-11T03:11:...`) rather than a human-readable time.
+- **Root cause — (1) insufficient\_data was a data-timing/pipeline issue, not a scoring bug.**
+  The engine emits a real label (`on_track` minimum) whenever signals are present
+  (`scoring/engine/labels.py:41`); `insufficient_data` only fires at `engine.py:134`
+  (`unified is None`). Two upstream gaps combined: scores were written before NAV was populated,
+  AND `mf_funds` was empty (0 rows) so `_compute_cohort` returned `{}` (no category-relative
+  signals). The empty `mf_funds` traced directly to B61 — `nav_daily_fetch` was failing on every
+  run (CardinalityViolationError), so the task that populates `mf_funds` never completed.
+  Stale scores needed a re-score after the pipeline fix, not a code change in the engine.
+- **Root cause — (2) invested ₹0 (data):** CDSL holdings with no transaction history carry no
+  cost basis; `valuation.cost` is `None` → `invested_amount` is null in the API response. The
+  frontend rendered null as `₹0` instead of a neutral placeholder.
+- **Root cause — (3) scheme-name control chars (data/parse):** `casparser` emits raw ASCII
+  control characters (U+0002 STX) in scheme names for certain CDSL entries. `cas.py` passed
+  names through without sanitization, so the characters reached the DB and the UI.
+- **Root cause — (4) raw ISO timestamp (frontend):** the report page rendered the
+  `generated_at` field from the API response verbatim without formatting.
+- **Fix (PR #81, `e8d8463`, deployed 2026-06-11):**
+  1. `backend/dhanradar/tasks/mf.py` — dedup `_navrows_to_nav_upserts` (keep last-seen per
+     `(isin, nav_date)`) and `_navrows_to_fund_upserts` (keep last-seen per `isin`), closing B61
+     and unblocking `mf_funds` population so the engine receives real cohort signals.
+  2. `backend/dhanradar/mf/cas.py` — new `_clean_text` helper strips ASCII control characters
+     (U+0000–U+001F except tab/LF/CR) from scheme names at parse time.
+  3. `frontend/src/app/(app)/mf/report/[jobId]/page.tsx` — `formatIstDateTime` renders
+     `generated_at` as a readable IST string; null `invested_amount` renders "—" not ₹0.
+  4. `frontend/src/features/mf/api.ts` and `types.ts` — `invested_amount` typed as
+     `number | null`; display helpers added.
+- **Verification:** deployed to KVM4; `nav_daily_fetch` succeeded immediately ("14,041 navs,
+  14,037 funds"); `mf_funds` went from 0 → 14,037; an empirical re-score of the user's 6 held
+  ISINs returned real labels (`on_track`/`off_track`/`in_form`, cohort populated, confidence
+  ~0.59–0.67) — zero `insufficient_data`.
+- **Prevention:** 7 new unit tests: 3 dedup tests for the upsert helpers
+  (duplicate `(isin, nav_date)` → single output row); 4 `_clean_text` sanitization tests
+  (STX stripped, printable chars preserved, empty string, None-safe). Standing lesson: a
+  "labels look wrong" symptom can be entirely upstream data — scores written before their NAV
+  and category inputs exist, plus a silently-failing ingestion task leaving `mf_funds` empty.
+  Always verify the pipeline (task logs, `mf_funds` row count) before suspecting the scoring
+  engine; stale scores need a re-score, not a code change.
+- **Follow-ups (deferred):** IDCW/dividend-plan cross-variant ISIN NAV fallback (one fund type
+  can still be `insufficient_data` if only its growth/reinvest variant carries NAV);
+  folio-level aggregation for invested amount.
+- **Phase/area:** Phase 5 MF report — data quality (parse + scoring data pipeline + UI).
+
 ### 2026-06-11 — Daily NAV refresh has never worked: duplicate (isin, nav_date) pairs abort bulk upsert (B61)
 
 - **Symptom:** `nav_daily_fetch` triggered manually on prod (post-PR #74 deploy verification)
@@ -31,15 +79,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
   same `INSERT … ON CONFLICT DO UPDATE` statement → Postgres rejects any single statement that
   would update the same physical row twice. `_navrows_to_fund_upserts` (~lines 109–126) has the
   same gap (keyed on `isin` alone). Found during post-deploy verification of PR #74.
-- **Fix (NOT YET APPLIED — tracked as B61):** deduplicate parsed rows before the upsert, keeping
-  last-seen per `(isin, nav_date)` in `_navrows_to_nav_upserts` and last-seen per `isin` in
-  `_navrows_to_fund_upserts`. Add a unit test feeding duplicate `(isin, nav_date)` pairs and
-  asserting one deduped output row. Both `nav_daily_fetch` and `nav_backfill` share these helpers
-  and will benefit from the fix.
-- **Prevention (once fixed):** the unit test for the dedup helpers; a post-fix prod smoke trigger
-  of `nav_daily_fetch` to confirm non-zero rows written.
+- **Fix (PR #81, `e8d8463`):** deduplicate parsed rows before the upsert, keeping last-seen per
+  `(isin, nav_date)` in `_navrows_to_nav_upserts` and last-seen per `isin` in
+  `_navrows_to_fund_upserts`. Verified in prod: `nav_daily_fetch` now writes 14,041 NAV rows and
+  14,037 fund rows; `mf_funds` went 0 → 14,037.
+- **Prevention:** 3 dedup unit tests feeding duplicate `(isin, nav_date)` rows and asserting one
+  deduped output row; post-fix prod smoke trigger of `nav_daily_fetch` confirmed non-zero rows.
 - **Phase/area:** MF data ingestion — `backend/dhanradar/tasks/mf.py`
-  (`_navrows_to_nav_upserts`, `_navrows_to_fund_upserts`). Status: NOT-YET-FIXED, tracked as B61.
+  (`_navrows_to_nav_upserts`, `_navrows_to_fund_upserts`). Closes B61.
 
 ### 2026-06-10 — SEV2 NullPool migration completion: CAS jobs stuck in `queued` forever + empty-NAV blocker
 

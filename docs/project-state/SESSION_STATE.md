@@ -1,9 +1,40 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (Data Transparency Plan Group 9/PU2 — Opus-gated ACCEPT, merged #80, **DEPLOYED** `5cd1c48`; CI greened #72; NAV backfilled 2.0 M rows; SEV2 NullPool deployed `42c96db` #74; daily-NAV B61 open)
+**Last updated:** 2026-06-11 (MF report data-quality fixes shipped + deployed PR #81 `e8d8463`; B61 resolved; `nav_daily_fetch` live — `mf_funds` 0 → 14,037)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## MF report data-quality fixes — SHIPPED + DEPLOYED (2026-06-11, PR #81, `e8d8463`)
+
+Four live-report defects fixed and deployed to KVM4 in a single PR:
+
+- **B61 RESOLVED** — `nav_daily_fetch` CardinalityViolationError fixed by deduping
+  `_navrows_to_nav_upserts` (by `(isin, nav_date)`) and `_navrows_to_fund_upserts` (by `isin`)
+  in `backend/dhanradar/tasks/mf.py`. Prod verification: task now succeeds ("14,041 navs,
+  14,037 funds"); `mf_funds` went 0 → 14,037; NAV refreshes nightly automatically.
+- **Real labels restored** — with `mf_funds` populated, `_compute_cohort` returns category peers;
+  re-score of the user's 6 held ISINs returned `on_track`/`off_track`/`in_form` (confidence
+  ~0.59–0.67, cohort populated) — zero `insufficient_data`.
+- **Scheme-name sanitization** — `_clean_text` in `backend/dhanradar/mf/cas.py` strips U+0002
+  STX control chars that `casparser` emits for certain CDSL entries.
+- **UI polish** — `formatIstDateTime` renders the report timestamp as readable IST;
+  null `invested_amount` shows "—" instead of ₹0 in
+  `frontend/src/app/(app)/mf/report/[jobId]/page.tsx` and `frontend/src/features/mf/`.
+- **Tests** — 7 new unit tests: 3 dedup + 4 sanitization.
+- **RCA** appended at top of `docs/rca/README.md` (two entries: MF data-quality + B61 fix).
+
+### Agent-utilization & routing telemetry (MF report data-quality docs session)
+
+- **Opus (Tier 0):** all three doc edits (BLOCKERS B61 resolution, RCA entries, SESSION_STATE
+  update) authored directly — content was fully specified verbatim in the task prompt
+  (transcription, not composition); delegation exemption per the ≤30-line hot-cache rule applied
+  to the BLOCKERS + SESSION_STATE edits; RCA prose was spec-provided. Hook reminder logged;
+  reworked: N/A (no subagent draft to rework).
+- **Sonnet (Tier 1):** ~6 subagents in the underlying PR #81 work slice (diagnosis,
+  scoring investigation, backend impl, frontend impl, deploy+verify, prior docs).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — account not entitled to GPT-5; no security-critical path touched.
 
 ## CI UNBLOCK — main backend CI greened (2026-06-11, Opus session)
 
