@@ -358,3 +358,132 @@ async def test_reap_stuck_cas_jobs_does_not_touch_done_job():
 
     assert "0" in summary
     assert len(calls) == 1
+
+
+# --- B61: AMFI batch deduplication ------------------------------------------
+
+class _FakeNavRow:
+    """Minimal NavRow stand-in — carries only the attributes the helpers read."""
+
+    def __init__(
+        self,
+        isin_growth: str | None,
+        isin_reinvest: str | None,
+        nav_date: object,
+        nav: float,
+        amfi_code: str,
+        scheme_name: str,
+        category: str,
+    ) -> None:
+        self.isin_growth = isin_growth
+        self.isin_reinvest = isin_reinvest
+        self.nav_date = nav_date
+        self.nav = nav
+        self.amfi_code = amfi_code
+        self.scheme_name = scheme_name
+        self.category = category
+
+
+def test_navrows_to_nav_upserts_deduplicates_same_isin_nav_date():
+    """Duplicate (isin, nav_date) in the batch → exactly one output row, last-seen wins."""
+    from datetime import date as _date
+
+    from dhanradar.tasks.mf import _navrows_to_nav_upserts
+
+    d = _date(2026, 6, 10)
+    rows = [
+        _FakeNavRow("INF001", None, d, 100.0, "A001", "Fund A", "Equity"),
+        _FakeNavRow("INF001", None, d, 105.0, "A001", "Fund A", "Equity"),  # duplicate
+    ]
+    result = _navrows_to_nav_upserts(rows)
+
+    assert len(result) == 1, "duplicate (isin, nav_date) must be collapsed to one row"
+    assert result[0]["isin"] == "INF001"
+    assert result[0]["nav"] == 105.0, "last-seen value must win"
+    assert result[0]["nav_date"] == d
+    assert result[0]["source"] == "amfi"
+
+
+def test_navrows_to_nav_upserts_skips_none_isin():
+    """Rows where both ISINs are None must be silently dropped."""
+    from datetime import date as _date
+
+    from dhanradar.tasks.mf import _navrows_to_nav_upserts
+
+    rows = [
+        _FakeNavRow(None, None, _date(2026, 6, 10), 99.0, "X", "Y", "Z"),
+        _FakeNavRow("INF002", None, _date(2026, 6, 10), 50.0, "B001", "Fund B", "Debt"),
+    ]
+    result = _navrows_to_nav_upserts(rows)
+    assert len(result) == 1
+    assert result[0]["isin"] == "INF002"
+
+
+def test_navrows_to_fund_upserts_deduplicates_same_isin():
+    """Duplicate isin in the batch → exactly one output row, last-seen wins."""
+    from datetime import date as _date
+
+    from dhanradar.tasks.mf import _navrows_to_fund_upserts
+
+    d = _date(2026, 6, 10)
+    rows = [
+        _FakeNavRow("INF003", None, d, 200.0, "C001", "Fund C v1", "Hybrid"),
+        _FakeNavRow("INF003", None, d, 210.0, "C001", "Fund C v2", "Hybrid"),  # duplicate
+    ]
+    result = _navrows_to_fund_upserts(rows)
+
+    assert len(result) == 1, "duplicate isin must be collapsed to one row"
+    assert result[0]["isin"] == "INF003"
+    assert result[0]["scheme_name"] == "Fund C v2", "last-seen scheme_name must win"
+
+
+# --- FIX 2: control-char sanitization ----------------------------------------
+
+def test_clean_text_strips_control_chars_from_scheme_name():
+    """_clean_text must remove ASCII control characters and preserve real punctuation."""
+    from dhanradar.mf.cas import _clean_text
+
+    raw = "AXIS\x02FUND"          # U+0002 STX embedded in the name
+    cleaned = _clean_text(raw)
+
+    assert "\x02" not in cleaned, "control char must be removed"
+    assert "AXIS" in cleaned and "FUND" in cleaned, "words must be preserved"
+    assert "  " not in cleaned, "double-space must be collapsed"
+
+
+def test_clean_text_preserves_legitimate_punctuation():
+    """_clean_text must not alter hyphens, slashes, parentheses, or periods."""
+    from dhanradar.mf.cas import _clean_text
+
+    name = "HDFC Top-100 Fund (Direct) / Growth 3.5%"
+    assert _clean_text(name) == name
+
+
+def test_clean_text_handles_falsy_input():
+    """_clean_text must return the original value unchanged when s is falsy."""
+    from dhanradar.mf.cas import _clean_text
+
+    assert _clean_text("") == ""
+
+
+def test_parse_cas_strips_control_chars_from_scheme_name():
+    """End-to-end: parse_cas must deliver a scheme_name free of control chars."""
+
+    def _reader_with_ctrl(_path, _password):
+        return {
+            "folios": [
+                {"folio": "F99", "schemes": [
+                    {"isin": "INF999", "amfi": "999", "scheme": "AXIS\x02FUND",
+                     "close": 10.0,
+                     "valuation": {"nav": 50.0, "value": 500.0, "cost": 400.0,
+                                   "date": "2026-06-10"},
+                     "transactions": []},
+                ]},
+            ]
+        }
+
+    holdings = parse_cas("x.pdf", "pw", reader=_reader_with_ctrl)
+    assert len(holdings) == 1
+    h = holdings[0]
+    assert "\x02" not in h.scheme_name
+    assert "AXIS" in h.scheme_name and "FUND" in h.scheme_name

@@ -12,6 +12,7 @@ a real PDF; production passes the real `casparser.read_cas_pdf`.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -61,6 +62,23 @@ def _to_date(value: Any) -> date | None:
         except ValueError:
             return None
     return None
+
+
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean_text(s: str) -> str:
+    """Strip ASCII control characters from free-text PDF fields.
+
+    casparser can emit raw control chars (e.g. U+0002 STX) inside scheme names,
+    which render as replacement-box glyphs in the UI.  This helper replaces any
+    control character with a space, collapses double-spaces, and strips leading/
+    trailing whitespace.  Legitimate punctuation (hyphens, slashes, parentheses,
+    etc.) is untouched.  Returns the original value unchanged when falsy.
+    """
+    if not s:
+        return s
+    return _CTRL.sub(" ", s).replace("  ", " ").strip()
 
 
 def parse_cas(
@@ -115,7 +133,7 @@ def parse_cas(
                 ParsedHolding(
                     isin=isin,
                     amfi_code=(str(scheme["amfi"]) if scheme.get("amfi") else None),
-                    scheme_name=str(scheme.get("scheme") or ""),
+                    scheme_name=_clean_text(str(scheme.get("scheme") or "")),
                     folio_number=folio_no,
                     units=float(scheme.get("close") or scheme.get("units") or 0.0),
                     nav=_opt_float(valuation.get("nav")),
@@ -164,7 +182,7 @@ def parse_cas(
                     ParsedHolding(
                         isin=isin,
                         amfi_code=(str(entry["amfi"]) if entry.get("amfi") else None),
-                        scheme_name=scheme_name,
+                        scheme_name=_clean_text(scheme_name),
                         folio_number=str(entry.get("folio") or ""),
                         units=float(entry.get("balance") or entry.get("units") or 0.0),
                         nav=_opt_float(entry.get("nav")),
