@@ -1,0 +1,304 @@
+"""
+DhanRadar — Transparency service (Plan Group 9 / PU2).
+
+READ-ONLY over persisted tables. Never imports or modifies:
+  scoring/engine/*, mf/signals.py, mf/scoring_bridge.py, mf/service.py,
+  tasks/*, news/*, insights/*.
+
+Confidence + label are consumed from already-persisted mf.user_fund_scores rows.
+NAV freshness is derived from MAX(mf_nav_history.nav_date) per ISIN.
+Holdings provenance is derived from mf_user_holdings.source + as_of_date.
+unified_score is NEVER selected.
+
+Driver derivation logic:
+  The engine's live `flags` list (partial_coverage/stale/low_liquidity/
+  provisional_model) is NOT persisted to user_fund_scores. We derive equivalent
+  qualitative drivers from what IS persisted: confidence_band + NAV days-ago.
+  This is conservative and safe — it never inverts a flag the engine didn't set.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, date, datetime
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from dhanradar.models.mf import (
+    MfFund,
+    MfNavHistory,
+    MfPortfolio,
+    MfUserHolding,
+    UserFundScore,
+)
+from dhanradar.transparency.schemas import (
+    DataSource,
+    FreshnessMeta,
+    FundTransparency,
+    InsufficientDataRefusal,
+    PortfolioTransparencyResponse,
+)
+
+logger = logging.getLogger(__name__)
+
+# NAV age threshold (calendar days) above which we flag as stale.
+_STALE_THRESHOLD_DAYS = 5
+
+# Source display names — maps the raw `source` column value to a human label.
+_HOLDING_SOURCE_NAMES: dict[str, str] = {
+    "cas": "CAMS/KARVY CAS",
+    "broker": "Broker Import",
+    "manual": "Manual Entry",
+}
+_NAV_SOURCE_NAMES: dict[str, str] = {
+    "amfi": "AMFI NAV Feed",
+}
+
+
+# ---------------------------------------------------------------------------
+# Plain-language driver derivation (educational; never advisory)
+# ---------------------------------------------------------------------------
+
+def _derive_drivers(confidence_band: str, nav_days_ago: int | None) -> list[str]:
+    """
+    Derive qualitative data-quality driver strings from persisted state.
+
+    These are factual statements about coverage and freshness — EDUCATIONAL,
+    never advisory. No buy/sell/hold/switch language anywhere.
+    """
+    if confidence_band == "insufficient_data":
+        return []  # refusal block carries the explanation, not drivers
+
+    drivers: list[str] = []
+
+    if confidence_band == "high":
+        drivers.append(
+            "Based on 24+ months of NAV history across all signal axes"
+        )
+    elif confidence_band == "medium":
+        drivers.append(
+            "Based on available history; category benchmark may be partially available"
+        )
+    elif confidence_band == "low":
+        drivers.append(
+            "Limited data coverage — label may update as more history accumulates"
+        )
+
+    if nav_days_ago is not None and nav_days_ago > _STALE_THRESHOLD_DAYS:
+        drivers.append(
+            f"NAV data is {nav_days_ago} day(s) old — freshness check recommended"
+        )
+
+    return drivers
+
+
+def _build_refusal() -> InsufficientDataRefusal:
+    """Standard PU2 refusal block. Educational framing — honesty signal, not error."""
+    return InsufficientDataRefusal(
+        reason=(
+            "Not enough data to assess this fund yet \u2014 we won\u2019t guess."
+        ),
+        detail=(
+            "A minimum of 14 months of NAV history and category peer data are "
+            "needed for a reliable assessment. This label will update automatically "
+            "as more data becomes available."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# DB query helpers (read-only; unified_score never touched)
+# ---------------------------------------------------------------------------
+
+async def _fetch_score_rows(
+    db: AsyncSession, portfolio_id: UUID
+) -> list[tuple]:
+    """
+    Fetch latest score per ISIN for a portfolio.
+
+    Returns list of (isin, confidence_band, verb_label, scored_at, model_version).
+    unified_score is deliberately excluded from the SELECT list.
+    """
+    stmt = (
+        select(
+            UserFundScore.isin,
+            UserFundScore.confidence_band,
+            UserFundScore.verb_label,
+            UserFundScore.scored_at,
+            UserFundScore.model_version,
+        )
+        .where(UserFundScore.portfolio_id == portfolio_id)
+        .order_by(UserFundScore.isin, UserFundScore.scored_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    # Deduplicate to latest per ISIN (query is ordered isin ASC, scored_at DESC).
+    seen: set[str] = set()
+    result = []
+    for row in rows:
+        if row.isin not in seen:
+            seen.add(row.isin)
+            result.append(row)
+    return result
+
+
+async def _fetch_fund_meta(
+    db: AsyncSession, isins: list[str]
+) -> dict[str, tuple[str, str | None]]:
+    """Return {isin: (scheme_name, category)} from mf_funds."""
+    if not isins:
+        return {}
+    stmt = select(MfFund.isin, MfFund.scheme_name, MfFund.category).where(
+        MfFund.isin.in_(isins)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {r.isin: (r.scheme_name, r.category) for r in rows}
+
+
+async def _fetch_latest_nav_dates(
+    db: AsyncSession, isins: list[str]
+) -> dict[str, date | None]:
+    """Return {isin: max(nav_date)} from mf_nav_history."""
+    if not isins:
+        return {}
+    stmt = (
+        select(MfNavHistory.isin, func.max(MfNavHistory.nav_date).label("latest_nav"))
+        .where(MfNavHistory.isin.in_(isins))
+        .group_by(MfNavHistory.isin)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {r.isin: r.latest_nav for r in rows}
+
+
+async def _fetch_holding_meta(
+    db: AsyncSession, portfolio_id: UUID, isins: list[str]
+) -> dict[str, tuple[str, date | None]]:
+    """Return {isin: (source, as_of_date)} from mf_user_holdings (first row per isin)."""
+    if not isins:
+        return {}
+    stmt = (
+        select(MfUserHolding.isin, MfUserHolding.source, MfUserHolding.as_of_date)
+        .where(
+            MfUserHolding.portfolio_id == portfolio_id,
+            MfUserHolding.isin.in_(isins),
+        )
+        .order_by(MfUserHolding.isin, MfUserHolding.updated_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    seen: set[str] = set()
+    result: dict[str, tuple[str, date | None]] = {}
+    for r in rows:
+        if r.isin not in seen:
+            seen.add(r.isin)
+            result[r.isin] = (r.source, r.as_of_date)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+async def get_portfolio_transparency(
+    db: AsyncSession,
+    portfolio_id: UUID,
+    requesting_user_id: UUID,
+) -> PortfolioTransparencyResponse | None:
+    """
+    Build the full transparency payload for a portfolio.
+
+    Returns None when the portfolio does not exist or does not belong to the
+    requesting user (caller must convert None → 404).
+
+    Ownership check: we confirm mf_portfolios.user_id == requesting_user_id
+    to prevent IDOR before reading any score data.
+    unified_score is NEVER selected anywhere in this function.
+    """
+    # --- IDOR ownership check ---
+    portfolio_row = (
+        await db.execute(
+            select(MfPortfolio.id, MfPortfolio.user_id).where(
+                MfPortfolio.id == portfolio_id
+            )
+        )
+    ).first()
+    if portfolio_row is None or portfolio_row.user_id != requesting_user_id:
+        return None
+
+    # --- Fetch persisted score rows ---
+    score_rows = await _fetch_score_rows(db, portfolio_id)
+    isins = [r.isin for r in score_rows]
+
+    # --- Bulk-fetch supporting data ---
+    fund_meta, nav_dates, holding_meta = (
+        await _fetch_fund_meta(db, isins),
+        await _fetch_latest_nav_dates(db, isins),
+        await _fetch_holding_meta(db, portfolio_id, isins),
+    )
+
+    today = datetime.now(tz=UTC).date()
+
+    funds: list[FundTransparency] = []
+    for row in score_rows:
+        isin = row.isin
+        scheme_name, category = fund_meta.get(isin, (isin, None))
+
+        # Freshness
+        latest_nav = nav_dates.get(isin)
+        nav_days_ago: int | None = None
+        is_stale = False
+        if latest_nav is not None:
+            nav_days_ago = (today - latest_nav).days
+            is_stale = nav_days_ago > _STALE_THRESHOLD_DAYS
+
+        holding_src, holding_as_of = holding_meta.get(isin, ("cas", None))
+        freshness = FreshnessMeta(
+            nav_as_of=latest_nav.isoformat() if latest_nav else None,
+            nav_days_ago=nav_days_ago,
+            is_stale=is_stale,
+            holdings_as_of=holding_as_of.isoformat() if holding_as_of else None,
+        )
+
+        # Sources
+        sources: list[DataSource] = []
+        nav_src_name = _NAV_SOURCE_NAMES.get("amfi", "AMFI NAV Feed")
+        if latest_nav is not None:
+            sources.append(DataSource(name=nav_src_name, type="nav_data"))
+        holding_src_name = _HOLDING_SOURCE_NAMES.get(holding_src, holding_src.capitalize())
+        sources.append(DataSource(name=holding_src_name, type="holdings"))
+
+        # Drivers + refusal
+        drivers = _derive_drivers(row.confidence_band, nav_days_ago)
+        refusal = _build_refusal() if row.confidence_band == "insufficient_data" else None
+
+        funds.append(
+            FundTransparency(
+                isin=isin,
+                scheme_name=scheme_name,
+                category=category,
+                label=row.verb_label,
+                confidence_band=row.confidence_band,
+                drivers=drivers,
+                refusal=refusal,
+                sources=sources,
+                freshness=freshness,
+                scored_at=row.scored_at.isoformat() if row.scored_at else None,
+                model_version=row.model_version,
+            )
+        )
+
+    # Import disclosure constants read-only (B56-f1: same source as dashboard).
+    from dhanradar.scoring.engine.schemas import (  # noqa: PLC0415
+        DISCLAIMER_VERSION,
+        DISCLOSURE_BUNDLE,
+        NOT_ADVICE,
+    )
+
+    return PortfolioTransparencyResponse(
+        portfolio_id=str(portfolio_id),
+        generated_at=datetime.now(tz=UTC).isoformat(),
+        funds=funds,
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+        disclaimer_version=DISCLAIMER_VERSION,
+    )
