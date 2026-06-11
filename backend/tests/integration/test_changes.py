@@ -437,7 +437,9 @@ _ADVISORY_VERBS = (
 
 
 async def test_changes_no_advisory_verb_in_response(async_client, db_session, patch_redis):
-    """None of the SEBI-forbidden advisory verbs must appear in the full response body."""
+    """No SEBI-forbidden advisory verb may appear in the module-GENERATED copy
+    (reasons / change_kind / labels). The disclosure bundle is exempt: it legitimately
+    negates those verbs and is a separately-trusted imported constant."""
     user_id = await _seed_user(db_session)
     uid, pid = await _seed_portfolio_and_fund(db_session, user_id)
 
@@ -457,9 +459,30 @@ async def test_changes_no_advisory_verb_in_response(async_client, db_session, pa
         app.dependency_overrides.pop(current_user_or_anonymous, None)
 
     assert r.status_code == 200, r.text
-    raw_lower = r.text.lower()
+    body = r.json()
+
+    # Scan only MODULE-GENERATED educational copy: reasons + change_kind + labels.
+    # The disclosure bundle is deliberately EXCLUDED — it is an imported, separately
+    # trusted constant that legitimately negates advisory verbs (the canonical
+    # DISCLOSURE_BUNDLE ends with a non-recommendation clause naming the four verbs),
+    # so scanning the full body would false-positive on that mandated negation (same
+    # rationale as the transparency suite). Fund scheme names are excluded too — a
+    # fund may legally carry any name.
+    generated: list[str] = []
+    for c in body["changes"]:
+        generated.extend(c["reasons"])
+        generated.append(c["change_kind"])
+        generated.append(c["label_to"])
+        if c["label_from"]:
+            generated.append(c["label_from"])
+    scan_text = " ".join(generated).lower()
 
     for verb in _ADVISORY_VERBS:
-        assert verb not in raw_lower, (
-            f"Advisory verb '{verb}' found in changes response body"
+        assert verb not in scan_text, (
+            f"Advisory verb '{verb}' found in module-generated changes copy"
         )
+
+    # The disclosure bundle MUST still be present — it is the ONLY place the
+    # negated verbs may legitimately appear.
+    assert body["disclosure"]
+    assert body["not_advice"] == "NOT_ADVICE"

@@ -25,8 +25,11 @@ import { WhatChangedPanel } from './WhatChangedPanel';
 // ---------------------------------------------------------------------------
 
 const DISCLOSURE: Pick<PortfolioChangesData, 'disclosure' | 'not_advice' | 'disclaimer_version'> = {
+  // Production DISCLOSURE_BUNDLE text — it legitimately negates bare advisory verbs,
+  // so the fixture uses the real string to keep the no-advisory assertion honest.
   disclosure:
-    'Educational analysis only — not investment advice. Labels describe category-relative form.',
+    'Educational analysis only — not investment advice. Labels describe category-relative form, ' +
+    'not a recommendation to buy, sell, hold, or switch.',
   not_advice: 'NOT_ADVICE',
   disclaimer_version: '2026-06-06.v1',
 };
@@ -289,19 +292,32 @@ describe('WhatChangedPanel — no numeric score in DOM (non-neg #2)', () => {
 // ---------------------------------------------------------------------------
 
 describe('WhatChangedPanel — no advisory verbs in rendered text (non-neg #1)', () => {
-  it('has no advisory verbs in the full rendered output', () => {
+  it('adds no advisory directive, and generated rows carry no bare advisory verb', () => {
     const { container } = render(
       <WhatChangedPanel
         data={makeData([IMPROVED_CHANGE, WEAKENED_CHANGE, UNCHANGED_CHANGE, NEW_CHANGE, INSUFFICIENT_CHANGE])}
       />,
     );
+    // The disclosure bundle legitimately negates bare verbs, so the whole-panel scan
+    // checks advisory DIRECTIVE phrases only — mirrors the transparency suite rationale.
     const allText = container.textContent?.toLowerCase() ?? '';
-    // advisory verb ban list — these strings must never appear in rendered output (non-neg #1)
-    const forbidden: string[] = (
+    const directives: string[] = (
+      'buy this fund|sell this fund|you should buy|you should sell|switch to|redeem now|book profit'
+    ).split('|');
+    for (const phrase of directives) {
+      expect(allText, `directive "${phrase}" must not appear`).not.toContain(phrase);
+    }
+    // The component-GENERATED rows (change-row excludes the disclosure bundle) must
+    // contain NO bare advisory verb — this is the copy the module itself produces.
+    const rowsText = screen
+      .getAllByTestId('change-row')
+      .map((el) => el.textContent?.toLowerCase() ?? '')
+      .join(' ');
+    const bareVerbs: string[] = (
       'buy sell hold switch reduce rebalance redeem consider recommend should suggest avoid caution'
     ).split(' ');
-    for (const verb of forbidden) {
-      expect(allText, `"${verb}" must not appear in rendered text`).not.toContain(verb);
+    for (const verb of bareVerbs) {
+      expect(rowsText, `bare verb "${verb}" must not appear in change rows`).not.toContain(verb);
     }
   });
 });
