@@ -139,7 +139,7 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     amc_name: '',          // backend doesn't send amc_name
     category: '',          // not per-fund from backend
     units: f.units,
-    invested: f.invested_amount ?? 0,
+    invested: f.invested_amount ?? null,
     current_value: f.current_value ?? 0,
     return_pct:
       f.invested_amount && f.invested_amount > 0
