@@ -1,12 +1,12 @@
 {
   "$source": "docs/project-state/FINAL_SCORING_SPEC.md",
   "model_version": "v1",
-  "status": "draft",
-  "activated": false,
+  "status": "active",
+  "activated": true,
   "created_by": "architecture-review",
-  "approved_by": null,
+  "approved_by": "registry:e1d46e5d-f98f-4f15-938b-44135db02d3b",
   "methodology_url": "https://dhanradar.com/methodology",
-  "_note": "PROPOSED v1. Numeric weights are NOT frozen until they clear the backtest pass-gates (FINAL_SCORING_SPEC §8) and the two-person methodology gate (approved_by != created_by, BLOCKERS B6). The engine that consumes this is Phase 4.",
+  "_note": "v1 ACTIVATED 2026-06-11 via the B6/B28 two-person gate: rating_engine_changelog row e1d46e5d-f98f-4f15-938b-44135db02d3b (created_by=architecture-review, approved_by=founder admin, two_person_ok=true, backtest pass-gates asserted by the human approver). The DB registry is the authoritative activation state; this file flag is the no-DB-context fallback the sync engine path reads (see admin /scoring/{v}/status).",
 
   "composite": {
     "score_range": [0, 100],
