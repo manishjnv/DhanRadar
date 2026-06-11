@@ -1,11 +1,11 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (CI-unblock session — main backend CI greened; prod verified current at `74d1eb8`/`0016`)
+**Last updated:** 2026-06-11 (Data Transparency Plan Group 9/PU2 — Opus-gated ACCEPT, merged #80, **DEPLOYED** `5cd1c48`; CI greened #72; NAV backfilled 2.0 M rows; SEV2 NullPool deployed `42c96db` #74; daily-NAV B61 open)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## CI UNBLOCK + DEPLOY VERIFY — 2026-06-11 (Opus session)
+## CI UNBLOCK — main backend CI greened (2026-06-11, Opus session)
 
 `main` backend CI had been **red across multiple pushes**, blocking every PR. Two stale-test
 causes (production code was fine in both — test-only drift):
@@ -23,11 +23,9 @@ advisory-red as usual) → **merged to `main`**, which unblocked the merge queue
 (news stale-feed) **closed as superseded** — the live fix (`0b91826`) + a fuller RCA entry already
 landed on `main`.
 
-**Deploy status — NOTHING PENDING. Prod is fully current.** A concurrent session deployed
-`74d1eb8` (#78, image built 2026-06-10T19:21Z) to KVM4 ~6h ago. Verified live this session:
-`alembic current = 0016 (head)`; site/`/api/v1/health`/`/learn/tax` → 200; `/news` serves **today's**
-items (`published_at 2026-06-11` — the stale-feed/404 issue is fixed in prod via live RSS). 9
-dhanradar containers healthy; host etip lifeline untouched. No deploy action taken (none needed).
+**Deploy status (at the time of this CI-unblock):** prod was current at `74d1eb8`/`0016`; `/news`
+served today's items (stale-feed/404 fixed via live RSS); host etip lifeline untouched. **Prod has
+since advanced to `5cd1c48`** — see the Data Transparency section above for the latest deploy.
 
 **Open follow-ups (not deploy-blocking):** PR #76 (SEV2 NullPool/deploy/NAV-backfill RCA, docs),
 PR #64 (ui-system restore — should NOT merge; harvest-not-adopt), PR #19 (B31 consent gate). Known
@@ -44,6 +42,102 @@ bypass; worth filing as a CI-reliability item.
   don't-delegate-when-faster rule).
 - **Haiku (Tier 3):** n/a.
 - **codex:rescue:** n/a — unavailable on this account; no security-critical change to gate.
+
+## DATA TRANSPARENCY (Plan Group 9 / PU2) — Opus-gated ACCEPT · MERGED #80 · DEPLOYED (2026-06-11)
+
+Branch: `feat/data-transparency-layer`. 5 commits off `main` (`74d1eb8`).
+
+**Feature:** Data Transparency & Explainability (Plan Group 9 / PU2). Read-only surface answering
+"how confident is this read, what data is it based on, how fresh, and — when we won't score —
+says so openly."
+
+**Implementation:**
+- `backend/dhanradar/transparency/` (new module): `schemas.py` (allowlist models; `unified_score`
+  absent by design), `service.py` (read-only over `user_fund_scores` + `mf_nav_history` +
+  `mf_user_holdings` + `mf_funds`; IDOR ownership check; educational driver derivation from
+  `confidence_band` + NAV freshness; `unified_score` never SELECTed), `router.py`
+  (`GET /api/v1/portfolio/{portfolio_id}/transparency`; authed; 401/404 guards).
+- `backend/dhanradar/main.py`: one `include_router` line added.
+- `backend/tests/integration/test_transparency.py`: 6 test cases (canonical fixtures).
+- `frontend/src/components/transparency/`: `TransparencyPanel.tsx` + vitest (14/14).
+
+**Compliance invariants:**
+- `unified_score` never selected, serialized, or rendered.
+- `insufficient_data` surfaces explicit PU2 refusal block ("we won't guess"), not error/blank.
+- Disclosure bundle (`DISCLOSURE_BUNDLE + NOT_ADVICE + DISCLAIMER_VERSION`) on every response,
+  imported read-only from `scoring/engine/schemas.py` (B56-f1: no third copy).
+- All driver copy is educational (data-quality facts); "freshness check recommended" replaced by
+  "this label uses older price data" (B2 from reviewer: "recommended" is a passive advisory verb).
+- Advisory verb test lists expanded to full SEBI non-neg set (avoid/consider/suggest added).
+- Locked lanes (`scoring/engine/*`, `mf/signals.py`, `scoring_bridge.py`, etc.) zero edits.
+
+**Gates:** ruff clean · ci_guards clean · anti-pattern clean · tsc clean · vitest 14/14 · imports OK.
+Integration tests require CI Postgres (local DB DNS unavailable). Unit test suite: 345/346 pass
+(1 pre-existing `test_monthly_rescore_skips_free_users` connectivity fail; not our regression).
+
+**Independent reviewer:** CONDITIONAL → all findings actioned (B2 fixed, B1/B3 expanded, A1/A2
+strengthened, D commented). Post-fix verdict: PASS on C and D; CONDITIONAL on A/B fully resolved.
+
+**Opus compliance gate: ACCEPT** (2026-06-11) — verified no numeric score/weights/raw confidence in
+the DOM (allowlist schema), all driver + PU2-refusal copy descriptive (zero advisory verbs),
+disclosure rendered (non-neg #9), auth 401 / IDOR 404, owned-empty → 200, lane-isolated. Closed the
+B60 coverage gap (added the owned-empty→200 integration test; 7 tests). CI green on all blocking
+jobs → **merged #80 (`5cd1c48`) → DEPLOYED to KVM4** (no migration; alembic 0016 unchanged).
+Verified live: `/portfolio/{id}/transparency` → 401 anon (route live + auth-gated); site / health /
+`/learn/tax` → 200; postgres/redis/cloudflared not recreated; host etip lifeline intact.
+
+**Registered:** `BLOCKERS.md` B60 (closed) · `GROWTH_BACKLOG.md` PU2 IMPLEMENTED ·
+`docs/features/transparency.md` (as-built).
+
+### Agent-utilization & routing telemetry (transparency session)
+
+- **Sonnet (builder):** Phase 0 warm-start (subagent), plan, all implementation slices, gate runs,
+  independent reviewer spawn (subagent), reviewer-findings fixes, doc updates.
+- **Opus gate (Tier 0):** compliance + numeric/advisory-boundary diff review → ACCEPT; added the B60 owned-empty test; pushed branch; drove CI green; merged #80; deployed to KVM4 + live verification.
+
+---
+
+## SEV2 NullPool migration completion — DEPLOYED to KVM4 (2026-06-10, `42c96db`, PR #74)
+
+PR #69 (`670bc1a`) introduced `TaskSessionLocal` / `task_engine` (NullPool) for Celery tasks but
+missed the service files those tasks call. CAS jobs were orphaned in `queued` forever in prod.
+
+**Fix (PR #74, `42c96db`, merged + deployed):**
+
+- Completed NullPool migration in `compliance/service.py`, `audit/service.py`,
+  `mood/service.py`, `tasks/compliance.py`.
+- Added `scripts/ci_guards.py` Guard #6 (bans pooled engine outside `db.py`) + regression tests.
+- New `reap_stuck_cas_jobs` Celery beat (every 5 min) — marks orphaned jobs `stuck_timeout`.
+- Frontend CAS status poll times out after 150 s → re-upload prompt (no infinite spinner).
+- Repaired 3 `test_audit_ledger.py` integration tests broken by the engine-injection change.
+- Prod: 2 orphaned jobs cleared; `nav_backfill` (one-off docker run -m 2g) populated
+  `mf.mf_nav_history` → 2,027,380 rows / 9,401 funds (2023-06-11 → 2026-06-10).
+  Resolves B29 deploy-gate and the long-standing empty-NAV blocker (prod-nav-history-empty).
+
+**Reviews:** Opus diff review + independent Sonnet adversarial pass (ACCEPT-with-conditions;
+both conditions assessed — C1 FastAPI-NullPool accepted as documented trade-off, C2 reaper-retouch
+was an incorrect premise). CI green (backend / frontend / migrations / guards).
+
+**RCA:** `docs/rca/README.md` — new SEV2 entry at top.
+
+**Open (found in post-deploy verification, 2026-06-11):** B61 — daily NAV upsert fails with
+`CardinalityViolationError`; `nav_daily_fetch` has never written a row. Dedup fix ready to
+implement in `backend/dhanradar/tasks/mf.py` ~lines 81–126. See `BLOCKERS.md` B61.
+
+### Agent-utilization & routing telemetry (SEV2 NullPool completion + docs session)
+
+- **Opus (Tier 0):** diff review, inline adversarial assessment, all gates, docs authoring
+  (RCA entry self-authored — delegation reminder fired after first edit; SESSION_STATE +
+  BLOCKERS drafted on Opus as within-session edits ≤30 lines in hot cache).
+- **Sonnet (Tier 1):** ~8 subagents across the underlying PR #74 work — 2 evidence pulls,
+  3 implementation, 1 adversarial sign-off, 1 deploy verification, 1 nav_backfill, 1 docs PR.
+  Reworked: N (adversarial ACCEPT-with-conditions assessed by Opus; both conditions cleared
+  without code change).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — account not entitled to GPT-5; Sonnet adversarial takeover per
+  standing memory entry.
+
+---
 
 ## FIX/B56-LIVE-NEWS-RSS — merge-eligible, NOT deployed (2026-06-10)
 
