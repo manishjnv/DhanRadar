@@ -1,11 +1,48 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (C1 concept explainers Opus-gated ACCEPT → merged #85 →
-**DEPLOYED** `4e121e4` + seeded + verified live; What Changed engine merged #82 + deployed
-`e7e416e`; B62 resolved; prod current)
+**Last updated:** 2026-06-11 (scoring v1 ACTIVATED — B6/B28 human gate cleared, registry row
+written in prod, file-flag flip PR; earlier today: C1 explainers deployed `4e121e4`; What Changed
+engine deployed `e7e416e`)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## SCORING ENGINE v1 ACTIVATION (B6/B28) — DONE IN PROD (2026-06-11)
+
+The founder cleared the human gate in-session ("human steps done, go deploy"): backtest
+pass-gates asserted + activation approved. Executed:
+
+- **Registry activation (authoritative, LIVE):** one-off operator script inside the prod fastapi
+  container called `activation.activate_model_version` (gates intact: two-person check,
+  backtest assertion, dup guard) → `compliance.rating_engine_changelog` row
+  `e1d46e5d-f98f-4f15-938b-44135db02d3b` (`v1`, `activated=t`, `two_person_ok=t`,
+  `created_by=architecture-review`, `approved_by=<founder admin uuid>`). Verified by SQL.
+  `audit.admin_actions` row `activate_scoring_model/v1/success` emitted + verified.
+- **File-flag flip (runtime `provisional_model` removal):** this PR —
+  `ranking_configs_v1.json` `activated:true` + status/approved_by/_note updated (registry row
+  referenced, no user UUID in the public file); `test_scoring_engine.py` provisional test pinned
+  to an explicit non-activated config + new shipped-config-activated test; `test_admin.py`
+  `file_activated` assertion updated (registry still governs `provisional`);
+  `RATING_ENGINE_CHANGELOG.md` v1-ACTIVATED entry.
+- **Accepted-at-activation caveats (recorded in the changelog):** B24 fail-safe veto (no recency
+  window) + B58-f4 flat 2.0pp margin for debt cohorts — future-version methodology items via the
+  same gate.
+- **NOT done (classifier-denied, optional):** setting `ADMIN_USER_IDS` in the prod `.env`
+  (admin endpoints stay fail-closed 404). Note: the value must be the founder's **user UUID**
+  (`auth.users.id`) — an email is silently dropped by the parser. Operator action if wanted.
+
+### Agent-utilization & routing telemetry (2026-06-11 v1 activation session)
+
+- **Opus (Tier 0):** progress audit (evidence-based, live-prod verified), activation-mechanism
+  code review (activation.py/admin router/config validator/engine flag path), prod activation
+  script + execution + SQL verification, file-flip PR + test updates, these docs. Doc edits
+  self-authored under the ≤30-line hot-cache exemption (facts verified in-session, not
+  draftable externally); routing hook reminder fired and is logged here.
+- **Sonnet (Tier 1) / Haiku (Tier 3):** n/a — judgment-bound load-bearing path (scoring
+  activation); per overlay, no cheap-tier code in this lane.
+- **codex:rescue:** n/a — account not entitled (standing memory); change is the execution of the
+  already-reviewed B6/B28 mechanism (ledger `reviews/b6-b28-scoring-activation.md`), human-approved
+  in-session; rigor scaled per the change-magnitude rule.
 
 ## C1 CONCEPT-EXPLAINER LEARN LIBRARY — Opus-gated ACCEPT · MERGED #85 · DEPLOYED `4e121e4` (2026-06-11)
 

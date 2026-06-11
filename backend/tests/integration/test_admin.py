@@ -556,7 +556,8 @@ async def test_scoring_status_provisional_before_activation(
     async_client, db_session, monkeypatch
 ):
     """Before any registry activation, status must show registry_activated=False and
-    provisional=True (the gate, not the file flag, governs `provisional`)."""
+    provisional=True — even though the shipped file flag is True (B6/B28 activation,
+    2026-06-11). The gate (registry), not the file flag, governs `provisional`."""
     from dhanradar.config import settings
     from tests.conftest import make_auth_headers
 
@@ -568,5 +569,5 @@ async def test_scoring_status_provisional_before_activation(
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["registry_activated"] is False
-    assert body["file_activated"] is False  # ranking_configs_v1.json has activated:false
-    assert body["provisional"] is True
+    assert body["file_activated"] is True  # ranking_configs_v1.json activated 2026-06-11
+    assert body["provisional"] is True  # registry empty in this test DB → still provisional

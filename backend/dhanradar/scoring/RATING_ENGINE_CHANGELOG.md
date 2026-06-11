@@ -33,6 +33,27 @@ an entry here until the table exists. Source of truth for the spec:
 
 ---
 
+## v1 ACTIVATED — 2026-06-11
+
+- **model_version:** `v1` · **status:** `active` · **activated:** `true`
+- **Registry row (authoritative):** `compliance.rating_engine_changelog`
+  `e1d46e5d-f98f-4f15-938b-44135db02d3b` — `created_by=architecture-review`,
+  `approved_by=founder admin`, `two_person_ok=true`, `activated_at=2026-06-11T10:09:59Z`.
+- **Gate clearance:** backtest pass-gates + activation approval asserted by the human
+  approver (founder, in-session 2026-06-11); two-person gate enforced by
+  `activation.activate_model_version` (`approved_by ≠ created_by`).
+- **Audit:** `audit.admin_actions` row `activate_scoring_model / scoring_model / v1 / success`.
+- **Weights unchanged** from the v1 proposal below (quality 0.24 · valuation 0.22 ·
+  momentum 0.20 · trend 0.22 · risk 0.12). This entry activates; it does not modify.
+- **File flag flipped** (`ranking_configs_v1.json` `activated: true`) so the sync engine
+  path stops tagging results `provisional_model`; the DB registry remains authoritative.
+- **Accepted-at-activation caveats:** B24 (manager-change/structural-concern veto has no
+  recency window — ships as the documented fail-safe) and B58-f4 (flat 2.0pp cohort margin
+  is effectively inactive for debt categories). Changing either is a methodology change →
+  a new version through this same gate.
+
+---
+
 ## v1 engine implementation (Phase 4) — 2026-06-06
 
 - The deterministic engine that CONSUMES `ranking_configs_v1.json` is now built
