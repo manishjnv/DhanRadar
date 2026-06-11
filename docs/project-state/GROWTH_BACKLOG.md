@@ -129,6 +129,7 @@ moat dimension, none recommended merely because PowerUp has it):
   refusal openly as an honesty signal instead of a silent fallback. No competitor shows its own
   uncertainty — pure trust moat. This is **presentation of an existing engine rule**, not new
   scoring logic. Pairs with G10. Buildable once labels are real (B29). Low cost; high trust ROI.
+  **IMPLEMENTED 2026-06-11** (`feat/data-transparency-layer`, B60) — `GET /api/v1/portfolio/{id}/transparency` + `TransparencyPanel` component. Pending Opus compliance gate before merge.
 - **PU3 — Audit-grounded AI answers (cite data point + freshness per answer).** Every AI
   explanation cites the input and as-of date it used ("rolling-return rank dropped; data as of
   <date>"). Extends **G5/G10**; the citation-per-answer is the enhancement. Wire through the
