@@ -368,6 +368,13 @@ async def _load_nav_series(
 # > 3 years of NAV, unlike the 400-day momentum/risk load.
 _COHORT_LOOKBACK_DAYS = 1200
 
+# B63: peers' NAV series are loaded in batches of this many ISINs. Loading every
+# peer's 1200-day series at once OOM-killed (SIGKILL) the 640M batch worker the
+# moment the NAV table became complete (5.9M rows; hundreds of peers per
+# category). Peak memory is now one batch; per-peer stats are identical — the
+# same long_horizon_stats runs on the same per-fund series either way.
+_COHORT_PEER_CHUNK = 200
+
 
 async def _compute_cohort(
     db: Any, target_isins: list[str], *, as_of: date | None = None
@@ -418,10 +425,15 @@ async def _compute_cohort(
 
     # 3. Long NAV series for every peer (≥3y); compute each peer's long-horizon
     #    stats ONCE (targets are peers too), then the per-category median benchmark.
-    series, _ = await _load_nav_series(db, all_peer_isins, lookback_days=_COHORT_LOOKBACK_DAYS)
-    stats_by_isin = {
-        i: long_horizon_stats(series.get(i, []), as_of=as_of) for i in set(all_peer_isins)
-    }
+    #    Peers load in bounded chunks (B63) — each batch's series is freed before
+    #    the next loads, keeping peak memory flat regardless of cohort size.
+    unique_peers = sorted(set(all_peer_isins))
+    stats_by_isin = {}
+    for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
+        batch = unique_peers[start : start + _COHORT_PEER_CHUNK]
+        series, _ = await _load_nav_series(db, batch, lookback_days=_COHORT_LOOKBACK_DAYS)
+        for i in batch:
+            stats_by_isin[i] = long_horizon_stats(series.get(i, []), as_of=as_of)
     benchmarks = {
         cat: build_benchmark(cat, [stats_by_isin[i] for i in cat_isins])
         for cat, cat_isins in peers_by_cat.items()
