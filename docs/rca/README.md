@@ -15,6 +15,28 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-11 — Every 2nd+ CAS upload in a worker child fails: Redis singleton bound to a closed event loop
+
+- **Symptom:** CAMS E2E upload failed instantly (`internal_error`, progress 0) with
+  `RuntimeError: Event loop is closed` at `cas_pipeline_start`, while the CDSL upload that ran
+  FIRST in the same prefork child succeeded (`done`). Job 62923c49, worker child shared with the
+  successful f4aee869.
+- **Root cause (proven):** `redis_client.get_redis()` cached ONE module-level async client.
+  Celery tasks each run under their own `asyncio.run()` loop: task #1 created the client bound to
+  loop #1, `asyncio.run` closed loop #1 on exit, and task #2's first Redis call on the cached
+  client raised "Event loop is closed". Same cross-loop-global class as the SEV2 asyncpg
+  NullPool RCA (2026-06-10) — Redis was the remaining global. Masked historically because
+  OOM-kills/deploys kept recycling worker children, so most tasks ran as the FIRST in a child.
+- **Fix:** `redis_client.py` — the cache is now loop-aware: a new running loop gets a fresh
+  client; the same loop (the entire web tier) reuses the cached one; no-loop callers keep
+  legacy behaviour. Stale clients' dead sockets are abandoned to TCP cleanup (bounded: one per
+  task loop).
+- **Prevention:** regression test `test_redis_client_loop.py` (new-loop → new client, same-loop
+  → same client); standing review rule extended: ANY module-level async resource (engine,
+  client, pool) must be loop-aware or per-task — grep for module singletons when a Celery task
+  touches a new async dependency.
+- **Phase/area:** infra / redis_client / Celery task plumbing.
+
 ### 2026-06-11 — Shared-checkout co-edit: concurrent session's in-flight hunk silently carried into PR #93
 
 - **Symptom:** PR #93's first CI run failed on two jobs (`guards` + `backend`): the compose
