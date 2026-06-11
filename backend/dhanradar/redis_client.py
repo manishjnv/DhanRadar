@@ -28,7 +28,12 @@ import redis.asyncio as aioredis
 from dhanradar.config import settings
 
 _client: aioredis.Redis | None = None
-_client_loop: asyncio.AbstractEventLoop | None = None
+# The client THIS module created + the loop it was created under. Eviction must
+# compare against the exact object we made: a test-injected fake assigned to
+# ``_client`` (conftest patch_redis) is never ours, so it is never evicted —
+# even when test loops change between cases (each async test runs its own loop).
+_own_client: aioredis.Redis | None = None
+_own_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _running_loop() -> asyncio.AbstractEventLoop | None:
@@ -41,30 +46,34 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
 def get_redis() -> aioredis.Redis:
     """Return the shared async Redis client for the CURRENT event loop.
 
-    Recreates the client ONLY when the cached one is loop-BOUND to a different
-    (closed) loop — i.e. it was created inside some earlier ``asyncio.run()``.
-    A cached client with no recorded loop is reused as-is: that preserves both
-    the no-loop legacy path and test fixtures that inject a fake by assigning
-    ``_client`` directly (their ``_client_loop`` stays None)."""
-    global _client, _client_loop
+    Recreates the client ONLY when the cached one is the one WE created AND it
+    is bound to a different (closed) loop — the Celery prefork case where each
+    task runs its own ``asyncio.run()``. Anything injected from outside
+    (test fakes) and the no-loop legacy path are reused untouched."""
+    global _client, _own_client, _own_loop
     loop = _running_loop()
     stale = (
-        _client_loop is not None and loop is not None and _client_loop is not loop
+        _client is not None
+        and _client is _own_client
+        and _own_loop is not None
+        and loop is not None
+        and _own_loop is not loop
     )
     if _client is None or stale:
-        _client = aioredis.from_url(
+        _client = _own_client = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
         )
-        _client_loop = loop
+        _own_loop = loop
     return _client
 
 
 async def close_redis() -> None:
     """Close the Redis connection pool — call from lifespan shutdown."""
-    global _client, _client_loop
+    global _client, _own_client, _own_loop
     if _client is not None:
         await _client.aclose()
         _client = None
-        _client_loop = None
+        _own_client = None
+        _own_loop = None

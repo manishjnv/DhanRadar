@@ -17,7 +17,8 @@ import dhanradar.redis_client as rc
 
 def _reset():
     rc._client = None
-    rc._client_loop = None
+    rc._own_client = None
+    rc._own_loop = None
 
 
 def test_new_loop_gets_new_client_same_loop_reuses():
@@ -54,4 +55,20 @@ def test_injected_fake_client_is_never_replaced():
 
     assert asyncio.run(_grab()) is sentinel
     assert asyncio.run(_grab()) is sentinel  # across loops too
+    _reset()
+
+
+def test_injection_after_loopbound_creation_survives_new_loop():
+    # The CI break: a real client had been created loop-bound earlier; the next
+    # test injected a fake, ran in a NEW loop, and the stale loop record evicted
+    # the fake. Eviction must apply only to the module's OWN client object.
+    _reset()
+
+    async def _grab():
+        return rc.get_redis()
+
+    asyncio.run(_grab())  # module-created, loop-bound
+    sentinel = object()
+    rc._client = sentinel  # patch_redis-style injection
+    assert asyncio.run(_grab()) is sentinel  # new loop must NOT evict the fake
     _reset()
