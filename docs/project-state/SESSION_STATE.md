@@ -1,9 +1,42 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (MF report data-quality fixes shipped + deployed PR #81 `e8d8463`; B61 resolved; `nav_daily_fetch` live — `mf_funds` 0 → 14,037)
+**Last updated:** 2026-06-11 (What Changed engine Opus-gated + merged #82 + **DEPLOYED** `e7e416e`; B62 resolved; prod current)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## WHAT CHANGED ENGINE (Plan Group 2) — Opus-gated · MERGED #82 · DEPLOYED (2026-06-11, `e7e416e`)
+
+Read-only "What Changed" surface (`GET /api/v1/portfolio/{id}/changes`) — diffs the two most-recent
+`mf_user_fund_score_history` snapshots per fund and explains the label/band move in plain language;
+honest `new`/`insufficient_data` framing, no fabricated diff. Built by a Sonnet session (isolated
+`backend/dhanradar/changes/` module + `WhatChangedPanel`); handed to Opus for the gate.
+
+- **Opus compliance/numeric-boundary gate: ACCEPT.** No numeric score/weights/raw confidence in the
+  DOM (allowlist schema; `nav_days_ago` is the freshness-integer exception). Reasons are factual
+  ("the label moved from X to Y, a stronger/weaker category-relative form"); zero advisory verbs;
+  the "Weakened" chip is amber, not red (observation, not alarm). Honest new/insufficient_data;
+  disclosure rendered (non-neg #9); auth 401 / IDOR 404 (no 403 leak) / cold-start 200; lane-isolated
+  (changes/ + 2 main.py lines + FE + 1-line queryKeys). Canonical test fixtures (no insights repeat).
+- **CI green** on all blocking jobs (23 unit + 11 integration + 19 vitest); `lint` advisory-red.
+  **Merged #82 (`3eaac87`).** B62 RESOLVED.
+- **DEPLOYED to KVM4** (`e7e416e`; no migration, alembic `0016` unchanged) via canonical `deploy.sh`.
+  Verified live: `/portfolio/{id}/changes` → 401 anon (route live + auth-gated); site / health → 200;
+  postgres/redis/cloudflared NOT recreated (Up 34h/27h — data + tunnel intact); host etip lifeline
+  active + 32 etip containers untouched. Feature doc `docs/features/what-changed.md`.
+- **In prod today** `mf_user_fund_score_history` accrues only from the monthly re-score, so most
+  funds have ≤1 snapshot → the engine honestly shows `new` until history builds; not a bug.
+- **Follow-ups:** B62-f1 (chip-tint cosmetic CSS `${color}22` on a `var()`); B62-f2 (mount the panel
+  on a portfolio page). The Transparency panel (Group 9) is also unmounted — both await a host page.
+
+### Agent-utilization & routing telemetry (2026-06-11 What-Changed gate + deploy session)
+
+- **Opus (Tier 0):** compliance/numeric-boundary diff gate (ACCEPT) on the Sonnet-built feature,
+  pushed branch + drove CI green, merged #82, deployed to KVM4 + live verification, recovered the
+  stray local-`main` as-built docs commit (cherry-pick → this PR), this handoff. Self-authored
+  (deploy/gate facts verified live this session — not draftable without the context).
+- **Sonnet (Tier 1):** the What-Changed build + its own independent reviewer (separate session).
+- **Haiku / codex:rescue:** n/a.
 
 ## MF report data-quality fixes — SHIPPED + DEPLOYED (2026-06-11, PR #81, `e8d8463`)
 
