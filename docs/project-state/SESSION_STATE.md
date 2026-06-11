@@ -42,8 +42,12 @@ concurrent B63 memory rebalance).
 
 **Open items (operator actions):**
 
-1. `SENTRY_DSN` — user adding to `/opt/dhanradar/.env`; fastapi restart activates
-   `init_sentry()` (field already in `config.py`; placeholder on line 55 of `.env.example`).
+1. ~~`SENTRY_DSN`~~ — **DONE 2026-06-11 evening**: DSN synced to `/opt/dhanradar/.env`,
+   fastapi recreated, `init_sentry()` returned True, test event delivered to Sentry.
+   Note: the `.env` append changed the env_file hash for every service → compose cascaded a
+   full-stack recreate incl. postgres/redis; data verified intact post-recreate (alembic
+   `0017`, 3 users, 5.94 M NAV rows, 226 redis keys) — the PR #89 volume fix held. Treat
+   box `.env` edits as mini-deploys.
 2. Grafana alert rules — copy UID-filled `/tmp/dhanradar-alerts.yaml` on the box into
    `/opt/intelwatch/docker/grafana/provisioning/alerting/`; restart `etip_grafana`.
 
