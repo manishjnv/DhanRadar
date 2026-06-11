@@ -1,9 +1,49 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-10 (fix/b56-live-news-rss — B56 stale news feed fixed; live RBI RSS ingestion; merge-eligible, NOT deployed)
+**Last updated:** 2026-06-11 (CI-unblock session — main backend CI greened; prod verified current at `74d1eb8`/`0016`)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## CI UNBLOCK + DEPLOY VERIFY — 2026-06-11 (Opus session)
+
+`main` backend CI had been **red across multiple pushes**, blocking every PR. Two stale-test
+causes (production code was fine in both — test-only drift):
+
+- **Insights tests** (`test_insights.py`) referenced undefined fixtures
+  (`test_client`/`auth_test_client`/`empty_portfolio_id`) → 8 setup errors. Rewrote to the
+  canonical `async_client` + `app.dependency_overrides[current_user_or_anonymous]` pattern
+  (mirrors `test_dashboard.py`); seeds a real owned `MfPortfolio` for the empty-portfolio 200s.
+- **mf_alerts test** (`test_mf_alerts.py`) patched `async_sessionmaker`, but the SEV2 NullPool fix
+  (#69) moved Celery tasks to a pre-built `dhanradar.db.TaskSessionLocal`; the mock missed so the
+  label-change alert never fired. Repointed the patch (verified locally 19/19 pass).
+
+Both landed in **PR #72** (`a4fc475`) → backend/frontend/guards/migrations green (`lint`
+advisory-red as usual) → **merged to `main`**, which unblocked the merge queue. RCA PR #66
+(news stale-feed) **closed as superseded** — the live fix (`0b91826`) + a fuller RCA entry already
+landed on `main`.
+
+**Deploy status — NOTHING PENDING. Prod is fully current.** A concurrent session deployed
+`74d1eb8` (#78, image built 2026-06-10T19:21Z) to KVM4 ~6h ago. Verified live this session:
+`alembic current = 0016 (head)`; site/`/api/v1/health`/`/learn/tax` → 200; `/news` serves **today's**
+items (`published_at 2026-06-11` — the stale-feed/404 issue is fixed in prod via live RSS). 9
+dhanradar containers healthy; host etip lifeline untouched. No deploy action taken (none needed).
+
+**Open follow-ups (not deploy-blocking):** PR #76 (SEV2 NullPool/deploy/NAV-backfill RCA, docs),
+PR #64 (ui-system restore — should NOT merge; harvest-not-adopt), PR #19 (B31 consent gate). Known
+CI flake: the `migrations` job intermittently reds on the TimescaleDB CAGG downgrade
+(`DROP MATERIALIZED VIEW mf.mf_nav_monthly_agg` → "tuple concurrently deleted") — re-run, don't
+bypass; worth filing as a CI-reliability item.
+
+### Agent-utilization & routing telemetry (2026-06-11 CI-unblock session)
+
+- **Opus (Tier 0):** RCA of the red CI (two independent causes), both test fixes (load-bearing test
+  correctness, self-authored), local verification of mf_alerts (19/19), prod deploy verification via
+  SSH, branch/PR hygiene, this handoff. Stayed in lane vs concurrent sessions (staged only own files).
+- **Sonnet (Tier 1):** n/a this session (fixes were small + judgment-bound; self-authored per the
+  don't-delegate-when-faster rule).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; no security-critical change to gate.
 
 ## FIX/B56-LIVE-NEWS-RSS — merge-eligible, NOT deployed (2026-06-10)
 
