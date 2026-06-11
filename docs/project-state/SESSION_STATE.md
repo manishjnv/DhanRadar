@@ -1,10 +1,49 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (B38 Prometheus scrape wired live; Sentry pending DSN; shared-checkout
-co-edit incident — see RCA)
+**Last updated:** 2026-06-11 (E2E CAS test GREEN for both sample PDFs after two real bugs found+fixed:
+B63 cohort OOM → chunked loader; redis cross-loop singleton → loop-aware client)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
+
+Founder-requested end-to-end test of the core wedge against prod (3 fresh test accounts,
+`manishjnvk+e2e1/2/3@gmail.com`; signup → consent grant → upload → poll → report). The test
+caught and drove fixes for two real production bugs before going green:
+
+- **B63 RESOLVED — cohort OOM (PRs #92 + #95, deployed `61a1a58`).** First run: scoring
+  SIGKILLed the 256M batch worker; 640M (budget-neutral rebalance, §A6 holds) still OOM'd in
+  9s — `_compute_cohort` loaded EVERY peer's 1200-day NAV series at once (fatal on the complete
+  5.94M-row table). Proper fix: `_COHORT_PEER_CHUNK=200` batched loads, math unchanged
+  (regression test: chunked == one-shot). CI memory-budget guard correctly rejected a 3584M
+  bump attempt — rebalance funded by redis/fastapi/nextjs/cloudflared cuts at ≥2.5× live usage.
+- **Redis cross-loop singleton fixed (PR #97, deployed `560782e`; RCA logged).** CDSL (task #1
+  in the worker child) succeeded; CAMS (task #2) failed instantly: `Event loop is closed` — the
+  module-level async Redis client was bound to task #1's closed `asyncio.run()` loop. Every 2nd+
+  CAS upload per child failed; masked historically by OOM/deploy child recycling. Same class as
+  the SEV2 asyncpg NullPool RCA. Fix: identity-based loop-aware cache (own client + different
+  loop → recreate; injected test fakes never evicted — two CI catches pinned by 4 regression tests).
+- **Final results (live prod):** CDSL `docs/cas.pdf` → done; report 200: 10 funds, labels
+  {on_track 5, off_track 3, in_form 1, insufficient_data 1}, bands only, NO `unified_score` in
+  payload, disclosure + not_advice + disclaimer 2026-06-06.v1, value ₹1,95,850. CAMS
+  `docs/cas_cams.pdf` → done; report 200: 11 funds, labels {on_track 4, in_form 4, off_track 2,
+  insufficient_data 1}, same compliance surface, value ₹94,767 / invested ₹91,812. Loop-fix
+  validation: a SECOND task in the same worker child (account 3, CDSL) → done.
+- **Observation (not chased):** CAMS report `xirr_pct` is null despite transaction history —
+  worth a look when touching the report pipeline next.
+- **Test fixtures left in prod:** the 3 `+e2e*` accounts and their holdings (founder's own
+  aliases/data) — handy for future smoke tests; delete on request.
+
+### Agent-utilization & routing telemetry (E2E CAS test session arc)
+
+- **Opus (Tier 0):** E2E test design + execution against prod, evidence-first diagnosis of both
+  failures (worker logs, container OOM state, loop timeline), both fixes (load-bearing paths,
+  self-authored), 4+1 regression tests, 3 PRs driven through CI (two CI catches on #97
+  diagnosed and fixed), deploys + live verification, docs. Doc prose self-authored — in-session facts
+  (routing hook fired repeatedly; logged honestly; external drafting would require writing the
+  facts into the prompt anyway).
+- **Sonnet/Haiku/codex:rescue:** n/a — incident-response + load-bearing scoring/infra paths.
 
 ## B38 OBSERVABILITY WIRING — SCRAPE LIVE · SENTRY PENDING DSN (2026-06-11)
 
