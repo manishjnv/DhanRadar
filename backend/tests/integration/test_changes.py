@@ -369,6 +369,23 @@ async def test_changes_anonymous_401(async_client, patch_redis):
 
 
 # ---------------------------------------------------------------------------
+# 8b. bad_uuid_404 — malformed portfolio_id → 404 (no existence leak, never 422)
+# ---------------------------------------------------------------------------
+
+
+async def test_changes_bad_uuid_404(async_client, db_session, patch_redis):
+    """An authed request with a non-UUID portfolio_id → 404 (not 422/500); the
+    parse error must look identical to a missing/other-user portfolio (no leak)."""
+    user_id = await _seed_user(db_session)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        r = await async_client.get("/api/v1/portfolio/not-a-uuid/changes")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert r.status_code == 404, r.text
+
+
+# ---------------------------------------------------------------------------
 # 9. no_numeric_leak — unified_score and raw floats absent from response body
 # ---------------------------------------------------------------------------
 
