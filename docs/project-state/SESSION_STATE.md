@@ -39,8 +39,8 @@ caught and drove fixes for two real production bugs before going green:
 
 - **Opus (Tier 0):** E2E test design + execution against prod, evidence-first diagnosis of both
   failures (worker logs, container OOM state, loop timeline), both fixes (load-bearing paths,
-  self-authored), 4+1 regression tests, 3 PRs driven through CI (two CI catches on #97 diagnosed
-  + fixed), deploys + live verification, docs. Doc prose self-authored — in-session facts
+  self-authored), 4+1 regression tests, 3 PRs driven through CI (two CI catches on #97
+  diagnosed and fixed), deploys + live verification, docs. Doc prose self-authored — in-session facts
   (routing hook fired repeatedly; logged honestly; external drafting would require writing the
   facts into the prompt anyway).
 - **Sonnet/Haiku/codex:rescue:** n/a — incident-response + load-bearing scoring/infra paths.
