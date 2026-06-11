@@ -1,9 +1,59 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-10 (fix/b56-live-news-rss — B56 stale news feed fixed; live RBI RSS ingestion; merge-eligible, NOT deployed)
+**Last updated:** 2026-06-11 (feat/data-transparency-layer — Plan Group 9 / PU2 data transparency surface; pending Opus compliance gate)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## FEAT/DATA-TRANSPARENCY-LAYER — merge-eligible pending Opus gate (2026-06-11)
+
+Branch: `feat/data-transparency-layer`. 5 commits off `main` (`74d1eb8`).
+
+**Feature:** Data Transparency & Explainability (Plan Group 9 / PU2). Read-only surface answering
+"how confident is this read, what data is it based on, how fresh, and — when we won't score —
+says so openly."
+
+**Implementation:**
+- `backend/dhanradar/transparency/` (new module): `schemas.py` (allowlist models; `unified_score`
+  absent by design), `service.py` (read-only over `user_fund_scores` + `mf_nav_history` +
+  `mf_user_holdings` + `mf_funds`; IDOR ownership check; educational driver derivation from
+  `confidence_band` + NAV freshness; `unified_score` never SELECTed), `router.py`
+  (`GET /api/v1/portfolio/{portfolio_id}/transparency`; authed; 401/404 guards).
+- `backend/dhanradar/main.py`: one `include_router` line added.
+- `backend/tests/integration/test_transparency.py`: 6 test cases (canonical fixtures).
+- `frontend/src/components/transparency/`: `TransparencyPanel.tsx` + vitest (14/14).
+
+**Compliance invariants:**
+- `unified_score` never selected, serialized, or rendered.
+- `insufficient_data` surfaces explicit PU2 refusal block ("we won't guess"), not error/blank.
+- Disclosure bundle (`DISCLOSURE_BUNDLE + NOT_ADVICE + DISCLAIMER_VERSION`) on every response,
+  imported read-only from `scoring/engine/schemas.py` (B56-f1: no third copy).
+- All driver copy is educational (data-quality facts); "freshness check recommended" replaced by
+  "this label uses older price data" (B2 from reviewer: "recommended" is a passive advisory verb).
+- Advisory verb test lists expanded to full SEBI non-neg set (avoid/consider/suggest added).
+- Locked lanes (`scoring/engine/*`, `mf/signals.py`, `scoring_bridge.py`, etc.) zero edits.
+
+**Gates:** ruff clean · ci_guards clean · anti-pattern clean · tsc clean · vitest 14/14 · imports OK.
+Integration tests require CI Postgres (local DB DNS unavailable). Unit test suite: 345/346 pass
+(1 pre-existing `test_monthly_rescore_skips_free_users` connectivity fail; not our regression).
+
+**Independent reviewer:** CONDITIONAL → all findings actioned (B2 fixed, B1/B3 expanded, A1/A2
+strengthened, D commented). Post-fix verdict: PASS on C and D; CONDITIONAL on A/B fully resolved.
+
+**STOP BEFORE MERGE:** Opus compliance gate required (numeric-boundary + advisory-boundary surface).
+Hand diff to Opus session for final review. Do NOT self-merge.
+
+**Registered:** `BLOCKERS.md` B60 · `GROWTH_BACKLOG.md` PU2 marked IMPLEMENTED.
+**Feature doc:** `docs/features/transparency.md` (as-built).
+**No deploy** (human-gated; no migration required).
+
+### Agent-utilization & routing telemetry (transparency session)
+
+- **Sonnet (builder):** Phase 0 warm-start (subagent), plan, all implementation slices, gate runs,
+  independent reviewer spawn (subagent), reviewer-findings fixes, doc updates.
+- **Opus gate:** REQUIRED — not yet requested. Hand to Opus for compliance + load-bearing-seam review.
+
+---
 
 ## FIX/B56-LIVE-NEWS-RSS — merge-eligible, NOT deployed (2026-06-10)
 
