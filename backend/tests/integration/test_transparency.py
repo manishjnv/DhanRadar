@@ -399,3 +399,33 @@ async def test_transparency_anonymous_401(async_client, patch_redis):
     dummy_pid = str(_uuid.uuid4())
     r = await async_client.get(f"/api/v1/portfolio/{dummy_pid}/transparency")
     assert r.status_code == 401, r.text
+
+
+# ---------------------------------------------------------------------------
+# Owned-but-empty portfolio → 200 with empty funds list (cold-start, not 404) [B60]
+# ---------------------------------------------------------------------------
+
+
+async def test_transparency_owned_empty_portfolio_200(async_client, db_session, patch_redis):
+    """A portfolio that exists and belongs to the user but has zero scored funds
+    returns 200 with funds=[] (cold-start), never 404; disclosure bundle present."""
+    user_id = await _seed_user(db_session)
+    portfolio = MfPortfolio(user_id=_uuid.UUID(user_id), name="Empty Portfolio")
+    db_session.add(portfolio)
+    await db_session.commit()
+    pid = str(portfolio.id)
+
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        r = await async_client.get(f"/api/v1/portfolio/{pid}/transparency")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["portfolio_id"] == pid
+    assert body["funds"] == []
+    assert body["disclosure"], "disclosure must be present"
+    assert body["not_advice"], "not_advice must be present"
+    assert body["disclaimer_version"], "disclaimer_version must be present"
+    assert "unified_score" not in r.text
