@@ -284,6 +284,12 @@ section only sets the working order.
   Re-verified in code 2026-06-07 (this slice): the fail-safes are present and correct, so charges
   cannot be created from wrong/absent config. What remains is **data-only seeding at launch**, gated
   on the Razorpay dashboard being provisioned — there is **no further implementation**.
+  **FOUNDER DECISION RE-CONFIRMED 2026-06-11 (binding):** the documented PHASE 5M behavior stands —
+  freemium + Founding Access (every signup stamped Plus-free until `FOUNDING_ACCESS_UNTIL`,
+  placeholder 2026-12-31, reset to billing-go-live + 30d grace at go-live; founding ₹599/yr locked).
+  **No fixed 90-day promo cap.** Razorpay is configured only when billing becomes applicable
+  (registered business + KYC + dashboard). Until then checkout stays fail-closed (503/free) by
+  design — do not seed, do not revisit.
   - **Verified fail-safes:** checkout REFUSES with **503** when a plan is unseeded —
     `if plan.razorpay_plan_id is None or plan.total_count is None` (`billing/service.py:113`); tier
     derivation is fail-safe — an `plan_id` not in `EXACT_PLAN_TIERS` grants **NO paid tier** (returns
