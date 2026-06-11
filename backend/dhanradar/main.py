@@ -32,6 +32,7 @@ from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
 from dhanradar.insights.router import router as insights_router
+from dhanradar.changes.router import router as changes_router
 from dhanradar.transparency.router import router as transparency_router
 from dhanradar.news.router import router as news_router
 from dhanradar.notifications.router import router as notifications_router
@@ -128,6 +129,7 @@ app.include_router(education_router, prefix="/api/v1")  # G8 — public tax-educ
 app.include_router(news_router, prefix="/api/v1")  # B56 — curated headline metadata (anonymous-read)
 app.include_router(insights_router, prefix="/api/v1")  # Plan Group 3 — portfolio intelligence (overlap + concentration)
 app.include_router(transparency_router, prefix="/api/v1")  # Plan Group 9 — data transparency + explainability (PU2)
+app.include_router(changes_router, prefix="/api/v1")  # Plan Group 2 — What Changed explainability (read-only)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).

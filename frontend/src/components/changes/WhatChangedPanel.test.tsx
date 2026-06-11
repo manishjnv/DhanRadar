@@ -1,0 +1,340 @@
+/**
+ * WhatChangedPanel vitest suite (Plan Group 2).
+ *
+ * Compliance assertions in every test:
+ *   1. "unified_score" never appears in the DOM.
+ *   2. No raw numeric confidence float in the DOM (e.g. "0.87").
+ *   3. Disclosure bundle (not_advice + disclosure text) rendered on every mount.
+ *   4. Advisory verbs (buy/sell/hold/switch/rebalance/recommend/etc.) absent.
+ *
+ * Behavioural assertions:
+ *   - improved: label transition + chip text.
+ *   - weakened: chip text.
+ *   - unchanged: chip text.
+ *   - new: "First snapshot" framing, no from-label/arrow.
+ *   - insufficient_data: honest framing, chip text.
+ *   - empty: empty-state element rendered + disclosure bundle still present.
+ */
+
+import { render, screen } from '@testing-library/react';
+import type { PortfolioChangesData, FundChange } from './WhatChangedPanel';
+import { WhatChangedPanel } from './WhatChangedPanel';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const DISCLOSURE: Pick<PortfolioChangesData, 'disclosure' | 'not_advice' | 'disclaimer_version'> = {
+  disclosure:
+    'Educational analysis only — not investment advice. Labels describe category-relative form.',
+  not_advice: 'NOT_ADVICE',
+  disclaimer_version: '2026-06-06.v1',
+};
+
+const IMPROVED_CHANGE: FundChange = {
+  isin: 'INF001A01017',
+  scheme_name: 'Alpha Equity Fund',
+  label_from: 'off_track',
+  label_to: 'on_track',
+  band_from: 'low',
+  band_to: 'medium',
+  changed: true,
+  change_kind: 'improved',
+  reasons: ['NAV momentum recovered over 3-month window', 'Category rank improved'],
+  as_of_from: '2026-05-01',
+  as_of_to: '2026-06-01',
+  nav_as_of: '2026-06-01',
+  nav_days_ago: 10,
+  nav_is_stale: false,
+};
+
+const WEAKENED_CHANGE: FundChange = {
+  ...IMPROVED_CHANGE,
+  isin: 'INF002B01025',
+  scheme_name: 'Beta Debt Fund',
+  label_from: 'on_track',
+  label_to: 'off_track',
+  band_from: 'high',
+  band_to: 'medium',
+  changed: true,
+  change_kind: 'weakened',
+  reasons: ['Category rank declined'],
+};
+
+const UNCHANGED_CHANGE: FundChange = {
+  ...IMPROVED_CHANGE,
+  isin: 'INF003C01033',
+  scheme_name: 'Gamma Hybrid Fund',
+  label_from: 'on_track',
+  label_to: 'on_track',
+  band_from: 'medium',
+  band_to: 'medium',
+  changed: false,
+  change_kind: 'unchanged',
+  reasons: ['No material change in category-relative performance'],
+};
+
+const NEW_CHANGE: FundChange = {
+  isin: 'INF004D01041',
+  scheme_name: 'Delta New Fund',
+  label_from: null,
+  label_to: 'in_form',
+  band_from: null,
+  band_to: 'high',
+  changed: true,
+  change_kind: 'new',
+  reasons: ['First assessment — 14+ months of history now available'],
+  as_of_from: null,
+  as_of_to: '2026-06-01',
+  nav_as_of: '2026-06-01',
+  nav_days_ago: 0,
+  nav_is_stale: false,
+};
+
+const INSUFFICIENT_CHANGE: FundChange = {
+  isin: 'INF005E01059',
+  scheme_name: 'Epsilon Unknown Fund',
+  label_from: null,
+  label_to: 'insufficient_data',
+  band_from: null,
+  band_to: 'insufficient_data',
+  changed: false,
+  change_kind: 'insufficient_data',
+  reasons: ['Less than 14 months of NAV history available'],
+  as_of_from: null,
+  as_of_to: '2026-06-01',
+  nav_as_of: null,
+  nav_days_ago: null,
+  nav_is_stale: false,
+};
+
+const STALE_CHANGE: FundChange = {
+  ...IMPROVED_CHANGE,
+  isin: 'INF006F01067',
+  scheme_name: 'Stale NAV Fund',
+  nav_days_ago: 8,
+  nav_is_stale: true,
+};
+
+// ---------------------------------------------------------------------------
+// Helper: assert no numeric score in the DOM (mirrors TransparencyPanel pattern)
+// ---------------------------------------------------------------------------
+
+function assertNoNumericScore(container: HTMLElement) {
+  expect(container.innerHTML).not.toContain('unified_score');
+  // raw confidence floats like 0.87 must never appear
+  expect(container.innerHTML).not.toMatch(/\b0\.\d{2,}\b/);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: build a minimal PortfolioChangesData
+// ---------------------------------------------------------------------------
+
+function makeData(changes: FundChange[]): PortfolioChangesData {
+  return {
+    portfolio_id: 'test-pid-001',
+    changes,
+    ...DISCLOSURE,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 1. improved — label transition + chip
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — improved', () => {
+  it('renders "Off Track → On Track" label transition', () => {
+    const { container } = render(<WhatChangedPanel data={makeData([IMPROVED_CHANGE])} />);
+    const transition = screen.getByTestId('label-transition');
+    expect(transition.textContent).toContain('Off Track');
+    expect(transition.textContent).toContain('On Track');
+    assertNoNumericScore(container);
+  });
+
+  it('renders "Improved" chip', () => {
+    render(<WhatChangedPanel data={makeData([IMPROVED_CHANGE])} />);
+    const chip = screen.getByTestId('change-kind-chip');
+    expect(chip.textContent).toBe('Improved');
+  });
+
+  it('renders reasons list', () => {
+    render(<WhatChangedPanel data={makeData([IMPROVED_CHANGE])} />);
+    const reasons = screen.getByTestId('change-reasons');
+    expect(reasons.textContent).toContain('NAV momentum recovered');
+  });
+
+  it('renders disclosure bundle', () => {
+    render(<WhatChangedPanel data={makeData([IMPROVED_CHANGE])} />);
+    expect(screen.getByTestId('not-advice-label').textContent).toContain('NOT_ADVICE');
+    expect(screen.getByTestId('disclosure-text').textContent).toContain('Educational analysis only');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. weakened — chip text
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — weakened', () => {
+  it('renders "Weakened" chip', () => {
+    render(<WhatChangedPanel data={makeData([WEAKENED_CHANGE])} />);
+    const chip = screen.getByTestId('change-kind-chip');
+    expect(chip.textContent).toBe('Weakened');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. unchanged — chip text
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — unchanged', () => {
+  it('renders "Unchanged" chip', () => {
+    render(<WhatChangedPanel data={makeData([UNCHANGED_CHANGE])} />);
+    const chip = screen.getByTestId('change-kind-chip');
+    expect(chip.textContent).toBe('Unchanged');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. new — "First snapshot" framing, no from-label/arrow
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — new entry', () => {
+  it('renders "First snapshot" framing', () => {
+    render(<WhatChangedPanel data={makeData([NEW_CHANGE])} />);
+    const transition = screen.getByTestId('label-transition');
+    expect(transition.textContent).toContain('First snapshot');
+    expect(transition.textContent).toContain('In Form');
+  });
+
+  it('does NOT render a from-label or arrow for new entry', () => {
+    render(<WhatChangedPanel data={makeData([NEW_CHANGE])} />);
+    const transition = screen.getByTestId('label-transition');
+    // Should not contain any from-label text (label_from is null)
+    expect(transition.textContent).not.toContain('null');
+    // The arrow → should not appear in the label-transition for new entries
+    expect(transition.textContent).not.toContain('→');
+  });
+
+  it('renders "New" chip', () => {
+    render(<WhatChangedPanel data={makeData([NEW_CHANGE])} />);
+    const chip = screen.getByTestId('change-kind-chip');
+    expect(chip.textContent).toBe('New');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. insufficient_data — honest framing
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — insufficient_data', () => {
+  it('renders "Insufficient data" chip', () => {
+    render(<WhatChangedPanel data={makeData([INSUFFICIENT_CHANGE])} />);
+    const chip = screen.getByTestId('change-kind-chip');
+    expect(chip.textContent).toBe('Insufficient data');
+  });
+
+  it('renders the reasons verbatim', () => {
+    render(<WhatChangedPanel data={makeData([INSUFFICIENT_CHANGE])} />);
+    const reasons = screen.getByTestId('change-reasons');
+    expect(reasons.textContent).toContain('Less than 14 months');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. empty state
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — empty state', () => {
+  it('renders the empty-state element', () => {
+    render(<WhatChangedPanel data={makeData([])} />);
+    const empty = screen.getByTestId('changes-empty');
+    expect(empty.textContent).toContain('No changes to show yet');
+  });
+
+  it('still renders the disclosure bundle when changes is empty', () => {
+    render(<WhatChangedPanel data={makeData([])} />);
+    expect(screen.getByTestId('disclosure-bundle')).toBeTruthy();
+    expect(screen.getByTestId('not-advice-label').textContent).toContain('NOT_ADVICE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. no-numeric: no unified_score, no raw float
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — no numeric score in DOM (non-neg #2)', () => {
+  it('never renders unified_score in the DOM', () => {
+    const { container } = render(
+      <WhatChangedPanel
+        data={makeData([IMPROVED_CHANGE, WEAKENED_CHANGE, INSUFFICIENT_CHANGE])}
+      />,
+    );
+    expect(container.innerHTML).not.toContain('unified_score');
+  });
+
+  it('never renders a raw confidence float (e.g. "0.87")', () => {
+    const { container } = render(
+      <WhatChangedPanel
+        data={makeData([IMPROVED_CHANGE, WEAKENED_CHANGE, INSUFFICIENT_CHANGE])}
+      />,
+    );
+    expect(container.innerHTML).not.toContain('0.87');
+    // General float pattern check
+    expect(container.innerHTML).not.toMatch(/\b0\.\d{2,}\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. no-advisory-verbs: full rendered text must not contain forbidden substrings
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — no advisory verbs in rendered text (non-neg #1)', () => {
+  it('has no advisory verbs in the full rendered output', () => {
+    const { container } = render(
+      <WhatChangedPanel
+        data={makeData([IMPROVED_CHANGE, WEAKENED_CHANGE, UNCHANGED_CHANGE, NEW_CHANGE, INSUFFICIENT_CHANGE])}
+      />,
+    );
+    const allText = container.textContent?.toLowerCase() ?? '';
+    // advisory verb ban list — these strings must never appear in rendered output (non-neg #1)
+    const forbidden: string[] = (
+      'buy sell hold switch reduce rebalance redeem consider recommend should suggest avoid caution'
+    ).split(' ');
+    for (const verb of forbidden) {
+      expect(allText, `"${verb}" must not appear in rendered text`).not.toContain(verb);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. stale NAV note appears when nav_is_stale=true
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — stale NAV note', () => {
+  it('shows NAV days old when nav_is_stale is true', () => {
+    render(<WhatChangedPanel data={makeData([STALE_CHANGE])} />);
+    const freshness = screen.getByTestId('freshness');
+    expect(freshness.textContent).toContain('8 days old');
+  });
+
+  it('does not show NAV stale note when nav_is_stale is false', () => {
+    render(<WhatChangedPanel data={makeData([IMPROVED_CHANGE])} />);
+    const freshness = screen.getByTestId('freshness');
+    expect(freshness.textContent).not.toContain('days old');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Disclosure bundle appears exactly once
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — disclosure bundle invariant', () => {
+  it('renders disclosure-bundle exactly once', () => {
+    render(
+      <WhatChangedPanel
+        data={makeData([IMPROVED_CHANGE, WEAKENED_CHANGE])}
+      />,
+    );
+    expect(screen.getAllByTestId('disclosure-bundle').length).toBe(1);
+  });
+});
