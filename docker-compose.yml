@@ -17,6 +17,16 @@ x-logging: &default-logging
 networks:
   dhanradar:
     driver: bridge
+  # B38 metrics-scrape bridge. Pre-created on the host (docker network create
+  # dhanradar_metrics); the shared etip_prometheus container is attached to it
+  # with `docker network connect dhanradar_metrics etip_prometheus`. Declared
+  # external so `compose down` can never remove it while the co-tenant scraper
+  # is attached. ONLY dhanradar-fastapi joins: the scraper needs /metrics on
+  # :8000 and must never be able to reach the password-less dhanradar-redis or
+  # dhanradar-postgres on the app network.
+  metrics:
+    name: dhanradar_metrics
+    external: true
 
 volumes:
   dhanradar_pgdata:
@@ -117,6 +127,7 @@ services:
       - dhanradar_cas_tmp:/tmp/dhanradar_cas
     networks:
       - dhanradar
+      - metrics
     depends_on:
       dhanradar-postgres:
         condition: service_healthy
