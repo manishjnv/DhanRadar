@@ -85,21 +85,23 @@ def _navrows_to_nav_upserts(rows: Any) -> list[dict]:
     Keying strategy: prefer isin_growth; fall back to isin_reinvest.
     Rows where BOTH ISINs are None are silently skipped (cannot key the row).
     Returns dicts with keys: isin, nav_date, nav, source.
+
+    Deduplication: the AMFI feed sometimes emits duplicate (isin, nav_date) pairs
+    within a single batch, which triggers asyncpg.CardinalityViolationError on the
+    ON CONFLICT DO UPDATE.  Last-seen row wins (dict keyed by (isin, nav_date)).
     """
-    out: list[dict] = []
+    out: dict[tuple[str, object], dict] = {}
     for row in rows:
         isin = row.isin_growth or row.isin_reinvest
         if isin is None:
             continue
-        out.append(
-            {
-                "isin": isin,
-                "nav_date": row.nav_date,
-                "nav": row.nav,
-                "source": "amfi",
-            }
-        )
-    return out
+        out[(isin, row.nav_date)] = {
+            "isin": isin,
+            "nav_date": row.nav_date,
+            "nav": row.nav,
+            "source": "amfi",
+        }
+    return list(out.values())
 
 
 def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
@@ -109,21 +111,22 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
     Only the three columns this feed owns are included: amfi_code, scheme_name,
     category.  isin is the PK (isin_growth preferred, else isin_reinvest).
     Rows without a keyable ISIN are skipped.
+
+    Deduplication: last-seen row wins for duplicate ISINs in one batch (dict keyed
+    by isin), preventing ON CONFLICT DO UPDATE cardinality errors.
     """
-    out: list[dict] = []
+    out: dict[str, dict] = {}
     for row in rows:
         isin = row.isin_growth or row.isin_reinvest
         if isin is None:
             continue
-        out.append(
-            {
-                "isin": isin,
-                "amfi_code": row.amfi_code,
-                "scheme_name": row.scheme_name,
-                "category": row.category,
-            }
-        )
-    return out
+        out[isin] = {
+            "isin": isin,
+            "amfi_code": row.amfi_code,
+            "scheme_name": row.scheme_name,
+            "category": row.category,
+        }
+    return list(out.values())
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,8 @@ export interface BackendFund {
   scheme_name: string;
   folio_number: string;
   units: number;
-  invested_amount: number;
+  /** null when CAS has no cost basis (CDSL / no-transaction holdings) */
+  invested_amount: number | null;
   current_value: number;
   verb_label: string;
   confidence_band: string;
@@ -61,8 +62,9 @@ export interface MfScheme {
   amc_name: string;
   category: string;
   units: number;
-  /** User's own money figures — allowed in DOM per architecture rule */
-  invested: number;
+  /** User's own money figures — allowed in DOM per architecture rule.
+   *  null when CAS has no cost basis (CDSL / no-transaction holdings). */
+  invested: number | null;
   current_value: number;
   return_pct: number;
   /** Non-advisory label (never advisory verbs) */
