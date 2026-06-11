@@ -221,3 +221,57 @@ async def test_no_cohort_still_yields_on_track_not_in_form():
     sig = compute_fund_signals("INF_PLAIN", pts, as_of=_AS_OF)
     result = await score_fund(_engine(), sig)
     assert result.verb_label == VerbLabel.on_track
+
+
+# --- B63: peer NAV loads are chunked (memory-bounded), results unchanged ------
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeDb:
+    """Serves the two _compute_cohort queries: target categories, then peers."""
+
+    def __init__(self, cat_rows, peer_rows):
+        self._results = [_FakeResult(cat_rows), _FakeResult(peer_rows)]
+
+    async def execute(self, _stmt):
+        return self._results.pop(0)
+
+
+async def test_cohort_peer_load_is_chunked_and_equivalent(monkeypatch):
+    # Loading ALL peers' 1200-day series at once OOM-killed the 640M worker on
+    # the complete NAV dataset (B63). The fix loads peers in bounded chunks;
+    # this asserts (a) no single load exceeds the chunk size and (b) the
+    # category-relative output is byte-identical to the one-shot computation.
+    from dhanradar.tasks import mf as tasks_mf
+
+    peers = [f"INF{i:04d}" for i in range(7)]
+    cat_rows = [(peers[0], "equity_mid")]
+    peer_rows = [(i, "equity_mid") for i in peers]
+    series = {
+        i: _daily_series(start_nav=100.0, daily_growth_pct=0.02 + 0.005 * k, days=400, end=_AS_OF)
+        for k, i in enumerate(peers)
+    }
+
+    batches: list[int] = []
+
+    async def _fake_load(db, isins, lookback_days=400):
+        batches.append(len(isins))
+        return {i: series[i] for i in isins}, {}
+
+    monkeypatch.setattr(tasks_mf, "_load_nav_series", _fake_load)
+
+    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 3)
+    chunked = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
+    assert batches and max(batches) <= 3  # every load bounded by the chunk size
+
+    batches.clear()
+    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 10_000)
+    oneshot = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
+    assert batches == [len(peers)]  # one-shot control loaded everything at once
+
+    assert chunked == oneshot  # identical math either way
