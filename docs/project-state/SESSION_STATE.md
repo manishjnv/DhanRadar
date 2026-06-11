@@ -1,13 +1,13 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (C1 concept explainers built — PR open, awaiting Opus compliance
-gate; What Changed engine Opus-gated + merged #82 + **DEPLOYED** `e7e416e`; B62 resolved; prod
-current)
+**Last updated:** 2026-06-11 (C1 concept explainers Opus-gated ACCEPT → merged #85 →
+**DEPLOYED** `4e121e4` + seeded + verified live; What Changed engine merged #82 + deployed
+`e7e416e`; B62 resolved; prod current)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## C1 CONCEPT-EXPLAINER LEARN LIBRARY — built · PR open · AWAITING OPUS COMPLIANCE GATE (2026-06-11)
+## C1 CONCEPT-EXPLAINER LEARN LIBRARY — Opus-gated ACCEPT · MERGED #85 · DEPLOYED `4e121e4` (2026-06-11)
 
 Branch `feat/c1-concept-explainers` (isolated worktree `e:\code\DhanRadar-c1`, branched off
 `origin/main` `e8d8463`, rebased onto `56f566a` after What-Changed merged mid-build). Commits:
@@ -29,16 +29,22 @@ queryKeys edit, 4-line main.py) were a **two-dot-diff artifact** against the adv
 — the three-dot merge-base diff shows 22 files/1681 insertions, all C1-lane; resolved by rebasing
 onto `56f566a` (one expected main.py include-block conflict, both router lines kept).
 
-**NOT MERGED — handoff:** Opus session must run the inline Compliance review (Tier-A +
-compliance, public financial-education copy) on the PR before merge. Deploy (later, human-gated):
-`alembic upgrade head` (0017) + `python -m dhanradar.concepts.seed` + `INTERNAL_API_URL` on
-nextjs (shared G8 prerequisite).
+**MERGED + DEPLOYED (same session, explicit human approval):** independent Opus Compliance
+review returned **ACCEPT** (6/6 rules pass, 2 non-blocking NITs left as-is; ledger:
+`reviews/c1-concept-explainers.md`) → PR #85 squash-merged `4e121e4` (plain merge — lint is
+advisory, no admin bypass needed) → KVM4 synced + `scripts/deploy.sh deploy` (smoke 200) →
+`alembic current = 0017 (head)` → seed = 8 rows → live-verified: API list returns all 8 slugs +
+disclosure bundle `2026-06-06.v1`, detail 200 / bad slug RFC7807 404, SSR `/learn/concepts` +
+detail pages render with the not-advice line; `INTERNAL_API_URL` was already set (G8 deploy).
+All 9 containers healthy.
 
 ### Agent-utilization & routing telemetry (2026-06-11 C1 session)
 
-- **Opus (Tier 0):** n/a — builder session ran on Fable 5 (1M); judgment work (concept copy,
-  compliance seams, migration, conflict resolution) self-authored in-session; Opus reserved for
-  the pending compliance gate.
+- **Opus (Tier 0):** independent Compliance reviewer subagent (gate redirected to this session
+  by the operator; builder did not self-certify) · verdict ACCEPT · reworked: N. Builder session
+  itself ran on Fable 5 (1M); judgment work (concept copy,
+  compliance seams, migration, conflict resolution) self-authored in-session; Opus engaged only
+  for that gate.
 - **Sonnet (Tier 1):** independent C1 reviewer · reworked: N (verdict honored; its lane findings
   re-verified as a stale-base artifact, not dismissed) · warm-start subagent · Phase-0 brief ·
   reworked: N (one stale fact: pointed at test_education_endpoints.py which doesn't exist —
