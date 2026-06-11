@@ -1,10 +1,79 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (🚨 SEV1: prod DB destroyed by PGDATA volume-path mismatch on
-postgres recreate — fixed + rebuilt, see below; scoring v1 activated earlier the same day)
+**Last updated:** 2026-06-11 (B38 Prometheus scrape wired live; Sentry pending DSN; shared-checkout
+co-edit incident — see RCA)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B38 OBSERVABILITY WIRING — SCRAPE LIVE · SENTRY PENDING DSN (2026-06-11)
+
+Branch `docs/b38-observability-wiring` (worktree `E:\code\DhanRadar-wt-b38`).
+Compose change: PR #93 squash-merged to main as `adf73de`. Deployed: `27685cb` (includes
+concurrent B63 memory rebalance).
+
+**What shipped:**
+
+- `docker-compose.yml` adds external network `dhanradar_metrics`; only `dhanradar-fastapi`
+  joins it. Design rationale: `dhanradar-redis` is password-less on the app network (holds
+  refresh-token JTIs) so the co-tenant scraper (`etip_prometheus`) must never join the app
+  network; the dedicated bridge limits it to `fastapi:8000`.
+- Host network created; `etip_prometheus` attached; fastapi dual-homed
+  (`dhanradar_dhanradar` + `dhanradar_metrics`, fastapi metrics-net IP `172.20.0.2`).
+- Scrape job `dhanradar` appended to `/opt/intelwatch/docker/prometheus/prometheus.yml`
+  (target `dhanradar-fastapi:8000`, path `/metrics`, 15 s, labels `env=production
+  app=dhanradar`); backup at `prometheus.yml.bak-b38-20260611`; `promtool` validation
+  SUCCESS; reloaded via lifecycle endpoint (no container restart).
+- Verified: before = 24 targets up, after = 25 up (all etip targets unaffected);
+  `up{job="dhanradar"}` returns 1; public surface unchanged
+  (`https://dhanradar.com/metrics` → 404, `/api/v1/health` → 200).
+- Grafana alert rules (target-down 2 m, p99 > 500 ms 5 m) STAGED — not applied. Repo file
+  `infra/observability/grafana-alerts-dhanradar.yaml` (placeholder `<PROM_DS_UID>` kept in
+  public repo deliberately); UID-filled copy at `/tmp/dhanradar-alerts.yaml` on the box.
+  Operator action required (see open items below).
+- App-side code pre-existed (`backend/dhanradar/observability.py`, commit `efc6556`,
+  2026-06-07): `PrometheusMiddleware` + `/metrics` endpoint (outside `/api/v1`,
+  unauthenticated by design, docker-network access control) + `init_sentry()` DPDP-safe
+  scrubber (no-op without `SENTRY_DSN`).
+- Tier-B review ledger: `docs/project-state/reviews/b38-metrics-network.md` — deterministic
+  gates green; independent Sonnet adversarial Security review ACCEPT-WITH-CONDITIONS
+  (2 doc conditions, satisfied); Compliance ACCEPT. Feature doc:
+  `docs/features/observability.md`. RCA (shared-checkout incident): `docs/rca/README.md`.
+
+**Open items (operator actions):**
+
+1. `SENTRY_DSN` — user adding to `/opt/dhanradar/.env`; fastapi restart activates
+   `init_sentry()` (field already in `config.py`; placeholder on line 55 of `.env.example`).
+2. Grafana alert rules — copy UID-filled `/tmp/dhanradar-alerts.yaml` on the box into
+   `/opt/intelwatch/docker/grafana/provisioning/alerting/`; restart `etip_grafana`.
+
+**Residuals (security review + session):**
+
+- (a) Any container on `dhanradar_metrics` reaches fastapi's full `:8000` surface, not just
+  `/metrics` — future hardening: non-Authorization scrape token dual-control.
+- (b) `etip_prometheus` network attach is imperative — lost if that container is recreated;
+  must re-run `docker network connect dhanradar_metrics etip_prometheus`.
+- (c) Runbook audit-write-failure + AI-budget alerts not wirable from `/metrics` (counters in
+  Redis — need an exporter or `/metrics` gauges).
+- (d) Celery workers never call `init_sentry()` (only `main.py` does) — worker errors will
+  not reach Sentry.
+
+### Agent-utilization & routing telemetry (B38 session)
+
+- **Opus (Fable 5 main):** orchestration, Tier-B compose diff authoring (load-bearing path),
+  KVM4 wiring + verification, governance gates.
+- **Sonnet (Tier 1):** warm-start Phase-0 brief · reworked: N | Tier-B adversarial
+  Security + Compliance review (compose diff) · reworked: N (verdicts adopted as-returned) |
+  session-exit docs draft · reworked: Y (RCA wrong-branch + commit-ref fixes; feature-doc
+  scrape-job YAML structure corrected to match the deployed config).
+- **Haiku (Tier 3):** n/a — recon was a handful of targeted SSH reads, no bulk sweeps.
+- **codex:rescue:** n/a — account not entitled; Sonnet adversarial takeover,
+  verdict=ACCEPT-WITH-CONDITIONS (conditions closed in-session).
+- **Tier-2/Tier-4:** n/a — two doc-routing nudges deliberately exempted (review ledger +
+  infra-notes carry security/prod-ops content, hard-rule (b)); session docs routed to Sonnet
+  instead.
+
+---
 
 ## 🚨 SEV1 — PROD DATABASE LOST ON POSTGRES RECREATE + RECOVERY (2026-06-11)
 
