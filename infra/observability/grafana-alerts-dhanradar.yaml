@@ -1,0 +1,84 @@
+# DhanRadar — Grafana alert rules (B38), STAGED IN REPO, applied manually.
+#
+# Target stack: the shared etip_grafana (file provisioning at
+# /opt/intelwatch/docker/grafana/provisioning). DhanRadar must not exec into or
+# restart the co-tenant Grafana, so this file is applied by the operator:
+#
+#   1. Replace <PROM_DS_UID> below with the Prometheus datasource UID
+#      (Grafana UI → Connections → Data sources → Prometheus → UID, or
+#      /opt/intelwatch/docker/grafana/provisioning/datasources/*.yml).
+#   2. sudo mkdir -p /opt/intelwatch/docker/grafana/provisioning/alerting
+#   3. Copy this file there.
+#   4. Reload provisioning: restart etip_grafana at a low-traffic moment
+#      (docker restart etip_grafana — brief dashboard blip) OR, with admin
+#      credentials, POST /api/admin/provisioning/alerting/reload.
+#   5. Point the notification policy at a Telegram contact point once a bot
+#      token exists (Architecture §6: alerts route to Telegram).
+#
+# Alerts wired from the dhanradar scrape job (Architecture §6 thresholds):
+#   - target down (up == 0 for 2m)
+#   - p99 HTTP latency > 500ms sustained 5m
+# NOT wired here (need exporters that don't exist yet — see BLOCKERS.md B38
+# residuals): container mem >80% (needs cAdvisor), AI budget keys + audit
+# write-failure counters (live in Redis, need an exporter or a /metrics gauge).
+
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: dhanradar
+    folder: DhanRadar
+    interval: 1m
+    rules:
+      - uid: dhanradar-target-down
+        title: "DhanRadar /metrics target down"
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Alerting
+        annotations:
+          summary: "etip_prometheus cannot scrape dhanradar-fastapi:8000/metrics (target down 2m)."
+        labels:
+          app: dhanradar
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: <PROM_DS_UID>
+            model:
+              expr: up{job="dhanradar"}
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      - uid: dhanradar-p99-latency
+        title: "DhanRadar p99 HTTP latency > 500ms (5m)"
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Alerting
+        annotations:
+          summary: "p99 request latency above the 500ms Architecture §6 threshold for 5 minutes."
+        labels:
+          app: dhanradar
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: <PROM_DS_UID>
+            model:
+              expr: histogram_quantile(0.99, sum by (le) (rate(dhanradar_http_request_duration_seconds_bucket[5m])))
+              refId: A
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.5] }
