@@ -88,3 +88,13 @@ SSR base fix all confirmed correct.
 **Lane honored:** no edits to `scoring/engine/*`, `mf/signals.py`, `mf/scoring_bridge.py`
 (Session A) or `dashboard/*` + `frontend/src/features/dashboard/*` (Session B); `main.py`
 got exactly one `include_router` line.
+
+## Post-deploy sign-off addendum (2026-06-11)
+
+**Human CA sign-off on the FY 2025-26 tax figures: RECORDED.** Attested by the founder
+in-session 2026-06-11: a human CA reviewed and signed off the FY 2025-26 figures in
+`backend/dhanradar/education/content.py` (the verify list above) — equity STCG/LTCG
+(20% / 12.5% over ₹1.25L), debt slab §50AA, ELSS §80C old-regime, IDCW §194K TDS
+threshold, exit-load framing. The "Deploy-eligible" condition **human CA tax sign-off**
+is now satisfied; content figures stand as published. Any FY revision or rate change
+requires a fresh CA pass before edit.
