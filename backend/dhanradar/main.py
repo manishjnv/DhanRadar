@@ -18,6 +18,7 @@ from dhanradar.admin.router import router as admin_router
 from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
 from dhanradar.compliance.router import router as compliance_router
+from dhanradar.concepts.router import router as concepts_router
 from dhanradar.consent.router import router as consent_router
 from dhanradar.core.logging import configure_logging
 from dhanradar.dashboard.router import router as dashboard_router
@@ -130,6 +131,7 @@ app.include_router(news_router, prefix="/api/v1")  # B56 — curated headline me
 app.include_router(insights_router, prefix="/api/v1")  # Plan Group 3 — portfolio intelligence (overlap + concentration)
 app.include_router(transparency_router, prefix="/api/v1")  # Plan Group 9 — data transparency + explainability (PU2)
 app.include_router(changes_router, prefix="/api/v1")  # Plan Group 2 — What Changed explainability (read-only)
+app.include_router(concepts_router, prefix="/api/v1")  # C1 — public concept explainers (anonymous-read, crawlable)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).
