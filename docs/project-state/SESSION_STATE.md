@@ -64,8 +64,9 @@ Founder asked for the three open frontend functionality items, one by one. All t
   transparent)` — the old 2-digit hex-alpha on a CSS `var()` was invalid CSS, silently dropped.
   Source-guard vitest (jsdom can't catch it at render time; first guard draft tripped on its own
   explanatory comment — reworded). RCA 2026-06-12; Architect ACCEPT; ledger
-  `reviews/b62-f1-chip-tint.md`. Tint approach credited to superseded **PR #86 (still open —
-  founder to close;** classifier denied the agent closing a PR it didn't create).
+  `reviews/b62-f1-chip-tint.md`. Tint approach credited to superseded **PR #86 — CLOSED
+  2026-06-12** (founder authorized after the permission classifier denied the agent closing a
+  PR it didn't create; stale branch deleted).
 - **B60/PU2 mount (PR #103, `2dfb6bf`):** `TransparencySection` + `usePortfolioTransparency`
   mirror the B62-f2 pattern; mounted LAST on `/portfolio/[id]/intelligence`. Architect + UI both
   ACCEPT-WITH-CONDITIONS; conditions applied (`queryKeys.portfolio.transparency` factory entry;
@@ -75,9 +76,13 @@ Founder asked for the three open frontend functionality items, one by one. All t
 - **Gates:** 31/31 + 21/21 vitest (orchestrator-verified, not builder-claimed) · tsc · scoped
   eslint · markdownlint · CI green on all three PRs (lint job = pre-existing backend ruff debt;
   no Python touched).
-- **Tooling discovery:** Tier-4 `free-chain` is DEAD on this account — HTTP 404 "no endpoints
-  matching data policy" (OpenRouter privacy settings exclude all `:free` providers), not a 429.
-  Tier-2 `dsf` worked as fallback (RCA draft).
+- **Tooling discovery + RESOLUTION (same day):** Tier-4 `free-chain` was DEAD on this account —
+  HTTP 404 "no endpoints matching data policy" (OpenRouter privacy settings excluded all `:free`
+  providers), not a 429. Tier-2 `dsf` covered the RCA draft. **Fixed 2026-06-12:** founder
+  enabled both free-endpoint toggles (may-train + may-publish); `free-chain` rebuilt in `or.mjs`
+  (`qwen-big → llama → hermes → qwen → gemma`; glm/minimax `:free` retired upstream;
+  `gpt-oss`/`nemotron:free` remain per-provider policy-blocked). Verified: failures are now
+  429 capacity weather only — fall back to `dsf`, never retry-spin. Memory updated.
 
 ### Agent-utilization & routing telemetry (frontend-sweep session)
 
