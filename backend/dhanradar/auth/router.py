@@ -9,9 +9,11 @@ Endpoints:
   GET  /api/v1/auth/me
   POST /api/v1/auth/totp/setup
   POST /api/v1/auth/totp/verify
-  POST /api/v1/auth/totp/login      (Feature 2: standalone TOTP login)
-  GET  /api/v1/auth/google/start    (Feature 1: Google SSO — begin flow)
-  GET  /api/v1/auth/google/callback (Feature 1: Google SSO — code exchange)
+  POST /api/v1/auth/totp/login         (Feature 2: standalone TOTP login)
+  GET  /api/v1/auth/google/start       (Feature 1: Google SSO — begin flow)
+  GET  /api/v1/auth/google/callback    (Feature 1: Google SSO — code exchange)
+  POST /api/v1/auth/email-otp/request  (Feature 3: email OTP — request code)
+  POST /api/v1/auth/email-otp/login    (Feature 3: email OTP — verify & login)
 
 All tokens are issued as RS256 JWTs in HttpOnly __Host-* cookies.
 The JS layer never reads the token value.
@@ -23,6 +25,7 @@ Security notes:
   - Logout clears both cookies AND revokes the refresh jti in Redis.
   - Google callback failures redirect to /login?error= (browser navigation path).
   - Tokens are NEVER put in URLs, response bodies, or non-HttpOnly cookies.
+  - email-otp/request always returns 202 regardless of whether the account exists.
 """
 
 from __future__ import annotations
@@ -67,6 +70,10 @@ _rl_totp = RateLimit(max_requests=10, window_seconds=60)
 _rl_google = RateLimit(max_requests=10, window_seconds=60)
 # Standalone TOTP login: tighter than setup/verify.
 _rl_totp_login = RateLimit(max_requests=5, window_seconds=60)
+# Email OTP: request is looser (3/min per IP); login is the credential-guessing
+# surface so matches the password-login limit (5/min per IP).
+_rl_email_otp_request = RateLimit(max_requests=3, window_seconds=60)
+_rl_email_otp_login = RateLimit(max_requests=5, window_seconds=60)
 
 _OAUTH_STATE_TTL = 600  # seconds — matches the Google flow time-to-live
 _OAUTH_STATE_PREFIX = "auth:oauth_state:"
@@ -332,6 +339,78 @@ async def totp_login(
       - Same cookie issuance as every other login path.
     """
     user = await auth_svc.authenticate_totp(body.email, body.code, db)
+
+    access_token, _ = create_access_token(str(user.id))
+    refresh_token, refresh_jti = create_refresh_token(str(user.id))
+    await auth_svc.store_refresh_jti(refresh_jti, str(user.id))
+
+    set_auth_cookies(response, access_token, refresh_token)
+
+    return schemas.LoginResponse(
+        message="login_successful",
+        user=schemas.UserResponse.model_validate(user),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/email-otp/request  — Feature 3: request an email OTP
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/email-otp/request",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request a 6-digit login code sent to the given email address",
+)
+async def email_otp_request(
+    body: schemas.EmailOTPRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_email_otp_request)] = None,
+) -> dict:
+    """
+    Trigger delivery of a one-time login code to the supplied email address.
+
+    Fail-closed: returns 503 if RESEND_API_KEY is not configured (mirrors
+    google_start's 503 pattern for unconfigured providers).
+
+    Security: ALWAYS returns {"message": "otp_sent_if_account_exists"} with
+    HTTP 202 — identical response regardless of whether the account exists,
+    whether the cooldown is active, or whether the daily cap is hit.  This
+    prevents using the endpoint as a user-existence oracle.
+    """
+    if not settings.RESEND_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="email_otp_not_configured",
+        )
+
+    await auth_svc.request_email_otp(body.email, db)
+    return {"message": "otp_sent_if_account_exists"}
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/email-otp/login  — Feature 3: verify OTP and issue session
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/email-otp/login",
+    response_model=schemas.LoginResponse,
+    summary="Authenticate with a one-time email code (standalone — not a second factor)",
+)
+async def email_otp_login(
+    body: schemas.EmailOTPLoginRequest,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_email_otp_login)] = None,
+) -> schemas.LoginResponse:
+    """
+    Issue a session using a valid email OTP in place of a password.
+
+    Security properties mirror /auth/totp/login exactly:
+      - Generic 401 on any failure (no enumeration).
+      - Brute-force + expiry guards in service.authenticate_email_otp.
+      - Same cookie issuance as every other login path.
+    """
+    user = await auth_svc.authenticate_email_otp(body.email, body.code, db)
 
     access_token, _ = create_access_token(str(user.id))
     refresh_token, refresh_jti = create_refresh_token(str(user.id))

@@ -37,6 +37,9 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0026 | Scoring-engine activation: admin-triggered, DB-registry-authoritative two-person + backtest gate (B6/B28) | Accepted |
 | ADR-0027 | First AI-gateway consumer = MF report portfolio commentary; complete() returns CompletionResult(output, model_used) | Accepted |
 | ADR-0028 | Centralised structured logging (P1): structlog JSON + request_id correlation + Docker json-file rotation + compliance redaction | Accepted |
+| ADR-0029 | Two additional login methods: Google SSO (server-side OAuth+PKCE) and TOTP as a standalone first factor | Accepted |
+| ADR-0030 | Cohort label band goes category-class-aware (model v1.1, B58-f4) | Accepted |
+| ADR-0031 | Email OTP as an alternative login factor (amends the OTP-first IGNORE scope) | Accepted |
 
 ---
 
@@ -666,3 +669,74 @@ through the same gate, informed by `label_distribution_sanity` telemetry.
 
 **Source:** `BLOCKERS.md` B58-f4; `FINAL_SCORING_SPEC.md` §4.1/§7; ADR-0026;
 `docs/project-state/reviews/b58-f2-f4-b62-f2.md`.
+
+## ADR-0031 — Email OTP as an alternative login factor (amends the OTP-first IGNORE scope)
+
+**Date:** 2026-06-12 · **Status:** Accepted
+
+**Context:** The auth canon specifies email+password, Google SSO (ADR-0029), and TOTP standalone
+login (ADR-0029) as login methods. The `docs/ui-system/` "OTP-first" signup pattern (D2) is
+explicitly IGNORE-listed in MIGRATION_STRATEGY_FINAL.md: it proposes OTP as the primary gate for
+all users at signup, requires an SMS provider, and was rejected (ADR-0014). On 2026-06-12 the
+founder requested a 4th login method: email OTP as an alternative first factor — a user-initiated
+code-for-password swap on the existing password-default login page, triggered from a secondary
+"Sign in with email code" button.
+
+This feature is NOT the IGNORE-listed OTP-first pattern. The IGNORE ban covers: OTP replacing
+the password as the default gate for all users at signup, SMS as a delivery channel, and OTP as
+the only login path. This feature is opt-in, email-delivered, behind the existing
+password-default page, and requires an existing account — the same scope distinction ADR-0029
+drew for TOTP-login vs the TOTP-as-mandatory-step-up concern.
+
+**Decision:**
+
+(a) **Email OTP = alternative first factor** — NOT 2FA, NOT the banned OTP-first pattern.
+Endpoints: `POST /api/v1/auth/email-otp/request` (202 always — enumeration-safe even for
+unknown email, cooldown, or daily cap; 503 `email_otp_not_configured` when `RESEND_API_KEY`
+is unset, fail-closed matching SSO) and `POST /api/v1/auth/email-otp/login` (generic 401 on
+every failure; RS256 `__Host-` cookie issuance via the shared `set_auth_cookies` path).
+
+(b) **Redis-only state (no DB migration).** Five keys: `auth:email_otp:{uid}` (SHA-256 hash of
+active code, TTL 600 s); `auth:email_otp_cooldown:{uid}` (send cooldown, SET NX 60 s);
+`auth:email_otp_daily:{uid}` (daily send cap, SET NX + INCR + EXPIREAT);
+`auth:email_otp_attempts:{uid}` (failed-verify lock, 5 attempts / 15 min, 401 not 429 —
+not an account oracle); and `auth:email_otp_used:{uid}:{hash}` (per-code atomic consume
+marker, SET NX — never deleted, per-code keying closes the TOCTOU double-spend race without
+introducing a post-login lockout).
+
+(c) **Delivery via `notifications.channels.deliver_email` (Resend; interface-only coupling;
+code never logged).** Send is fire-and-forget (`asyncio.create_task`) to remove response time
+as an enumeration oracle.
+
+(d) **UI handover.** The login page's code-mode (previously the authenticator-app TOTP entry
+form) is now email OTP. `POST /auth/totp/login` stays live API-side; settings → Security
+enrolment is untouched.
+
+(e) **Deletion-pending accounts:** silent 202 on the request endpoint; 403 only after code
+verification on the login endpoint (not an account oracle — matching the TOTP-login accepted
+residual, ADR-0029).
+
+(f) **Digit validation hardening:** all OTP schemas (new email-OTP and existing TOTP) use
+`[0-9]` not `\d` (Unicode-digit hardening).
+
+**Consequences:** four login methods now converge on one session-issuance path. Email OTP is
+fail-closed: absent `RESEND_API_KEY` → 503 (SSO pattern); TOTP login and Google SSO are
+unaffected. The per-code consume marker (`auth:email_otp_used:{uid}:{hash}`) is the TOCTOU
+fix — it is deliberately NOT cleared on success (clearing would reopen the race). A DPDP
+counsel-confirmation residual is open for cross-border transactional auth email via Resend
+(non-Indian processor; see B64). Gate ledger: `reviews/email-otp-login.md` (Security ACCEPT
+after revise + re-verify; Compliance ACCEPT-WITH-CONDITIONS, all 3 conditions satisfied).
+Net-new endpoints to fold into `CANONICAL_OPENAPI_ALIGNMENT.md` at the next contract-sync.
+
+Alternatives considered:
+
+- **Authenticator-app TOTP only (no email OTP):** the founder explicitly rejected this for
+  friction — TOTP requires prior enrolment and a phone app; email OTP works for any account
+  without setup.
+- **Magic links (single-use URL emailed):** rejected because the token lives in the email body
+  for longer than a 6-digit code (typical link expiry 15–30 min vs 10 min code), and a link
+  in transit or in email search is a more phishable surface than a short code the user must
+  type.
+
+**Source:** `docs/project-state/reviews/email-otp-login.md`;
+`BLOCKERS.md` B64; ADR-0029 (precedent for opt-in alternative factor scope).

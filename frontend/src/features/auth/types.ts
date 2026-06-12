@@ -55,3 +55,19 @@ export interface TotpSetupResponse {
 export interface TotpVerifyRequest {
   code: string;
 }
+
+/** POST /auth/email-otp/request body */
+export interface EmailOtpRequestBody {
+  email: string;
+}
+
+/** POST /auth/email-otp/request 202 response */
+export interface EmailOtpRequestResponse {
+  message: string;
+}
+
+/** POST /auth/email-otp/login body */
+export interface EmailOtpCredentials {
+  email: string;
+  code: string;
+}

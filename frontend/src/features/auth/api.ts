@@ -12,6 +12,9 @@ import type {
   AuthEnvelope,
   AuthUser,
   Credentials,
+  EmailOtpCredentials,
+  EmailOtpRequestBody,
+  EmailOtpRequestResponse,
   MeEnvelope,
   TotpCredentials,
   TotpSetupResponse,
@@ -79,6 +82,35 @@ export function useTotpLogin() {
     onSuccess: (data) => {
       // Seed the me cache BEFORE the caller navigates — same seeding order as
       // useLogin (RCA: AuthGuard reads stale cache if navigation fires first).
+      qc.setQueryData(queryKeys.auth.me(), data.user);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useRequestEmailOtp — fire POST /auth/email-otp/request. The backend always
+// returns 202 {"message":"otp_sent_if_account_exists"} to prevent enumeration;
+// 503 means the feature is unconfigured; 429 on rate limit.
+// ---------------------------------------------------------------------------
+export function useRequestEmailOtp() {
+  return useMutation({
+    mutationFn: (body: EmailOtpRequestBody) =>
+      api.post<EmailOtpRequestResponse>('/auth/email-otp/request', body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useEmailOtpLogin — sign in with email + 6-digit OTP code.
+// Mirrors useTotpLogin exactly: POST /auth/email-otp/login, seeds me cache.
+// The 401 from this endpoint is intentionally uniform regardless of failure
+// reason (expired code, wrong code, unknown email) — no enumeration signal.
+// ---------------------------------------------------------------------------
+export function useEmailOtpLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (creds: EmailOtpCredentials) =>
+      api.post<AuthEnvelope>('/auth/email-otp/login', creds),
+    onSuccess: (data) => {
       qc.setQueryData(queryKeys.auth.me(), data.user);
     },
   });

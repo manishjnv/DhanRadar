@@ -24,6 +24,7 @@ Security invariants:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -61,6 +62,11 @@ TOTP_LOCK_TTL = 900  # matches brute-force window
 # A dummy Argon2 hash used to equalise timing on unknown-email login attempts.
 # Pre-computed once at import time so it doesn't add startup cost per request.
 _DUMMY_HASH = hash_password("DummyP@ssw0rd_timing_equaliser_not_a_real_account")
+
+# Fire-and-forget task set for email OTP delivery (R3 — timing-oracle fix).
+# Keeps strong references to in-flight send tasks so they are not GC'd before
+# they complete; the done-callback discards the reference on completion.
+_send_tasks: set[asyncio.Task] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +615,151 @@ async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
 
     # Success — clear failure counter.
     await redis.delete(attempts_key)
+    return user  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Email OTP login (Feature 3 — standalone email OTP auth)
+# ---------------------------------------------------------------------------
+
+async def request_email_otp(email: str, db: AsyncSession) -> None:
+    """
+    Generate, store, and deliver a 6-digit OTP to the given email address.
+
+    Security invariants:
+      - ALWAYS returns silently regardless of whether the account exists,
+        whether the cooldown is active, or whether the daily cap is hit.
+        The caller must always respond 202 so this endpoint cannot be used
+        as a user-existence oracle.
+      - deletion_requested_at: silently suppressed (same silent-202 path).
+      - Raw OTP code is never logged (enforced in email_otp.send_otp_email).
+    """
+    from dhanradar.auth import email_otp as _otp
+
+    normalised = email.strip().lower()
+
+    user: User | None = await db.scalar(
+        select(User).where(User.email == normalised)
+    )
+
+    # Unknown email, deletion pending, cooldown active, or daily cap hit →
+    # all return silently. The caller MUST always send 202.
+    if user is None:
+        return
+    if user.deletion_requested_at is not None:
+        return
+
+    uid = str(user.id)
+
+    # Cooldown: one send per minute per account.
+    cooldown_ok = await _otp.check_and_set_cooldown(uid)
+    if not cooldown_ok:
+        return
+
+    # Daily cap: at most EMAIL_OTP_DAILY_CAP sends per account per day.
+    # NOTE: we already incremented the counter inside check_and_increment_daily_cap;
+    # if over cap we just return (the increment is a minor over-count on the cap
+    # boundary, which is acceptable — it prevents a cap-bypass race).
+    cap_ok = await _otp.check_and_increment_daily_cap(uid)
+    if not cap_ok:
+        return
+
+    code = _otp.generate_code()
+    await _otp.store_code(uid, code)
+    # Fire-and-forget the Resend HTTP call so that known-email requests and
+    # unknown-email requests (which return immediately above) take the same
+    # wall-clock time and this endpoint cannot be used as a timing oracle for
+    # user existence.  send_otp_email already catches/logs all delivery
+    # failures internally (including transport errors — DeliveryResult is
+    # returned, never raised), so the task cannot die with an unobserved
+    # exception.
+    task = asyncio.create_task(_otp.send_otp_email(normalised, code))
+    _send_tasks.add(task)
+    task.add_done_callback(_send_tasks.discard)
+
+
+async def authenticate_email_otp(email: str, code: str, db: AsyncSession) -> User:
+    """
+    Authenticate a user by email + one-time OTP code (standalone — not 2FA).
+
+    Security invariants (mirror authenticate_totp exactly):
+      1. Unknown email and any verification failure are ALL indistinguishable:
+         same generic 401 "invalid_credentials" detail.
+      2. Brute-force lock (≥EMAIL_OTP_LOCK_LIMIT failed attempts) → generic 401,
+         NOT 429 — a 429 on this unauthenticated surface would leak account existence.
+         The per-IP RateLimit on the router already issues 429 at the transport level.
+      3. Code absent/expired → increment attempts, generic 401.
+      4. Wrong code → increment attempts, generic 401.
+         If this increment crosses the lock threshold, fire record_security_event.
+      5. Atomic consume (SET NX used-marker): exactly one concurrent request
+         per code can reach session issuance; the loser gets generic 401.
+      6. deletion_requested_at: refused (403) only AFTER verify + consume —
+         reachable only with a proven code, same as authenticate_totp.
+      7. Success: delete the code key and attempts key (single-use), return user.
+    """
+    from dhanradar.auth import email_otp as _otp
+
+    normalised = email.strip().lower()
+
+    user: User | None = await db.scalar(
+        select(User).where(User.email == normalised)
+    )
+
+    # Unknown email → generic 401 (no timing equalisation needed here since
+    # we are not doing a slow hash comparison, but we exit immediately).
+    if user is None:
+        _raise_invalid_credentials()
+
+    # mypy: user is User here
+    uid = str(user.id)  # type: ignore[union-attr]
+
+    # Brute-force lock check.
+    # The security event was already fired exactly once when the counter
+    # crossed the threshold (in the increment branches below).  Do NOT fire
+    # again here — repeated events on every locked attempt flood the audit log
+    # and differ from the TOTP discipline where the event is transition-only.
+    current_attempts = await _otp.get_attempt_count(uid)
+    if current_attempts >= _otp.EMAIL_OTP_LOCK_LIMIT:
+        _raise_invalid_credentials()
+
+    # Fetch stored hash. Absent or expired → increment attempts, generic 401.
+    stored_hash = await _otp.get_stored_hash(uid)
+    if stored_hash is None:
+        new_count = await _otp.increment_attempts(uid)
+        if new_count >= _otp.EMAIL_OTP_LOCK_LIMIT:
+            await record_security_event(event_type="email_otp_locked", user_id=uid)
+        _raise_invalid_credentials()
+
+    # Timing-safe code comparison.
+    if not _otp._verify_code(uid, code, stored_hash):  # type: ignore[arg-type]
+        new_count = await _otp.increment_attempts(uid)
+        if new_count >= _otp.EMAIL_OTP_LOCK_LIMIT:
+            await record_security_event(event_type="email_otp_locked", user_id=uid)
+        _raise_invalid_credentials()
+
+    # Atomic single-use consume (SET NX on a per-code marker) — closes the
+    # TOCTOU where two concurrent requests with the same correct code both
+    # pass the hash check above and each mint a session. Exactly one wins;
+    # the loser is treated as a failed attempt. Mirrors the TOTP replay
+    # guard. Per-code keying means a new code is never blocked by an old
+    # marker (no post-login lockout window).
+    if not await _otp.consume_code(uid, stored_hash):  # type: ignore[arg-type]
+        new_count = await _otp.increment_attempts(uid)
+        if new_count >= _otp.EMAIL_OTP_LOCK_LIMIT:
+            await record_security_event(event_type="email_otp_locked", user_id=uid)
+        _raise_invalid_credentials()
+
+    # deletion_requested_at — checked after successful verify + consume, so
+    # the 403 is only reachable by a caller who proved knowledge of the OTP
+    # (mirrors authenticate_totp; NOT an unauthenticated enumeration oracle).
+    if user.deletion_requested_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_deletion_pending",
+        )
+
+    # Success: single-use enforcement — delete code key + attempts key.
+    await _otp.delete_code_and_attempts(uid)
     return user  # type: ignore[return-value]
 
 
