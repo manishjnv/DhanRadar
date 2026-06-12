@@ -157,3 +157,26 @@ logged; Builder + Architect signed.
 provisioned in the KVM4 `.env` (currently on the missing-secrets list — founder action
 required); separate explicit human deploy approval. Email OTP returns 503 until
 `RESEND_API_KEY` exists; TOTP login and Google SSO are unaffected by this dependency.
+
+## Deploy record (2026-06-12 evening)
+
+Deploy conditions cleared with explicit founder approval in-session:
+
+1. Real CI green on the rebased PR #104 (backend incl. both email-OTP integration flows,
+   frontend, guards, migrations; lint red = pre-existing advisory debt). An ~75-minute GitHub
+   Actions scheduling stall (events received, zero runs scheduled repo-wide) was bridged by a
+   local CI-equivalent run — full pytest vs `timescale/timescaledb-ha:pg16` with CI env
+   (947, then 956 on the rebased tree) + the three guard scripts — before Actions recovered
+   and confirmed on the real run.
+2. Rebase onto main resolved an ADR-number collision: the concurrent session's cohort-band ADR
+   took 0030, so this feature is **ADR-0031** (renumbered everywhere; missing 0030 index row
+   added for the sibling).
+3. `RESEND_API_KEY` already present on the box (sha256 hash-verified identical to local).
+4. Squash-merged `ad1657f`; `scripts/deploy.sh deploy` run; no new migration (alembic stays
+   `0018`). Smoke: `/auth/email-otp/request` **202** enumeration-safe body (not 503 — Resend
+   path live) · wrong-code login **401** · SSO start still 302 · health 200 · 9 containers
+   healthy.
+
+**Status: LIVE in production.** B64 (DPDP counsel confirmation) remains OPEN as a non-blocking
+residual. Same deploy also executed the #100 ledger's binding v1.1 registry activation (see
+`reviews/b58-f2-f4-b62-f2.md`).
