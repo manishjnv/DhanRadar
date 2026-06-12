@@ -1,10 +1,59 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (E2E CAS test GREEN for both sample PDFs after two real bugs found+fixed:
-B63 cohort OOM → chunked loader; redis cross-loop singleton → loop-aware client)
+**Last updated:** 2026-06-12 (Google SSO + standalone TOTP login shipped — PR #99, ADR-0029;
+blocking CI green, Tier-B Security+Compliance ACCEPT)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## LOGIN METHODS EXTENDED — Google SSO + standalone TOTP login (2026-06-12, PR #99)
+
+Founder-requested: add Google SSO and let TOTP be used to log in (clarified: an **alternative
+first factor**, not 2FA), with the OTP box auto-focused, auto-submitting on the 6th digit, and an
+inline error on a wrong code. Net-new vs the canon (no SSO; TOTP was enrolment-only / Pro+
+step-up) → **ADR-0029**.
+
+- **Google SSO** — server-side OAuth2 auth-code + PKCE(S256) + nonce. `GET /auth/google/{start,
+  callback}`; id_token verified locally vs Google JWKS; single-use Redis state (`GETDEL`);
+  `email_verified` required; fail-closed **503** until `GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URI`
+  are set. Terminates in the same `__Host-` cookie path as password login (non-neg #5 held).
+- **TOTP standalone login** — `POST /auth/totp/login` (email + 6-digit). Opt-in, post-enrolment,
+  NOT "OTP-first". Enumeration-safe generic 401 on every failure; per-account lock (own counter,
+  separate from enrolment-verify) + per-code single-use replay guard.
+- **Model/migration** — `hashed_password` nullable (SSO-only), unique `google_sub`; migration
+  `0018` (CI `migrations` job green).
+- **Frontend** — dual-mode login page (Google button + TOTP mode: ref+effect auto-focus, auto-
+  submit on 6th digit, inline error+clear), settings → Security enrolment page.
+- **Tier-B reviews (inline, load-bearing path):** Security (Sonnet adversarial takeover; codex
+  n/a) **REVISE → ACCEPT** — fixed a backslash open-redirect and an account-takeover-via-auto-link
+  (password accounts are now rejected, never silently linked, since local emails are unverified).
+  Compliance **ACCEPT** — no advisory surface, no DPDP consent bypass, erasure parity. Ledger:
+  `reviews/google-sso-totp-login.md`.
+- **CI (PR #99):** backend (incl. SSO + TOTP-login integration tests), frontend, migrations,
+  guards all **PASS**; `lint` red is pre-existing repo debt (292 issues across ~65 files; my new
+  files add zero — `models/auth.py` UP042 is pre-existing) → advisory/non-blocking.
+- **Commits:** `feat(auth): Google SSO + standalone TOTP login (ADR-0029)`; `fix(auth): CI green —
+  distributed-attacker TOTP lock test + drop autoFocus`.
+- **NOT deploy-eligible yet:** provision the Google OAuth client + 3 env vars on KVM4 (SSO is 503
+  until then; TOTP login needs none), run migration `0018`, separate human deploy approval.
+  CANONICAL_OPENAPI_ALIGNMENT to fold the 3 new endpoints at next contract-sync.
+
+### Agent-utilization & routing telemetry (SSO + TOTP-login session)
+
+- **Opus (Tier 0):** governance gate, Phase-0 orientation, contract design + the 4 scope decisions,
+  Tier-B Security finding triage + both fixes (open-redirect, auto-link takeover — load-bearing,
+  self-authored), Compliance review, CI failure diagnosis (rate-limit-vs-account-lock test model;
+  autoFocus a11y), all governance docs (ledger/ADR/feature-doc — written on Opus under the
+  ≤30-line hot-cache exemption; routing hook fired, logged honestly), commits/PR/CI.
+- **Sonnet (Tier 1):** `warm-start` brief · auth-surface survey (`Explore`) · backend build
+  (google.py + endpoints + service + migration + tests) · frontend build (dual-mode login +
+  security page + hooks + tests) · Security adversarial takeover. Backend build **reworked: Y**
+  (Opus fixed 2 MAJOR security findings + 1 MINOR + 1 NIT + scope-copy). Frontend build
+  **reworked: Y** (Opus removed autoFocus for CI a11y; MSW secret-name for guards). Security
+  takeover **reworked: N** (verdict applied as-returned).
+- **Haiku (Tier 3):** n/a — Explore/warm-start covered fan-out reads.
+- **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
+  (Tier-B Security, verdict REVISE→ACCEPT).
 
 ## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
 
