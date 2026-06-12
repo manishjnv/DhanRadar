@@ -95,3 +95,20 @@ revise) + Compliance (ACCEPT) logged; Builder + Architect signed.
 **NOT deploy-eligible** until: CI integration tests pass on the PR; `GOOGLE_CLIENT_ID/_SECRET/
 _REDIRECT_URI` provisioned in the KVM4 `.env`; migration `0018` run on the box; separate explicit
 human deploy approval. SSO returns 503 until the credentials exist; TOTP login needs no secrets.
+
+## Deploy record (2026-06-12)
+
+All four deploy conditions cleared, with explicit founder approval in-session:
+
+1. CI green on the PR (backend incl. both integration flows, frontend, migrations, guards;
+   `lint` red = pre-existing advisory debt, zero new findings).
+2. Google OAuth client created by the founder; `GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URI` synced
+   to the KVM4 `.env`.
+3. Squash-merged as `6468797`; `scripts/deploy.sh deploy` run (env-hash full-stack recreate,
+   expected); migration `0017 → 0018` in the deploy log; prod DB asserts `alembic_version=0018`
+   and `users.google_sub` exists.
+4. Smoke: `/api/v1/health` 200 · `GET /auth/google/start` 302 → accounts.google.com
+   (PKCE S256 + nonce, prod redirect_uri) · `POST /auth/totp/login` enumeration-safe 401.
+   All 9 containers running (healthy where checked).
+
+**Status: LIVE in production.**
