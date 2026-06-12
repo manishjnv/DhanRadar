@@ -1,10 +1,49 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-11 (E2E CAS test GREEN for both sample PDFs after two real bugs found+fixed:
-B63 cohort OOM → chunked loader; redis cross-loop singleton → loop-aware client)
+**Last updated:** 2026-06-12 (B58-f2 rescore cohort hoist + B58-f4 class-aware label band as
+model v1.1 + B62-f2 WhatChangedPanel mounted — Tier-C/A reviews passed, deploy + v1.1 registry
+activation this session)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B58-f2 + B58-f4 + B62-f2 — IMPLEMENTED, REVIEWED, DEPLOYING (2026-06-12)
+
+Branch `feat/b58-perf-margin-b62-panel` (worktree `E:\code\DhanRadar-wt-b58`, off `origin/main`).
+Commits: `25d2a2c` (B58-f2 hoist) · `144851a` (B58-f4 model v1.1) · `ce23819` (B62-f2 mount) ·
+`dcfac33` (review-condition fixes) · docs commit (this one).
+
+- **B58-f2:** `_compute_cohort` → `_build_cohort_context` (ONE build per monthly-rescore run,
+  union of Plus portfolios' holdings, B63 chunking kept) + `_relative_from_context` (pure
+  per-portfolio lookup). CAS path unchanged. The skips-free-users test was found vacuous
+  (async_sessionmaker patch was a no-op) and made real.
+- **B58-f4:** cohort label band class-aware as **model v1.1** — Debt 0.5pp · Hybrid 1.0pp ·
+  default 2.0pp; manifest in `ranking_configs_v1.json` lockstep test-enforced; changelog v1.1
+  entry; ADR-0030. **Registry activation at deploy** (two-person gate, founder approved);
+  UUID backfill in the post-deploy docs PR.
+- **B62-f2:** `WhatChangedSection` mounts `WhatChangedPanel` first on
+  `/portfolio/[id]/intelligence`; transient shell mirrors the panel's token surface + h2.
+- **Reviews (inline, load-bearing):** Architect / Compliance / Product / UI all
+  ACCEPT-WITH-CONDITIONS — every condition fixed in `dcfac33` or logged as accepted residual.
+  Ledger: `reviews/b58-f2-f4-b62-f2.md`. Gates: 672 backend unit, 158 vitest, tsc, scoped
+  ruff/eslint, secrets/anti-pattern/advisory greps — green (CI is the merge gate).
+- **Deploy condition (Compliance, binding):** `POST /admin/scoring/v1.1/activate` is the first
+  post-migration action, before scoring traffic; verify `registry_activated:true`; divergence =
+  deploy blocker.
+
+### Agent-utilization & routing telemetry (B58/B62 session)
+
+- **Opus-tier (Fable, Tier 0):** orchestration; all three implementations self-authored
+  (load-bearing scoring path + small hot-cache edits); review-condition fixes; ledger/BLOCKERS/
+  session-state self-assembled from in-context reviewer output (routing hook fired; logged —
+  external drafting would re-type the same facts into a prompt).
+- **Sonnet (Tier 1):** warm-start brief · reworked: N | Architect review · reworked: N |
+  Product review · reworked: N | UI review · reworked: N | feature-docs draft · **reworked: Y**
+  (fabricated "untested error branch" follow-up replaced; band-edge/cohort-margin conflation
+  fixed).
+- **Fable subagent:** Compliance review (Tier-C; no model:opus in Fable window) · reworked: N.
+- **Haiku / Tier-2 / Tier-4 / codex:rescue:** n/a — no bulk sweeps; codex unavailable on this
+  account (memory), Tier-C handled by the four-agent panel above.
 
 ## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
 
