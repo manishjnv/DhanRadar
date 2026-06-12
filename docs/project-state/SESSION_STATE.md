@@ -1,12 +1,55 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (frontend functionality sweep MERGED — #100 conflict-resolved +
-merged, B62-f1 chip tint #102, B60 TransparencyPanel mount #103; v1.1 registry activation still
-owed at next deploy)
+**Last updated:** 2026-06-12 (Email OTP login built — ADR-0031; Tier-B Security ACCEPT after 2
+MAJOR fixes; Compliance ACCEPT-WITH-CONDITIONS · earlier: frontend sweep #100/#102/#103 merged;
+v1.1 registry activation owed at next deploy)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
+## EMAIL OTP LOGIN — 4th login method (2026-06-12, ADR-0031)
+
+Founder-requested (clarified mid-session: the code-login button must be a *delivered-to-email*
+code, not the authenticator-app TOTP that shipped in PR #99 — and a prominent button, not a
+text link). Amends the ui-system OTP-first IGNORE scope as an OPT-IN alternative first factor
+→ **ADR-0031**.
+
+- **Backend** — `POST /auth/email-otp/{request,login}`: 202-always enumeration-safe request
+  (fire-and-forget Resend send kills the timing oracle; fail-closed 503 until
+  `RESEND_API_KEY`); generic-401 login with sha256 code-hash (TTL 600s), 60s cooldown + 10/day
+  cap (atomic SET NX), 5-attempt/15-min lock (401 not 429, transition-only security event),
+  per-code atomic consume marker (TOCTOU close). No migration (Redis-only).
+- **Frontend** — login-page code mode is now email-OTP (TOTP UI handed over; the endpoint and
+  the settings → Security enrolment stay): secondary button "Sign in with email code",
+  two-phase flow, auto-submit on 6th digit, manual Log in fallback, 60s-countdown resend.
+- **Tier-B reviews (inline, load-bearing path):** Security (Sonnet adversarial takeover)
+  **REVISE → ACCEPT** — fixed a one-code-two-sessions TOCTOU (per-code SET NX consume; the
+  re-verification round caught a 10-min post-login lockout the first per-uid fix introduced;
+  the clear-on-success alternative was rejected — it reopens the race) + a
+  deletion-pending-403-before-verify enumeration oracle + 2 MINOR (INCR/EXPIRE atomicity,
+  Unicode-digit `\d`). Compliance **ACCEPT-WITH-CONDITIONS** (ADR-0031 in-PR ✓; B64 counsel
+  residual on DPDP cross-border transactional email; template stays strictly transactional).
+  Ledger: `reviews/email-otp-login.md`.
+- **Gates:** backend unit 46/46 + full unit suite green (1 pre-existing main failure,
+  `test_mf_tracking`, reproduced on clean main — out of lane); ruff clean on changed files;
+  tsc clean; vitest 165/165. Integration tests CI-only.
+- **NOT deploy-eligible:** `RESEND_API_KEY` missing in prod (feature 503s safely if deployed);
+  separate human deploy approval owed. Morning's SSO+TOTP deploy record is in the section below.
+
+### Agent-utilization & routing telemetry (email-OTP session)
+
+- **Opus (Fable, Tier 0):** SSO+TOTP deploy chain (morning), email-OTP contracts, both MAJOR
+  security fixes + the per-code marker design, Compliance review, line-by-line diff critique,
+  docs verification, this SESSION_STATE section (hot-cache exemption; routing hook fired).
+- **Sonnet (Tier 1):** backend build · frontend build · backend revise · frontend revise ·
+  test update · Security adversarial ×3 (initial REVISE, re-verify, final ACCEPT) ·
+  governance-docs draft. Backend build **reworked: Y** (2 MAJOR + 2 MINOR security findings;
+  Opus-authored fixes). Frontend build **reworked: Y** (manual-submit dead-end + 403/429
+  handling bounced to revision). Revisions / test-update / security passes / docs draft
+  **reworked: N** (ledger placeholders date-filled by Opus).
+- **Haiku (Tier 3):** n/a — no fan-out reads needed.
+- **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
+  (verdict REVISE → ACCEPT; 2 MAJOR found and fixed pre-merge).
 ## FRONTEND FUNCTIONALITY SWEEP — B62-f2 / B62-f1 / B60 MOUNT ALL MERGED (2026-06-12 afternoon)
 
 Founder asked for the three open frontend functionality items, one by one. All three are on main:

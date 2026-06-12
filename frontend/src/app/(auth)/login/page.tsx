@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * Login — email + password (default) OR TOTP one-time code.
+ * Login — email + password (default) OR email OTP (one-time code sent to inbox).
  *
  * Modes:
- *  - password  (default): email + password → POST /auth/login
- *  - totp:               email + 6-digit code → POST /auth/totp/login
- *                        auto-submits when the 6th digit lands and email is valid.
+ *  - password    (default): email + password → POST /auth/login
+ *  - email_otp:             email → POST /auth/email-otp/request → 6-digit code
+ *                           → POST /auth/email-otp/login
+ *                           auto-submits when the 6th digit lands and email is valid.
  *
  * Google SSO: full-page redirect to GET /api/v1/auth/google/start?next=…
  * Error params: ?error=google_auth_failed | account_deletion_pending are read on mount.
@@ -20,7 +21,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { ApiError } from '@/lib/apiClient';
-import { useLogin, useTotpLogin } from '@/features/auth/api';
+import { useLogin, useRequestEmailOtp, useEmailOtpLogin } from '@/features/auth/api';
 import type { Credentials } from '@/features/auth/types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -39,20 +40,27 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { mutate: login, isPending: loginPending } = useLogin();
-  const { mutate: totpLogin, isPending: totpPending } = useTotpLogin();
+  const { mutate: requestOtp, isPending: requestPending } = useRequestEmailOtp();
+  const { mutate: emailOtpLogin, isPending: emailOtpLoginPending } = useEmailOtpLogin();
 
-  const [mode, setMode] = React.useState<'password' | 'totp'>('password');
+  const [mode, setMode] = React.useState<'password' | 'email_otp'>('password');
+  // email_otp phase: 'request' = pre-send, 'code' = code input shown
+  const [otpPhase, setOtpPhase] = React.useState<'request' | 'code'>('request');
   const [formError, setFormError] = React.useState<string | null>(null);
   // code is managed in local state (not react-hook-form) so auto-submit
   // can fire synchronously from the onChange handler.
   const [codeValue, setCodeValue] = React.useState('');
   const [codeError, setCodeError] = React.useState<string | null>(null);
 
+  // Resend countdown: null = not started; 0 = enabled; >0 = seconds remaining.
+  const [resendCountdown, setResendCountdown] = React.useState<number | null>(null);
+  const resendIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Prevents double-fire of auto-submit in the same keystroke.
   const autoSubmitFiredRef = React.useRef(false);
   const codeInputRef = React.useRef<HTMLInputElement>(null);
 
-  const isPending = loginPending || totpPending;
+  const isPending = loginPending || requestPending || emailOtpLoginPending;
 
   const {
     register,
@@ -94,12 +102,33 @@ function LoginForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Focus the code input whenever TOTP mode is activated.
+  // Focus the code input whenever email_otp code phase is activated.
   React.useEffect(() => {
-    if (mode === 'totp') {
+    if (mode === 'email_otp' && otpPhase === 'code') {
       codeInputRef.current?.focus();
     }
-  }, [mode]);
+  }, [mode, otpPhase]);
+
+  // Clear interval on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+    };
+  }, []);
+
+  function startResendCountdown() {
+    if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+    setResendCountdown(60);
+    resendIntervalRef.current = setInterval(() => {
+      setResendCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
 
   function handleGoogleSSO() {
     window.location.assign(
@@ -107,18 +136,24 @@ function LoginForm() {
     );
   }
 
-  function switchToTotp() {
+  function switchToEmailOtp() {
     setFormError(null);
     setCodeError(null);
     setCodeValue('');
+    setOtpPhase('request');
+    setResendCountdown(null);
+    if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
     autoSubmitFiredRef.current = false;
-    setMode('totp');
+    setMode('email_otp');
   }
 
   function switchToPassword() {
     setFormError(null);
     setCodeError(null);
     setCodeValue('');
+    setOtpPhase('request');
+    setResendCountdown(null);
+    if (resendIntervalRef.current) clearInterval(resendIntervalRef.current);
     autoSubmitFiredRef.current = false;
     setMode('password');
   }
@@ -140,11 +175,11 @@ function LoginForm() {
     }
   }
 
-  function handleTotpError(err: unknown) {
+  function handleEmailOtpLoginError(err: unknown) {
     if (err instanceof ApiError) {
       const { status, detail } = err.problem;
       if (status === 401) {
-        setFormError('Invalid code. Please try again.');
+        setCodeError('Invalid or expired code. Please try again.');
         setCodeValue('');
         codeInputRef.current?.focus();
       } else if (status === 403 && detail === 'account_deletion_pending') {
@@ -160,35 +195,66 @@ function LoginForm() {
     autoSubmitFiredRef.current = false;
   }
 
-  function onPasswordSubmit(values: Credentials) {
+  async function handleRequestOtp() {
+    // Validate email before firing the request.
+    const emailValid = await trigger('email');
+    if (!emailValid) {
+      const emailInput = document.getElementById('email') as HTMLInputElement | null;
+      emailInput?.focus();
+      return;
+    }
     setFormError(null);
-    login(values, {
-      onSuccess: () => router.replace(safeNext()),
-      onError: handleLoginError,
-    });
-  }
-
-  function submitTotpCredentials(email: string, code: string) {
-    if (isPending) return;
-    setFormError(null);
-    totpLogin(
-      { email, code },
+    const email = getValues('email');
+    requestOtp(
+      { email },
       {
-        onSuccess: () => router.replace(safeNext()),
-        onError: handleTotpError,
+        onSuccess: () => {
+          setOtpPhase('code');
+          startResendCountdown();
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.problem.status === 503) {
+            setFormError('Email code login is not available right now.');
+          } else if (err instanceof ApiError && err.problem.status === 429) {
+            setFormError('Too many requests. Please wait a minute.');
+          } else {
+            setFormError('Something went wrong. Please try again.');
+          }
+        },
       },
     );
   }
 
-  function onTotpManualSubmit(values: Credentials) {
-    // Manual submit from the "Log in" button — uses the current codeValue.
-    if (!codeValue || codeValue.length < 6) {
-      setCodeError('Enter your 6-digit authenticator code.');
-      return;
-    }
+  async function handleResend() {
+    setFormError(null);
+    const email = getValues('email');
+    requestOtp(
+      { email },
+      {
+        onSuccess: () => {
+          startResendCountdown();
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.problem.status === 429) {
+            setFormError('Too many requests. Please wait a minute.');
+          } else {
+            setFormError('Something went wrong. Please try again.');
+          }
+        },
+      },
+    );
+  }
+
+  function submitEmailOtpCredentials(email: string, code: string) {
+    if (isPending) return;
     setCodeError(null);
-    autoSubmitFiredRef.current = false;
-    submitTotpCredentials(values.email, codeValue);
+    emailOtpLogin(
+      { email, code },
+      {
+        onSuccess: () => router.replace(safeNext()),
+        onError: handleEmailOtpLoginError,
+      },
+    );
   }
 
   async function handleCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -200,7 +266,6 @@ function LoginForm() {
       // Validate the email field first.
       const emailValid = await trigger('email');
       if (!emailValid) {
-        // Show email error and focus the email field.
         const emailInput = document.getElementById('email') as HTMLInputElement | null;
         emailInput?.focus();
         return;
@@ -208,18 +273,37 @@ function LoginForm() {
 
       if (autoSubmitFiredRef.current || isPending) return;
       autoSubmitFiredRef.current = true;
-      submitTotpCredentials(getValues('email'), raw);
+      submitEmailOtpCredentials(getValues('email'), raw);
     } else {
       autoSubmitFiredRef.current = false;
     }
+  }
+
+  function onPasswordSubmit(values: Credentials) {
+    setFormError(null);
+    login(values, {
+      onSuccess: () => router.replace(safeNext()),
+      onError: handleLoginError,
+    });
   }
 
   // react-hook-form handleSubmit routes to the right handler based on mode.
   function onSubmit(values: Credentials) {
     if (mode === 'password') {
       onPasswordSubmit(values);
-    } else {
-      onTotpManualSubmit(values);
+    } else if (mode === 'email_otp') {
+      if (otpPhase === 'request') {
+        // Enter pressed in the email field during request phase.
+        handleRequestOtp();
+      } else {
+        // Manual submit from the "Log in" button (or Enter key) in code phase.
+        if (codeValue.length === 6) {
+          autoSubmitFiredRef.current = false;
+          submitEmailOtpCredentials(values.email, codeValue);
+        } else {
+          setCodeError('Enter the 6-digit code from your email.');
+        }
+      }
     }
   }
 
@@ -256,22 +340,32 @@ function LoginForm() {
               />
             </Field>
           ) : (
-            <Field id="code" label="Authenticator code" error={codeError ?? undefined}>
-              <Input
-                id="code"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                pattern="\d{6}"
-                placeholder="000000"
-                ref={codeInputRef}
-                value={codeValue}
-                onChange={handleCodeChange}
-                aria-invalid={!!codeError}
-                className="tracking-widest"
-              />
-            </Field>
+            /* email_otp mode */
+            <>
+              {otpPhase === 'code' && (
+                <>
+                  <p className="text-small text-ink-secondary">
+                    We sent a 6-digit code to your email. It expires in 10 minutes.
+                  </p>
+                  <Field id="code" label="Email code" error={codeError ?? undefined}>
+                    <Input
+                      id="code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      pattern="\d{6}"
+                      placeholder="000000"
+                      ref={codeInputRef}
+                      value={codeValue}
+                      onChange={handleCodeChange}
+                      aria-invalid={!!codeError}
+                      className="tracking-widest"
+                    />
+                  </Field>
+                </>
+              )}
+            </>
           )}
 
           {formError && (
@@ -280,19 +374,53 @@ function LoginForm() {
             </p>
           )}
 
-          <Button type="submit" size="lg" disabled={isPending} className="w-full">
-            {isPending ? 'Logging in…' : 'Log in'}
-          </Button>
+          {mode === 'password' ? (
+            <Button type="submit" size="lg" disabled={isPending} className="w-full">
+              {isPending ? 'Logging in…' : 'Log in'}
+            </Button>
+          ) : (
+            /* email_otp: phase-specific action buttons, no form submit */
+            otpPhase === 'request' ? (
+              <Button
+                type="button"
+                size="lg"
+                disabled={isPending}
+                className="w-full"
+                onClick={handleRequestOtp}
+              >
+                {isPending ? 'Sending…' : 'Email me a login code'}
+              </Button>
+            ) : (
+              /* phase 'code': primary submit + resend button (countdown-gated) */
+              <>
+                <Button type="submit" size="lg" disabled={isPending} className="w-full">
+                  {isPending ? 'Logging in…' : 'Log in'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={isPending || (resendCountdown !== null && resendCountdown > 0)}
+                  className="text-small text-ink-secondary hover:text-ink text-center disabled:opacity-40"
+                >
+                  {resendCountdown !== null && resendCountdown > 0
+                    ? `Resend code (${resendCountdown}s)`
+                    : 'Resend code'}
+                </button>
+              </>
+            )
+          )}
 
           {/* Mode switcher */}
           {mode === 'password' ? (
-            <button
+            <Button
               type="button"
-              onClick={switchToTotp}
-              className="text-small text-ink-secondary hover:text-ink text-center"
+              variant="secondary"
+              size="lg"
+              className="w-full"
+              onClick={switchToEmailOtp}
             >
-              Sign in with an authenticator code instead
-            </button>
+              Sign in with email code
+            </Button>
           ) : (
             <button
               type="button"
