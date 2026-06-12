@@ -205,7 +205,13 @@ TanStack Query. Query key: `['portfolio', portfolioId, 'changes']` via
 on `401` or `404`. The `PortfolioChangesData`, `FundChange`, and `ChangeKind` types are
 re-exported from `WhatChangedPanel` so callers have one import point.
 
-The component is not yet mounted on any portfolio page. It is ready to embed.
+**Mounted (B62-f2).** `WhatChangedSection` in
+`frontend/src/features/changes/WhatChangedSection.tsx` wraps `usePortfolioChanges` and
+renders `WhatChangedPanel` once data arrives. It is mounted **first** in the section stack
+on `/portfolio/[portfolioId]/intelligence` (before Overlap and Concentration). The
+transient shell (loading / error state) mirrors the panel's token surface and `h2` heading
+(`var(--dr-r-xl)` border-radius, `var(--surface)` background) so geometry and heading
+level are consistent across all fetch states.
 
 ## Tests
 
@@ -302,6 +308,7 @@ renders without a background tint. The border and text colour are unaffected. Th
 replace the pattern with a `color-mix(in srgb, var(--dr-emerald) 13%, transparent)` expression
 or a dedicated token-with-alpha CSS custom property.
 
-**Panel not yet embedded.** `WhatChangedPanel` is complete but is not yet mounted on any
-portfolio page. It needs to be wired to a page that can supply a `portfolioId` and pass the
-`usePortfolioChanges` result as the `data` prop.
+**Duplicate-ISIN row keys unguarded.** `WhatChangedPanel` keys change rows on `change.isin`;
+the backend response is expected to be unique per ISIN within a portfolio, but nothing asserts
+it (UI review NIT). Harmless today; assert uniqueness in the backend schema or panel if a
+folio-level split ever lands.

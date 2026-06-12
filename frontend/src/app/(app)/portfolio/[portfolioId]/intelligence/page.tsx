@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Portfolio Intelligence page — Fund Overlap + Concentration (Plan Group 3).
+ * Portfolio Intelligence page — Fund Overlap + Concentration (Plan Group 3)
+ * + What Changed (B62-f2).
  *
  * Route: /portfolio/[portfolioId]/intelligence
  *
@@ -22,6 +23,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { OverlapSection } from '@/features/portfolio/components/OverlapSection';
 import { ConcentrationSection } from '@/features/portfolio/components/ConcentrationSection';
+import { WhatChangedSection } from '@/features/changes/WhatChangedSection';
 
 interface Props {
   params: { portfolioId: string };
@@ -51,6 +53,7 @@ export default function PortfolioIntelligencePage({ params }: Props) {
       </p>
 
       <div className="space-y-6">
+        <WhatChangedSection portfolioId={portfolioId} />
         <OverlapSection portfolioId={portfolioId} />
         <ConcentrationSection portfolioId={portfolioId} />
       </div>

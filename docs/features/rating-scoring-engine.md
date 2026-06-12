@@ -85,12 +85,18 @@ Ledger: `docs/project-state/reviews/b6-b28-scoring-activation.md`.
   `(label, model_used, disclaimer_version)` at serve time is the caller's job.
 - **B27** — `contributing/contradicting` are free-text; a canonical signal-name taxonomy is owed for
   consistent UI.
-- Band-edge ±2 buffer (smoothing) is documented but the eval-count hysteresis is the active flip gate; band-edge dead-zone is a v1.1 refinement.
+- Band-edge ±2 buffer (smoothing) is documented but the eval-count hysteresis is the active
+  flip gate; the score-band-edge dead-zone remains an open refinement. (Distinct from the
+  COHORT margin band, which became category-class-aware in model v1.1 — B58-f4, ADR-0030.)
 - Upstream normalization (winsorize/z-score against the sector peer set) helpers are provided, but the peer-set data pipeline lands with the consuming modules (Phase 5+).
 - The internal read endpoint returns the cached published result; persistence to a `scores`/`user_fund_scores` table is the caller's job (Phase 5).
 
 ## Changelog
 
+- 2026-06-12 — B58-f4: category-class-aware cohort label band shipped as model v1.1 —
+  Debt Scheme 0.5pp / Hybrid Scheme 1.0pp / default 2.0pp; AMFI class prefix before ` - `;
+  unknown class → default wider band (fail-safe); manifest in `ranking_configs_v1.json`
+  `labels.cohort_margin_pct` (lockstep test-enforced); ADR-0030; registry row at deploy.
 - 2026-06-07 — B6/B28 activation gate built: admin endpoint `POST /api/v1/admin/scoring/{version}/activate`
   (`RequireAdmin()`); `assert_activatable` enforces backtest_passed + two-person gate fail-early;
   `compliance.rating_engine_changelog` is the authoritative registry; `uq_engine_changelog_activated_per_version`

@@ -260,11 +260,15 @@ async def test_monthly_rescore_skips_free_users(monkeypatch):
     async def _fake_is_plus(uid: str, db: Any) -> bool:
         return uid == user_a
 
-    async def _fake_append(**kw) -> None:
+    async def _fake_append(db_arg=None, **kw) -> bool:
         append_calls.append(kw)
+        return True
 
-    async def _fake_persist(**kw) -> None:
+    async def _fake_persist(db_arg=None, **kw) -> None:
         persist_calls.append(kw)
+
+    async def _fake_prior(db_arg=None, *a, **kw) -> None:
+        return None
 
     async def _fake_score_fund(engine, signals):
         return _make_result(isin=signals.isin)
@@ -311,7 +315,18 @@ async def test_monthly_rescore_skips_free_users(monkeypatch):
         async def execute(self, stmt):
             self._n += 1
             holding = user_a_holding if self._uid == user_a else user_b_holding
-            return _FakeHoldingResult(holding)
+            if self._n == 1:
+                # portfolio owner/name resolve
+                r = MagicMock()
+                r.first = lambda: (self._uid, "Portfolio")
+                return r
+            if self._n == 2:
+                # holdings select
+                return _FakeHoldingResult(holding)
+            # scheme-name batch fetch (and any later reads)
+            r = MagicMock()
+            r.all = lambda: [(holding.isin, "Test Fund")]
+            return r
 
         async def __aenter__(self):
             return self
@@ -320,11 +335,20 @@ async def test_monthly_rescore_skips_free_users(monkeypatch):
             pass
 
     class _FakeUserSession:
+        def __init__(self):
+            self._n = 0
+
         async def execute(self, stmt):
-            class _R:
-                def all(self_inner):
-                    return [(user_a,), (user_b,)]
-            return _R()
+            self._n += 1
+            r = MagicMock()
+            if self._n == 1:
+                # distinct (portfolio_id, isin) pre-pass rows (B58-f2) — the
+                # harness conflates pid with uid (one portfolio per user).
+                r.all = lambda: [(user_a, "INF000A01"), (user_b, "INF000B01")]
+            else:
+                # portfolio → owner resolve
+                r.all = lambda: [(user_a, user_a), (user_b, user_b)]
+            return r
 
         async def __aenter__(self):
             return self
@@ -350,22 +374,38 @@ async def test_monthly_rescore_skips_free_users(monkeypatch):
     monkeypatch.setattr(mf_tasks, "compute_fund_signals", _fake_compute_signals, raising=True)
     monkeypatch.setattr(mf_tasks, "build_snapshot", lambda holdings: _make_snap(), raising=True)
     monkeypatch.setattr(mf_tasks, "upsert_user_fund_score", AsyncMock(), raising=True)
+    # Cohort context build is hoisted out of the per-portfolio loop (B58-f2):
+    # it must run exactly ONCE per rescore, over Plus users' isins only.
+    fake_build = AsyncMock(return_value=mf_tasks._EMPTY_COHORT_CONTEXT)
+    monkeypatch.setattr(mf_tasks, "_build_cohort_context", fake_build, raising=True)
     # history helpers are imported locally inside _monthly_rescore — patch at source.
     monkeypatch.setattr(_mf_history_mod, "append_score_history", _fake_append)
     monkeypatch.setattr(_mf_history_mod, "persist_portfolio_snapshot", _fake_persist)
+    monkeypatch.setattr(_mf_history_mod, "get_prior_label", _fake_prior)
     # is_plus is imported locally too — patch at source (dhanradar.deps).
     monkeypatch.setattr("dhanradar.deps.is_plus", _fake_is_plus)
 
-    with patch("sqlalchemy.ext.asyncio.async_sessionmaker", lambda *a, **kw: _FakeSessionMaker()):
+    # Patch the sessionmaker ATTRIBUTE _monthly_rescore imports at call time —
+    # patching sqlalchemy.ext.asyncio.async_sessionmaker was a no-op (the real
+    # TaskSessionLocal is created at dhanradar.db import time), which left this
+    # test running against a real DB connection and asserting vacuously.
+    with patch("dhanradar.db.TaskSessionLocal", _FakeSessionMaker()):
         with patch("dhanradar.scoring.engine.RatingEngine", MagicMock()):
-            with patch("dhanradar.db.engine", MagicMock()):
+            with patch("dhanradar.redis_client.get_redis", lambda: MagicMock()):
                 summary = await mf_tasks._monthly_rescore()
 
-    # Append must only have been called for user_a (Plus), never user_b (Free).
+    # Append must have been called for user_a (Plus) ONLY — never user_b (Free).
+    assert append_calls, "the Plus user's holding must reach append_score_history"
     for call in append_calls:
         assert call.get("user_id") == user_a, f"Expected only user_a but got {call}"
 
-    assert "rescored" in summary
+    assert "rescored 1" in summary
+
+    # B58-f2 acceptance: ONE context build per run, over the Plus user's isins
+    # only (user_b is Free — their holding never reaches the cohort build).
+    assert fake_build.await_count == 1
+    built_isins = fake_build.await_args.args[1]
+    assert built_isins == ["INF000A01"]
 
 
 # ---------------------------------------------------------------------------

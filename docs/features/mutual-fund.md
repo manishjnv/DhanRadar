@@ -44,25 +44,62 @@ Schema (`mf`): `mf_funds`, `mf_nav_history` (TimescaleDB hypertable, 1-month chu
 ### Category-relative labelling (peer-cohort benchmark)
 
 The peer-cohort benchmark is the per-category MEDIAN of 1Y/3Y return and max-drawdown computed
-from existing AMFI NAV data in `mf_nav_history` — no new external source, no migration. New
-pure module `dhanradar/mf/cohort.py` builds the benchmark; `dhanradar/mf/signals.py:long_horizon_stats`
+from existing AMFI NAV data in `mf_nav_history` — no new external source, no migration. Pure
+module `dhanradar/mf/cohort.py` builds the benchmark; `dhanradar/mf/signals.py:long_horizon_stats`
 derives the 1Y/3Y/drawdown inputs, and `compute_fund_signals` gained a `category_relative` param.
-A fund maps to `in_form` when it beats the category median by >2 pp on both 1Y and 3Y return and
-`drawdown_controlled=True`; it maps to `off_track` when it trails the median by >2 pp on 1Y
-return (`underperform_12m`); all other cases remain `on_track`. The deterministic rule table lives
-in `dhanradar/scoring/engine/labels.py`. A category needs ≥5 peers (each with a usable 1Y return)
-or the benchmark is withheld and the fund stays `on_track` with an explainability note ("category
-peer benchmark unavailable") — it does NOT become `insufficient_data` (that floor is reserved for a
-fund whose own NAV history is too sparse to score). The 3Y return input additionally needs ≥~2.5
-years of the fund's own NAV history, else it is omitted (a young fund can never reach `in_form`).
-The `out_of_form` label requires a `structural_concern` fundamentals signal not yet ingested and is
-intentionally unreachable at this stage. Benchmark quality depends on AMFI category taxonomy consistency —
-miscategorised funds upstream silently distort the peer median (a known dependency). All
-thresholds are tagged `provisional_model` and are subject to the B6/B28 activation gate before
-production use. No numeric score or factor weight reaches the client; labels remain non-advisory
+A fund maps to `in_form` when it beats the category median by more than the margin on both 1Y and
+3Y return and `drawdown_controlled=True`; it maps to `off_track` when it trails the median by more
+than the margin on 1Y return (`underperform_12m`); all other cases remain `on_track`. The
+deterministic rule table lives in `dhanradar/scoring/engine/labels.py`.
+
+**Category-class-aware margin (model v1.1, B58-f4).** The out/under-performance band is no
+longer a flat 2pp. The AMFI category class (prefix before ` - ` in the full category string,
+e.g. `"Debt Scheme"` from `"Debt Scheme - Banking and PSU Fund"`) sets the margin:
+Debt Scheme 0.5pp · Hybrid Scheme 1.0pp · all other classes (Equity, Solution Oriented,
+Other Scheme, unknown) 2.0pp. An unparseable or unrecognised class falls back to the default
+2.0pp (wider = harder to flag = `on_track`, the fail-safe). The margin map is mirrored in
+`ranking_configs_v1.json` (`labels.cohort_margin_pct`) and kept in lockstep by a
+test (`test_margin_manifest_lockstep_with_config`). Shipped as `model_version v1.1`; ADR-0030;
+registry activation row written at deploy.
+
+A category needs ≥5 peers (each with a usable 1Y return) or the benchmark is withheld and
+the fund stays `on_track` with an explainability note ("category peer benchmark unavailable")
+— it does NOT become `insufficient_data` (that floor is reserved for a fund whose own NAV
+history is too sparse to score). The 3Y return input additionally needs ≥~2.5 years of the
+fund's own NAV history, else it is omitted (a young fund can never reach `in_form`).
+The `out_of_form` label requires a `structural_concern` fundamentals signal not yet ingested
+and is intentionally unreachable at this stage. Benchmark quality depends on AMFI category
+taxonomy consistency — miscategorised funds upstream silently distort the peer median (a
+known dependency). All thresholds are subject to the B6/B28 activation gate before production
+use. No numeric score or factor weight reaches the client; labels remain non-advisory
 (educational only, non-neg #1 and #2).
+
+**Monthly-rescore cohort hoisting (B58-f2).** `_monthly_rescore` now calls
+`_build_cohort_context` once per run over the union of all Plus portfolios' holdings, then
+calls `_relative_from_context` (a pure dict lookup) per portfolio. Previously each portfolio
+re-fetched the same category peer NAV sets independently. The single-portfolio CAS upload
+path is unchanged — it still calls the `_compute_cohort` wrapper which builds and looks up
+in one shot. A portfolio that turns Plus mid-run is absent from the pre-built union and
+scores without category flags that month — the same honest fail-safe as an uncategorised fund.
 
 ## Changelog
 
-- 2026-06-06 — CAS→report slice built (Phase 5): consent-gated upload + SHA-256 dedup + <200ms enqueue; casparser-injectable parse; XIRR/allocation/overlap snapshot; Rating-Engine bridge → `user_fund_scores`; disclosure-injected, no-numeric report; 24h raw-file purge; Alembic 0004 mf schema. Snapshot math delegated to Sonnet (Opus-reviewed); compliance core + router on Opus (Tier-B).
-- 2026-06-06 — Tier-B governance fan-out (Architect/Security/Compliance): 2 BLOCKERs + MAJ/MIN fixed in-branch — **per-user dedup key** (was a cross-user job_id leak), public `model_version` (no engine-internals), bounded upload read + PDF magic-byte check, CAS password off the Celery broker (ephemeral Redis), opaque error codes, migration CAGG orphan removed, `updated_at` on upsert. Residuals B26/B29/B30. 163 unit tests. Ledger: `reviews/phase5-mf-module.md`.
+- 2026-06-12 — B58-f4: category-class-aware cohort label band shipped as model v1.1 —
+  Debt Scheme 0.5pp / Hybrid Scheme 1.0pp / default 2.0pp; AMFI class = prefix before
+  ` - `; unknown class falls back to default wider band (fail-safe); manifest in
+  `ranking_configs_v1.json` `labels.cohort_margin_pct` (lockstep test-enforced); ADR-0030;
+  registry activation row written at deploy.
+- 2026-06-12 — B58-f2: cohort context hoisted out of monthly-rescore per-portfolio loop;
+  `_build_cohort_context` called once over union of Plus holdings; `_relative_from_context`
+  is a pure lookup per portfolio; CAS path unchanged via `_compute_cohort` wrapper.
+- 2026-06-06 — CAS→report slice built (Phase 5): consent-gated upload + SHA-256 dedup +
+  <200ms enqueue; casparser-injectable parse; XIRR/allocation/overlap snapshot; Rating-Engine
+  bridge → `user_fund_scores`; disclosure-injected, no-numeric report; 24h raw-file purge;
+  Alembic 0004 mf schema. Snapshot math delegated to Sonnet (Opus-reviewed); compliance
+  core + router on Opus (Tier-B).
+- 2026-06-06 — Tier-B governance fan-out (Architect/Security/Compliance): 2 BLOCKERs +
+  MAJ/MIN fixed in-branch — **per-user dedup key** (was a cross-user job_id leak), public
+  `model_version` (no engine-internals), bounded upload read + PDF magic-byte check, CAS
+  password off the Celery broker (ephemeral Redis), opaque error codes, migration CAGG orphan
+  removed, `updated_at` on upsert. Residuals B26/B29/B30. 163 unit tests.
+  Ledger: `reviews/phase5-mf-module.md`.

@@ -6,6 +6,7 @@
  *   - OverlapSection renders pairs + disclosure
  *   - ConcentrationSection renders empty state
  *   - ConcentrationSection renders items + disclosure
+ *   - WhatChangedSection mounts the panel / loading / error / empty (B62-f2)
  *   - No advisory verb in any rendered text
  *   - Disclosure bundle present in every state
  */
@@ -17,6 +18,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { OverlapSection } from '@/features/portfolio/components/OverlapSection';
 import { ConcentrationSection } from '@/features/portfolio/components/ConcentrationSection';
+import { WhatChangedSection } from '@/features/changes/WhatChangedSection';
 
 // ---------------------------------------------------------------------------
 // Mock the API hooks
@@ -27,10 +29,15 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioConcentration: vi.fn(),
 }));
 
+vi.mock('@/features/changes/api', () => ({
+  usePortfolioChanges: vi.fn(),
+}));
+
 import {
   usePortfolioOverlap,
   usePortfolioConcentration,
 } from '@/features/portfolio/api';
+import { usePortfolioChanges } from '@/features/changes/api';
 
 const DISCLOSURE = 'Educational analysis only — not investment advice.';
 const NOT_ADVICE = 'NOT_ADVICE';
@@ -100,6 +107,36 @@ const CONCENTRATION_WITH_DATA = {
   ],
 };
 
+const EMPTY_CHANGES = {
+  portfolio_id: 'pid',
+  changes: [],
+  disclosure: DISCLOSURE,
+  not_advice: NOT_ADVICE,
+  disclaimer_version: VERSION,
+};
+
+const CHANGES_WITH_DATA = {
+  ...EMPTY_CHANGES,
+  changes: [
+    {
+      isin: 'INF000K01WU9',
+      scheme_name: 'Fund A',
+      label_from: 'on_track',
+      label_to: 'off_track',
+      band_from: 'medium',
+      band_to: 'medium',
+      changed: true,
+      change_kind: 'weakened' as const,
+      reasons: ['behind category peers over the trailing 12 months'],
+      as_of_from: '2026-05-01',
+      as_of_to: '2026-06-01',
+      nav_as_of: '2026-06-10',
+      nav_days_ago: 2,
+      nav_is_stale: false,
+    },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -119,6 +156,12 @@ function renderConcentration(overrides = {}) {
   const mock = vi.mocked(usePortfolioConcentration);
   mock.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null, ...overrides } as any);
   return render(<ConcentrationSection portfolioId="pid" />, { wrapper });
+}
+
+function renderWhatChanged(overrides = {}) {
+  const mock = vi.mocked(usePortfolioChanges);
+  mock.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null, ...overrides } as any);
+  return render(<WhatChangedSection portfolioId="pid" />, { wrapper });
 }
 
 const ADVISORY_VERBS = ['reduce', 'diversify', 'switch', 'rebalance', 'sell', 'buy', 'exit', 'avoid', 'invest', 'recommend', 'should', 'suggest', 'allocate', 'overweight', 'underweight'];
@@ -223,5 +266,58 @@ describe('ConcentrationSection', () => {
     renderConcentration({ data: CONCENTRATION_WITH_DATA });
     // 100.0% should appear in DOM (user's own data — allowed)
     expect(screen.getAllByText(/100\.0%/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('WhatChangedSection (B62-f2)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('renders loading skeleton with the section title at the panel heading level', () => {
+    renderWhatChanged({ isLoading: true });
+    // h2 in EVERY state — same heading level as the loaded panel (UI cond-2).
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
+  });
+
+  it('renders the shell (not a blank) when data is undefined and not loading', () => {
+    renderWhatChanged();
+    expect(screen.getByTestId('what-changed-shell')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
+  });
+
+  it('mounts WhatChangedPanel when data is present', () => {
+    renderWhatChanged({ data: CHANGES_WITH_DATA });
+    expect(screen.getByTestId('what-changed-panel')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
+    // Backend-authored reason rendered verbatim; label transition displayed.
+    expect(screen.getByText('behind category peers over the trailing 12 months')).toBeDefined();
+    expect(screen.getByText('Off Track')).toBeDefined();
+  });
+
+  it('renders the panel empty state for a portfolio with no changes', () => {
+    renderWhatChanged({ data: EMPTY_CHANGES });
+    expect(screen.getByTestId('changes-empty')).toBeDefined();
+  });
+
+  it('renders disclosure bundle in data and empty states', () => {
+    renderWhatChanged({ data: CHANGES_WITH_DATA });
+    expect(screen.getByText(NOT_ADVICE)).toBeDefined();
+  });
+
+  it('renders disclosure bundle on empty state', () => {
+    renderWhatChanged({ data: EMPTY_CHANGES });
+    expect(screen.getByText(NOT_ADVICE)).toBeDefined();
+  });
+
+  it('renders error message on error (single bundle-free Card, no panel)', () => {
+    renderWhatChanged({ isError: true, error: new Error('fail') });
+    expect(screen.getByText(/Unable to load change history/i)).toBeDefined();
+    expect(screen.queryByTestId('what-changed-panel')).toBeNull();
+  });
+
+  it('has no advisory verbs and no numeric score in rendered text', () => {
+    renderWhatChanged({ data: CHANGES_WITH_DATA });
+    const text = document.body.textContent ?? '';
+    assertNoAdvisoryVerbs(text);
+    expect(text).not.toMatch(/unified_score|score:\s*\d/i);
   });
 });
