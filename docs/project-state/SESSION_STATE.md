@@ -1,11 +1,54 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (B58-f2/f4 model v1.1 + B62-f2 WhatChanged mount MERGED — v1.1
-registry activation owed at next deploy; earlier today: Google SSO + standalone TOTP login
-DEPLOYED LIVE — merge `6468797`, migration `0018`, smoke green)
+**Last updated:** 2026-06-12 (frontend functionality sweep MERGED — #100 conflict-resolved +
+merged, B62-f1 chip tint #102, B60 TransparencyPanel mount #103; v1.1 registry activation still
+owed at next deploy)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## FRONTEND FUNCTIONALITY SWEEP — B62-f2 / B62-f1 / B60 MOUNT ALL MERGED (2026-06-12 afternoon)
+
+Founder asked for the three open frontend functionality items, one by one. All three are on main:
+
+- **B62-f2 (via PR #100, `7ccea5e`):** PR #100 had gone CONFLICTING after the SSO docs merge
+  (#101) — resolved the SESSION_STATE both-sessions conflict (one leftover marker slipped into
+  the first push; fixed in a follow-up commit), CI re-verified green, founder sign-off, squash-
+  merged. Carries B58-f2/f4 model v1.1 → **registry activation is the FIRST post-migration
+  action at next deploy (binding compliance condition, ledger `reviews/b58-f2-f4-b62-f2.md`).**
+- **B62-f1 (PR #102, `205321e`):** chip tint via `color-mix(in srgb, token 13%/33%,
+  transparent)` — the old 2-digit hex-alpha on a CSS `var()` was invalid CSS, silently dropped.
+  Source-guard vitest (jsdom can't catch it at render time; first guard draft tripped on its own
+  explanatory comment — reworded). RCA 2026-06-12; Architect ACCEPT; ledger
+  `reviews/b62-f1-chip-tint.md`. Tint approach credited to superseded **PR #86 (still open —
+  founder to close;** classifier denied the agent closing a PR it didn't create).
+- **B60/PU2 mount (PR #103, `2dfb6bf`):** `TransparencySection` + `usePortfolioTransparency`
+  mirror the B62-f2 pattern; mounted LAST on `/portfolio/[id]/intelligence`. Architect + UI both
+  ACCEPT-WITH-CONDITIONS; conditions applied (`queryKeys.portfolio.transparency` factory entry;
+  shell heading 16px not the panel's subtitle-tight 4px). h2-invariant assertion added to BOTH
+  error-state tests. Stale B60 BLOCKERS row corrected (was "pending compliance gate" although #80
+  merged with Opus gate ACCEPT). Ledger `reviews/b60-transparency-mount.md`.
+- **Gates:** 31/31 + 21/21 vitest (orchestrator-verified, not builder-claimed) · tsc · scoped
+  eslint · markdownlint · CI green on all three PRs (lint job = pre-existing backend ruff debt;
+  no Python touched).
+- **Tooling discovery:** Tier-4 `free-chain` is DEAD on this account — HTTP 404 "no endpoints
+  matching data policy" (OpenRouter privacy settings exclude all `:free` providers), not a 429.
+  Tier-2 `dsf` worked as fallback (RCA draft).
+
+### Agent-utilization & routing telemetry (frontend-sweep session)
+
+- **Opus-tier (Fable, Tier 0):** orchestration; PR #100 conflict resolution + merges; B62-f1 fix
+  and guard test (small hot-cache edits); review-condition fixes; ledgers/SESSION_STATE
+  self-assembled from in-context verdicts (routing hook fired; logged — external drafting would
+  re-type the same facts).
+- **Sonnet (Tier 1):** warm-start pending-items brief · reworked: N | transparency-mount build ·
+  **reworked: Y** (Opus applied 2 review conditions + h2 error-state assertions) | Architect
+  review #102 · reworked: N | Architect review #103 · reworked: N | UI review #103 · reworked: N.
+- **Tier-2 paid (`dsf`):** RCA draft B62-f1 · **reworked: Y** (template field names, ASCII
+  punctuation, line-range).
+- **Tier-4 free-chain:** attempted once · failed (404 data-policy — switch to `dsf` until the
+  OpenRouter privacy setting changes).
+- **Haiku / codex:rescue:** n/a — no bulk sweeps; codex unavailable on this account (memory).
 
 ## B58-f2 + B58-f4 + B62-f2 — IMPLEMENTED, REVIEWED, MERGED; DEPLOY + v1.1 ACTIVATION OWED (2026-06-12)
 
@@ -444,6 +487,7 @@ Branch: `feat/data-transparency-layer`. 5 commits off `main` (`74d1eb8`).
 says so openly."
 
 **Implementation:**
+
 - `backend/dhanradar/transparency/` (new module): `schemas.py` (allowlist models; `unified_score`
   absent by design), `service.py` (read-only over `user_fund_scores` + `mf_nav_history` +
   `mf_user_holdings` + `mf_funds`; IDOR ownership check; educational driver derivation from
@@ -454,6 +498,7 @@ says so openly."
 - `frontend/src/components/transparency/`: `TransparencyPanel.tsx` + vitest (14/14).
 
 **Compliance invariants:**
+
 - `unified_score` never selected, serialized, or rendered.
 - `insufficient_data` surfaces explicit PU2 refusal block ("we won't guess"), not error/blank.
 - Disclosure bundle (`DISCLOSURE_BUNDLE + NOT_ADVICE + DISCLAIMER_VERSION`) on every response,
@@ -540,6 +585,7 @@ Branch: `fix/b56-live-news-rss`. One commit (`0b91826`) off latest `main` (`670b
 No live fetch ever existed.
 
 **Fix:**
+
 - `news/rss.py` (NEW): sanctioned-feed registry (RBI press releases + notifications); httpx async
   fetch + feedparser; per-item HEAD liveness check at ingest (non-2xx → skip); graceful degrade
   (any error returns []). ToS confirmed live 2026-06-10 from rbi.org.in/Scripts/rss.aspx. SEBI
@@ -613,6 +659,7 @@ Plan Group 3 MF-first wedge: factual portfolio composition analysis — no advis
 numeric DhanRadar score in DOM.
 
 **Backend: `backend/dhanradar/insights/` (new module)**
+
 - `GET /api/v1/portfolio/{portfolio_id}/overlap` — factual fund-pair overlap by shared category
   allocation; category distribution breakdown. Empty portfolio → 200 with empty lists. IDOR guard:
   `portfolio_id + user_id` check → 404 on mismatch. Reuses `mf.snapshot.category_allocation`.
@@ -627,6 +674,7 @@ numeric DhanRadar score in DOM.
   wrong portfolio 404, empty portfolio 200 + disclosure).
 
 **Frontend:**
+
 - `frontend/src/features/portfolio/api.ts`: `usePortfolioOverlap` + `usePortfolioConcentration`
   hooks; explicit allowlist types; retry: never on 401/404.
 - `frontend/src/lib/queryKeys.ts`: added `portfolio.overlap(id)` + `portfolio.concentration(id)`.
@@ -639,7 +687,7 @@ numeric DhanRadar score in DOM.
   tsc clean, eslint clean.
 
 **Compliance review (inline, Tier-A + Compliance — Opus):** ACCEPT. Advisory verbs absent (CI guards
-  + 22 unit verb scans); no numeric DhanRadar score in DOM; disclosure on every response; IDOR guard
+  and 22 unit verb scans); no numeric DhanRadar score in DOM; disclosure on every response; IDOR guard
   confirmed; cold-start 200 confirmed. No advisory text produced by frontend — all framing copy is
   backend-authored observational strings rendered verbatim.
 
@@ -654,8 +702,6 @@ numeric DhanRadar score in DOM.
 - **Sonnet (Tier 1):** n/a — subagent invocation failed; Opus self-executed.
 - **Haiku (Tier 3):** n/a.
 - **codex:rescue:** n/a — account not entitled; Tier-A change; no auth/scoring/billing/AI path.
-
-
 
 Closed the B56 `/news` deferral by implementing the backend endpoint and wiring the dashboard widget
 to the real contract shape.
