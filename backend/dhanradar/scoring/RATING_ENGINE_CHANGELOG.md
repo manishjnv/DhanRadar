@@ -9,10 +9,15 @@ an entry here until the table exists. Source of truth for the spec:
 
 ## v1.1 — category-class-aware cohort label band (B58-f4) — 2026-06-12
 
-- **model_version:** `v1.1` · **status:** `active` (registry row written at deploy)
+- **model_version:** `v1.1` · **status:** `active` · **activated:** `true`
+- **Registry row (authoritative):** `compliance.rating_engine_changelog`
+  `a7aa1e86-5199-43cb-8e92-5c697d0d51f4` — `created_by=architecture-review`,
+  `approved_by=founder admin`, `two_person_ok=true`, activated 2026-06-12 (first
+  post-deploy action of merge `ad1657f`; `REGISTRY_ACTIVATED=True` re-verified after
+  cache clear; explicit founder approval in-session — see
+  `docs/project-state/reviews/b58-f2-f4-b62-f2.md`).
 - **created_by:** architecture-review · **approved_by:** founder admin (two-person
-  gate via `POST /admin/scoring/v1.1/activate` at deploy; `approved_by ≠ created_by`
-  enforced by `activation.activate_model_version`)
+  gate `approved_by ≠ created_by` enforced by `activation.activate_model_version`)
 - **factors_before / factors_after:** UNCHANGED (quality 0.24 · valuation 0.22 ·
   momentum 0.20 · trend 0.22 · risk 0.12) — this version changes NO weights.
 - **What changed:** the category-relative LABEL band (`_MARGIN_PCT`,
