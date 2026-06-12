@@ -15,6 +15,21 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-12 — B62-f1: chip tint invisible — hex-alpha suffix on a CSS var() is invalid CSS
+
+- **Symptom:** "What Changed" panel change-kind chips rendered with no background or border tint
+  in every browser; chip text color still applied, so the chips looked like plain text.
+- **Root cause:** `WhatChangedPanel.tsx` built the tint by appending a 2-digit hex alpha suffix to
+  an interpolated design-token color — but the token is a CSS `var()` reference, and `var()`
+  followed by hex digits is an invalid CSS color value, so browsers silently dropped both the
+  background and border declarations.
+- **Fix:** `frontend/src/components/changes/WhatChangedPanel.tsx:116-119` — tint via
+  `color-mix(in srgb, <token> 13%, transparent)` (border at 33%), which keeps the `var()` valid.
+- **Prevention:** source-level vitest guard in `WhatChangedPanel.test.tsx` asserts no hex-alpha
+  suffix is appended to the interpolated color and that `color-mix` is present. jsdom cannot catch
+  this at render time — its CSS parser drops both the broken and the fixed value.
+- **Phase/area:** frontend / What Changed explainability (Plan Group 2, B62).
+
 ### 2026-06-11 — Every 2nd+ CAS upload in a worker child fails: Redis singleton bound to a closed event loop
 
 - **Symptom:** CAMS E2E upload failed instantly (`internal_error`, progress 0) with
@@ -236,8 +251,8 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 - **Prevention:** (1) URL liveness HEAD check at ingest — dead links can never reach the UI;
   (2) recency guard (`NEWS_MAX_AGE_DAYS`) — old items dropped from `list_news`; (3) staleness
   observability — WARNING log when newest served item > `NEWS_STALENESS_WARN_HOURS` old; (4)
-  regression tests in `test_news_rss.py` (8) + `test_news_service.py` (recency/staleness/rss-dedup)
-  + `test_news.py` integration recency test.
+  regression tests in `test_news_rss.py` (8) + `test_news_service.py` (recency/staleness/rss-dedup) +
+  `test_news.py` integration recency test.
 - **Phase/area:** B56 / `backend/dhanradar/news/`.
 
 ### 2026-06-10 — G8: CI frontend build failed (`fetch failed / ECONNREFUSED`) on new SSR pages
