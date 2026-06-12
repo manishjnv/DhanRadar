@@ -1,5 +1,5 @@
 """
-DhanRadar — News service: list, upsert, and ingest news items (B56).
+DhanRadar — News service: list, upsert, and ingest news items (B56 / B56-f4).
 
 Two ingestion paths:
 1. RSS ingestion (primary): `fetch_and_upsert_rss_news` fetches sanctioned RSS
@@ -9,13 +9,18 @@ Two ingestion paths:
 
 Article body/excerpt is NEVER stored (copyright compliance, SEBI-safe).
 The endpoint always degrades gracefully to 200 [] (never 500).
+
+B56-f4: Admin CRUD helpers appended at the end of this module — see
+"Admin CRUD (B56-f4)" section below.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
+import sqlalchemy.exc
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,6 +122,10 @@ async def upsert_curated_news(db: AsyncSession) -> int:
             )
             .on_conflict_do_update(
                 index_elements=["canonical_url"],
+                # B56-f4: is_active deliberately NOT in set_ — ingestion never
+                # flips the publication state of an existing row (admin drafts
+                # stay drafts; admin deactivation sticks). New rows still insert
+                # active via .values().
                 set_={
                     "title": title,
                     "source": source,
@@ -124,7 +133,7 @@ async def upsert_curated_news(db: AsyncSession) -> int:
                     "category": category,
                     "published_at": published_at,
                     "fetched_at": now,
-                    "is_active": True,
+                    "updated_at": now,
                 },
             )
         )
@@ -240,6 +249,9 @@ async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
             )
             .on_conflict_do_update(
                 index_elements=["canonical_url"],
+                # B56-f4: is_active deliberately NOT in set_ — ingestion never
+                # flips the publication state of an existing row (reviewer gate:
+                # only admins change is_active). New rows insert active.
                 set_={
                     "title": title,
                     "source": source,
@@ -248,7 +260,7 @@ async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
                     "published_at": published_at,
                     "provenance_source": provenance_source,
                     "fetched_at": now,
-                    "is_active": True,
+                    "updated_at": now,
                 },
             )
         )
@@ -258,3 +270,194 @@ async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
     await db.commit()
     logger.info("news.service.rss: upserted %d items", upserted)
     return upserted
+
+
+# ---------------------------------------------------------------------------
+# Admin CRUD (B56-f4) — RequireAdmin-gated operations workflow
+# ---------------------------------------------------------------------------
+# These helpers replace the hand-edited curated seed as the operator workflow
+# for managing news.news_items rows.  All validation is centralised here so
+# the admin_router remains a thin translation layer.
+# ---------------------------------------------------------------------------
+
+
+class DuplicateUrlError(Exception):
+    """Raised when a canonical_url collides with an existing row."""
+
+
+# Defense-in-depth advisory screen over admin-entered titles before they reach
+# a public surface (non-neg #1). Mirrors mood/service.py:65-67 exactly —
+# the core SEBI-advisory verb set; the versioned, domain-signed taxonomy lives
+# with the AI gateway (B23). Admin-entered titles are user-facing, so this
+# screen applies here just as it does to AI-generated commentary.
+_ADVISORY_RE = re.compile(
+    r"\b(strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)\b",
+    re.IGNORECASE,
+)
+
+
+def _validate_fields(**fields: str | None) -> None:  # noqa: C901 — deliberately flat
+    """Apply shared validation rules to the provided string fields.
+
+    Rules (applied to every non-None field):
+      - Strip whitespace; if result is empty → ValueError("empty_field: <name>").
+      - canonical_url must start with http:// or https://.
+      - title must not match _ADVISORY_RE (SEBI non-advisory, non-neg #1).
+
+    Raises ValueError with a short machine-readable code so callers can
+    surface it as a 400 detail without leaking internal paths.
+    """
+    for name, value in fields.items():
+        if value is None:
+            continue
+        stripped = str(value).strip()
+        if not stripped:
+            raise ValueError(f"empty_field: {name}")
+        if name == "canonical_url":
+            if not (stripped.startswith("http://") or stripped.startswith("https://")):
+                raise ValueError("invalid_url")
+        if name == "title" and _ADVISORY_RE.search(stripped):
+            raise ValueError("advisory_title_rejected")
+
+
+async def create_news_item(
+    db: AsyncSession,
+    *,
+    title: str,
+    source: str,
+    canonical_url: str,
+    category: str,
+    scope: str = "market",
+    published_at: datetime | None = None,
+) -> NewsItemModel:
+    """Create a new news item as a draft (is_active=False).
+
+    The item starts inactive — publication is a deliberate PATCH (reviewer
+    gate).  provenance_source is always "admin_curated" for this path.
+
+    Raises:
+        ValueError:          field validation failure (empty, bad URL, advisory title).
+        DuplicateUrlError:   canonical_url already exists in the table.
+    """
+    _validate_fields(
+        title=title,
+        source=source,
+        canonical_url=canonical_url,
+        category=category,
+        scope=scope,
+    )
+    now = datetime.now(UTC)
+    row = NewsItemModel(
+        scope=scope.strip(),
+        category=category,
+        title=title.strip(),
+        source=source.strip(),
+        canonical_url=canonical_url.strip(),
+        published_at=published_at if published_at is not None else now,
+        provenance_source="admin_curated",
+        fetched_at=now,
+        is_active=False,
+    )
+    db.add(row)
+    try:
+        await db.flush()
+        await db.commit()
+    except sqlalchemy.exc.IntegrityError:
+        await db.rollback()
+        raise DuplicateUrlError(canonical_url)
+    await db.refresh(row)
+    return row
+
+
+# Fields an admin may update via PATCH. The router schema already constrains
+# this, but the service is the centralised validation layer (defense-in-depth
+# against a future caller bypassing the schema).
+_UPDATABLE_FIELDS = frozenset(
+    {"title", "source", "canonical_url", "category", "scope", "published_at", "is_active"}
+)
+_STRING_FIELDS = frozenset({"title", "source", "canonical_url", "category", "scope"})
+
+
+async def update_news_item(
+    db: AsyncSession,
+    item_id: str,
+    **fields: object,
+) -> NewsItemModel:
+    """Apply partial updates to an existing news item.
+
+    Only the provided keyword arguments are applied (partial update).  The
+    same validation rules as create apply to any string field that is given.
+
+    Raises:
+        KeyError:            no row with item_id.
+        ValueError:          unknown field, explicit null, or field validation
+                             failure (empty, bad URL, advisory title).
+        DuplicateUrlError:   canonical_url collision.
+    """
+    unknown = sorted(set(fields) - _UPDATABLE_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown_field: {unknown[0]}")
+    for name, value in fields.items():
+        if value is None:
+            # Every updatable column is NOT NULL — letting a null through would
+            # surface as an IntegrityError mislabelled 409 news_url_exists.
+            raise ValueError(f"null_field: {name}")
+
+    result = await db.execute(select(NewsItemModel).where(NewsItemModel.id == item_id))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise KeyError(item_id)
+
+    # Validate the string fields that are being updated.
+    str_fields_to_validate = {k: v for k, v in fields.items() if k in _STRING_FIELDS}
+    if str_fields_to_validate:
+        _validate_fields(**str_fields_to_validate)  # type: ignore[arg-type]
+
+    for attr, value in fields.items():
+        # Store string fields stripped, matching create_news_item.
+        setattr(row, attr, value.strip() if attr in _STRING_FIELDS else value)  # type: ignore[union-attr]
+
+    try:
+        await db.flush()
+        await db.commit()
+    except sqlalchemy.exc.IntegrityError:
+        await db.rollback()
+        raise DuplicateUrlError(fields.get("canonical_url", ""))
+    await db.refresh(row)
+    return row
+
+
+async def delete_news_item(db: AsyncSession, item_id: str) -> None:
+    """Hard-delete a news item by id.
+
+    Raises:
+        KeyError: no row with item_id.
+    """
+    result = await db.execute(select(NewsItemModel).where(NewsItemModel.id == item_id))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise KeyError(item_id)
+    await db.delete(row)
+    await db.commit()
+
+
+async def admin_list_news(
+    db: AsyncSession,
+    *,
+    scope: str | None = None,
+    is_active: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[NewsItemModel]:
+    """Return news items for admin review — no recency cutoff, all provenance.
+
+    Optional filters: scope, is_active.  Ordered published_at DESC.
+    """
+    stmt = select(NewsItemModel)
+    if scope is not None:
+        stmt = stmt.where(NewsItemModel.scope == scope)
+    if is_active is not None:
+        stmt = stmt.where(NewsItemModel.is_active.is_(is_active))
+    stmt = stmt.order_by(NewsItemModel.published_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

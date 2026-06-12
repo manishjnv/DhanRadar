@@ -277,3 +277,61 @@ async def test_fetch_and_upsert_rss_news_dedup():
     assert db.execute.call_count == 2
     db.commit.assert_called_once()
 
+
+
+# ---------------------------------------------------------------------------
+# 4. B56-f4 reviewer gate — ingestion upserts never touch is_active
+# ---------------------------------------------------------------------------
+
+
+async def test_curated_upsert_never_touches_is_active():
+    """upsert_curated_news must NOT set is_active in ON CONFLICT DO UPDATE —
+    automation never flips publication state (admin drafts stay drafts, admin
+    deactivations stick — B56-f4 reviewer gate). updated_at IS refreshed."""
+    from sqlalchemy.dialects import postgresql
+
+    from dhanradar.news.service import upsert_curated_news
+
+    db = AsyncMock()
+    await upsert_curated_news(db)
+
+    assert db.execute.call_count >= 1
+    for call in db.execute.call_args_list:
+        compiled = str(call[0][0].compile(dialect=postgresql.dialect()))
+        set_clause = compiled.split("DO UPDATE SET", 1)[1]
+        assert "is_active" not in set_clause, (
+            "Curated upsert must not flip is_active on existing rows (B56-f4)"
+        )
+        assert "updated_at" in set_clause
+
+
+async def test_rss_upsert_never_touches_is_active():
+    """fetch_and_upsert_rss_news must NOT set is_active in DO UPDATE (B56-f4)."""
+    from sqlalchemy.dialects import postgresql
+
+    from dhanradar.news.service import fetch_and_upsert_rss_news
+
+    items = [
+        {
+            "scope": "market",
+            "category": "regulation",
+            "title": "RBI press release on liquidity operations",
+            "source": "RBI",
+            "canonical_url": "https://rbi.org.in/pr/1",
+            "published_at": datetime(2026, 6, 1, tzinfo=UTC),
+            "provenance_source": "rss",
+        }
+    ]
+    db = AsyncMock()
+    with patch(
+        "dhanradar.news.rss.fetch_all_feeds", new=AsyncMock(return_value=items)
+    ):
+        count = await fetch_and_upsert_rss_news(db)
+
+    assert count == 1
+    compiled = str(db.execute.call_args[0][0].compile(dialect=postgresql.dialect()))
+    set_clause = compiled.split("DO UPDATE SET", 1)[1]
+    assert "is_active" not in set_clause, (
+        "RSS upsert must not flip is_active on existing rows (B56-f4)"
+    )
+    assert "updated_at" in set_clause

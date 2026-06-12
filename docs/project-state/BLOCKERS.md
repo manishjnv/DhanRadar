@@ -61,13 +61,19 @@ First KVM4 deploy is DONE. Real status of the deploy-gate blockers (detail:
     `scoring/engine/schemas.py`; dashboard imports them read-only (as mood does). Move to a shared
     `compliance`/`shared` constants module so non-scoring consumers don't reach into the engine
     schema. Deferred — the move EDITS `scoring/engine/*` (a concurrent-session lane); coordinate.
+    Additionally, the `_ADVISORY_RE` core verb regex (B56-f4 architect finding, 2026-06-12) is now
+    duplicated in `mood/service.py` AND `news/service.py` — fold it into the same shared-constants
+    move.
   - **B56-f2 `[OPEN LOW]`** — promote the reused Yahoo helpers `_quote_meta`/`_signal_value` to a
     public interface (rename) instead of importing underscore-privates from the provider.
   - **B56-f3 `[OPEN LOW]`** — add composite index `(user_id, isin, scored_at DESC)` on
     `mf.user_fund_scores` (+ migration) before the dashboard sees real load; optional: parallelize
     the 4 Yahoo index fetches with `asyncio.gather`. Latent perf only (~0 users today).
-  - **B56-f4 `[OPEN LOW]`** — replace static curated seed rows with admin-managed CRUD for
-    `news.news_items` (operations workflow + reviewer gate).
+  - **B56-f4 `[RESOLVED — feat/b56-f4-news-admin-crud]` 2026-06-12** — admin news CRUD live:
+    4 `RequireAdmin`-gated endpoints (`/api/v1/admin/news`), draft→publish reviewer gate (create
+    always `is_active=false`), advisory-verb title screen, ingestion upserts no longer touch
+    `is_active` (reviewer-gate non-clobber), admin audit on all mutations. Ledger
+    `reviews/b56-f4-news-admin-crud.md`; feature doc `docs/features/news.md`.
   - **B56-f5 `[RESOLVED — 0b91826]`** — RSS ingestion live; RBI press releases + notifications
     sanctioned (ToS confirmed 2026-06-10 from rbi.org.in/Scripts/rss.aspx); `news/rss.py` has
     source registry with `enabled` flag; SEBI feed disabled (URL 404 confirmed); provenance stamped.
