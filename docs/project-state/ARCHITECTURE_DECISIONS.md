@@ -558,6 +558,59 @@ an arbitrary key rely on call-site discipline; (4) `configure_logging()` clears 
 (intentional — single JSON handler), which drops any separately-configured uvicorn
 access-log file handler.
 
+## ADR-0029 — Two additional login methods: Google SSO (server-side OAuth+PKCE) and TOTP as a standalone first factor
+
+**Date:** 2026-06-12 · **Status:** Accepted
+
+**Context:** The canon (`DhanRadar_Architecture_Final.md` §2, `CANONICAL_OPENAPI_ALIGNMENT.md` §2)
+specified email+password as the only login method, scoped TOTP to "Pro+ sensitive-action step-up"
+(enrolment-only today, never checked at login), and contained **no** Google SSO. The "OTP-first"
+signup pattern (D2) is explicitly REJECTED and grep-banned. The founder asked for (a) Google SSO
+and (b) TOTP usable to log in — clarifying that TOTP here is **another way to log in**, not a
+second factor. Both are net-new scope and an extension of the auth contract, so they require an ADR
+before implementation (Engineering-Governance Inv. 4).
+
+**Decision:**
+
+(a) **Google SSO = server-side OAuth 2.0 authorization-code flow with PKCE (S256) + nonce**, not
+the in-browser Google Identity Services button (founder choice). Rationale: no third-party JS, no
+token ever transits the browser, and the flow terminates in the **same** `set_auth_cookies` path as
+password login — preserving non-neg #5 (RS256 `__Host-` cookies, no bearer auth). New endpoints
+`GET /api/v1/auth/google/{start,callback}` under the existing `/auth` prefix. The id_token is
+verified **locally** against Google's JWKS (RS256-only, `aud`/`iss`/`exp`/`nonce`) — Google's token
+endpoint is never trusted blindly. State is single-use (`GETDEL`); `email_verified=True` is
+required. SSO is **fail-closed**: absent `GOOGLE_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI` → 503.
+
+(b) **TOTP standalone login = alternative first factor**, NOT 2FA, and NOT "OTP-first" (the banned
+D2 pattern is OTP *replacing the password as the primary gate for all users at signup*; this is an
+**opt-in** code-for-password swap for users who have already enrolled an authenticator under the
+existing `/totp/setup`+`/totp/verify`). New endpoint `POST /api/v1/auth/totp/login`. Strictly
+6-digit. Enumeration-safe: unknown email / not-enrolled / wrong code / locked all return the same
+generic 401 (the per-account lock deliberately returns 401, not 429, so it is not an
+account-exists oracle; the per-IP limiter supplies its own 429). Per-code single-use replay guard
+(Redis `SET NX`, 90s). This supersedes the auth-feature-doc statement "TOTP is not enforced at
+login" — TOTP is now a **login option**, while still never a forced second factor.
+
+(c) **Account model:** `auth.users.hashed_password` becomes nullable (SSO-only accounts have none;
+the password-login path runs a dummy-hash verify then the generic 401, so an SSO-only account is
+indistinguishable from an unknown email). New unique `google_sub`. Migration `0018_google_sso`.
+
+(d) **No silent account-linking onto password accounts (security decision).** DhanRadar does not
+verify local emails, so a Google identity whose email matches an existing **password** account is
+**rejected** (`/login?error=account_exists_use_password`), never auto-linked — otherwise a
+Google-side controller of that address (e.g. a Workspace admin) could hijack the local account.
+Auto-create is allowed only when no row exists; linking a passwordless row is future-proofed but
+unreachable today. Explicit "link Google from settings while logged in" is deferred.
+
+**Consequences:** three login methods now converge on one session-issuance path (parity on
+refresh-jti storage, founding-access stamp, and security-audit events is asserted in the Tier-B
+ledger). SSO needs operator-provisioned Google credentials + the registered redirect URI before it
+leaves 503. A real email-verification flow remains absent — decision (d) is the compensating
+control until one exists. Gate ledger: `reviews/google-sso-totp-login.md` (Security ACCEPT after
+revise — backslash open-redirect + auto-link takeover both fixed; Compliance ACCEPT — no advisory
+surface, no DPDP consent bypass). Net-new endpoints to fold into `CANONICAL_OPENAPI_ALIGNMENT.md`
+at the next contract-sync.
+
 **Tier-B adversarial sign-off:** independent Sonnet adversarial takeover (codex unavailable —
 ChatGPT-plan entitlement error). Verdict **ACCEPT-WITH-CONDITIONS**; all MUST-FIX and
 SHOULD-FIX conditions applied in-session. MUST-FIX: (M1) raw user UUID was %-interpolated

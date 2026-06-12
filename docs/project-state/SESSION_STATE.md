@@ -1,13 +1,13 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (B58-f2 rescore cohort hoist + B58-f4 class-aware label band as
-model v1.1 + B62-f2 WhatChangedPanel mounted — Tier-C/A reviews passed, deploy + v1.1 registry
-activation this session)
+**Last updated:** 2026-06-12 (B58-f2/f4 model v1.1 + B62-f2 WhatChanged mount MERGED — v1.1
+registry activation owed at next deploy; earlier today: Google SSO + standalone TOTP login
+DEPLOYED LIVE — merge `6468797`, migration `0018`, smoke green)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## B58-f2 + B58-f4 + B62-f2 — IMPLEMENTED, REVIEWED, DEPLOYING (2026-06-12)
+## B58-f2 + B58-f4 + B62-f2 — IMPLEMENTED, REVIEWED, MERGED; DEPLOY + v1.1 ACTIVATION OWED (2026-06-12)
 
 Branch `feat/b58-perf-margin-b62-panel` (worktree `E:\code\DhanRadar-wt-b58`, off `origin/main`).
 Commits: `25d2a2c` (B58-f2 hoist) · `144851a` (B58-f4 model v1.1) · `ce23819` (B62-f2 mount) ·
@@ -44,6 +44,65 @@ Commits: `25d2a2c` (B58-f2 hoist) · `144851a` (B58-f4 model v1.1) · `ce23819` 
 - **Fable subagent:** Compliance review (Tier-C; no model:opus in Fable window) · reworked: N.
 - **Haiku / Tier-2 / Tier-4 / codex:rescue:** n/a — no bulk sweeps; codex unavailable on this
   account (memory), Tier-C handled by the four-agent panel above.
+
+## LOGIN METHODS EXTENDED — Google SSO + standalone TOTP login (2026-06-12, PR #99)
+
+Founder-requested: add Google SSO and let TOTP be used to log in (clarified: an **alternative
+first factor**, not 2FA), with the OTP box auto-focused, auto-submitting on the 6th digit, and an
+inline error on a wrong code. Net-new vs the canon (no SSO; TOTP was enrolment-only / Pro+
+step-up) → **ADR-0029**.
+
+- **Google SSO** — server-side OAuth2 auth-code + PKCE(S256) + nonce. `GET /auth/google/{start,
+  callback}`; id_token verified locally vs Google JWKS; single-use Redis state (`GETDEL`);
+  `email_verified` required; fail-closed **503** until `GOOGLE_CLIENT_ID/_SECRET/_REDIRECT_URI`
+  are set. Terminates in the same `__Host-` cookie path as password login (non-neg #5 held).
+- **TOTP standalone login** — `POST /auth/totp/login` (email + 6-digit). Opt-in, post-enrolment,
+  NOT "OTP-first". Enumeration-safe generic 401 on every failure; per-account lock (own counter,
+  separate from enrolment-verify) + per-code single-use replay guard.
+- **Model/migration** — `hashed_password` nullable (SSO-only), unique `google_sub`; migration
+  `0018` (CI `migrations` job green).
+- **Frontend** — dual-mode login page (Google button + TOTP mode: ref+effect auto-focus, auto-
+  submit on 6th digit, inline error+clear), settings → Security enrolment page.
+- **Tier-B reviews (inline, load-bearing path):** Security (Sonnet adversarial takeover; codex
+  n/a) **REVISE → ACCEPT** — fixed a backslash open-redirect and an account-takeover-via-auto-link
+  (password accounts are now rejected, never silently linked, since local emails are unverified).
+  Compliance **ACCEPT** — no advisory surface, no DPDP consent bypass, erasure parity. Ledger:
+  `reviews/google-sso-totp-login.md`.
+- **CI (PR #99):** backend (incl. SSO + TOTP-login integration tests), frontend, migrations,
+  guards all **PASS**; `lint` red is pre-existing repo debt (292 issues across ~65 files; my new
+  files add zero — `models/auth.py` UP042 is pre-existing) → advisory/non-blocking.
+- **Commits:** `feat(auth): Google SSO + standalone TOTP login (ADR-0029)`; `fix(auth): CI green —
+  distributed-attacker TOTP lock test + drop autoFocus`.
+- **DEPLOYED LIVE 2026-06-12** (squash-merge `6468797`, explicit founder approval): Google OAuth
+  client created (founder); 3 `GOOGLE_*` vars synced to the KVM4 `.env`;
+  `scripts/deploy.sh deploy` run (env-hash full-stack recreate, expected); migration `0017 → 0018`
+  confirmed in the deploy log AND the prod DB (`alembic_version=0018`, `users.google_sub`
+  present). Smoke: `/api/v1/health` 200 · `GET /auth/google/start` 302 → accounts.google.com
+  (PKCE S256 + nonce, prod redirect_uri) · `POST /auth/totp/login` enumeration-safe 401. All 9
+  containers healthy. Remaining: CANONICAL_OPENAPI_ALIGNMENT to fold the 3 new endpoints at next
+  contract-sync.
+
+### Agent-utilization & routing telemetry (SSO + TOTP-login session)
+
+- **Opus (Tier 0):** governance gate, Phase-0 orientation, contract design + the 4 scope decisions,
+  Tier-B Security finding triage + both fixes (open-redirect, auto-link takeover — load-bearing,
+  self-authored), Compliance review, CI failure diagnosis (rate-limit-vs-account-lock test model;
+  autoFocus a11y), all governance docs (ledger/ADR/feature-doc — written on Opus under the
+  ≤30-line hot-cache exemption; routing hook fired, logged honestly), commits/PR/CI.
+- **Sonnet (Tier 1):** `warm-start` brief · auth-surface survey (`Explore`) · backend build
+  (google.py + endpoints + service + migration + tests) · frontend build (dual-mode login +
+  security page + hooks + tests) · Security adversarial takeover. Backend build **reworked: Y**
+  (Opus fixed 2 MAJOR security findings + 1 MINOR + 1 NIT + scope-copy). Frontend build
+  **reworked: Y** (Opus removed autoFocus for CI a11y; MSW secret-name for guards). Security
+  takeover **reworked: N** (verdict applied as-returned).
+- **Haiku (Tier 3):** n/a — Explore/warm-start covered fan-out reads.
+- **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
+  (Tier-B Security, verdict REVISE→ACCEPT).
+- **Deploy addendum (2026-06-12 afternoon session):** Opus-only — merge + env sync +
+  `deploy.sh` + DB/smoke verification (sequential ops commands, nothing delegable); this docs
+  update typed under the ≤30-line hot-cache exemption (routing hook fired, logged honestly).
+  No subagent delegations.
+>>>>>>> origin/main
 
 ## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
 

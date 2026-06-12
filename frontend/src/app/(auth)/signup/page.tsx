@@ -4,6 +4,9 @@
  * Signup — create a free-tier account (POST /auth/signup). Password min length
  * (10) mirrors the backend SignupRequest bound. Duplicate email returns 409.
  *
+ * Google SSO also auto-creates accounts on first sign-in via
+ * GET /api/v1/auth/google/start?next=…
+ *
  * After signup the user has no risk_profile yet; once the Onboarding screen
  * (and its backend write endpoint) lands, route new accounts to /onboarding.
  * Until then they go to the dashboard cold-start state.
@@ -19,6 +22,12 @@ import { Input, Field } from '@/components/ui/Input';
 import { ApiError } from '@/lib/apiClient';
 import { useSignup } from '@/features/auth/api';
 import type { Credentials } from '@/features/auth/types';
+
+const API_BASE =
+  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL
+    : '/api/v1'
+  ).replace(/\/$/, '');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -101,6 +110,31 @@ export default function SignupPage() {
             {isPending ? 'Creating account…' : 'Create account'}
           </Button>
         </form>
+
+        {/* Divider */}
+        <div className="relative my-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-line" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-surface px-2 text-caption text-ink-muted">or</span>
+          </div>
+        </div>
+
+        {/* Google SSO — auto-creates account on first sign-in */}
+        <Button
+          type="button"
+          variant="secondary"
+          size="lg"
+          className="w-full"
+          onClick={() =>
+            window.location.assign(
+              `${API_BASE}/auth/google/start?next=${encodeURIComponent('/dashboard')}`,
+            )
+          }
+        >
+          Continue with Google
+        </Button>
 
         <p className="mt-4 text-center text-small text-ink-secondary">
           Already have an account?{' '}
