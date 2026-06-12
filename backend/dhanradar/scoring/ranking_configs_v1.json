@@ -1,12 +1,12 @@
 {
   "$source": "docs/project-state/FINAL_SCORING_SPEC.md",
-  "model_version": "v1",
+  "model_version": "v1.1",
   "status": "active",
   "activated": true,
   "created_by": "architecture-review",
-  "approved_by": "registry:e1d46e5d-f98f-4f15-938b-44135db02d3b",
+  "approved_by": "registry:rating_engine_changelog (v1.1 activation row)",
   "methodology_url": "https://dhanradar.com/methodology",
-  "_note": "v1 ACTIVATED 2026-06-11 via the B6/B28 two-person gate: rating_engine_changelog row e1d46e5d-f98f-4f15-938b-44135db02d3b (created_by=architecture-review, approved_by=founder admin, two_person_ok=true, backtest pass-gates asserted by the human approver). The DB registry is the authoritative activation state; this file flag is the no-DB-context fallback the sync engine path reads (see admin /scoring/{v}/status).",
+  "_note": "v1.1 (B58-f4): identical to v1 ACTIVATED 2026-06-11 (registry row e1d46e5d-f98f-4f15-938b-44135db02d3b) EXCEPT labels.cohort_margin_pct — the category-relative label band is now category-class-aware (debt 0.5pp, hybrid 1.0pp, default 2.0pp; the flat 2.0pp band was inactive for sub-2pp-dispersion debt cohorts). Weights and all other methodology UNCHANGED. v1.1's own registry activation row is written at deploy via POST /admin/scoring/v1.1/activate (founder = approved_by; two-person gate enforced). The DB registry is the authoritative activation state; this file flag is the no-DB-context fallback the sync engine path reads (see admin /scoring/{v}/status).",
 
   "composite": {
     "score_range": [0, 100],
@@ -85,6 +85,12 @@
   "labels": {
     "enum": ["in_form", "on_track", "off_track", "out_of_form", "insufficient_data"],
     "primary": "deterministic rule table on category-relative performance (NOT a pure function of the score)",
+    "cohort_margin_pct": {
+      "default": 2.0,
+      "by_class": { "Debt Scheme": 0.5, "Hybrid Scheme": 1.0 },
+      "_unit": "return percentage points beyond the category-peer median (1Y/3Y) before a fund counts as out/under-performing; AMFI class = prefix of category before ' - '; unknown class uses default (wider band, on_track fail-safe)",
+      "_lockstep": "mirrors backend/dhanradar/mf/cohort.py _MARGIN_PCT_DEFAULT/_MARGIN_PCT_BY_CLASS — test_margin_manifest_lockstep_with_config"
+    },
     "rule_table": {
       "in_form": "outperforming category 1Y AND 3Y, controlled drawdown",
       "on_track": "matching category, no red flags",

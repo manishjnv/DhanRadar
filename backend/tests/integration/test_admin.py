@@ -410,6 +410,7 @@ async def test_scoring_activate_backtest_not_passed_422(
 ):
     """Admin posting backtest_passed=false → 422 backtest_not_passed."""
     from dhanradar.config import settings
+    from dhanradar.scoring.engine.config import get_config
     from tests.conftest import make_auth_headers
 
     user_id, access = await _signup(async_client, "activate_nobacktest@example.com")
@@ -417,8 +418,11 @@ async def test_scoring_activate_backtest_not_passed_422(
     monkeypatch.setattr(_db_mod, "engine", db_session.bind)
     headers = make_auth_headers(access_token=access)
 
+    # Only the currently loaded config version is activatable — derive it so a
+    # model_version bump (e.g. v1 → v1.1) doesn't 404 this test.
+    ver = get_config().model_version
     r = await async_client.post(
-        "/api/v1/admin/scoring/v1/activate",
+        f"/api/v1/admin/scoring/{ver}/activate",
         json={"backtest_passed": False},
         headers=headers,
     )
@@ -429,9 +433,11 @@ async def test_scoring_activate_backtest_not_passed_422(
 async def test_scoring_activate_happy_path(
     async_client, db_session, monkeypatch
 ):
-    """Admin activates v1 with backtest_passed=true → 200 with full registry row;
-    subsequent GET /status shows registry_activated=True, provisional=False."""
+    """Admin activates the loaded config version with backtest_passed=true → 200
+    with full registry row; subsequent GET /status shows registry_activated=True,
+    provisional=False."""
     from dhanradar.config import settings
+    from dhanradar.scoring.engine.config import get_config
     from tests.conftest import make_auth_headers
     from dhanradar.scoring.engine import activation as _activation
 
@@ -442,8 +448,9 @@ async def test_scoring_activate_happy_path(
     monkeypatch.setattr(_db_mod, "engine", db_session.bind)
     headers = make_auth_headers(access_token=access)
 
+    ver = get_config().model_version
     r = await async_client.post(
-        "/api/v1/admin/scoring/v1/activate",
+        f"/api/v1/admin/scoring/{ver}/activate",
         json={"backtest_passed": True},
         headers=headers,
     )
@@ -453,13 +460,13 @@ async def test_scoring_activate_happy_path(
     assert body["two_person_ok"] is True
     assert body["approved_by"] == user_id
     assert body["created_by"] == "architecture-review"
-    assert body["model_version"] == "v1"
+    assert body["model_version"] == ver
 
     # Clear memo so status check goes to DB.
     _activation._activated_cache.clear()
 
     r = await async_client.get(
-        "/api/v1/admin/scoring/v1/status",
+        f"/api/v1/admin/scoring/{ver}/status",
         headers=headers,
     )
     assert r.status_code == 200, r.text
@@ -505,9 +512,13 @@ async def test_scoring_activate_double_activation_409(
     monkeypatch.setattr(_db_mod, "engine", db_session.bind)
     headers = make_auth_headers(access_token=access)
 
+    from dhanradar.scoring.engine.config import get_config
+
+    ver = get_config().model_version
+
     # First activation — must succeed.
     r = await async_client.post(
-        "/api/v1/admin/scoring/v1/activate",
+        f"/api/v1/admin/scoring/{ver}/activate",
         json={"backtest_passed": True},
         headers=headers,
     )
@@ -518,7 +529,7 @@ async def test_scoring_activate_double_activation_409(
 
     # Second activation — must return 409.
     r = await async_client.post(
-        "/api/v1/admin/scoring/v1/activate",
+        f"/api/v1/admin/scoring/{ver}/activate",
         json={"backtest_passed": True},
         headers=headers,
     )
@@ -557,17 +568,20 @@ async def test_scoring_status_provisional_before_activation(
 ):
     """Before any registry activation, status must show registry_activated=False and
     provisional=True — even though the shipped file flag is True (B6/B28 activation,
-    2026-06-11). The gate (registry), not the file flag, governs `provisional`."""
+    2026-06-11; v1.1 follows the same shape). The gate (registry), not the file
+    flag, governs `provisional`."""
     from dhanradar.config import settings
+    from dhanradar.scoring.engine.config import get_config
     from tests.conftest import make_auth_headers
 
     user_id, access = await _signup(async_client, "status_provisional@example.com")
     monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
     headers = make_auth_headers(access_token=access)
 
-    r = await async_client.get("/api/v1/admin/scoring/v1/status", headers=headers)
+    ver = get_config().model_version
+    r = await async_client.get(f"/api/v1/admin/scoring/{ver}/status", headers=headers)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["registry_activated"] is False
-    assert body["file_activated"] is True  # ranking_configs_v1.json activated 2026-06-11
+    assert body["file_activated"] is True  # ranking_configs_v1.json ships activated:true
     assert body["provisional"] is True  # registry empty in this test DB → still provisional

@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
@@ -34,6 +35,7 @@ from dhanradar.celery_app import celery_app
 from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
 from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
+from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
@@ -376,13 +378,26 @@ _COHORT_LOOKBACK_DAYS = 1200
 _COHORT_PEER_CHUNK = 200
 
 
-async def _compute_cohort(
+@dataclass(frozen=True)
+class _CohortContext:
+    """Pre-built peer-cohort benchmarks + per-fund long-horizon stats (B58-f2).
+
+    Built ONCE per task run by :func:`_build_cohort_context`; per-portfolio label
+    inputs then come from :func:`_relative_from_context` as pure lookups — the
+    expensive peer NAV loads never repeat inside a per-portfolio loop."""
+
+    category_by_isin: dict[str, str]
+    stats_by_isin: dict[str, FundStats]
+    benchmarks: dict[str, CohortBenchmark]
+
+
+_EMPTY_COHORT_CONTEXT = _CohortContext({}, {}, {})
+
+
+async def _build_cohort_context(
     db: Any, target_isins: list[str], *, as_of: date | None = None
-) -> dict[str, CategoryRelative]:
-    """Build category peer-cohort benchmarks and return each target fund's
-    category-relative LABEL inputs (B58).  Returns {isin: CategoryRelative}; a fund
-    absent from the map (no category, thin cohort, or no NAV) is scored with no
-    category red flag → on_track, the honest fail-safe.
+) -> _CohortContext:
+    """Build category peer-cohort benchmarks for the given target funds (B58).
 
     Read-only on the mf schema (MfFund + mf_nav_history) — no cross-module access.
     The peer set for a category is every fund AMFI tags in that category; the fund
@@ -390,12 +405,12 @@ async def _compute_cohort(
     """
     from sqlalchemy import select
 
-    from dhanradar.mf.cohort import build_benchmark, compare_to_cohort
+    from dhanradar.mf.cohort import build_benchmark
     from dhanradar.mf.signals import long_horizon_stats
     from dhanradar.models.mf import MfFund
 
     if not target_isins:
-        return {}
+        return _EMPTY_COHORT_CONTEXT
     as_of = as_of or date.today()
 
     # 1. Resolve each target's category; keep only real categories.
@@ -409,7 +424,7 @@ async def _compute_cohort(
     }
     categories = set(target_category.values())
     if not categories:
-        return {}
+        return _EMPTY_COHORT_CONTEXT
 
     # 2. All peers in those categories.
     peer_rows = (
@@ -428,7 +443,7 @@ async def _compute_cohort(
     #    Peers load in bounded chunks (B63) — each batch's series is freed before
     #    the next loads, keeping peak memory flat regardless of cohort size.
     unique_peers = sorted(set(all_peer_isins))
-    stats_by_isin = {}
+    stats_by_isin: dict[str, FundStats] = {}
     for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
         batch = unique_peers[start : start + _COHORT_PEER_CHUNK]
         series, _ = await _load_nav_series(db, batch, lookback_days=_COHORT_LOOKBACK_DAYS)
@@ -438,15 +453,38 @@ async def _compute_cohort(
         cat: build_benchmark(cat, [stats_by_isin[i] for i in cat_isins])
         for cat, cat_isins in peers_by_cat.items()
     }
+    return _CohortContext(target_category, stats_by_isin, benchmarks)
 
-    # 4. Each target's own stats (reused from the cache) vs its category benchmark.
+
+def _relative_from_context(
+    ctx: _CohortContext, target_isins: list[str]
+) -> dict[str, CategoryRelative]:
+    """Each target's own stats vs its category benchmark — pure lookup against a
+    pre-built context.  A fund absent from the result (no category at build time,
+    thin cohort, or no NAV) is scored with no category red flag → on_track, the
+    honest fail-safe."""
+    from dhanradar.mf.cohort import compare_to_cohort
+
     out: dict[str, CategoryRelative] = {}
     for i in target_isins:
-        c = target_category.get(i)
+        c = ctx.category_by_isin.get(i)
         if c is None:
             continue
-        out[i] = compare_to_cohort(stats_by_isin.get(i, (None, None, None)), benchmarks.get(c))
+        out[i] = compare_to_cohort(
+            ctx.stats_by_isin.get(i, (None, None, None)), ctx.benchmarks.get(c)
+        )
     return out
+
+
+async def _compute_cohort(
+    db: Any, target_isins: list[str], *, as_of: date | None = None
+) -> dict[str, CategoryRelative]:
+    """Build category peer-cohort benchmarks and return each target fund's
+    category-relative LABEL inputs (B58) — build + lookup in one call, for the
+    single-portfolio path (CAS upload).  The monthly rescore builds the context
+    once and reuses it across portfolios instead (B58-f2)."""
+    ctx = await _build_cohort_context(db, target_isins, as_of=as_of)
+    return _relative_from_context(ctx, target_isins)
 
 
 async def _mark_failed(job_id: str, message: str) -> None:
@@ -660,13 +698,47 @@ async def _monthly_rescore() -> str:
     redis = get_redis()
 
     async with TaskSessionLocal() as db:
-        # All distinct portfolios that currently have holdings.
-        pid_rows = (
+        # All distinct (portfolio, isin) pairs that currently have holdings.
+        pid_isin_rows = (
             await db.execute(
-                select(MfUserHolding.portfolio_id).distinct()
+                select(MfUserHolding.portfolio_id, MfUserHolding.isin).distinct()
             )
         ).all()
-        portfolio_ids = [str(row[0]) for row in pid_rows]
+        isins_by_pid: dict[str, set[str]] = {}
+        raw_pids: list[Any] = []  # native UUIDs for the owner query — no str round-trip
+        for pid_raw, isin_raw in pid_isin_rows:
+            key = str(pid_raw)
+            if key not in isins_by_pid:
+                raw_pids.append(pid_raw)
+            isins_by_pid.setdefault(key, set()).add(isin_raw)
+        portfolio_ids = list(isins_by_pid)
+
+        # B58-f2: build the peer-cohort context ONCE per run, over the union of
+        # Plus portfolios' holdings — not per portfolio inside the loop (the
+        # build re-fetched the same category peer NAV sets for every portfolio).
+        # Peer loads stay chunked (B63).  A portfolio that turns Plus mid-run is
+        # absent from the union and scores without category flags this month —
+        # the same honest fail-safe as an uncategorized fund.
+        owner_rows = (
+            await db.execute(
+                select(MfPortfolio.id, MfPortfolio.user_id).where(
+                    MfPortfolio.id.in_(raw_pids)
+                )
+            )
+        ).all()
+        uid_by_pid = {str(r[0]): str(r[1]) for r in owner_rows}
+        plus_by_uid: dict[str, bool] = {}
+        for uid in set(uid_by_pid.values()):
+            plus_by_uid[uid] = await is_plus(uid, db)
+        plus_isins: set[str] = set()
+        for pid, uid in uid_by_pid.items():
+            if plus_by_uid.get(uid):
+                plus_isins |= isins_by_pid[pid]
+        cohort_ctx = (
+            await _build_cohort_context(db, sorted(plus_isins), as_of=today)
+            if plus_isins
+            else _EMPTY_COHORT_CONTEXT
+        )
 
     rescored = 0
 
@@ -703,8 +775,9 @@ async def _monthly_rescore() -> str:
 
                 isins = [h.isin for h in holding_rows]
                 nav_series, latest_nav = await _load_nav_series(db, isins)
-                # Peer-cohort benchmark for category-relative labels (B58).
-                cohort = await _compute_cohort(db, isins)
+                # Category-relative label inputs — pure lookup against the
+                # run-level cohort context built before the loop (B58-f2).
+                cohort = _relative_from_context(cohort_ctx, isins)
 
                 # Batch-fetch scheme names for alert copy (never scores or numerics).
                 scheme_rows = await db.execute(

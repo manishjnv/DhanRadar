@@ -450,11 +450,19 @@ async def _run_rescore_with_patches(
             pass
 
     class _FakeUserSession:
+        def __init__(self) -> None:
+            self._n = 0
+
         async def execute(self, stmt: Any) -> Any:
-            class _R:
-                def all(self_inner) -> list:
-                    return [(pid,)]
-            return _R()
+            self._n += 1
+            r = MagicMock()
+            if self._n == 1:
+                # distinct (portfolio_id, isin) holdings pre-pass (B58-f2)
+                r.all = lambda: [(pid, isin)]
+            else:
+                # portfolio → owner resolve
+                r.all = lambda: [(pid, uid)]
+            return r
 
         async def __aenter__(self) -> _FakeUserSession:
             return self
@@ -477,6 +485,13 @@ async def _run_rescore_with_patches(
     monkeypatch.setattr(mf_tasks, "compute_fund_signals", _fake_compute_signals, raising=True)
     monkeypatch.setattr(mf_tasks, "build_snapshot", lambda holdings: _make_snap(), raising=True)
     monkeypatch.setattr(mf_tasks, "upsert_user_fund_score", AsyncMock(), raising=True)
+    # Cohort context is built once before the loop (B58-f2) — not under test here.
+    monkeypatch.setattr(
+        mf_tasks,
+        "_build_cohort_context",
+        AsyncMock(return_value=mf_tasks._EMPTY_COHORT_CONTEXT),
+        raising=True,
+    )
     monkeypatch.setattr(_mf_history_mod, "append_score_history", _fake_append)
     monkeypatch.setattr(_mf_history_mod, "get_prior_label", _fake_get_prior_label)
     monkeypatch.setattr(_mf_history_mod, "persist_portfolio_snapshot", _fake_persist)
