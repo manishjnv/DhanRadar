@@ -309,3 +309,67 @@ async def test_hoisted_context_lookup_matches_compute_cohort(monkeypatch):
 
     # Empty targets short-circuit to the shared empty context.
     assert await tasks_mf._build_cohort_context(_FakeDb([], []), []) is tasks_mf._EMPTY_COHORT_CONTEXT
+
+
+# --- B58-f4: the label band is category-class-aware (model v1.1) --------------
+_DEBT_BENCH = CohortBenchmark(
+    "Debt Scheme - Banking and PSU Fund",
+    median_return_1y=7.0, median_return_3y=21.0, median_max_drawdown=2.0, n_peers=20,
+)
+_EQUITY_BENCH = CohortBenchmark(
+    "Equity Scheme - Large Cap Fund",
+    median_return_1y=10.0, median_return_3y=30.0, median_max_drawdown=15.0, n_peers=20,
+)
+
+
+def test_margin_is_category_class_aware():
+    from dhanradar.mf.cohort import margin_pct_for_category
+
+    assert margin_pct_for_category("Debt Scheme - Banking and PSU Fund") == 0.5
+    assert margin_pct_for_category("Hybrid Scheme - Aggressive Hybrid Fund") == 1.0
+    assert margin_pct_for_category("Equity Scheme - Large Cap Fund") == 2.0
+    # Unknown / unparseable class → the conservative default band (on_track-leaning).
+    assert margin_pct_for_category("Large Cap") == 2.0
+    assert margin_pct_for_category("Solution Oriented Scheme - Retirement Fund") == 2.0
+
+
+def test_debt_fund_one_pp_ahead_now_outperforms():
+    # +1.0pp on both windows: INSIDE the old flat 2.0pp band (→ on_track forever),
+    # OUTSIDE the 0.5pp debt band — the label can genuinely flip (RCA B58 lesson:
+    # assert real flips, not just "a label exists").
+    cr = compare_to_cohort((8.0, 22.0, 1.5), _DEBT_BENCH)
+    assert cr.outperform_1y and cr.outperform_3y
+    assert cr.drawdown_controlled  # shallower drawdown than the debt cohort median
+
+
+def test_debt_fund_one_pp_behind_now_underperforms():
+    cr = compare_to_cohort((6.0, 20.0, 3.0), _DEBT_BENCH)
+    assert cr.underperform_12m and cr.sustained_underperformance
+
+
+def test_debt_fund_within_half_pp_still_matching():
+    cr = compare_to_cohort((7.3, 21.2, 2.5), _DEBT_BENCH)
+    assert cr == CategoryRelative()  # inside the 0.5pp debt band → on_track
+
+
+def test_equity_band_unchanged_at_two_pp():
+    # +1.0pp for an equity fund stays inside the 2.0pp band — v1 behaviour is
+    # bit-identical for equity categories (v1.1 changes debt/hybrid only).
+    cr = compare_to_cohort((11.0, 31.0, 16.0), _EQUITY_BENCH)
+    assert cr == CategoryRelative()
+
+
+def test_margin_manifest_lockstep_with_config():
+    # ranking_configs_v1.json carries the v1.1 margin manifest; the pure module's
+    # constants must match it exactly (methodology versioning, B6/B28).
+    import json
+    from pathlib import Path
+
+    from dhanradar.mf import cohort as cohort_mod
+
+    cfg_path = (
+        Path(cohort_mod.__file__).resolve().parents[1] / "scoring" / "ranking_configs_v1.json"
+    )
+    manifest = json.loads(cfg_path.read_text(encoding="utf-8"))["labels"]["cohort_margin_pct"]
+    assert manifest["default"] == cohort_mod._MARGIN_PCT_DEFAULT
+    assert manifest["by_class"] == cohort_mod._MARGIN_PCT_BY_CLASS

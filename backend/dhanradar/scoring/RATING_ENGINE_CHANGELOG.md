@@ -7,6 +7,35 @@ an entry here until the table exists. Source of truth for the spec:
 
 ---
 
+## v1.1 — category-class-aware cohort label band (B58-f4) — 2026-06-12
+
+- **model_version:** `v1.1` · **status:** `active` (registry row written at deploy)
+- **created_by:** architecture-review · **approved_by:** founder admin (two-person
+  gate via `POST /admin/scoring/v1.1/activate` at deploy; `approved_by ≠ created_by`
+  enforced by `activation.activate_model_version`)
+- **factors_before / factors_after:** UNCHANGED (quality 0.24 · valuation 0.22 ·
+  momentum 0.20 · trend 0.22 · risk 0.12) — this version changes NO weights.
+- **What changed:** the category-relative LABEL band (`_MARGIN_PCT`,
+  `backend/dhanradar/mf/cohort.py`) goes from a flat 2.0pp to category-class-aware:
+  **Debt Scheme 0.5pp · Hybrid Scheme 1.0pp · default (Equity/Solution
+  Oriented/Other/unknown) 2.0pp**. Manifest: `ranking_configs_v1.json`
+  `labels.cohort_margin_pct` (lockstep test-enforced).
+- **Why:** the v1-activation entry below accepted B58-f4 as a caveat — debt-cohort
+  1Y-return dispersion is sub-2pp, so the flat band was effectively inactive there
+  and every debt fund labelled `on_track` regardless of relative performance.
+  Class-aware bands restore label honesty for debt/hybrid; equity behaviour is
+  bit-identical to v1.
+- **Calibration basis:** band sized to class dispersion (debt peer spreads cluster
+  well under 1pp around the median; hybrid sits between debt and equity). Values
+  are a defensible first calibration, refinable at the next version from observed
+  prod label-distribution sanity checks (governance `label_distribution_sanity`).
+- **Direction of error is conservative:** an unknown/unparseable category class
+  falls back to the WIDEST band → harder to flag → `on_track` (the honest
+  fail-safe), never an escalated label.
+- **ADR:** ADR-0030 (`docs/project-state/ARCHITECTURE_DECISIONS.md`).
+
+---
+
 ## v1 — initial proposal (DRAFT, NOT ACTIVATED)
 
 - **model_version:** `v1`

@@ -14,13 +14,18 @@ Semantics (FINAL_SCORING_SPEC §4.1 — the LABEL rule is category-relative):
   * a fund "outperforms" only when it beats the cohort median by more than a margin;
     "underperforms" only when it trails by more than the margin; inside the band it
     is "matching category" → on_track.  The margin keeps a basis-point gap around
-    the median from flipping ~half of every category to off_track.
+    the median from flipping ~half of every category to off_track.  The margin is
+    CATEGORY-CLASS-AWARE (v1.1 / B58-f4): debt cohorts disperse far less than
+    equity cohorts, so a flat band sized for equity was effectively inactive there.
   * out_of_form additionally needs a ``structural_concern`` (fundamentals we do not
     yet ingest), so ``sustained_underperformance`` alone is necessary-not-sufficient
     — out_of_form stays honestly unreachable until structural signals exist.
 
-All thresholds are PROVISIONAL v1 heuristics — every engine result is tagged
-``provisional_model`` until the backtest + two-person activation gate (B6 / B28).
+Thresholds are VERSIONED METHODOLOGY (B6/B28 two-person gate): v1 activated
+2026-06-11 (registry ``e1d46e5d``); the class-aware margins are model_version
+v1.1 through the same gate.  The margin manifest in ``ranking_configs_v1.json``
+(``labels.cohort_margin_pct``) must stay in lockstep with the constants here —
+test-enforced (``test_margin_manifest_lockstep_with_config``).
 The peer set includes the fund itself; with ≥ ``_MIN_COHORT_PEERS`` peers the
 self-inclusion bias on a median is negligible and standard for category-relative
 ranking.
@@ -44,8 +49,26 @@ _MIN_COHORT_PEERS = 5
 
 # A fund must beat / trail the cohort median by MORE than this many return
 # percentage points to count as out / under-performing; inside the band it is
-# "matching category" (on_track).
-_MARGIN_PCT = 2.0
+# "matching category" (on_track).  Class-aware since v1.1 (B58-f4): the flat
+# 2.0pp band sized for equity dispersion was effectively inactive for debt
+# categories (peer 1Y-return dispersion there is sub-2pp), labelling every debt
+# fund on_track regardless of relative performance.  AMFI category strings read
+# "<class> - <subcategory>" (e.g. "Debt Scheme - Banking and PSU Fund"); a
+# class not in the map gets the conservative DEFAULT band (wider band → harder
+# to flag → on_track, the honest fail-safe).  Values mirror
+# ranking_configs_v1.json ``labels.cohort_margin_pct`` — lockstep test-enforced.
+_MARGIN_PCT_DEFAULT = 2.0
+_MARGIN_PCT_BY_CLASS = {
+    "Debt Scheme": 0.5,
+    "Hybrid Scheme": 1.0,
+}
+
+
+def margin_pct_for_category(category: str) -> float:
+    """Out/under-performance band (return percentage points) for one AMFI
+    category string, keyed on its category class prefix."""
+    cls = category.split(" - ", 1)[0].strip()
+    return _MARGIN_PCT_BY_CLASS.get(cls, _MARGIN_PCT_DEFAULT)
 
 # Per-fund long-horizon stats: (return_1y_pct, return_3y_pct, max_drawdown_pct);
 # any component may be None (insufficient history for that window).
@@ -110,12 +133,13 @@ def compare_to_cohort(own: FundStats, benchmark: CohortBenchmark | None) -> Cate
     med_1y = benchmark.median_return_1y
     med_3y = benchmark.median_return_3y
     med_dd = benchmark.median_max_drawdown
+    margin = margin_pct_for_category(benchmark.category)
 
     def _ahead(value: float | None, median: float | None) -> bool:
-        return value is not None and median is not None and value > median + _MARGIN_PCT
+        return value is not None and median is not None and value > median + margin
 
     def _behind(value: float | None, median: float | None) -> bool:
-        return value is not None and median is not None and value < median - _MARGIN_PCT
+        return value is not None and median is not None and value < median - margin
 
     outperform_1y = _ahead(own_1y, med_1y)
     outperform_3y = _ahead(own_3y, med_3y)

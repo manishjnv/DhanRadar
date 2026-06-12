@@ -569,3 +569,47 @@ tuple/set recursion, safe-error sentinel preserving correlation keys. RCA:
 
 **Source:** `docs/project-state/LOGGING_PLAN.md` §1–§8; `BLOCKERS.md` B57;
 `docs/project-state/reviews/b57-p1-logging.md`.
+
+## ADR-0030 — Cohort label band goes category-class-aware (model v1.1, B58-f4)
+
+**Date:** 2026-06-12 · **Status:** Accepted (ADR-0029 reserved by PR #99 — Google SSO/TOTP login)
+
+**Context:** The B58 category-relative label rule compares a fund's 1Y/3Y returns to its AMFI
+category-peer median with a ±margin band (`backend/dhanradar/mf/cohort.py`). v1 shipped a flat
+`_MARGIN_PCT = 2.0` return-percentage-points sized for equity dispersion. Debt-category peer
+dispersion is sub-2pp, so the band was effectively inactive there: every debt fund labelled
+`on_track` regardless of relative performance. The v1 activation entry
+(`RATING_ENGINE_CHANGELOG.md`) explicitly accepted this as caveat B58-f4 and bound any change to
+"a new version through this same gate" (B6/B28 two-person methodology gate, ADR-0026).
+
+- **Option A — class-aware fixed bands (chosen):** margin keyed on the AMFI category-class prefix
+  (`"<class> - <subcategory>"`): Debt 0.5pp · Hybrid 1.0pp · default 2.0pp (Equity, Solution
+  Oriented, Other, unknown). Deterministic, auditable, bit-identical to v1 for equity.
+- **Option B — dispersion-adaptive band (rejected for v1.1):** margin derived per-cohort from peer
+  IQR/stdev. Self-calibrating but harder to explain/audit, changes equity behaviour too, and makes
+  labels non-reproducible without snapshotting the dispersion input. A future-version candidate
+  once prod label-distribution telemetry accumulates.
+- **Option C — leave flat, document (status quo, rejected):** label quality for debt funds stays
+  zero; the wedge's CAS report mislabels a whole asset class.
+
+**Decision:** Option A as **model_version v1.1** through the ADR-0026 activation machinery:
+`ranking_configs_v1.json` bumps `model_version` to `v1.1` and carries the margin manifest
+(`labels.cohort_margin_pct`); the pure module constants (`_MARGIN_PCT_DEFAULT`,
+`_MARGIN_PCT_BY_CLASS`) are lockstep test-enforced against the manifest
+(`test_margin_manifest_lockstep_with_config`). No weight, normalization, confidence, or rule-table
+change — the band parameters are the only delta. Unknown/unparseable category classes take the
+WIDEST band (harder to flag → `on_track`), keeping the error direction conservative and
+non-escalating. v1.1's registry activation row (`approved_by` = founder admin ≠ `created_by` =
+`architecture-review`) is written at deploy; new score rows carry `model_version=v1.1` for
+reproducibility.
+
+**Consequences:** debt/hybrid funds can now genuinely reach `in_form`/`off_track`; equity labels
+are unchanged; historical rows keep `v1` and stay bit-reproducible under their own version. The
+band values are a first calibration sized to class dispersion — refinement is a future version
+through the same gate, informed by `label_distribution_sanity` telemetry.
+
+**Files:** `backend/dhanradar/mf/cohort.py`; `backend/dhanradar/scoring/ranking_configs_v1.json`;
+`backend/dhanradar/scoring/RATING_ENGINE_CHANGELOG.md`; `backend/tests/unit/test_mf_cohort.py`.
+
+**Source:** `BLOCKERS.md` B58-f4; `FINAL_SCORING_SPEC.md` §4.1/§7; ADR-0026;
+`docs/project-state/reviews/b58-f2-f4-b62-f2.md`.
