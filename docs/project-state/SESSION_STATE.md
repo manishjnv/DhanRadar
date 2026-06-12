@@ -1,8 +1,8 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (Email OTP login built — ADR-0031; Tier-B Security ACCEPT after 2
-MAJOR fixes; Compliance ACCEPT-WITH-CONDITIONS · earlier: frontend sweep #100/#102/#103 merged;
-v1.1 registry activation owed at next deploy)
+**Last updated:** 2026-06-12 (Email OTP login DEPLOYED LIVE — merge `ad1657f`, smoke 202/401;
+**v1.1 registry ACTIVATED** at this deploy, row `a7aa1e86`, two_person_ok — the #100 binding
+condition is closed)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -33,8 +33,18 @@ text link). Amends the ui-system OTP-first IGNORE scope as an OPT-IN alternative
 - **Gates:** backend unit 46/46 + full unit suite green (1 pre-existing main failure,
   `test_mf_tracking`, reproduced on clean main — out of lane); ruff clean on changed files;
   tsc clean; vitest 165/165. Integration tests CI-only.
-- **NOT deploy-eligible:** `RESEND_API_KEY` missing in prod (feature 503s safely if deployed);
-  separate human deploy approval owed. Morning's SSO+TOTP deploy record is in the section below.
+- **DEPLOYED LIVE 2026-06-12 evening** (squash-merge `ad1657f`, founder approval in-session):
+  real CI green on the rebased PR (backend/frontend/guards/migrations; an ~75-min GitHub Actions
+  scheduling stall was bridged by a local CI-equivalent run — 947/956 pass vs a local
+  `timescaledb-ha:pg16` + guard scripts — before Actions recovered and confirmed); rebase
+  resolved an ADR-number collision (concurrent session took 0030 → this feature is **ADR-0031**;
+  missing 0030 index row added). `RESEND_API_KEY` was already on the box (hash-verified vs
+  local). Smoke: `/auth/email-otp/request` **202** enumeration-safe (not 503 — Resend live),
+  wrong-code login **401**, SSO still 302, health 200, 9 containers healthy.
+- **v1.1 registry ACTIVATION executed at this deploy** (the #100 ledger's binding condition,
+  founder-approved in-session): registry row `a7aa1e86-5199-43cb-8e92-5c697d0d51f4`,
+  `two_person_ok=True`, `REGISTRY_ACTIVATED=True` self-verified. New scores drop the
+  provisional tag under v1.1. Morning's SSO+TOTP deploy record is two sections below.
 
 ### Agent-utilization & routing telemetry (email-OTP session)
 
@@ -50,6 +60,10 @@ text link). Amends the ui-system OTP-first IGNORE scope as an OPT-IN alternative
 - **Haiku (Tier 3):** n/a — no fan-out reads needed.
 - **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
   (verdict REVISE → ACCEPT; 2 MAJOR found and fixed pre-merge).
+- **Deploy addendum (evening):** Opus-only — CI-stall diagnosis + local CI-equivalent gates,
+  rebase/ADR-0031 conflict resolution, deploy, founder-gated v1.1 activation, smoke, these
+  deploy records (typed on Opus under the session-exit exemption; routing hook fired, logged
+  honestly — the records are judgment-bearing post-incident summaries, not boilerplate).
 
 ## FRONTEND FUNCTIONALITY SWEEP — B62-f2 / B62-f1 / B60 MOUNT ALL MERGED (2026-06-12 afternoon)
 
