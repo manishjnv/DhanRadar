@@ -23,7 +23,7 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
   an interpolated design-token color — but the token is a CSS `var()` reference, and `var()`
   followed by hex digits is an invalid CSS color value, so browsers silently dropped both the
   background and border declarations.
-- **Fix:** `frontend/src/components/changes/WhatChangedPanel.tsx:116-121` — tint via
+- **Fix:** `frontend/src/components/changes/WhatChangedPanel.tsx:116-119` — tint via
   `color-mix(in srgb, <token> 13%, transparent)` (border at 33%), which keeps the `var()` valid.
 - **Prevention:** source-level vitest guard in `WhatChangedPanel.test.tsx` asserts no hex-alpha
   suffix is appended to the interpolated color and that `color-mix` is present. jsdom cannot catch
