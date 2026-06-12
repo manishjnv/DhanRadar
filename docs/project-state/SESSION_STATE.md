@@ -1,7 +1,7 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (Google SSO + standalone TOTP login shipped — PR #99, ADR-0029;
-blocking CI green, Tier-B Security+Compliance ACCEPT)
+**Last updated:** 2026-06-12 (Google SSO + standalone TOTP login DEPLOYED LIVE on KVM4 — merge
+`6468797`, migration `0018`, smoke green)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -34,9 +34,14 @@ step-up) → **ADR-0029**.
   files add zero — `models/auth.py` UP042 is pre-existing) → advisory/non-blocking.
 - **Commits:** `feat(auth): Google SSO + standalone TOTP login (ADR-0029)`; `fix(auth): CI green —
   distributed-attacker TOTP lock test + drop autoFocus`.
-- **NOT deploy-eligible yet:** provision the Google OAuth client + 3 env vars on KVM4 (SSO is 503
-  until then; TOTP login needs none), run migration `0018`, separate human deploy approval.
-  CANONICAL_OPENAPI_ALIGNMENT to fold the 3 new endpoints at next contract-sync.
+- **DEPLOYED LIVE 2026-06-12** (squash-merge `6468797`, explicit founder approval): Google OAuth
+  client created (founder); 3 `GOOGLE_*` vars synced to the KVM4 `.env`;
+  `scripts/deploy.sh deploy` run (env-hash full-stack recreate, expected); migration `0017 → 0018`
+  confirmed in the deploy log AND the prod DB (`alembic_version=0018`, `users.google_sub`
+  present). Smoke: `/api/v1/health` 200 · `GET /auth/google/start` 302 → accounts.google.com
+  (PKCE S256 + nonce, prod redirect_uri) · `POST /auth/totp/login` enumeration-safe 401. All 9
+  containers healthy. Remaining: CANONICAL_OPENAPI_ALIGNMENT to fold the 3 new endpoints at next
+  contract-sync.
 
 ### Agent-utilization & routing telemetry (SSO + TOTP-login session)
 
@@ -54,6 +59,10 @@ step-up) → **ADR-0029**.
 - **Haiku (Tier 3):** n/a — Explore/warm-start covered fan-out reads.
 - **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
   (Tier-B Security, verdict REVISE→ACCEPT).
+- **Deploy addendum (2026-06-12 afternoon session):** Opus-only — merge + env sync +
+  `deploy.sh` + DB/smoke verification (sequential ops commands, nothing delegable); this docs
+  update typed under the ≤30-line hot-cache exemption (routing hook fired, logged honestly).
+  No subagent delegations.
 
 ## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
 
