@@ -16,6 +16,10 @@
  *   - empty: empty-state element rendered + disclosure bundle still present.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { render, screen } from '@testing-library/react';
 import type { PortfolioChangesData, FundChange } from './WhatChangedPanel';
 import { WhatChangedPanel } from './WhatChangedPanel';
@@ -352,5 +356,29 @@ describe('WhatChangedPanel — disclosure bundle invariant', () => {
       />,
     );
     expect(screen.getAllByTestId('disclosure-bundle').length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Chip tint is valid CSS (B62-f1 regression)
+//
+// Source-level guard: a bare `${color}22` hex-alpha suffix on a CSS var() is
+// invalid CSS — the chip silently renders with NO tint. jsdom's CSS parser
+// drops both the broken value and color-mix() from computed styles, so a
+// rendered-style assertion cannot distinguish them; guard the source instead.
+// ---------------------------------------------------------------------------
+
+describe('WhatChangedPanel — chip tint valid CSS (B62-f1)', () => {
+  const src = readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), './WhatChangedPanel.tsx'),
+    'utf8',
+  );
+
+  it('never suffixes a hex alpha onto an interpolated color token', () => {
+    expect(src).not.toMatch(/\$\{color\}[0-9a-fA-F]{2}/);
+  });
+
+  it('tints the chip via color-mix() so the var() stays valid', () => {
+    expect(src).toContain('color-mix(in srgb');
   });
 });
