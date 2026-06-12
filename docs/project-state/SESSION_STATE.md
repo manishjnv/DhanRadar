@@ -102,7 +102,6 @@ step-up) → **ADR-0029**.
   `deploy.sh` + DB/smoke verification (sequential ops commands, nothing delegable); this docs
   update typed under the ≤30-line hot-cache exemption (routing hook fired, logged honestly).
   No subagent delegations.
->>>>>>> origin/main
 
 ## E2E CAS UPLOAD TEST — BOTH SAMPLE PDFS VERIFIED LIVE (2026-06-11 evening)
 
