@@ -29,6 +29,13 @@ an entry here until the table exists. Source of truth for the spec:
   well under 1pp around the median; hybrid sits between debt and equity). Values
   are a defensible first calibration, refinable at the next version from observed
   prod label-distribution sanity checks (governance `label_distribution_sanity`).
+  Known accepted limitations (Product review): liquid/overnight sub-categories
+  (~0.05–0.15pp spreads) remain inside even the 0.5pp band — the label carries
+  little relative information there, the honest outcome for regulation-constrained
+  categories; conservative-hybrid behaves debt-like under the 1.0pp class band.
+- **Recalibration trigger:** a single evaluation cycle flipping **>30% of any debt
+  sub-category** off `on_track` (e.g. a credit-event year in Credit Risk / Medium
+  Duration) initiates a recalibration review at the next version through this gate.
 - **Direction of error is conservative:** an unknown/unparseable category class
   falls back to the WIDEST band → harder to flag → `on_track` (the honest
   fail-safe), never an escalated label.

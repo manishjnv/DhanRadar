@@ -352,6 +352,24 @@ def test_debt_fund_within_half_pp_still_matching():
     assert cr == CategoryRelative()  # inside the 0.5pp debt band → on_track
 
 
+_HYBRID_BENCH = CohortBenchmark(
+    "Hybrid Scheme - Aggressive Hybrid Fund",
+    median_return_1y=9.0, median_return_3y=27.0, median_max_drawdown=10.0, n_peers=20,
+)
+
+
+def test_hybrid_fund_one_and_half_pp_ahead_now_outperforms():
+    # +1.5pp on both windows: inside the old flat 2.0pp band, outside the 1.0pp
+    # hybrid band — the hybrid label can genuinely flip both ways too.
+    cr = compare_to_cohort((10.5, 28.5, 9.0), _HYBRID_BENCH)
+    assert cr.outperform_1y and cr.outperform_3y
+
+
+def test_hybrid_fund_one_and_half_pp_behind_now_underperforms():
+    cr = compare_to_cohort((7.5, 25.5, 12.0), _HYBRID_BENCH)
+    assert cr.underperform_12m and cr.sustained_underperformance
+
+
 def test_equity_band_unchanged_at_two_pp():
     # +1.0pp for an equity fund stays inside the 2.0pp band — v1 behaviour is
     # bit-identical for equity categories (v1.1 changes debt/hybrid only).

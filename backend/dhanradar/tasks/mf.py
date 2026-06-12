@@ -705,8 +705,12 @@ async def _monthly_rescore() -> str:
             )
         ).all()
         isins_by_pid: dict[str, set[str]] = {}
+        raw_pids: list[Any] = []  # native UUIDs for the owner query — no str round-trip
         for pid_raw, isin_raw in pid_isin_rows:
-            isins_by_pid.setdefault(str(pid_raw), set()).add(isin_raw)
+            key = str(pid_raw)
+            if key not in isins_by_pid:
+                raw_pids.append(pid_raw)
+            isins_by_pid.setdefault(key, set()).add(isin_raw)
         portfolio_ids = list(isins_by_pid)
 
         # B58-f2: build the peer-cohort context ONCE per run, over the union of
@@ -718,7 +722,7 @@ async def _monthly_rescore() -> str:
         owner_rows = (
             await db.execute(
                 select(MfPortfolio.id, MfPortfolio.user_id).where(
-                    MfPortfolio.id.in_(portfolio_ids)  # type: ignore[arg-type]
+                    MfPortfolio.id.in_(raw_pids)
                 )
             )
         ).all()
@@ -731,7 +735,7 @@ async def _monthly_rescore() -> str:
             if plus_by_uid.get(uid):
                 plus_isins |= isins_by_pid[pid]
         cohort_ctx = (
-            await _build_cohort_context(db, sorted(plus_isins))
+            await _build_cohort_context(db, sorted(plus_isins), as_of=today)
             if plus_isins
             else _EMPTY_COHORT_CONTEXT
         )

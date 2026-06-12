@@ -94,6 +94,12 @@ def _median_or_none(values: list[float]) -> float | None:
 def build_benchmark(category: str, peer_stats: list[FundStats]) -> CohortBenchmark:
     """Aggregate same-category peers' long-horizon stats into median benchmarks.
 
+    ``category`` is the FULL AMFI leaf string (e.g. "Other Scheme - Index Funds")
+    and callers group peers by exact leaf equality — cohorts never mix leaf
+    categories, so e.g. index funds never share a benchmark with active funds or
+    gold ETFs that merely share the "Other Scheme" class prefix (the class prefix
+    is used ONLY for the margin width, never for peer grouping).
+
     Each window is aggregated independently over the peers that HAVE that window
     (a young fund with no 3Y return still contributes its 1Y return).  When fewer
     than ``_MIN_COHORT_PEERS`` peers have a 1Y return the whole benchmark is

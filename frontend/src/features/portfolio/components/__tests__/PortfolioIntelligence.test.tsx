@@ -272,14 +272,22 @@ describe('ConcentrationSection', () => {
 describe('WhatChangedSection (B62-f2)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('renders loading skeleton with the section title', () => {
+  it('renders loading skeleton with the section title at the panel heading level', () => {
     renderWhatChanged({ isLoading: true });
-    expect(screen.getByText('What Changed')).toBeDefined();
+    // h2 in EVERY state — same heading level as the loaded panel (UI cond-2).
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
+  });
+
+  it('renders the shell (not a blank) when data is undefined and not loading', () => {
+    renderWhatChanged();
+    expect(screen.getByTestId('what-changed-shell')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
   });
 
   it('mounts WhatChangedPanel when data is present', () => {
     renderWhatChanged({ data: CHANGES_WITH_DATA });
     expect(screen.getByTestId('what-changed-panel')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
     // Backend-authored reason rendered verbatim; label transition displayed.
     expect(screen.getByText('behind category peers over the trailing 12 months')).toBeDefined();
     expect(screen.getByText('Off Track')).toBeDefined();
