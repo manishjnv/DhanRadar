@@ -459,4 +459,47 @@ export const handlers = [
     if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
     return HttpResponse.json({ risk_profile: 'moderate' });
   }),
+
+  // ---------------------------------------------------------------------------
+  // TOTP — two-factor authentication endpoints
+  // ---------------------------------------------------------------------------
+
+  // POST /api/v1/auth/totp/login — sign in with email + one-time code.
+  // Always succeeds in the default handler; tests override via server.use()
+  // to exercise the 401 "invalid_credentials" and 429 paths.
+  http.post('/api/v1/auth/totp/login', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      email?: string;
+      code?: string;
+    };
+    mockLoggedIn = true;
+    return HttpResponse.json({
+      message: 'login_successful',
+      user: { ...MOCK_USER, email: body.email || MOCK_USER.email },
+    });
+  }),
+
+  // POST /api/v1/auth/totp/setup — initiate enrollment; authenticated route.
+  // Returns a mock otpauth URI + base32 secret. The secret value is a safe,
+  // non-real placeholder — never a real TOTP seed in the mock.
+  http.post('/api/v1/auth/totp/setup', () => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    const mockTotpB32 = 'JBSWY3DPEHPK3PXP';
+    return HttpResponse.json({
+      provisioning_uri: `otpauth://totp/DhanRadar:${MOCK_USER.email}?secret=${mockTotpB32}&issuer=DhanRadar`,
+      secret: mockTotpB32,
+    });
+  }),
+
+  // POST /api/v1/auth/totp/verify — confirm enrollment code; authenticated route.
+  // Mock: any 6-digit code succeeds; 400 for shorter/non-digit input.
+  http.post('/api/v1/auth/totp/verify', async ({ request }) => {
+    if (!mockLoggedIn) return problem(401, 'Unauthorized', 'not_authenticated');
+    const body = (await request.json().catch(() => ({}))) as { code?: string };
+    const code = body.code ?? '';
+    if (!/^\d{6}$/.test(code)) {
+      return problem(400, 'Bad Request', 'totp_invalid');
+    }
+    return HttpResponse.json({ message: 'totp_enabled' });
+  }),
 ];

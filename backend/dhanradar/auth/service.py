@@ -24,9 +24,7 @@ Security invariants:
 
 from __future__ import annotations
 
-import secrets
-from datetime import UTC, datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pyotp
@@ -43,7 +41,7 @@ from dhanradar.auth.security import (
     verify_password,
 )
 from dhanradar.config import settings
-from dhanradar.models.auth import Subscription, User, UserTierEnum
+from dhanradar.models.auth import User, UserTierEnum
 from dhanradar.redis_client import get_redis
 
 # ---------------------------------------------------------------------------
@@ -86,6 +84,19 @@ def tier_rank(tier: str) -> int:
 # Signup
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Founding-access stamp helper (shared by signup_user and get_or_create_google_user)
+# ---------------------------------------------------------------------------
+
+
+def _apply_founding_access(user: User) -> None:
+    """Stamp pro_access_until / pro_access_reason if within the founding window."""
+    founding_until = settings.FOUNDING_ACCESS_UNTIL
+    if founding_until is not None and datetime.now(UTC) < founding_until:
+        user.pro_access_until = founding_until
+        user.pro_access_reason = "founding"
+
+
 async def signup_user(email: str, password: str, db: AsyncSession) -> User:
     """
     Create a new free-tier user.
@@ -116,12 +127,7 @@ async def signup_user(email: str, password: str, db: AsyncSession) -> User:
     )
 
     # PHASE 5M Founding Access — stamp the configured window onto new signups.
-    from dhanradar.config import settings as _settings
-
-    founding_until = _settings.FOUNDING_ACCESS_UNTIL
-    if founding_until is not None and datetime.now(UTC) < founding_until:
-        user.pro_access_until = founding_until
-        user.pro_access_reason = "founding"
+    _apply_founding_access(user)
 
     db.add(user)
     try:
@@ -151,9 +157,13 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
     "invalid_credentials" detail on ANY failure — unknown email, wrong
     password, or deactivated account.  Argon2 verify is called on unknown-
     email paths against a dummy hash to avoid timing-based enumeration.
+
+    SSO-only accounts (hashed_password is None): the dummy hash is verified for
+    timing equalisation, then the same generic 401 is raised so an SSO-only
+    account is indistinguishable from an unknown email on the password path.
     """
     normalised_email = email.strip().lower()
-    user: Optional[User] = await db.scalar(
+    user: User | None = await db.scalar(
         select(User).where(User.email == normalised_email)
     )
 
@@ -163,7 +173,13 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
         verify_password(_DUMMY_HASH, password)
         _raise_invalid_credentials()
 
-    # mypy: user is User here
+    # mypy: user is User here.
+    # SSO-only users have hashed_password=None — run dummy verify for timing
+    # then reject.  The caller must not learn whether the account exists.
+    if user.hashed_password is None:  # type: ignore[union-attr]
+        verify_password(_DUMMY_HASH, password)
+        _raise_invalid_credentials()
+
     ok = verify_password(user.hashed_password, password)  # type: ignore[union-attr]
     if not ok:
         _raise_invalid_credentials()
@@ -337,7 +353,7 @@ async def totp_verify(user_id: UUID, code: str, db: AsyncSession) -> None:
     redis = get_redis()
     attempts_key = f"{TOTP_ATTEMPTS_PREFIX}{user_id}"
 
-    user: Optional[User] = await db.scalar(
+    user: User | None = await db.scalar(
         select(User).where(User.id == user_id)
     )
     if user is None or user.totp_secret is None:
@@ -381,6 +397,222 @@ async def totp_verify(user_id: UUID, code: str, db: AsyncSession) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Google SSO — user resolution
+# ---------------------------------------------------------------------------
+
+# Sentinel exceptions raised inside get_or_create_google_user so the router
+# can map them to the correct RedirectResponse without importing HTTPException
+# at the service layer.
+
+class _DeletionPendingError(Exception):
+    """User exists but has requested account erasure."""
+
+
+class _SubConflictError(Exception):
+    """Email is linked to a different google_sub."""
+
+
+class _AccountExistsError(Exception):
+    """A password-bearing account already exists for this email — no auto-link."""
+
+
+async def get_or_create_google_user(
+    google_sub: str,
+    email: str,
+    db: AsyncSession,
+) -> User:
+    """
+    Resolve (or create) a User for a verified Google identity.
+
+    Resolution order:
+      a) SELECT by google_sub → exists:
+         - deletion_requested_at set → raise _DeletionPendingError.
+         - else return user.
+      b) SELECT by email → exists: apply _resolve_existing_email_user (sub
+         conflict → _SubConflictError; deletion pending → _DeletionPendingError;
+         password account → _AccountExistsError — auto-link is forbidden because
+         local emails are never verified).
+      c) No match → create new free-tier user with founding-access stamp.
+         IntegrityError race on email/sub constraint → re-select and apply the
+         same policy as (b).
+    """
+    # --- a) Lookup by google_sub ---
+    user: User | None = await db.scalar(
+        select(User).where(User.google_sub == google_sub)
+    )
+    if user is not None:
+        if user.deletion_requested_at is not None:
+            raise _DeletionPendingError()
+        return user
+
+    # --- b) Lookup by email ---
+    user = await db.scalar(
+        select(User).where(User.email == email)
+    )
+    if user is not None:
+        return await _resolve_existing_email_user(user, google_sub, db)
+
+    # --- c) Create new user ---
+    new_user = User(
+        email=email,
+        hashed_password=None,     # SSO-only — no password
+        google_sub=google_sub,
+        tier=UserTierEnum.free,
+    )
+    _apply_founding_access(new_user)
+    db.add(new_user)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Concurrent creation with the same email or google_sub lost the race.
+        # Roll back, re-select, and apply the SAME linking policy as path (b).
+        await db.rollback()
+        user = await db.scalar(
+            select(User).where(User.google_sub == google_sub)
+        )
+        if user is not None:
+            if user.deletion_requested_at is not None:
+                raise _DeletionPendingError()
+            return user
+        user = await db.scalar(
+            select(User).where(User.email == email)
+        )
+        if user is None:
+            # Should not happen; surface as an unexpected error.
+            raise
+        return await _resolve_existing_email_user(user, google_sub, db)
+
+    await db.refresh(new_user)
+    return new_user
+
+
+async def _resolve_existing_email_user(
+    user: User, google_sub: str, db: AsyncSession
+) -> User:
+    """
+    Apply the linking policy to an existing row found by email.
+
+    SECURITY (Tier-B review finding): DhanRadar never verifies local emails, so
+    a Google identity for the same address must NOT silently take over a
+    password account — an attacker who controls the address on Google's side
+    (e.g. a Workspace admin for that domain) could otherwise hijack the local
+    account.  Password accounts raise _AccountExistsError; explicit linking can
+    be added later behind a logged-in settings flow.
+    """
+    if user.google_sub is not None and user.google_sub != google_sub:
+        # A different Google account already owns this email row — security event.
+        await record_security_event(
+            event_type="google_sub_conflict",
+            user_id=str(user.id),
+        )
+        raise _SubConflictError()
+    if user.deletion_requested_at is not None:
+        raise _DeletionPendingError()
+    if user.google_sub == google_sub:
+        # Concurrent-creation race: another request already linked this sub.
+        return user
+    if user.hashed_password is not None:
+        raise _AccountExistsError()
+    # Passwordless, unlinked row (not creatable today; future-proof): link it.
+    await db.execute(
+        update(User).where(User.id == user.id).values(google_sub=google_sub)
+    )
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+# ---------------------------------------------------------------------------
+# TOTP standalone login (Feature 2)
+# ---------------------------------------------------------------------------
+
+# Module-level dummy TOTP instance for timing equalisation on unknown-email /
+# not-enrolled paths.  Constructed once at import time.
+_DUMMY_TOTP = pyotp.TOTP(pyotp.random_base32())
+
+# Redis key prefix for per-code replay guard.
+TOTP_USED_KEY_PREFIX = "auth:totp_used:"
+
+# Separate from TOTP_ATTEMPTS_PREFIX (enrolment verify) so an unauthenticated
+# attacker spraying /totp/login cannot lock a victim out of completing
+# enrolment on /totp/verify (cross-surface DoS — Tier-B review finding).
+TOTP_LOGIN_ATTEMPTS_PREFIX = "auth:totp_login_attempts:"
+
+
+async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
+    """
+    Authenticate a user by TOTP code (standalone — not a second factor).
+
+    Security invariants:
+      1. Unknown email, not-enrolled (totp_secret None or totp_verified False),
+         and wrong code are ALL indistinguishable: same generic 401.
+      2. Brute-force lock (≥TOTP_LOCK_LIMIT failed attempts) → generic 401.
+         Deliberately NOT 429 on this unauthenticated surface: a 429 would reveal
+         that the account exists AND is enrolled, leaking information to an
+         attacker.  The per-IP RateLimit dependency on the router already applies
+         its own 429 at the transport level.
+      3. Replay guard: successful codes are SET NX in Redis for 90s; a duplicate
+         use within that window is treated as failure and increments the counter.
+      4. deletion_requested_at → 403 (checked AFTER successful code verify so it
+         is not an enumeration oracle — the caller proved knowledge of the secret).
+    """
+    normalised = email.strip().lower()
+    redis = get_redis()
+
+    user: User | None = await db.scalar(
+        select(User).where(User.email == normalised)
+    )
+
+    # Guard: unknown email, not enrolled (secret absent or not yet verified).
+    # Run dummy verify on every failure path for timing equalisation.
+    if user is None or user.totp_secret is None or not user.totp_verified:
+        _DUMMY_TOTP.verify(code)
+        _raise_invalid_credentials()
+
+    # mypy: user is User here
+    attempts_key = f"{TOTP_LOGIN_ATTEMPTS_PREFIX}{user.id}"  # type: ignore[union-attr]
+
+    # Brute-force lock check.
+    current_attempts = await redis.get(attempts_key)
+    if current_attempts is not None and int(current_attempts) >= TOTP_LOCK_LIMIT:
+        # See docstring: intentionally generic 401, not 429.
+        await record_security_event(
+            event_type="totp_locked",
+            user_id=str(user.id),  # type: ignore[union-attr]
+        )
+        _raise_invalid_credentials()
+
+    # Verify TOTP code (default valid_window=0 — strict).
+    totp = pyotp.TOTP(user.totp_secret)  # type: ignore[union-attr]
+    if not totp.verify(code):
+        count = await redis.incr(attempts_key)
+        if count == 1:
+            await redis.expire(attempts_key, TOTP_LOCK_TTL)
+        _raise_invalid_credentials()
+
+    # Replay guard: SET NX the used code for 90s (one TOTP step + margin).
+    # If the code was already used (SET NX returns falsy) → treat as failure.
+    replay_key = f"{TOTP_USED_KEY_PREFIX}{user.id}:{code}"  # type: ignore[union-attr]
+    placed = await redis.set(replay_key, "1", ex=90, nx=True)
+    if not placed:
+        count = await redis.incr(attempts_key)
+        if count == 1:
+            await redis.expire(attempts_key, TOTP_LOCK_TTL)
+        _raise_invalid_credentials()
+
+    # deletion_requested_at — checked after successful verify (not an enumeration oracle).
+    if user.deletion_requested_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_deletion_pending",
+        )
+
+    # Success — clear failure counter.
+    await redis.delete(attempts_key)
+    return user  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
 # Tier resolution
 # ---------------------------------------------------------------------------
 
@@ -401,7 +633,7 @@ async def resolve_tier_with_db(user_id: str, db: AsyncSession) -> str:
         return cached
 
     # DB read — parameterized ORM
-    user: Optional[User] = await db.scalar(
+    user: User | None = await db.scalar(
         select(User).where(User.id == user_id)
     )
     if user is None:
