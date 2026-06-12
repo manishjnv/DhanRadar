@@ -111,6 +111,18 @@ Renders: confidence band badge · educational drivers · source chips · freshne
 
 Design tokens only (`--dr-*`, `--surface`, `--border`, `--text-*`). No ad-hoc colours.
 
+**Mounted 2026-06-12** (`feat/b60-transparency-mount`) on `/portfolio/[portfolioId]/intelligence`,
+last in the section stack (meta-information after the analysis sections):
+
+- `frontend/src/features/transparency/api.ts` — `usePortfolioTransparency(portfolioId)`
+  (TanStack Query; key from `queryKeys.portfolio.transparency`; same retry/staleTime contract as
+  the changes hook).
+- `frontend/src/features/transparency/TransparencySection.tsx` — fetch wrapper mirroring
+  `WhatChangedSection`: shell renders in ALL non-data states with the panel's surface tokens +
+  the same h2, so geometry and heading level never jump across fetch states. Shell heading
+  margin is 16px (not the panel's subtitle-tight 4px — UI review condition). The wrapper adds
+  no disclosure copy of its own; the panel owns the compliance surface.
+
 ---
 
 ## Compliance invariants enforced
