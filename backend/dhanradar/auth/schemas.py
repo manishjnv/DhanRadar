@@ -34,7 +34,7 @@ class TOTPVerifyRequest(BaseModel):
     code: str = Field(
         min_length=6,
         max_length=8,
-        pattern=r"^\d{6,8}$",
+        pattern=r"^[0-9]{6,8}$",  # ASCII digits only (\d admits Unicode digits)
         description="6-8 digit TOTP code",
     )
 
@@ -48,8 +48,29 @@ class TOTPLoginRequest(BaseModel):
     code: str = Field(
         min_length=6,
         max_length=6,
-        pattern=r"^\d{6}$",
+        pattern=r"^[0-9]{6}$",  # ASCII digits only (\d admits Unicode digits)
         description="6-digit TOTP code",
+    )
+
+
+class EmailOTPRequest(BaseModel):
+    """Request body for POST /auth/email-otp/request."""
+
+    email: EmailStr
+
+
+class EmailOTPLoginRequest(BaseModel):
+    """Request body for POST /auth/email-otp/login."""
+
+    email: EmailStr
+    # Strictly 6 ASCII digits — [0-9] not \d: Python's re matches \d against
+    # Unicode decimal digits (e.g. ١٢٣٤٥٦), which can never verify and would
+    # only burn the user's lockout attempts.
+    code: str = Field(
+        min_length=6,
+        max_length=6,
+        pattern=r"^[0-9]{6}$",
+        description="6-digit email OTP code",
     )
 
 

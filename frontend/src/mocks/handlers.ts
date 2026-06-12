@@ -479,6 +479,47 @@ export const handlers = [
     });
   }),
 
+  // ---------------------------------------------------------------------------
+  // Email OTP — passwordless login via one-time code sent to the user's email.
+  // ---------------------------------------------------------------------------
+
+  // POST /api/v1/auth/email-otp/request — always 202 (enumeration-safe).
+  // Override with server.use() to exercise 503 (unconfigured) or 429.
+  http.post('/api/v1/auth/email-otp/request', async ({ request }) => {
+    // consume body to avoid "unhandled body" warnings in tests
+    await request.json().catch(() => ({}));
+    return HttpResponse.json(
+      { message: 'otp_sent_if_account_exists' },
+      { status: 202 },
+    );
+  }),
+
+  // POST /api/v1/auth/email-otp/login — code '123456' succeeds; anything else
+  // returns a generic 401.  Tests override via server.use() for negative paths.
+  http.post('/api/v1/auth/email-otp/login', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      email?: string;
+      code?: string;
+    };
+    if (body.code !== '123456') {
+      return HttpResponse.json(
+        {
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+          detail: 'invalid_credentials',
+          request_id: 'mock-401',
+        },
+        { status: 401, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    }
+    mockLoggedIn = true;
+    return HttpResponse.json({
+      message: 'login_successful',
+      user: { ...MOCK_USER, email: body.email || MOCK_USER.email },
+    });
+  }),
+
   // POST /api/v1/auth/totp/setup — initiate enrollment; authenticated route.
   // Returns a mock otpauth URI + base32 secret. The secret value is a safe,
   // non-real placeholder — never a real TOTP seed in the mock.
