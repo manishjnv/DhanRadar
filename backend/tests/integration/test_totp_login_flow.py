@@ -154,28 +154,34 @@ async def test_totp_login_brute_force_lock_stays_generic(async_client):
     5 wrong codes lock the account.  The 6th attempt must still return 401
     (not 429) — a 429 on this unauthenticated surface would leak that the
     account exists and is enrolled.
+
+    Each request comes from a DISTINCT IP: the per-account lock (keyed on
+    user.id) is the control under test here, and it only becomes observable to
+    a *distributed* attacker — a single IP would hit the per-IP rate limiter
+    (5/60s) and get a 429 on the 6th request before the account-lock branch
+    runs.  Varying the IP keeps the per-IP limiter under its threshold so the
+    account lock is what answers the 6th attempt.
     """
     email = "totp_lock@example.com"
-    fixed_ip = "203.0.113.10"
-    headers = {"CF-Connecting-IP": fixed_ip}
 
     _, access, refresh = await _signup(async_client, email)
     await _enrol_totp(async_client, access)
     await _logout(async_client, access, refresh)
 
-    for _ in range(5):
+    for i in range(5):
         r = await async_client.post(
             "/api/v1/auth/totp/login",
             json={"email": email, "code": "000000"},
-            headers=headers,
+            headers={"CF-Connecting-IP": f"203.0.113.{10 + i}"},
         )
         assert r.status_code == 401, r.text
 
-    # 6th attempt — account is now locked; must still be 401.
+    # 6th attempt, fresh IP — per-IP limiter is clear, but the account is now
+    # locked; the lock must answer with a generic 401, never a 429.
     locked = await async_client.post(
         "/api/v1/auth/totp/login",
         json={"email": email, "code": "111111"},
-        headers=headers,
+        headers={"CF-Connecting-IP": "203.0.113.99"},
     )
     assert locked.status_code == 401, locked.text
     assert locked.json()["detail"] == "invalid_credentials"

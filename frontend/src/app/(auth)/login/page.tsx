@@ -265,7 +265,6 @@ function LoginForm() {
                 maxLength={6}
                 pattern="\d{6}"
                 placeholder="000000"
-                autoFocus
                 ref={codeInputRef}
                 value={codeValue}
                 onChange={handleCodeChange}
