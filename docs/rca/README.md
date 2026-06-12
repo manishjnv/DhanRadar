@@ -15,6 +15,40 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-12 — B65: CAMS CAS XIRR null — casparser sign convention not normalised at the parse boundary
+
+- **Symptom:** CAMS CAS report shows `xirr_pct: null` despite the statement carrying full
+  transaction history. Observed by the founder during the 2026-06-12 E2E (CAMS
+  `docs/cas_cams.pdf`: 11 funds, value ₹94,767, invested ₹91,812, xirr null). CDSL CAS
+  xirr-null is by design (no txn history) — this is a separate, distinct bug.
+- **Root cause:** `parse_cas` (`backend/dhanradar/mf/cas.py`) did not normalise casparser's
+  statement sign convention to the investor convention its own `ParsedTxn` contract and the
+  `snapshot.xirr()` consumer require. casparser 1.0.1 (`parsers/cams_detailed.py:316-358`
+  `_apply_balance_sign_fix`) delivers CAMS amounts in statement convention — purchases are
+  POSITIVE (sign follows units). The investor convention requires purchases to be negative
+  outflows. Without normalisation, an all-purchase portfolio produces all-positive cash flows;
+  `snapshot.xirr()` (`backend/dhanradar/mf/snapshot.py:76-82`) guards against all-same-sign
+  flows (a degenerate XIRR input) and returns None. Two contributing factors: (1) the unit
+  fixture `test_mf_module.py:29` fed `amount: -4000.0` for a purchase, encoding the
+  developer's assumed convention rather than real casparser output — CI stayed green because
+  the injectable-reader design isolated tests from the real library's semantics; (2) the worker
+  task logged neither txn counts nor the XIRR outcome, so the null was only surfaced by
+  founder eyeball.
+- **Fix:** per-type sign normalisation at the parse boundary in `backend/dhanradar/mf/cas.py`.
+  `_TXN_INFLOW_AS_PRINTED` = DIVIDEND_PAYOUT kept as printed; `_TXN_FLOW_EXCLUDED` =
+  DIVIDEND_REINVEST / SEGREGATION / STT_TAX / STAMP_DUTY_TAX / TDS_TAX / MISC / UNKNOWN
+  excluded from cash flows; everything else (purchases, redemptions, switches) is negated so
+  purchases become outflows and redemptions become inflows; reversal pairs self-cancel; switch
+  pairs cancel at portfolio level. Handles both casparser 1.0 enum members and 0.7.x plain-string
+  types via `getattr(.value)`. Branch: `fix/b65-cams-xirr-sign`.
+- **Prevention:** 7 regression tests including the exact bug repro
+  (`test_b65_all_purchase_portfolio_xirr_computable`) and a `(str, Enum)` type fake that fails
+  a `str()`-based implementation; fixtures migrated to realistic statement convention.
+  Observability closed: `cas.parse` logs excluded txn counts; the worker logs
+  `mf.snapshot.built {funds, cashflows, xirr_computed}` per report build (boolean flag only —
+  DPDP log discipline, no per-user financial values). 790 unit tests green; integration in CI.
+- **Phase/area:** Phase 5 MF module — CAS pipeline / XIRR computation (B65).
+
 ### 2026-06-12 — B62-f1: chip tint invisible — hex-alpha suffix on a CSS var() is invalid CSS
 
 - **Symptom:** "What Changed" panel change-kind chips rendered with no background or border tint

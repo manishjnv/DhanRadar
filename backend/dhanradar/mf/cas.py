@@ -8,19 +8,54 @@ supported (anti-pattern guard); a non-MF CAS yields no MF schemes.
 `casparser` is an optional runtime dependency (installed in the worker image). It
 is injected via `reader=` so this module is unit-testable without the library or
 a real PDF; production passes the real `casparser.read_cas_pdf`.
+
+Transaction amounts are normalized from STATEMENT convention (casparser output,
+where amount sign follows units sign) to INVESTOR convention (outflows negative,
+inflows positive) inside `parse_cas`. All downstream consumers — `ParsedTxn`,
+`snapshot.xirr()` — expect INVESTOR convention. See B65.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 # A reader takes (path, password) and returns the casparser output — a dict
 # (casparser 0.7.x) or a CASData pydantic model (>=1.0); parse_cas normalises both.
 CasReader = Callable[[str, str | None], Any]
+
+
+# ---------------------------------------------------------------------------
+# Transaction sign normalization (B65) — statement → investor convention
+# ---------------------------------------------------------------------------
+# casparser emits CAMS/KFintech detailed-CAS transactions in STATEMENT
+# convention: the amount sign follows the units sign (purchases positive,
+# redemptions negative — casparser cross-checks signs against the running
+# unit-balance column). ParsedTxn and snapshot.xirr() require INVESTOR
+# convention: outflows from the investor's pocket negative, inflows positive.
+# Without this normalization an all-purchase portfolio yields only positive
+# cash flows → xirr() all-same-sign guard → XIRR null (B65).
+#
+#   negate (statement sign follows units; money to/from the fund):
+#     PURCHASE, PURCHASE_SIP, SWITCH_IN(_MERGER), REDEMPTION,
+#     SWITCH_OUT(_MERGER), REVERSAL (reversal pairs then self-cancel)
+#   keep as printed (cash credited to the investor):
+#     DIVIDEND_PAYOUT
+#   excluded from cash flows (no external cash movement, or immaterial
+#   charges that double-count against gross purchase rows):
+#     DIVIDEND_REINVEST, SEGREGATION, STT_TAX, STAMP_DUTY_TAX, TDS_TAX,
+#     MISC, UNKNOWN
+_TXN_INFLOW_AS_PRINTED = frozenset({"DIVIDEND_PAYOUT"})
+_TXN_FLOW_EXCLUDED = frozenset(
+    {"DIVIDEND_REINVEST", "SEGREGATION", "STT_TAX", "STAMP_DUTY_TAX",
+     "TDS_TAX", "MISC", "UNKNOWN"}
+)
 
 
 class CasParseError(Exception):
@@ -30,7 +65,7 @@ class CasParseError(Exception):
 @dataclass(frozen=True)
 class ParsedTxn:
     when: date
-    amount: float  # signed: purchases negative (outflow), redemptions positive
+    amount: float  # signed INVESTOR convention: outflows negative, inflows positive (normalized in parse_cas, B65)
 
 
 @dataclass(frozen=True)
@@ -115,6 +150,7 @@ def parse_cas(
         raw = raw.model_dump(mode="python")
 
     holdings: list[ParsedHolding] = []
+    excluded_txns = 0
     for folio in raw.get("folios", []) or []:
         folio_no = str(folio.get("folio") or "")
         for scheme in folio.get("schemes", []) or []:
@@ -128,7 +164,13 @@ def parse_cas(
                 amt = t.get("amount")
                 if when is None or amt is None:
                     continue
-                txns.append(ParsedTxn(when=when, amount=float(amt)))
+                ttype_raw = t.get("type")
+                ttype = str(getattr(ttype_raw, "value", ttype_raw) or "").upper()
+                if ttype in _TXN_FLOW_EXCLUDED:
+                    excluded_txns += 1
+                    continue
+                amount = float(amt) if ttype in _TXN_INFLOW_AS_PRINTED else -float(amt)
+                txns.append(ParsedTxn(when=when, amount=amount))
             holdings.append(
                 ParsedHolding(
                     isin=isin,
@@ -143,6 +185,11 @@ def parse_cas(
                     txns=txns,
                 )
             )
+
+    if excluded_txns:
+        logger.info(
+            "cas.parse: excluded %d non-cashflow txns (tax/reinvest/misc)", excluded_txns
+        )
 
     # casparser 1.1.0 CDSL CAS: holdings are under accounts[].mutual_funds[]
     # (distinct from the folios[] structure used by CAMS/KFintech CAS).
