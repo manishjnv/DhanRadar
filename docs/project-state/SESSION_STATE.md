@@ -1,10 +1,41 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (B37 RESOLVED — nightly backup cron live on KVM4 + first validated
-restore drills PASS ×2; RPO ≤24h / prod RTO ≤15min drill-backed. PR #111 `95013ac`, CI pending)
+**Last updated:** 2026-06-13 (B65 RESOLVED — CAMS CAS XIRR-null sign-convention fix merged #109
+`412f126` + DEPLOYED; ledger signed; founder live-proof pending)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B65 RESOLVED — CAMS CAS XIRR null (sign-convention fix) — merged + DEPLOYED (2026-06-13)
+
+PR #109 (`fix/b65-cams-xirr-sign`, head `a5a6af7`) squash-merged as `412f126`. Built by the
+2026-06-12 session; completed this session (gates + Architect review + merge + deploy) on the
+operator's "complete b65" instruction.
+
+- **Fix:** per-type sign normalization at the `parse_cas` boundary
+  (`backend/dhanradar/mf/cas.py`) — casparser statement convention → investor convention;
+  DIVIDEND_PAYOUT kept as printed; tax/reinvest/misc excluded; everything else negated. Worker
+  now logs `mf.snapshot.built {funds, cashflows, xirr_computed}` (boolean only, DPDP discipline).
+- **Gates:** CI run 27420947600 green (790 unit + integration, guards, migrations, frontend);
+  lint red = pre-existing I001 debt only (none of the PR's files among the 52 locations).
+- **Architect (independent Sonnet):** ACCEPT — casparser 1.0.1 enum names verified exactly
+  (`DIVIDEND_REINVEST` at `enums.py:48`); CDSL path unaffected; lane clean; 2 NITs accepted.
+  Ledger: `reviews/b65-cams-xirr-sign.md`.
+- **Deploy:** box pre-verified at `3fae69b` clean/healthy → `scripts/deploy.sh deploy` → smoke
+  `/api/v1/health` 200; box at `412f126`; alembic `0018` unchanged; `_TXN_FLOW_EXCLUDED`
+  grep-verified in the deployed celery-batch image.
+- **Open:** founder live-proof — re-upload the CAMS CAS PDF, confirm `xirr_pct` non-null
+  (worker log `mf.snapshot.built xirr_computed=true`). Residual (LOW): casparser drift
+  sentinel (tracked in the B65 row).
+
+### Agent-utilization & routing telemetry (2026-06-13 B65 session)
+
+- **Opus (Fable, Tier 0):** governance gate, evidence verification, merge, deploy +
+  verification, docs review/landing.
+- **Sonnet (Tier 1):** B65 architect review · reworked: N | B65 closing-docs draft ·
+  reworked: Y (Opus corrected lane-file list + lint wording, trimmed BLOCKERS cell).
+- **Haiku (Tier 3):** n/a — no bulk sweeps.
+- **codex:rescue:** n/a — Tier A change; account not entitled (standing memory).
 
 ## B37 RESOLVED — nightly backup cron + validated restore drills (2026-06-12 evening, PR #111)
 
