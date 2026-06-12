@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
     # ------------------------------------------------------------------
+    # Google SSO (OAuth 2.0 authorization-code + PKCE)
+    # All three must be set for SSO to be active; any absent → 503.
+    # ------------------------------------------------------------------
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
+
+    # ------------------------------------------------------------------
     # Internal service auth (server-to-server)
     # ------------------------------------------------------------------
     # Shared secret for the internal numeric endpoints (e.g. /internal/v1/score).

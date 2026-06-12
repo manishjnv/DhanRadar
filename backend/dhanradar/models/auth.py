@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -25,11 +24,11 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from dhanradar.models.base import Base
-
 
 # ---------------------------------------------------------------------------
 # Postgres ENUM — auth.user_tier
@@ -73,7 +72,8 @@ class User(Base):
     # UNIQUE constraint is created in the migration.
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
-    hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nullable for SSO-only accounts (Google SSO users have no password).
+    hashed_password: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tier: Mapped[UserTierEnum] = mapped_column(
         _user_tier_pg,
@@ -81,28 +81,32 @@ class User(Base):
         server_default="free",
     )
 
+    # Google SSO — the opaque subject identifier from Google's id_token.
+    # Null for password-only accounts; unique across all rows.
+    google_sub: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+
     # TOTP — secret stored as plain text for now.
     # TODO Phase: encrypt totp_secret at rest (e.g. via Fernet with a KMS-backed key).
-    totp_secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     totp_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     # Risk profile — sole writer is the Onboarding module (later phase).
-    risk_profile: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risk_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # DPDP / consent fields — managed by the Consent module (later phase).
-    dpdp_consent_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dpdp_consent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     dpdp_consents: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
 
-    deletion_requested_at: Mapped[Optional[datetime]] = mapped_column(
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     # PHASE 5M tiering — Plus time-window grant + one-time AI-commentary taster.
-    pro_access_until: Mapped[Optional[datetime]] = mapped_column(
+    pro_access_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    pro_access_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ai_taster_used_at: Mapped[Optional[datetime]] = mapped_column(
+    pro_access_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_taster_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
@@ -147,7 +151,7 @@ class Subscription(Base):
         nullable=False,
     )
 
-    razorpay_subscription_id: Mapped[Optional[str]] = mapped_column(
+    razorpay_subscription_id: Mapped[str | None] = mapped_column(
         Text, nullable=True, unique=True
     )
 
@@ -155,15 +159,15 @@ class Subscription(Base):
     plan: Mapped[str] = mapped_column(Text, nullable=False)
     # Transitional FK into the billing.plans catalog (D4). Nullable while the
     # catalog is populated; `plan` stays the source of truth until cutover.
-    plan_id: Mapped[Optional[str]] = mapped_column(
+    plan_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("billing.plans.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
 
-    current_period_start: Mapped[Optional[datetime]] = mapped_column(
+    current_period_start: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    current_period_end: Mapped[Optional[datetime]] = mapped_column(
+    current_period_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
