@@ -275,3 +275,37 @@ async def test_cohort_peer_load_is_chunked_and_equivalent(monkeypatch):
     assert batches == [len(peers)]  # one-shot control loaded everything at once
 
     assert chunked == oneshot  # identical math either way
+
+
+# --- B58-f2: hoisted context build + pure lookup == one-call compute ----------
+async def test_hoisted_context_lookup_matches_compute_cohort(monkeypatch):
+    # The monthly rescore builds ONE _CohortContext per run and derives each
+    # portfolio's label inputs by pure lookup; the result must be identical to
+    # the single-call _compute_cohort path (which the CAS upload still uses).
+    from dhanradar.tasks import mf as tasks_mf
+
+    peers = [f"INF{i:04d}" for i in range(7)]
+    cat_rows = [(peers[0], "equity_mid")]
+    peer_rows = [(i, "equity_mid") for i in peers]
+    series = {
+        i: _daily_series(start_nav=100.0, daily_growth_pct=0.02 + 0.005 * k, days=400, end=_AS_OF)
+        for k, i in enumerate(peers)
+    }
+
+    async def _fake_load(db, isins, lookback_days=400):
+        return {i: series[i] for i in isins}, {}
+
+    monkeypatch.setattr(tasks_mf, "_load_nav_series", _fake_load)
+
+    direct = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
+    ctx = await tasks_mf._build_cohort_context(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
+    hoisted = tasks_mf._relative_from_context(ctx, [peers[0]])
+    assert direct  # non-empty — the comparison is real, not vacuous
+    assert hoisted == direct
+
+    # An ISIN unknown at build time is simply absent from the lookup result —
+    # the downstream honest fail-safe (no category red flag → on_track).
+    assert "INF_UNSEEN" not in tasks_mf._relative_from_context(ctx, ["INF_UNSEEN", peers[0]])
+
+    # Empty targets short-circuit to the shared empty context.
+    assert await tasks_mf._build_cohort_context(_FakeDb([], []), []) is tasks_mf._EMPTY_COHORT_CONTEXT
