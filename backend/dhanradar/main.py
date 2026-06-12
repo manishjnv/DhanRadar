@@ -36,6 +36,7 @@ from dhanradar.insights.router import router as insights_router
 from dhanradar.changes.router import router as changes_router
 from dhanradar.transparency.router import router as transparency_router
 from dhanradar.news.router import router as news_router
+from dhanradar.news.admin_router import router as news_admin_router
 from dhanradar.notifications.router import router as notifications_router
 from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
 from dhanradar.onboarding.router import router as onboarding_router
@@ -128,6 +129,7 @@ app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile 
 app.include_router(dashboard_router, prefix="/api/v1")  # B56 — home dashboard reads (portfolio summary / indices / top-scored)
 app.include_router(education_router, prefix="/api/v1")  # G8 — public tax-education (anonymous-read, crawlable)
 app.include_router(news_router, prefix="/api/v1")  # B56 — curated headline metadata (anonymous-read)
+app.include_router(news_admin_router, prefix="/api/v1")  # B56-f4 — admin news CRUD ops workflow (RequireAdmin-gated)
 app.include_router(insights_router, prefix="/api/v1")  # Plan Group 3 — portfolio intelligence (overlap + concentration)
 app.include_router(transparency_router, prefix="/api/v1")  # Plan Group 9 — data transparency + explainability (PU2)
 app.include_router(changes_router, prefix="/api/v1")  # Plan Group 2 — What Changed explainability (read-only)
