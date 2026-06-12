@@ -29,6 +29,47 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
   suffix is appended to the interpolated color and that `color-mix` is present. jsdom cannot catch
   this at render time — its CSS parser drops both the broken and the fixed value.
 - **Phase/area:** frontend / What Changed explainability (Plan Group 2, B62).
+### 2026-06-12 — restore.sh lacked TimescaleDB pre/post-restore wrappers (latent restore-failure bug)
+
+- **Symptom:** latent — never bit in production. Found during B37 drill implementation when
+  reviewing the restore path against TimescaleDB docs. A plain `pg_restore` on a TimescaleDB
+  database without `timescaledb_pre_restore()` / `timescaledb_post_restore()` wrappers causes
+  hypertable chunk catalog restore failures and leaves the database with
+  `timescaledb.restoring=on` (unusable until `post_restore` is called manually).
+- **Root cause:** `restore.sh` was written with a vanilla `pg_restore` call. The
+  `timescaledb_pre_restore` / `timescaledb_post_restore` wrapper requirement is specific to
+  TimescaleDB and is not part of the standard `pg_restore` documentation; it was not added
+  when the script was first written.
+- **Fix:** `scripts/restore.sh` lines 210–229 — `timescaledb_pre_restore()` is called before
+  `pg_restore`; `timescaledb_post_restore()` runs unconditionally after (even when `pg_restore`
+  exits non-zero) so the database is never left in restoring mode. `scripts/restore-drill.sh`
+  lines 178–193 uses the same sequence. The 2026-06-12 restore drill ran both wrappers with
+  `--exit-on-error` clean (PASS).
+- **Prevention:** the quarterly restore drill exercises the real restore path end-to-end,
+  including the TimescaleDB wrappers — a regression here would surface as a drill FAIL before
+  it could affect production. Record is in `docs/ops/restore-drill-log.md`.
+- **Phase/area:** infra / B37 backup-restore — `scripts/restore.sh`, `scripts/restore-drill.sh`.
+
+### 2026-06-12 — MANIFEST alembic_rev always recorded as "unavailable"
+
+- **Symptom:** every backup MANIFEST generated before 2026-06-12 recorded
+  `alembic_rev=unavailable`. The field appeared to run successfully (no error logged) but
+  produced no revision string.
+- **Root cause:** `backup.sh` ran bare `alembic current` inside `docker compose run`. The
+  `alembic` console script does not add the working directory (`/app`) to `sys.path`, so
+  `env.py`'s `from dhanradar import ...` import raised `ModuleNotFoundError` on every
+  invocation. The error was silently swallowed by `2>/dev/null` and the fallback
+  `|| echo "unavailable"` fired, making every MANIFEST look like it succeeded.
+- **Fix:** `scripts/backup.sh` line 147 — changed to `python -m alembic current`. The
+  `-m` invocation adds CWD to `sys.path`, matching the pattern already used in `deploy.sh`.
+  The 2026-06-12 drill restored the last pre-fix backup (stamp `20260612171924`, MANIFEST
+  still saying `unavailable`); the restored alembic revision was verified directly instead
+  (`0018`). MANIFESTs record the real revision from the next nightly run onward.
+- **Prevention:** the quarterly restore drill verifies the restored alembic revision against
+  a known head, which catches any future MANIFEST field failures. The fix mirrors the
+  standing rule from the 2026-06-08 first-deploy RCA: always invoke Python entry points
+  as `python -m <tool>` in containerised environments where CWD must be importable.
+- **Phase/area:** infra / B37 backup MANIFEST — `scripts/backup.sh` line 147.
 
 ### 2026-06-11 — Every 2nd+ CAS upload in a worker child fails: Redis singleton bound to a closed event loop
 

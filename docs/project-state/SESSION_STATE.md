@@ -1,11 +1,55 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-12 (Email OTP login DEPLOYED LIVE — merge `ad1657f`, smoke 202/401;
-**v1.1 registry ACTIVATED** at this deploy, row `a7aa1e86`, two_person_ok — the #100 binding
-condition is closed)
+**Last updated:** 2026-06-12 (B37 RESOLVED — nightly backup cron live on KVM4 + first validated
+restore drills PASS ×2; RPO ≤24h / prod RTO ≤15min drill-backed. PR #111 `95013ac`, CI pending)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B37 RESOLVED — nightly backup cron + validated restore drills (2026-06-12 evening, PR #111)
+
+Branch `feat/b37-backup-cron-drill` (commit `95013ac`, rebased onto `dad722a`), CI pending at
+session exit.
+
+- **Cron + scripts:** host cron 21:30 UTC (03:00 IST, after compliance beats) + flock guard,
+  verified on the box; aws CLI v2 relocated from repo checkout to a dhanradar-scoped tools dir
+  (prod checkout clean). Fresh live backup stamp `20260612171924` (43.6 MB) to new `backups/`
+  R2 prefix.
+- **Restore drills:** `scripts/restore-drill.sh` — isolated `dhanradar-drill` compose-project;
+  two live drills **PASS** (28 s pre-hardening; 44 s with hardened scripts). Restored: alembic
+  `0018`, 6 users, 41 audit rows, 5,954,403 NAV rows.
+- **Bug fixes (RCAs logged):** MANIFEST `alembic_rev` always "unavailable" (bare `alembic` →
+  `python -m alembic`, `backup.sh`); `restore.sh` latent TimescaleDB pre/post_restore gap.
+- **Tier-B inline reviews (load-bearing):** Security (Sonnet adversarial takeover, codex n/a)
+  **ACCEPT-W/C** — 3 BLOCKERs closed in-session (empty-MANIFEST bypass, sha256=absent bypass,
+  cp --recursive key-derived path traversal — closed via per-object named fetches, stronger than
+  proposed). Compliance **ACCEPT-W/C** — residency overclaims target-qualified, 2026-06-12
+  risk-acceptance sentence added. Ledger: `reviews/b37-backup-cron-drill.md`.
+- **Docs:** backup-restore-runbook reconciled as canon; `backup-and-restore.md` marked alternate;
+  `restore-drill-log.md` created; RPO/RTO statement added; BLOCKERS B37 → RESOLVED, B34 annotated
+  (R2 bucket hint APAC; no India jurisdiction today — operator/counsel decision).
+- **Open after this session:** R2 lifecycle rule (S3 token AccessDenied — operator dashboard
+  action); B37-f1 LOW backup-failure alerting; B34 residency decision; quarterly drill due
+  2026-09; box pulls main after PR #111 merges (cron then runs canonical scripts; tonight's
+  21:30 UTC run uses pre-merge box script — harmless, root-prefix upload).
+
+### Agent-utilization & routing telemetry (B37 session)
+
+- **Opus (Fable 5, main):** orchestration; load-bearing script authoring + Tier-B condition
+  fixes; Phase-3 diff critiques; rebase conflict resolution; review ledger typed on Opus
+  (deliberate deviation from cheap-tier doc drafting — verdict fidelity in the review-of-record).
+- **Sonnet (Tier 1):** warm-start brief · ops-docs 5-file draft · Security adversarial review ·
+  Compliance review (4 delegations).
+- **Haiku (Tier 3):** n/a — no bulk sweeps this session.
+- **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover per standing
+  fallback.
+- warm-start · B37 orientation brief · reworked: N
+- sonnet · ops-docs draft (5 files) · reworked: Y (RCA contradictory sentence + drill-log
+  PASS-criteria overpromise corrected by Opus)
+- sonnet · SESSION_STATE draft · reworked: Y (false self-referential routing-violation note fixed)
+- sonnet · security adversarial review · reworked: N (verdict adopted; Opus strengthened fix #3
+  beyond proposal)
+- sonnet · compliance review · reworked: N
 
 ## EMAIL OTP LOGIN — 4th login method (2026-06-12, ADR-0031)
 

@@ -96,25 +96,43 @@ else
   _assert_var R2_ENDPOINT
 
   RESTORE_DIR="$(mktemp -d /tmp/dhanradar-restore-XXXXXX)"
-  R2_SRC="s3://${R2_BACKUP_BUCKET}/${BACKUP_ARG}/"
+  # A bare UTC stamp resolves under the backups/ prefix (see backup.sh §6).
+  # An argument containing "/" is used verbatim (explicit prefix). The single
+  # legacy root-level backup (20260611111632, pre-prefix) is restorable via
+  # its local copy under /var/backups/dhanradar/ using the local-path form.
+  BACKUP_ARG="${BACKUP_ARG%/}"
+  if [[ "${BACKUP_ARG}" == */* ]]; then
+    R2_SRC="s3://${R2_BACKUP_BUCKET}/${BACKUP_ARG}/"
+  else
+    R2_SRC="s3://${R2_BACKUP_BUCKET}/backups/${BACKUP_ARG}/"
+  fi
 
   log "Downloading backup from R2: ${R2_SRC} → ${RESTORE_DIR} ..."
   # R2 creds via a private temp credentials file (chmod 600), not inline env
   # vars, so they never appear in the aws process's /proc/<pid>/environ.
+  # The trap is registered BEFORE the secret is written so no failure window
+  # can leave the file behind.
   R2_CRED_FILE="$(mktemp)"
-  chmod 600 "${R2_CRED_FILE}"
   trap 'rm -f "${R2_CRED_FILE}"' EXIT
+  chmod 600 "${R2_CRED_FILE}"
   printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
     "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${R2_CRED_FILE}"
 
-  AWS_SHARED_CREDENTIALS_FILE="${R2_CRED_FILE}" AWS_PROFILE=default \
-    aws s3 cp \
-      --recursive \
-      "${R2_SRC}" \
-      "${RESTORE_DIR}/" \
-      --endpoint-url "${R2_ENDPOINT}" \
-      --no-progress \
-    || die "R2 download failed. Check prefix and credentials."
+  # Fetch each expected artifact BY NAME — never `cp --recursive`: S3 object
+  # keys may legally contain "/" or "..", and a recursive copy plants
+  # key-derived paths relative to (or outside) RESTORE_DIR as root. Explicit
+  # per-object destinations make key-based path traversal impossible
+  # regardless of CLI behaviour. (Tier-B security review, 2026-06-12.)
+  _r2_get() {
+    AWS_SHARED_CREDENTIALS_FILE="${R2_CRED_FILE}" AWS_PROFILE=default \
+      aws s3 cp "${R2_SRC}$1" "${RESTORE_DIR}/$1" \
+        --endpoint-url "${R2_ENDPOINT}" \
+        --no-progress
+  }
+  _r2_get "MANIFEST" || die "R2 download failed for MANIFEST. Check prefix and credentials."
+  _r2_get "db.dump"  || die "R2 download failed for db.dump. Check prefix and credentials."
+  _r2_get "redis-dump.rdb"          || warn "redis-dump.rdb not fetched (may be absent at source) — continuing."
+  _r2_get "redis-appendonly.tar.gz" || warn "redis-appendonly.tar.gz not fetched (may be absent at source) — continuing."
 
   rm -f "${R2_CRED_FILE}"
   trap - EXIT
@@ -130,6 +148,7 @@ log "Verifying MANIFEST checksums ..."
 
 # Read each file=... line and compare sha256.
 checksum_ok=true
+db_dump_verified=false
 while IFS= read -r line; do
   if [[ "${line}" =~ ^file=([^[:space:]]+)[[:space:]]+size=[^[:space:]]+[[:space:]]+sha256=([^[:space:]]+) ]]; then
     fname="${BASH_REMATCH[1]}"
@@ -144,6 +163,12 @@ while IFS= read -r line; do
     fpath="${RESTORE_DIR}/${fname}"
 
     if [[ "${expected_sha}" == "absent" ]]; then
+      # "absent" means the artifact was NOT produced at backup time. If a file
+      # by that name nonetheless exists here, someone planted it — a crafted
+      # MANIFEST must not be able to skip verification of a present file.
+      if [[ -f "${fpath}" ]]; then
+        die "MANIFEST marks ${fname} absent-at-backup-time but the file IS present — refusing (possible tampering)."
+      fi
       warn "Artifact ${fname} was absent at backup time — skipping checksum."
       continue
     fi
@@ -159,11 +184,19 @@ while IFS= read -r line; do
       die "Checksum MISMATCH for ${fname}: expected=${expected_sha} actual=${actual_sha}. Aborting restore — backup may be corrupt."
     fi
     log "  OK  ${fname} (sha256 verified)"
+    if [[ "${fname}" == "db.dump" ]]; then
+      db_dump_verified=true
+    fi
   fi
 done < "${MANIFEST}"
 
 if [[ "${checksum_ok}" != "true" ]]; then
   die "One or more artifact checksum failures. Restore aborted."
+fi
+# A MANIFEST with zero file= lines (or with db.dump stripped) must never pass:
+# verification is only meaningful if the artifact we restore was verified.
+if [[ "${db_dump_verified}" != "true" ]]; then
+  die "MANIFEST contained no verified db.dump entry — refusing (empty or stripped MANIFEST; possible tampering)."
 fi
 log "All checksums verified."
 
@@ -191,6 +224,18 @@ DB_DUMP="${RESTORE_DIR}/db.dump"
 [[ -f "${DB_DUMP}" ]] || die "db.dump not found in restore dir."
 
 log "Restoring Postgres from db.dump (--clean --if-exists) ..."
+
+# TimescaleDB: the hypertable catalog must be put into restoring mode around
+# pg_restore (timescaledb_pre_restore / timescaledb_post_restore), or restoring
+# chunk catalogs fails. post_restore MUST run even when pg_restore fails —
+# otherwise the database is left with timescaledb.restoring=on and is unusable.
+docker compose exec -T dhanradar-postgres \
+  psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+  -c "CREATE EXTENSION IF NOT EXISTS timescaledb; SELECT timescaledb_pre_restore();" \
+  > /dev/null \
+  || die "timescaledb_pre_restore failed — aborting before pg_restore."
+
+restore_rc=0
 docker compose exec -T dhanradar-postgres \
   pg_restore \
     -U dhanradar \
@@ -199,7 +244,17 @@ docker compose exec -T dhanradar-postgres \
     --if-exists \
     --exit-on-error \
   < "${DB_DUMP}" \
-  || die "pg_restore failed. Check the error above. The database may be in a partially restored state."
+  || restore_rc=$?
+
+docker compose exec -T dhanradar-postgres \
+  psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+  -c "SELECT timescaledb_post_restore();" \
+  > /dev/null \
+  || warn "timescaledb_post_restore FAILED — run it manually before serving traffic: SELECT timescaledb_post_restore();"
+
+if (( restore_rc != 0 )); then
+  die "pg_restore failed (exit ${restore_rc}). Check the error above. The database may be in a partially restored state."
+fi
 
 log "Postgres restore complete."
 
