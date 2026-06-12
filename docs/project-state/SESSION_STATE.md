@@ -50,6 +50,7 @@ text link). Amends the ui-system OTP-first IGNORE scope as an OPT-IN alternative
 - **Haiku (Tier 3):** n/a — no fan-out reads needed.
 - **codex:rescue:** n/a — unavailable on this account; Sonnet adversarial takeover substituted
   (verdict REVISE → ACCEPT; 2 MAJOR found and fixed pre-merge).
+
 ## FRONTEND FUNCTIONALITY SWEEP — B62-f2 / B62-f1 / B60 MOUNT ALL MERGED (2026-06-12 afternoon)
 
 Founder asked for the three open frontend functionality items, one by one. All three are on main:
