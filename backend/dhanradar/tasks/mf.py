@@ -218,7 +218,17 @@ async def _run_pipeline(
         # table can emit in_form/off_track, not only on_track/insufficient_data.
         cohort = await _compute_cohort(db, [p.isin for p in parsed])
 
-        snap = build_snapshot(parsed_to_snapshot_holdings(parsed, nav_map=latest_nav))
+        snapshot_holdings = parsed_to_snapshot_holdings(parsed, nav_map=latest_nav)
+        snap = build_snapshot(snapshot_holdings)
+        # B65 observability: an uncomputable XIRR must be visible in worker logs,
+        # not discovered by eyeball in a report. Log the boolean only — a user's
+        # XIRR value is personal financial data (DPDP log discipline).
+        _slog.info(
+            "mf.snapshot.built",
+            funds=len(parsed),
+            cashflows=sum(len(h.cashflows) for h in snapshot_holdings),
+            xirr_computed=snap.xirr_pct is not None,
+        )
 
         from dhanradar.compliance import service as compliance_service
 
