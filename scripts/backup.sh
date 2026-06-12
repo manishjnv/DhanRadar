@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/backup.sh — Nightly backup of DhanRadar Postgres + Redis to Cloudflare R2 (India).
+# scripts/backup.sh — Nightly backup of DhanRadar Postgres + Redis to Cloudflare R2
+# (target: India-resident bucket; residency NOT yet verified — see B34 in BLOCKERS.md).
 #
 # REQUIREMENTS
 #   - Run from the repo root (docker-compose.yml must exist in CWD).
@@ -140,10 +141,14 @@ MANIFEST="${WORK_DIR}/MANIFEST"
 GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
 
 # Best-effort: alembic current (needs dhanradar-fastapi service image).
+# MUST be `python -m alembic`, not bare `alembic`: the console script does not
+# put CWD (/app) on sys.path, so env.py's `from dhanradar...` import fails
+# (found 2026-06-12 — every prior MANIFEST recorded alembic_rev=unavailable).
 ALEMBIC_REV="$(docker compose run --rm --quiet dhanradar-fastapi \
-  alembic current 2>/dev/null \
+  python -m alembic current 2>/dev/null \
   | grep -oE '^[a-f0-9]+' | head -1 \
   || echo "unavailable")"
+[[ -n "${ALEMBIC_REV}" ]] || ALEMBIC_REV="unavailable"
 
 sha256_of() {
   local f="$1"
@@ -168,17 +173,21 @@ log "MANIFEST written."
 
 # ── 6. Upload to R2 ──────────────────────────────────────────────────────────
 
-R2_PREFIX="${UTC_STAMP}"
+# Backups live under the backups/ prefix: the bucket is shared with app assets,
+# and the R2 lifecycle rule (7-yr retention, B37) is scoped to this prefix so it
+# can never expire asset objects. Root-level stamps (pre-2026-06-12) are legacy.
+R2_PREFIX="backups/${UTC_STAMP}"
 R2_DEST="s3://${R2_BACKUP_BUCKET}/${R2_PREFIX}/"
 
 log "Uploading backup to R2: ${R2_DEST} ..."
 
 # R2 creds go in a private temp credentials file (chmod 600) rather than inline
 # env vars, so they never appear in the aws process's /proc/<pid>/environ
-# (readable by same-UID/root processes on the shared KVM4 box).
+# (readable by same-UID/root processes on the shared KVM4 box). The trap is
+# registered BEFORE the secret is written so no failure window leaks the file.
 R2_CRED_FILE="$(mktemp)"
-chmod 600 "${R2_CRED_FILE}"
 trap 'rm -f "${R2_CRED_FILE}"' EXIT
+chmod 600 "${R2_CRED_FILE}"
 printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
   "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${R2_CRED_FILE}"
 

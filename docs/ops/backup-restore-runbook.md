@@ -3,7 +3,8 @@
 ## Purpose and data-residency requirement
 
 This runbook covers nightly backup of the DhanRadar TimescaleDB Postgres database and
-Redis instance to Cloudflare R2 (India-resident), plus the verified restore procedure.
+Redis instance to Cloudflare R2 (target: India-resident — see the verified-state note
+below), plus the verified restore procedure.
 
 **Data-residency is a hard requirement.** The backup bucket MUST be created with
 `"jurisdiction": "in"` (Cloudflare India region). This satisfies:
@@ -15,6 +16,17 @@ Redis instance to Cloudflare R2 (India-resident), plus the verified restore proc
 The bucket jurisdiction cannot be changed after creation. See
 [docs/ops/b25-b34-infra-verification.md](b25-b34-infra-verification.md) for the exact
 verification steps and Cloudflare API call to create a correctly scoped bucket.
+
+**Verified state (2026-06-12):** `get-bucket-location` returned an APAC hint. Cloudflare
+R2 currently offers no India jurisdiction option (available jurisdictions: EU, FedRAMP only).
+The `"jurisdiction": "in"` requirement above is not yet satisfiable as-written. An
+operator/counsel decision is required under **B34** before compliance-archival or backups
+of user data are declared residency-compliant. Do NOT delete or soften the requirement
+above — it remains the target; only the verification status is being annotated here.
+The decision to run nightly backups before residency is verified was made 2026-06-12 (the
+B37 escalation: "wire the cron NOW" after the SEV1 total-data-loss event) — a deliberate
+risk acceptance that data-loss risk outweighs the unresolved residency question, pending
+formal operator/counsel review under B34.
 
 ---
 
@@ -58,13 +70,27 @@ event for user or audit data.
 
 ## Schedule
 
-Add to the KVM4 host crontab (run as the user owning the repo checkout):
+The KVM4 host crontab entry is **installed and verified** (2026-06-12). Run as the user
+owning the repo checkout:
 
 ```cron
-15 19 * * * cd /path/to/dhanradar && bash scripts/backup.sh >> /var/log/dhanradar-backup.log 2>&1
+30 21 * * * cd <DHANRADAR-REPO-PATH> && PATH=<DHANRADAR-TOOLS>/bin:/usr/bin:/bin flock -n /var/lock/dhanradar-backup.lock bash scripts/backup.sh >> /var/log/dhanradar-backup.log 2>&1
 ```
 
-`19:15 UTC` = `00:45 IST`, which is after midnight IST and well outside peak traffic.
+`21:30 UTC` = `03:00 IST` — chosen so the backup runs after the two nightly compliance beat
+jobs: `archive_audit_daily` at `02:00 IST` and `reconcile_audit_disclaimers` at `02:30 IST`.
+This ensures the audit trail written by those jobs is included in the same nightly snapshot.
+
+The `flock -n` guard prevents a second backup from starting if a prior run is still in
+progress (e.g. a slow R2 upload on a large dump). If the lock is held the new invocation
+exits immediately and logs nothing — check `/var/log/dhanradar-backup.log` if a run appears
+to have been skipped.
+
+The `aws` CLI (v2) used by `backup.sh` lives in a DhanRadar-scoped tools directory outside
+the repo checkout. Its real path is in `docs/infra-notes.md` (local-only, never committed).
+The `PATH=<DHANRADAR-TOOLS>/bin:…` prefix in the cron line makes it available without
+modifying the system PATH. Replace `<DHANRADAR-REPO-PATH>` and `<DHANRADAR-TOOLS>` with
+the real values from `docs/infra-notes.md`.
 
 Alternatively, use a systemd timer for more robust failure handling and logging:
 
@@ -74,7 +100,7 @@ Alternatively, use a systemd timer for more robust failure handling and logging:
 Description=DhanRadar nightly backup timer
 
 [Timer]
-OnCalendar=*-*-* 19:15:00 UTC
+OnCalendar=*-*-* 21:30:00 UTC
 Persistent=true
 
 [Install]
@@ -101,26 +127,62 @@ Enable with: `systemctl enable --now dhanradar-backup.timer`
 
 ## Storage and residency
 
+### Object prefix layout
+
+Backups are uploaded under the `backups/<UTC_STAMP>/` prefix inside the R2 bucket, e.g.:
+
+```
+backups/20260612171924/db.dump
+backups/20260612171924/redis-dump.rdb
+backups/20260612171924/redis-appendonly.tar.gz
+backups/20260612171924/MANIFEST
+```
+
+The bucket is shared with other app assets. Using a `backups/` prefix keeps backup objects
+in a distinct namespace so the lifecycle rule (see below) can be scoped to `backups/` only
+and can never accidentally expire app assets.
+
+**Legacy note:** one root-level backup exists from the pre-prefix era (stamp
+`20260611111632`). It is NOT addressable via the current `restore.sh` R2 path form (which
+now prepends `backups/`). It can still be restored using `restore.sh`'s local-path form if
+the corresponding directory exists under `/var/backups/dhanradar/` on the KVM4 host:
+
+```bash
+CONFIRM_RESTORE=1 bash scripts/restore.sh /var/backups/dhanradar/20260611111632
+```
+
 ### R2 bucket requirements
 
-- **Jurisdiction**: `"in"` (India). Verified via the Cloudflare dashboard or the API call
-  documented in [docs/ops/b25-b34-infra-verification.md](b25-b34-infra-verification.md).
+- **Jurisdiction**: `"in"` (India). See residency note in the Purpose section above and
+  B34 for the current verified state.
 - **Lifecycle rule — 7-year retention for audit trail**: Configure an R2 lifecycle rule to
-  retain objects in this bucket for at least 7 years (2,557 days). This is a deploy-time
-  infra action in the Cloudflare dashboard; the backup script does not set lifecycle rules.
+  retain objects for at least 7 years (≥ 2,557 days), scoped to the `backups/` prefix
+  **only**. This is an operator action in the Cloudflare dashboard; the S3 API token
+  (Object Read & Write only) gets `AccessDenied` on `GetBucketLifecycleConfiguration` /
+  `PutBucketLifecycleConfiguration` — verified 2026-06-12. The rule must be set manually
+  by an operator with account-level R2 admin access.
 
-Example lifecycle rule via Cloudflare API:
+  **Important:** with no expiration rule in place, objects are retained indefinitely.
+  Indefinite retention satisfies the ≥ 7-year floor — the lifecycle rule is cost hygiene
+  (pruning very old backups), not the compliance control. Until the rule is set, the
+  retention requirement is met by the absence of any expiration, not violated by it.
+
+  Scope the rule to prefix `backups/` **only** — never to the whole bucket, which would
+  risk expiring app assets stored at other prefixes.
+
+Example lifecycle rule (operator runs this in the Cloudflare dashboard or via an
+account-admin token — NOT the backup script's Object Read & Write token):
 
 ```bash
 curl -s -X PUT \
   "https://api.cloudflare.com/client/v4/accounts/${R2_ACCOUNT_ID}/r2/buckets/${R2_BACKUP_BUCKET}/lifecycle" \
-  -H "Authorization: Bearer <R2_API_TOKEN>" \
+  -H "Authorization: Bearer <R2_ADMIN_API_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "rules": [{
       "id": "7yr-audit-retention",
       "status": "Enabled",
-      "filter": { "prefix": "" },
+      "filter": { "prefix": "backups/" },
       "expiration": { "days": 2557 }
     }]
   }'
@@ -152,7 +214,7 @@ All secrets come from the root `.env` file (gitignored). Never commit secrets.
 | `R2_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 API token key ID |
 | `R2_SECRET_ACCESS_KEY` | R2 API token secret |
-| `R2_BACKUP_BUCKET` | Name of the India-resident backup bucket |
+| `R2_BACKUP_BUCKET` | Name of the backup bucket (target: India-resident per B34 — residency not yet verified; see the Purpose section) |
 | `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
 
 Optional overrides (set before calling the script):
@@ -180,13 +242,23 @@ AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
 - Confirm the application is in a maintenance window or taken offline before restoring.
   Restoring into a live database risks data inconsistency.
 
+### TimescaleDB restore wrappers
+
+`restore.sh` wraps `pg_restore` in `timescaledb_pre_restore()` / `timescaledb_post_restore()`
+calls. This is required for TimescaleDB databases: without these wrappers the hypertable
+chunk catalog restore fails. The `post_restore` call runs unconditionally even when
+`pg_restore` exits non-zero — if it were skipped after a failed restore the database would
+be left with `timescaledb.restoring=on` and would be unusable. The quarterly restore drill
+(see below) exercises this exact sequence end-to-end and proved it works (2026-06-12).
+
 ### Invocation
 
 ```bash
-CONFIRM_RESTORE=1 bash scripts/restore.sh <backup-prefix>
+CONFIRM_RESTORE=1 bash scripts/restore.sh <backup-stamp>
 ```
 
-Where `<backup-prefix>` is the UTC timestamp directory name from R2, e.g. `20260607194500`.
+Where `<backup-stamp>` is the UTC timestamp directory name from R2, e.g. `20260612171924`.
+The script fetches from the `backups/<stamp>/` prefix automatically.
 
 To restore from a local backup dir already on disk:
 
@@ -265,16 +337,42 @@ docker compose exec -T dhanradar-redis redis-cli ping
 
 **An untested backup is not a backup.**
 
-Run a full restore drill into a scratch stack every quarter:
+Run a full restore drill every quarter from the repo root:
 
-1. Spin up a separate Docker Compose stack with a distinct project name:
-   `COMPOSE_PROJECT_NAME=dhanradar-drill docker compose up -d dhanradar-postgres dhanradar-redis`
-2. Restore the most recent backup into the drill stack using `restore.sh` (point
-   `COMPOSE_PROJECT_NAME=dhanradar-drill` and a matching compose override).
-3. Run the verification steps above against the drill stack.
-4. Tear down the drill stack: `COMPOSE_PROJECT_NAME=dhanradar-drill docker compose down -v`
-5. Log the drill outcome (pass/fail, any issues) in `docs/project-state/SESSION_STATE.md`
-   or a dedicated ops log.
+```bash
+bash scripts/restore-drill.sh [<backup-stamp>]
+```
+
+The script automates the complete isolated-project flow: it spins up a `dhanradar-drill`
+Compose project, fetches the backup from R2, verifies the MANIFEST sha256, runs the
+`timescaledb_pre_restore` / `pg_restore` / `timescaledb_post_restore` sequence, checks
+the alembic revision and row counts, measures timings, and tears down the drill stack on
+success. It is non-destructive — the production stack is never touched.
+
+Log the drill outcome in `docs/ops/restore-drill-log.md` (one fenced record per drill;
+see that file for the record format and the first PASS entry from 2026-06-12).
+
+---
+
+## RPO / RTO statement (B37, drill-backed)
+
+**RPO: ≤ 24 hours.** The nightly cron at 21:30 UTC sets the maximum data-loss window to
+one day. A failure of the cron job (check `/var/log/dhanradar-backup.log`) can extend this
+window — backup-failure alerting is a residual item (B37-f1).
+
+**RTO: drill-measured 28–44 seconds end-to-end** for a 43.6 MB dump (5,954,403 NAV rows,
+41 audit rows, 6 auth users) — two runs on 2026-06-12 (the 44 s run used the shipping
+hardened scripts; per-object fetches add ~17 s vs the recursive copy). Restore portion is
+~17–18 s in both (scratch-pg start + timescaledb_pre_restore + pg_restore + post_restore).
+
+**Stated production RTO: ≤ 15 minutes**, accounting for app stop/start, operator reaction
+time, and post-restore verification before returning to traffic. This is a conservative
+estimate based on the drill timing plus operational overhead.
+
+RTO must be re-derived if database size grows materially (e.g. after equities/ETF data
+ingestion). The drill-measured 28 s is the restore-only lower bound at current size.
+WAL archival with point-in-time recovery (PITR) remains the planned next tier for a tighter
+RPO; see the WAL sketch in the "What is backed up" section.
 
 ---
 

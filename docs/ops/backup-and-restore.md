@@ -1,5 +1,13 @@
 # DhanRadar — DB Backup and Restore
 
+> **Note — alternate manual path only.** This document describes the alternate manual
+> backup path using `scripts/backup-db.sh` (single pg_dump, no MANIFEST, no checksums,
+> no Redis artifacts). The **canonical nightly backup system** is `scripts/backup.sh` +
+> `scripts/restore.sh` + `scripts/restore-drill.sh`, documented in full at
+> `docs/ops/backup-restore-runbook.md`. The host cron on KVM4 runs `backup.sh`, not
+> `backup-db.sh`. Use this document only for manual one-off dumps or as a reference for
+> the simpler standalone pg_dump path.
+
 ## 1. What is backed up and where
 
 A nightly `pg_dump -Fc` of the full `dhanradar` Postgres database is uploaded to
@@ -25,12 +33,17 @@ HOST cron is decoupled from app health: a container restart does not skip a back
 Run at **21:30 UTC (03:00 IST)** — after the 02:00 IST `archive_audit_daily`
 beat task and the 02:30 IST `reconcile_audit_disclaimers` beat task.
 
-Sample crontab line (replace `<DHANRADAR-REPO-PATH>` with the real checkout path
-from `docs/infra-notes.md`):
+Sample crontab line for the **canonical** nightly backup (replace placeholders with real
+values from `docs/infra-notes.md`):
 
 ```cron
-# 30 21 * * * cd <DHANRADAR-REPO-PATH> && bash scripts/backup-db.sh backup >> /var/log/dhanradar-backup.log 2>&1
+30 21 * * * cd <DHANRADAR-REPO-PATH> && PATH=<DHANRADAR-TOOLS>/bin:/usr/bin:/bin flock -n /var/lock/dhanradar-backup.lock bash scripts/backup.sh >> /var/log/dhanradar-backup.log 2>&1
 ```
+
+This is the line installed on KVM4 (verified 2026-06-12). It runs `backup.sh` (canonical,
+with MANIFEST + checksums + Redis artifacts), not `backup-db.sh`. See
+`docs/ops/backup-restore-runbook.md` for full details including the flock guard and the
+aws CLI tools-dir PATH note.
 
 ## 3. Run or list manually
 
@@ -130,11 +143,14 @@ docker compose -p dhanradar -f docker-compose.yml up -d
   delete older objects automatically) must be configured as an R2 bucket lifecycle
   policy. This is an infra gate, not a code gate.
 
-- **Restore drill** — a tested restore against the live box must be performed and
-  logged before backup is considered production-ready.
+- **Restore drill** — a tested restore must be performed and logged before backup is
+  considered production-ready. The first restore drill ran and **PASSED 2026-06-12**
+  (stamp `20260612171924`; restored alembic `0018`; 5,954,403 NAV rows; total 28 s).
+  See `docs/ops/restore-drill-log.md` for the full record. Quarterly cadence; next
+  drill due 2026-09.
 
-Until these three gates are cleared, the backup script may run in dev/staging
-but must not be the sole recovery mechanism for production user data.
+Until the residency and lifecycle gates are cleared, the backup script may run in
+dev/staging but must not be the sole recovery mechanism for production user data.
 
 ## 6. Pointer
 
