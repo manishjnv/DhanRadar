@@ -38,3 +38,20 @@ export interface Credentials {
   email: string;
   password: string;
 }
+
+/** POST /auth/totp/login */
+export interface TotpCredentials {
+  email: string;
+  code: string;
+}
+
+/** POST /auth/totp/setup response */
+export interface TotpSetupResponse {
+  provisioning_uri: string;
+  secret: string;
+}
+
+/** POST /auth/totp/verify request */
+export interface TotpVerifyRequest {
+  code: string;
+}

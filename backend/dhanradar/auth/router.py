@@ -9,6 +9,9 @@ Endpoints:
   GET  /api/v1/auth/me
   POST /api/v1/auth/totp/setup
   POST /api/v1/auth/totp/verify
+  POST /api/v1/auth/totp/login      (Feature 2: standalone TOTP login)
+  GET  /api/v1/auth/google/start    (Feature 1: Google SSO — begin flow)
+  GET  /api/v1/auth/google/callback (Feature 1: Google SSO — code exchange)
 
 All tokens are issued as RS256 JWTs in HttpOnly __Host-* cookies.
 The JS layer never reads the token value.
@@ -18,17 +21,23 @@ Security notes:
   - Signup 409 on duplicate email (intentional tradeoff — see service.py).
   - /refresh implements rotation + reuse detection.
   - Logout clears both cookies AND revokes the refresh jti in Redis.
+  - Google callback failures redirect to /login?error= (browser navigation path).
+  - Tokens are NEVER put in URLs, response bodies, or non-HttpOnly cookies.
 """
 
 from __future__ import annotations
 
+import json
+import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.auth import google as google_svc
 from dhanradar.auth import schemas
 from dhanradar.auth import service as auth_svc
 from dhanradar.auth.security import (
@@ -38,9 +47,11 @@ from dhanradar.auth.security import (
     decode_token,
     set_auth_cookies,
 )
+from dhanradar.config import settings
 from dhanradar.db import get_db
 from dhanradar.deps import UserContext, current_user_or_anonymous
 from dhanradar.ratelimit import RateLimit
+from dhanradar.redis_client import get_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -52,6 +63,13 @@ _rl_login = RateLimit(max_requests=5, window_seconds=60)
 _rl_signup = RateLimit(max_requests=5, window_seconds=60)
 _rl_refresh = RateLimit(max_requests=30, window_seconds=60)
 _rl_totp = RateLimit(max_requests=10, window_seconds=60)
+# Google SSO: 10 starts per minute per IP (prevents state-spray).
+_rl_google = RateLimit(max_requests=10, window_seconds=60)
+# Standalone TOTP login: tighter than setup/verify.
+_rl_totp_login = RateLimit(max_requests=5, window_seconds=60)
+
+_OAUTH_STATE_TTL = 600  # seconds — matches the Google flow time-to-live
+_OAUTH_STATE_PREFIX = "auth:oauth_state:"
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +230,7 @@ async def me(
         )
 
     from sqlalchemy import select
+
     from dhanradar.models.auth import User as UserModel
 
     db_user = await db.scalar(
@@ -247,6 +266,7 @@ async def totp_setup(
         )
 
     from sqlalchemy import select
+
     from dhanradar.models.auth import User as UserModel
 
     db_user = await db.scalar(
@@ -286,3 +306,194 @@ async def totp_verify(
     import uuid as _uuid
     await auth_svc.totp_verify(_uuid.UUID(user.user_id), body.code, db)
     return schemas.TOTPVerifyResponse(message="totp_verified")
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/totp/login  — Feature 2: standalone TOTP login
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/totp/login",
+    response_model=schemas.LoginResponse,
+    summary="Authenticate with TOTP code (standalone — not a second factor)",
+)
+async def totp_login(
+    body: schemas.TOTPLoginRequest,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_totp_login)] = None,
+) -> schemas.LoginResponse:
+    """
+    Issue a session using a valid TOTP code in place of a password.
+
+    Security properties mirror /auth/login exactly:
+      - Generic 401 on any failure (no enumeration).
+      - Brute-force + replay guards in service.authenticate_totp.
+      - Same cookie issuance as every other login path.
+    """
+    user = await auth_svc.authenticate_totp(body.email, body.code, db)
+
+    access_token, _ = create_access_token(str(user.id))
+    refresh_token, refresh_jti = create_refresh_token(str(user.id))
+    await auth_svc.store_refresh_jti(refresh_jti, str(user.id))
+
+    set_auth_cookies(response, access_token, refresh_token)
+
+    return schemas.LoginResponse(
+        message="login_successful",
+        user=schemas.UserResponse.model_validate(user),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/google/start  — Feature 1: initiate Google SSO
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/google/start",
+    summary="Begin Google SSO — redirects to Google with PKCE + nonce",
+    status_code=status.HTTP_302_FOUND,
+)
+async def google_start(
+    next: Annotated[str | None, Query(alias="next")] = None,
+    _rl: Annotated[None, Depends(_rl_google)] = None,
+) -> RedirectResponse:
+    """
+    Generate PKCE state, nonce, and code_verifier; store them in Redis; then
+    redirect the browser to Google's authorisation endpoint.
+
+    Fail-closed: returns 503 if any Google credential is absent from settings.
+    """
+    if not (settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET and settings.GOOGLE_REDIRECT_URI):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="google_sso_not_configured",
+        )
+
+    safe_next = google_svc.validate_next(next)
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = google_svc.pkce_challenge(code_verifier)
+
+    redis = get_redis()
+    state_payload = json.dumps(
+        {"nonce": nonce, "code_verifier": code_verifier, "next": safe_next}
+    )
+    await redis.set(f"{_OAUTH_STATE_PREFIX}{state}", state_payload, ex=_OAUTH_STATE_TTL)
+
+    auth_url = google_svc.build_auth_url(
+        state=state,
+        nonce=nonce,
+        code_challenge=code_challenge,
+        redirect_uri=settings.GOOGLE_REDIRECT_URI,
+    )
+    return RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/google/callback  — Feature 1: handle Google's redirect
+# ---------------------------------------------------------------------------
+
+_ERROR_REDIRECT = "/login?error=google_auth_failed"
+_DELETION_REDIRECT = "/login?error=account_deletion_pending"
+# A password account already exists for this email — auto-link is forbidden
+# (local emails are never verified; see _resolve_existing_email_user).
+_ACCOUNT_EXISTS_REDIRECT = "/login?error=account_exists_use_password"
+
+
+@router.get(
+    "/google/callback",
+    summary="Google SSO callback — exchanges code and issues session cookies",
+    status_code=status.HTTP_303_SEE_OTHER,
+)
+async def google_callback(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    state: Annotated[str | None, Query()] = None,
+    code: Annotated[str | None, Query()] = None,
+    error: Annotated[str | None, Query()] = None,
+    _rl: Annotated[None, Depends(_rl_google)] = None,
+) -> RedirectResponse:
+    """
+    Browser-navigation endpoint — ALL failures redirect to /login?error=...
+    so the user never sees a raw JSON error page.
+
+    Security properties:
+      - state is single-use (GETDEL); stale/missing → error redirect.
+      - nonce verified against stored value (replay protection).
+      - id_token verified locally with JWKS (not trusted blindly).
+      - email_verified must be True.
+      - Tokens are NEVER placed in URLs, response bodies, or non-HttpOnly cookies.
+    """
+    # --- Validate state and consume it atomically ---
+    if not state:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    redis = get_redis()
+    raw_state = await redis.getdel(f"{_OAUTH_STATE_PREFIX}{state}")
+    if raw_state is None:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    try:
+        state_data = json.loads(raw_state)
+        stored_nonce: str = state_data["nonce"]
+        code_verifier: str = state_data["code_verifier"]
+        stored_next: str = state_data.get("next", "/dashboard")
+    except (KeyError, ValueError):
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    # --- Check for provider error ---
+    if error:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    if not code:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    # --- Exchange code for tokens ---
+    try:
+        token_response = await google_svc.exchange_code_with_verifier(code, code_verifier)
+    except Exception:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    id_token = token_response.get("id_token")
+    if not id_token:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    # --- Verify id_token locally ---
+    try:
+        claims = await google_svc.verify_id_token(id_token, stored_nonce)
+    except Exception:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    # email_verified must be explicitly True.
+    if not claims.get("email_verified"):
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    google_sub: str = claims["sub"]
+    email: str = claims["email"].lower()
+
+    # --- Resolve or create user ---
+    try:
+        user = await auth_svc.get_or_create_google_user(google_sub, email, db)
+    except auth_svc._DeletionPendingError:
+        return RedirectResponse(url=_DELETION_REDIRECT, status_code=status.HTTP_302_FOUND)
+    except auth_svc._SubConflictError:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+    except auth_svc._AccountExistsError:
+        return RedirectResponse(url=_ACCOUNT_EXISTS_REDIRECT, status_code=status.HTTP_302_FOUND)
+    except Exception:
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
+
+    # --- Issue session cookies (same path as login) ---
+    # Re-validate `next` defensively before using it.
+    safe_next = google_svc.validate_next(stored_next)
+
+    redirect = RedirectResponse(url=safe_next, status_code=status.HTTP_303_SEE_OTHER)
+
+    access_token, _ = create_access_token(str(user.id))
+    refresh_token, refresh_jti = create_refresh_token(str(user.id))
+    await auth_svc.store_refresh_jti(refresh_jti, str(user.id))
+
+    set_auth_cookies(redirect, access_token, refresh_token)
+    return redirect

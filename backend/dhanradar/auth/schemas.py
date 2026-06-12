@@ -10,11 +10,9 @@ Rules:
 
 from __future__ import annotations
 
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
-
 
 # ---------------------------------------------------------------------------
 # Request schemas
@@ -41,6 +39,20 @@ class TOTPVerifyRequest(BaseModel):
     )
 
 
+class TOTPLoginRequest(BaseModel):
+    """Request schema for TOTP-only login (Feature 2 — standalone TOTP auth)."""
+
+    email: EmailStr
+    # Strictly 6 digits: pyotp issues 6-digit codes, so a 7-8 digit input can
+    # never verify and would only burn one of the user's 5 lockout attempts.
+    code: str = Field(
+        min_length=6,
+        max_length=6,
+        pattern=r"^\d{6}$",
+        description="6-digit TOTP code",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
@@ -52,8 +64,8 @@ class UserResponse(BaseModel):
     email: str
     tier: str
     totp_verified: bool
-    risk_profile: Optional[str]
-    dpdp_consent_version: Optional[str]
+    risk_profile: str | None
+    dpdp_consent_version: str | None
 
 
 class SignupResponse(BaseModel):

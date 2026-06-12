@@ -8,7 +8,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
-import type { AuthEnvelope, AuthUser, Credentials, MeEnvelope } from './types';
+import type {
+  AuthEnvelope,
+  AuthUser,
+  Credentials,
+  MeEnvelope,
+  TotpCredentials,
+  TotpSetupResponse,
+  TotpVerifyRequest,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // useMe — current session. The cookie is the source of truth; a 401 means
@@ -54,6 +62,48 @@ export function useSignup() {
     onSuccess: (data) => {
       qc.setQueryData(queryKeys.auth.me(), data.user);
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useTotpLogin — sign in with a TOTP code instead of a password.
+// Mirrors useLogin exactly: POST /auth/totp/login, then seeds the me cache.
+// The 401 from this endpoint is intentionally uniform ("invalid_credentials")
+// regardless of whether the email is unknown, not enrolled, or code is wrong.
+// ---------------------------------------------------------------------------
+export function useTotpLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (creds: TotpCredentials) =>
+      api.post<AuthEnvelope>('/auth/totp/login', creds),
+    onSuccess: (data) => {
+      // Seed the me cache BEFORE the caller navigates — same seeding order as
+      // useLogin (RCA: AuthGuard reads stale cache if navigation fires first).
+      qc.setQueryData(queryKeys.auth.me(), data.user);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useTotpSetup — initiate TOTP enrollment; returns provisioning_uri + secret.
+// Authenticated route — only call when the user is already logged in.
+// ---------------------------------------------------------------------------
+export function useTotpSetup() {
+  return useMutation({
+    mutationFn: () =>
+      api.post<TotpSetupResponse>('/auth/totp/setup'),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useTotpVerify — confirm the TOTP code to activate TOTP on the account.
+// On success the caller should invalidate queryKeys.auth.me() so totp_verified
+// flips to true in the me cache.
+// ---------------------------------------------------------------------------
+export function useTotpVerify() {
+  return useMutation({
+    mutationFn: (req: TotpVerifyRequest) =>
+      api.post<{ message: string }>('/auth/totp/verify', req),
   });
 }
 
