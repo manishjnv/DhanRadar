@@ -24,6 +24,7 @@ export const queryKeys = {
     overlap:       (portfolioId: string) => ['portfolio', portfolioId, 'overlap'] as const,
     concentration: (portfolioId: string) => ['portfolio', portfolioId, 'concentration'] as const,
     changes:       (portfolioId: string) => ['portfolio', portfolioId, 'changes'] as const,
+    transparency:  (portfolioId: string) => ['portfolio', portfolioId, 'transparency'] as const,
   },
   watchlists: {
     all:    () => ['watchlists'] as const,

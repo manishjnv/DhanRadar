@@ -19,6 +19,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OverlapSection } from '@/features/portfolio/components/OverlapSection';
 import { ConcentrationSection } from '@/features/portfolio/components/ConcentrationSection';
 import { WhatChangedSection } from '@/features/changes/WhatChangedSection';
+import { TransparencySection } from '@/features/transparency/TransparencySection';
 
 // ---------------------------------------------------------------------------
 // Mock the API hooks
@@ -33,11 +34,16 @@ vi.mock('@/features/changes/api', () => ({
   usePortfolioChanges: vi.fn(),
 }));
 
+vi.mock('@/features/transparency/api', () => ({
+  usePortfolioTransparency: vi.fn(),
+}));
+
 import {
   usePortfolioOverlap,
   usePortfolioConcentration,
 } from '@/features/portfolio/api';
 import { usePortfolioChanges } from '@/features/changes/api';
+import { usePortfolioTransparency } from '@/features/transparency/api';
 
 const DISCLOSURE = 'Educational analysis only — not investment advice.';
 const NOT_ADVICE = 'NOT_ADVICE';
@@ -137,6 +143,41 @@ const CHANGES_WITH_DATA = {
   ],
 };
 
+const EMPTY_TRANSPARENCY = {
+  portfolio_id: 'pid',
+  generated_at: '2026-06-12T00:00:00Z',
+  funds: [],
+  disclosure: DISCLOSURE,
+  not_advice: NOT_ADVICE,
+  disclaimer_version: VERSION,
+};
+
+const TRANSPARENCY_WITH_DATA = {
+  ...EMPTY_TRANSPARENCY,
+  funds: [
+    {
+      isin: 'INF000K01WU9',
+      scheme_name: 'Fund A',
+      category: 'Large Cap',
+      label: 'on_track',
+      confidence_band: 'high',
+      drivers: ['consistent NAV growth over trailing 12 months'],
+      refusal: null,
+      sources: [
+        { name: 'AMFI', type: 'nav_data' },
+      ],
+      freshness: {
+        nav_as_of: '2026-06-10',
+        nav_days_ago: 2,
+        is_stale: false,
+        holdings_as_of: null,
+      },
+      scored_at: '2026-06-12T00:00:00Z',
+      model_version: 'v1',
+    },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -162,6 +203,12 @@ function renderWhatChanged(overrides = {}) {
   const mock = vi.mocked(usePortfolioChanges);
   mock.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null, ...overrides } as any);
   return render(<WhatChangedSection portfolioId="pid" />, { wrapper });
+}
+
+function renderTransparency(overrides = {}) {
+  const mock = vi.mocked(usePortfolioTransparency);
+  mock.mockReturnValue({ data: undefined, isLoading: false, isError: false, error: null, ...overrides } as any);
+  return render(<TransparencySection portfolioId="pid" />, { wrapper });
 }
 
 const ADVISORY_VERBS = ['reduce', 'diversify', 'switch', 'rebalance', 'sell', 'buy', 'exit', 'avoid', 'invest', 'recommend', 'should', 'suggest', 'allocate', 'overweight', 'underweight'];
@@ -312,10 +359,68 @@ describe('WhatChangedSection (B62-f2)', () => {
     renderWhatChanged({ isError: true, error: new Error('fail') });
     expect(screen.getByText(/Unable to load change history/i)).toBeDefined();
     expect(screen.queryByTestId('what-changed-panel')).toBeNull();
+    // h2 invariant holds in the error state too (UI cond-2).
+    expect(screen.getByRole('heading', { level: 2, name: 'What Changed' })).toBeDefined();
   });
 
   it('has no advisory verbs and no numeric score in rendered text', () => {
     renderWhatChanged({ data: CHANGES_WITH_DATA });
+    const text = document.body.textContent ?? '';
+    assertNoAdvisoryVerbs(text);
+    expect(text).not.toMatch(/unified_score|score:\s*\d/i);
+  });
+});
+
+describe('TransparencySection (B60/PU2)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('renders loading skeleton with the section title at the panel heading level', () => {
+    renderTransparency({ isLoading: true });
+    // h2 in EVERY state — same heading level as the loaded panel (UI cond-2).
+    expect(screen.getByRole('heading', { level: 2, name: 'Data Transparency' })).toBeDefined();
+  });
+
+  it('renders the shell (not a blank) when data is undefined and not loading', () => {
+    renderTransparency();
+    expect(screen.getByTestId('transparency-shell')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'Data Transparency' })).toBeDefined();
+  });
+
+  it('mounts TransparencyPanel when data is present', () => {
+    renderTransparency({ data: TRANSPARENCY_WITH_DATA });
+    expect(screen.getByTestId('transparency-panel')).toBeDefined();
+    expect(screen.getByRole('heading', { level: 2, name: 'Data Transparency' })).toBeDefined();
+    // Backend-authored driver rendered verbatim; scheme name displayed.
+    expect(screen.getByText('consistent NAV growth over trailing 12 months')).toBeDefined();
+    expect(screen.getByText('Fund A')).toBeDefined();
+  });
+
+  it('renders the panel empty state for a portfolio with no funds', () => {
+    renderTransparency({ data: EMPTY_TRANSPARENCY });
+    expect(screen.getByTestId('transparency-panel')).toBeDefined();
+    expect(screen.getByText('No fund data available yet.')).toBeDefined();
+  });
+
+  it('renders disclosure bundle in data state', () => {
+    renderTransparency({ data: TRANSPARENCY_WITH_DATA });
+    expect(screen.getByText(NOT_ADVICE)).toBeDefined();
+  });
+
+  it('renders disclosure bundle on empty state', () => {
+    renderTransparency({ data: EMPTY_TRANSPARENCY });
+    expect(screen.getByText(NOT_ADVICE)).toBeDefined();
+  });
+
+  it('renders error message on error (single bundle-free shell, no panel)', () => {
+    renderTransparency({ isError: true, error: new Error('fail') });
+    expect(screen.getByText(/Unable to load transparency data/i)).toBeDefined();
+    expect(screen.queryByTestId('transparency-panel')).toBeNull();
+    // h2 invariant holds in the error state too (UI cond-2).
+    expect(screen.getByRole('heading', { level: 2, name: 'Data Transparency' })).toBeDefined();
+  });
+
+  it('has no advisory verbs and no numeric score in rendered text', () => {
+    renderTransparency({ data: TRANSPARENCY_WITH_DATA });
     const text = document.body.textContent ?? '';
     assertNoAdvisoryVerbs(text);
     expect(text).not.toMatch(/unified_score|score:\s*\d/i);
