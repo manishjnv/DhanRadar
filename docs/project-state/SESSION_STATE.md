@@ -1,7 +1,7 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation built + reviewed; 7-gap
-data-ingestion triage filed as B67–B70)
+**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation built + reviewed + **DEPLOYED to
+KVM4**; 7-gap data-ingestion triage filed as B67–B70; `IDF`/legacy-category finding filed B66-f1)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -36,8 +36,32 @@ codex n/a) ACCEPT-WITH-CONDITIONS; non-str hardening (finding 3a) applied. Cohor
 - **#3 fund constituents** → already tracked by **B59-f2 + ADR-0033(a)** (top-10 AMC scrapers,
   behind Task 3). **#7 Kite (B47)** → already filed, equities phase, ToS external. No new rows.
 
-**Deploy.** B66 is merge-eligible (gates green + adversarial logged); merge to main + KVM4 deploy +
-one-off `nav_daily_fetch` to populate `sebi_category` are the closing actions of this session.
+**Deploy — DONE 2026-06-13.** Merged PR #123 (`326049e`) → KVM4 deploy from `2856e6b`→`326049e`
+via `scripts/deploy.sh deploy` (all 6 images rebuilt; alembic stayed `0021` — no migration; full
+stack healthy; smoke 200). One-off `nav_daily_fetch` populated `sebi_category`: **9,165 of 14,041
+funds map to a canonical SEBI leaf; ~4,876 (~35%) sit under pre-2017 legacy/unknown headers** —
+`IDF` 2,572, `Income` 2,046, `Growth` 245, `Gilt` 13 (`sebi_category` NULL; the drift WARN fired in
+prod as designed). Normalization verified live (double-space / curly-apostrophe / bare-`ELSS` all
+canonicalized). The high legacy share means those funds' cohorts are fragmented today — **B66-f1**
+tracks the fix (extend the taxonomy for `IDF`/`Income`/`Growth` + the two-person-gated cohort-rewire
+to group on `sebi_category`).
+
+### Agent-utilization & routing telemetry (2026-06-13 B66 session)
+
+- **Opus (Fable, Tier 0):** orchestration; Phase-0 warm-start dispatch; governance gate + tier
+  classification; live-prod verification (corrected the mood `data_unavailable` premise; pulled the
+  live AMFI taxonomy; found the `IDF` drift); line-by-line diff review; caught + fixed the
+  `_navrows_to_fund_upserts` guard-test regression the builder missed; applied the adversarial
+  non-str finding; BLOCKERS/SESSION_STATE rows (one-shot exemption — fact-dense governance prose
+  typed directly, not delegated); commit · merge · KVM4 deploy · post-deploy verification.
+- **Sonnet (Tier 1):** B66 build · reworked: Y (Opus fixed the missed `test_only_*` guard-test
+  regression + applied the non-str hardening finding) | B66 independent adversarial review ·
+  reworked: N (ACCEPT-WITH-CONDITIONS; finding actioned).
+- **warm-start (Sonnet):** Phase-0 orientation brief · reworked: N. **Explore (Sonnet):** 7-gap
+  code-state inventory · reworked: N.
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; the independent Sonnet adversarial takeover
+  served the load-bearing-path gate.
 
 ## B27 + PU1 BUILT + DEPLOYED — canonical signal-names + Market Mood Context (2026-06-13)
 
