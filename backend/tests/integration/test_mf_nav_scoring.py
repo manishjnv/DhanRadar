@@ -93,3 +93,35 @@ async def test_seeded_nav_history_scores_real_label(db_session, db_tables):
         await db_session.execute(delete(MfNavHistory).where(MfNavHistory.isin == _DEMO_ISIN))
         await db_session.execute(delete(MfFund).where(MfFund.isin == _DEMO_ISIN))
         await db_session.commit()
+
+
+_PROV_ISIN = "INF_PROV0019"
+
+
+async def test_nav_insert_stamps_ingested_at_provenance(db_session, db_tables):
+    """Migration 0019 / data-platform provenance: a NAV row inserted WITHOUT an
+    explicit ingested_at is stamped by the column server default (now()) — the
+    "when received" provenance is never left unknown for freshly-ingested rows."""
+    from sqlalchemy import select
+
+    try:
+        await db_session.execute(
+            insert(MfNavHistory).values(
+                isin=_PROV_ISIN,
+                nav_date=datetime.date(2026, 6, 6),
+                nav=123.4567,
+                source="amfi",
+            )
+        )
+        await db_session.commit()
+
+        row = (
+            await db_session.execute(
+                select(MfNavHistory).where(MfNavHistory.isin == _PROV_ISIN)
+            )
+        ).scalar_one()
+        # Server default populated the ingestion wall-clock without us supplying it.
+        assert row.ingested_at is not None
+    finally:
+        await db_session.execute(delete(MfNavHistory).where(MfNavHistory.isin == _PROV_ISIN))
+        await db_session.commit()

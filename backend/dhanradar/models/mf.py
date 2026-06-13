@@ -68,6 +68,13 @@ class MfNavHistory(Base):
     nav_date: Mapped[date] = mapped_column(Date, primary_key=True)
     nav: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default="amfi")
+    # Provenance (six-question rule): "where from" = source; "as of when" = nav_date;
+    # "when received" = ingested_at. Nullable: rows backfilled before this column
+    # existed have an unknown ingestion time and stay NULL (never fabricated). New
+    # rows auto-stamp via the column DEFAULT; the upsert refreshes it on re-ingest.
+    ingested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, server_default=func.now()
+    )
 
 
 class MfPortfolio(Base):
