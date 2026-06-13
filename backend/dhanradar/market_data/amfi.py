@@ -147,29 +147,45 @@ def parse_navall_with_category(text: str) -> list[NavRow]:
     """
     Parse the DAILY AMFI feed (NAVAll.txt) with scheme-type category tracking.
 
-    Same skip rules as ``parse_navall``.  Additionally, non-data lines that
-    contain BOTH "(" and ")" are treated as scheme-type section headers; the
-    text between the outermost parentheses is extracted and carried as
-    ``category`` on every subsequent ``NavRow`` until the next such header.
+    Same skip rules as ``parse_navall``.  Additionally, the structured
+    scheme-type SECTION headers — non-data lines whose text before "(" ends with
+    "Schemes" (e.g. "Open Ended Schemes(Equity Scheme - Large Cap Fund)",
+    "Close Ended Schemes(Income)", "Interval Fund Schemes(Income)") — set the
+    ``category`` carried on every subsequent ``NavRow`` until the next such
+    header.
 
-    A bare AMC-name line (e.g. "Taurus Mutual Fund") has no parentheses and
-    does NOT change the current category.  Schemes before any category header
-    receive ``category=None``.
+    An AMC-name line is NOT a category header, even when it contains parentheses
+    (e.g. "IL&FS Mutual Fund (IDF)"): only the "…Schemes(…)" prefix anchors a
+    real header, so such lines no longer poison the carry-forward (B66-f1).
+    Bare AMC-name lines (e.g. "Taurus Mutual Fund") and blank lines also do not
+    change the category.  Schemes before any category header receive
+    ``category=None``.
     """
     rows: list[NavRow] = []
     current_category: str | None = None
     for line in text.splitlines():
         parts = line.split(";")
         if len(parts) != _NAVALL_FIELDS:
-            # Non-data line — check whether it is a category header.
+            # Non-data line — check whether it is a scheme-type SECTION header.
+            # ONLY the structured section headers carry the category: their text
+            # before "(" ends with "Schemes" — e.g.
+            #   "Open Ended Schemes(Equity Scheme - Large Cap Fund)"
+            #   "Close Ended Schemes(Income)"
+            #   "Interval Fund Schemes(Income)"
+            # An AMC-NAME line that merely happens to contain parentheses — e.g.
+            # "IL&FS Mutual Fund (IDF)" — must NOT be treated as a header, or it
+            # poisons current_category for every subsequent fund until the next
+            # real header (the B66-f1 carry-forward bug: ~2,572 close-ended FMPs
+            # mis-tagged "IDF"). The "Schemes" prefix anchor distinguishes the
+            # two reliably; an AMC name never ends in "Schemes" before a paren.
             stripped = line.strip()
             if stripped and "(" in stripped and ")" in stripped:
-                # Extract text inside the outermost parentheses.
                 open_idx = stripped.index("(")
                 close_idx = stripped.rindex(")")
-                if close_idx > open_idx:
+                prefix = stripped[:open_idx].strip()
+                if close_idx > open_idx and prefix.lower().endswith("schemes"):
                     current_category = stripped[open_idx + 1 : close_idx].strip()
-            # AMC-name lines (no parens) are ignored; blank lines too.
+            # AMC-name lines and blank lines do not change the current category.
             continue
         # Skip the column-header row.
         if parts[0].strip().lower() == _SCHEME_CODE_HEADER:
