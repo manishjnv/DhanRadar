@@ -15,7 +15,7 @@ Cold-start and empty portfolio return a valid 200. Frontend adds
 factory entry. Mounted second on `/portfolio/[id]/intelligence` (after WhatChanged,
 before Overlap). RegimeChip component carries a safe fallback for unknown regimes.
 
-**Branch:** `feat/pu1-mood-portfolio-context` — PR #\<pending\>
+**Branch:** `feat/pu1-mood-portfolio-context` — PR #116
 
 **Classification:** Tier A (new feature, portfolio intelligence page) with Compliance
 review required (educational surface with mood/label content). Required reviews:
