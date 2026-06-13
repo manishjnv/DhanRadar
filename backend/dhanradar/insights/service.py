@@ -23,6 +23,7 @@ from dhanradar.insights.schemas import (
     ConcentrationItem,
     ConcentrationResponse,
     FundPairOverlap,
+    MoodContextResponse,
     OverlapResponse,
 )
 from dhanradar.mf.snapshot import category_allocation
@@ -459,5 +460,233 @@ async def get_concentration(db: Any, user_id: str, portfolio_id: str) -> Concent
         by_fund=by_fund,
         observation_summary=summary,
         data_completeness=_COMPLETE_COMPLETENESS,
+        **disc,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mood-context helpers (pure — no I/O)
+# ---------------------------------------------------------------------------
+
+_REGIME_LABELS: dict[str, str] = {
+    "extreme_fear": "Extreme Fear",
+    "fear": "Fear",
+    "neutral": "Neutral",
+    "greed": "Greed",
+    "extreme_greed": "Extreme Greed",
+    "insufficient_data": "Insufficient Data",
+    "data_unavailable": "Data Unavailable",
+}
+
+
+def _regime_display(regime: str) -> str:
+    """Return a human-readable label for a regime string, safe for unknown values."""
+    return _REGIME_LABELS.get(regime, regime.replace("_", " ").title())
+
+
+# Band taxonomy governed by ADR-0032 — descriptive, non-advisory; thresholds provisional v1.
+def _concentration_band(fund_count: int, top_pct: float) -> str:
+    """
+    Derive a public-safe concentration band from fund count and top-category %.
+
+    Banding thresholds (educational description — never prescriptive):
+      empty    — no holdings
+      high     — top category >= 70% OR only 1 fund
+      moderate — top category 40–69%
+      low      — top category < 40% with 2+ funds
+    """
+    if fund_count == 0:
+        return "empty"
+    if fund_count == 1 or top_pct >= 70.0:
+        return "high"
+    if top_pct >= 40.0:
+        return "moderate"
+    return "low"
+
+
+def _build_observations(
+    regime: str,
+    regime_as_of: str | None,
+    fund_count: int,
+    concentration_band: str,
+) -> list[str]:
+    """
+    Build the three deterministic, SEBI-compliant observation strings.
+
+    Templates are fixed — no LLM, no advisory verbs, no direction prediction.
+    Exactly three observations are always returned (contract from spec).
+    """
+    # Observation 1 — regime read
+    if regime == "data_unavailable":
+        obs1 = (
+            "Market mood data is currently unavailable; "
+            "the read below covers only your portfolio's structure."
+        )
+    else:
+        date_str = regime_as_of or "unknown date"
+        label = _regime_display(regime)
+        obs1 = (
+            f"Market mood is currently {label} — an educational read of overall "
+            f"market conditions as of {date_str}."
+        )
+
+    # Observation 2 — portfolio structure
+    if fund_count > 0:
+        obs2 = (
+            f"Your portfolio holds {fund_count} "
+            f"{'fund' if fund_count == 1 else 'funds'}; "
+            f"its concentration reads {concentration_band} based on category mix."
+        )
+    else:
+        obs2 = (
+            "No scored holdings yet — upload a CAS statement to see "
+            "your portfolio's structure here."
+        )
+
+    # Observation 3 — always present independence disclaimer
+    obs3 = (
+        "Portfolio structure and market mood are independent reads — "
+        "neither is a signal to act. "
+        "Mood describes conditions; it does not predict direction."
+    )
+
+    # Independence disclaimer placed between the mood and structure reads so the
+    # regime↔concentration pairing can never be read adjacently without the
+    # "not a signal to act" line between them (Compliance review F2).
+    return [obs1, obs3, obs2]
+
+
+# ---------------------------------------------------------------------------
+# Mood-context service
+# ---------------------------------------------------------------------------
+
+async def get_mood_context(
+    db: Any,
+    user_id: str,
+    portfolio_id: str,
+) -> MoodContextResponse:
+    """
+    Build the mood-context response for the given portfolio.
+
+    - Verifies portfolio belongs to user (IDOR guard → ValueError on mismatch).
+    - Reads current mood via mood.service public read path (no raw mood-table SQL here).
+    - Derives concentration band from existing concentration internals (same isin_value logic).
+    - Cold-start / empty portfolio → valid 200 with honest empty read.
+    - No new migration required — reads only existing mf.* tables.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfFund, MfPortfolio, MfUserHolding
+
+    uid = _parse_uid(user_id)
+    try:
+        pid = UUID(portfolio_id)
+    except (ValueError, TypeError):
+        pid = None
+
+    disc = _safe_disclosure()
+
+    # Fetch current mood — always succeeds (returns data_unavailable sentinel on miss)
+    from dhanradar.mood.service import get_latest, unavailable_public
+
+    mood_row = await get_latest(db)
+    mood = mood_row if mood_row is not None else unavailable_public()
+    regime = mood.regime
+    regime_as_of = mood.snapshot_date if mood.snapshot_date else None
+
+    # Malformed inputs → empty but valid response (no 500)
+    if uid is None or pid is None:
+        observations = _build_observations(regime, regime_as_of, 0, "empty")
+        return MoodContextResponse(
+            portfolio_id=portfolio_id,
+            regime=regime,
+            regime_as_of=regime_as_of or None,
+            fund_count=0,
+            concentration_band="empty",
+            top_category=None,
+            observations=observations,
+            **disc,
+        )
+
+    # IDOR guard: portfolio must exist AND belong to this user
+    port_result = await db.execute(
+        select(MfPortfolio).where(MfPortfolio.id == pid, MfPortfolio.user_id == uid)
+    )
+    portfolio = port_result.scalar_one_or_none()
+    if portfolio is None:
+        raise ValueError("portfolio_not_found")
+
+    # Load holdings (same query as concentration)
+    holdings_result = await db.execute(
+        select(
+            MfUserHolding.isin,
+            MfUserHolding.invested_amount,
+        ).where(
+            MfUserHolding.portfolio_id == pid,
+            MfUserHolding.user_id == uid,
+        )
+    )
+    rows = holdings_result.fetchall()
+
+    if not rows:
+        observations = _build_observations(regime, regime_as_of, 0, "empty")
+        return MoodContextResponse(
+            portfolio_id=portfolio_id,
+            regime=regime,
+            regime_as_of=regime_as_of or None,
+            fund_count=0,
+            concentration_band="empty",
+            top_category=None,
+            observations=observations,
+            **disc,
+        )
+
+    isins = list({r.isin for r in rows})
+
+    # Resolve fund metadata (same as concentration)
+    fund_meta_result = await db.execute(
+        select(MfFund.isin, MfFund.category).where(MfFund.isin.in_(isins))
+    )
+    fund_meta: dict[str, str] = {
+        r.isin: r.category or "Uncategorized"
+        for r in fund_meta_result.fetchall()
+    }
+
+    # Compute value per ISIN (same proxy as concentration)
+    isin_value: dict[str, float] = {}
+    for r in rows:
+        v = float(r.invested_amount) if r.invested_amount else 0.0
+        isin_value[r.isin] = isin_value.get(r.isin, 0.0) + v
+
+    total_value = sum(isin_value.values())
+    fund_count = len(isins)
+
+    # Derive concentration band using the banding helper (reuses concentration logic)
+    if total_value == 0.0:
+        # Holdings exist but cost basis not yet available — treat as empty for banding
+        band = "empty"
+        top_category = None
+    else:
+        # Top-category % (same math as by_category in get_concentration)
+        cat_value: dict[str, float] = {}
+        for isin, val in isin_value.items():
+            cat = fund_meta.get(isin, "Uncategorized")
+            cat_value[cat] = cat_value.get(cat, 0.0) + val
+
+        top_cat, top_val = max(cat_value.items(), key=lambda x: x[1])
+        top_pct = top_val / total_value * 100
+        band = _concentration_band(fund_count, top_pct)
+        top_category = top_cat
+
+    observations = _build_observations(regime, regime_as_of, fund_count, band)
+
+    return MoodContextResponse(
+        portfolio_id=portfolio_id,
+        regime=regime,
+        regime_as_of=regime_as_of or None,
+        fund_count=fund_count,
+        concentration_band=band,
+        top_category=top_category,
+        observations=observations,
         **disc,
     )

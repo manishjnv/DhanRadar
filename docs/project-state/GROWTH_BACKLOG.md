@@ -130,7 +130,10 @@ moat dimension, none recommended merely because PowerUp has it):
   market mood ("your concentration, in this mood regime"). Uses owned Mood IP — not copyable.
   **Compliance watch:** mood *describes* conditions; never predicts direction or implies a
   buy/sell window (defer phrasing to the compliance guardrail). Data-gated: needs G3 + real Mood
-  signals (B35). Defer to the portfolio phase.
+  signals (B35). Defer to the portfolio phase. — **IMPLEMENTED 2026-06-13**
+  (feat/pu1-mood-portfolio-context; `GET /portfolio/{id}/mood-context` + MoodContextSection
+  mounted on intelligence page; ADR-0032; Tier-A + Compliance ACCEPT-W-C, ledger:
+  `reviews/pu1-mood-portfolio-context.md`; merged PR #\<pending\>; deploy human-gated).
 - **PU2 — "We refuse to score" as a visible trust feature.** Surface the `insufficient_data`
   refusal openly as an honesty signal instead of a silent fallback. No competitor shows its own
   uncertainty — pure trust moat. This is **presentation of an existing engine rule**, not new
