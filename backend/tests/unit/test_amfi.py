@@ -21,6 +21,7 @@ from dhanradar.market_data.amfi import (
     fetch_navall,
     parse_nav_history,
     parse_navall,
+    parse_navall_with_category,
 )
 from dhanradar.market_data.exceptions import ProviderError
 
@@ -305,3 +306,83 @@ class TestFetchNavHistory:
         call_args = fake_client.get.call_args
         url = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
         assert url == NAV_HISTORY_URL
+
+
+# ===========================================================================
+# parse_navall_with_category — section-header carry-forward (B66-f1)
+# ===========================================================================
+
+# Reproduces the live-feed structure that caused the carry-forward bug: an
+# AMC-name line that contains parentheses — "IL&FS Mutual Fund (IDF)" — sitting
+# inside a "Close Ended Schemes(Income)" section. The old parser treated the
+# AMC line as a header and mis-tagged every following fund "IDF".
+NAVALL_CATEGORY_FIXTURE = """\
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+
+Open Ended Schemes(Equity Scheme - Large Cap Fund)
+
+HDFC Mutual Fund
+
+100016;INF179K01BB4;-;HDFC Top 100 Fund - Growth;1052.3456;02-Jun-2026
+
+Close Ended Schemes(Income)
+
+IL&FS Mutual Fund (IDF)
+
+500001;INF999X01AA1;-;IL&FS Infrastructure Debt Fund - Series 1 - Growth;11.2345;02-Jun-2026
+
+Nippon India Mutual Fund
+
+500002;INF204K01XX1;-;Nippon India Fixed Horizon Fund XXXIII - Series 2 - Growth;13.4567;02-Jun-2026
+"""
+
+
+class TestParseNavallWithCategory:
+    def test_section_header_sets_category(self):
+        rows = parse_navall_with_category(NAVALL_CATEGORY_FIXTURE)
+        by_isin = {r.isin_growth: r for r in rows}
+        assert by_isin["INF179K01BB4"].category == "Equity Scheme - Large Cap Fund"
+
+    def test_amc_name_line_with_parens_does_not_become_category(self):
+        # The crux of B66-f1: "IL&FS Mutual Fund (IDF)" must NOT set category="IDF".
+        rows = parse_navall_with_category(NAVALL_CATEGORY_FIXTURE)
+        assert all(r.category != "IDF" for r in rows), [r.category for r in rows]
+
+    def test_funds_after_amc_paren_line_keep_section_category(self):
+        # Both the IL&FS scheme AND the next AMC's funds inherit the real section
+        # category ("Income"), not the poisoned "IDF".
+        rows = parse_navall_with_category(NAVALL_CATEGORY_FIXTURE)
+        by_isin = {r.isin_growth: r for r in rows}
+        assert by_isin["INF999X01AA1"].category == "Income"
+        assert by_isin["INF204K01XX1"].category == "Income"
+
+    def test_interval_and_close_ended_headers_recognized(self):
+        feed = (
+            "Interval Fund Schemes(Income)\n\n"
+            "Some AMC\n\n"
+            "600001;INF600X01AA1;-;Some Interval Income Plan - Growth;10.1;02-Jun-2026\n"
+        )
+        rows = parse_navall_with_category(feed)
+        assert rows[0].category == "Income"
+
+    def test_schemes_prefix_required_even_without_amc_paren(self):
+        # A stray non-header line with parens whose prefix is not "...Schemes"
+        # never sets the category.
+        feed = (
+            "Random Note (see circular)\n\n"
+            "700001;INF700X01AA1;-;Pre-header Fund - Growth;9.9;02-Jun-2026\n"
+        )
+        rows = parse_navall_with_category(feed)
+        assert rows[0].category is None
+
+    def test_space_before_paren_header_still_recognized(self):
+        # Defensive (adversarial finding 4): a header with a space before "("
+        # — "Open Ended Schemes (Income)" — must still be recognized; the prefix
+        # `.strip()` handles the trailing space before the "Schemes" anchor.
+        feed = (
+            "Open Ended Schemes (Equity Scheme - Value Fund)\n\n"
+            "Some AMC\n\n"
+            "800001;INF800X01AA1;-;Some Value Fund - Growth;10.0;02-Jun-2026\n"
+        )
+        rows = parse_navall_with_category(feed)
+        assert rows[0].category == "Equity Scheme - Value Fund"
