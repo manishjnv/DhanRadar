@@ -287,11 +287,17 @@ class TestNavrowsToFundUpserts:
         assert out[0]["amfi_code"] == "139619"
         assert out[0]["scheme_name"] == "Taurus Short Term Income Fund"
 
-    def test_only_three_amfi_owned_columns_plus_isin(self):
-        """Must NOT include columns like expense_ratio, aum, etc."""
+    def test_only_amfi_owned_columns_plus_isin(self):
+        """Must NOT include columns the feed does not own (expense_ratio, aum, etc.).
+
+        `sebi_category` is the validated/canonical form of the feed's own `category`
+        (B66 taxonomy layer) — it is derived from feed data, so it belongs here while
+        scheme-master columns like aum/expense_ratio (a different source) do not."""
         rows = [_row()]
         out = _navrows_to_fund_upserts(rows)
-        assert set(out[0].keys()) == {"isin", "amfi_code", "scheme_name", "category"}
+        assert set(out[0].keys()) == {
+            "isin", "amfi_code", "scheme_name", "category", "sebi_category",
+        }
 
 
 # ===========================================================================
