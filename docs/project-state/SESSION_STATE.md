@@ -1,10 +1,64 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B65 RESOLVED — CAMS CAS XIRR-null sign-convention fix merged #109
-`412f126` + DEPLOYED; ledger signed; founder live-proof pending)
+**Last updated:** 2026-06-13 (MF master-DB P0 — NAV provenance + TimescaleDB compression
+merged #113 `a7fe682` + DEPLOYED to KVM4; Tasks 2-3 queued, P2 blocked)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## MF master-DB P0 — NAV provenance + compression — merged + DEPLOYED (2026-06-13)
+
+Founder asked whether to build a local master DB of all India MFs with full history for heavy
+local analytics. Deep-research workflow + repo inventory → phased plan (full source-per-dataset
+matrix + remaining tasks in memory `mf-master-db-plan-and-p0`). The NAV master store already
+exists and is live (`mf.mf_nav_history`, ~5.96M rows). P0 hardens it.
+
+PR #113 (`feat/mf-nav-provenance-compression`) squash-merged as `a7fe682`.
+
+- **0019 — provenance:** `mf_nav_history.ingested_at` (timestamptz, nullable, no column-default →
+  ~6M backfilled rows stay honestly NULL; SET DEFAULT now() for new rows; daily + backfill
+  upserts stamp `func.now()` on conflict). Satisfies the data-platform six-question rule.
+- **0020 — compression:** native columnstore (segmentby=isin, orderby=nav_date DESC,
+  `compress_after=5 years`). 5y horizon keeps every routine `nav_backfill` (default 3y) + the
+  daily current-day write in UNCOMPRESSED chunks (ON CONFLICT into a compressed chunk hard-errors
+  on TS 2.x); compression acts only on the deep >5y tail. Atomic (no COMMIT) → re-runnable.
+- **Load-bearing review (Sonnet adversarial takeover, codex n/a):** ACCEPT-W/C, **2 blockers
+  resolved** — backfill-into-compressed (365d→5y); partial-apply (removed cargo-culted COMMIT).
+  Ledger: `reviews/mf-master-db-p0-nav-provenance-compression.md`.
+- **Gates:** CI run 27456778360 — guards/backend/migrations/frontend **green** (migrations job
+  upgrade→downgrade→upgrade on real `timescaledb-ha:pg16` validated both fixes); lint red =
+  pre-existing advisory I001/UP debt only.
+- **Deploy (zero-downtime):** box pre-verified at `412f126`, alembic `0018`, TS `2.27.1`,
+  `ingested_at` absent, 5,962,910 NAV rows. `git pull` + `build dhanradar-fastapi` +
+  `run --rm alembic upgrade head` (additive → running stack safe on new schema; no restart).
+  Verified: alembic `0020`, `ingested_at` live (timestamptz/nullable), compression_enabled=`t`,
+  policy job 1001 every 12h, **96 deep-tail chunks compressed**. Immediate byte win small (deep
+  tail is sparse); compression is scaling infra for the planned deep backfill.
+- **Deferred to next app deploy:** the celery upsert code change (ingested_at re-stamp on
+  conflict) — non-urgent; the column DEFAULT auto-stamps new daily rows regardless of code.
+
+**Remaining (handoff — fresh session recommended for the Tier-C rewire):**
+
+- **Task 2 (Tier-C, load-bearing):** `mf.mf_fund_metrics` persisted table + nightly task + rewire
+  the cohort/scoring read path to read it instead of loading ~6M NAV rows (root cause celery-batch
+  is pinned at 640M; OOM'd at 256/512M). MUST be numerically equivalent to the on-the-fly cohort
+  math (Tier-C compliance). Read `mf/cohort.py` + `mf/signals.py` first; next migration 0021.
+- **Task 3 (Tier-A, additive):** scheme-master enrichment (`plan_type`/`option_type`/
+  `fund_manager` + AMFI AUM/TER job) + scheme-lineage table (mergers/code-reuse).
+- **P2 (BLOCKED):** fund constituents (overlap) + benchmark TRI — founder build-vs-buy + counsel
+  sign-off on AMFI/TRI redistribution required before implementation.
+
+### Agent-utilization & routing telemetry (2026-06-13 MF master-DB P0 session)
+
+- **Opus (Fable, Tier 0):** architecture review/synthesis, migration design, blocker
+  adjudication, gates, merge, prod deploy + verification, session-exit docs.
+- **Sonnet (Tier 1):** repo data-layer inventory (Explore) · reworked: N | Task-1 adversarial
+  review (migrations + ingestion, ACCEPT-W/C) · reworked: N (both blockers fixed by Opus per the
+  reviewer's prescription — review itself shipped as-returned).
+- **Haiku (Tier 3):** n/a — no bulk sweeps.
+- **codex:rescue:** n/a — account not entitled (standing memory); Sonnet adversarial takeover used.
+- **deep-research workflow:** 106 agents, 24 sources, 13 claims verified; synthesis step hit the
+  account session limit (3:10am IST) — Opus synthesized the report from verified claims + inventory.
 
 ## B65 RESOLVED — CAMS CAS XIRR null (sign-convention fix) — merged + DEPLOYED (2026-06-13)
 
