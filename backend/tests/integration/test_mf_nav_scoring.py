@@ -96,6 +96,9 @@ async def test_seeded_nav_history_scores_real_label(db_session, db_tables):
 
 
 _PROV_ISIN = "INF_PROV0019"
+_METRICS_ISINS = [f"INF_METRICS{i:02d}" for i in range(6)]
+_METRICS_CATEGORY = "Equity Scheme - Large Cap Fund"
+_METRICS_AS_OF = datetime.date(2026, 6, 13)
 
 
 async def test_nav_insert_stamps_ingested_at_provenance(db_session, db_tables):
@@ -124,4 +127,140 @@ async def test_nav_insert_stamps_ingested_at_provenance(db_session, db_tables):
         assert row.ingested_at is not None
     finally:
         await db_session.execute(delete(MfNavHistory).where(MfNavHistory.isin == _PROV_ISIN))
+        await db_session.commit()
+
+
+async def test_mf_fund_metrics_refresh_equivalence(db_session, db_tables):
+    """Tier-C equivalence oracle: mf_fund_metrics refresh → cohort-builder path
+    produces bit-identical benchmarks and CategoryRelative outputs vs direct
+    long_horizon_stats + build_benchmark (the old math).
+
+    Seeds 6 funds in one category with enough 1Y history (some with 3Y), runs the
+    reference computation, runs the refresh upsert, then calls the rewired
+    _build_cohort_context and asserts exact equality on benchmarks + per-fund labels.
+    """
+    from sqlalchemy import func
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.mf.cohort import build_benchmark, compare_to_cohort
+    from dhanradar.mf.signals import long_horizon_stats
+    from dhanradar.models.mf import MfFundMetrics
+    from dhanradar.tasks.mf import (
+        _COHORT_LOOKBACK_DAYS,
+        _build_cohort_context,
+        _relative_from_context,
+    )
+
+    # --- seed mf_funds -------------------------------------------------------
+    fund_rows = [
+        {
+            "isin": isin,
+            "scheme_name": f"Test Fund {i}",
+            "category": _METRICS_CATEGORY,
+        }
+        for i, isin in enumerate(_METRICS_ISINS)
+    ]
+    await db_session.execute(insert(MfFund).values(fund_rows))
+
+    # --- seed NAV history: 6 funds, varying history lengths ------------------
+    # Funds 0-3: ~400 days (supports 1Y; no genuine 3Y).
+    # Funds 4-5: ~1200 days (supports both 1Y and 3Y).
+    nav_rows = []
+    growth_rates = [0.04, 0.02, 0.06, 0.03, 0.05, 0.01]
+    for fund_idx, isin in enumerate(_METRICS_ISINS):
+        days = 1200 if fund_idx >= 4 else 400
+        nav = 100.0
+        for i in range(days):
+            d = _METRICS_AS_OF - datetime.timedelta(days=(days - 1 - i))
+            nav_rows.append({
+                "isin": isin,
+                "nav_date": d,
+                "nav": round(nav, 4),
+                "source": "amfi",
+            })
+            nav *= 1.0 + growth_rates[fund_idx] / 365.0
+    await db_session.execute(insert(MfNavHistory).values(nav_rows))
+    await db_session.commit()
+
+    try:
+        # --- REFERENCE: compute stats + benchmark the OLD way ----------------
+        from dhanradar.tasks.mf import _load_nav_series
+
+        ref_series, _ = await _load_nav_series(
+            db_session, _METRICS_ISINS, lookback_days=_COHORT_LOOKBACK_DAYS
+        )
+        ref_stats = {
+            isin: long_horizon_stats(ref_series.get(isin, []), as_of=_METRICS_AS_OF)
+            for isin in _METRICS_ISINS
+        }
+        ref_benchmark = build_benchmark(
+            _METRICS_CATEGORY, [ref_stats[i] for i in _METRICS_ISINS]
+        )
+        ref_labels = {
+            isin: compare_to_cohort(ref_stats[isin], ref_benchmark)
+            for isin in _METRICS_ISINS
+        }
+
+        # --- REFRESH: populate mf_fund_metrics (simulates the nightly task) --
+        today = _METRICS_AS_OF
+        upsert_dicts = []
+        for isin in _METRICS_ISINS:
+            r1, r3, dd = long_horizon_stats(
+                ref_series.get(isin, []), as_of=today
+            )
+            upsert_dicts.append({
+                "isin": isin,
+                "return_1y_pct": r1,
+                "return_3y_pct": r3,
+                "max_drawdown_pct": dd,
+                "nav_points": len(ref_series.get(isin, [])),
+                "as_of_date": today,
+            })
+        stmt = pg_insert(MfFundMetrics).values(upsert_dicts).on_conflict_do_update(
+            index_elements=["isin"],
+            set_={
+                "return_1y_pct": pg_insert(MfFundMetrics).excluded.return_1y_pct,
+                "return_3y_pct": pg_insert(MfFundMetrics).excluded.return_3y_pct,
+                "max_drawdown_pct": pg_insert(MfFundMetrics).excluded.max_drawdown_pct,
+                "nav_points": pg_insert(MfFundMetrics).excluded.nav_points,
+                "as_of_date": pg_insert(MfFundMetrics).excluded.as_of_date,
+                "computed_at": func.now(),
+            },
+        )
+        await db_session.execute(stmt)
+        await db_session.commit()
+
+        # --- REWIRED PATH: _build_cohort_context reads mf_fund_metrics -------
+        ctx = await _build_cohort_context(
+            db_session, _METRICS_ISINS, as_of=_METRICS_AS_OF
+        )
+        new_labels = _relative_from_context(ctx, _METRICS_ISINS)
+
+        # --- ASSERT: benchmarks are bit-identical ----------------------------
+        new_bm = ctx.benchmarks.get(_METRICS_CATEGORY)
+        assert new_bm is not None, "Benchmark missing from rewired context"
+        assert new_bm.n_peers == ref_benchmark.n_peers
+        assert new_bm.median_return_1y == ref_benchmark.median_return_1y
+        assert new_bm.median_return_3y == ref_benchmark.median_return_3y
+        assert new_bm.median_max_drawdown == ref_benchmark.median_max_drawdown
+
+        # --- ASSERT: per-fund CategoryRelative is identical ------------------
+        for isin in _METRICS_ISINS:
+            # Funds categorised in context produce a label; absent = on_track fail-safe.
+            new_cr = new_labels.get(isin)
+            ref_cr = ref_labels.get(isin)
+            assert new_cr == ref_cr, (
+                f"CategoryRelative mismatch for {isin}: rewired={new_cr!r} ref={ref_cr!r}"
+            )
+
+    finally:
+        await db_session.execute(
+            delete(MfFundMetrics).where(MfFundMetrics.isin.in_(_METRICS_ISINS))
+        )
+        await db_session.execute(
+            delete(MfNavHistory).where(MfNavHistory.isin.in_(_METRICS_ISINS))
+        )
+        await db_session.execute(
+            delete(MfFund).where(MfFund.isin.in_(_METRICS_ISINS))
+        )
         await db_session.commit()

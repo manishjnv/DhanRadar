@@ -20,6 +20,7 @@ from uuid import UUID
 from sqlalchemy import (
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -74,6 +75,28 @@ class MfNavHistory(Base):
     # rows auto-stamp via the column DEFAULT; the upsert refreshes it on re-ingest.
     ingested_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, server_default=func.now()
+    )
+
+
+class MfFundMetrics(Base):
+    """Precomputed per-fund long-horizon stats, refreshed nightly after nav_daily_fetch.
+
+    The cohort builder reads these instead of loading peer NAV series (B63 memory cap).
+    Values are exactly ``long_horizon_stats()`` output — bit-identical, Float not Numeric
+    (Python float ↔ float8 round-trips exactly; Numeric would round and break bit-identity).
+    """
+
+    __tablename__ = "mf_fund_metrics"
+    __table_args__ = _SCHEMA
+
+    isin: Mapped[str] = mapped_column(Text, primary_key=True)
+    return_1y_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    return_3y_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_drawdown_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    nav_points: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
