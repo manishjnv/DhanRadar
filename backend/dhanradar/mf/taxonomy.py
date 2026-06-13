@@ -1,0 +1,312 @@
+"""
+DhanRadar — MF category taxonomy validation + canonicalization (B66).
+
+Source of truth:
+  * SEBI circular SEBI/HO/IMD/DF3/CIR/P/2017/114 (October 6, 2017) — MF
+    categorization and rationalization: defines the 36 permitted scheme
+    categories across 5 class groups (Equity / Debt / Hybrid /
+    Solution-Oriented / Other Scheme).
+  * AMFI NAVAll.txt section headers — the live feed emits scheme-type strings
+    that correspond (with minor presentation variations) to those 36 SEBI leaf
+    categories plus a handful of bare-legacy strings predating the circular.
+
+INVARIANT: this module NEVER mutates the raw ``category`` cohort key stored in
+``mf_funds.category``.  It only classifies raw category strings and produces
+the ``sebi_category`` canonical value.  The cohort scoring in
+``mf/cohort.py`` groups peers by exact ``category`` string equality; touching
+that column would silently regroup cohorts and corrupt category-relative labels.
+All writes from this module go to ``mf_funds.sebi_category`` only.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+# ---------------------------------------------------------------------------
+# Canonical SEBI leaf set (42 strings)
+# ---------------------------------------------------------------------------
+# Normalized form: single internal spaces, straight apostrophe (U+0027).
+# "Equity Scheme - Sectoral/ Thematic" keeps the space after the slash — that
+# is the canonical AMFI presentation of the SEBI sectoral/thematic category.
+# "Other Scheme - Other ETFs" uses a single space between Other and ETFs.
+
+_CANONICAL_LEAVES: frozenset[str] = frozenset(
+    {
+        # Equity — 12 leaves
+        "Equity Scheme - Contra Fund",
+        "Equity Scheme - Dividend Yield Fund",
+        "Equity Scheme - ELSS",
+        "Equity Scheme - Flexi Cap Fund",
+        "Equity Scheme - Focused Fund",
+        "Equity Scheme - Large & Mid Cap Fund",
+        "Equity Scheme - Large Cap Fund",
+        "Equity Scheme - Mid Cap Fund",
+        "Equity Scheme - Multi Cap Fund",
+        "Equity Scheme - Sectoral/ Thematic",
+        "Equity Scheme - Small Cap Fund",
+        "Equity Scheme - Value Fund",
+        # Debt — 16 leaves
+        "Debt Scheme - Banking and PSU Fund",
+        "Debt Scheme - Corporate Bond Fund",
+        "Debt Scheme - Credit Risk Fund",
+        "Debt Scheme - Dynamic Bond",
+        "Debt Scheme - Floater Fund",
+        "Debt Scheme - Gilt Fund",
+        "Debt Scheme - Gilt Fund with 10 year constant duration",
+        "Debt Scheme - Liquid Fund",
+        "Debt Scheme - Long Duration Fund",
+        "Debt Scheme - Low Duration Fund",
+        "Debt Scheme - Medium Duration Fund",
+        "Debt Scheme - Medium to Long Duration Fund",
+        "Debt Scheme - Money Market Fund",
+        "Debt Scheme - Overnight Fund",
+        "Debt Scheme - Short Duration Fund",
+        "Debt Scheme - Ultra Short Duration Fund",
+        # Hybrid — 7 leaves
+        "Hybrid Scheme - Aggressive Hybrid Fund",
+        "Hybrid Scheme - Arbitrage Fund",
+        "Hybrid Scheme - Balanced Hybrid Fund",
+        "Hybrid Scheme - Conservative Hybrid Fund",
+        "Hybrid Scheme - Dynamic Asset Allocation or Balanced Advantage",
+        "Hybrid Scheme - Equity Savings",
+        "Hybrid Scheme - Multi Asset Allocation",
+        # Solution Oriented — 2 leaves
+        "Solution Oriented Scheme - Children's Fund",
+        "Solution Oriented Scheme - Retirement Fund",
+        # Other Scheme — 5 leaves
+        "Other Scheme - FoF Domestic",
+        "Other Scheme - FoF Overseas",
+        "Other Scheme - Gold ETF",
+        "Other Scheme - Index Funds",
+        "Other Scheme - Other ETFs",
+    }
+)
+
+# ---------------------------------------------------------------------------
+# Legacy maps
+# ---------------------------------------------------------------------------
+
+# Unambiguous bare-header → canonical leaf.  Only strings that map to exactly
+# one SEBI leaf are placed here; ambiguous ones go to _LEGACY_UNMAPPABLE.
+_LEGACY_MAP: dict[str, str] = {
+    "ELSS": "Equity Scheme - ELSS",
+}
+
+# Recognized old/ambiguous bare headers that we deliberately do NOT auto-map.
+# "Gilt" is ambiguous between two SEBI Gilt leaves; "Growth" / "Income" /
+# "Money Market" are pre-rationalization umbrella names with no single mapping.
+_LEGACY_UNMAPPABLE: frozenset[str] = frozenset(
+    {"Gilt", "Growth", "Income", "Money Market"}
+)
+
+# Pre-compiled pattern: any run of whitespace (tabs, double spaces, etc.)
+_WS_RUN = re.compile(r"\s+")
+
+# Curly apostrophes → straight apostrophe
+_CURLY_APOSTROPHES = str.maketrans(
+    {
+        "’": "'",  # RIGHT SINGLE QUOTATION MARK  '
+        "‘": "'",  # LEFT SINGLE QUOTATION MARK   '
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# Normalize
+# ---------------------------------------------------------------------------
+
+
+def normalize(raw: str | None) -> str | None:
+    """Return a cleaned string or None.
+
+    * None / blank / whitespace-only → None.
+    * Strip leading and trailing whitespace.
+    * Replace curly apostrophes (U+2018, U+2019) with straight ``'`` (U+0027).
+    * Collapse any internal whitespace run (tabs, double spaces, etc.) to a
+      single ASCII space.
+    """
+    if not isinstance(raw, str):
+        # None — or any unexpected non-str type from an upstream parser regression.
+        # canonical_for() runs UNWRAPPED inside the per-row nightly upsert mapping,
+        # so this must never raise (a non-str .strip() AttributeError would kill the
+        # whole NAV refresh). Treat anything that is not a str as empty/unclassifiable.
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    s = s.translate(_CURLY_APOSTROPHES)
+    s = _WS_RUN.sub(" ", s)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# Classification result
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CategoryValidation:
+    """Result of classifying one raw ``mf_funds.category`` string.
+
+    Fields
+    ------
+    raw
+        The original unmodified string (or None) as read from the AMFI feed.
+    normalized
+        The result of :func:`normalize` applied to ``raw``; None when raw is
+        None / blank.
+    status
+        One of ``"canonical"`` / ``"legacy"`` / ``"unknown"`` / ``"empty"``.
+
+        * ``canonical`` — normalized matches a SEBI leaf (directly or via
+          :data:`_LEGACY_MAP`); ``canonical`` field is populated.
+        * ``legacy`` — recognized old/ambiguous bare header in
+          :data:`_LEGACY_UNMAPPABLE`; not auto-mapped; ``canonical`` is None.
+        * ``unknown`` — not recognized at all; may indicate AMFI taxonomy drift;
+          ``canonical`` is None.
+        * ``empty`` — raw is None or whitespace-only.
+    canonical
+        The SEBI-canonical leaf string to store in ``mf_funds.sebi_category``,
+        or None when the status is not ``"canonical"``.
+    scheme_class
+        The class prefix (e.g. ``"Equity Scheme"``, ``"Debt Scheme"``) derived
+        from the canonical leaf's ``"<class> - <sub>"`` structure, or None.
+    """
+
+    raw: str | None
+    normalized: str | None
+    status: str
+    canonical: str | None
+    scheme_class: str | None
+
+
+def classify(raw: str | None) -> CategoryValidation:
+    """Classify one raw category string against the SEBI taxonomy.
+
+    Returns a :class:`CategoryValidation` whose ``status`` is one of
+    ``"canonical"`` / ``"legacy"`` / ``"unknown"`` / ``"empty"``.
+    Never raises; designed to be called in a tight ingestion loop.
+    """
+    norm = normalize(raw)
+
+    if norm is None:
+        return CategoryValidation(
+            raw=raw,
+            normalized=None,
+            status="empty",
+            canonical=None,
+            scheme_class=None,
+        )
+
+    # Direct canonical match
+    if norm in _CANONICAL_LEAVES:
+        scheme_class = norm.split(" - ", 1)[0]
+        return CategoryValidation(
+            raw=raw,
+            normalized=norm,
+            status="canonical",
+            canonical=norm,
+            scheme_class=scheme_class,
+        )
+
+    # Legacy map (unambiguous bare → canonical)
+    if norm in _LEGACY_MAP:
+        canonical = _LEGACY_MAP[norm]
+        scheme_class = canonical.split(" - ", 1)[0]
+        return CategoryValidation(
+            raw=raw,
+            normalized=norm,
+            status="canonical",
+            canonical=canonical,
+            scheme_class=scheme_class,
+        )
+
+    # Recognized unmappable bare header (ambiguous legacy)
+    if norm in _LEGACY_UNMAPPABLE:
+        return CategoryValidation(
+            raw=raw,
+            normalized=norm,
+            status="legacy",
+            canonical=None,
+            scheme_class=None,
+        )
+
+    # Unrecognized — possible AMFI taxonomy drift
+    return CategoryValidation(
+        raw=raw,
+        normalized=norm,
+        status="unknown",
+        canonical=None,
+        scheme_class=None,
+    )
+
+
+def canonical_for(raw: str | None) -> str | None:
+    """Return the canonical SEBI leaf for ``raw``, or None if not resolvable.
+
+    Convenience wrapper around :func:`classify`; this is the value to store in
+    ``mf_funds.sebi_category``.
+    """
+    return classify(raw).canonical
+
+
+# ---------------------------------------------------------------------------
+# Batch summarizer
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ValidationSummary:
+    """Aggregate validation result over a batch of raw category strings.
+
+    Fields
+    ------
+    total
+        Number of input strings processed (including None / blank).
+    counts
+        Per-status tallies: ``{"canonical": N, "legacy": N, "unknown": N,
+        "empty": N}``.
+    unknown_samples
+        Up to 20 distinct raw values (sorted) whose status is ``"unknown"``.
+        Useful for detecting AMFI taxonomy drift in worker logs.
+    legacy_samples
+        Up to 20 distinct raw values (sorted) whose status is ``"legacy"``.
+    """
+
+    total: int
+    counts: dict[str, int]
+    unknown_samples: list[str]
+    legacy_samples: list[str]
+
+
+def summarize(raws: Iterable[str | None]) -> ValidationSummary:
+    """Tally classification results across a batch of raw category strings.
+
+    Collects up to 20 DISTINCT raw values for ``"unknown"`` and ``"legacy"``
+    statuses (sorted) so callers can log them as observability samples.
+    """
+    counts: dict[str, int] = {"canonical": 0, "legacy": 0, "unknown": 0, "empty": 0}
+    unknown_set: set[str] = set()
+    legacy_set: set[str] = set()
+    total = 0
+
+    for raw in raws:
+        total += 1
+        result = classify(raw)
+        counts[result.status] = counts.get(result.status, 0) + 1
+        if result.status == "unknown" and raw is not None:
+            unknown_set.add(raw)
+        elif result.status == "legacy" and raw is not None:
+            legacy_set.add(raw)
+
+    unknown_samples = sorted(unknown_set)[:20]
+    legacy_samples = sorted(legacy_set)[:20]
+
+    return ValidationSummary(
+        total=total,
+        counts=counts,
+        unknown_samples=unknown_samples,
+        legacy_samples=legacy_samples,
+    )

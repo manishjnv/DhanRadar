@@ -39,6 +39,8 @@ from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
+from dhanradar.mf.taxonomy import canonical_for
+from dhanradar.mf.taxonomy import summarize as taxonomy_summarize
 
 logger = logging.getLogger(__name__)
 _slog = get_logger(__name__)
@@ -127,6 +129,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             "amfi_code": row.amfi_code,
             "scheme_name": row.scheme_name,
             "category": row.category,
+            "sebi_category": canonical_for(row.category),
         }
     return list(out.values())
 
@@ -595,6 +598,23 @@ async def _nav_daily_pipeline() -> str:
     rows = await amfi.fetch_navall_rows_with_category()
     logger.info("nav_daily_fetch: fetched %d rows", len(rows))
 
+    # Taxonomy validation — best-effort; never let logging raise and break ingestion.
+    try:
+        summary = taxonomy_summarize(r.category for r in rows)
+        logger.info(
+            "nav_daily_fetch: taxonomy counts %s",
+            summary.counts,
+        )
+        if summary.counts.get("unknown", 0) > 0 or summary.counts.get("legacy", 0) > 0:
+            logger.warning(
+                "nav_daily_fetch: taxonomy drift detected — "
+                "unknown_samples=%r legacy_samples=%r",
+                summary.unknown_samples,
+                summary.legacy_samples,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("nav_daily_fetch: taxonomy summarize failed (non-fatal)", exc_info=True)
+
     nav_dicts = _navrows_to_nav_upserts(rows)
     fund_dicts = _navrows_to_fund_upserts(rows)
 
@@ -628,6 +648,7 @@ async def _nav_daily_pipeline() -> str:
                     "amfi_code": insert(MfFund).excluded.amfi_code,
                     "scheme_name": insert(MfFund).excluded.scheme_name,
                     "category": insert(MfFund).excluded.category,
+                    "sebi_category": insert(MfFund).excluded.sebi_category,
                 },
             )
             await db.execute(stmt)
