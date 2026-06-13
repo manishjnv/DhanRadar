@@ -1,10 +1,55 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (MF master-DB P0 — NAV provenance + TimescaleDB compression
-merged #113 `a7fe682` + DEPLOYED to KVM4; Tasks 2-3 queued, P2 blocked)
+**Last updated:** 2026-06-13 (B27 canonical signal-names + PU1 Market Mood Context — both
+built, reviewed, merged, and DEPLOYED to KVM4)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B27 + PU1 BUILT + DEPLOYED — canonical signal-names + Market Mood Context (2026-06-13)
+
+**Goal:** founder asked to implement whichever of four named unbuilt items were buildable.
+Built B27 + PU1. G1 (Creator Studio) deliberately NOT built — Growth-phase-sequenced, embed
+widget B35 unbuilt, counsel gate on published-score embeds. G7 (vernacular onboarding)
+deliberately NOT built — hard-gated on a Hindi/regional advisory filter that does not exist
+(B23 resolved English-only).
+
+**B27 — canonical signal-name registry.** PR #115 (`ba0a5a2`). New
+`scoring/engine/signal_names.py` single-sources the 9 approved label-signal phrases; public
+API byte-identical; 24 tests including byte-exact compliance pins; Tier-C independent review
+ACCEPT; ledger `reviews/b27-canonical-signal-names.md`. Closes B27.
+
+**PU1 — Market Mood Context.** PR #116 (`4940cd9`). New
+`GET /api/v1/portfolio/{id}/mood-context` (insights module) + `MoodContextSection` mounted
+second on the intelligence page; 3 deterministic non-advisory observations with the
+independence disclaimer between the mood and structure reads; descriptive concentration band
+governed by ADR-0032; no numeric in DOM; module-isolated mood read. Tier-A + Compliance
+ACCEPT-WITH-CONDITIONS, all conditions applied; ledger
+`reviews/pu1-mood-portfolio-context.md`.
+
+**Concurrent-session note.** PU1 rebased past a merge conflict with PR #117 (MF master-DB
+ADR-0033); ADR-0032 kept and reordered before 0033; the other session had pre-reserved
+ADR-0032 for this feature; all gates re-verified green post-rebase.
+
+**Deploy.** KVM4 `a7fe682` → `4940cd9` via `scripts/deploy.sh deploy`; smoke `/api/v1/health`
+200; both features verified in deployed image; mood-context live 401 anon; alembic `0020`
+unchanged (neither change adds a migration).
+
+**Also this session (earlier).** B65 CAMS XIRR completed + deployed (PRs #109/#112); several
+"is X implemented" audit queries answered.
+
+### Agent-utilization & routing telemetry (2026-06-13 B27 + PU1 session)
+
+- **Opus (Fable, Tier 0):** orchestration, governance gate, diff critique, seam verification,
+  ADR rebase-conflict resolution, ci\_guards FE-list fix + B27 docstring NIT (typed directly),
+  merge, deploy, post-deploy verification.
+- **Sonnet (Tier 1):** B27 build · reworked: N | PU1 build · reworked: Y (Fable drove the F2
+  observation reorder, ADR-0032, and the ci\_guards FE advisory-list fix) | B27 Tier-C review ·
+  reworked: N | PU1 Compliance+Architect+UI review · reworked: N | PU1 condition-application ·
+  reworked: N | handoff/feature-doc drafting · reworked: N.
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; the independent Sonnet Tier-C review
+  served as the adversarial scoring-path gate.
 
 ## MF master-DB P0 — NAV provenance + compression — merged + DEPLOYED (2026-06-13)
 

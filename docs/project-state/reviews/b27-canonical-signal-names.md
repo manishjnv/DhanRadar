@@ -14,7 +14,7 @@ NIT, resolved via docstring softening — see Conditions). LLM commentary signal
 separate field on `ScoringResult` and never enter the label-signal lists; verified by the
 independent reviewer.
 
-**Branch:** `fix/b27-canonical-signal-names` — PR #115
+**Branch:** `fix/b27-canonical-signal-names` — merged PR #115 (`ba0a5a2`)
 
 **Classification:** Tier C — load-bearing scoring path (`scoring/engine/`). Required
 reviews: Builder + Architect + Compliance + Product (independent agents; builder ≠
@@ -90,8 +90,10 @@ One NIT from the independent review was applied in-branch before the ledger was 
   protection.
 
 **Merge-eligible** — all deterministic gates green; Tier-C independent review ACCEPT;
-NIT applied.
+NIT applied. Merged PR #115 (`ba0a5a2`).
 
 ## Deploy record
 
-Pending — human-gated; not yet deployed.
+DEPLOYED 2026-06-13 to KVM4 (box `a7fe682` → `4940cd9` via `scripts/deploy.sh deploy`);
+smoke `/api/v1/health` 200; `signal_names.py` present in the deployed image; alembic `0020`
+unchanged (no migration added by this change).

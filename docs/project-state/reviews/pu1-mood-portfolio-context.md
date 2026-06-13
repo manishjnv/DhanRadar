@@ -15,7 +15,7 @@ Cold-start and empty portfolio return a valid 200. Frontend adds
 factory entry. Mounted second on `/portfolio/[id]/intelligence` (after WhatChanged,
 before Overlap). RegimeChip component carries a safe fallback for unknown regimes.
 
-**Branch:** `feat/pu1-mood-portfolio-context` — PR #116
+**Branch:** `feat/pu1-mood-portfolio-context` — merged PR #116 (`4940cd9`)
 
 **Classification:** Tier A (new feature, portfolio intelligence page) with Compliance
 review required (educational surface with mood/label content). Required reviews:
@@ -101,7 +101,16 @@ Both conditions applied; no open BLOCKERs or MAJORs remain.
 
 **Merge-eligible** — all deterministic gates green; Architect + Compliance + UI
 ACCEPT-WITH-CONDITIONS with both conditions applied and all residuals accepted.
+Merged PR #116 (`4940cd9`).
 
 ## Deploy record
 
-Pending — human-gated; not yet deployed to KVM4.
+DEPLOYED 2026-06-13 to KVM4 (box `a7fe682` → `4940cd9` via `scripts/deploy.sh deploy`);
+smoke `/api/v1/health` 200; mood-context route present in the deployed image; LIVE endpoint
+`/api/v1/portfolio/{id}/mood-context` → 401 anonymous (auth/IDOR gate working); alembic
+`0020` unchanged (no new migration).
+
+Concurrent-session ADR rebase note: ADR-0032 was reordered before ADR-0033 (from PR #117,
+MF master-DB session) during a clean rebase onto the advanced main; the other session had
+pre-reserved the ADR-0032 slot for this feature. All deterministic gates re-verified green
+post-rebase.
