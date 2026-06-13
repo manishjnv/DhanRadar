@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Any
 
+from dhanradar.ai_gateway.quality import _ADVISORY_RE
 from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
 from dhanradar.scoring.engine.schemas import (
@@ -60,11 +60,13 @@ def _labelize(keys: list[str]) -> list[str]:
     return [_FACTOR_LABELS.get(k, k) for k in keys]
 
 # Defense-in-depth advisory screen over the FREE-TEXT commentary before publish — no
-# advisory verb may reach a public surface (non-neg #1). This is the CORE set; the
-# versioned, domain-signed taxonomy lives with the AI gateway (B23).
-_ADVISORY_RE = re.compile(
-    r"\b(strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)\b", re.IGNORECASE
-)
+# advisory verb may reach a public surface (non-neg #1). We REUSE the AI gateway's
+# canonical compiled advisory regex (`_ADVISORY_RE`, imported above) — the exact term list
+# QualityValidator screens model output with — rather than a second, NARROWER local copy.
+# A narrower copy would silently pass terms the gateway covers (accumulate / book profits /
+# overweight / top pick / go long / ...), defeating the defense-in-depth purpose. (B35-e
+# review finding; closes the mood half of the B56-f1 _ADVISORY_RE duplication — news/service.py
+# still carries its own copy and stays tracked under B56-f1.)
 
 
 def default_fetch_inputs() -> dict[str, float | None]:
@@ -78,10 +80,15 @@ async def compute_and_store(
     snapshot_date: date,
     snapshot_time: datetime,
     fetch: Callable[[], dict[str, float | None]] = default_fetch_inputs,
-    generate_commentary: Callable[[MoodResult], str | None] | None = None,
+    generate_commentary: Callable[[MoodResult], Awaitable[str | None]] | None = None,
 ) -> MoodResult | None:
     """Run one snapshot. Returns the MoodResult, or None if ALL inputs are missing
-    (caller skips + retries)."""
+    (caller skips + retries).
+
+    `generate_commentary` is an ASYNC, best-effort hook (B35-e): it is awaited only when
+    the snapshot's own `commentary_allowed` gate is set (>= 7 signals, confidence >= 0.40)
+    and is expected to return the commentary string or None. It must not raise — but we
+    still guard it so a hook failure never breaks the snapshot."""
     result = compute_mood(fetch())
     if result is None:
         logger.warning("mood: all inputs missing for %s — skip", snapshot_date)
@@ -90,7 +97,7 @@ async def compute_and_store(
     commentary = None
     if result.commentary_allowed and generate_commentary is not None:
         try:
-            commentary = generate_commentary(result)
+            commentary = await generate_commentary(result)
         except Exception:  # noqa: BLE001 — commentary is best-effort spillover
             logger.warning("mood: commentary generation failed; publishing without it")
         # Never publish commentary that slipped an advisory verb past the model's own
