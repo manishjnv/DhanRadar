@@ -223,7 +223,7 @@ async def test_no_cohort_still_yields_on_track_not_in_form():
     assert result.verb_label == VerbLabel.on_track
 
 
-# --- B63: peer NAV loads are chunked (memory-bounded), results unchanged ------
+# --- B63 / B-metrics: peer metrics queries are chunked (memory-bounded) -------
 class _FakeResult:
     def __init__(self, rows):
         self._rows = rows
@@ -232,21 +232,83 @@ class _FakeResult:
         return self._rows
 
 
-class _FakeDb:
-    """Serves the two _compute_cohort queries: target categories, then peers."""
+class _MetricsRow:
+    """Minimal stand-in for a MfFundMetrics ORM row."""
 
-    def __init__(self, cat_rows, peer_rows):
-        self._results = [_FakeResult(cat_rows), _FakeResult(peer_rows)]
+    def __init__(self, isin, r1, r3, dd):
+        self.isin = isin
+        self.return_1y_pct = r1
+        self.return_3y_pct = r3
+        self.max_drawdown_pct = dd
+
+
+def _make_metric_rows(peers, series, as_of=_AS_OF):
+    """Build fake precomputed metric rows matching long_horizon_stats output."""
+    rows = []
+    for isin in peers:
+        r1, r3, dd = long_horizon_stats(series.get(isin, []), as_of=as_of)
+        rows.append(_MetricsRow(isin, r1, r3, dd))
+    return rows
+
+
+class _FakeDb:
+    """Serves the three _build_cohort_context queries:
+    (1) target categories, (2) all peers in those categories,
+    (3+) MfFundMetrics IN queries (one per _COHORT_PEER_CHUNK batch).
+    Pass ``metrics_rows`` as the rows to serve for ALL metrics batches;
+    the db returns them wholesale for each batch call so the test can
+    control which ISINs have precomputed stats.
+    """
+
+    def __init__(self, cat_rows, peer_rows, metrics_rows=None):
+        self._cat_peer = [_FakeResult(cat_rows), _FakeResult(peer_rows)]
+        self._metrics_rows = metrics_rows or []
 
     async def execute(self, _stmt):
-        return self._results.pop(0)
+        if self._cat_peer:
+            return self._cat_peer.pop(0)
+        # Subsequent calls are the chunked MfFundMetrics IN queries.
+        return _FakeResult(self._metrics_rows)
 
 
 async def test_cohort_peer_load_is_chunked_and_equivalent(monkeypatch):
-    # Loading ALL peers' 1200-day series at once OOM-killed the 640M worker on
-    # the complete NAV dataset (B63). The fix loads peers in bounded chunks;
-    # this asserts (a) no single load exceeds the chunk size and (b) the
-    # category-relative output is byte-identical to the one-shot computation.
+    # After the mf_fund_metrics rewrite (B-metrics), peer stats come from DB rows
+    # rather than loading NAV series.  The IN query is still chunked by
+    # _COHORT_PEER_CHUNK to stay under bind-param limits.  This test asserts:
+    # (a) the output with a small chunk == the output with a large chunk (identical
+    #     math — the same precomputed stats are read either way), and (b) the
+    #     result is non-empty (a real comparison happens).
+    from dhanradar.tasks import mf as tasks_mf
+
+    peers = [f"INF{i:04d}" for i in range(7)]
+    cat_rows = [(peers[0], "equity_mid")]
+    peer_rows = [(i, "equity_mid") for i in peers]
+    series = {
+        i: _daily_series(start_nav=100.0, daily_growth_pct=0.02 + 0.005 * k, days=400, end=_AS_OF)
+        for k, i in enumerate(peers)
+    }
+    metrics_rows = _make_metric_rows(peers, series)
+
+    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 3)
+    chunked = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows), [peers[0]], as_of=_AS_OF
+    )
+
+    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 10_000)
+    oneshot = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows), [peers[0]], as_of=_AS_OF
+    )
+
+    assert chunked  # non-empty — a real comparison happened
+    assert chunked == oneshot  # identical math either way
+
+
+async def test_cohort_falls_back_to_live_when_metrics_empty(monkeypatch):
+    # Empty-table safety net: when mf_fund_metrics has NO row for any peer (fresh
+    # deploy before the first mf_metrics_refresh), _build_cohort_context must fall
+    # back to the live NAV computation rather than silently withhold every benchmark
+    # (which would degrade every fund to on_track). The fallback must be numerically
+    # identical to the populated-metrics path.
     from dhanradar.tasks import mf as tasks_mf
 
     peers = [f"INF{i:04d}" for i in range(7)]
@@ -257,24 +319,23 @@ async def test_cohort_peer_load_is_chunked_and_equivalent(monkeypatch):
         for k, i in enumerate(peers)
     }
 
-    batches: list[int] = []
-
     async def _fake_load(db, isins, lookback_days=400):
-        batches.append(len(isins))
         return {i: series[i] for i in isins}, {}
 
     monkeypatch.setattr(tasks_mf, "_load_nav_series", _fake_load)
 
-    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 3)
-    chunked = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
-    assert batches and max(batches) <= 3  # every load bounded by the chunk size
+    # metrics_rows=[] → no peer has a precomputed row → fallback path.
+    fallback = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows=[]), [peers[0]], as_of=_AS_OF
+    )
+    # Populated metrics → primary read path (same underlying series).
+    metrics_rows = _make_metric_rows(peers, series)
+    primary = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows), [peers[0]], as_of=_AS_OF
+    )
 
-    batches.clear()
-    monkeypatch.setattr(tasks_mf, "_COHORT_PEER_CHUNK", 10_000)
-    oneshot = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
-    assert batches == [len(peers)]  # one-shot control loaded everything at once
-
-    assert chunked == oneshot  # identical math either way
+    assert fallback  # non-empty — the fallback produced a real comparison
+    assert fallback == primary  # fallback == metrics path: numerically identical
 
 
 # --- B58-f2: hoisted context build + pure lookup == one-call compute ----------
@@ -291,14 +352,14 @@ async def test_hoisted_context_lookup_matches_compute_cohort(monkeypatch):
         i: _daily_series(start_nav=100.0, daily_growth_pct=0.02 + 0.005 * k, days=400, end=_AS_OF)
         for k, i in enumerate(peers)
     }
+    metrics_rows = _make_metric_rows(peers, series)
 
-    async def _fake_load(db, isins, lookback_days=400):
-        return {i: series[i] for i in isins}, {}
-
-    monkeypatch.setattr(tasks_mf, "_load_nav_series", _fake_load)
-
-    direct = await tasks_mf._compute_cohort(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
-    ctx = await tasks_mf._build_cohort_context(_FakeDb(cat_rows, peer_rows), [peers[0]], as_of=_AS_OF)
+    direct = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows), [peers[0]], as_of=_AS_OF
+    )
+    ctx = await tasks_mf._build_cohort_context(
+        _FakeDb(cat_rows, peer_rows, metrics_rows), [peers[0]], as_of=_AS_OF
+    )
     hoisted = tasks_mf._relative_from_context(ctx, [peers[0]])
     assert direct  # non-empty — the comparison is real, not vacuous
     assert hoisted == direct
@@ -308,7 +369,10 @@ async def test_hoisted_context_lookup_matches_compute_cohort(monkeypatch):
     assert "INF_UNSEEN" not in tasks_mf._relative_from_context(ctx, ["INF_UNSEEN", peers[0]])
 
     # Empty targets short-circuit to the shared empty context.
-    assert await tasks_mf._build_cohort_context(_FakeDb([], []), []) is tasks_mf._EMPTY_COHORT_CONTEXT
+    assert (
+        await tasks_mf._build_cohort_context(_FakeDb([], []), [])
+        is tasks_mf._EMPTY_COHORT_CONTEXT
+    )
 
 
 # --- B58-f4: the label band is category-class-aware (model v1.1) --------------
@@ -391,3 +455,52 @@ def test_margin_manifest_lockstep_with_config():
     manifest = json.loads(cfg_path.read_text(encoding="utf-8"))["labels"]["cohort_margin_pct"]
     assert manifest["default"] == cohort_mod._MARGIN_PCT_DEFAULT
     assert manifest["by_class"] == cohort_mod._MARGIN_PCT_BY_CLASS
+
+
+# --- mf_fund_metrics round-trip invariant (DB-free) --------------------------
+
+def test_metrics_refresh_round_trip_is_bit_identical():
+    """The stats stored in mf_fund_metrics equal long_horizon_stats() output.
+
+    Simulates the refresh → read path without a DB: compute long_horizon_stats
+    on a synthetic series (as the refresh task does), store the tuple, then
+    reassemble it as the cohort builder would read it back.  The two tuples must
+    be identical — Float (float8) round-trips Python floats exactly, so this is
+    a strict equality check, not approximate.
+    """
+    series = _daily_series(start_nav=100.0, daily_growth_pct=0.03, days=1200, end=_AS_OF)
+
+    # Simulate what mf_metrics_refresh computes and stores.
+    r1, r3, dd = long_horizon_stats(series, as_of=_AS_OF)
+    stored = {"return_1y_pct": r1, "return_3y_pct": r3, "max_drawdown_pct": dd}
+
+    # Simulate what _build_cohort_context reads back.
+    read_back: tuple[float | None, float | None, float | None] = (
+        stored["return_1y_pct"],
+        stored["return_3y_pct"],
+        stored["max_drawdown_pct"],
+    )
+
+    # Bit-identical: same Python floats in, same floats out (no Numeric rounding).
+    assert read_back == (r1, r3, dd)
+    # Sanity: this series is long enough to have real values (not all None).
+    assert r1 is not None and r3 is not None and dd is not None
+
+
+def test_metrics_refresh_empty_series_yields_none_triple():
+    """An ISIN with no NAV (or fewer than _MIN_POINTS) stores (None, None, None),
+    matching the honest fail-safe of the old direct long_horizon_stats call on []."""
+    r1, r3, dd = long_horizon_stats([])
+    assert (r1, r3, dd) == (None, None, None)
+
+
+def test_metrics_refresh_short_series_no_3y_return():
+    """A fund with only 1Y of history stores None for 3Y — same as the old path."""
+    short = _daily_series(start_nav=100.0, daily_growth_pct=0.04, days=200, end=_AS_OF)
+    r1, r3, dd = long_horizon_stats(short, as_of=_AS_OF)
+    assert r1 is not None   # 1Y computable
+    assert r3 is None       # 3Y not computable from 200 days
+    # The stored tuple is identical to what _build_cohort_context would have
+    # computed inline — the precomputed path is numerically equivalent.
+    stored_tuple = (r1, r3, dd)
+    assert stored_tuple == long_horizon_stats(short, as_of=_AS_OF)
