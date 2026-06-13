@@ -65,6 +65,10 @@ Unlock once Tier 0 #1 lands and real history accrues.
   rupee expense-drag, manager-change flags). Treat as **core MF differentiation**, fold into the
   "make MF real" work. Overlap + expense-drag math partly exist in the snapshot. Data-gated.
 - **G10 — Show your working** (per-score inputs, weights, freshness, "what would change this").
+  **PARTIALLY SHIPPED 2026-06-13 (PR #119):** engine `flags` now persisted to `user_fund_scores`
+  (migration 0023) and surfaced as flag-aware educational drivers + a directional "what would
+  change this" list in the transparency endpoint + `TransparencyPanel`. Numeric factor WEIGHTS
+  stay server-side (non-neg #2) — the "weights" sub-item is intentionally NOT exposed.
   Strong compliance moat. **Constraint v2.4 misses:** non-neg #2 — the per-instrument numeric
   score must NOT reach the public DOM. Surface label + band + qualitative factors only; keep the
   number server-side.

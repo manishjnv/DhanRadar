@@ -1,10 +1,72 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B27 canonical signal-names + PU1 Market Mood Context — both
-built, reviewed, merged, and DEPLOYED to KVM4)
+**Last updated:** 2026-06-13 (backlog triage of 8 items → 3 built: B58-f3 + G10 + B35-e;
+PRs #119 + #120 open, merge-eligible)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B58-f3 + G10 + B35-e BUILT (PRs #119 + #120, merge-eligible) — backlog triage (2026-06-13)
+
+**Goal:** founder handed a list of 8 candidate items — "check if implemented, else implement
+one by one, best recommendation, no permission needed." Triaged all 8; built the 3 genuinely
+buildable without faking data or bypassing a methodology/counsel gate.
+
+**Already done (verified live on main).** B58-f2 (cohort hoist) + B58-f4 (class-aware debt
+margin, v1.1 activated) — both merged via PR #100; the "owes a calibration pass" note was
+stale (the PR *was* that pass). Debt margins (0.5/1.0pp) are founder-approved provisional
+values; a true dispersion recalibration is a Tier-C two-person gate, not a builder change.
+
+**Built this session (each independently reviewed; merge-eligible — deploy needs the Phase-7
+§5 pass + human approval; both PRs add migrations, run `alembic upgrade head`).**
+
+- **B58-f3 — `ix_mf_funds_category` index** (PR #119, migration 0022). Cohort peer lookup
+  `category IN (…)` was a seq scan; now btree-indexed. Index lives in the migration (source of
+  truth); no model `index=` to avoid the `ix_mf_mf_funds_category` auto-name divergence.
+- **G10 — show-your-working** (PR #119, migration 0023). Engine `flags` now persisted to
+  `user_fund_scores` + surfaced as flag-aware educational drivers + a directional "what would
+  change this" list (transparency endpoint + `TransparencyPanel`). No numeric, no advisory
+  verbs (`provisional_model` suppressed; `insufficient_data` → `[]`); numeric weights stay
+  server-side. 46 frontend tests green. Architect+Compliance review ACCEPT (its lone "syntax
+  error" finding was a verified false positive — curly U+2019 apostrophe).
+- **B35-e — real Mood AI commentary** (PR #120). `mood/commentary.py` = 2nd governed gateway
+  consumer (CALL→FLOOR→AUDIT; no consent gate — market-wide non-PII); async hook; generates
+  only when the snapshot's `commentary_allowed` gate is set (≥7 signals, confidence ≥0.40).
+  Tier-B Security+Compliance review ACCEPT-W-C; the one condition (advisory-screen too narrow)
+  was resolved inline by reusing the gateway's canonical `_ADVISORY_RE` — closes the mood half
+  of B56-f1. 12 unit tests green.
+
+**Genuinely blocked — NOT built (documented, never faked).**
+
+- `out_of_form` label — needs a `structural_concern` fundamentals data source; faking it
+  violates the rule-table boundary (non-neg #1). B58-f5 unreachability glossary note stays OPEN.
+- B11 (concentration weight) + B24 (veto recency window) — methodology changes requiring the
+  two-person gate + an architecture-owner decision; both also inert today (no data writer).
+- B1 (you-vs-NIFTY-50-TRI) — needs TRI ingestion + counsel sign-off (P2 / ADR-0033 deploy gate).
+- G3 deep MF analytics — debt duration/YTM/credit-quality + true stock-level overlap + rupee
+  expense drag all data-gated. Expense drag is closest (column exists, always NULL); the unlock
+  is a new AMFI fund-master ingestion adapter — deferred as its own unit because the real file
+  format can't be validated offline (data-correctness > velocity).
+- B35-f mood-history (pgvector) + the `mood.snapshot.published` event bus — deferred; neither
+  is required for commentary.
+
+**Next action:** merge PRs #119 + #120 once CI is green, run the Phase-7 §5 pre-deploy pass,
+deploy (`alembic upgrade head` → 0023). Then G3's AMFI fund-master ingestion adapter is the
+next concrete buildable unit (unlocks expense drag + duration/YTM + credit quality together).
+
+**Agent utilization & routing telemetry (this session).**
+
+- **Opus/Fable (main):** orchestration, all design, all load-bearing diff reviews, all builds
+  (scoring write-path · migrations · AI-gateway consumer), doc updates. (Fable per the pin.)
+- **Sonnet:** 4 parallel state-triage investigators + 2 adversarial reviews. n/a Haiku.
+- **codex:rescue: n/a** — unavailable on this account (ChatGPT plan not entitled); Sonnet
+  adversarial takeover used for both the Tier-A/Compliance and Tier-B sign-offs (standing
+  fallback).
+- Routing lines: warm-start · orientation · reworked N · Sonnet · investigate scoring items ·
+  reworked N · Sonnet · investigate MF/benchmark · reworked N · Sonnet · investigate
+  transparency/mood/PR100 · reworked N · Sonnet · review B58-f3+G10 · reworked N (finding was a
+  false positive) · Sonnet · review B35-e · reworked Y (1 real condition — widen advisory
+  screen — applied inline).
 
 ## B27 + PU1 BUILT + DEPLOYED — canonical signal-names + Market Mood Context (2026-06-13)
 
