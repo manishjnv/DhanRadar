@@ -537,6 +537,7 @@ def nav_daily_fetch() -> str:
 
 
 async def _nav_daily_pipeline() -> str:
+    from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
     from dhanradar.db import TaskSessionLocal
@@ -559,7 +560,11 @@ async def _nav_daily_pipeline() -> str:
                 continue
             stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
                 constraint="uq_mf_nav_isin_date",
-                set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+                set_={
+                    "nav": insert(MfNavHistory).excluded.nav,
+                    "source": "amfi",
+                    "ingested_at": func.now(),
+                },
             )
             await db.execute(stmt)
             n_nav += len(chunk)
@@ -606,6 +611,7 @@ def nav_backfill(years: int = 3) -> str:
 async def _nav_backfill_pipeline(years: int) -> str:
     import asyncio as _asyncio
 
+    from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
     from dhanradar.db import TaskSessionLocal
@@ -654,7 +660,11 @@ async def _nav_backfill_pipeline(years: int) -> str:
                         continue
                     stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
                         constraint="uq_mf_nav_isin_date",
-                        set_={"nav": insert(MfNavHistory).excluded.nav, "source": "amfi"},
+                        set_={
+                            "nav": insert(MfNavHistory).excluded.nav,
+                            "source": "amfi",
+                            "ingested_at": func.now(),
+                        },
                     )
                     await db.execute(stmt)
                 await db.commit()
