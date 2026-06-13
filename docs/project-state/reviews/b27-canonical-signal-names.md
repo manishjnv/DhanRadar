@@ -14,7 +14,7 @@ NIT, resolved via docstring softening — see Conditions). LLM commentary signal
 separate field on `ScoringResult` and never enter the label-signal lists; verified by the
 independent reviewer.
 
-**Branch:** `fix/b27-canonical-signal-names` — PR #\<pending\>
+**Branch:** `fix/b27-canonical-signal-names` — PR #115
 
 **Classification:** Tier C — load-bearing scoring path (`scoring/engine/`). Required
 reviews: Builder + Architect + Compliance + Product (independent agents; builder ≠
