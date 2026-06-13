@@ -15,6 +15,30 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-13 — B66-f1: AMFI category carry-forward poisoned by an AMC-name line with parens ("IDF")
+
+- **Symptom:** on its first prod run, the freshly-deployed B66 taxonomy validation layer WARNed
+  that 2,572 funds carried category `IDF` and 2,046 `Income`. 2,572 is impossible for real
+  Infrastructure Debt Funds (India has a handful); the `IDF`-tagged funds were actually
+  close-ended FMPs (Nippon/Reliance/Kotak/SBI/ICICI Fixed Maturity / Fixed Horizon plans).
+- **Root cause:** `parse_navall_with_category` (`backend/dhanradar/market_data/amfi.py`) treated
+  ANY non-data line containing both "(" and ")" as a scheme-type section header and carried its
+  inner-paren text forward as `category`. The live AMFI NAVAll.txt contains the AMC-name line
+  `IL&FS Mutual Fund (IDF)` inside the "Close Ended Schemes(Income)" section; the parser read
+  "(IDF)" as a header and mis-tagged every subsequent fund `IDF` until the next real header.
+  `category` is the exact-string peer-cohort key (`mf/cohort.py`), so those funds cohorted as a
+  bogus 2,572-member "IDF" group instead of with their real peers.
+- **Fix:** require the text before "(" to end with "Schemes" before treating a line as a header
+  (`amfi.py` `parse_navall_with_category`). The real headers — "Open Ended Schemes(…)",
+  "Close Ended Schemes(…)", "Interval Fund Schemes(…)" — all end in "Schemes"; an AMC name never
+  does. Ex-`IDF` funds now inherit their real section category ("Income"). Deployed; the next
+  `nav_daily_fetch` drift log confirms `IDF` drops to ~0.
+- **Prevention:** `TestParseNavallWithCategory` in `test_amfi.py` — a regression fixture with the
+  exact `IL&FS Mutual Fund (IDF)` poison line asserting funds keep the section category, plus the
+  "Schemes"-prefix-required and space-before-paren cases. The B66 taxonomy validation layer is the
+  standing detector: any future such drift WARNs in the nightly `nav_daily_fetch` log.
+- **Phase/area:** MF data ingestion (AMFI parser) → scoring cohort key. Surfaced by B66.
+
 ### 2026-06-12 — B65: CAMS CAS XIRR null — casparser sign convention not normalised at the parse boundary
 
 - **Symptom:** CAMS CAS report shows `xirr_pct: null` despite the statement carrying full
