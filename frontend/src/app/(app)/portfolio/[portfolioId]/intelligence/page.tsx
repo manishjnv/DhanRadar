@@ -24,6 +24,7 @@ import Link from 'next/link';
 import { OverlapSection } from '@/features/portfolio/components/OverlapSection';
 import { ConcentrationSection } from '@/features/portfolio/components/ConcentrationSection';
 import { WhatChangedSection } from '@/features/changes/WhatChangedSection';
+import { MoodContextSection } from '@/features/insights/MoodContextSection';
 import { TransparencySection } from '@/features/transparency/TransparencySection';
 
 interface Props {
@@ -55,6 +56,7 @@ export default function PortfolioIntelligencePage({ params }: Props) {
 
       <div className="space-y-6">
         <WhatChangedSection portfolioId={portfolioId} />
+        <MoodContextSection portfolioId={portfolioId} />
         <OverlapSection portfolioId={portfolioId} />
         <ConcentrationSection portfolioId={portfolioId} />
         <TransparencySection portfolioId={portfolioId} />

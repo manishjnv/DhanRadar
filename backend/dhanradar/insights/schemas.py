@@ -78,3 +78,34 @@ class ConcentrationResponse(BaseModel):
     disclosure: str
     not_advice: str
     disclaimer_version: str
+
+
+# ---------------------------------------------------------------------------
+# Mood-context endpoint schemas
+# ---------------------------------------------------------------------------
+
+class MoodContextResponse(BaseModel):
+    """
+    Educational mood-context read: current market regime + portfolio structure.
+
+    Compliance:
+      - No numeric mood_score / 0-100 values in any field (non-neg #2)
+      - regime is a string enum incl. data_unavailable — never an advisory verb (non-neg #1)
+      - observations are deterministic templates, NOT LLM-generated
+      - Disclosure bundle on every response (non-neg #9)
+    """
+
+    portfolio_id: str
+    # Mood side — public read from mood module (no mood_score float, no 0-100 value)
+    regime: str                        # extreme_fear|fear|neutral|greed|extreme_greed|data_unavailable
+    regime_as_of: str | None           # ISO date string, None when data_unavailable
+    # Portfolio structure side — reuses concentration module's public banded values only
+    fund_count: int                    # number of holdings in this portfolio
+    concentration_band: str            # "high" | "moderate" | "low" | "empty" — banded, not a pct
+    top_category: str | None           # category with highest allocation, or None if empty
+    # Templated, deterministic observations (non-LLM)
+    observations: list[str]
+    # Disclosure (non-neg #9) — same constants as overlap/concentration
+    disclosure: str
+    not_advice: str
+    disclaimer_version: str

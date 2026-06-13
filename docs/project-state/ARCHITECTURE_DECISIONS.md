@@ -741,6 +741,46 @@ Alternatives considered:
 **Source:** `docs/project-state/reviews/email-otp-login.md`;
 `BLOCKERS.md` B64; ADR-0029 (precedent for opt-in alternative factor scope).
 
+## ADR-0032 — Concentration-band taxonomy for the mood-context surface (PU1)
+
+**Date:** 2026-06-13 · **Status:** Accepted
+
+**Context:** The mood-context educational surface (PU1) needs a coarse, descriptive read of
+portfolio structure to pair with the market-regime read. The existing concentration endpoint
+(`/api/v1/insights/{portfolio_id}/concentration`) exposes per-category `allocation_pct` and an
+`observation` text line but no banded label. A raw percentage cannot be surfaced in the DOM
+(non-neg #2: numeric score never reaches the client). A descriptive band — empty / high /
+moderate / low — gives the educational read without exposing the underlying figure.
+
+**Decision:** Introduce a descriptive (non-prescriptive, non-advisory) concentration band derived
+from existing allocation math already computed in `get_concentration`. Thresholds:
+
+- 0 funds → `empty`
+- 1 fund OR top category ≥ 70 % → `high`
+- Top category 40–69 % → `moderate`
+- Top category < 40 % with 2+ funds → `low`
+
+The underlying percentage is computed server-side and **never serialized** (non-neg #2). The band
+is an educational description of structure, not an evaluation or a recommendation, and is always
+rendered alongside the independence disclaimer and the full disclosure bundle (non-neg #1 / #9).
+The independence disclaimer is placed **between** the regime read and the structure read in the
+`observations` array (index 1) so the regime↔concentration pairing is never adjacent without the
+"not a signal to act" line between them (Compliance review F2).
+
+**Consequences:** This is a PU1-introduced taxonomy, distinct from the scoring engine's
+`in_form/on_track/off_track/out_of_form` labels and from market mood. Thresholds are provisional
+v1 heuristics sized for an initial educational read and may be recalibrated via the ADR gate if
+label-distribution telemetry shows systematic mismatch. Any future surface needing a portfolio
+concentration band should reuse `_concentration_band` in `backend/dhanradar/insights/service.py`,
+not introduce a parallel banding scheme.
+
+**Files:** `backend/dhanradar/insights/service.py` (`_concentration_band`, `_build_observations`);
+`backend/tests/unit/test_mood_context_service.py`;
+`frontend/src/features/insights/__tests__/MoodContextSection.test.tsx`.
+
+**Source:** `BLOCKERS.md` PU1 row; `docs/project-state/reviews/pu1-mood-portfolio-context.md`;
+Compliance review F2 (observation ordering).
+
 ## ADR-0033 — MF master-DB P2 data sourcing: build top-10 constituents scrapers, relative-only benchmark display, counsel-attested redistribution
 
 **Date:** 2026-06-13 · **Status:** Accepted (ADR-0032 reserved by a concurrent session —
