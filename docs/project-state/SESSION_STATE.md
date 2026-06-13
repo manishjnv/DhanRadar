@@ -1,12 +1,13 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation built + reviewed + **DEPLOYED to
-KVM4**; 7-gap data-ingestion triage filed as B67–B70; `IDF`/legacy-category finding filed B66-f1)
+**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation + B66-f1 part 1 AMFI parser
+carry-forward fix — both built, reviewed, **DEPLOYED to KVM4 + verified**; 7-gap data-ingestion
+triage filed B67–B70; B67-AUM premise corrected → source-blocked)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
 
-## B66 BUILT + 7-gap data-ingestion triage (2026-06-13)
+## B66 + B66-f1 BUILT + DEPLOYED + 7-gap data-ingestion triage (2026-06-13)
 
 **Goal:** founder asked to review 7 data-ingestion gaps, implement the unbuilt ones, and deploy to
 KVM4. **Triage verdict:** 6 of 7 are sourcing / ToS / sequencing-gated (not unbuilt features); 1
@@ -25,8 +26,13 @@ codex n/a) ACCEPT-WITH-CONDITIONS; non-str hardening (finding 3a) applied. Cohor
 **7-gap triage (the rest filed as blockers; see BLOCKERS.md):**
 
 - **B67 — Fundamentals (manager change / AUM flows / credit downgrades).** The biggest gap; was
-  unfiled. AUM via AMFI monthly AAUM sequenced first; manager-change + credit-downgrade need
-  source decisions (ADR + counsel/ToS). Blocks `out_of_form`, B24, G3.
+  unfiled. **AUM premise CORRECTED 2026-06-13** (memory `b67-aum-no-clean-per-scheme-source`): AUM
+  is NOT sequence-first/buildable — AMFI exposes only AMC-wise AUM (SPA call, no static file;
+  legacy + `modules/AverageAUMDetails` endpoints all 404), per-scheme AUM is scattered across 40+
+  ToS-gated AMC sites, and §8.4 forbids imputing per-fund `aum_crore` from AMC-level. AMFI is NOT
+  geo-blocked (homepage 200) — the blocker is granularity + endpoint reverse-engineering. So all
+  three slices (AUM, manager-change, credit-downgrade) need a founder sourcing decision (ADR +
+  counsel/ToS), not a build. Blocks `out_of_form`, B24, G3.
 - **B68 — NIFTY 50 TRI.** Governed by ADR-0033(b) (relative-only public surface, internal TRI
   storage); sequenced behind Task 3. Blocks B1.
 - **B69 — Mood breadth.** **Prod premise corrected:** `/api/v1/market/mood` returns 200
@@ -42,21 +48,44 @@ stack healthy; smoke 200). One-off `nav_daily_fetch` populated `sebi_category`: 
 funds map to a canonical SEBI leaf; ~4,876 (~35%) sit under pre-2017 legacy/unknown headers** —
 `IDF` 2,572, `Income` 2,046, `Growth` 245, `Gilt` 13 (`sebi_category` NULL; the drift WARN fired in
 prod as designed). Normalization verified live (double-space / curly-apostrophe / bare-`ELSS` all
-canonicalized). The high legacy share means those funds' cohorts are fragmented today — **B66-f1**
-tracks the fix (extend the taxonomy for `IDF`/`Income`/`Growth` + the two-person-gated cohort-rewire
-to group on `sebi_category`).
+canonicalized).
 
-### Agent-utilization & routing telemetry (2026-06-13 B66 session)
+**B66-f1 part 1 — AMFI parser carry-forward fix (BUILT + DEPLOYED + VERIFIED).** PR #125 (`b961bdc`).
+The B66 drift WARN immediately surfaced a real pre-existing BUG: 2,572 funds were tagged `IDF`
+(impossible for real Infrastructure Debt Funds). Root cause — `parse_navall_with_category` treated
+ANY non-data line with parens as a section header, so the AMC-name line `IL&FS Mutual Fund (IDF)`
+hijacked the carry-forward and mis-tagged ~2,572 close-ended FMPs `IDF` until the next real header
+(`category` is the exact-string cohort key). Fix: a header's prefix-before-"(" must end with
+"Schemes". RCA logged; `TestParseNavallWithCategory` guards it; adversarial review (Sonnet, codex
+n/a) ACCEPT-WITH-CONDITIONS (space-before-paren test applied). **Deployed to KVM4 + verified:** the
+re-run `nav_daily_fetch` shows `unknown_samples=[]` (`IDF`→0), `Income` 2,046→4,618 (the ex-FMPs
+reverted to their real section), and the 9,165 canonical funds untouched. `Income`/`Growth`/`Gilt`
+are genuine AMFI legacy umbrellas (deliberately not auto-mapped). **B66-f1 part 2** (rewire
+`cohort.py` to group on validated `sebi_category`) stays OPEN — a two-person-gated Tier-C
+methodology change needing Compliance/Product review + a before/after backtest.
+
+**State at exit:** `origin/main` = local `main` = KVM4 box = `b961bdc`; alembic `0021`; site health
+200. Everything built this session is merged AND live — nothing to re-deploy.
+
+**Next session (prompt drafted for handoff):** PRIMARY = B66-f1 part 2 (the gated cohort-rewire +
+backtest) — the next buildable quality win. SECOND = B67 — bring the founder a sourcing-options memo
+(AUM is source-blocked per above; manager-change + credit-downgrade are ADR/counsel-gated), decide
+before any build. B68/B69/B70 are sourcing/ToS items; #3 (B59-f2) + #7 (B47) already tracked.
+
+### Agent-utilization & routing telemetry (2026-06-13 B66 + B66-f1 session)
 
 - **Opus (Fable, Tier 0):** orchestration; Phase-0 warm-start dispatch; governance gate + tier
   classification; live-prod verification (corrected the mood `data_unavailable` premise; pulled the
-  live AMFI taxonomy; found the `IDF` drift); line-by-line diff review; caught + fixed the
-  `_navrows_to_fund_upserts` guard-test regression the builder missed; applied the adversarial
-  non-str finding; BLOCKERS/SESSION_STATE rows (one-shot exemption — fact-dense governance prose
-  typed directly, not delegated); commit · merge · KVM4 deploy · post-deploy verification.
+  live AMFI taxonomy; found the `IDF` drift, then diagnosed it as a parser carry-forward BUG);
+  line-by-line diff review; caught + fixed the `_navrows_to_fund_upserts` guard-test regression the
+  builder missed; wrote the parser fix + RCA + B66-f1 regression tests directly (≤30-line in-cache
+  exemption); applied both adversarial findings; BLOCKERS/SESSION_STATE/RCA rows (one-shot
+  exemption — fact-dense governance prose typed directly, not delegated); commit · merge · KVM4
+  deploy · post-deploy verification (`IDF`→0).
 - **Sonnet (Tier 1):** B66 build · reworked: Y (Opus fixed the missed `test_only_*` guard-test
   regression + applied the non-str hardening finding) | B66 independent adversarial review ·
-  reworked: N (ACCEPT-WITH-CONDITIONS; finding actioned).
+  reworked: N (ACCEPT-WITH-CONDITIONS; finding actioned) | B66-f1 parser-fix adversarial review ·
+  reworked: N (ACCEPT-WITH-CONDITIONS; space-before-paren test condition applied).
 - **warm-start (Sonnet):** Phase-0 orientation brief · reworked: N. **Explore (Sonnet):** 7-gap
   code-state inventory · reworked: N.
 - **Haiku (Tier 3):** n/a.
