@@ -1,11 +1,52 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation + B66-f1 part 1 AMFI parser
-carry-forward fix — both built, reviewed, **DEPLOYED to KVM4 + verified**; 7-gap data-ingestion
-triage filed B67–B70; B67-AUM premise corrected → source-blocked)
+**Last updated:** 2026-06-14 (B66-f1 part 2 cohort rewire to validated `sebi_category` — built,
+Tier-C reviewed, **MERGED to main dormant (PR #128 `8e77333`)**; read-only prod backtest quantified
+196 label flips if activated; founder greenlit the **v1.2 activation package** + **B67 AUM option-a**
+— both are NEXT-SESSION work)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B66-f1 pt2 cohort rewire MERGED (dormant) + activation GREENLIT + B67 AUM option-a GREENLIT (2026-06-14)
+
+**B66-f1 part 2 — cohort rewire to `sebi_category` — MERGED to main (PR #128, `8e77333`).**
+OFF-BY-DEFAULT (`_COHORT_GROUPING_KEY="category"` in `tasks/mf.py`, mirrored in
+`ranking_configs_v1.json`, lockstep-tested) → merging is a behavioural NO-OP. Inline Tier-C review
+(load-bearing path): Architect/adversarial **ACCEPT**; Compliance + Product **ACCEPT-WITH-CONDITIONS**
+(`reviews/b66f1-pt2-cohort-sebi-rewire.md`). Migration `0022` adds indexes on `category` (closes
+B58-f3) + `sebi_category`. CI green on all blocking gates (`lint` advisory-red = pre-existing
+repo-wide ruff backlog, `continue-on-error`, not these files). **NOT deployed** — dormant, no
+behavioural change, so a deploy is optional/no-rush.
+
+**Read-only prod backtest (14,041 funds; label is today a pure fn of cohort output) — what activation
+WOULD do:** 196 labels flip (1.40%) — 113 dissolving the bogus 4,618-fund `Income` pseudo-cohort
+(→ uncohorted → on_track), 83 ELSS (80 bare-`ELSS` join the canonical cohort; **57 second-order**
+peer-median flips). Net on_track +102 / off_track −92 / in_form −10; insufficient_data +0. Data
+freshness confirmed (zero funds still tagged `IDF`).
+
+**Founder go-aheads (2026-06-14) → NEXT SESSION (start from this doc after `/clear`):**
+
+1. **Build the v1.2 activation package** (founder approved proceeding; the LIVE flip is still gated on
+   the two-person methodology gate + final sign-off + KVM4 deploy approval):
+   - **B71** — emit a NULL-`sebi_category` context signal (new `COHORT_NO_CANONICAL_CATEGORY` or reuse
+     `COHORT_THIN_BENCHMARK`) so uncohorted legacy-umbrella funds publish `on_track` WITH an honest
+     "category benchmark unavailable — predates SEBI taxonomy" context. New user-facing string → its
+     OWN Tier-C compliance review (`signal_names.py` invariant). Emission seam: `_build_cohort_context`
+     must mark NULL-grouping targets (they're filtered at step 1 today) so `_relative_from_context`
+     returns the context signal instead of silently skipping.
+   - **B58-f5** — label-glossary footnote for cohort-recalibration flips + soften the monthly-rescore
+     change-alert copy (`tasks/mf.py` `_monthly_rescore`).
+   - **v1.2** — flip `_COHORT_GROUPING_KEY="sebi_category"` + new `ranking_configs` v1.2
+     (`cohort_grouping_key:"sebi_category"`, `created_by≠approved_by`, `model_version` v1.2) +
+     `DISCLAIMER_VERSION` bump + update the lockstep test + ADR + methodology/changelog entry.
+   - Activation = registry activation row (two-person gate) + KVM4 deploy + pre-rescore user notice,
+     all on EXPLICIT founder approval. Do NOT flip live without it.
+2. **B67 AUM — option (a) ONLY** (founder chose, 2026-06-14): reverse-engineer AMFI's AMC-wise SPA
+   endpoint into a NEW amc-level field; do **NOT** impute per-scheme `aum_crore` (§8.4). First step =
+   ADR scoping it as AMC-level enrichment + the ToS-risk decision + a URL-liveness/ToS check (B56-f5 /
+   Data-Ingestion discipline) BEFORE any ingestion. Manager-change + credit-downgrade stay
+   ADR/counsel-gated. Memo: `B67_FUNDAMENTALS_SOURCING_MEMO.md`.
 
 ## B66 + B66-f1 BUILT + DEPLOYED + 7-gap data-ingestion triage (2026-06-13)
 
@@ -71,6 +112,30 @@ methodology change needing Compliance/Product review + a before/after backtest.
 backtest) — the next buildable quality win. SECOND = B67 — bring the founder a sourcing-options memo
 (AUM is source-blocked per above; manager-change + credit-downgrade are ADR/counsel-gated), decide
 before any build. B68/B69/B70 are sourcing/ToS items; #3 (B59-f2) + #7 (B47) already tracked.
+
+### Agent-utilization & routing telemetry (2026-06-14 B66-f1 pt2 + B67 memo session)
+
+- **Opus (Fable, Tier 0):** orchestration; verified the warm-start brief against real code before
+  acting; live read-only prod recon (data-freshness gate: `IDF`→0; exported `mf_funds` +
+  `mf_fund_metrics`); designed the backtest (proved the label is a pure fn of the cohort output →
+  `insufficient_data` invariant under the rewire); wrote the cohort-rewire diff + tests + migration
+  directly (load-bearing, small, in hot cache); synthesized the 3 independent reviews + wrote the
+  compliance gate ledger (Tier-0 judgment); commit · PR #128 · merge.
+- **Sonnet (Tier 1):** Compliance review · reworked: N (ACCEPT-W-C; conditions filed B71 + C2) |
+  Product review · reworked: N (ACCEPT-W-C; independently converged on B71; filed B58-f5) |
+  adversarial methodology review · reworked: N (ACCEPT, all 5 correctness checks PASS) | B67
+  sourcing-memo first draft · reworked: minimal (light header edit; content as-returned). All three
+  reviewers were independent agents, never the builder instance.
+- **warm-start (Sonnet):** Phase-0 orientation brief · reworked: N (its file:line claims were
+  re-verified against live code before I acted on them).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; the independent Sonnet adversarial methodology
+  takeover served the load-bearing-path gate (VERDICT ACCEPT).
+- **Doc-routing note (honest):** the review ledger + BLOCKERS rows + SESSION_STATE were typed on the
+  main model despite the doc-draft routing nudge — deliberate: the ledger is the compliance gate
+  ledger (judgment synthesis) and the BLOCKERS/state edits are surgical structured-table rows where
+  precision + the B-number-collision trap outweigh a delegate-then-reconcile loop. The B67 memo
+  (genuine long-form prose) WAS delegated to Sonnet first, per the rule.
 
 ### Agent-utilization & routing telemetry (2026-06-13 B66 + B66-f1 session)
 
