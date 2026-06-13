@@ -292,3 +292,35 @@ class TestNavrowsToFundUpserts:
         rows = [_row()]
         out = _navrows_to_fund_upserts(rows)
         assert set(out[0].keys()) == {"isin", "amfi_code", "scheme_name", "category"}
+
+
+# ===========================================================================
+# Provenance contract — mf_nav_history.ingested_at (migration 0019)
+# ===========================================================================
+
+class TestNavHistoryProvenanceColumn:
+    """The ingestion-provenance column is part of the data-platform contract
+    (six-question rule: "when received"). Guard its shape so it can't be silently
+    dropped or have its nullable/default semantics changed."""
+
+    def test_ingested_at_column_exists_nullable_with_default(self):
+        from sqlalchemy import DateTime
+
+        from dhanradar.models.mf import MfNavHistory
+
+        col = MfNavHistory.__table__.columns["ingested_at"]
+        assert isinstance(col.type, DateTime)
+        assert col.type.timezone is True
+        # Nullable: backfilled rows with an unknown ingestion time stay NULL —
+        # never imputed (no-fabrication invariant).
+        assert col.nullable is True
+        # New rows auto-stamp via the server default.
+        assert col.server_default is not None
+
+    def test_nav_upsert_mapping_excludes_ingested_at(self):
+        """The pure mapping helper must NOT carry ingested_at — it is stamped
+        server-side (column default on insert; func.now() in the upsert set_),
+        so historical backfills can't smuggle a client clock into provenance."""
+        rows = [_row()]
+        out = _navrows_to_nav_upserts(rows)
+        assert "ingested_at" not in out[0]
