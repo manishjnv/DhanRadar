@@ -12,9 +12,13 @@ unified_score is NEVER selected.
 
 Driver derivation logic:
   The engine's live `flags` list (partial_coverage/stale/low_liquidity/
-  provisional_model) is NOT persisted to user_fund_scores. We derive equivalent
-  qualitative drivers from what IS persisted: confidence_band + NAV days-ago.
-  This is conservative and safe — it never inverts a flag the engine didn't set.
+  provisional_model) IS now persisted to user_fund_scores (G10, migration 0041).
+  We render honest qualitative drivers from those flags + confidence_band + NAV
+  days-ago, and a directional "what would change this" guidance list (G10
+  show-your-working). Both are EDUCATIONAL strings only — no numeric weight, score,
+  threshold, or advice ever appears (non-neg #1 + #2). The internal `provisional_model`
+  governance flag is deliberately NOT surfaced to users. Rows scored before 0041 have
+  flags == NULL/[] and degrade gracefully to the confidence+freshness-only drivers.
 """
 
 from __future__ import annotations
@@ -61,12 +65,23 @@ _NAV_SOURCE_NAMES: dict[str, str] = {
 # Plain-language driver derivation (educational; never advisory)
 # ---------------------------------------------------------------------------
 
-def _derive_drivers(confidence_band: str, nav_days_ago: int | None) -> list[str]:
+# Engine flags we deliberately NEVER surface to users. `provisional_model` is an
+# internal governance/activation tag (B6) — exposing it would confuse a retail reader
+# about a model that is, from their perspective, live. `insufficient_data` is carried
+# by the refusal block, not the driver list.
+_INTERNAL_ONLY_FLAGS = frozenset({"provisional_model", "insufficient_data"})
+
+
+def _derive_drivers(
+    confidence_band: str, nav_days_ago: int | None, flags: list[str] | None
+) -> list[str]:
     """
     Derive qualitative data-quality driver strings from persisted state.
 
     These are factual statements about coverage and freshness — EDUCATIONAL,
-    never advisory. No buy/sell/hold/switch language anywhere.
+    never advisory. No buy/sell/hold/switch language anywhere. Now flag-aware
+    (G10): when the engine recorded WHY confidence was capped (partial coverage,
+    low liquidity), we say so honestly instead of only inferring from the band.
     """
     if confidence_band == "insufficient_data":
         return []  # refusal block carries the explanation, not drivers
@@ -79,19 +94,83 @@ def _derive_drivers(confidence_band: str, nav_days_ago: int | None) -> list[str]
         )
     elif confidence_band == "medium":
         drivers.append(
-            "Based on available history; category benchmark may be partially available"
+            "Based on the history available so far — some category comparisons may be incomplete"
         )
     elif confidence_band == "low":
         drivers.append(
             "Limited data coverage — label may update as more history accumulates"
         )
 
+    flagset = set(flags or [])
+    if "partial_coverage" in flagset:
+        drivers.append(
+            "Some signal axes had limited data — this label reflects the signals "
+            "that were available"
+        )
+    if "low_liquidity" in flagset:
+        drivers.append(
+            "This fund trades less often, so parts of the assessment are treated "
+            "more cautiously"
+        )
+
+    # NAV age is the AUTHORITATIVE staleness signal (computed from mf_nav_history),
+    # so the engine's own `stale` flag is intentionally NOT given a separate driver
+    # here — it would duplicate this line. If a fund has no NAV row, there is no
+    # age to report and staleness is simply not asserted.
     if nav_days_ago is not None and nav_days_ago > _STALE_THRESHOLD_DAYS:
         drivers.append(
             f"NAV data is {nav_days_ago} day(s) old — this label uses older price data"
         )
 
     return drivers
+
+
+def _derive_what_would_change(
+    confidence_band: str,
+    nav_days_ago: int | None,
+    is_stale: bool,
+    flags: list[str] | None,
+) -> list[str]:
+    """
+    G10 "what would change this" — directional, educational guidance on what would
+    move the label or raise confidence.
+
+    STRICTLY non-advisory and non-numeric: it explains the METHODOLOGY (how the
+    category-relative label is formed, what raises confidence) so a reader can see the
+    working. It NEVER tells the user to act (no buy/sell/switch), names a number, or
+    states a threshold. Empty when confidence_band == insufficient_data (the refusal
+    block already explains what data is missing).
+    """
+    if confidence_band == "insufficient_data":
+        return []
+
+    items: list[str] = []
+
+    # Always: the core methodology in plain language — this is the "show your working".
+    items.append(
+        "This label is category-relative: a sustained change in how this fund's "
+        "1-year and 3-year returns compare with its category peers can move it"
+    )
+
+    flagset = set(flags or [])
+
+    # Confidence-raising paths — only when confidence is not already high (a high band
+    # with a partial_coverage flag is already resolved; saying "confidence can rise"
+    # there reads as contradictory).
+    if confidence_band in ("low", "medium"):
+        items.append(
+            "As more price and category history builds up, the confidence can go up"
+        )
+    if "low_liquidity" in flagset:
+        items.append(
+            "If this fund traded more often, we could assess it with more confidence"
+        )
+    if is_stale or (nav_days_ago is not None and nav_days_ago > _STALE_THRESHOLD_DAYS):
+        items.append(
+            "A fresher NAV would re-evaluate this label against the latest prices"
+        )
+
+    return items
 
 
 def _build_refusal() -> InsufficientDataRefusal:
@@ -118,8 +197,9 @@ async def _fetch_score_rows(
     """
     Fetch latest score per ISIN for a portfolio.
 
-    Returns list of (isin, confidence_band, verb_label, scored_at, model_version).
-    unified_score is deliberately excluded from the SELECT list.
+    Returns list of (isin, confidence_band, verb_label, scored_at, model_version, flags).
+    unified_score is deliberately excluded from the SELECT list (flags are qualitative
+    string tags, not the numeric — safe to select, G10).
     """
     stmt = (
         select(
@@ -128,6 +208,7 @@ async def _fetch_score_rows(
             UserFundScore.verb_label,
             UserFundScore.scored_at,
             UserFundScore.model_version,
+            UserFundScore.flags,
         )
         .where(UserFundScore.portfolio_id == portfolio_id)
         .order_by(UserFundScore.isin, UserFundScore.scored_at.desc())
@@ -267,8 +348,13 @@ async def get_portfolio_transparency(
         holding_src_name = _HOLDING_SOURCE_NAMES.get(holding_src, holding_src.capitalize())
         sources.append(DataSource(name=holding_src_name, type="holdings"))
 
-        # Drivers + refusal
-        drivers = _derive_drivers(row.confidence_band, nav_days_ago)
+        # Drivers + "what would change this" + refusal (G10). `row.flags` is NULL for
+        # rows scored before migration 0041 → treated as [] (graceful degradation).
+        row_flags = list(row.flags or [])
+        drivers = _derive_drivers(row.confidence_band, nav_days_ago, row_flags)
+        what_would_change = _derive_what_would_change(
+            row.confidence_band, nav_days_ago, is_stale, row_flags
+        )
         refusal = _build_refusal() if row.confidence_band == "insufficient_data" else None
 
         funds.append(
@@ -279,6 +365,7 @@ async def get_portfolio_transparency(
                 label=row.verb_label,
                 confidence_band=row.confidence_band,
                 drivers=drivers,
+                what_would_change=what_would_change,
                 refusal=refusal,
                 sources=sources,
                 freshness=freshness,
