@@ -25,11 +25,13 @@ def compute_mood_snapshot() -> str:
     signal subset, then calls compute_and_store.  Signal fetch failure is caught
     and degrades gracefully to the all-None (data_unavailable) path.
     """
+    from dhanradar.ai_gateway.gateway import OpenRouterGateway
     from dhanradar.market_data.adapter import MarketDataAdapter
     from dhanradar.market_data.config import load_ladders
     from dhanradar.market_data.providers.macro import NseMacroProvider
     from dhanradar.market_data.providers.yahoo import YahooMacroProvider
     from dhanradar.mood import service
+    from dhanradar.mood.commentary import generate_mood_commentary
     from dhanradar.mood.signals import fetch_mood_inputs
 
     async def _go() -> str:
@@ -51,10 +53,17 @@ def compute_mood_snapshot() -> str:
         except Exception:  # noqa: BLE001 — never let signal fetch crash the task
             inputs = service.default_fetch_inputs()
 
+        # B35-e: AI commentary generator (governed gateway consumer). Awaited by the
+        # service ONLY when the snapshot's commentary_allowed gate is set (>= 7 signals,
+        # confidence >= 0.40); best-effort — None on any gateway/budget/low-confidence
+        # path leaves the snapshot published with its regime label and no commentary.
         result = await service.compute_and_store(
             snapshot_date=now_ist.date(),
             snapshot_time=now_ist,
             fetch=lambda: inputs,
+            generate_commentary=lambda r: generate_mood_commentary(
+                OpenRouterGateway(), result=r
+            ),
         )
         if result is None:
             return "mood: skipped (all inputs missing)"
