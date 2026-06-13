@@ -740,3 +740,70 @@ Alternatives considered:
 
 **Source:** `docs/project-state/reviews/email-otp-login.md`;
 `BLOCKERS.md` B64; ADR-0029 (precedent for opt-in alternative factor scope).
+
+## ADR-0033 — MF master-DB P2 data sourcing: build top-10 constituents scrapers, relative-only benchmark display, counsel-attested redistribution
+
+**Date:** 2026-06-13 · **Status:** Accepted (ADR-0032 reserved by a concurrent session —
+mood-context concentration-band taxonomy)
+
+**Context:** The "local MF master DB" plan (memory `mf-master-db-plan-and-p0`; P0 NAV
+provenance + compression shipped in ADR-0025-aligned migrations 0019/0020, PR #113) has a P2
+tier that was BLOCKED pending three founder/compliance decisions: how to source fund
+**constituents** (holdings-of-funds, needed for the overlap matrix which is permanently `{}`
+today because `build_snapshot()` never receives a `constituents` feed), how to surface
+**benchmark** comparisons (B1), and the **legal posture** for redistributing AMFI/NSE-BSE
+index-derived data commercially. Deep research established: there is no free consolidated
+constituents API; NSE/BSE restrict commercial *display/redistribution* of raw index values
+(internal computation is lower-risk); and AMFI tightened fintech data access in Sept 2025. On
+2026-06-13 the founder resolved all three.
+
+**Decision:**
+
+(a) **Constituents — BUILD, not buy (top-10 AMCs first).** Build per-AMC parsers for the
+monthly SEBI-format portfolio disclosures of the **top ~10 AMCs by AUM** (≈75-80% of industry
+assets), with name→ISIN resolution (SEBI's holdings table does not mandate ISIN). A licensed
+feed (ICRA MFI360 / CMOTS) is explicitly deferred — revisited only once there is revenue. This
+is a new sanctioned source under `DhanRadar-Data-Ingestion-Normalization`: it requires a
+constituents canonical schema + provenance + monthly freshness SLA + a Tier-B/Compliance review
+(scraping ToS + DPDP) before it goes live. Coverage below the top-10 is a documented, `log()`-ed
+gap, never silently presented as full-universe overlap.
+
+(b) **Benchmark — relative metrics only, no raw licensed index values in the DOM.** The public
+surface shows only *derived/relative* educational metrics (e.g. "this fund vs its category
+benchmark"), never raw NSE/BSE TRI point values. TRI series are stored for **internal
+computation only**. This composes with the non-numeric-in-DOM boundary (ADR-0010) and keeps the
+platform clear of NSE/BSE display-redistribution restrictions. Benchmark mapping depends on the
+Task-3 scheme-master enrichment (`benchmark_index` population).
+
+(c) **AMFI/NSE-BSE redistribution — counsel-attested (founder).** The founder attests on
+2026-06-13 that counsel has signed off on the AMFI NAV / index-derived redistribution posture
+for the educational platform. **This ADR records the founder's attestation; it does NOT
+self-certify legal compliance** (per `DhanRadar-SEBI-Compliance-Guardrail`, which escalates legal
+questions to counsel and never self-certifies). ACTION RESIDUAL: file the actual counsel sign-off
+artifact (date, scope, signatory) under `docs/legal/` and link it here; the attestation stands as
+the go-ahead, the filed document is the evidence of record.
+
+**Consequences:** P2 is UNBLOCKED for implementation, but it is multi-session work sequenced
+BEHIND its prerequisites — Task 2 (persisted `mf_fund_metrics` + cohort/scoring rewire, the 6M-row
+OOM fix) and Task 3 (scheme-master enrichment incl. `benchmark_index` + a scheme-lineage table).
+Order: Task 2 → Task 3 → P2a constituents (top-10) → P2b benchmark TRI (relative). Each P2 surface
+that touches a public output is governed by `DhanRadar-SEBI-Compliance-Guardrail`; the constituents
+scraper and the TRI ingestion each get their own data-source sanction + Tier-B/Compliance review
+at build time. The "relative-only" benchmark rule is binding on all future benchmark UI.
+
+**Alternatives considered:**
+
+- **License a constituents feed now (ICRA MFI360 / CMOTS):** rejected for launch on cost vs the
+  ₹15K/month budget target; ICRA ships an off-the-shelf Portfolio Overlap product, so buying stays
+  the clean fallback once revenue justifies it.
+- **Display raw TRI index values:** rejected — NSE/BSE commercial display/redistribution
+  restrictions + the non-numeric-in-DOM boundary both cut against it; relative metrics deliver the
+  educational value without the licensing exposure.
+- **Defer P2 entirely until revenue:** rejected — the founder wants the overlap + benchmark wedge
+  built on the free top-10/relative path, which is viable now.
+
+**Source:** founder decisions 2026-06-13; memory `mf-master-db-plan-and-p0`; deep-research report
+(this session); ADR-0010 (non-numeric/educational boundary), ADR-0025 (AMFI canonical NAV source);
+`DhanRadar-Data-Ingestion-Normalization` (sanctioned-source regime),
+`DhanRadar-SEBI-Compliance-Guardrail` (advice/redistribution boundary). Counsel artifact: TO FILE
+under `docs/legal/`.
