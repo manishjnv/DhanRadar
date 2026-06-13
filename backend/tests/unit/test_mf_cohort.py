@@ -504,3 +504,72 @@ def test_metrics_refresh_short_series_no_3y_return():
     # computed inline — the precomputed path is numerically equivalent.
     stored_tuple = (r1, r3, dd)
     assert stored_tuple == long_horizon_stats(short, as_of=_AS_OF)
+
+
+# --- B66-f1 pt2: cohort grouping key (category vs validated sebi_category) -----
+
+def test_cohort_grouping_key_default_is_dormant_category():
+    """The validated-taxonomy rewire stays UN-ACTIVATED until a NEW ranking_configs
+    version clears the two-person methodology gate (B6/B28) + explicit prod
+    activation. The shipped default MUST stay the active key so merging the rewire
+    is behaviourally a no-op. Guards against an accidental premature flip."""
+    from dhanradar.tasks import mf as tasks_mf
+
+    assert tasks_mf._COHORT_GROUPING_KEY == "category"
+
+
+def test_grouping_column_resolves_mf_funds_columns():
+    """_grouping_column maps the methodology key to the right mf_funds column and
+    fails loud on an unknown key (a manifest typo must not silently regroup)."""
+    import pytest
+
+    from dhanradar.tasks import mf as tasks_mf
+
+    assert tasks_mf._grouping_column("category").key == "category"
+    assert tasks_mf._grouping_column("sebi_category").key == "sebi_category"
+    with pytest.raises(ValueError):
+        tasks_mf._grouping_column("scheme_name")
+
+
+async def test_cohort_groups_on_sebi_key_and_null_stays_uncohorted():
+    """With grouping_key="sebi_category" the param threads through to the cohort
+    build, a fund in a real canonical cohort gets a comparison, and a fund whose
+    sebi_category is NULL (legacy umbrella Income/Growth/Gilt) is dropped at the
+    target filter → absent from the result → on_track fail-safe (NOT auto-mapped)."""
+    from dhanradar.tasks import mf as tasks_mf
+
+    peers = [f"INF{i:04d}" for i in range(7)]
+    # cat_rows: one canonical-leaf target + one NULL-sebi target (legacy umbrella).
+    cat_rows = [(peers[0], "Equity Scheme - ELSS"), ("INF_NULL", None)]
+    peer_rows = [(i, "Equity Scheme - ELSS") for i in peers]
+    series = {
+        i: _daily_series(start_nav=100.0, daily_growth_pct=0.02 + 0.005 * k, days=400, end=_AS_OF)
+        for k, i in enumerate(peers)
+    }
+    metrics_rows = _make_metric_rows(peers, series)
+
+    res = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, peer_rows, metrics_rows),
+        [peers[0], "INF_NULL"],
+        as_of=_AS_OF,
+        grouping_key="sebi_category",
+    )
+    assert peers[0] in res            # real canonical cohort → a comparison happened
+    assert "INF_NULL" not in res      # NULL sebi_category → uncohorted → on_track fail-safe
+
+
+def test_cohort_grouping_key_lockstep_with_config():
+    """ranking_configs_v1.json carries the active grouping key; the runtime constant
+    must match it exactly (methodology versioning, B6/B28 — same discipline as the
+    margin-manifest lockstep). A v1.2 activation flips BOTH in lockstep."""
+    import json
+    from pathlib import Path
+
+    from dhanradar.mf import cohort as cohort_mod
+    from dhanradar.tasks import mf as tasks_mf
+
+    cfg_path = (
+        Path(cohort_mod.__file__).resolve().parents[1] / "scoring" / "ranking_configs_v1.json"
+    )
+    labels = json.loads(cfg_path.read_text(encoding="utf-8"))["labels"]
+    assert labels["cohort_grouping_key"] == tasks_mf._COHORT_GROUPING_KEY
