@@ -107,6 +107,9 @@ async def upsert_user_fund_score(
         unified_score=result.unified_score,
         confidence_band=result.confidence_band.value,
         verb_label=result.verb_label.value,
+        # G10: persist the engine's own diagnostic flags verbatim (qualitative tags,
+        # no numeric) so the transparency surface renders honest data-quality "why".
+        flags=list(result.flags or []),
         model_version=result.model_version,
     )
     stmt = stmt.on_conflict_do_update(
@@ -115,6 +118,7 @@ async def upsert_user_fund_score(
             "unified_score": stmt.excluded.unified_score,
             "confidence_band": stmt.excluded.confidence_band,
             "verb_label": stmt.excluded.verb_label,
+            "flags": stmt.excluded.flags,
             "model_version": stmt.excluded.model_version,
             "scored_at": __import__("sqlalchemy").func.now(),
         },

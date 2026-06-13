@@ -33,6 +33,10 @@ const BASE_FUND = {
   label: 'on_track',
   confidence_band: 'medium',
   drivers: ['Based on available history; category benchmark may be partially available'],
+  what_would_change: [
+    'This label is category-relative: a sustained change in how this fund’s 1-year and 3-year returns compare with its category peers can move it',
+    'As more NAV and category history accumulate, the confidence band can rise',
+  ],
   refusal: null,
   sources: [
     { name: 'AMFI NAV Feed', type: 'nav_data' },
@@ -55,6 +59,7 @@ const INSUFFICIENT_FUND = {
   label: 'insufficient_data',
   confidence_band: 'insufficient_data',
   drivers: [],
+  what_would_change: [],
   refusal: {
     reason: "Not enough data to assess this fund yet \u2014 we won\u2019t guess.",
     detail:
@@ -141,6 +146,19 @@ describe('TransparencyPanel — happy path', () => {
     expect(screen.getByTestId('disclosure-text').textContent).toContain(
       'Educational analysis only'
     );
+  });
+
+  it('renders the "What would change this" block (G10) with no advisory verbs', () => {
+    const { container } = render(<TransparencyPanel data={DISCLOSURE_DATA} />);
+    const block = screen.getByTestId('what-would-change');
+    expect(block.textContent).toContain('What would change this');
+    expect(block.textContent).toContain('category-relative');
+    // Educational only — no advisory verbs in the guidance (non-neg #1).
+    const lowered = block.textContent!.toLowerCase();
+    for (const verb of ['buy', 'sell', 'switch', 'redeem', 'avoid']) { // advisory verbs that must never appear in educational guidance copy
+      expect(lowered).not.toContain(verb);
+    }
+    assertNoNumericScore(container);
   });
 });
 

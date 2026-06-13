@@ -406,6 +406,106 @@ async def test_transparency_anonymous_401(async_client, patch_redis):
 # ---------------------------------------------------------------------------
 
 
+async def test_transparency_flags_drive_drivers_and_what_would_change(
+    async_client, db_session, patch_redis
+):
+    """G10: persisted engine flags surface honest drivers + a 'what would change this'
+    guidance list — and that guidance is strictly educational (no advisory verbs) and
+    carries no numeric score (non-neg #1 + #2)."""
+    user_id = await _seed_user(db_session)
+    uid, pid = await _seed_base(db_session, user_id, fund_count=1)
+
+    today = datetime.now(tz=UTC).date()
+    db_session.add(
+        MfNavHistory(isin="INF001A01017", nav_date=today - timedelta(days=1), nav=100.0)
+    )
+    db_session.add(
+        UserFundScore(
+            user_id=uid,
+            portfolio_id=pid,
+            isin="INF001A01017",
+            unified_score=64,  # server-side only; must not leak
+            confidence_band="medium",
+            verb_label="on_track",
+            flags=["partial_coverage", "low_liquidity", "provisional_model"],
+            model_version="v1",
+            scored_at=datetime(2026, 6, 10, tzinfo=UTC),
+        )
+    )
+    await db_session.commit()
+
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        r = await async_client.get(f"/api/v1/portfolio/{pid}/transparency")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    fund = body["funds"][0]
+
+    # Drivers reflect the persisted flags (partial coverage + low liquidity).
+    drivers_joined = " ".join(fund["drivers"]).lower()
+    assert "limited data" in drivers_joined  # partial_coverage
+    assert "less frequently" in drivers_joined  # low_liquidity
+
+    # what_would_change is present, non-empty, and includes the category-relative
+    # methodology explainer + a liquidity-specific path.
+    wwc = fund["what_would_change"]
+    assert isinstance(wwc, list) and len(wwc) >= 2
+    wwc_joined = " ".join(wwc).lower()
+    assert "category-relative" in wwc_joined
+    assert "liquidity" in wwc_joined
+
+    # The internal governance flag must NEVER reach the client.
+    assert "provisional" not in r.text.lower(), "provisional_model is internal-only"
+
+    # No advisory verbs anywhere in drivers or what_would_change (non-neg #1).
+    advisory_verbs = ("buy", "sell", "hold", "switch", "redeem", "avoid", "invest in")
+    for verb in advisory_verbs:
+        assert verb not in wwc_joined, f"advisory verb '{verb}' in what_would_change"
+        assert verb not in drivers_joined, f"advisory verb '{verb}' in drivers"
+
+    # No numeric score leak (non-neg #2).
+    assert "unified_score" not in r.text
+    assert " 64," not in r.text and " 64}" not in r.text and '"64"' not in r.text
+
+
+async def test_transparency_what_would_change_empty_on_insufficient_data(
+    async_client, db_session, patch_redis
+):
+    """An insufficient_data fund returns what_would_change=[] (the refusal block, not
+    guidance, carries the explanation)."""
+    user_id = await _seed_user(db_session)
+    uid, pid = await _seed_base(db_session, user_id, fund_count=1)
+    db_session.add(
+        UserFundScore(
+            user_id=uid,
+            portfolio_id=pid,
+            isin="INF001A01017",
+            unified_score=None,
+            confidence_band="insufficient_data",
+            verb_label="insufficient_data",
+            flags=["insufficient_data", "partial_coverage"],
+            model_version="v1",
+            scored_at=datetime(2026, 6, 10, tzinfo=UTC),
+        )
+    )
+    await db_session.commit()
+
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        r = await async_client.get(f"/api/v1/portfolio/{pid}/transparency")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert r.status_code == 200, r.text
+    fund = r.json()["funds"][0]
+    assert fund["what_would_change"] == []
+    assert fund["drivers"] == []
+    assert fund["refusal"] is not None
+
+
 async def test_transparency_owned_empty_portfolio_200(async_client, db_session, patch_redis):
     """A portfolio that exists and belongs to the user but has zero scored funds
     returns 200 with funds=[] (cold-start), never 404; disclosure bundle present."""
