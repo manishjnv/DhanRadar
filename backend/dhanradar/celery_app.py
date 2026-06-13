@@ -127,6 +127,12 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.nav_daily_fetch",
         "schedule": crontab(hour=23, minute=30),
     },
+    # Fund metrics precompute — 00:15 IST; must run after nav_daily_fetch so
+    # metrics reflect the day's fresh NAV.
+    "mf-metrics-refresh": {
+        "task": "dhanradar.tasks.mf.mf_metrics_refresh",
+        "schedule": crontab(hour=0, minute=15),
+    },
     # Raw CAS file purge — 24h backstop (anti-pattern guard). 02:00 IST.
     "mf-purge-cas-files": {
         "task": "dhanradar.tasks.mf.purge_cas_files",

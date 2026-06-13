@@ -387,6 +387,9 @@ _COHORT_LOOKBACK_DAYS = 1200
 # same long_horizon_stats runs on the same per-fund series either way.
 _COHORT_PEER_CHUNK = 200
 
+# Batch size for the nightly mf_metrics_refresh upsert (ISINs per iteration).
+_METRICS_REFRESH_CHUNK = 500
+
 
 @dataclass(frozen=True)
 class _CohortContext:
@@ -409,19 +412,26 @@ async def _build_cohort_context(
 ) -> _CohortContext:
     """Build category peer-cohort benchmarks for the given target funds (B58).
 
-    Read-only on the mf schema (MfFund + mf_nav_history) — no cross-module access.
+    Read-only on the mf schema (MfFund + mf_fund_metrics) — no cross-module access.
     The peer set for a category is every fund AMFI tags in that category; the fund
     itself is included (negligible self-bias on a ≥5-peer median).
+
+    Step 3 reads precomputed ``mf_fund_metrics`` rows (refreshed nightly by
+    ``mf_metrics_refresh``) instead of loading peer NAV series into memory (B63).
+    The stats are numerically identical — ``mf_metrics_refresh`` stores exactly
+    ``long_horizon_stats()`` output on the same NAV data.
+
+    ``as_of`` is kept for caller compatibility; stats are now precomputed so the
+    value is not forwarded to the DB read.
     """
     from sqlalchemy import select
 
     from dhanradar.mf.cohort import build_benchmark
-    from dhanradar.mf.signals import long_horizon_stats
-    from dhanradar.models.mf import MfFund
+    from dhanradar.models.mf import MfFund, MfFundMetrics
 
     if not target_isins:
         return _EMPTY_COHORT_CONTEXT
-    as_of = as_of or date.today()
+    # as_of retained for signature compatibility; stats are precomputed nightly.
 
     # 1. Resolve each target's category; keep only real categories.
     cat_rows = (
@@ -448,17 +458,54 @@ async def _build_cohort_context(
         peers_by_cat.setdefault(c, []).append(i)
         all_peer_isins.append(i)
 
-    # 3. Long NAV series for every peer (≥3y); compute each peer's long-horizon
-    #    stats ONCE (targets are peers too), then the per-category median benchmark.
-    #    Peers load in bounded chunks (B63) — each batch's series is freed before
-    #    the next loads, keeping peak memory flat regardless of cohort size.
+    # 3. Read precomputed long-horizon stats from mf_fund_metrics (refreshed nightly
+    #    after nav_daily_fetch) in bounded chunks to stay under bind-param limits.
+    #    Peers with no row default to (None, None, None) — identical to the old path's
+    #    long_horizon_stats([]) for a fund AMFI tags in a category but with no NAV
+    #    (that mf_funds-vs-mf_nav_history asymmetry predates this change; both paths
+    #    treat it the same way).
     unique_peers = sorted(set(all_peer_isins))
     stats_by_isin: dict[str, FundStats] = {}
+    found_any = False
     for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
         batch = unique_peers[start : start + _COHORT_PEER_CHUNK]
-        series, _ = await _load_nav_series(db, batch, lookback_days=_COHORT_LOOKBACK_DAYS)
+        metric_rows = (
+            await db.execute(
+                select(
+                    MfFundMetrics.isin,
+                    MfFundMetrics.return_1y_pct,
+                    MfFundMetrics.return_3y_pct,
+                    MfFundMetrics.max_drawdown_pct,
+                ).where(MfFundMetrics.isin.in_(batch))
+            )
+        ).all()
+        if metric_rows:
+            found_any = True
+        row_map = {r.isin: (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in metric_rows}
         for i in batch:
-            stats_by_isin[i] = long_horizon_stats(series.get(i, []), as_of=as_of)
+            stats_by_isin[i] = row_map.get(i, (None, None, None))
+
+    # Empty-table safety net: if mf_fund_metrics has NO row for ANY peer (a fresh
+    # deploy before the first mf_metrics_refresh, or a wiped table), every benchmark
+    # would silently withhold → on_track for everyone. Fall back to the live NAV
+    # computation for THIS run (the exact pre-refactor math — equivalent, just
+    # memory-heavier) and log loudly so the missed populate is observable, not silent.
+    if unique_peers and not found_any:
+        from dhanradar.mf.signals import long_horizon_stats
+
+        logger.critical(
+            "mf_fund_metrics empty for %d peers — falling back to live cohort "
+            "computation; run mf_metrics_refresh to populate", len(unique_peers),
+        )
+        ref_as_of = as_of or date.today()
+        stats_by_isin = {}
+        for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
+            batch = unique_peers[start : start + _COHORT_PEER_CHUNK]
+            series, _ = await _load_nav_series(db, batch, lookback_days=_COHORT_LOOKBACK_DAYS)
+            for i in batch:
+                stats_by_isin[i] = long_horizon_stats(series.get(i, []), as_of=ref_as_of)
+
+    # 4. Per-category median benchmark — unchanged.
     benchmarks = {
         cat: build_benchmark(cat, [stats_by_isin[i] for i in cat_isins])
         for cat, cat_isins in peers_by_cat.items()
@@ -681,6 +728,89 @@ async def _nav_backfill_pipeline(years: int) -> str:
         f"nav_backfill: {total_rows} rows upserted across {windows_fetched}/{len(windows)} windows"
         f" (years={years})"
     )
+    logger.info(summary)
+    return summary
+
+
+@celery_app.task(name="dhanradar.tasks.mf.mf_metrics_refresh")
+def mf_metrics_refresh() -> str:
+    """Nightly precompute of per-fund long-horizon stats into mf_fund_metrics.
+
+    Runs after nav_daily_fetch so metrics reflect the day's fresh NAV.
+    The cohort builder reads these rows instead of loading peer NAV series
+    into worker memory (B63 memory cap).  Wired to the beat schedule.
+    """
+    try:
+        return asyncio.run(_metrics_refresh_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("mf_metrics_refresh pipeline error")
+        return "mf_metrics_refresh: failed — see worker logs"
+
+
+async def _metrics_refresh_pipeline() -> str:
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.signals import long_horizon_stats
+    from dhanradar.models.mf import MfFundMetrics, MfNavHistory
+
+    today = date.today()
+
+    async with TaskSessionLocal() as db:
+        # Load all ISINs that have any NAV data.
+        isin_rows = (
+            await db.execute(
+                select(MfNavHistory.isin).distinct()
+            )
+        ).all()
+        all_isins = [r[0] for r in isin_rows]
+
+    logger.info("mf_metrics_refresh: %d ISINs to process", len(all_isins))
+
+    n_processed = 0
+    for start in range(0, len(all_isins), _METRICS_REFRESH_CHUNK):
+        chunk = all_isins[start : start + _METRICS_REFRESH_CHUNK]
+        if not chunk:
+            continue
+
+        async with TaskSessionLocal() as db:
+            # Load long NAV series for this chunk (same lookback as cohort builder).
+            series, _ = await _load_nav_series(db, chunk, lookback_days=_COHORT_LOOKBACK_DAYS)
+
+            upsert_dicts: list[dict] = []
+            for isin in chunk:
+                r1, r3, dd = long_horizon_stats(series.get(isin, []), as_of=today)
+                upsert_dicts.append({
+                    "isin": isin,
+                    "return_1y_pct": r1,
+                    "return_3y_pct": r3,
+                    "max_drawdown_pct": dd,
+                    "nav_points": len(series.get(isin, [])),
+                    "as_of_date": today,
+                })
+
+            # Bulk upsert in sub-chunks to bound statement size.
+            for i in range(0, len(upsert_dicts), _UPSERT_CHUNK):
+                sub = upsert_dicts[i : i + _UPSERT_CHUNK]
+                if not sub:
+                    continue
+                stmt = insert(MfFundMetrics).values(sub).on_conflict_do_update(
+                    index_elements=["isin"],
+                    set_={
+                        "return_1y_pct": insert(MfFundMetrics).excluded.return_1y_pct,
+                        "return_3y_pct": insert(MfFundMetrics).excluded.return_3y_pct,
+                        "max_drawdown_pct": insert(MfFundMetrics).excluded.max_drawdown_pct,
+                        "nav_points": insert(MfFundMetrics).excluded.nav_points,
+                        "as_of_date": insert(MfFundMetrics).excluded.as_of_date,
+                        "computed_at": func.now(),
+                    },
+                )
+                await db.execute(stmt)
+            await db.commit()
+            n_processed += len(chunk)
+
+    summary = f"mf_metrics_refresh: {n_processed} funds"
     logger.info(summary)
     return summary
 
