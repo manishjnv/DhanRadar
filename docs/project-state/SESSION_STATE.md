@@ -1,10 +1,43 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-13 (B27 canonical signal-names + PU1 Market Mood Context — both
-built, reviewed, merged, and DEPLOYED to KVM4)
+**Last updated:** 2026-06-13 (B66 MF category-taxonomy validation built + reviewed; 7-gap
+data-ingestion triage filed as B67–B70)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B66 BUILT + 7-gap data-ingestion triage (2026-06-13)
+
+**Goal:** founder asked to review 7 data-ingestion gaps, implement the unbuilt ones, and deploy to
+KVM4. **Triage verdict:** 6 of 7 are sourcing / ToS / sequencing-gated (not unbuilt features); 1
+was cleanly buildable and was shipped.
+
+**B66 — MF category taxonomy validation (BUILT).** `feat/b66-mf-taxonomy-validation` (`8f385dd`).
+New PURE `mf/taxonomy.py` classifies raw AMFI NAVAll.txt category strings against the 42
+SEBI-circular leaves → canonical / legacy / unknown / empty; populates the previously-empty
+`mf_funds.sebi_category` with the validated canonical value; nightly `nav_daily_fetch` logs
+per-status counts + WARNs on taxonomy drift (unknown/legacy samples). Raw `category` cohort key is
+NEVER mutated (test-enforced) → zero scoring perturbation; **no migration** (`sebi_category` exists
+since 0004). 90 unit tests; ruff + ci_guards green. Independent adversarial review (Sonnet takeover,
+codex n/a) ACCEPT-WITH-CONDITIONS; non-str hardening (finding 3a) applied. Cohort-rewire to read
+`sebi_category` is a FUTURE two-person-gated step (B6/B28) — deliberately not done here.
+
+**7-gap triage (the rest filed as blockers; see BLOCKERS.md):**
+
+- **B67 — Fundamentals (manager change / AUM flows / credit downgrades).** The biggest gap; was
+  unfiled. AUM via AMFI monthly AAUM sequenced first; manager-change + credit-downgrade need
+  source decisions (ADR + counsel/ToS). Blocks `out_of_form`, B24, G3.
+- **B68 — NIFTY 50 TRI.** Governed by ADR-0033(b) (relative-only public surface, internal TRI
+  storage); sequenced behind Task 3. Blocks B1.
+- **B69 — Mood breadth.** **Prod premise corrected:** `/api/v1/market/mood` returns 200
+  `greed`/`medium`/`degraded` (NOT `data_unavailable`) — Yahoo feeds 6/11; reaching ≥7 inputs is
+  blocked on a non-NSE source (NSE geo-blocked).
+- **B70 — News breadth.** Only RBI RSS live; SEBI 404s; new sources need a HEAD + ToS check.
+- **#3 fund constituents** → already tracked by **B59-f2 + ADR-0033(a)** (top-10 AMC scrapers,
+  behind Task 3). **#7 Kite (B47)** → already filed, equities phase, ToS external. No new rows.
+
+**Deploy.** B66 is merge-eligible (gates green + adversarial logged); merge to main + KVM4 deploy +
+one-off `nav_daily_fetch` to populate `sebi_category` are the closing actions of this session.
 
 ## B27 + PU1 BUILT + DEPLOYED — canonical signal-names + Market Mood Context (2026-06-13)
 
