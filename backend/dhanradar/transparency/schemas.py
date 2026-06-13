@@ -47,12 +47,16 @@ class FundTransparency(BaseModel):
     """Per-fund transparency projection.
 
     All compliance-sensitive fields:
-      label           — non-advisory VerbLabel value
-      confidence_band — BAND only (high/medium/low/insufficient_data)
-      drivers         — plain-language data-quality reasons (educational, not advice)
-      refusal         — non-null ONLY when confidence_band == insufficient_data (PU2)
-      sources         — data source names + types
-      freshness       — NAV + holdings freshness metadata
+      label             — non-advisory VerbLabel value
+      confidence_band   — BAND only (high/medium/low/insufficient_data)
+      drivers           — plain-language data-quality reasons (educational, not advice)
+      what_would_change — directional, educational "what would move this label / raise
+                          confidence" guidance (G10 show-your-working). Qualitative
+                          only — never a numeric weight, score, or threshold; never
+                          advice (no buy/sell/switch). [] when refusal.
+      refusal           — non-null ONLY when confidence_band == insufficient_data (PU2)
+      sources           — data source names + types
+      freshness         — NAV + holdings freshness metadata
     """
 
     isin: str
@@ -61,6 +65,7 @@ class FundTransparency(BaseModel):
     label: str              # VerbLabel: in_form/on_track/off_track/out_of_form/insufficient_data
     confidence_band: str    # ConfidenceBand: high/medium/low/insufficient_data
     drivers: list[str]      # educational plain-language data-quality reasons; [] when refusal
+    what_would_change: list[str]  # G10 — directional educational guidance; [] when refusal
     refusal: InsufficientDataRefusal | None  # PU2 — non-null only on insufficient_data
     sources: list[DataSource]
     freshness: FreshnessMeta

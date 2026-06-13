@@ -45,6 +45,7 @@ export interface FundTransparency {
   label: string;
   confidence_band: string;
   drivers: string[];
+  what_would_change: string[];
   refusal: InsufficientDataRefusal | null;
   sources: DataSource[];
   freshness: FreshnessMeta;
@@ -308,6 +309,60 @@ function FundRow({ fund }: { fund: FundTransparency }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* G10 — "What would change this" (educational, directional; never advice) */}
+      {fund.what_would_change.length > 0 && (
+        <div data-testid="what-would-change" style={{ marginTop: 12 }}>
+          <p
+            style={{
+              margin: '0 0 4px',
+              fontFamily: 'var(--dr-font-sans)',
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              color: 'var(--text-muted)',
+            }}
+          >
+            What would change this
+          </p>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            {fund.what_would_change.map((w, i) => (
+              <li
+                key={i}
+                style={{
+                  fontFamily: 'var(--dr-font-sans)',
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  paddingLeft: 12,
+                  position: 'relative',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    color: 'var(--dr-royal)',
+                  }}
+                  aria-hidden="true"
+                >
+                  ·
+                </span>
+                {w}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* Sources */}

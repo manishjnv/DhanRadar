@@ -162,6 +162,9 @@ const TRANSPARENCY_WITH_DATA = {
       label: 'on_track',
       confidence_band: 'high',
       drivers: ['consistent NAV growth over trailing 12 months'],
+      what_would_change: [
+        'This label is category-relative: a sustained change in how this fund’s 1-year and 3-year returns compare with its category peers can move it',
+      ],
       refusal: null,
       sources: [
         { name: 'AMFI', type: 'nav_data' },
