@@ -37,6 +37,7 @@ import statistics
 from dataclasses import dataclass
 
 from dhanradar.mf.signals import CategoryRelative
+from dhanradar.scoring.engine.signal_names import SignalName, display
 
 # ---------------------------------------------------------------------------
 # Tunables (provisional v1 — not frozen; see module docstring / B6)
@@ -132,7 +133,7 @@ def compare_to_cohort(own: FundStats, benchmark: CohortBenchmark | None) -> Cate
         # Cohort too thin to benchmark — assert no category position, but tell the
         # user WHY it is unlabelled vs genuinely matching peers (explainability).
         return CategoryRelative(
-            contributing=["category peer benchmark unavailable — too few comparable funds to compare"]
+            contributing=[display(SignalName.COHORT_THIN_BENCHMARK)]
         )
 
     own_1y, own_3y, own_dd = own
@@ -162,22 +163,20 @@ def compare_to_cohort(own: FundStats, benchmark: CohortBenchmark | None) -> Cate
     if outperform_1y and own_3y is None:
         # Ahead on 1Y but no 3-year history → cannot reach in_form; say so plainly
         # so a strong young fund is not silently held at on_track (explainability).
-        contributing.append(
-            "ahead of category peers over the past year; three-year track record not yet established"
-        )
+        contributing.append(display(SignalName.COHORT_1Y_AHEAD_SHORT_TRACK))
     elif outperform_1y:
-        contributing.append("ahead of category peers over the past year")
+        contributing.append(display(SignalName.COHORT_1Y_AHEAD))
     if outperform_3y:
-        contributing.append("ahead of category peers over three years")
+        contributing.append(display(SignalName.COHORT_3Y_AHEAD))
     if drawdown_controlled:
-        contributing.append("drawdown contained versus category peers")
+        contributing.append(display(SignalName.COHORT_DRAWDOWN_CONTAINED))
     if underperform_12m:
-        contradicting.append("behind category peers over the trailing 12 months")
+        contradicting.append(display(SignalName.COHORT_12M_BEHIND))
     if sustained_underperformance:
         # Factual 3Y context — kept escalation-free: this state maps to off_track
         # (out_of_form needs a structural concern we do not yet ingest), so the
         # phrasing must not read as the most-severe label (Compliance B58 cond-1).
-        contradicting.append("also behind category peers over three years")
+        contradicting.append(display(SignalName.COHORT_3Y_ALSO_BEHIND))
 
     return CategoryRelative(
         outperform_1y=outperform_1y,

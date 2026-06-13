@@ -48,6 +48,7 @@ import statistics
 from dataclasses import dataclass, field
 
 from dhanradar.mf.scoring_bridge import FundSignals
+from dhanradar.scoring.engine.signal_names import SignalName, display
 
 # ---------------------------------------------------------------------------
 # Tunables (provisional v1 — not frozen; see module docstring / B6)
@@ -289,9 +290,9 @@ def compute_fund_signals(
     contributing: list[str] = []
     contradicting: list[str] = []
     if momentum is not None:
-        contributing.append("trailing return computed from NAV history")
+        contributing.append(display(SignalName.NAV_TRAILING_RETURN))
     if risk is not None:
-        contributing.append("volatility/drawdown computed from NAV history")
+        contributing.append(display(SignalName.NAV_VOLATILITY_DRAWDOWN))
 
     cr = category_relative or CategoryRelative()
     contributing.extend(cr.contributing)
