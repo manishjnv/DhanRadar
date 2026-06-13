@@ -83,16 +83,45 @@ Ledger: `docs/project-state/reviews/b6-b28-scoring-activation.md`.
   topology; full network/mTLS policy is a deploy gate.
 - **B26** — `disclaimer_version` carried on results; persisting `ai_recommendation_audit`
   `(label, model_used, disclaimer_version)` at serve time is the caller's job.
-- **B27** — `contributing/contradicting` are free-text; a canonical signal-name taxonomy is owed for
-  consistent UI.
+- **B27** — RESOLVED 2026-06-13. Canonical signal-name registry shipped; see section below.
 - Band-edge ±2 buffer (smoothing) is documented but the eval-count hysteresis is the active
   flip gate; the score-band-edge dead-zone remains an open refinement. (Distinct from the
   COHORT margin band, which became category-class-aware in model v1.1 — B58-f4, ADR-0030.)
 - Upstream normalization (winsorize/z-score against the sector peer set) helpers are provided, but the peer-set data pipeline lands with the consuming modules (Phase 5+).
 - The internal read endpoint returns the cached published result; persistence to a `scores`/`user_fund_scores` table is the caller's job (Phase 5).
 
+## Canonical signal-name registry (B27)
+
+All contributing and contradicting signal phrases are now centralised in
+`backend/dhanradar/scoring/engine/signal_names.py`. The module defines `SignalName`
+(a `StrEnum` with 9 keys), `SIGNAL_DISPLAY` (a dict mapping each key to its
+compliance-approved display phrase), `CANONICAL_SIGNAL_PHRASES` (a `frozenset` of
+the 9 approved phrases used as a compliance reference), and a
+`display(name: SignalName) -> str` helper.
+
+All 9 signal producers have been rewired to call `display(SignalName.X)` — 7 in
+`mf/cohort.py` and 2 in `mf/signals.py`. Phrases are byte-identical to the prior
+inline literals. The public API (`list[str]` on `ScoringResult`), labels, numeric
+scores, and confidence bands are unchanged. No migration is required.
+
+Rules governing this registry:
+
+- All contributing/contradicting string values must be produced via
+  `display(SignalName.X)`. Inline string literals for signal phrases are prohibited.
+- Adding a new phrase requires a new `SignalName` key and `SIGNAL_DISPLAY` entry.
+  This is a Tier-C change because it touches the scoring engine module.
+- `CANONICAL_SIGNAL_PHRASES` is the compliance-approved reference set. Runtime
+  enforcement at call sites is a planned follow-on item.
+- LLM commentary signals live in a separate field on `ScoringResult` and are never
+  governed by this registry.
+
+Ledger: `docs/project-state/reviews/b27-canonical-signal-names.md`.
+
 ## Changelog
 
+- 2026-06-13 — B27: canonical signal-name registry shipped (`scoring/engine/signal_names.py`);
+  9 approved phrases single-sourced + byte-pinned; all producers rewired; public API unchanged;
+  Tier-C ACCEPT. Ledger: `reviews/b27-canonical-signal-names.md`.
 - 2026-06-12 — B58-f4: category-class-aware cohort label band shipped as model v1.1 —
   Debt Scheme 0.5pp / Hybrid Scheme 1.0pp / default 2.0pp; AMFI class prefix before ` - `;
   unknown class → default wider band (fail-safe); manifest in `ranking_configs_v1.json`
