@@ -91,6 +91,8 @@
       "_unit": "return percentage points beyond the category-peer median (1Y/3Y) before a fund counts as out/under-performing; AMFI class = prefix of category before ' - '; unknown class uses default (wider band, on_track fail-safe)",
       "_lockstep": "mirrors backend/dhanradar/mf/cohort.py _MARGIN_PCT_DEFAULT/_MARGIN_PCT_BY_CLASS — test_margin_manifest_lockstep_with_config"
     },
+    "cohort_grouping_key": "category",
+    "_cohort_grouping_key_note": "mf_funds column peers are grouped into a category cohort by (B66-f1 pt2). v1.1 ACTIVE = 'category' (raw AMFI string). The validated-taxonomy rewire to 'sebi_category' (canonical SEBI leaf; legacy umbrellas Income/Growth/Gilt stay NULL → uncohorted → on_track fail-safe, never auto-mapped) is an un-activated methodology delta: it SHIFTS LIVE USER LABELS and requires a NEW ranking_configs version through the two-person gate (approved_by != created_by) + explicit prod activation before it goes live. Mirrors backend/dhanradar/mf/tasks _COHORT_GROUPING_KEY — lockstep test-enforced (test_cohort_grouping_key_lockstep_with_config).",
     "rule_table": {
       "in_form": "outperforming category 1Y AND 3Y, controlled drawdown",
       "on_track": "matching category, no red flags",

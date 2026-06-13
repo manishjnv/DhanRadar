@@ -393,6 +393,39 @@ _COHORT_PEER_CHUNK = 200
 # Batch size for the nightly mf_metrics_refresh upsert (ISINs per iteration).
 _METRICS_REFRESH_CHUNK = 500
 
+# Peer-cohort GROUPING KEY — VERSIONED METHODOLOGY (B6/B28 two-person gate), B66-f1
+# part 2. Which mf_funds column groups peers into a category cohort:
+#   * "category"      — the RAW AMFI string (v1.1, ACTIVE). Malformed variants
+#     (bare "ELSS", double-space "Other  ETFs", curly-apostrophe "Children's")
+#     and pre-2017 legacy umbrellas ("Income"/"Growth"/"Gilt") each form their own
+#     string-distinct cohort → fragmentation + a few bogus mega-cohorts.
+#   * "sebi_category" — the VALIDATED canonical SEBI leaf (taxonomy.canonical_for,
+#     B66). Malformed variants collapse into the correct canonical cohort; legacy
+#     umbrellas are sebi_category NULL → excluded by SQL `IN` (NULLs never match)
+#     and by the `if c` target filter → those funds stay HONESTLY UNCOHORTED
+#     (no benchmark → on_track fail-safe). NEVER auto-mapped.
+# This is the grouping key ONLY; the raw `category` column is never mutated (the
+# taxonomy.py invariant). Mirrored in ranking_configs_v1.json
+# labels.cohort_grouping_key — lockstep test-enforced. Flipping this to
+# "sebi_category" SHIFTS LIVE USER LABELS, so it is an un-activated methodology
+# delta until a new ranking_configs version clears the two-person gate
+# (approved_by != created_by) + explicit prod activation. Default stays the
+# active value so merging the rewire is behaviourally a NO-OP.
+_COHORT_GROUPING_KEY = "category"
+
+
+def _grouping_column(grouping_key: str):
+    """Resolve the methodology cohort grouping key to its mf_funds column.
+
+    Pure mapping (no DB access); raises on an unknown key so a typo in the
+    methodology manifest fails loud rather than silently regrouping cohorts."""
+    from dhanradar.models.mf import MfFund
+
+    cols = {"category": MfFund.category, "sebi_category": MfFund.sebi_category}
+    if grouping_key not in cols:
+        raise ValueError(f"unknown cohort grouping key: {grouping_key!r}")
+    return cols[grouping_key]
+
 
 @dataclass(frozen=True)
 class _CohortContext:
@@ -411,13 +444,24 @@ _EMPTY_COHORT_CONTEXT = _CohortContext({}, {}, {})
 
 
 async def _build_cohort_context(
-    db: Any, target_isins: list[str], *, as_of: date | None = None
+    db: Any,
+    target_isins: list[str],
+    *,
+    as_of: date | None = None,
+    grouping_key: str = _COHORT_GROUPING_KEY,
 ) -> _CohortContext:
     """Build category peer-cohort benchmarks for the given target funds (B58).
 
     Read-only on the mf schema (MfFund + mf_fund_metrics) — no cross-module access.
     The peer set for a category is every fund AMFI tags in that category; the fund
     itself is included (negligible self-bias on a ≥5-peer median).
+
+    ``grouping_key`` (B66-f1 pt2) selects the mf_funds column peers are grouped by
+    — "category" (raw, v1.1 active) or "sebi_category" (validated canonical leaf).
+    See ``_COHORT_GROUPING_KEY``: a fund whose grouping column is NULL/blank is
+    dropped at step 1 and never appears as a peer (SQL ``IN`` excludes NULL), so it
+    stays uncohorted → on_track fail-safe. The raw ``category`` column is never
+    mutated regardless of the key (taxonomy.py invariant).
 
     Step 3 reads precomputed ``mf_fund_metrics`` rows (refreshed nightly by
     ``mf_metrics_refresh``) instead of loading peer NAV series into memory (B63).
@@ -435,11 +479,13 @@ async def _build_cohort_context(
     if not target_isins:
         return _EMPTY_COHORT_CONTEXT
     # as_of retained for signature compatibility; stats are precomputed nightly.
+    group_col = _grouping_column(grouping_key)
 
-    # 1. Resolve each target's category; keep only real categories.
+    # 1. Resolve each target's grouping value; keep only real cohort keys (a NULL/
+    #    blank/"uncategorized" value → uncohorted → on_track fail-safe).
     cat_rows = (
         await db.execute(
-            select(MfFund.isin, MfFund.category).where(MfFund.isin.in_(target_isins))
+            select(MfFund.isin, group_col).where(MfFund.isin.in_(target_isins))
         )
     ).all()
     target_category: dict[str, str] = {
@@ -449,10 +495,10 @@ async def _build_cohort_context(
     if not categories:
         return _EMPTY_COHORT_CONTEXT
 
-    # 2. All peers in those categories.
+    # 2. All peers in those cohorts (SQL ``IN`` excludes NULL-keyed funds).
     peer_rows = (
         await db.execute(
-            select(MfFund.isin, MfFund.category).where(MfFund.category.in_(categories))
+            select(MfFund.isin, group_col).where(group_col.in_(categories))
         )
     ).all()
     peers_by_cat: dict[str, list[str]] = {}
@@ -537,13 +583,17 @@ def _relative_from_context(
 
 
 async def _compute_cohort(
-    db: Any, target_isins: list[str], *, as_of: date | None = None
+    db: Any,
+    target_isins: list[str],
+    *,
+    as_of: date | None = None,
+    grouping_key: str = _COHORT_GROUPING_KEY,
 ) -> dict[str, CategoryRelative]:
     """Build category peer-cohort benchmarks and return each target fund's
     category-relative LABEL inputs (B58) — build + lookup in one call, for the
     single-portfolio path (CAS upload).  The monthly rescore builds the context
     once and reuses it across portfolios instead (B58-f2)."""
-    ctx = await _build_cohort_context(db, target_isins, as_of=as_of)
+    ctx = await _build_cohort_context(db, target_isins, as_of=as_of, grouping_key=grouping_key)
     return _relative_from_context(ctx, target_isins)
 
 
