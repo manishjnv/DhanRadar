@@ -138,7 +138,7 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     isin: f.isin,
     scheme_name: f.scheme_name,
     amc_name: '',          // backend doesn't send amc_name
-    category: '',          // not per-fund from backend
+    category: f.category ?? '',   // AMFI category from mf_funds (filled server-side)
     units: f.units,
     invested: f.invested_amount ?? null,
     current_value: f.current_value ?? 0,
