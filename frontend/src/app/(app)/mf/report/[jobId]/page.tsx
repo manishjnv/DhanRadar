@@ -16,6 +16,7 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { LabelChip } from '@/components/ui/LabelChip';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
+import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { useCasStatus, useMfReport } from '@/features/mf/api';
@@ -261,7 +262,8 @@ function ReportView({ jobId }: { jobId: string }) {
     );
   }
 
-  const { summary, schemes, category_allocation, overlap, disclosure, not_advice } = data;
+  const { summary, schemes, category_allocation, overlap, commentary, disclosure, not_advice } =
+    data;
 
   return (
     <div className="flex flex-col gap-6">
@@ -272,6 +274,10 @@ function ReportView({ jobId }: { jobId: string }) {
         asOf={summary.as_of}
         schemeCount={summary.scheme_count}
       />
+
+      {/* F1-B: plain-language AI portfolio summary (governed gateway, consent-gated).
+          Hides itself when the backend returns no commentary. */}
+      <PortfolioCommentaryCard commentary={commentary} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
