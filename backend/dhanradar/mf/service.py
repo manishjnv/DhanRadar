@@ -78,6 +78,7 @@ def assemble_report(
     generated_at: str | None = None,
     disclaimer_version: str | None = None,
     commentary: dict | None = None,
+    portfolio_id: str | None = None,
 ) -> PortfolioReport:
     """Build the client report. The disclosure bundle + NOT_ADVICE are ALWAYS
     injected here; `unified_score` is never included (each fund carries only
@@ -95,6 +96,8 @@ def assemble_report(
             confidence_band=f.get("confidence_band"),
             contributing_signals=f.get("contributing_signals", []),
             contradicting_signals=f.get("contradicting_signals", []),
+            previous_label=f.get("previous_label"),
+            confidence_factors=f.get("confidence_factors"),
         )
         for f in funds
     ]
@@ -110,6 +113,7 @@ def assemble_report(
         commentary=commentary,
         model_version=model_version,
         generated_at=generated_at,
+        portfolio_id=portfolio_id,
         disclosure=DISCLOSURE_BUNDLE,
         not_advice=NOT_ADVICE,
         disclaimer_version=disclaimer_version or DISCLAIMER_VERSION,

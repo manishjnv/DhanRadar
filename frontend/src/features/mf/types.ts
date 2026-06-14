@@ -31,6 +31,10 @@ export interface BackendFund {
   confidence_band: string;
   contributing_signals: string[];
   contradicting_signals: string[];
+  /** Feature 3: label from previous upload; null on first-ever upload. */
+  previous_label: string | null;
+  /** Feature 4: named confidence quality signals — string bands only. null on old cached reports. */
+  confidence_factors?: Record<string, 'high' | 'medium' | 'low'> | null;
 }
 
 /** Wire shape returned by GET /api/v1/mf/report/{job_id} */
@@ -46,6 +50,8 @@ export interface BackendPortfolioReport {
   commentary: string | null;
   model_version: string | null;
   generated_at: string | null;
+  /** Feature 2/3: forwarded from MfCasJob.portfolio_id for the history endpoint. */
+  portfolio_id: string | null;
   disclosure: string;
   not_advice: string;
   disclaimer_version: string | null;
@@ -76,6 +82,12 @@ export interface MfScheme {
    *  already sends these on every fund; they MUST be forwarded, not dropped. */
   contributing_signals: string[];
   contradicting_signals: string[];
+  /** Feature 3: label from the previous CAS upload for the delta (↑/↓) indicator.
+   *  null on first-ever upload or when prior history is unavailable. */
+  previous_label: Label | null;
+  /** Feature 4: named confidence quality signals — "high"/"medium"/"low" only, never floats.
+   *  null/absent on old cached reports; UI degrades gracefully when missing. */
+  confidence_factors?: Record<string, 'high' | 'medium' | 'low'> | null;
 }
 
 export interface AllocationSlice {
@@ -98,11 +110,20 @@ export interface MfReportSummary {
   scheme_count: number;
 }
 
+export interface LabelHistoryEntry {
+  isin: string;
+  snapshot_date: string;
+  verb_label: Label;
+  confidence_band: ConfidenceBand;
+}
+
 export interface MfReport {
   summary: MfReportSummary;
   schemes: MfScheme[];
   category_allocation: AllocationSlice[];
   overlap: OverlapPair[];
+  /** Feature 2/3: needed to call GET /api/v1/mf/history?portfolio_id={id}. */
+  portfolio_id: string | null;
   /** Plain-language AI-generated educational commentary from the governed gateway
    *  (consent-gated; null when not consented / not generated). Rendered verbatim by
    *  <PortfolioCommentaryCard/>. */
