@@ -21,6 +21,7 @@ import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
 import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard';
 import { ResearchAssistant } from '@/components/mf/ResearchAssistant';
 import { ConcentrationCallout } from '@/components/mf/ConcentrationCallout';
+import { StickyPortfolioBar } from '@/components/mf/StickyPortfolioBar';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { PortfolioHealthSummary } from '@/components/mf/PortfolioHealthSummary';
@@ -339,6 +340,19 @@ function ReportView({ jobId }: { jobId: string }) {
   const { data, isLoading, isError, refetch } = useMfReport(jobId, true);
   const [activeFilter, setActiveFilter] = React.useState<Label | null>(null);
 
+  // B4: track whether the SummaryRow is visible in the viewport.
+  const summaryRef = React.useRef<HTMLDivElement>(null);
+  const [summaryVisible, setSummaryVisible] = React.useState(true);
+  React.useEffect(() => {
+    const el = summaryRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => setSummaryVisible(entry.isIntersecting), {
+      threshold: 0,
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   // Feature 2: fetch label history (Plus-gated); enabled once portfolio_id is known.
   const { entries: historyEntries, isLocked: historyLocked } = useMfLabelHistory(
     data?.portfolio_id ?? null,
@@ -398,15 +412,24 @@ function ReportView({ jobId }: { jobId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <FadeUp delay={0}>
-        <SummaryRow
-          totalInvested={summary.total_invested}
-          currentValue={summary.current_value}
-          xirrPct={summary.xirr_pct}
-          asOf={summary.as_of}
-          schemeCount={summary.scheme_count}
-        />
-      </FadeUp>
+      {/* B4: sticky bar — slides in when SummaryRow scrolls out of view */}
+      <StickyPortfolioBar
+        currentValue={summary.current_value}
+        schemes={schemes}
+        visible={!summaryVisible}
+      />
+
+      <div ref={summaryRef}>
+        <FadeUp delay={0}>
+          <SummaryRow
+            totalInvested={summary.total_invested}
+            currentValue={summary.current_value}
+            xirrPct={summary.xirr_pct}
+            asOf={summary.as_of}
+            schemeCount={summary.scheme_count}
+          />
+        </FadeUp>
+      </div>
 
       {/* F1-B: plain-language AI portfolio summary (governed gateway, consent-gated).
           Hides itself when the backend returns no commentary. */}
