@@ -459,7 +459,9 @@ async def test_scoring_activate_happy_path(
     assert body["activated"] is True
     assert body["two_person_ok"] is True
     assert body["approved_by"] == user_id
-    assert body["created_by"] == "architecture-review"
+    # created_by is sourced from the active config (changes per model version) — assert
+    # the endpoint surfaces it, not a frozen literal (v1.2 = "claude-builder (B66-f1 pt2)").
+    assert body["created_by"] == get_config().created_by
     assert body["model_version"] == ver
 
     # Clear memo so status check goes to DB.
