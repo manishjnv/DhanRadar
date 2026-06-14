@@ -251,6 +251,20 @@ def test_parsed_to_snapshot_falls_back_to_cas_value_without_nav():
     assert snap_holdings[0].current_value == 5000.0  # CAS-reported valuation used
 
 
+def test_parsed_to_snapshot_fills_category_from_map():
+    # Holding category is filled from the mf_funds master so the portfolio
+    # category-allocation + per-fund Category column are real (else every holding
+    # buckets as "uncategorized" → a meaningless 100% donut).
+    holdings = parse_cas("x.pdf", None, reader=_fake_cas)
+    filled = parsed_to_snapshot_holdings(
+        holdings, category_map={"INF001": "Equity Scheme - Small Cap Fund"}
+    )
+    assert filled[0].category == "Equity Scheme - Small Cap Fund"
+    # An ISIN absent from the master stays honestly uncategorized (not guessed).
+    bare = parsed_to_snapshot_holdings(holdings, category_map={})
+    assert bare[0].category == "uncategorized"
+
+
 # --- consent gate wiring (B20) ----------------------------------------------
 def test_upload_route_is_consent_gated_for_mf_analytics():
     from dhanradar.mf import router as mf_router

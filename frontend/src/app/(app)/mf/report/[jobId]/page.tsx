@@ -91,13 +91,13 @@ function SummaryRow({
       <Card className="p-4">
         <p className="text-caption text-ink-muted uppercase tracking-wide">Total invested</p>
         <p className="mt-1 text-h3 font-medium text-ink tabular-nums">
-          ₹{totalInvested.toLocaleString('en-IN')}
+          ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
       </Card>
       <Card className="p-4">
         <p className="text-caption text-ink-muted uppercase tracking-wide">Current value</p>
         <p className="mt-1 text-h3 font-medium text-ink tabular-nums">
-          ₹{currentValue.toLocaleString('en-IN')}
+          ₹{currentValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
       </Card>
       <Card className="p-4">
@@ -196,10 +196,10 @@ function SchemesTable({
                   </td>
                   <td className="py-2.5 pr-3 text-ink-secondary hidden sm:table-cell">{s.category}</td>
                   <td className="py-2.5 pr-3 text-right text-ink-secondary tabular-nums hidden md:table-cell">
-                    {s.invested == null ? '—' : `₹${s.invested.toLocaleString('en-IN')}`}
+                    {s.invested == null ? '—' : `₹${s.invested.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
                   </td>
                   <td className="py-2.5 pr-3 text-right text-ink tabular-nums">
-                    ₹{s.current_value.toLocaleString('en-IN')}
+                    ₹{s.current_value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </td>
                   <td className={cn('py-2.5 pr-3 text-right tabular-nums font-medium', s.return_pct >= 0 ? 'text-emerald' : 'text-red')}>
                     {s.return_pct >= 0 ? '+' : ''}{s.return_pct.toFixed(1)}%

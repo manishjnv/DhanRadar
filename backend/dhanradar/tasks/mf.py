@@ -52,11 +52,18 @@ _UPSERT_CHUNK = 2000
 
 
 def parsed_to_snapshot_holdings(
-    parsed: list[ParsedHolding], nav_map: dict[str, float] | None = None
+    parsed: list[ParsedHolding],
+    nav_map: dict[str, float] | None = None,
+    category_map: dict[str, str] | None = None,
 ) -> list[Holding]:
     """Map parsed CAS holdings → snapshot.Holding, applying the latest NAV when
-    available (else falling back to the CAS-reported valuation). Pure + testable."""
+    available (else falling back to the CAS-reported valuation). Pure + testable.
+
+    ``category_map`` (isin → AMFI category from mf_funds) fills each holding's
+    category so the portfolio category-allocation is real; a holding whose ISIN is
+    not in the master stays ``"uncategorized"`` (honest)."""
     nav_map = nav_map or {}
+    category_map = category_map or {}
     out: list[Holding] = []
     for p in parsed:
         nav = nav_map.get(p.isin, p.nav)
@@ -71,7 +78,7 @@ def parsed_to_snapshot_holdings(
                 units=p.units,
                 invested_amount=invested,
                 current_value=current_value,
-                category="uncategorized",  # filled from mf_funds when metadata exists
+                category=(category_map.get(p.isin) or "uncategorized"),
                 cashflows=cashflows,
             )
         )
@@ -166,6 +173,23 @@ def parse_cas_job(
         _purge(path)
 
 
+async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
+    """Map isin → AMFI category from the mf_funds master (read-only, mf schema).
+    Fills holding categories so the portfolio category-allocation + per-fund Category
+    column are real; an ISIN absent from the master is simply omitted (→ the holding
+    stays "uncategorized")."""
+    if not isins:
+        return {}
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfFund
+
+    rows = (
+        await db.execute(select(MfFund.isin, MfFund.category).where(MfFund.isin.in_(isins)))
+    ).all()
+    return {i: c for i, c in rows if c}
+
+
 async def _run_pipeline(
     job_id: str, path: str, user_id: str, portfolio_id: str,
     request_id: str | None = None,
@@ -220,8 +244,14 @@ async def _run_pipeline(
         # Peer-cohort benchmark (B58): category-relative label inputs so the rule
         # table can emit in_form/off_track, not only on_track/insufficient_data.
         cohort = await _compute_cohort(db, [p.isin for p in parsed])
+        # Resolve each holding's AMFI category from the master so the snapshot's
+        # category-allocation and the per-fund Category column are real (else every
+        # holding buckets as "uncategorized" → a meaningless 100% donut).
+        category_map = await _fetch_fund_categories(db, [p.isin for p in parsed])
 
-        snapshot_holdings = parsed_to_snapshot_holdings(parsed, nav_map=latest_nav)
+        snapshot_holdings = parsed_to_snapshot_holdings(
+            parsed, nav_map=latest_nav, category_map=category_map
+        )
         snap = build_snapshot(snapshot_holdings)
         # B65 observability: an uncomputable XIRR must be visible in worker logs,
         # not discovered by eyeball in a report. Log the boolean only — a user's
@@ -277,6 +307,7 @@ async def _run_pipeline(
             )
             funds_payload.append({
                 "isin": p.isin, "scheme_name": p.scheme_name, "folio_number": p.folio_number,
+                "category": category_map.get(p.isin),
                 "units": p.units, "invested_amount": p.cost, "current_value": p.value,
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
                 "contributing_signals": result.contributing_signals,

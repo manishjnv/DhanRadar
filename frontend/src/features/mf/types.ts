@@ -23,6 +23,8 @@ export interface BackendFund {
   isin: string;
   scheme_name: string;
   folio_number: string;
+  /** AMFI category from the mf_funds master; null when the ISIN isn't in the master. */
+  category?: string | null;
   units: number;
   /** null when CAS has no cost basis (CDSL / no-transaction holdings) */
   invested_amount: number | null;
