@@ -371,6 +371,7 @@ async def _run_pipeline(
         # Stamp latest_job_id on the portfolio so GET /mf/portfolio/latest works
         # and the daily refresh task knows which job to rebuild. Portfolio lifecycle fix.
         import uuid as _uuid
+
         from dhanradar.models.mf import MfPortfolio as _MfPortfolio
         await db.execute(
             update(_MfPortfolio)
