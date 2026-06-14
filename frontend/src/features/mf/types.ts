@@ -139,6 +139,14 @@ export interface ResearchAskResponse {
   reason?: string;
 }
 
+/** Returned by GET /api/v1/mf/portfolio/latest — enables "view portfolio without
+ *  re-uploading" flow. The frontend uses job_id to navigate to the report page. */
+export interface PortfolioLatestResponse {
+  job_id: string;
+  portfolio_id: string;
+  portfolio_name: string;
+}
+
 export interface MfReport {
   summary: MfReportSummary;
   schemes: MfScheme[];

@@ -133,6 +133,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.mf_metrics_refresh",
         "schedule": crontab(hour=0, minute=15),
     },
+    # Portfolio daily refresh — 01:30 IST; after NAV (23:30) + metrics (00:15).
+    # Rebuilds cached reports from stored holdings + today's NAV so users see a
+    # fresh portfolio when they log in without re-uploading their CAS statement.
+    "mf-daily-portfolio-refresh": {
+        "task": "dhanradar.tasks.mf.daily_portfolio_refresh",
+        "schedule": crontab(hour=1, minute=30),
+    },
     # Raw CAS file purge — 24h backstop (anti-pattern guard). 02:00 IST.
     "mf-purge-cas-files": {
         "task": "dhanradar.tasks.mf.purge_cas_files",
