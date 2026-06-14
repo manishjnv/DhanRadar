@@ -20,6 +20,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
 import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard';
 import { ResearchAssistant } from '@/components/mf/ResearchAssistant';
+import { ConcentrationCallout } from '@/components/mf/ConcentrationCallout';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { PortfolioHealthSummary } from '@/components/mf/PortfolioHealthSummary';
@@ -431,6 +432,8 @@ function ReportView({ jobId }: { jobId: string }) {
             </CardHeader>
             <CardBody>
               <AllocationDonut data={category_allocation} />
+              {/* D1: factual concentration callout — top-3 categories, no advisory framing */}
+              <ConcentrationCallout allocation={category_allocation} />
             </CardBody>
           </Card>
 
