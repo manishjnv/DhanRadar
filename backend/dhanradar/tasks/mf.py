@@ -59,9 +59,9 @@ def parsed_to_snapshot_holdings(
     """Map parsed CAS holdings → snapshot.Holding, applying the latest NAV when
     available (else falling back to the CAS-reported valuation). Pure + testable.
 
-    ``category_map`` (isin → AMFI category from mf_funds) fills each holding's
-    category so the portfolio category-allocation is real; a holding whose ISIN is
-    not in the master stays ``"uncategorized"`` (honest)."""
+    ``category_map`` (isin → SEBI-canonical or raw AMFI category from mf_funds) fills
+    each holding's category so the portfolio category-allocation is real; a holding
+    whose ISIN is not in the master stays ``"uncategorized"`` (honest)."""
     nav_map = nav_map or {}
     category_map = category_map or {}
     out: list[Holding] = []
@@ -174,10 +174,10 @@ def parse_cas_job(
 
 
 async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
-    """Map isin → AMFI category from the mf_funds master (read-only, mf schema).
-    Fills holding categories so the portfolio category-allocation + per-fund Category
-    column are real; an ISIN absent from the master is simply omitted (→ the holding
-    stays "uncategorized")."""
+    """Map isin → validated SEBI category (sebi_category preferred; falls back to raw
+    AMFI category) from the mf_funds master (read-only). Fills holding categories so
+    the portfolio category-allocation is real; an ISIN absent from the master (or with
+    no category data) stays 'uncategorized' (honest)."""
     if not isins:
         return {}
     from sqlalchemy import select
@@ -185,9 +185,12 @@ async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
     from dhanradar.models.mf import MfFund
 
     rows = (
-        await db.execute(select(MfFund.isin, MfFund.category).where(MfFund.isin.in_(isins)))
+        await db.execute(
+            select(MfFund.isin, MfFund.sebi_category, MfFund.category)
+            .where(MfFund.isin.in_(isins))
+        )
     ).all()
-    return {i: c for i, c in rows if c}
+    return {i: (sc or c) for i, sc, c in rows if (sc or c)}
 
 
 async def _run_pipeline(
