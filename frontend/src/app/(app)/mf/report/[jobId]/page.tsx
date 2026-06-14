@@ -20,7 +20,8 @@ import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { PortfolioHealthSummary } from '@/components/mf/PortfolioHealthSummary';
-import { useCasStatus, useMfReport } from '@/features/mf/api';
+import { useCasStatus, useMfReport, useMfLabelHistory } from '@/features/mf/api';
+import type { LabelHistoryEntry } from '@/features/mf/types';
 import { cn } from '@/lib/cn';
 import type { Label } from '@/components/charts/ScoreRing';
 import type { MfScheme, OverlapPair } from '@/features/mf/types';
@@ -117,9 +118,47 @@ function SummaryRow({
 }
 
 // ---------------------------------------------------------------------------
+// Feature 3 — label change delta helpers
+// ---------------------------------------------------------------------------
+
+const LABEL_RANK: Record<Label, number> = {
+  in_form: 4,
+  on_track: 3,
+  off_track: 2,
+  out_of_form: 1,
+  insufficient_data: 0,
+};
+
+function DeltaBadge({ current, previous }: { current: Label; previous: Label | null }) {
+  if (!previous || previous === current) return null;
+  const improved = LABEL_RANK[current] > LABEL_RANK[previous];
+  const label = `Was ${previous.replace(/_/g, '-')} in previous upload`;
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={cn(
+        'shrink-0 text-base font-bold leading-none select-none',
+        improved ? 'text-emerald' : 'text-red',
+      )}
+    >
+      {improved ? '↑' : '↓'}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Schemes table
 // ---------------------------------------------------------------------------
-function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
+function SchemesTable({
+  schemes,
+  historyByIsin,
+  historyLocked,
+}: {
+  schemes: MfScheme[];
+  historyByIsin: Record<string, LabelHistoryEntry[]>;
+  historyLocked: boolean;
+}) {
   // F1-A: per-fund "Why this label" disclosure. Track which funds are expanded.
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
 
@@ -168,6 +207,8 @@ function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
                   <td className="py-2.5 pl-4">
                     <div className="flex items-center gap-2">
                       <LabelChip label={s.label} confidenceBand={s.confidence_band} />
+                      {/* Feature 3: label change delta (↑/↓) */}
+                      <DeltaBadge current={s.label} previous={s.previous_label} />
                       <button
                         type="button"
                         onClick={() => toggle(s.isin)}
@@ -187,6 +228,9 @@ function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
                         id={panelId}
                         contributingSignals={s.contributing_signals}
                         contradictingSignals={s.contradicting_signals}
+                        confidenceFactors={s.confidence_factors ?? null}
+                        historyEntries={historyByIsin[s.isin] ?? []}
+                        historyLocked={historyLocked}
                       />
                     </td>
                   </tr>
@@ -242,6 +286,20 @@ function OverlapSection({ pairs }: { pairs: OverlapPair[] }) {
 function ReportView({ jobId }: { jobId: string }) {
   const { data, isLoading, isError, refetch } = useMfReport(jobId, true);
   const [activeFilter, setActiveFilter] = React.useState<Label | null>(null);
+
+  // Feature 2: fetch label history (Plus-gated); enabled once portfolio_id is known.
+  const { entries: historyEntries, isLocked: historyLocked } = useMfLabelHistory(
+    data?.portfolio_id ?? null,
+  );
+
+  // Group history entries by ISIN for O(1) lookup in SchemesTable / WhyThisLabelPanel.
+  const historyByIsin = React.useMemo<Record<string, LabelHistoryEntry[]>>(() => {
+    const map: Record<string, LabelHistoryEntry[]> = {};
+    for (const e of historyEntries) {
+      (map[e.isin] ??= []).push(e);
+    }
+    return map;
+  }, [historyEntries]);
 
   if (isLoading) {
     return (
@@ -309,7 +367,12 @@ function ReportView({ jobId }: { jobId: string }) {
             <CardTitle>Your Holdings</CardTitle>
           </CardHeader>
           <CardBody>
-            <SchemesTable schemes={filteredSchemes} />
+            {/* Feature 3: historyByIsin powers ↑/↓ delta; Feature 2: history shown in WhyPanel */}
+            <SchemesTable
+              schemes={filteredSchemes}
+              historyByIsin={historyByIsin}
+              historyLocked={historyLocked}
+            />
           </CardBody>
         </Card>
       </div>

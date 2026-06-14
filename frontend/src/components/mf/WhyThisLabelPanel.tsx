@@ -24,12 +24,22 @@
  */
 
 import * as React from 'react';
+import { FactorStrengthBar } from './FactorStrengthBar';
+import { LabelHistoryChart } from '@/components/mf/LabelHistoryChart';
+import type { LabelHistoryEntry } from '@/features/mf/types';
 
 export interface WhyThisLabelPanelProps {
   /** Verbatim factual phrases that support the fund's label. */
   contributingSignals: string[];
   /** Verbatim factual phrases that point against the fund's label. */
   contradictingSignals: string[];
+  /** Feature 4: named confidence quality bands — "high"/"medium"/"low" only, never floats.
+   *  null/absent on old cached reports; renders nothing when missing. */
+  confidenceFactors?: Record<string, 'high' | 'medium' | 'low'> | null;
+  /** Feature 2: label history entries for this fund for the timeline chart. */
+  historyEntries?: LabelHistoryEntry[];
+  /** Feature 2: true when the history endpoint returned 402 (Plus gate). */
+  historyLocked?: boolean;
   /** Optional DOM id so a toggle button can aria-control this panel. */
   id?: string;
 }
@@ -80,11 +90,16 @@ function SignalList({
 export function WhyThisLabelPanel({
   contributingSignals,
   contradictingSignals,
+  confidenceFactors,
+  historyEntries,
+  historyLocked,
   id,
 }: WhyThisLabelPanelProps) {
   const hasContributing = contributingSignals.length > 0;
   const hasContradicting = contradictingSignals.length > 0;
   const noSignals = !hasContributing && !hasContradicting;
+  const hasFactors =
+    confidenceFactors != null && Object.keys(confidenceFactors).length > 0;
 
   return (
     <div
@@ -110,6 +125,12 @@ export function WhyThisLabelPanel({
       >
         Why this label
       </p>
+
+      {hasFactors && (
+        <div style={{ marginBottom: 12 }}>
+          <FactorStrengthBar factors={confidenceFactors!} />
+        </div>
+      )}
 
       {noSignals ? (
         <p
@@ -160,6 +181,17 @@ export function WhyThisLabelPanel({
             )}
           </div>
         </div>
+      )}
+
+      {/* Feature 2: label history timeline. Renders even when history is empty
+          (shows "not enough history yet"); Plus-gated with blur overlay. Only
+          mount when the prop is present so old call sites without history don't
+          fire a useless 402 attempt. */}
+      {historyEntries !== undefined && (
+        <LabelHistoryChart
+          history={historyEntries}
+          isLocked={!!historyLocked}
+        />
       )}
     </div>
   );
