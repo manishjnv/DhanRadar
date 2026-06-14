@@ -72,6 +72,13 @@ class TestCompliancePins:
             "category peer benchmark unavailable — too few comparable funds to compare"
         )
 
+    def test_cohort_no_canonical_category(self):
+        """Pin the no-canonical-SEBI-category phrase (B71)."""
+        assert display(SignalName.COHORT_NO_CANONICAL_CATEGORY) == (
+            "category peer benchmark unavailable — fund not mapped to a SEBI peer "
+            "category; no peer comparison made"
+        )
+
     def test_cohort_1y_ahead_short_track(self):
         """Pin the 1Y-ahead / no 3Y track record phrase."""
         assert display(SignalName.COHORT_1Y_AHEAD_SHORT_TRACK) == (
