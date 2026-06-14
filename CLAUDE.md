@@ -110,6 +110,17 @@ boundary** and the **scoring two-person gate**). Recent "nothing ships to the UI
 dormant flags, source-blocked data, and backend-only work — **not** by approvals. Keep docs for
 decisions worth re-reading, not as a tax on every diff.
 
+**Development-phase skill suspension (binding until pre-launch audit).** Do NOT
+auto-invoke `DhanRadar-Engineering-Governance` during routine development sessions. Only invoke it
+when explicitly requested by name, when touching a load-bearing path (auth / scoring / payments /
+AI-classifier / migrations), or when a new score/label/AI surface is being introduced. For all other
+work — UI, reporting, copy, data-pipeline, dev-tooling — skip the Engineering-Governance gatekeeper
+and go straight to: automated deterministic gates + the two hard compliance gates below.
+The full reviewer panels (`DhanRadar-Explainable-AI-Enrichment` red-team,
+`DhanRadar-SEBI-Compliance-Guardrail` independent review, `DhanRadar-Feature-Competitiveness-Reviewer`)
+are deferred to the end-of-phase audit pass, not per-session. `DhanRadar-Project-Progress-Auditor`
+and `DhanRadar-Scoring-Engine` remain on-demand only (invoke only when explicitly requested).
+
 **A change is complete only when** the deterministic gates are green, the tier's required reviews
 pass (ACCEPT / ACCEPT-WITH-CONDITIONS), and the gate ledger is signed off. **The per-change review
 file** `docs/project-state/reviews/<change-id>.md` **is required only for load-bearing / Tier-B/C
