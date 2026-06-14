@@ -15,6 +15,7 @@ import type {
   BackendCasJobStatus,
   BackendPortfolioReport,
   ResearchAskResponse,
+  PortfolioLatestResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -286,5 +287,19 @@ export function useResearchAsk(jobId: string) {
   return useMutation({
     mutationFn: (question: string) =>
       api.post<ResearchAskResponse>(`/mf/report/${jobId}/ask`, { question }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio latest — "view portfolio without re-uploading"
+// ---------------------------------------------------------------------------
+/** Returns the latest job_id for the caller's portfolio.
+ *  404 → {data: undefined, isError: true} — user has no portfolio yet, show upload CTA. */
+export function useLatestPortfolio() {
+  return useQuery<PortfolioLatestResponse>({
+    queryKey: ['mf', 'portfolio', 'latest'],
+    queryFn: () => api.get<PortfolioLatestResponse>('/mf/portfolio/latest'),
+    retry: false,
+    staleTime: 5 * 60 * 1000,  // 5 min — portfolio_id is stable between uploads
   });
 }

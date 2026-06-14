@@ -368,6 +368,15 @@ async def _run_pipeline(
                 status="done", progress_pct=100, completed_at=datetime.now(UTC)
             )
         )
+        # Stamp latest_job_id on the portfolio so GET /mf/portfolio/latest works
+        # and the daily refresh task knows which job to rebuild. Portfolio lifecycle fix.
+        import uuid as _uuid
+        from dhanradar.models.mf import MfPortfolio as _MfPortfolio
+        await db.execute(
+            update(_MfPortfolio)
+            .where(_MfPortfolio.id == _uuid.UUID(portfolio_id))
+            .values(latest_job_id=_uuid.UUID(job_id))
+        )
         await db.commit()
     return f"done: {len(parsed)} schemes"
 
@@ -1236,6 +1245,58 @@ async def _reap_stuck_cas_jobs() -> str:
     n = len(rows)
     _slog.info("reap_stuck_cas_jobs: reaped", count=n, job_ids=job_ids)
     return f"reaped {n} stuck jobs"
+
+
+@celery_app.task(name="dhanradar.tasks.mf.daily_portfolio_refresh")
+def daily_portfolio_refresh() -> str:
+    """Rebuild cached reports for every portfolio that has been uploaded at least once.
+
+    Runs at 01:30 IST — after nav_daily_fetch (23:30) and mf_metrics_refresh (00:15)
+    so current_value reflects today's NAV. Users who log in after this task has run
+    see a fresh portfolio without re-uploading their CAS statement.
+    """
+    try:
+        return asyncio.run(_daily_portfolio_refresh_pipeline())
+    except Exception:
+        logger.exception("daily_portfolio_refresh pipeline error")
+        return "daily_portfolio_refresh: failed — see worker logs"
+
+
+async def _daily_portfolio_refresh_pipeline() -> str:
+    from sqlalchemy import select
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfPortfolio
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+    refreshed = 0
+    failed = 0
+
+    async with TaskSessionLocal() as db:
+        portfolios = (
+            await db.execute(
+                select(MfPortfolio).where(MfPortfolio.latest_job_id.isnot(None))
+            )
+        ).scalars().all()
+
+        for portfolio in portfolios:
+            try:
+                job_id = str(portfolio.latest_job_id)
+                portfolio_id = str(portfolio.id)
+                # Invalidate the stale cache so rebuild_report_from_db writes fresh data.
+                await redis.delete(f"{service._REPORT_PREFIX}{job_id}")
+                await service.rebuild_report_from_db(
+                    job_id=job_id, portfolio_id=portfolio_id, redis=redis, db=db
+                )
+                refreshed += 1
+            except Exception:
+                logger.exception(
+                    "daily_portfolio_refresh: failed for portfolio_id=%s", portfolio.id
+                )
+                failed += 1
+
+    return f"daily_portfolio_refresh: refreshed={refreshed} failed={failed}"
 
 
 @celery_app.task(name="dhanradar.tasks.mf.purge_cas_files")

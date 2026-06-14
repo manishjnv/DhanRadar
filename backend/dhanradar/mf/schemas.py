@@ -27,6 +27,15 @@ class PortfolioListResponse(BaseModel):
     portfolios: list[PortfolioSummary]
 
 
+class PortfolioLatestResponse(BaseModel):
+    """Returned by GET /mf/portfolio/latest — lets the frontend navigate to the
+    user's most recent report without the user supplying or re-uploading a CAS."""
+
+    job_id: str
+    portfolio_id: str
+    portfolio_name: str
+
+
 class PortfolioCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
 

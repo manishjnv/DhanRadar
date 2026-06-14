@@ -54,6 +54,7 @@ from dhanradar.mf.schemas import (
     MFResearchAskResponse,
     PortfolioCreateRequest,
     PortfolioHistoryResponse,
+    PortfolioLatestResponse,
     PortfolioListResponse,
     PortfolioReport,
     PortfolioSummary,
@@ -338,7 +339,53 @@ async def cas_report(
         return service.assemble_report(
             job_id=job_id, status=job.status, snapshot=None, funds=[], portfolio_id=portfolio_id
         )
+    # Cache miss on a completed job: rebuild from stored holdings + today's NAV so
+    # the user sees their portfolio without re-uploading (CAS lifecycle fix).
+    if portfolio_id:
+        rebuilt = await service.rebuild_report_from_db(
+            job_id=job_id, portfolio_id=portfolio_id, redis=redis, db=db
+        )
+        if rebuilt:
+            return rebuilt
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report_expired")
+
+
+# ---------------------------------------------------------------------------
+# Portfolio latest — lets the frontend navigate without a job_id
+# ---------------------------------------------------------------------------
+
+
+@router.get("/portfolio/latest", response_model=PortfolioLatestResponse)
+async def portfolio_latest(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> PortfolioLatestResponse:
+    """Return the latest completed job_id for the caller's portfolio.
+
+    Allows the frontend to navigate to GET /report/{job_id} (which rebuilds from
+    stored holdings if the cache has expired) without the user needing to supply
+    or re-upload a CAS statement.  Returns 404 when no portfolio exists yet.
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    result = await db.execute(
+        select(MfPortfolio)
+        .where(MfPortfolio.user_id == user.user_id)
+        .where(MfPortfolio.latest_job_id.isnot(None))
+        .order_by(MfPortfolio.created_at.desc())
+        .limit(1)
+    )
+    portfolio = result.scalar_one_or_none()
+
+    if not portfolio or not portfolio.latest_job_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_portfolio")
+
+    return PortfolioLatestResponse(
+        job_id=str(portfolio.latest_job_id),
+        portfolio_id=str(portfolio.id),
+        portfolio_name=portfolio.name,
+    )
 
 
 # ---------------------------------------------------------------------------

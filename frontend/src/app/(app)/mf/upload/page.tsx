@@ -6,14 +6,15 @@
  */
 
 import * as React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { FileDrop } from '@/components/mf/FileDrop';
-import { useUploadCas } from '@/features/mf/api';
+import { useUploadCas, useLatestPortfolio } from '@/features/mf/api';
 import { useConsent } from '@/features/consent/api';
 import { ConsentModal } from '@/features/consent/ConsentModal';
 
@@ -25,6 +26,7 @@ export default function UploadCasPage() {
   const [consentOpen, setConsentOpen] = React.useState(false);
   const { mutate: uploadCas, isPending } = useUploadCas();
   const { data: consent } = useConsent();
+  const { data: latestPortfolio } = useLatestPortfolio();
 
   function doUpload() {
     if (!file) return;
@@ -53,8 +55,26 @@ export default function UploadCasPage() {
 
   return (
     <div className="mx-auto max-w-xl py-4">
+      {/* Returning user — portfolio already stored; no re-upload needed. */}
+      {latestPortfolio && (
+        <Link
+          href={`/mf/report/${latestPortfolio.job_id}`}
+          className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-royal/30 bg-royal/5 px-4 py-3 transition-colors hover:bg-royal/10"
+        >
+          <div>
+            <p className="text-small font-medium text-ink">
+              {latestPortfolio.portfolio_name || 'Your portfolio is ready'}
+            </p>
+            <p className="text-caption text-ink-secondary">
+              Updated with today&apos;s NAV — no upload needed
+            </p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-royal" aria-hidden="true" />
+        </Link>
+      )}
+
       <h1 className="text-h2 font-medium text-ink">
-        Get your portfolio report in 60 seconds
+        {latestPortfolio ? 'Upload a new CAS' : 'Get your portfolio report in 60 seconds'}
       </h1>
       <p className="mt-2 text-body text-ink-secondary">
         Upload your CAMS or Karvy Consolidated Account Statement (CAS) PDF.
