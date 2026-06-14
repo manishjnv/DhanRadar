@@ -5,10 +5,62 @@ signal + **B58-f5** doc note (PR #131 `086fe01`, dormant); **v1.2 activation run
 ADR-0034** (Status: Proposed, founder-gated — NOT activated); **B67 AUM option-a recorded ADR-0035**.
 Prior: pt2 cohort rewire merged + DEPLOYED dormant to KVM4 (box `84bc158`, alembic `0022`, grouping
 still `category`, labels unchanged). Concurrent session shipped #130 + the F1-A "Why this label" FE
-panel #132.)
+panel #132. **B67 per-scheme path identified (B67 sourcing-handoff session):** a $0 ADR-0033(a)
+piggyback fills the per-scheme `aum_crore` that ADR-0035 leaves source-blocked — the $0-vs-vendor
+decision is OPEN, founder leaning $0.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B67 fundamentals sourcing — $0 ADR-0033(a) piggyback fills the per-scheme gap ADR-0035 leaves open; decision OPEN (2026-06-14)
+
+Docs-only handoff session (no code). Merged **PR #130** (the B66-f1 pt2 dormant-deploy record →
+`origin/main`) and **independently re-verified the box** live + dormant (`84bc158`, alembic `0022`,
+`_COHORT_GROUPING_KEY=category`, both `ix_mf_funds_category` + `ix_mf_funds_sebi_category` present,
+health 200) — nothing undeployed. A concurrent session then merged #131 (B71+B58-f5), #133
+(ADR-0034/0035) and #134 (state) onto main; this PR was rebased onto that and reconciled against
+ADR-0035.
+
+**B67 finding (complements ADR-0035, does not supersede it).** ADR-0035 (Accepted) pursues option (a)
+— an AMFI AMC-wise SPA endpoint into a new `amc_level_aum` field — and **deliberately leaves
+per-scheme `aum_crore` source-blocked** (§8.4). A **$0 path fills that per-scheme gap:** the monthly
+SEBI portfolio-disclosure files that **ADR-0033(a)**'s top-10-AMC constituents scraper will already
+parse also carry per-scheme net-assets/AUM + the current manager + holding-level credit ratings — so
+all three B67 slices ride that scraper as a near-free add-on. Trade-offs: top-10 / ~75–80% AUM
+coverage (rest = honest `log()`-ed gap, never imputed §8.4); gated on the scraper landing (behind
+Task 2→Task 3→P2a); manager-change history accrues from monthly snapshots; credit quality DERIVED
+(not agency); needs an **ADR-0033 amendment** ((b)/(c) are taken) so the Tier-B/ToS/DPDP gate covers
+the extra fields. Paid-vendor fallback (route c) verified shortlist: CRISIL Intelligence / ICRA
+MFI360 / Accord ACE Datafeed (deferred to revenue; skip Morningstar/Bloomberg/LSEG pre-revenue; dead
+ends Value Research, CAMS/KFintech, free APIs). Memo + BLOCKERS B67 slice (1) updated this PR.
+
+**OPEN founder decision (the single ask, for the per-scheme slice ADR-0035 leaves open):** **(d) $0
+ADR-0033(a) piggyback (recommended)** vs **(c) paid vendor** — founder leaning $0. Picking $0 ties the
+per-scheme slice to the constituents-scraper delivery; a vendor buys full-universe data now at
+licensing + counsel cost. Either way `out_of_form` also needs B24 + the two-person methodology gate;
+the public surface stays non-numeric and non-advisory regardless. Memo:
+`B67_FUNDAMENTALS_SOURCING_MEMO.md`.
+
+### Agent-utilization & routing telemetry (2026-06-14 B67 sourcing-handoff session)
+
+- **Opus (Fable, Tier 0):** orchestration; ground-truth verification (#126–#129 on `origin/main`);
+  surfaced the open PR #130 SESSION_STATE overlap → founder chose merge-then-fresh-branch; merged
+  #130; **detected mid-flight that a concurrent session had merged ADR-0035 (B67 option-a) + B71 +
+  ADR-0034**, so rebased onto the new main and **reframed the $0 path as a complement to ADR-0035**
+  (it fills the per-scheme gap ADR-0035 leaves source-blocked) rather than a supersession; caught the
+  Sonnet draft's ADR-0033(b) collision (b/c already taken) and corrected it to an ADR-0033 amendment;
+  typed the surgical BLOCKERS B67 cell + this SESSION_STATE section + the ADR-0035 reconciliation
+  edits directly (collision-sensitive structured/state edits, precision exemption).
+- **Sonnet (Tier 1):** B67 memo prose (3 new sections + summary update + recommendation rewrite) ·
+  **reworked: Y** (Opus fixed the ADR-0033(b)→amendment collision AND reframed supersession→complement
+  for ADR-0035 consistency).
+- **warm-start (Sonnet):** Phase-0 orientation brief · reworked: N (correctly flagged the
+  ADR-0033(a)=constituents-only nuance that drove the amendment framing).
+- **Haiku (Tier 3):** box live-verification sweep (commit/alembic/env/indexes/health) · reworked: N.
+- **codex:rescue:** n/a — docs-only, no load-bearing/security path; account not entitled (memory).
+- **Doc-routing note (honest):** the memo long-form prose was delegated to Sonnet per the rule; the
+  BLOCKERS row + this SESSION_STATE section + the ADR-0035 reconciliation were typed on the main model
+  (collision-sensitive structured/state edits — the same deliberate exemption logged last session).
 
 ## B66-f1 pt2 activation prereqs MERGED + v1.2 runbook (ADR-0034) + B67 AUM ADR-0035 (2026-06-14, session 2)
 
@@ -23,8 +75,8 @@ under the active `category` key (0/14,041 prod funds lack a raw category); only 
 **v1.2 ACTIVATION — runbook recorded ADR-0034 (Status: Proposed, GATED — NOT activated).** The
 `sebi_category` grouping flip is the live-label change (196 funds / 1.40%). I did NOT execute it: the
 auto-mode guardrail correctly blocked marking the methodology `activated` autonomously — it is the
-FOUNDER's two-person action. ADR-0034 is the exact runbook (flip `_COHORT_GROUPING_KEY`→`sebi_category`
-+ manifest v1.2 + `POST /admin/scoring/v1.2/activate` with `approved_by≠created_by` + pre-rescore user
+FOUNDER's two-person action. ADR-0034 is the exact runbook (flip `_COHORT_GROUPING_KEY`→`sebi_category` +
+manifest v1.2 + `POST /admin/scoring/v1.2/activate` with `approved_by≠created_by` + pre-rescore user
 notice + KVM4 deploy + rollback). v1.1 stays the active prod methodology until the founder activates.
 NO `DISCLAIMER_VERSION` bump (B71 review: disclosure-neutral).
 

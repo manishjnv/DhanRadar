@@ -1,7 +1,12 @@
 # B67 Fundamentals Data — Sourcing Decision Memo
 
-**Status:** Decision required before any build work begins (no code written yet).
-**Date:** 2026-06-13 · **Audience:** Founder · **Prepared by:** Builder (Sonnet draft, Opus-reviewed)
+**Status:** AMC-level slice SETTLED — **ADR-0035 (Accepted 2026-06-14)** pursues option (a) (AMFI
+AMC-wise SPA → a new `amc_level_aum` field) and **deliberately leaves per-scheme `aum_crore`
+source-blocked** (§8.4). OPEN founder decision for the GENUINE per-scheme slice (+ manager + credit):
+**$0 ADR-0033(a) piggyback (recommended)** vs a paid data vendor — see "The $0 path" and "Open
+founder decision" below.
+**Date:** 2026-06-13 (updated 2026-06-14) · **Audience:** Founder · **Prepared by:** Builder
+(Sonnet draft, Opus-reviewed)
 
 ---
 
@@ -16,6 +21,116 @@ licensed rating-agency relationship. Recommendation: defer AUM to a bounded
 **AMC-level** signal (new field, no imputation), park manager change pending a vendor
 cost assessment, and treat credit downgrades as a counsel-gated future slice. No
 slice is built before its ADR is filed and a data-source sanction is obtained.
+
+**Update (2026-06-14).** The AMC-level slice is now settled: **ADR-0035 (Accepted)** pursues
+option (a) — an AMFI AMC-wise SPA endpoint into a new `amc_level_aum` field — and explicitly leaves
+per-scheme `aum_crore` source-blocked (§8.4). A **$0 path now fills that per-scheme gap:** the monthly
+SEBI portfolio-disclosure files that ADR-0033(a)'s top-10-AMC constituents scraper will already parse
+also carry per-scheme net assets, the current manager, and holding-level ratings — covering all three
+B67 slices as a near-free add-on. It **complements ADR-0035**, it does not replace it. The single open
+decision is **$0 ADR-0033(a) piggyback vs paid vendor** for that per-scheme slice — see "Open founder
+decision" below.
+
+---
+
+## The $0 path — ADR-0033(a) piggyback (RECOMMENDED no-budget option)
+
+**Relationship to ADR-0035.** ADR-0035 (Accepted 2026-06-14) pursues option (a) — an AMFI AMC-wise
+SPA endpoint into a new `amc_level_aum` field — and is explicit that it does **not** fill per-scheme
+`aum_crore`, which stays source-blocked under §8.4. The $0 path below is how that per-scheme column
+actually gets filled. It **complements ADR-0035** (AMC-level context now, per-scheme `aum_crore` when
+the scraper lands); it does not supersede it.
+
+**Finding (2026-06-14).** The same monthly SEBI portfolio-disclosure files that ADR-0033(a)'s
+per-AMC parsers will already read also carry, per scheme: net assets / AUM (month-end), the current
+fund manager (on the scheme factsheet / SID), and holding-level credit ratings. All three B67
+slices — `mf_funds.aum_crore`, the `manager_change` signal, and the debt-fund `structural_concern` —
+can ride the constituents scraper as a near-free add-on. No new vendor, no new budget line, and no
+additional ToS / DPDP review surface beyond what ADR-0033(a) already mandates.
+
+**Why this satisfies §8.4.** The per-scheme net-assets line in the monthly disclosure is genuine
+scheme-level data — not an AMC-aggregate imputed downward. §8.4's prohibition on deriving
+`aum_crore` from AMC-level aggregate data does not apply here.
+
+**Honest trade-offs — state all of these to the founder:**
+
+- **Coverage is top-10 AMCs only (~75–80% of industry AUM).** Funds outside the top-10 stay an
+  honest `log()`-ed gap; §8.4 forbids imputing the remainder from AMC-level totals. Same discipline
+  ADR-0033(a) already imposes for constituents — no new exposure.
+- **Gated on the constituents scraper delivery.** The dependency chain is Task 2 (`mf_fund_metrics`
+  OOM fix) → Task 3 (scheme-master enrichment) → P2a (constituents parser). This is not a quick win;
+  it arrives when the scraper arrives. (ADR-0035's AMC-level field, by contrast, can proceed on its
+  own gates independently and sooner.)
+- **Manager-change history accrues forward, not backward.** The current manager is available from
+  snapshot 1. Change detection requires ≥2 monthly snapshots — day-1 history is not recoverable from
+  this source.
+- **Credit quality is derived, not curated.** We parse and weight holding-level ratings from the
+  disclosure — an educational structural signal suitable for `structural_concern`. It is lower
+  fidelity than a CRISIL / ICRA rating-change event feed and must not be presented as a downgrade
+  alert.
+- **Per-AMC format variability.** Confirm during scraper build that each of the top-10 AMCs' monthly
+  disclosures prints a per-scheme net-assets line and the manager name. Near-universal on factsheets
+  and portfolio statements, but format varies by AMC — verification is required before treating it
+  as reliable.
+- **Requires an ADR-0033 amendment.** ADR-0033(a) today scopes constituents only. Extending the
+  parser to capture AUM / manager / ratings must be written up as a new ADR-0033 sub-decision — note
+  that (b)/(c) are already the benchmark and redistribution decisions, so this is an ADR-0033(a)
+  amendment or a fresh sub-letter — so the Tier-B / ToS / DPDP gate explicitly covers the additional
+  fields. It cannot silently inherit ADR-0033(a)'s approval.
+
+**Activation note.** Data alone does not unlock `out_of_form`. The label also requires B24 (recency
+window) and B6/B28 (the two-person methodology gate). The public surface remains non-numeric and
+non-advisory regardless of which data source is chosen.
+
+## Verified vendor shortlist (route (c) — paid, deferred to revenue)
+
+Three vendors cover all three slices and are worth quoting when revenue permits. Each needs a quote,
+a counsel redistribution-terms review, and a new ADR before procurement.
+
+- **CRISIL Intelligence** — covers per-scheme AUM, manager-change events, and agency credit ratings;
+  SEBI-recognised; enterprise pricing ($$$). Highest fidelity for the credit slice.
+- **ICRA Analytics MFI360** — covers all three; first-party ratings data; startup-accessible
+  pricing. Already named in ADR-0033(a) as the deferred licensed constituents feed — consistent with
+  the existing decision.
+- **Accord Fintech ACE Datafeed** — a real REST / FTP API, India-priced. **Confirm** it carries
+  per-scheme AUM **and** ratings before selecting; coverage scope needs verification.
+
+**Skip pre-revenue:** Morningstar (~$20k+/yr), Bloomberg, LSEG — pricing is out of band for the
+launch stage.
+
+**Dead ends — do not pursue:**
+
+- **Value Research** — no API.
+- **CAMS / KFintech** — no third-party data licensing; the MFCentral third-party API shut
+  September 2025.
+- **`mf.captnemo.in` / `mfdata.in`** — prototyping only, not a sanctioned production source.
+
+## Open founder decision
+
+ADR-0035 already settled the AMC-level slice (option (a)). The remaining open question is how to
+source the **genuine per-scheme** slice (per-scheme AUM + manager + credit) that ADR-0035 leaves
+source-blocked.
+
+**Single open question:** route **(d) $0 ADR-0033(a) piggyback** vs route **(c) paid data vendor**.
+
+- **Route (d) — $0 piggyback (RECOMMENDED).** No vendor spend; no new approval surface beyond
+  ADR-0033(a)'s already-mandated Tier-B / ToS / DPDP gate; all three B67 slices covered for the
+  top-10 AMCs. Trade-offs: tied to constituents-scraper delivery (Task 2 → Task 3 → P2a), top-10
+  coverage only, manager-change history accrues forward only, credit quality is derived. Requires an
+  ADR-0033 amendment to formally extend scope.
+- **Route (c) — paid vendor.** Full-universe per-scheme AUM, curated manager-change events, and
+  agency-grade rating feeds — available now rather than after the scraper lands. Cost: a licensing
+  fee + counsel review + an ADR per vendor. Consistent with ADR-0033(a)'s own framing: a licensed
+  feed deferred until there is revenue.
+- **Founder's current lean:** $0 / no-budget — consistent with ADR-0033(a)'s decision to defer the
+  licensed feed. **Status: OPEN** — no decision recorded yet; this memo requests a call or async
+  sign-off.
+- **Either route:** `out_of_form` activation still requires B24 (recency window) + B6/B28 (the
+  two-person methodology gate). Data sourcing is a prerequisite, not the sole gate. The public
+  surface stays non-numeric and non-advisory regardless of source.
+
+**Action requested:** founder to confirm **(d)** or **(c)** so the ADR-0033 amendment can be drafted
+and the scraper build (or vendor procurement) sequenced.
 
 ---
 
@@ -100,11 +215,15 @@ ADR precedes any build.
 
 **Sequencing for the founder's decision:**
 
-1. **AUM — pursue option (a) only, bounded scope.** Reverse-engineer the AMFI SPA
-   endpoint for **AMC-level** AUM into a NEW AMC-level field; do **not** impute
-   per-scheme (§8.4 is hard). File an ADR scoping it as AMC-level enrichment, recording
-   the ToS-risk decision; get ToS legal confirmation before ingestion. Most tractable
-   near-term action.
+1. **AUM (AMC-level) — DONE as ADR-0035.** Option (a) is settled: reverse-engineer the AMFI
+   AMC-wise SPA endpoint into a new `amc_level_aum` field (honest granularity; no per-scheme
+   imputation, §8.4); build gated on SPA-confirm + ToS review + data-source sanction. **For the
+   GENUINE per-scheme slice (+ manager + credit) — recommended: the $0 ADR-0033(a) piggyback**
+   (see "The $0 path"): ride the top-10 monthly-disclosure parsers for per-scheme AUM + current
+   manager + derived credit quality; record it as an ADR-0033 amendment on the existing sanction;
+   accept top-10 coverage (rest = honest `log()`-ed gap, never imputed). The paid vendor (route c)
+   is the revenue-stage fallback for full-universe + curated feeds. **Decision OPEN — see "Open
+   founder decision".**
 2. **Manager change — commission a vendor cost assessment before the next phase.** Do not
    build SID/factsheet scraping without a ToS opinion (Sep-2025 tightening). If vendor
    cost is acceptable, file the ADR; otherwise explicitly defer and accept `out_of_form`
@@ -122,8 +241,10 @@ ADR precedes any build.
   methodology gate cleared (B6/B28).
 - Do not treat any slice as a "quick fill" — the recon confirms none is.
 
-**First ADR to file:** Slice 1 option (a) — scope AMC-level AUM as a new enrichment
-field, document the §8.4 boundary, record the ToS-risk decision.
+**ADRs on record / to file:** Slice 1 option (a) is filed as **ADR-0035 (Accepted)** — AMC-level
+`amc_level_aum` enrichment, §8.4 boundary, ToS-risk gate. The next ADR is an **ADR-0033 amendment**
+extending the top-10 constituents scraper to also capture per-scheme AUM + manager + ratings (the $0
+path) — file it once the founder confirms the $0-vs-vendor decision.
 
 ---
 
