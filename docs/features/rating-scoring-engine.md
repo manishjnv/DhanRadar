@@ -139,6 +139,12 @@ AMFI category-taxonomy consistency (the B66 validation layer).
 
 ## Changelog
 
+- 2026-06-14 — **B66-f1 pt2 — model v1.2 ACTIVATED**: cohort grouping key flipped from raw
+  `category` to the validated canonical `sebi_category` (`_COHORT_GROUPING_KEY` + manifest v1.2,
+  lockstep). Activated under the B6/B28 two-person gate (founder = `approved_by` ≠ `created_by`) +
+  founder deploy approval (ADR-0034); prod backtest = 196-fund / 1.40% label shift, within the 5%
+  churn gate. Legacy umbrellas (sebi_category NULL) stay uncohorted with the B71 context. Weights +
+  margins unchanged from v1.1.
 - 2026-06-14 — B71 + B58-f5: uncohorted funds (no canonical SEBI category) now carry the
   `COHORT_NO_CANONICAL_CATEGORY` context (honest-not-positive `on_track`); feature-doc note on
   cohort-recalibration label sensitivity. Dormant-safe under the active `category` grouping key (no

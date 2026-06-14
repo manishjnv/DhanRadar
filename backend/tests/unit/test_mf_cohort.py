@@ -508,14 +508,14 @@ def test_metrics_refresh_short_series_no_3y_return():
 
 # --- B66-f1 pt2: cohort grouping key (category vs validated sebi_category) -----
 
-def test_cohort_grouping_key_default_is_dormant_category():
-    """The validated-taxonomy rewire stays UN-ACTIVATED until a NEW ranking_configs
-    version clears the two-person methodology gate (B6/B28) + explicit prod
-    activation. The shipped default MUST stay the active key so merging the rewire
-    is behaviourally a no-op. Guards against an accidental premature flip."""
+def test_cohort_grouping_key_is_sebi_category_v1_2():
+    """B66-f1 pt2 v1.2 ACTIVATED 2026-06-14: the grouping key is the validated
+    `sebi_category` (the prior v1.1 value was `category`). Activated under the B6/B28
+    two-person gate + founder deploy approval (ADR-0034). The lockstep test keeps this
+    constant and the ranking_configs manifest in step."""
     from dhanradar.tasks import mf as tasks_mf
 
-    assert tasks_mf._COHORT_GROUPING_KEY == "category"
+    assert tasks_mf._COHORT_GROUPING_KEY == "sebi_category"
 
 
 def test_grouping_column_resolves_mf_funds_columns():
