@@ -285,7 +285,6 @@ function SchemesTable({
 // Overlap section
 // ---------------------------------------------------------------------------
 function OverlapSection({ pairs }: { pairs: OverlapPair[] }) {
-  if (pairs.length === 0) return null;
   return (
     <Card>
       <CardHeader>
@@ -293,25 +292,39 @@ function OverlapSection({ pairs }: { pairs: OverlapPair[] }) {
       </CardHeader>
       <CardBody>
         <p className="text-small text-ink-secondary mb-4">
-          High overlap between funds may reduce diversification benefit.
+          When two funds hold many of the same stocks, buying both adds less
+          diversification than it appears. A 60% overlap means 60% of that money
+          effectively sits in a shared pool — not two separate baskets.
         </p>
-        <ul className="flex flex-col gap-3">
-          {pairs.map((p, i) => (
-            <li key={i} className="flex items-center gap-3 text-small">
-              <span className="flex-1 text-ink">{p.fund_a}</span>
-              <span className="text-ink-muted shrink-0">↔</span>
-              <span className="flex-1 text-ink">{p.fund_b}</span>
-              <span
-                className={cn(
-                  'shrink-0 font-medium tabular-nums',
-                  p.overlap_pct > 40 ? 'text-amber' : 'text-ink-secondary',
-                )}
-              >
-                {p.overlap_pct}%
-              </span>
-            </li>
-          ))}
-        </ul>
+        {pairs.length === 0 ? (
+          <div className="rounded-lg border border-line bg-surface-2 p-4 text-center">
+            <p className="text-small font-medium text-ink">
+              Stock-level overlap analysis coming soon
+            </p>
+            <p className="mt-1 text-caption text-ink-muted">
+              Overlap requires each fund&apos;s individual stock holdings. We are
+              building this feed from SEBI-mandated monthly portfolio disclosures.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {pairs.map((p, i) => (
+              <li key={i} className="flex items-center gap-3 text-small">
+                <span className="flex-1 text-ink">{p.fund_a}</span>
+                <span className="text-ink-muted shrink-0">↔</span>
+                <span className="flex-1 text-ink">{p.fund_b}</span>
+                <span
+                  className={cn(
+                    'shrink-0 font-medium tabular-nums',
+                    p.overlap_pct > 40 ? 'text-amber' : 'text-ink-secondary',
+                  )}
+                >
+                  {p.overlap_pct}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </CardBody>
     </Card>
   );
