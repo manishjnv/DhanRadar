@@ -245,16 +245,23 @@ async def _run_pipeline(
             )
             result = await score_fund(rengine, signals)
             await upsert_user_fund_score(db, user_id, result, portfolio_id)
-            # Plus-only: retain label history per fund (no numeric persisted).
-            if plus:
-                await mf_history.append_score_history(
-                    db,
-                    user_id=user_id,
-                    result=result,
-                    snapshot_date=date.today(),
-                    source="cas_upload",
-                    portfolio_id=portfolio_id,
-                )
+            # Fetch the previous label BEFORE writing today's row (snapshot_date <
+            # today is the filter, so today's row is excluded either way).
+            # None on first upload — delta arrow is suppressed in the frontend.
+            previous_label_val = await mf_history.get_prior_label(
+                db, portfolio_id, p.isin, date.today()
+            )
+            # Write label history for ALL users (not just Plus) so the delta feature
+            # (Feature 3: ↑/↓ arrow on the report) works for free users too.
+            # The full history READ endpoint stays Plus-gated (router.py).
+            await mf_history.append_score_history(
+                db,
+                user_id=user_id,
+                result=result,
+                snapshot_date=date.today(),
+                source="cas_upload",
+                portfolio_id=portfolio_id,
+            )
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
             # failure is logged and never breaks the report pipeline.
@@ -274,6 +281,8 @@ async def _run_pipeline(
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
                 "contributing_signals": result.contributing_signals,
                 "contradicting_signals": result.contradicting_signals,
+                "previous_label": previous_label_val,
+                "confidence_factors": dict(result.confidence_factors),
             })
 
         # Plus-only: persist the portfolio-level snapshot (numbers stay server-side).

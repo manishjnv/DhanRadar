@@ -11,6 +11,7 @@ import type {
   CasStatusResponse,
   MfReport,
   MfScheme,
+  LabelHistoryEntry,
   BackendCasJobStatus,
   BackendPortfolioReport,
 } from './types';
@@ -152,6 +153,10 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     // scoring engine — rendered verbatim, never reinterpreted.
     contributing_signals: f.contributing_signals ?? [],
     contradicting_signals: f.contradicting_signals ?? [],
+    // Feature 3: delta indicator — null on first upload or when no prior history.
+    previous_label: (f.previous_label ?? null) as MfScheme['previous_label'],
+    // Feature 4: confidence quality signal bands — null on old cached reports (graceful).
+    confidence_factors: f.confidence_factors ?? null,
   }));
 
   const category_allocation = Object.entries(r.category_allocation ?? {}).map(
@@ -188,6 +193,8 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     schemes,
     category_allocation,
     overlap,
+    // Feature 2/3: forward portfolio_id so history endpoint can be called.
+    portfolio_id: r.portfolio_id ?? null,
     // F1-B: forward the governed gateway's educational commentary (previously
     // dropped here). null when not consented / not generated — the card hides itself.
     commentary: r.commentary ?? null,
@@ -208,4 +215,56 @@ export function useMfReport(jobId: string | null, enabled: boolean) {
     enabled: !!jobId && enabled,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Feature 2 — Label history (Plus-gated on the backend)
+// ---------------------------------------------------------------------------
+
+interface BackendSnapshotHistory {
+  snapshots: { snapshot_date: string; funds: { isin: string; verb_label: string; confidence_band: string }[] }[];
+}
+
+export interface UseMfLabelHistoryResult {
+  /** Flat list of all history entries, all ISINs. */
+  entries: LabelHistoryEntry[];
+  isLocked: boolean;
+  isLoading: boolean;
+}
+
+export function useMfLabelHistory(portfolioId: string | null): UseMfLabelHistoryResult {
+  const query = useQuery({
+    queryKey: ['mf', 'history', portfolioId ?? ''],
+    queryFn: async () => {
+      const raw = await api.get<BackendSnapshotHistory>(
+        `/mf/history?portfolio_id=${portfolioId}`
+      );
+      const entries: LabelHistoryEntry[] = [];
+      for (const snap of raw.snapshots) {
+        for (const f of snap.funds) {
+          entries.push({
+            isin: f.isin,
+            snapshot_date: snap.snapshot_date,
+            verb_label: f.verb_label as LabelHistoryEntry['verb_label'],
+            confidence_band: f.confidence_band as LabelHistoryEntry['confidence_band'],
+          });
+        }
+      }
+      return entries;
+    },
+    enabled: !!portfolioId,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  // 402 = Plus gate — backend returns upgrade_required; treat as "locked".
+  const isLocked =
+    query.isError &&
+    (query.error as { status?: number })?.status === 402;
+
+  return {
+    entries: query.data ?? [],
+    isLocked,
+    isLoading: query.isLoading,
+  };
 }

@@ -26,7 +26,7 @@ import json
 import os
 import tempfile
 import uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -195,8 +195,8 @@ async def upload_cas(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     file: Annotated[UploadFile, File()],
-    password: Annotated[Optional[str], Form()] = None,
-    portfolio_id: Annotated[Optional[str], Form()] = None,
+    password: Annotated[str | None, Form()] = None,
+    portfolio_id: Annotated[str | None, Form()] = None,
     _rl: Annotated[None, Depends(_rl_upload)] = None,
 ) -> CasUploadResponse:
     # 1. Auth (401) BEFORE consent (403). The consent gate is invoked explicitly
@@ -325,14 +325,17 @@ async def cas_report(
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
     job = await _own_job(db, job_id, user.user_id)  # IDOR guard
+    portfolio_id = str(job.portfolio_id) if job.portfolio_id else None
     redis = get_redis()
     cached = await redis.get(f"{service._REPORT_PREFIX}{job_id}")
     if cached:
         payload = json.loads(cached)
-        return service.assemble_report(**payload)
+        return service.assemble_report(**payload, portfolio_id=portfolio_id)
     if job.status != "done":
         # Not ready yet — return the current status with the disclosure injected.
-        return service.assemble_report(job_id=job_id, status=job.status, snapshot=None, funds=[])
+        return service.assemble_report(
+            job_id=job_id, status=job.status, snapshot=None, funds=[], portfolio_id=portfolio_id
+        )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report_expired")
 
 
@@ -345,7 +348,7 @@ async def cas_report(
 async def portfolio_history(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
-    portfolio_id: Annotated[Optional[str], Query()] = None,
+    portfolio_id: Annotated[str | None, Query()] = None,
 ) -> PortfolioHistoryResponse:
     """Return Plus users' label history grouped by snapshot date.
 

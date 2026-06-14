@@ -56,6 +56,12 @@ class FundReportItem(BaseModel):
     confidence_band: str | None = None
     contributing_signals: list[str] = []
     contradicting_signals: list[str] = []
+    # Feature 3: label from the previous upload for delta display (↑/↓).
+    # None on first-ever upload or when history is unavailable.
+    previous_label: str | None = None
+    # Feature 4: named confidence quality signals — string bands only (high/medium/low).
+    # null on old cached reports; frontend degrades gracefully when absent.
+    confidence_factors: dict[str, str] | None = None
 
 
 class FundLabelHistory(BaseModel):
@@ -99,6 +105,8 @@ class PortfolioReport(BaseModel):
     commentary: dict | None = None
     model_version: str | None = None
     generated_at: str | None = None
+    # Feature 2/3: portfolio_id exposed so the frontend can call the history endpoint.
+    portfolio_id: str | None = None
     # Mandatory disclosure bundle (non-neg #9) — injected at serialization. The
     # in-force `disclaimer_version` is stamped on the SERVED surface so it matches
     # the `ai_recommendation_audit` row for this report (B26 / §4 tie-to-version).
