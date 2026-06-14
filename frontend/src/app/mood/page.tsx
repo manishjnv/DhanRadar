@@ -22,7 +22,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
-import { MoodGauge, REGIME_COLOR, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
@@ -30,6 +30,16 @@ import type { Regime } from '@/features/mood/types';
 // ---------------------------------------------------------------------------
 // History strip — 30 small colored squares, one per day
 // ---------------------------------------------------------------------------
+const REGIME_BG_CLASS: Record<string, string> = {
+  extreme_fear:      'bg-[var(--dr-red)]',
+  fear:              'bg-[var(--dr-amber)]',
+  neutral:           'bg-[var(--dr-cyan)]',
+  greed:             'bg-[var(--dr-amber)]',
+  extreme_greed:     'bg-[var(--dr-red)]',
+  insufficient_data: 'bg-[var(--text-muted)]',
+  data_unavailable:  'bg-[var(--text-muted)]',
+};
+
 function HistoryStrip({ days }: { days: number }) {
   const { data, isError } = useMoodHistory(days);
 
@@ -44,8 +54,7 @@ function HistoryStrip({ days }: { days: number }) {
             key={item.snapshot_date}
             role="listitem"
             title={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
-            className="h-3 w-3 rounded-sm"
-            style={{ backgroundColor: REGIME_COLOR[item.regime as Regime] ?? '#6B7280' }}
+            className={`h-3 w-3 rounded-sm ${REGIME_BG_CLASS[item.regime] ?? 'bg-[var(--text-muted)]'}`}
             aria-label={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
           />
         ))}
