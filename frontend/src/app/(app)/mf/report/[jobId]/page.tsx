@@ -10,6 +10,8 @@
  */
 
 import * as React from 'react';
+import { FadeUp } from '@/components/ui/FadeUp';
+import { useCountUp } from '@/features/mf/useCountUp';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
@@ -51,19 +53,42 @@ function formatIstDateTime(iso: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 // Progress view
 // ---------------------------------------------------------------------------
+const PROGRESS_TIPS = [
+  'Reading fund categories…',
+  'Computing educational labels…',
+  'Checking category allocation…',
+  'Analysing portfolio composition…',
+  'Preparing your report…',
+];
+
 function ProgressView({ progress }: { progress: number }) {
+  const [tipIdx, setTipIdx] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setTipIdx((i) => (i + 1) % PROGRESS_TIPS.length), 8000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="mx-auto max-w-md py-16 text-center flex flex-col items-center gap-6">
-      <div className="text-4xl" aria-hidden="true">📊</div>
+      <svg
+        width="64" height="64" viewBox="0 0 64 64"
+        aria-hidden="true"
+        className="animate-spin"
+        style={{ animationDuration: '1.8s', animationTimingFunction: 'linear' }}
+      >
+        <circle cx="32" cy="32" r="26" fill="none" stroke="var(--border)" strokeWidth="5" />
+        <circle
+          cx="32" cy="32" r="26" fill="none"
+          stroke="var(--dr-royal)" strokeWidth="5" strokeLinecap="round"
+          strokeDasharray="35 128"
+        />
+      </svg>
       <div className="w-full">
         <ProgressBar value={progress} />
-        <p className="mt-3 text-small text-ink-secondary">
-          Analysing your portfolio… ~60 seconds
-        </p>
+        <p className="mt-3 text-small text-ink-secondary">{PROGRESS_TIPS[tipIdx]}</p>
       </div>
       <p className="text-caption text-ink-muted">
-        We are reading your holdings, computing educational labels, and checking
-        category allocation. No advisory recommendation is generated.
+        No advisory recommendation is generated. ~60 seconds.
       </p>
     </div>
   );
@@ -85,19 +110,22 @@ function SummaryRow({
   asOf: string;
   schemeCount: number;
 }) {
-  const returnPct = ((currentValue - totalInvested) / totalInvested) * 100;
+  const animInvested = useCountUp(totalInvested);
+  const animCurrent  = useCountUp(currentValue);
+  const returnPct    = ((animCurrent - animInvested) / totalInvested) * 100;
+  const animXirr     = useCountUp(xirrPct);
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Card className="p-4">
         <p className="text-caption text-ink-muted uppercase tracking-wide">Total invested</p>
         <p className="mt-1 text-h3 font-medium text-ink tabular-nums">
-          ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          ₹{animInvested.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
       </Card>
       <Card className="p-4">
         <p className="text-caption text-ink-muted uppercase tracking-wide">Current value</p>
         <p className="mt-1 text-h3 font-medium text-ink tabular-nums">
-          ₹{currentValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          ₹{animCurrent.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
       </Card>
       <Card className="p-4">
@@ -108,8 +136,8 @@ function SummaryRow({
       </Card>
       <Card className="p-4">
         <p className="text-caption text-ink-muted uppercase tracking-wide">XIRR</p>
-        <p className={cn('mt-1 text-h3 font-medium tabular-nums', xirrPct >= 0 ? 'text-emerald' : 'text-red')}>
-          {xirrPct >= 0 ? '+' : ''}{xirrPct.toFixed(1)}%
+        <p className={cn('mt-1 text-h3 font-medium tabular-nums', animXirr >= 0 ? 'text-emerald' : 'text-red')}>
+          {animXirr >= 0 ? '+' : ''}{animXirr.toFixed(1)}%
         </p>
         <p className="text-caption text-ink-muted">{schemeCount} schemes · as of {formatIstDateTime(asOf)}</p>
       </Card>
@@ -355,52 +383,62 @@ function ReportView({ jobId }: { jobId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <SummaryRow
-        totalInvested={summary.total_invested}
-        currentValue={summary.current_value}
-        xirrPct={summary.xirr_pct}
-        asOf={summary.as_of}
-        schemeCount={summary.scheme_count}
-      />
+      <FadeUp delay={0}>
+        <SummaryRow
+          totalInvested={summary.total_invested}
+          currentValue={summary.current_value}
+          xirrPct={summary.xirr_pct}
+          asOf={summary.as_of}
+          schemeCount={summary.scheme_count}
+        />
+      </FadeUp>
 
       {/* F1-B: plain-language AI portfolio summary (governed gateway, consent-gated).
           Hides itself when the backend returns no commentary. */}
-      <PortfolioCommentaryCard commentary={commentary} />
+      <FadeUp delay={80}>
+        <PortfolioCommentaryCard commentary={commentary} />
+      </FadeUp>
 
       {/* F1: Portfolio health summary — label counts as filter chips.
           Counts are always from the full schemes list; filter applies only to the table. */}
-      <PortfolioHealthSummary
-        schemes={schemes}
-        activeFilter={activeFilter}
-        onFilterChange={setActiveFilter}
-      />
+      <FadeUp delay={160}>
+        <PortfolioHealthSummary
+          schemes={schemes}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
+        />
+      </FadeUp>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Category Allocation</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <AllocationDonut data={category_allocation} />
-          </CardBody>
-        </Card>
+      <FadeUp delay={240}>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle>Category Allocation</CardTitle>
+            </CardHeader>
+            <CardBody>
+              <AllocationDonut data={category_allocation} />
+            </CardBody>
+          </Card>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Your Holdings</CardTitle>
-          </CardHeader>
-          <CardBody>
-            {/* Feature 3: historyByIsin powers ↑/↓ delta; Feature 2: history shown in WhyPanel */}
-            <SchemesTable
-              schemes={filteredSchemes}
-              historyByIsin={historyByIsin}
-              historyLocked={historyLocked}
-            />
-          </CardBody>
-        </Card>
-      </div>
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Your Holdings</CardTitle>
+            </CardHeader>
+            <CardBody>
+              {/* Feature 3: historyByIsin powers ↑/↓ delta; Feature 2: history shown in WhyPanel */}
+              <SchemesTable
+                schemes={filteredSchemes}
+                historyByIsin={historyByIsin}
+                historyLocked={historyLocked}
+              />
+            </CardBody>
+          </Card>
+        </div>
+      </FadeUp>
 
-      <OverlapSection pairs={overlap} />
+      <FadeUp delay={320}>
+        <OverlapSection pairs={overlap} />
+      </FadeUp>
 
       {/* Contextual #9 disclosure — version-tied disclosure + not_advice from
           the backend, rendered on the labelled-holdings surface (which now also
@@ -408,12 +446,14 @@ function ReportView({ jobId }: { jobId: string }) {
           with a hard-coded NOT_ADVICE fallback so an empty backend string can
           never silently drop the disclosure from a label surface (non-neg #9,
           fail-closed). The standing site-wide line is the AppShell footer. */}
-      <div className="rounded-lg border border-line bg-surface-2 p-4">
-        <DisclosureBundle
-          disclosure={disclosure || undefined}
-          notAdvice={not_advice || 'For education only — not investment advice.'}
-        />
-      </div>
+      <FadeUp delay={400}>
+        <div className="rounded-lg border border-line bg-surface-2 p-4">
+          <DisclosureBundle
+            disclosure={disclosure || undefined}
+            notAdvice={not_advice || 'For education only — not investment advice.'}
+          />
+        </div>
+      </FadeUp>
     </div>
   );
 }
