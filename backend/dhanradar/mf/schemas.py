@@ -113,3 +113,31 @@ class PortfolioReport(BaseModel):
     disclosure: str
     not_advice: str
     disclaimer_version: str | None = None
+
+
+class MFResearchAskRequest(BaseModel):
+    """Request body for POST /mf/report/{job_id}/ask."""
+
+    question: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Educational question about the user's own portfolio (max 500 chars).",
+    )
+
+
+class MFResearchAskResponse(BaseModel):
+    """Public response shape for the research endpoint.
+
+    NEVER includes numeric confidence float (non-neg #2).
+    """
+
+    state: str  # "ok" | "insufficient_data" | "unavailable" | "daily_cap"
+    answer: str | None = None
+    citations: list[str] | None = None
+    refusal_triggered: bool | None = None
+    confidence_band: str | None = None
+    contributing_signals: list[str] | None = None
+    contradicting_signals: list[str] | None = None
+    disclaimer: str | None = None
+    disclaimer_version: str | None = None
+    reason: str | None = None  # on unavailable/daily_cap: why it failed

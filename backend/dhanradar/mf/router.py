@@ -50,6 +50,8 @@ from dhanradar.mf import service
 from dhanradar.mf.schemas import (
     CasJobStatus,
     CasUploadResponse,
+    MFResearchAskRequest,
+    MFResearchAskResponse,
     PortfolioCreateRequest,
     PortfolioHistoryResponse,
     PortfolioListResponse,
@@ -390,6 +392,78 @@ async def portfolio_history(
         not_advice=NOT_ADVICE,
         disclaimer_version=DISCLAIMER_VERSION,
     )
+
+
+# ---------------------------------------------------------------------------
+# F2 — MF research assistant (Plus-gated, grounded, non-advisory)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/report/{job_id}/ask", response_model=MFResearchAskResponse)
+async def ask_mf_research(
+    job_id: str,
+    body: Annotated[MFResearchAskRequest, Body()],
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> MFResearchAskResponse:
+    """Grounded MF research assistant — educational, non-advisory (F2).
+
+    Gate order: 401 (anon) → IDOR (job ownership) → 422 (report not done) →
+    402 (not Plus) → consent → daily cap → gateway → confidence floor → audit.
+    No numeric confidence float in the response (non-neg #2).
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    job = await _own_job(db, job_id, user.user_id)  # IDOR: own job only
+    if job.status != "done":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="report_not_ready",
+        )
+    if not await is_plus(user.user_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"error": "upgrade_required", "upgrade_url": "/pricing"},
+        )
+
+    # Load cached report for grounding context.
+    redis_client = get_redis()
+    cached_bytes = await redis_client.get(f"{service._REPORT_PREFIX}{job_id}")
+    if not cached_bytes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report_expired")
+
+    payload = json.loads(cached_bytes)
+    snapshot_data: dict = payload.get("snapshot") or {}
+    funds_data: list[dict] = payload.get("funds") or []
+
+    # Lightweight snapshot object for the research module (attribute access).
+    from types import SimpleNamespace
+
+    snapshot = SimpleNamespace(
+        category_allocation=snapshot_data.get("category_allocation") or {},
+        xirr_pct=snapshot_data.get("xirr_pct"),
+    )
+
+    from datetime import UTC, datetime
+
+    from dhanradar.ai_gateway.gateway import OpenRouterGateway
+    from dhanradar.mf.research import generate_research_answer
+
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+    result = await generate_research_answer(
+        OpenRouterGateway(),
+        user_id=user.user_id,
+        db=db,
+        redis=redis_client,
+        snapshot=snapshot,
+        funds=funds_data,
+        question=body.question,
+        date_str=date_str,
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+    return MFResearchAskResponse(**result)
 
 
 # ---------------------------------------------------------------------------
