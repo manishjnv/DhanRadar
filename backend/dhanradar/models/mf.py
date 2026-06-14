@@ -121,6 +121,9 @@ class MfPortfolio(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Stamped after every successful CAS pipeline run.  Enables GET /mf/portfolio/latest
+    # and the daily report rebuild so users see a fresh portfolio without re-uploading.
+    latest_job_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
 
 class MfUserHolding(Base):
