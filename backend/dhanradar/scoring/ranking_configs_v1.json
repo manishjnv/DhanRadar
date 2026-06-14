@@ -1,12 +1,12 @@
 {
   "$source": "docs/project-state/FINAL_SCORING_SPEC.md",
-  "model_version": "v1.1",
+  "model_version": "v1.2",
   "status": "active",
   "activated": true,
-  "created_by": "architecture-review",
-  "approved_by": "registry:rating_engine_changelog (v1.1 activation row)",
+  "created_by": "claude-builder (B66-f1 pt2)",
+  "approved_by": "registry:rating_engine_changelog (v1.2 activation row — founder, two-person gate)",
   "methodology_url": "https://dhanradar.com/methodology",
-  "_note": "v1.1 (B58-f4): identical to v1 ACTIVATED 2026-06-11 (registry row e1d46e5d-f98f-4f15-938b-44135db02d3b) EXCEPT labels.cohort_margin_pct — the category-relative label band is now category-class-aware (debt 0.5pp, hybrid 1.0pp, default 2.0pp; the flat 2.0pp band was inactive for sub-2pp-dispersion debt cohorts). Weights and all other methodology UNCHANGED. v1.1's own registry activation row is written at deploy via POST /admin/scoring/v1.1/activate (founder = approved_by; two-person gate enforced). The DB registry is the authoritative activation state; this file flag is the no-DB-context fallback the sync engine path reads (see admin /scoring/{v}/status).",
+  "_note": "v1.2 (B66-f1 pt2): identical to v1.1 EXCEPT labels.cohort_grouping_key — peer cohorts now group on the VALIDATED canonical mf_funds.sebi_category (B66 taxonomy) instead of the raw category string. Weights, margins, and all other methodology UNCHANGED. ACTIVATED 2026-06-14 under the B6/B28 two-person gate (founder = approved_by != created_by) + founder deploy approval, per ADR-0034. Read-only prod backtest (2026-06-13, 14,041 funds) measured 196 funds (1.40%) changing label — 113 from the dissolved 4,618-fund Income pseudo-cohort (-> uncohorted -> on_track + COHORT_NO_CANONICAL_CATEGORY context per B71) and 83 ELSS (incl. 57 second-order peer-median flips); net on_track +102 / off_track -92 / in_form -10; insufficient_data +0 (within the 5% churn gate). Prereqs B71 + B58-f5 landed first (PR #131). The DB registry (rating_engine_changelog v1.2 row) is the authoritative activation state; this file flag is the no-DB-context fallback. v1.1 was the prior active version (registry row e1d46e5d; ACTIVATED 2026-06-11). Ledger reviews/b66f1-pt2-cohort-sebi-rewire.md; ADR-0034.",
 
   "composite": {
     "score_range": [0, 100],
@@ -91,8 +91,8 @@
       "_unit": "return percentage points beyond the category-peer median (1Y/3Y) before a fund counts as out/under-performing; AMFI class = prefix of category before ' - '; unknown class uses default (wider band, on_track fail-safe)",
       "_lockstep": "mirrors backend/dhanradar/mf/cohort.py _MARGIN_PCT_DEFAULT/_MARGIN_PCT_BY_CLASS — test_margin_manifest_lockstep_with_config"
     },
-    "cohort_grouping_key": "category",
-    "_cohort_grouping_key_note": "mf_funds column peers are grouped into a category cohort by (B66-f1 pt2). v1.1 ACTIVE = 'category' (raw AMFI string). The validated-taxonomy rewire to 'sebi_category' (canonical SEBI leaf; legacy umbrellas Income/Growth/Gilt stay NULL → uncohorted → on_track fail-safe, never auto-mapped) is an un-activated methodology delta: it SHIFTS LIVE USER LABELS and requires a NEW ranking_configs version through the two-person gate (approved_by != created_by) + explicit prod activation before it goes live. Mirrors backend/dhanradar/mf/tasks _COHORT_GROUPING_KEY — lockstep test-enforced (test_cohort_grouping_key_lockstep_with_config).",
+    "cohort_grouping_key": "sebi_category",
+    "_cohort_grouping_key_note": "mf_funds column peers are grouped into a category cohort by (B66-f1 pt2). v1.2 ACTIVE = 'sebi_category' (the validated canonical SEBI leaf); v1.1 was 'category' (raw AMFI string). Legacy umbrellas Income/Growth/Gilt are sebi_category NULL → uncohorted → on_track + COHORT_NO_CANONICAL_CATEGORY context (B71), never auto-mapped. ACTIVATED 2026-06-14 under the two-person gate (approved_by != created_by) + founder deploy approval (ADR-0034); the prod backtest measured a 196-fund / 1.40% label shift, within the 5% churn gate. Mirrors backend/dhanradar/mf/tasks _COHORT_GROUPING_KEY — lockstep test-enforced (test_cohort_grouping_key_lockstep_with_config).",
     "rule_table": {
       "in_form": "outperforming category 1Y AND 3Y, controlled drawdown",
       "on_track": "matching category, no red flags",

@@ -157,6 +157,9 @@ async def test_mf_fund_metrics_refresh_equivalence(db_session, db_tables):
             "isin": isin,
             "scheme_name": f"Test Fund {i}",
             "category": _METRICS_CATEGORY,
+            # v1.2 (B66-f1 pt2): cohorts now group on the validated sebi_category.
+            # _METRICS_CATEGORY is already a canonical SEBI leaf, so sebi == category.
+            "sebi_category": _METRICS_CATEGORY,
         }
         for i, isin in enumerate(_METRICS_ISINS)
     ]

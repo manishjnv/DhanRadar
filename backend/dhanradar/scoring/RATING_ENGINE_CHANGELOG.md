@@ -7,6 +7,35 @@ an entry here until the table exists. Source of truth for the spec:
 
 ---
 
+## v1.2 — cohort grouping key → validated `sebi_category` (B66-f1 pt2) — 2026-06-14
+
+- **model_version:** `v1.2` · **status:** `active` · **activated:** `true`
+- **Registry row (authoritative):** `compliance.rating_engine_changelog` v1.2 row — written at
+  deploy via `POST /api/v1/admin/scoring/v1.2/activate` (`created_by=claude-builder (B66-f1 pt2)`,
+  `approved_by=founder admin`, `two_person_ok=true`; explicit founder approval in-session
+  2026-06-14 — "all permission approved, deploy to vps"). Backfill the row UUID here post-activation.
+- **created_by:** claude-builder (B66-f1 pt2) · **approved_by:** founder admin (two-person gate
+  `approved_by ≠ created_by` enforced by `activation.activate_model_version`).
+- **factors_before / factors_after:** UNCHANGED weights (quality 0.24 · valuation 0.22 ·
+  momentum 0.20 · trend 0.22 · risk 0.12) — this version changes NO weights/margins.
+- **What changed:** peer-cohort grouping key (`_COHORT_GROUPING_KEY`, `tasks/mf.py`; manifest
+  `ranking_configs_v1.json` `labels.cohort_grouping_key`, lockstep test-enforced) goes from the raw
+  AMFI `mf_funds.category` string to the validated canonical `mf_funds.sebi_category` (B66 taxonomy).
+  Malformed variants collapse into the correct canonical cohort; legacy umbrellas (sebi_category
+  NULL) stay HONESTLY UNCOHORTED — on_track + the `COHORT_NO_CANONICAL_CATEGORY` context (B71),
+  never auto-mapped. Raw `category` is never mutated.
+- **Why:** the raw category string fragmented cohorts (bare `ELSS`/double-space ETF/curly variants
+  in singleton cohorts) and formed bogus mega-cohorts (a 4,618-fund `Income` blob). Grouping on the
+  validated SEBI leaf makes the benchmark taxonomy-correct.
+- **Impact (read-only prod backtest 2026-06-13, 14,041 funds):** 196 funds (1.40%) change label —
+  113 from the dissolved `Income` pseudo-cohort, 83 ELSS (incl. 57 second-order peer-median flips);
+  net on_track +102 / off_track −92 / in_form −10; insufficient_data +0. Within the 5% churn gate.
+- **Prereqs:** B71 (`COHORT_NO_CANONICAL_CATEGORY` signal) + B58-f5 (doc note) — PR #131.
+- **Reviews / ADR:** `docs/project-state/reviews/b66f1-pt2-cohort-sebi-rewire.md`,
+  `reviews/b71-no-canonical-category-signal.md`; ADR-0034.
+
+---
+
 ## v1.1 — category-class-aware cohort label band (B58-f4) — 2026-06-12
 
 - **model_version:** `v1.1` · **status:** `active` · **activated:** `true`

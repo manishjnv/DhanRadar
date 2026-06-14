@@ -395,23 +395,25 @@ _METRICS_REFRESH_CHUNK = 500
 
 # Peer-cohort GROUPING KEY — VERSIONED METHODOLOGY (B6/B28 two-person gate), B66-f1
 # part 2. Which mf_funds column groups peers into a category cohort:
-#   * "category"      — the RAW AMFI string (v1.1, ACTIVE). Malformed variants
-#     (bare "ELSS", double-space "Other  ETFs", curly-apostrophe "Children's")
-#     and pre-2017 legacy umbrellas ("Income"/"Growth"/"Gilt") each form their own
-#     string-distinct cohort → fragmentation + a few bogus mega-cohorts.
+#   * "category"      — the RAW AMFI string (v1.1). Malformed variants (bare "ELSS",
+#     double-space "Other  ETFs", curly-apostrophe "Children's") and pre-2017 legacy
+#     umbrellas ("Income"/"Growth"/"Gilt") each form their own string-distinct cohort
+#     → fragmentation + a few bogus mega-cohorts.
 #   * "sebi_category" — the VALIDATED canonical SEBI leaf (taxonomy.canonical_for,
 #     B66). Malformed variants collapse into the correct canonical cohort; legacy
-#     umbrellas are sebi_category NULL → excluded by SQL `IN` (NULLs never match)
-#     and by the `if c` target filter → those funds stay HONESTLY UNCOHORTED
-#     (no benchmark → on_track fail-safe). NEVER auto-mapped.
-# This is the grouping key ONLY; the raw `category` column is never mutated (the
-# taxonomy.py invariant). Mirrored in ranking_configs_v1.json
-# labels.cohort_grouping_key — lockstep test-enforced. Flipping this to
-# "sebi_category" SHIFTS LIVE USER LABELS, so it is an un-activated methodology
-# delta until a new ranking_configs version clears the two-person gate
-# (approved_by != created_by) + explicit prod activation. Default stays the
-# active value so merging the rewire is behaviourally a NO-OP.
-_COHORT_GROUPING_KEY = "category"
+#     umbrellas are sebi_category NULL → excluded by SQL `IN` (NULLs never match) and
+#     by the `if c` target filter → those funds stay HONESTLY UNCOHORTED (on_track +
+#     the COHORT_NO_CANONICAL_CATEGORY context, B71). NEVER auto-mapped.
+# This is the grouping key ONLY; the raw `category` column is never mutated
+# (taxonomy.py invariant). Mirrored in ranking_configs_v1.json
+# labels.cohort_grouping_key — lockstep test-enforced.
+#
+# v1.2 ACTIVATED 2026-06-14 (B66-f1 pt2): flipped to "sebi_category" under the B6/B28
+# two-person gate (founder = approved_by ≠ created_by) + founder deploy approval, per
+# ADR-0034. Read-only prod backtest measured 196 funds (1.40%) changing label (within
+# the 5% churn gate). Prereqs B71 + B58-f5 landed first (PR #131). To roll back: set
+# this to "category" + manifest to v1.1 and redeploy (indexes stay).
+_COHORT_GROUPING_KEY = "sebi_category"
 
 
 def _grouping_column(grouping_key: str):
