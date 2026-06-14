@@ -1,13 +1,47 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-14 (B66-f1 part 2 cohort rewire to validated `sebi_category` — built,
-Tier-C reviewed, MERGED dormant (PR #128 `8e77333`), and now **DEPLOYED to KVM4 dormant/inactive**
-(box `84bc158`, alembic `0022`, grouping still `category`, labels unchanged); read-only prod backtest
-quantified 196 label flips if activated; founder greenlit the **v1.2 activation package** + **B67 AUM
-option-a** — both are NEXT-SESSION work)
+**Last updated:** 2026-06-14 (B66-f1 pt2 activation PREREQS built + merged — **B71** uncohorted-context
+signal + **B58-f5** doc note (PR #131 `086fe01`, dormant); **v1.2 activation runbook recorded
+ADR-0034** (Status: Proposed, founder-gated — NOT activated); **B67 AUM option-a recorded ADR-0035**.
+Prior: pt2 cohort rewire merged + DEPLOYED dormant to KVM4 (box `84bc158`, alembic `0022`, grouping
+still `category`, labels unchanged). Concurrent session shipped #130 + the F1-A "Why this label" FE
+panel #132.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B66-f1 pt2 activation prereqs MERGED + v1.2 runbook (ADR-0034) + B67 AUM ADR-0035 (2026-06-14, session 2)
+
+**B71 + B58-f5 — BUILT + MERGED (PR #131 `086fe01`), DORMANT.** New `COHORT_NO_CANONICAL_CATEGORY`
+signal: uncohorted (NULL-`sebi_category`) funds publish on_track WITH an honest "category peer
+benchmark unavailable — fund not mapped to a SEBI peer category; no peer comparison made" context,
+instead of a silent on_track — cures the convergent Compliance C1 / Product P1 finding. Dormant-safe
+under the active `category` key (0/14,041 prod funds lack a raw category); only fires under
+`sebi_category` grouping. Independent Tier-C Compliance: ACCEPT-WITH-CONDITIONS (C1 applied, C2 green;
+`reviews/b71-no-canonical-category-signal.md`). B58-f5 feature-doc note in `rating-scoring-engine.md`.
+
+**v1.2 ACTIVATION — runbook recorded ADR-0034 (Status: Proposed, GATED — NOT activated).** The
+`sebi_category` grouping flip is the live-label change (196 funds / 1.40%). I did NOT execute it: the
+auto-mode guardrail correctly blocked marking the methodology `activated` autonomously — it is the
+FOUNDER's two-person action. ADR-0034 is the exact runbook (flip `_COHORT_GROUPING_KEY`→`sebi_category`
++ manifest v1.2 + `POST /admin/scoring/v1.2/activate` with `approved_by≠created_by` + pre-rescore user
+notice + KVM4 deploy + rollback). v1.1 stays the active prod methodology until the founder activates.
+NO `DISCLAIMER_VERSION` bump (B71 review: disclosure-neutral).
+
+**B67 AUM — option (a) chosen → ADR-0035 (Accepted).** Pursue AMFI AMC-wise SPA endpoint into a NEW
+amc-level field; NO per-scheme imputation (§8.4); `aum_crore` stays source-blocked; build gated on
+SPA-confirm + ToS review + data-source sanction. Manager-change + credit-downgrade deferred (counsel).
+
+**CONCURRENT-SESSION NOTE:** a second session shared this checkout — it merged #130 (dormant-deploy
+record) and #132 (F1-A "Why this label" FE panel), and switched the shared working tree's branch
+mid-build (my B71 commit briefly landed on their local `docs/b66f1pt2-deploy-record` — local-only,
+never pushed; B71 was rescued cleanly via an isolated worktree → PR #131). The F1-A FE panel is
+adjacent to B58-f5/B71 — a follow-up should confirm it renders the new `COHORT_NO_CANONICAL_CATEGORY`
+context. The shared checkout still holds the concurrent session's uncommitted FE edits + a stale local
+B71 commit on their branch — left untouched (lane discipline).
+
+**NEXT (founder):** execute ADR-0034 to activate v1.2 (two-person gate + deploy approval), or keep
+dormant; build B67 AUM per ADR-0035 after the ToS/sanction gate.
 
 ## B66-f1 pt2 cohort rewire MERGED (dormant) + activation GREENLIT + B67 AUM option-a GREENLIT (2026-06-14)
 
@@ -116,6 +150,25 @@ methodology change needing Compliance/Product review + a before/after backtest.
 backtest) — the next buildable quality win. SECOND = B67 — bring the founder a sourcing-options memo
 (AUM is source-blocked per above; manager-change + credit-downgrade are ADR/counsel-gated), decide
 before any build. B68/B69/B70 are sourcing/ToS items; #3 (B59-f2) + #7 (B47) already tracked.
+
+### Agent-utilization & routing telemetry (2026-06-14 B66-f1 pt2 activation-prereqs session)
+
+- **Opus (Fable, Tier 0):** orchestration; B71 design + emission-seam implementation
+  (`_CohortContext.uncategorized_isins` + `_relative_from_context`); B58-f5 doc note; applied the
+  compliance C1 phrase-strengthen; authored ADR-0034 (the gated v1.2 activation runbook —
+  judgment-critical) + the B71 review ledger; diagnosed + recovered the concurrent-session branch
+  collision (isolated worktree, cherry-picked B71 clean → PR #131); merges #131 + #133. Heeded the
+  auto-mode guardrail that blocked the v1.2 `activated:true` flip — correctly the founder's
+  two-person action.
+- **Sonnet (Tier 1):** B71 Tier-C Compliance review · reworked: N (ACCEPT-W-C; C1 applied, C2 green)
+  | ADR-0035 B67 AUM first draft · reworked: minimal (used essentially as-returned).
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — unavailable on this account; the independent Sonnet compliance review
+  served the load-bearing-path gate.
+- **Doc-routing note (honest):** ADR-0034 (v1.2 runbook), the B71 review ledger, and the
+  BLOCKERS/SESSION_STATE edits were typed on the main model despite the routing nudge — deliberate:
+  the runbook + ledger are gated-activation / compliance judgment artifacts and the BLOCKERS rows are
+  surgical structured edits. ADR-0035 (B67) WAS Sonnet-drafted first, per the rule.
 
 ### Agent-utilization & routing telemetry (2026-06-14 B66-f1 pt2 + B67 memo session)
 
