@@ -333,7 +333,8 @@ async def cas_report(
     cached = await redis.get(f"{service._REPORT_PREFIX}{job_id}")
     if cached:
         payload = json.loads(cached)
-        return service.assemble_report(**payload, portfolio_id=portfolio_id)
+        payload["portfolio_id"] = portfolio_id  # use DB-authoritative value; adds if absent, overwrites if stale
+        return service.assemble_report(**payload)
     if job.status != "done":
         # Not ready yet — return the current status with the disclosure injected.
         return service.assemble_report(
