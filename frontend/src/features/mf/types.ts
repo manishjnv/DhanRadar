@@ -70,6 +70,12 @@ export interface MfScheme {
   /** Non-advisory label (never advisory verbs) */
   label: Label;
   confidence_band: ConfidenceBand;
+  /** Educational "why this label" signals — verbatim from the scoring engine's
+   *  compliance-approved vocabulary (backend `contributing_signals` /
+   *  `contradicting_signals`). Rendered by <WhyThisLabelPanel/>. The backend
+   *  already sends these on every fund; they MUST be forwarded, not dropped. */
+  contributing_signals: string[];
+  contradicting_signals: string[];
 }
 
 export interface AllocationSlice {
