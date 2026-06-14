@@ -50,6 +50,20 @@ from dhanradar.scoring.engine.schemas import (
 _DEFAULT_VALID_FOR = 7200  # 2h cache horizon (MF cadence)
 
 
+def _to_strength(value: float) -> str:
+    """Map a 0–1 confidence-factor float → qualitative band string.
+
+    Thresholds are independent of the confidence band thresholds (0.30/0.50/0.70)
+    — these measure per-factor DATA QUALITY, not the composite confidence level.
+    Edge cases: 0.0→low, 0.4→medium, 0.7→high, 1.0→high (correct in all cases).
+    """
+    if value >= 0.7:
+        return "high"
+    if value >= 0.4:
+        return "medium"
+    return "low"
+
+
 def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
@@ -103,6 +117,19 @@ class RatingEngine:
             model_signal=inputs.model_signal,
             weights=cfg.confidence_weights,
         )
+        # Named factor bands — captured BEFORE structural caps (caps lower the aggregate
+        # but do not change the per-factor quality; show the raw input quality to the user).
+        # Mapping to display names (Feature 4):
+        #   consistency   ← factor_agreement (do axes agree with each other?)
+        #   recency       ← freshness (how recent is the NAV data?)
+        #   volatility    ← retrieval_relevance (quality of the vol/risk signal retrieval)
+        #   data_coverage ← overall_axis_coverage (how many axes have usable data?)
+        _confidence_factors: dict[str, str] = {
+            "consistency": _to_strength(agreement),
+            "recency": _to_strength(inputs.freshness),
+            "volatility": _to_strength(inputs.retrieval_relevance),
+            "data_coverage": _to_strength(coverage),
+        }
         conf = apply_structural_caps(
             conf,
             partial_coverage=partial,
@@ -148,6 +175,7 @@ class RatingEngine:
                 contributing_signals=contributing,
                 contradicting_signals=contradicting,
                 flags=flags + ["insufficient_data"],
+                confidence_factors={},  # omit factors when confidence is refused
                 prior_label=outcome.prior_label,
             )
             await self._publish(result)
@@ -175,6 +203,7 @@ class RatingEngine:
             contributing_signals=contributing,
             contradicting_signals=contradicting,
             flags=flags,
+            confidence_factors=_confidence_factors,
             band_disagreement=disagreement,
             prior_label=outcome.prior_label,
         )
@@ -225,6 +254,7 @@ def _result_to_dict(r: ScoringResult) -> dict:
         "contributing_signals": r.contributing_signals,
         "contradicting_signals": r.contradicting_signals,
         "flags": r.flags,
+        "confidence_factors": dict(r.confidence_factors),
         "band_disagreement": r.band_disagreement,
         "prior_label": r.prior_label.value if r.prior_label else None,
         "disclaimer_version": r.disclaimer_version,

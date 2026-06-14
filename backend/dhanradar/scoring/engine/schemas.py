@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 MODEL_VERSION = "v1"
+
+# Named signal-quality bands surfaced to the client — never raw floats (non-neg #2).
+FactorStrength = Literal["high", "medium", "low"]
 
 # Disclosure bundle attached to every result (architecture §9 / non-neg #9).
 NOT_ADVICE = "NOT_ADVICE"
@@ -121,6 +124,9 @@ class PublicScore:
     disclosure: str
     not_advice: str
     disclaimer_version: str  # in-force disclaimer version (audit linkage, non-neg #9)
+    # Named confidence quality signals — same shape as ScoringResult.confidence_factors.
+    # String bands (high/medium/low) only; never floats (non-neg #2).
+    confidence_factors: dict[str, str] = field(default_factory=dict)
     prior_label: Optional[VerbLabel] = None  # label before this eval; lets a surface say
     #                                          "previously <x>, now insufficient data" (label, not numeric)
 
@@ -142,6 +148,10 @@ class ScoringResult:
     contributing_signals: list[str] = field(default_factory=list)
     contradicting_signals: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)  # partial_coverage / stale / low_liquidity / provisional_model / ...
+    # Named confidence quality signals — string bands only (high/medium/low), never floats.
+    # Mapping: consistency←agreement, recency←freshness, volatility←retrieval_relevance,
+    # data_coverage←overall_axis_coverage. Empty when confidence was refused (insufficient_data).
+    confidence_factors: dict[str, FactorStrength] = field(default_factory=dict)
     band_disagreement: bool = False  # rule label vs score-band leaning disagreed (rule wins)
     prior_label: Optional[VerbLabel] = None  # label published before this eval
     disclaimer_version: str = DISCLAIMER_VERSION
@@ -164,5 +174,6 @@ class ScoringResult:
             disclosure=self.disclosure,
             not_advice=self.not_advice,
             disclaimer_version=self.disclaimer_version,
+            confidence_factors=dict(self.confidence_factors),
             prior_label=self.prior_label,
         )
