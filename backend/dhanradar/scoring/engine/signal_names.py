@@ -44,6 +44,12 @@ class SignalName(enum.StrEnum):
     # Thin-cohort explainability (benchmark withheld because < _MIN_COHORT_PEERS).
     COHORT_THIN_BENCHMARK = "COHORT_THIN_BENCHMARK"
 
+    # No canonical SEBI peer category (B71): the fund's AMFI category is not mapped
+    # to a SEBI classification (pre-2017 legacy umbrella / unclassified) → it is
+    # honestly UNCOHORTED, not benchmarked. Distinguishes "no peer comparison made"
+    # from a genuine "matching category" so on_track reads honest-not-positive.
+    COHORT_NO_CANONICAL_CATEGORY = "COHORT_NO_CANONICAL_CATEGORY"
+
     # 1-year outperformance paths.
     COHORT_1Y_AHEAD_SHORT_TRACK = "COHORT_1Y_AHEAD_SHORT_TRACK"   # ahead 1Y, no 3Y history
     COHORT_1Y_AHEAD = "COHORT_1Y_AHEAD"                           # ahead 1Y, 3Y history exists
@@ -71,6 +77,10 @@ class SignalName(enum.StrEnum):
 SIGNAL_DISPLAY: dict[SignalName, str] = {
     SignalName.COHORT_THIN_BENCHMARK: (
         "category peer benchmark unavailable — too few comparable funds to compare"
+    ),
+    SignalName.COHORT_NO_CANONICAL_CATEGORY: (
+        "category peer benchmark unavailable — fund not mapped to a SEBI peer "
+        "category; no peer comparison made"
     ),
     SignalName.COHORT_1Y_AHEAD_SHORT_TRACK: (
         "ahead of category peers over the past year; "

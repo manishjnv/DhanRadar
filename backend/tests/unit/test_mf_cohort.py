@@ -531,11 +531,14 @@ def test_grouping_column_resolves_mf_funds_columns():
         tasks_mf._grouping_column("scheme_name")
 
 
-async def test_cohort_groups_on_sebi_key_and_null_stays_uncohorted():
+async def test_cohort_groups_on_sebi_key_and_null_carries_no_category_context():
     """With grouping_key="sebi_category" the param threads through to the cohort
     build, a fund in a real canonical cohort gets a comparison, and a fund whose
-    sebi_category is NULL (legacy umbrella Income/Growth/Gilt) is dropped at the
-    target filter → absent from the result → on_track fail-safe (NOT auto-mapped)."""
+    sebi_category is NULL (legacy umbrella Income/Growth/Gilt) is NOT auto-mapped —
+    it is KNOWN-uncohorted and carries the honest COHORT_NO_CANONICAL_CATEGORY
+    context (B71), with no performance booleans set → still resolves to on_track,
+    but honest-not-positive (no peer comparison was claimed)."""
+    from dhanradar.scoring.engine.signal_names import SignalName, display
     from dhanradar.tasks import mf as tasks_mf
 
     peers = [f"INF{i:04d}" for i in range(7)]
@@ -555,7 +558,29 @@ async def test_cohort_groups_on_sebi_key_and_null_stays_uncohorted():
         grouping_key="sebi_category",
     )
     assert peers[0] in res            # real canonical cohort → a comparison happened
-    assert "INF_NULL" not in res      # NULL sebi_category → uncohorted → on_track fail-safe
+    # NULL sebi_category → uncohorted, but KNOWN-uncohorted: carries the B71 context
+    # signal and NO performance booleans (→ on_track, honest-not-positive).
+    assert res["INF_NULL"] == CategoryRelative(
+        contributing=[display(SignalName.COHORT_NO_CANONICAL_CATEGORY)]
+    )
+
+
+async def test_cohort_all_targets_uncategorized_still_carry_context():
+    """When EVERY target is NULL-keyed (a portfolio entirely of legacy umbrellas),
+    _build_cohort_context still surfaces the B71 context for each (the empty-cohort
+    early-return must not swallow the known-uncohorted set)."""
+    from dhanradar.scoring.engine.signal_names import SignalName, display
+    from dhanradar.tasks import mf as tasks_mf
+
+    cat_rows = [("INF_A", None), ("INF_B", None)]
+    res = await tasks_mf._compute_cohort(
+        _FakeDb(cat_rows, [], []),
+        ["INF_A", "INF_B"],
+        as_of=_AS_OF,
+        grouping_key="sebi_category",
+    )
+    expected = CategoryRelative(contributing=[display(SignalName.COHORT_NO_CANONICAL_CATEGORY)])
+    assert res == {"INF_A": expected, "INF_B": expected}
 
 
 def test_cohort_grouping_key_lockstep_with_config():
