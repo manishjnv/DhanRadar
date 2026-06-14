@@ -103,6 +103,10 @@ export interface MfReport {
   schemes: MfScheme[];
   category_allocation: AllocationSlice[];
   overlap: OverlapPair[];
+  /** Plain-language AI-generated educational commentary from the governed gateway
+   *  (consent-gated; null when not consented / not generated). Rendered verbatim by
+   *  <PortfolioCommentaryCard/>. */
+  commentary: string | null;
   /** Contextual compliance disclosure (non-negotiable #9) — rendered next to
    *  the holdings labels via <DisclosureBundle/>. */
   disclosure: string;
