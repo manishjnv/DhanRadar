@@ -19,8 +19,10 @@ import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
 import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
+import { PortfolioHealthSummary } from '@/components/mf/PortfolioHealthSummary';
 import { useCasStatus, useMfReport } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
+import type { Label } from '@/components/charts/ScoreRing';
 import type { MfScheme, OverlapPair } from '@/features/mf/types';
 
 // ---------------------------------------------------------------------------
@@ -239,6 +241,7 @@ function OverlapSection({ pairs }: { pairs: OverlapPair[] }) {
 // ---------------------------------------------------------------------------
 function ReportView({ jobId }: { jobId: string }) {
   const { data, isLoading, isError, refetch } = useMfReport(jobId, true);
+  const [activeFilter, setActiveFilter] = React.useState<Label | null>(null);
 
   if (isLoading) {
     return (
@@ -265,6 +268,10 @@ function ReportView({ jobId }: { jobId: string }) {
   const { summary, schemes, category_allocation, overlap, commentary, disclosure, not_advice } =
     data;
 
+  const filteredSchemes = activeFilter
+    ? schemes.filter((s) => s.label === activeFilter)
+    : schemes;
+
   return (
     <div className="flex flex-col gap-6">
       <SummaryRow
@@ -278,6 +285,14 @@ function ReportView({ jobId }: { jobId: string }) {
       {/* F1-B: plain-language AI portfolio summary (governed gateway, consent-gated).
           Hides itself when the backend returns no commentary. */}
       <PortfolioCommentaryCard commentary={commentary} />
+
+      {/* F1: Portfolio health summary — label counts as filter chips.
+          Counts are always from the full schemes list; filter applies only to the table. */}
+      <PortfolioHealthSummary
+        schemes={schemes}
+        activeFilter={activeFilter}
+        onFilterChange={setActiveFilter}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
@@ -294,7 +309,7 @@ function ReportView({ jobId }: { jobId: string }) {
             <CardTitle>Your Holdings</CardTitle>
           </CardHeader>
           <CardBody>
-            <SchemesTable schemes={schemes} />
+            <SchemesTable schemes={filteredSchemes} />
           </CardBody>
         </Card>
       </div>
