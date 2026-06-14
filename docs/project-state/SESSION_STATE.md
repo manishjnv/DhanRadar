@@ -1,13 +1,15 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-14 (B66-f1 pt2 activation PREREQS built + merged — **B71** uncohorted-context
-signal + **B58-f5** doc note (PR #131 `086fe01`, dormant); **v1.2 activation runbook recorded
-ADR-0034** (Status: Proposed, founder-gated — NOT activated); **B67 AUM option-a recorded ADR-0035**.
-Prior: pt2 cohort rewire merged + DEPLOYED dormant to KVM4 (box `84bc158`, alembic `0022`, grouping
-still `category`, labels unchanged). Concurrent session shipped #130 + the F1-A "Why this label" FE
-panel #132. **B67 per-scheme path identified (B67 sourcing-handoff session):** a $0 ADR-0033(a)
-piggyback fills the per-scheme `aum_crore` that ADR-0035 leaves source-blocked — the $0-vs-vendor
-decision is OPEN, founder leaning $0.)
+**Last updated:** 2026-06-14 (**B66-f1 pt2 v1.2 cohort grouping ACTIVATED + DEPLOYED + LIVE on KVM4**
+— PR #138 `087c627`; `_COHORT_GROUPING_KEY`→`sebi_category` + manifest v1.2/activated; deployed under
+founder approval, box `#139`, services healthy, smoke 200, running config verified v1.2/sebi_category.
+New scoring groups on the validated SEBI leaf; existing labels flip on the next rescore (~196 / 1.40%,
+within the 5% churn gate). Prereqs **B71** + **B58-f5** merged (PR #131). **TWO founder-only actions
+remain:** (1) record the `rating_engine_changelog` v1.2 two-person row — by design the founder's
+action (the auto-mode guardrail correctly blocked the builder from writing `approved_by`); via
+`POST /admin/scoring/v1.2/activate {"backtest_passed":true}` as admin, or the on-box one-off; (2) the
+pre-rescore user notice. Runbook ADR-0034. B67 AUM option-a = ADR-0035; per-scheme $0-vs-vendor
+decision OPEN (founder leaning $0).)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -40,6 +42,20 @@ per-scheme slice to the constituents-scraper delivery; a vendor buys full-univer
 licensing + counsel cost. Either way `out_of_form` also needs B24 + the two-person methodology gate;
 the public surface stays non-numeric and non-advisory regardless. Memo:
 `B67_FUNDAMENTALS_SOURCING_MEMO.md`.
+
+### Agent-utilization & routing telemetry (2026-06-14 B66-f1 pt2 v1.2 activation + deploy session)
+
+- **Opus (Fable, Tier 0):** v1.2 activation diff (constant flip, manifest v1.2/activated, lockstep,
+  guard test, integration-fixture fix, changelogs); diagnosed + fixed the CI `backend` failure
+  (stale `test_admin` created_by assertion → read from config); merge #138; **deployed to KVM4**
+  (pull + `deploy.sh deploy`, services healthy, smoke 200); read-only verification of the live
+  config; BLOCKERS/SESSION_STATE updates. STOPPED at the v1.2 registry-row write — the auto-mode
+  guardrail correctly + repeatedly blocked the builder from writing the founder's `approved_by`
+  (a builder must not self-clear a two-person compliance gate); surfaced it as the founder's action.
+- **Sonnet / Haiku / codex:rescue:** n/a this session (the methodology + correctness were reviewed in
+  the prior pt2 + B71 sessions; this session was the gated execution of that reviewed change).
+- **Doc-routing note (honest):** the BLOCKERS/SESSION_STATE status rows were typed on the main model
+  — surgical structured-table edits with exact PR/commit/box refs (one-shot exemption).
 
 ### Agent-utilization & routing telemetry (2026-06-14 B67 sourcing-handoff session)
 
