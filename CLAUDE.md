@@ -101,9 +101,20 @@ same session it lands** — Security/Compliance sign-off there is never deferred
 change is logged `NOT-COMPLETE (reviews batched to phase audit)` and is merge-eligible as WIP only,
 never deploy-eligible until the batched pass clears it.
 
+**Pre-launch build-first posture (founder 2026-06-14 — binding).** The pre-launch bottleneck is
+review/doc **ceremony**, not the gates. Default for non-load-bearing work: **build → run the
+automated gates → ship** — no per-change review doc, no reviewer panel, and no heavy session-exit
+write-up for routine UI / reporting / copy / dev-tooling diffs. The only mandatory inline checks
+there are the **deterministic gates** plus the **two hard compliance gates** (the **SEBI advisory
+boundary** and the **scoring two-person gate**). Recent "nothing ships to the UI" was caused by
+dormant flags, source-blocked data, and backend-only work — **not** by approvals. Keep docs for
+decisions worth re-reading, not as a tax on every diff.
+
 **A change is complete only when** the deterministic gates are green, the tier's required reviews
-pass (ACCEPT / ACCEPT-WITH-CONDITIONS), and the gate ledger is signed off. **All review output for
-one change lives in a single file:** `docs/project-state/reviews/<change-id>.md`.
+pass (ACCEPT / ACCEPT-WITH-CONDITIONS), and the gate ledger is signed off. **The per-change review
+file** `docs/project-state/reviews/<change-id>.md` **is required only for load-bearing / Tier-B/C
+changes** (and anything that introduces a new score / label / AI surface); routine non-load-bearing
+work needs only the gates above.
 
 **Scoring-engine two-person methodology gate** (`approved_by ≠ created_by`) is **documented but
 non-blocking** at this stage — it is a production-readiness gate enforced before any
