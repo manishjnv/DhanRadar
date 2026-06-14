@@ -1,9 +1,10 @@
 # DhanRadar — Session State
 
 **Last updated:** 2026-06-14 (B66-f1 part 2 cohort rewire to validated `sebi_category` — built,
-Tier-C reviewed, **MERGED to main dormant (PR #128 `8e77333`)**; read-only prod backtest quantified
-196 label flips if activated; founder greenlit the **v1.2 activation package** + **B67 AUM option-a**
-— both are NEXT-SESSION work)
+Tier-C reviewed, MERGED dormant (PR #128 `8e77333`), and now **DEPLOYED to KVM4 dormant/inactive**
+(box `84bc158`, alembic `0022`, grouping still `category`, labels unchanged); read-only prod backtest
+quantified 196 label flips if activated; founder greenlit the **v1.2 activation package** + **B67 AUM
+option-a** — both are NEXT-SESSION work)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
@@ -16,8 +17,11 @@ OFF-BY-DEFAULT (`_COHORT_GROUPING_KEY="category"` in `tasks/mf.py`, mirrored in
 (load-bearing path): Architect/adversarial **ACCEPT**; Compliance + Product **ACCEPT-WITH-CONDITIONS**
 (`reviews/b66f1-pt2-cohort-sebi-rewire.md`). Migration `0022` adds indexes on `category` (closes
 B58-f3) + `sebi_category`. CI green on all blocking gates (`lint` advisory-red = pre-existing
-repo-wide ruff backlog, `continue-on-error`, not these files). **NOT deployed** — dormant, no
-behavioural change, so a deploy is optional/no-rush.
+repo-wide ruff backlog, `continue-on-error`, not these files). **DEPLOYED to KVM4 2026-06-14
+(dormant/inactive)** — box pulled to `84bc158`, `scripts/deploy.sh deploy` (all 6 images rebuilt,
+alembic `0021`→`0022`, smoke 200, stack healthy). Verified live: `_COHORT_GROUPING_KEY = category`
+(rewire INACTIVE → zero behavioural change / labels unchanged), both `ix_mf_funds_category` +
+`ix_mf_funds_sebi_category` indexes present, site health 200. Activation stays gated (below).
 
 **Read-only prod backtest (14,041 funds; label is today a pure fn of cohort output) — what activation
 WOULD do:** 196 labels flip (1.40%) — 113 dissolving the bogus 4,618-fund `Income` pseudo-cohort
@@ -120,7 +124,12 @@ before any build. B68/B69/B70 are sourcing/ToS items; #3 (B59-f2) + #7 (B47) alr
   `mf_fund_metrics`); designed the backtest (proved the label is a pure fn of the cohort output →
   `insufficient_data` invariant under the rewire); wrote the cohort-rewire diff + tests + migration
   directly (load-bearing, small, in hot cache); synthesized the 3 independent reviews + wrote the
-  compliance gate ledger (Tier-0 judgment); commit · PR #128 · merge.
+  compliance gate ledger (Tier-0 judgment); commit · PR #128 · merge. **Continuation (deploy +
+  handoff):** verified PR #128 dormancy mechanism before any deploy, confirmed a clean single
+  migration head (no 0022 collision), then deployed ALL merged session work to KVM4 (box `84bc158`,
+  dormant pt2 + migration `0022`); post-deploy verified dormancy (`_COHORT_GROUPING_KEY=category`,
+  labels unchanged), both indexes live, health 200; recorded the deploy here — fact-dense deploy
+  values typed directly (one-shot exemption, not delegated).
 - **Sonnet (Tier 1):** Compliance review · reworked: N (ACCEPT-W-C; conditions filed B71 + C2) |
   Product review · reworked: N (ACCEPT-W-C; independently converged on B71; filed B58-f5) |
   adversarial methodology review · reworked: N (ACCEPT, all 5 correctness checks PASS) | B67
