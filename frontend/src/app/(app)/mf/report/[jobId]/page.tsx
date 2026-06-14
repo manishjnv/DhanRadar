@@ -19,6 +19,7 @@ import { LabelChip } from '@/components/ui/LabelChip';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
 import { PortfolioCommentaryCard } from '@/components/mf/PortfolioCommentaryCard';
+import { ResearchAssistant } from '@/components/mf/ResearchAssistant';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { PortfolioHealthSummary } from '@/components/mf/PortfolioHealthSummary';
@@ -453,13 +454,19 @@ function ReportView({ jobId }: { jobId: string }) {
         <OverlapSection pairs={overlap} />
       </FadeUp>
 
+      {/* F2: Plus-gated grounded research assistant (non-advisory, consent-gated,
+          daily-capped). 402 → upgrade prompt rendered by the component itself. */}
+      <FadeUp delay={360}>
+        <ResearchAssistant jobId={jobId} />
+      </FadeUp>
+
       {/* Contextual #9 disclosure — version-tied disclosure + not_advice from
           the backend, rendered on the labelled-holdings surface (which now also
           carries the per-fund "Why this label" panels). Rendered UNCONDITIONALLY
           with a hard-coded NOT_ADVICE fallback so an empty backend string can
           never silently drop the disclosure from a label surface (non-neg #9,
           fail-closed). The standing site-wide line is the AppShell footer. */}
-      <FadeUp delay={400}>
+      <FadeUp delay={440}>
         <div className="rounded-lg border border-line bg-surface-2 p-4">
           <DisclosureBundle
             disclosure={disclosure || undefined}

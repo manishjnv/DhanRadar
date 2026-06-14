@@ -14,6 +14,7 @@ import type {
   LabelHistoryEntry,
   BackendCasJobStatus,
   BackendPortfolioReport,
+  ResearchAskResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -270,4 +271,20 @@ export function useMfLabelHistory(portfolioId: string | null): UseMfLabelHistory
     isLocked,
     isLoading: query.isLoading,
   };
+}
+
+// ---------------------------------------------------------------------------
+// F2 — Research assistant: POST /api/v1/mf/report/{job_id}/ask
+// ---------------------------------------------------------------------------
+
+/**
+ * Mutation hook for the Plus-gated, grounded research assistant.
+ * Callers handle 402 (ApiError.problem.status === 402) as the upgrade gate.
+ * All other non-2xx errors propagate via onError for the component to handle.
+ */
+export function useResearchAsk(jobId: string) {
+  return useMutation({
+    mutationFn: (question: string) =>
+      api.post<ResearchAskResponse>(`/mf/report/${jobId}/ask`, { question }),
+  });
 }
