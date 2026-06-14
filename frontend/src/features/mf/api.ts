@@ -195,9 +195,12 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     overlap,
     // Feature 2/3: forward portfolio_id so history endpoint can be called.
     portfolio_id: r.portfolio_id ?? null,
-    // F1-B: forward the governed gateway's educational commentary (previously
-    // dropped here). null when not consented / not generated — the card hides itself.
-    commentary: r.commentary ?? null,
+    // F1-B: extract plain text from the gateway's commentary dict.
+    // Backend shape: {state:"ok", commentary:"..."} | {state:"unavailable"|"upgrade_required"} | null.
+    // Only state:"ok" carries renderable text — everything else becomes null so the card hides.
+    commentary: r.commentary?.state === 'ok' && typeof r.commentary.commentary === 'string'
+      ? r.commentary.commentary
+      : null,
     // Contextual #9 disclosure — surfaced next to the holdings labels.
     disclosure: r.disclosure ?? '',
     not_advice: r.not_advice ?? '',
