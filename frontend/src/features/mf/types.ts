@@ -120,6 +120,25 @@ export interface LabelHistoryEntry {
   confidence_band: ConfidenceBand;
 }
 
+// ---------------------------------------------------------------------------
+// F2 — Research assistant /ask endpoint response
+// ---------------------------------------------------------------------------
+
+/** Wire shape returned by POST /api/v1/mf/report/{job_id}/ask */
+export interface ResearchAskResponse {
+  state: 'ok' | 'insufficient_data' | 'unavailable' | 'daily_cap';
+  answer?: string;
+  citations?: string[];
+  refusal_triggered?: boolean;
+  confidence_band?: string;
+  contributing_signals?: string[];
+  contradicting_signals?: string[];
+  disclaimer?: string;
+  disclaimer_version?: string;
+  /** Machine reason code on non-ok states: consent_required, cap_unavailable, etc. */
+  reason?: string;
+}
+
 export interface MfReport {
   summary: MfReportSummary;
   schemes: MfScheme[];
