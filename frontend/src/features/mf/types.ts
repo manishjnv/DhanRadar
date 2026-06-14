@@ -47,7 +47,8 @@ export interface BackendPortfolioReport {
   category_allocation: Record<string, number>;
   overlap_matrix: Record<string, Record<string, number>>;
   funds: BackendFund[];
-  commentary: string | null;
+  /** Backend returns a dict: {state:"ok",commentary:"...",...} or {state:"unavailable",...} or null */
+  commentary: { state: string; commentary?: string } | null;
   model_version: string | null;
   generated_at: string | null;
   /** Feature 2/3: forwarded from MfCasJob.portfolio_id for the history endpoint. */
