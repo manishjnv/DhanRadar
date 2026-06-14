@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { LabelChip } from '@/components/ui/LabelChip';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
+import { WhyThisLabelPanel } from '@/components/mf/WhyThisLabelPanel';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AllocationDonut } from '@/components/charts/AllocationDonut';
 import { useCasStatus, useMfReport } from '@/features/mf/api';
@@ -116,6 +117,17 @@ function SummaryRow({
 // Schemes table
 // ---------------------------------------------------------------------------
 function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
+  // F1-A: per-fund "Why this label" disclosure. Track which funds are expanded.
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
+
+  const toggle = (isin: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(isin)) next.delete(isin);
+      else next.add(isin);
+      return next;
+    });
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
@@ -130,27 +142,55 @@ function SchemesTable({ schemes }: { schemes: MfScheme[] }) {
           </tr>
         </thead>
         <tbody>
-          {schemes.map((s) => (
-            <tr key={s.isin} className="border-b border-line last:border-0">
-              <td className="py-2.5 pr-3">
-                <p className="font-medium text-ink leading-snug">{s.scheme_name}</p>
-                <p className="text-caption text-ink-muted">{s.amc_name}</p>
-              </td>
-              <td className="py-2.5 pr-3 text-ink-secondary hidden sm:table-cell">{s.category}</td>
-              <td className="py-2.5 pr-3 text-right text-ink-secondary tabular-nums hidden md:table-cell">
-                {s.invested == null ? '—' : `₹${s.invested.toLocaleString('en-IN')}`}
-              </td>
-              <td className="py-2.5 pr-3 text-right text-ink tabular-nums">
-                ₹{s.current_value.toLocaleString('en-IN')}
-              </td>
-              <td className={cn('py-2.5 pr-3 text-right tabular-nums font-medium', s.return_pct >= 0 ? 'text-emerald' : 'text-red')}>
-                {s.return_pct >= 0 ? '+' : ''}{s.return_pct.toFixed(1)}%
-              </td>
-              <td className="py-2.5 pl-4">
-                <LabelChip label={s.label} confidenceBand={s.confidence_band} />
-              </td>
-            </tr>
-          ))}
+          {schemes.map((s) => {
+            const isOpen = expanded.has(s.isin);
+            const panelId = `why-${s.isin}`;
+            return (
+              <React.Fragment key={s.isin}>
+                <tr className="border-b border-line last:border-0">
+                  <td className="py-2.5 pr-3">
+                    <p className="font-medium text-ink leading-snug">{s.scheme_name}</p>
+                    <p className="text-caption text-ink-muted">{s.amc_name}</p>
+                  </td>
+                  <td className="py-2.5 pr-3 text-ink-secondary hidden sm:table-cell">{s.category}</td>
+                  <td className="py-2.5 pr-3 text-right text-ink-secondary tabular-nums hidden md:table-cell">
+                    {s.invested == null ? '—' : `₹${s.invested.toLocaleString('en-IN')}`}
+                  </td>
+                  <td className="py-2.5 pr-3 text-right text-ink tabular-nums">
+                    ₹{s.current_value.toLocaleString('en-IN')}
+                  </td>
+                  <td className={cn('py-2.5 pr-3 text-right tabular-nums font-medium', s.return_pct >= 0 ? 'text-emerald' : 'text-red')}>
+                    {s.return_pct >= 0 ? '+' : ''}{s.return_pct.toFixed(1)}%
+                  </td>
+                  <td className="py-2.5 pl-4">
+                    <div className="flex items-center gap-2">
+                      <LabelChip label={s.label} confidenceBand={s.confidence_band} />
+                      <button
+                        type="button"
+                        onClick={() => toggle(s.isin)}
+                        aria-expanded={isOpen}
+                        aria-controls={isOpen ? panelId : undefined}
+                        className="shrink-0 text-caption text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
+                      >
+                        {isOpen ? 'Hide' : 'Why?'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {isOpen && (
+                  <tr>
+                    <td colSpan={6} className="pb-3">
+                      <WhyThisLabelPanel
+                        id={panelId}
+                        contributingSignals={s.contributing_signals}
+                        contradictingSignals={s.contradicting_signals}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -256,13 +296,17 @@ function ReportView({ jobId }: { jobId: string }) {
       <OverlapSection pairs={overlap} />
 
       {/* Contextual #9 disclosure — version-tied disclosure + not_advice from
-          the backend, rendered on the labelled-holdings surface. The standing
-          site-wide line is the AppShell footer, not here. */}
-      {(disclosure || not_advice) && (
-        <div className="rounded-lg border border-line bg-surface-2 p-4">
-          <DisclosureBundle disclosure={disclosure} notAdvice={not_advice} />
-        </div>
-      )}
+          the backend, rendered on the labelled-holdings surface (which now also
+          carries the per-fund "Why this label" panels). Rendered UNCONDITIONALLY
+          with a hard-coded NOT_ADVICE fallback so an empty backend string can
+          never silently drop the disclosure from a label surface (non-neg #9,
+          fail-closed). The standing site-wide line is the AppShell footer. */}
+      <div className="rounded-lg border border-line bg-surface-2 p-4">
+        <DisclosureBundle
+          disclosure={disclosure || undefined}
+          notAdvice={not_advice || 'For education only — not investment advice.'}
+        />
+      </div>
     </div>
   );
 }

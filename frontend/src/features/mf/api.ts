@@ -147,6 +147,11 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
         : 0,
     label: f.verb_label as MfScheme['label'],
     confidence_band: f.confidence_band as MfScheme['confidence_band'],
+    // F1-A: forward the backend's "why this label" signals (previously dropped
+    // here). These are the deterministic, compliance-approved phrases from the
+    // scoring engine — rendered verbatim, never reinterpreted.
+    contributing_signals: f.contributing_signals ?? [],
+    contradicting_signals: f.contradicting_signals ?? [],
   }));
 
   const category_allocation = Object.entries(r.category_allocation ?? {}).map(
