@@ -24,6 +24,7 @@
  */
 
 import * as React from 'react';
+import { cn } from '@/lib/cn';
 import { FactorStrengthBar } from './FactorStrengthBar';
 import { LabelHistoryChart } from '@/components/mf/LabelHistoryChart';
 import type { LabelHistoryEntry } from '@/features/mf/types';
@@ -57,27 +58,14 @@ function SignalList({
   return (
     <ul
       data-testid={testid}
-      style={{
-        margin: '4px 0 0',
-        padding: 0,
-        listStyle: 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
+      className="mt-1 p-0 list-none flex flex-col gap-1"
     >
       {signals.map((s, i) => (
         <li
           key={i}
-          style={{
-            fontFamily: 'var(--dr-font-sans)',
-            fontSize: 12,
-            color: 'var(--text-secondary)',
-            paddingLeft: 14,
-            position: 'relative',
-          }}
+          className="font-sans text-caption text-ink-secondary pl-3.5 relative"
         >
-          <span style={{ position: 'absolute', left: 0, color: accent }} aria-hidden="true">
+          <span className={cn('absolute left-0', accent)} aria-hidden="true">
             ·
           </span>
           {s}
@@ -105,29 +93,16 @@ export function WhyThisLabelPanel({
     <div
       id={id}
       data-testid="why-this-label"
-      style={{
-        fontFamily: 'var(--dr-font-sans)',
-        background: 'var(--surface-2)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--dr-r-lg)',
-        padding: '12px 16px',
-      }}
+      className="font-sans bg-surface-2 border border-line rounded-lg p-3"
     >
       <p
-        style={{
-          margin: '0 0 8px',
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: '0.04em',
-          textTransform: 'uppercase',
-          color: 'var(--text-muted)',
-        }}
+        className="mb-2 text-caption font-bold tracking-widest uppercase text-ink-muted"
       >
         Why this label
       </p>
 
       {hasFactors && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="mb-3">
           <FactorStrengthBar factors={confidenceFactors!} />
         </div>
       )}
@@ -135,46 +110,46 @@ export function WhyThisLabelPanel({
       {noSignals ? (
         <p
           data-testid="why-empty"
-          style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}
+          className="text-caption text-ink-muted leading-relaxed"
         >
           We couldn&apos;t benchmark this fund against its category peers yet, so there
           are no signals to show. This is a data gap, not a clean bill of health.
         </p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="flex flex-col gap-2.5">
           <div>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+            <p className="text-caption font-semibold text-ink">
               Factors consistent with this label
             </p>
             {hasContributing ? (
               <SignalList
                 testid="why-contributing"
                 signals={contributingSignals}
-                accent="var(--dr-emerald)"
+                accent="text-emerald"
               />
             ) : (
               <p
                 data-testid="why-contributing-empty"
-                style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}
+                className="mt-0.5 text-caption text-ink-muted"
               >
                 None recorded.
               </p>
             )}
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+            <p className="text-caption font-semibold text-ink">
               Factors that may weigh against it
             </p>
             {hasContradicting ? (
               <SignalList
                 testid="why-contradicting"
                 signals={contradictingSignals}
-                accent="var(--dr-amber)"
+                accent="text-amber"
               />
             ) : (
               <p
                 data-testid="why-contradicting-empty"
-                style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}
+                className="mt-0.5 text-caption text-ink-muted"
               >
                 None recorded.
               </p>
