@@ -438,6 +438,12 @@ class _CohortContext:
     category_by_isin: dict[str, str]
     stats_by_isin: dict[str, FundStats]
     benchmarks: dict[str, CohortBenchmark]
+    # Targets present in mf_funds but with NO usable cohort key (NULL/blank/
+    # "uncategorized" grouping value) — uncohorted, but KNOWN-uncohorted, so the
+    # label carries an honest "no canonical category" context (B71) rather than a
+    # silent on_track. Empty under the active "category" key (no prod fund lacks a
+    # raw category); populated by the legacy umbrellas under "sebi_category".
+    uncategorized_isins: frozenset[str] = frozenset()
 
 
 _EMPTY_COHORT_CONTEXT = _CohortContext({}, {}, {})
@@ -481,8 +487,10 @@ async def _build_cohort_context(
     # as_of retained for signature compatibility; stats are precomputed nightly.
     group_col = _grouping_column(grouping_key)
 
-    # 1. Resolve each target's grouping value; keep only real cohort keys (a NULL/
-    #    blank/"uncategorized" value → uncohorted → on_track fail-safe).
+    # 1. Resolve each target's grouping value; keep only real cohort keys. A target
+    #    present in mf_funds but with a NULL/blank/"uncategorized" grouping value is
+    #    KNOWN-uncohorted → it carries an honest "no canonical category" context
+    #    (B71), distinct from a genuine matching-category on_track.
     cat_rows = (
         await db.execute(
             select(MfFund.isin, group_col).where(MfFund.isin.in_(target_isins))
@@ -491,9 +499,13 @@ async def _build_cohort_context(
     target_category: dict[str, str] = {
         i: c for i, c in cat_rows if c and c != "uncategorized"
     }
+    uncategorized = frozenset(
+        i for i, c in cat_rows if not (c and c != "uncategorized")
+    )
     categories = set(target_category.values())
     if not categories:
-        return _EMPTY_COHORT_CONTEXT
+        # No target has a cohort key — still surface the known-uncohorted ones (B71).
+        return _CohortContext({}, {}, {}, uncategorized)
 
     # 2. All peers in those cohorts (SQL ``IN`` excludes NULL-keyed funds).
     peer_rows = (
@@ -559,7 +571,7 @@ async def _build_cohort_context(
         cat: build_benchmark(cat, [stats_by_isin[i] for i in cat_isins])
         for cat, cat_isins in peers_by_cat.items()
     }
-    return _CohortContext(target_category, stats_by_isin, benchmarks)
+    return _CohortContext(target_category, stats_by_isin, benchmarks, uncategorized)
 
 
 def _relative_from_context(
@@ -568,13 +580,21 @@ def _relative_from_context(
     """Each target's own stats vs its category benchmark — pure lookup against a
     pre-built context.  A fund absent from the result (no category at build time,
     thin cohort, or no NAV) is scored with no category red flag → on_track, the
-    honest fail-safe."""
+    honest fail-safe.  A KNOWN-uncohorted fund (its grouping value was NULL/blank —
+    a legacy umbrella with no canonical SEBI category) gets an explicit
+    ``COHORT_NO_CANONICAL_CATEGORY`` context (B71) so its on_track reads
+    honest-not-positive rather than implying a peer comparison was made."""
     from dhanradar.mf.cohort import compare_to_cohort
+    from dhanradar.scoring.engine.signal_names import SignalName, display
 
     out: dict[str, CategoryRelative] = {}
     for i in target_isins:
         c = ctx.category_by_isin.get(i)
         if c is None:
+            if i in ctx.uncategorized_isins:
+                out[i] = CategoryRelative(
+                    contributing=[display(SignalName.COHORT_NO_CANONICAL_CATEGORY)]
+                )
             continue
         out[i] = compare_to_cohort(
             ctx.stats_by_isin.get(i, (None, None, None)), ctx.benchmarks.get(c)

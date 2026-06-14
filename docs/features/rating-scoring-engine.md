@@ -117,7 +117,33 @@ Rules governing this registry:
 
 Ledger: `docs/project-state/reviews/b27-canonical-signal-names.md`.
 
+## Cohort-relative label sensitivity & uncohorted funds (B58-f5 / B71)
+
+The label is **category-relative**: a fund is judged against the median of its same-category
+peers. A consequence is that **a fund's label can change without the fund itself changing** — when
+the peer set is recalibrated (e.g. the B66 taxonomy correction that moves mis-tagged funds into
+their correct cohort), the cohort median shifts and some funds cross the margin band. This is
+correct behaviour (a more complete cohort is a more honest benchmark), not a fund-performance
+event. Any user-facing surface reporting a label change should frame a recalibration-driven move as
+"your peer group was updated", not "your fund got worse"; the durable mechanism for a one-off
+recalibration (e.g. a grouping-key activation) is a **one-time pre-rescore user notice**, not
+per-fund alarm copy.
+
+**Uncohorted funds (B71).** A fund with no canonical SEBI peer category — a pre-2017 legacy umbrella
+(`sebi_category` NULL) or an unclassified raw category — is **honestly uncohorted**: it is never
+auto-mapped into an unrelated cohort, and it publishes `on_track` carrying the
+`COHORT_NO_CANONICAL_CATEGORY` context ("category peer benchmark unavailable — fund not mapped to a
+SEBI peer category; no peer comparison made"). This distinguishes "no peer comparison was made" from a genuine "matching
+category" on_track, so the label reads honest-not-positive. Benchmark quality therefore depends on
+AMFI category-taxonomy consistency (the B66 validation layer).
+
 ## Changelog
+
+- 2026-06-14 — B71 + B58-f5: uncohorted funds (no canonical SEBI category) now carry the
+  `COHORT_NO_CANONICAL_CATEGORY` context (honest-not-positive `on_track`); feature-doc note on
+  cohort-recalibration label sensitivity. Dormant-safe under the active `category` grouping key (no
+  prod fund lacks a raw category); pre-activation prerequisites for the B66-f1 pt2 `sebi_category`
+  grouping activation.
 
 - 2026-06-13 — B27: canonical signal-name registry shipped (`scoring/engine/signal_names.py`);
   9 approved phrases single-sourced + byte-pinned; all producers rewired; public API unchanged;
