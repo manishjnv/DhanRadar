@@ -213,28 +213,37 @@ function SchemesTable({
                         type="button"
                         onClick={() => toggle(s.isin)}
                         aria-expanded={isOpen}
-                        aria-controls={isOpen ? panelId : undefined}
-                        className="shrink-0 text-caption text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
+                        aria-controls={panelId}
+                        className="shrink-0 text-caption px-2 py-0.5 rounded-full bg-surface-2 text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors"
                       >
                         {isOpen ? 'Hide' : 'Why?'}
                       </button>
                     </div>
                   </td>
                 </tr>
-                {isOpen && (
-                  <tr>
-                    <td colSpan={6} className="pb-3">
-                      <WhyThisLabelPanel
-                        id={panelId}
-                        contributingSignals={s.contributing_signals}
-                        contradictingSignals={s.contradicting_signals}
-                        confidenceFactors={s.confidence_factors ?? null}
-                        historyEntries={historyByIsin[s.isin] ?? []}
-                        historyLocked={historyLocked}
-                      />
-                    </td>
-                  </tr>
-                )}
+                <tr>
+                  <td colSpan={6} className="p-0">
+                    <div
+                      className={cn(
+                        'grid transition-all duration-200 ease-in-out',
+                        isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                      )}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="pb-3">
+                          <WhyThisLabelPanel
+                            id={panelId}
+                            contributingSignals={s.contributing_signals}
+                            contradictingSignals={s.contradicting_signals}
+                            confidenceFactors={s.confidence_factors ?? null}
+                            historyEntries={historyByIsin[s.isin] ?? []}
+                            historyLocked={historyLocked}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
               </React.Fragment>
             );
           })}
@@ -303,12 +312,26 @@ function ReportView({ jobId }: { jobId: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
+        {/* 4 KPI cards */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
         </div>
-        <Skeleton className="h-48 rounded-lg" />
-        <Skeleton className="h-64 rounded-lg" />
+        {/* Commentary card */}
+        <Skeleton className="h-24 rounded-lg" />
+        {/* Health summary chip row */}
+        <div className="flex gap-2">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-24 rounded-full" />)}
+        </div>
+        {/* Main grid: donut + table rows */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Skeleton className="h-64 rounded-lg lg:col-span-1" />
+          <div className="lg:col-span-2 flex flex-col gap-2">
+            {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+          </div>
+        </div>
+        {/* Overlap card */}
+        <Skeleton className="h-32 rounded-lg" />
       </div>
     );
   }
