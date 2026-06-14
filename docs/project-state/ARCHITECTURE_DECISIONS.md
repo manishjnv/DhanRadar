@@ -847,3 +847,110 @@ at build time. The "relative-only" benchmark rule is binding on all future bench
 `DhanRadar-Data-Ingestion-Normalization` (sanctioned-source regime),
 `DhanRadar-SEBI-Compliance-Guardrail` (advice/redistribution boundary). Counsel artifact: TO FILE
 under `docs/legal/`.
+
+## ADR-0034 — Cohort grouping rewire to validated `sebi_category` (model v1.2, B66-f1 pt2)
+
+**Date:** 2026-06-14 · **Status:** Proposed (activation GATED on the B6/B28 two-person gate + founder deploy approval — NOT yet active; v1.1 remains the active prod methodology)
+
+**Context:** The category-relative label benchmarks peers grouped by the raw AMFI `mf_funds.category`
+string. B66 showed that string is inconsistent: malformed variants (bare `ELSS`, double-space
+`Other  ETFs`, curly-apostrophe `Children's`) form their own singleton cohorts, and pre-2017 legacy
+umbrellas (`Income`/`Growth`/`Gilt`) act as bogus mega-cohorts (a 4,618-fund `Income` blob mixing
+FMPs + all debt). B66 added the validated canonical `mf_funds.sebi_category` (`taxonomy.canonical_for`)
+without changing the grouping key. B66-f1 pt2 (PR #128) made the grouping key a versioned,
+off-by-default constant `_COHORT_GROUPING_KEY` (mirrored in `ranking_configs_v1.json`
+`labels.cohort_grouping_key`, lockstep-tested). A read-only prod backtest (2026-06-13, 14,041 funds;
+the label is today a pure fn of the cohort output) measured flipping the key to `sebi_category`:
+**196 funds (1.40%) change label** — 113 from the dissolved `Income` pseudo-cohort (→ uncohorted →
+on_track + the B71 `COHORT_NO_CANONICAL_CATEGORY` context) and 83 ELSS (80 bare-`ELSS` join the
+canonical cohort, raising the median; 57 are second-order peer-median flips, 41 on_track→off_track).
+Net on_track +102 / off_track −92 / in_form −10; insufficient_data +0 — within the governance churn
+gate (5%). Inline Tier-C pt2 review: Architect/adversarial ACCEPT; Compliance + Product
+ACCEPT-WITH-CONDITIONS, whose conditions (B71 uncohorted-context signal, B58-f5 doc note) are the
+prerequisites and landed in PR #131.
+
+**Decision:** Adopt `sebi_category` as the cohort grouping key as scoring **model v1.2** — a
+category-relative methodology change. Legacy umbrellas (`sebi_category` NULL) stay HONESTLY
+UNCOHORTED (on_track + `COHORT_NO_CANONICAL_CATEGORY`), never auto-mapped; the raw `category` column
+is never mutated. v1.2 is **Proposed, not active**: the shipped `ranking_configs_v1.json` continues
+to represent v1.1 (the active prod methodology) until the founder performs the gated activation
+below. The guardrail correctly blocked marking v1.2 `activated` autonomously — activation is the
+founder's two-person action.
+
+**Activation runbook (founder-gated; do NOT partial-apply):**
+
+1. Prereq: B71 + B58-f5 merged (PR #131). [verify]
+2. On a branch, apply the v1.2 diff: (a) `tasks/mf.py` `_COHORT_GROUPING_KEY = "category"` →
+   `"sebi_category"`; (b) `ranking_configs_v1.json` `model_version` `v1.1`→`v1.2`,
+   `labels.cohort_grouping_key` `category`→`sebi_category`, `created_by`/`approved_by`/`_note` for
+   v1.2 (`approved_by` = founder, ≠ `created_by`), keep `activated:true`/`status:active`;
+   (c) `tests/unit/test_mf_cohort.py` grouping-key guard test asserts `sebi_category`; (d) changelog
+   entry in `docs/features/rating-scoring-engine.md`. Deterministic gates green (margin + grouping
+   lockstep tests stay green; `test_shipped_config_activated_no_provisional_flag` requires
+   `activated:true`).
+3. Two-person gate (B6/B28): record the `rating_engine_changelog` v1.2 activation row via
+   `POST /api/v1/admin/scoring/v1.2/activate` (founder = `approved_by` ≠ `created_by`). The DB
+   registry is the authoritative activation state.
+4. Send the one-time pre-rescore user notice ("we updated how peer groups are formed; some labels
+   may change") BEFORE the first post-activation rescore (Product P3).
+5. Merge + deploy to KVM4 (explicit founder deploy approval). Migration 0022 (the `sebi_category`
+   index) is already live on the box.
+6. Verify: the next rescore shifts the label distribution per the backtest (~196 flips, within the
+   5% churn gate); spot-check that legacy-umbrella funds publish on_track + the
+   `COHORT_NO_CANONICAL_CATEGORY` context.
+
+**Rollback:** revert `_COHORT_GROUPING_KEY` to `category` (+ config to v1.1) and redeploy — instant;
+the indexes stay (harmless). Labels revert on the next rescore.
+
+**Consequences:** the cohort benchmark becomes taxonomy-correct (peers grouped by validated SEBI
+leaf); labels become more honest (bogus mega-cohorts dissolved; uncohorted funds explicitly
+flagged). The cost is a one-time ~1.40% label shift, partly peer-driven (the 41 second-order ELSS
+flips) — communicated via the pre-rescore notice and explained by the B58-f5 cohort-recalibration
+doc note. Benchmark quality now depends on AMFI taxonomy consistency (the B66 validation layer + its
+drift WARN).
+
+**Source:** founder go-ahead 2026-06-14; `reviews/b66f1-pt2-cohort-sebi-rewire.md`;
+`reviews/b71-no-canonical-category-signal.md`; BLOCKERS B66-f1 / B71 / B58-f5; B6/B28 two-person
+gate; ADR-0030 (v1.1 band); ADR-0010 (non-numeric/educational boundary).
+
+## ADR-0035 — B67 AUM: Pursue AMC-level AMFI SPA endpoint; prohibit per-scheme imputation
+
+**Date:** 2026-06-14 · **Status:** Accepted
+
+**Context:** B67 originally classified AUM sourcing as sequence-first and straightforward. A
+2026-06-13 source recon overturned that premise. AMFI migrated to a Next.js + Strapi site; all
+legacy AUM endpoints (`modules/AverageAUMDetails`, `spages/aaum*.aspx`, `Themes/.../AverageAUM.aspx`)
+now 404. AMFI now centralises only AMC-wise (fund-house-level) average AUM via a client-side SPA call
+with no static file equivalent. Per-scheme AUM is scattered across 40+ AMC sites behind individual
+ToS agreements, or available only via paid vendor feeds. AMFI's homepage is reachable from KVM4
+(HTTP 200); the blocker is granularity and endpoint reverse-engineering, not geo-blocking.
+Data-Ingestion governance §8.4 explicitly forbids imputing a per-fund `aum_crore` value from
+AMC-level aggregate data. The existing `mf_funds.aum_crore` column therefore stays empty until a
+sanctioned per-scheme source exists. AMFI also tightened fintech data-access terms in September 2025,
+adding a ToS review requirement before calling any undocumented SPA endpoint.
+
+**Decision:** Pursue Option (a) from the B67 sourcing memo: reverse-engineer AMFI's AMC-wise SPA data
+endpoint and store the result in a new `amc_level_aum` field/table. Granularity labelling must be
+honest — AMC-level, not per-scheme. Do not impute `mf_funds.aum_crore` from this data; §8.4 is the
+binding constraint and `aum_crore` stays source-blocked. Gate the ingestion build on three
+pre-conditions: confirm SPA endpoint stability and response shape; complete a ToS review of calling
+an undocumented AMFI endpoint under the post-Sep-2025 terms; obtain a formal data-source sanction per
+the B56-f5 discipline. This ADR records the decision to pursue the endpoint; the actual pipeline
+build is a follow-on task after those gates clear. Manager-change (SID/factsheet source) and
+credit-downgrade (CRISIL/ICRA/CARE licensed feed) remain deferred, each requiring separate counsel
+review and an ADR; neither is in scope here. Because `out_of_form` activation depends on both of
+those slices plus B24 and the B6/B28 two-person gate, this AUM decision does not unlock `out_of_form`.
+Raw AUM point values do not reach the DOM regardless of what is ingested (ADR-0010).
+
+**Consequences:**
+
+- A new `amc_level_aum` table/field will exist alongside the empty `mf_funds.aum_crore`; downstream
+  consumers must not conflate the two.
+- Any server-side use of AMC-level AUM must document the granularity mismatch versus per-scheme
+  expectations.
+- `out_of_form` activation timeline is unaffected by this decision.
+- ToS and liveness gates must be signed off and logged before the ingestion PR is opened.
+
+**Source:** founder decision 2026-06-14; `docs/project-state/B67_FUNDAMENTALS_SOURCING_MEMO.md`;
+BLOCKERS B67; Data-Ingestion governance §8.4; B56-f5 source-sanction discipline; ADR-0010
+(non-numeric/educational boundary).
