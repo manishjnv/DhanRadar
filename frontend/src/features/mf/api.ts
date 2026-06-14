@@ -188,6 +188,9 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     schemes,
     category_allocation,
     overlap,
+    // F1-B: forward the governed gateway's educational commentary (previously
+    // dropped here). null when not consented / not generated — the card hides itself.
+    commentary: r.commentary ?? null,
     // Contextual #9 disclosure — surfaced next to the holdings labels.
     disclosure: r.disclosure ?? '',
     not_advice: r.not_advice ?? '',
