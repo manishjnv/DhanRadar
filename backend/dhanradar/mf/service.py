@@ -15,14 +15,14 @@ import json
 import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.scoring.engine.schemas import (
     DISCLAIMER_VERSION,
     DISCLOSURE_BUNDLE,
     NOT_ADVICE,
 )
+
+logger = logging.getLogger(__name__)
 
 _DEDUP_PREFIX = "mf:cas:dedup:"
 _DEDUP_TTL = 24 * 3600  # match the 24h raw-file purge window
@@ -142,8 +142,9 @@ async def rebuild_report_from_db(
     user_fund_scores — those fields will be empty in the rebuilt report.  Labels and
     confidence_band ARE stored and will appear correctly.
     """
-    from sqlalchemy import select, text
     from uuid import UUID as _UUID
+
+    from sqlalchemy import select, text
 
     from dhanradar.models.mf import (
         MfFund,
