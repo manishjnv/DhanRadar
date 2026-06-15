@@ -58,14 +58,14 @@ function CategoryTabs({
               'inline-flex items-center gap-1 px-3 py-1.5 rounded-full whitespace-nowrap',
               'text-[12px] font-medium border transition-colors',
               activeKey === cat.key
-                ? 'bg-royal text-white border-royal'
+                ? 'bg-ink text-bg border-ink'
                 : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
             )}
           >
             {cat.display_name}
             <span className={cn(
               'font-mono text-[10px]',
-              activeKey === cat.key ? 'text-white/70' : 'text-ink-muted',
+              activeKey === cat.key ? 'text-bg/60' : 'text-ink-muted',
             )}>
               {cat.fund_count}
             </span>
@@ -101,12 +101,12 @@ function SortChips({
             className={cn(
               'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap',
               sort === o.key
-                ? 'bg-royal text-white border-royal'
+                ? 'bg-ink text-bg border-ink'
                 : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
             )}
           >
             {o.label}
-            {sort === o.key && <span className="ml-1 text-white/80 text-[9px]">▴</span>}
+            {sort === o.key && <span className="ml-1 text-bg/70 text-[9px]">▴</span>}
           </button>
         ))}
       </div>
@@ -210,7 +210,7 @@ function Pagination({
               className={cn(
                 'inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-medium border transition-colors',
                 p === page
-                  ? 'bg-royal text-white border-royal'
+                  ? 'bg-ink text-bg border-ink'
                   : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
               )}
             >
