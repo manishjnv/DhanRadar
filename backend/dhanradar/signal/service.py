@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.signal.models import SignalDeployment, SignalDipFund, SignalJournal, SignalRules
+from dhanradar.signal.models import SignalDeployment, SignalDipFund, SignalJournal, SignalNotification, SignalRules
 
 DEFAULT_RULES: dict = {
     "nifty_threshold": Decimal("-8.00"),
@@ -142,6 +142,18 @@ def compute_behaviour_scores(entries: list[SignalJournal]) -> dict:
     }
 
 
+async def delete_journal_entry(db: AsyncSession, user_id: str, entry_id: str) -> bool:
+    """Delete a journal entry. Returns False if not found or not owned by user."""
+    uid = uuid.UUID(user_id)
+    eid = uuid.UUID(entry_id)
+    row = await db.get(SignalJournal, eid)
+    if row is None or row.user_id != uid:
+        return False
+    await db.delete(row)
+    await db.flush()
+    return True
+
+
 async def create_journal_entry(
     db: AsyncSession,
     user_id: str,
@@ -225,3 +237,74 @@ def get_learning_articles(signal_state: str) -> list[dict]:
         {**a, "link": f"/learn/concepts/{a['slug']}"}
         for a in articles
     ]
+
+
+# ---------------------------------------------------------------------------
+# Notifications (Phase 3)
+# ---------------------------------------------------------------------------
+
+async def get_unread_notifications(
+    db: AsyncSession, user_id: str, limit: int = 5
+) -> list[SignalNotification]:
+    uid = uuid.UUID(user_id)
+    stmt = (
+        select(SignalNotification)
+        .where(
+            SignalNotification.user_id == uid,
+            SignalNotification.read_at.is_(None),
+        )
+        .order_by(SignalNotification.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def mark_notification_read(
+    db: AsyncSession, user_id: str, notification_id: str
+) -> bool:
+    uid = uuid.UUID(user_id)
+    nid = uuid.UUID(notification_id)
+    row = await db.get(SignalNotification, nid)
+    if row is None or row.user_id != uid:
+        return False
+    row.read_at = datetime.now(UTC)
+    await db.flush()
+    return True
+
+
+async def has_recent_notification(
+    db: AsyncSession, user_id: str, hours: int = 20
+) -> bool:
+    uid = uuid.UUID(user_id)
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    stmt = (
+        select(SignalNotification)
+        .where(
+            SignalNotification.user_id == uid,
+            SignalNotification.read_at.is_(None),
+            SignalNotification.created_at >= cutoff,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
+async def create_notification(
+    db: AsyncSession,
+    user_id: str,
+    message: str,
+    signal_state: str,
+) -> SignalNotification:
+    uid = uuid.UUID(user_id)
+    row = SignalNotification(
+        id=uuid.uuid4(),
+        user_id=uid,
+        message=message,
+        signal_state=signal_state,
+        created_at=datetime.now(UTC),
+    )
+    db.add(row)
+    await db.flush()
+    return row
