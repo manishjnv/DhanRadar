@@ -98,3 +98,33 @@ export interface JournalEntryCreate {
   vix_level?: number | null;
   breadth_ratio?: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// Learning content (Phase 3 Part A)
+// ---------------------------------------------------------------------------
+
+export interface LearningArticle {
+  slug: string;
+  title: string;
+  read_min: number;
+  link: string;
+}
+
+export interface LearningContentResponse {
+  articles: LearningArticle[];
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (Phase 3 Part B)
+// ---------------------------------------------------------------------------
+
+export interface SignalNotification {
+  id: string;
+  message: string;
+  signal_state: SignalState;
+  created_at: string;
+}
+
+export interface NotificationsResponse {
+  unread: SignalNotification[];
+}
