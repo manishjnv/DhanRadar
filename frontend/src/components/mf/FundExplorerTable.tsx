@@ -86,18 +86,19 @@ function FactorCell({ value }: { value: 'high' | 'medium' | 'low' | null | undef
 // ---------------------------------------------------------------------------
 
 function SortHeader({
-  label, sortKey, activeSort, onSort,
+  label, sortKey, activeSort, sortDir, onSort,
 }: {
   label: string;
   sortKey: SortKey;
   activeSort: SortKey;
+  sortDir: 'desc' | 'asc';
   onSort: (k: SortKey) => void;
 }) {
   const isActive = activeSort === sortKey;
   return (
     <th
       scope="col"
-      aria-sort={isActive ? 'ascending' : 'none'}
+      aria-sort={isActive ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
       tabIndex={0}
       onClick={() => onSort(sortKey)}
       onKeyDown={(e) => {
@@ -112,7 +113,7 @@ function SortHeader({
     >
       {label}
       <span className={cn('ml-1 text-royal transition-opacity', isActive ? 'opacity-100' : 'opacity-0')} aria-hidden="true">
-        ▴
+        {sortDir === 'desc' ? '▾' : '▴'}
       </span>
     </th>
   );
@@ -125,10 +126,11 @@ function SortHeader({
 export interface FundExplorerTableProps {
   funds: FundExplorerItem[];
   activeSort: SortKey;
+  sortDir: 'desc' | 'asc';
   onSort: (key: SortKey) => void;
 }
 
-export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTableProps) {
+export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundExplorerTableProps) {
   const router = useRouter();
 
   const handleRowClick = React.useCallback((fund: FundExplorerItem) => {
@@ -153,7 +155,7 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
             <th scope="col" className="pb-3 px-3 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
               Fund
             </th>
-            <SortHeader label="Rank"   sortKey="rank"         activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="Rank"   sortKey="rank"         activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
             <th scope="col" className="pb-3 px-3 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
               Assessment
             </th>
@@ -166,11 +168,11 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
             <th scope="col" className="pb-3 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
               Volatility
             </th>
-            <SortHeader label="3M Ret" sortKey="return_3m"  activeSort={activeSort} onSort={onSort} />
-            <SortHeader label="6M Ret" sortKey="return_6m"  activeSort={activeSort} onSort={onSort} />
-            <SortHeader label="1Y Ret" sortKey="return_1y"  activeSort={activeSort} onSort={onSort} />
-            <SortHeader label="3Y Ret" sortKey="return_3y"  activeSort={activeSort} onSort={onSort} />
-            <SortHeader label="5Y Ret" sortKey="return_5y"  activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="3M Ret" sortKey="return_3m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="6M Ret" sortKey="return_6m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="1Y Ret" sortKey="return_1y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="3Y Ret" sortKey="return_3y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="5Y Ret" sortKey="return_5y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
           </tr>
         </thead>
 
