@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Upload, Compass, BookOpen, GraduationCap,
-  Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight,
+  Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -25,6 +25,7 @@ const WORKSPACE: NavItem[] = [
   { href: '/mf/upload',      label: 'Upload CAS',      icon: Upload           },
   { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
   { href: '/mood',           label: 'Market Mood',     icon: Compass          },
+  { href: '/signal',         label: 'Signal',          icon: Signal           },
   { href: '/learn/tax',      label: 'Tax Guides',      icon: BookOpen         },
   { href: '/learn/concepts', label: 'Investing Basics', icon: GraduationCap   },
 ];

@@ -1,5 +1,42 @@
 # DhanRadar — Session State
 
+**Last updated:** 2026-06-15 (**Signal page Phase 1 DONE, PR #191 open, CI pending.**
+`/signal` route live: Today tab (SignalHero, 3 MarketSignalCards, PortfolioContext, LearningContent)
+and Rules & Fund tab (RuleThresholdForm, DipFundCard, DeploymentHistory, HowSignalWorks). Backend:
+`signal` schema, migration 0027, 5 endpoints, VIX/Breadth stubs. SEBI-clean: `triggered/watch/no_signal`
+only; `weighted_score` never in DOM; "NOT FINANCIAL ADVICE" in every SignalHero footer. 13 tasks, 14
+commits on `feat/signal-page-phase1`. Next: merge after CI green → KVM4 deploy → `alembic upgrade head`.)
+
+## Signal page Phase 1 — full `/signal` route shipped (2026-06-15)
+
++ **Backend (Tasks 2–4):** `signal` Postgres schema, 4 tables, migration 0027 (Alembic chain 0026→0027).
+  Signal router at `/api/v1/signal/` — 5 endpoints (rules GET/PUT, dip-fund GET/POST, deployments GET).
+  VIX and Breadth Phase 1 stubs added to `mood/router.py` at `/api/v1/market/vix` and `/breadth`.
+  5 unit tests in `tests/unit/test_signal_service.py` — all pass.
++ **Frontend (Tasks 1, 5–13):** 11 new TS/TSX files. Signal CSS layer in `globals.css`. Types and
+  TanStack Query hooks. Components: `SignalHero` (SVG score ring), `MarketSignalCard` (3 variants),
+  `PortfolioContext`, `LearningContent`, `RuleThresholdForm` (3 sliders), `DipFundCard`, `DeploymentHistory`.
+  `SignalPage.tsx` — tab container, client-side signal state computation, `CASBanner`.
+  `(app)/signal/page.tsx` — server shell, `hasCAS` server-side fetch, `force-dynamic`.
+  `AppShell.tsx` — Signal nav item added after Market Mood.
++ **Gates:** tsc 0 errors, ruff clean, 5/5 signal unit tests pass. PR #191 open, CI pending.
+
+### Agent-utilization & routing telemetry (2026-06-15 Signal Phase 1 session)
+
++ **Opus / Fable (Tier 0):** Orchestrator — Phase-0 warm start; plan reading + task extraction; spec/quality
+  reviews per task; direct edits for Task 7 fix (2 lines) and Task 13 AppShell (2 lines, hot cache);
+  SESSION_STATE update. reworked: N/A (direct edits were under the ≤30-line one-shot threshold).
++ **Sonnet (Tier 1):** 13 implementation subagents (one per task) + 12 spec/quality reviewer pairs.
+  Reworked: Task 4 (Y — first subagent returned early without completing; re-dispatched); Task 7
+  (Y — scoreLabel null fallback missing on VIX+Breadth, fixed by Opus directly); all others N.
+  Total ~25 Sonnet subagent calls, parallel where independent (review + next-task implementation).
++ **Haiku (Tier 3):** n/a — Sonnet reviewers ran fast enough; no bulk-read sweeps needed.
++ **codex:rescue:** n/a — Signal page is Tier-A (non-load-bearing UI/API, no auth/scoring/payments path).
++ **Doc routing:** SESSION_STATE drafted on Opus directly (surgical ≤30-line exemption; structured-state
+  with exact commit/PR/test refs where free-chain drift would corrupt numbers). reworked: N.
+
+---
+
 **Last updated:** 2026-06-15 (**MF UI compliance audit DONE, PR #174 open**. Fund Detail page
 `/mf/fund/[isin]` created; token/a11y fixes across Explorer + LabelChip + LabelHistoryChart;
 `tsc --noEmit` clean. B67 Task 3 DONE+DEPLOYED — PR #172 `d2e96e5`, alembic `0025`, 14,041 funds
