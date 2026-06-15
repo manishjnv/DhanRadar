@@ -1,10 +1,11 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-16 (**All Signal features fully live on KVM4 — Phase 3 deployed.**
-Production at `6f687bd` (PR #202 schema-import fix). Alembic at 0029 (head);
-`signal_notifications` table live; `signal-daily-alert` Celery beat registered (09:15 IST).
-Signal features operational: Today tab, Rules & Fund tab, Reflect tab (journal + delete),
-Phase 3 (contextual learning + notification toast). No open Signal blockers.)
+**Last updated:** 2026-06-16 (**Signal Phase 3 fully deployed + 500→401 hotfix in PR #205.**
+Production at `6f687bd` (PR #202); `signal_notifications` live; 15 concept articles seeded;
+Celery beat registered. PR #205 (`bdf16e0`) pending merge: fixes anonymous-UUID 500 on all
+user-scoped `/signal/*` endpoints — `RequireTier("free")` lets anonymous through, service
+crashes on `user_id="anonymous"` as UUID. `/signal/learning` stays unauthenticated (public).)
+**Next action: merge PR #205 + `docker compose up -d --build dhanradar-fastapi` on KVM4.**
 
 ## Signal journal delete + Phase 3 on main — handoff (2026-06-16)
 
@@ -40,6 +41,35 @@ Headline: carry-over session — PR #198 merged + deployed; PR #199 on main, Pha
 + Per-delegation (telemetry): session-section draft · dsf (Tier 2 paid, free-chain 429) ·
   reworked: Y (Opus corrected PR #198/#199 conflation, added Phase 3 deploy steps,
   corrected "no migration" for #198, added telemetry line).
+
+### Concept articles + 500-fix addendum (2026-06-16)
+
++ **PR #200 (`f98b38d`) — 7 Signal concept articles:** Added all Signal-linked concept explainers
+  to `content.py`, fixing 404s on every Signal learning card article link. Slugs:
+  `india-vix-explained`, `dip-buying-discipline`, `nifty-correction-history`,
+  `sip-during-corrections`, `market-breadth-basics`, `patience-in-investing`, `sip-discipline`.
+  Seeded on prod: `python -m dhanradar.concepts.seed` → 15 total concepts.
++ **Bug discovered post-Phase-3-deploy:** `GET /api/v1/signal/rules` (and all user-scoped signal
+  endpoints) returned 500 `ValueError: badly formed hexadecimal UUID string` for unauthenticated
+  requests. Root cause: `RequireTier("free")` passes anonymous callers through to the service
+  layer which then tries to parse `user_id="anonymous"` as a Postgres UUID column.
++ **Fix — PR #205 (`bdf16e0`) open, not yet deployed:** Added `_require_auth` FastAPI dependency
+  to all 10 user-scoped `/signal/*` endpoints (raises 401 before service code runs).
+  `/signal/learning` intentionally left unauthenticated (public content, no user context needed).
+  **Next action: merge PR #205 CI-green + `docker compose up -d --build dhanradar-fastapi` on KVM4.**
+
+### Agent-utilization footer — concept articles + 500-fix (2026-06-16)
+
+Headline: PR #200 deployed (fixes 404s); 500-bug root-caused; PR #205 open with `_require_auth` fix.
+
++ **Fable (Tier 0):** 7 SEBI-compliant concept articles authored; DB seeded; root-caused
+  anonymous-UUID 500; wrote `_require_auth` + wired to 10 endpoints; opened PR #205.
++ **Sonnet (Tier 1):** n/a.
++ **Haiku (Tier 3):** n/a.
++ **codex:rescue:** n/a — not entitled; `_require_auth` is non-load-bearing (no auth logic change,
+  no token/session code, just a guard that prevents service seeing anonymous callers).
++ Per-delegation (telemetry): addendum draft · dsf (Tier 2 paid, free-chain 429) ·
+  reworked: Y (slug typo `difficulty`→`discipline`, telemetry format matched file pattern).
 
 ### Phase 3 deploy addendum (2026-06-16)
 
