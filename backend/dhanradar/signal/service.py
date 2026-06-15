@@ -9,7 +9,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.signal.models import SignalDeployment, SignalDipFund, SignalJournal, SignalNotification, SignalRules
+from dhanradar.signal.models import (
+    SignalDeployment,
+    SignalDipFund,
+    SignalJournal,
+    SignalNotification,
+    SignalRules,
+)
 
 DEFAULT_RULES: dict = {
     "nifty_threshold": Decimal("-8.00"),

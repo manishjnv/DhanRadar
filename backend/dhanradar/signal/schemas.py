@@ -177,3 +177,16 @@ class LearningArticleOut(BaseModel):
 
 class LearningContentOut(BaseModel):
     articles: list[LearningArticleOut]
+
+
+class SignalNotificationOut(BaseModel):
+    id: UUID
+    message: str
+    signal_state: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationsResponse(BaseModel):
+    unread: list[SignalNotificationOut]

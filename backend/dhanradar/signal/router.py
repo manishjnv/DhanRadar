@@ -158,3 +158,28 @@ async def get_learning_content(
     return LearningContentOut(
         articles=[LearningArticleOut(**a) for a in raw]
     )
+
+
+@router.get("/notifications", response_model=NotificationsResponse)
+async def get_notifications(
+    _: None = Depends(RequireTier("free")),
+    user: UserContext = Depends(current_user_or_anonymous),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationsResponse:
+    """Return unread signal notifications for the caller (max 5)."""
+    rows = await service.get_unread_notifications(db, user.user_id)
+    return NotificationsResponse(
+        unread=[SignalNotificationOut.model_validate(r) for r in rows]
+    )
+
+
+@router.post("/notifications/{notification_id}/read", status_code=204)
+async def mark_notification_read(
+    notification_id: str,
+    _: None = Depends(RequireTier("free")),
+    user: UserContext = Depends(current_user_or_anonymous),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Mark a notification as read."""
+    await service.mark_notification_read(db, user.user_id, notification_id)
+    await db.commit()
