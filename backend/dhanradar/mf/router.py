@@ -600,6 +600,8 @@ async def fund_explorer_list(
     category: Annotated[str | None, Query()] = None,
     sort: Annotated[str, Query()] = "rank",
     sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
+    plan_type: Annotated[str | None, Query(pattern="^(direct|regular)$")] = None,
+    option_type: Annotated[str | None, Query(pattern="^(growth|idcw)$")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 20,
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
@@ -635,6 +637,19 @@ async def fund_explorer_list(
     order_clause = f"{_SORT_COL[sort]} {sql_dir}{nulls}"
     offset = (page - 1) * limit
 
+    # Build optional server-side filters (plan_type, option_type).
+    # Values come from regex-validated params — hardcoded SQL literals are safe here.
+    extra_where: list[str] = []
+    filter_params: dict[str, object] = {"category": category}
+    if plan_type:
+        extra_where.append("f.plan_type = :plan_type")
+        filter_params["plan_type"] = plan_type
+    if option_type == "growth":
+        extra_where.append("f.option_type = 'growth'")
+    elif option_type == "idcw":
+        extra_where.append("f.option_type IN ('idcw', 'dividend_reinvest', 'dividend_payout')")
+    extra_filter = (" AND " + " AND ".join(extra_where)) if extra_where else ""
+
     base_sql = (
         "SELECT"
         "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
@@ -653,7 +668,7 @@ async def fund_explorer_list(
         "   FROM mf.mf_fund_metrics"
         "   ORDER BY isin, as_of_date DESC"
         " ) m ON f.isin = m.isin"
-        " WHERE f.sebi_category = :category"
+        f" WHERE f.sebi_category = :category{extra_filter}"
         f" ORDER BY {order_clause}"
         " LIMIT :lim OFFSET :off"
     )
@@ -666,12 +681,12 @@ async def fund_explorer_list(
         "   WHERE sebi_category = :category"
         "   ORDER BY isin, as_of_date DESC"
         " ) r ON f.isin = r.isin"
-        " WHERE f.sebi_category = :category"
+        f" WHERE f.sebi_category = :category{extra_filter}"
     )
 
-    params = {"category": category, "lim": limit, "off": offset}
+    params = {**filter_params, "lim": limit, "off": offset}
     rows = (await db.execute(sa_text(base_sql), params)).all()
-    total: int = (await db.execute(sa_text(count_sql), {"category": category})).scalar_one()
+    total: int = (await db.execute(sa_text(count_sql), filter_params)).scalar_one()
 
     items = [
         FundExplorerItem(
