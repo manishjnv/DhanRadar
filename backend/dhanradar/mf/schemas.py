@@ -140,8 +140,11 @@ class FundExplorerItem(BaseModel):
     confidence_factors: dict[str, str] | None = None
     category_rank: int
     category_total: int
+    return_3m_pct: float | None = None
+    return_6m_pct: float | None = None
     return_1y_pct: float | None = None
     return_3y_pct: float | None = None
+    return_5y_pct: float | None = None
     plan_type: str | None = None        # 'direct' | 'regular' | None
     option_type: str | None = None      # 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | None
     amc_level_aum_crore: float | None = None  # AMC-level AUM (ADR-0035); None until endpoint confirmed

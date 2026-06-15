@@ -81,6 +81,10 @@ _STALE_DAYS = 30          # > a month old → flagged stale + freshness floored
 _ONE_YEAR_DAYS = 365
 _THREE_YEAR_DAYS = 1095
 _THREE_YEAR_MIN_AGE_DAYS = 900   # require ≥ ~2.5y of history before a "3Y" return counts
+_THREE_MONTH_DAYS = 91
+_SIX_MONTH_DAYS = 182
+_FIVE_YEAR_DAYS = 1825
+_FIVE_YEAR_MIN_AGE_DAYS = 1460   # require ≥ 4y history before a "5Y" return counts
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +251,27 @@ def long_horizon_stats(
     ret_3y = _trailing_return_with_min_age(pts, _THREE_YEAR_DAYS, _THREE_YEAR_MIN_AGE_DAYS)
     max_dd = _max_drawdown_pct(pts)
     return ret_1y, ret_3y, max_dd
+
+
+def extended_horizon_stats(
+    points: list[tuple[datetime.date, float]],
+) -> tuple[float | None, float | None, float | None, float | None, float | None, float | None]:
+    """Return (return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct).
+
+    3M/6M are absolute returns (< 1 year — never annualize per MF analytics governance).
+    1Y/3Y/5Y are also stored as raw trailing % (consistent with long_horizon_stats).
+    Any component is None when the series cannot support it.
+    """
+    pts = _sorted_unique(points)
+    if len(pts) < _MIN_POINTS:
+        return None, None, None, None, None, None
+    r3m = _trailing_return_pct(pts, _THREE_MONTH_DAYS)
+    r6m = _trailing_return_pct(pts, _SIX_MONTH_DAYS)
+    r1y = _trailing_return_pct(pts, _ONE_YEAR_DAYS)
+    r3y = _trailing_return_with_min_age(pts, _THREE_YEAR_DAYS, _THREE_YEAR_MIN_AGE_DAYS)
+    r5y = _trailing_return_with_min_age(pts, _FIVE_YEAR_DAYS, _FIVE_YEAR_MIN_AGE_DAYS)
+    max_dd = _max_drawdown_pct(pts)
+    return r3m, r6m, r1y, r3y, r5y, max_dd
 
 
 # ---------------------------------------------------------------------------
