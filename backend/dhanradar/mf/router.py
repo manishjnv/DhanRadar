@@ -23,6 +23,7 @@ dedup is not implemented in this slice (noted for next iteration, non-neg #6).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import uuid
@@ -65,6 +66,7 @@ from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
 router = APIRouter(prefix="/mf", tags=["mutual-fund"])
+logger = logging.getLogger(__name__)
 
 _MAX_CAS_BYTES = 15 * 1024 * 1024  # 15 MB cap on the upload
 _rl_upload = RateLimit(max_requests=10, window_seconds=60)
@@ -334,7 +336,16 @@ async def cas_report(
     if cached:
         payload = json.loads(cached)
         payload["portfolio_id"] = portfolio_id  # use DB-authoritative value; adds if absent, overwrites if stale
-        return service.assemble_report(**payload)
+        # Fetch market ranks at read time — ranks are not baked into the Redis
+        # cache so they remain fresh after nightly compute_market_ranks runs.
+        isins = [f["isin"] for f in payload.get("funds", [])]
+        rank_by_isin: dict[str, dict] = {}
+        if isins:
+            try:
+                rank_by_isin = await service.fetch_fund_ranks(db, isins)
+            except Exception:
+                logger.warning("cas_report: rank fetch failed (non-fatal)", exc_info=True)
+        return service.assemble_report(**payload, rank_by_isin=rank_by_isin)
     if job.status != "done":
         # Not ready yet — return the current status with the disclosure injected.
         return service.assemble_report(

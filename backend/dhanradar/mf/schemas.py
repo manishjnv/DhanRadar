@@ -57,6 +57,8 @@ class FundReportItem(BaseModel):
     isin: str
     scheme_name: str
     folio_number: str
+    # SEBI-canonical category from mf_funds (fills the Category column in the holdings table).
+    category: str | None = None
     units: float
     invested_amount: float | None = None
     current_value: float | None = None
@@ -71,6 +73,10 @@ class FundReportItem(BaseModel):
     # Feature 4: named confidence quality signals — string bands only (high/medium/low).
     # null on old cached reports; frontend degrades gracefully when absent.
     confidence_factors: dict[str, str] | None = None
+    # Feature 5: market-wide category rank — ordinal integer only, never unified_score
+    # (non-neg #2). None when rank not yet computed or fund has no sebi_category.
+    category_rank: int | None = None
+    category_total: int | None = None
 
 
 class FundLabelHistory(BaseModel):

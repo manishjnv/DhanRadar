@@ -255,6 +255,37 @@ class MfUserFundScoreHistory(Base):
     )
 
 
+class MfFundRanks(Base):
+    """Market-wide per-category ordinal rank, computed nightly after mf_metrics_refresh.
+
+    unified_score is used ONLY internally for ordering — it is never written here
+    (non-neg #2). Only the ordinal rank and verb_label reach this table.
+    """
+
+    __tablename__ = "mf_fund_ranks"
+    __table_args__ = (
+        Index(
+            "ix_mf_fund_ranks_cat_date_rank",
+            "sebi_category",
+            "as_of_date",
+            "rank",
+        ),
+        _SCHEMA,
+    )
+
+    isin: Mapped[str] = mapped_column(
+        Text, ForeignKey("mf.mf_funds.isin", ondelete="CASCADE"), primary_key=True
+    )
+    as_of_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    sebi_category: Mapped[str] = mapped_column(Text, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_in_cat: Mapped[int] = mapped_column(Integer, nullable=False)
+    verb_label: Mapped[str] = mapped_column(Text, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class UserFundScore(Base):
     # `unified_score` is server-side / tier-gated — never serialized to a client.
     __tablename__ = "user_fund_scores"

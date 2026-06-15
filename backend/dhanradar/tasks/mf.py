@@ -961,6 +961,127 @@ async def _metrics_refresh_pipeline() -> str:
     return summary
 
 
+@celery_app.task(name="dhanradar.tasks.mf.compute_market_ranks")
+def compute_market_ranks() -> str:
+    """Market-wide per-category rank computation.
+
+    Runs nightly at 01:00 IST after mf_metrics_refresh (00:15). Reads precomputed
+    mf_fund_metrics stats, builds per-sebi_category benchmarks, scores each fund
+    category-relatively (no user context), and upserts ordinal ranks into
+    mf_fund_ranks. unified_score is used ONLY internally for ordering — it is never
+    written to mf_fund_ranks (non-neg #2). Idempotent: re-running on the same day
+    upserts, never duplicates.
+    """
+    try:
+        return asyncio.run(_compute_market_ranks_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("compute_market_ranks pipeline error")
+        return "compute_market_ranks: failed — see worker logs"
+
+
+async def _compute_market_ranks_pipeline() -> str:
+    from collections import defaultdict
+
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.cohort import build_benchmark, compare_to_cohort
+    from dhanradar.mf.scoring_bridge import score_fund
+    from dhanradar.mf.signals import compute_fund_signals
+    from dhanradar.models.mf import MfFund, MfFundMetrics, MfFundRanks
+    from dhanradar.scoring.engine import RatingEngine
+
+    today = date.today()
+
+    # Load all funds with a valid sebi_category + precomputed metrics in one query.
+    async with TaskSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(
+                    MfFund.isin,
+                    MfFund.sebi_category,
+                    MfFundMetrics.return_1y_pct,
+                    MfFundMetrics.return_3y_pct,
+                    MfFundMetrics.max_drawdown_pct,
+                )
+                .join(MfFundMetrics, MfFund.isin == MfFundMetrics.isin)
+                .where(MfFund.sebi_category.isnot(None))
+            )
+        ).all()
+
+    if not rows:
+        logger.warning(
+            "compute_market_ranks: mf_fund_metrics has no rows with sebi_category "
+            "— run mf_metrics_refresh first; skipping"
+        )
+        return "compute_market_ranks: skipped (mf_fund_metrics empty or no categorised funds)"
+
+    # Group by sebi_category.
+    by_cat: dict[str, list] = defaultdict(list)
+    for row in rows:
+        by_cat[row.sebi_category].append(row)
+
+    rengine = RatingEngine()
+    all_upserts: list[dict] = []
+
+    for cat, cat_rows in by_cat.items():
+        # Build the category benchmark from precomputed long-horizon stats (no NAV loads).
+        stats_list = [
+            (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in cat_rows
+        ]
+        benchmark = build_benchmark(cat, stats_list)
+
+        # Score each fund against its category benchmark. NAV series is empty — only
+        # category-relative signals inform the label (sufficient for ordinal ranking;
+        # OOM-safe vs loading peer NAV series for all ~14k ISINs, B63).
+        scored: list[tuple[str, int, str]] = []
+        for r in cat_rows:
+            fund_stats = (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct)
+            cat_rel = compare_to_cohort(fund_stats, benchmark)
+            signals = compute_fund_signals(r.isin, [], category_relative=cat_rel)
+            result = await score_fund(rengine, signals)
+            scored.append((r.isin, result.unified_score or 0, result.verb_label.value))
+
+        # Sort: highest unified_score first; isin alphabetically as deterministic tiebreaker.
+        scored.sort(key=lambda x: (-x[1], x[0]))
+        total = len(scored)
+        for rank, (isin, _score, verb_label) in enumerate(scored, start=1):
+            all_upserts.append({
+                "isin": isin,
+                "sebi_category": cat,
+                "rank": rank,
+                "total_in_cat": total,
+                "verb_label": verb_label,
+                "as_of_date": today,
+            })
+
+    # Bulk upsert — idempotent on (isin, as_of_date) PK.
+    async with TaskSessionLocal() as db:
+        for i in range(0, len(all_upserts), _UPSERT_CHUNK):
+            chunk = all_upserts[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = insert(MfFundRanks).values(chunk).on_conflict_do_update(
+                index_elements=["isin", "as_of_date"],
+                set_={
+                    "sebi_category": insert(MfFundRanks).excluded.sebi_category,
+                    "rank": insert(MfFundRanks).excluded.rank,
+                    "total_in_cat": insert(MfFundRanks).excluded.total_in_cat,
+                    "verb_label": insert(MfFundRanks).excluded.verb_label,
+                    "computed_at": func.now(),
+                },
+            )
+            await db.execute(stmt)
+        await db.commit()
+
+    summary = (
+        f"compute_market_ranks: {len(all_upserts)} ranks across {len(by_cat)} categories"
+    )
+    logger.info(summary)
+    return summary
+
+
 @celery_app.task(name="dhanradar.tasks.mf.monthly_rescore_plus_users")
 def monthly_rescore_plus_users() -> str:
     """Re-score every Plus user's current holdings from the latest NAV without
