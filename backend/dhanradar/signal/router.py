@@ -13,9 +13,7 @@ Endpoints (all under /api/v1/signal, auth-gated):
 
 from __future__ import annotations
 
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
@@ -132,20 +130,6 @@ async def create_journal_entry(
     )
     await db.commit()
     return JournalEntryCreatedOut(id=row.id, created_at=row.created_at)
-
-
-@router.delete("/journal/{entry_id}", status_code=204)
-async def delete_journal_entry(
-    entry_id: UUID,
-    _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    """Delete a journal entry owned by the caller."""
-    deleted = await service.delete_journal_entry(db, user.user_id, str(entry_id))
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Journal entry not found")
-    await db.commit()
 
 
 @router.get("/learning", response_model=LearningContentOut)
