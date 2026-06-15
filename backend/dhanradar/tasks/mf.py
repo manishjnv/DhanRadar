@@ -39,7 +39,7 @@ from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
-from dhanradar.mf.taxonomy import canonical_for
+from dhanradar.mf.taxonomy import canonical_for, parse_plan_option
 from dhanradar.mf.taxonomy import summarize as taxonomy_summarize
 
 logger = logging.getLogger(__name__)
@@ -119,9 +119,9 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
     """
     Map a list of NavRow → list of dicts ready for mf_funds upsert.
 
-    Only the three columns this feed owns are included: amfi_code, scheme_name,
-    category.  isin is the PK (isin_growth preferred, else isin_reinvest).
-    Rows without a keyable ISIN are skipped.
+    Columns this feed owns: amfi_code, scheme_name, category, sebi_category,
+    plan_type, option_type.  isin is the PK (isin_growth preferred, else
+    isin_reinvest).  Rows without a keyable ISIN are skipped.
 
     Deduplication: last-seen row wins for duplicate ISINs in one batch (dict keyed
     by isin), preventing ON CONFLICT DO UPDATE cardinality errors.
@@ -131,12 +131,15 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
         isin = row.isin_growth or row.isin_reinvest
         if isin is None:
             continue
+        plan_type, option_type = parse_plan_option(row.scheme_name)
         out[isin] = {
             "isin": isin,
             "amfi_code": row.amfi_code,
             "scheme_name": row.scheme_name,
             "category": row.category,
             "sebi_category": canonical_for(row.category),
+            "plan_type": plan_type,
+            "option_type": option_type,
         }
     return list(out.values())
 
@@ -794,6 +797,8 @@ async def _nav_daily_pipeline() -> str:
                     "scheme_name": insert(MfFund).excluded.scheme_name,
                     "category": insert(MfFund).excluded.category,
                     "sebi_category": insert(MfFund).excluded.sebi_category,
+                    "plan_type": insert(MfFund).excluded.plan_type,
+                    "option_type": insert(MfFund).excluded.option_type,
                 },
             )
             await db.execute(stmt)

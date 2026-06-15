@@ -625,6 +625,7 @@ async def fund_explorer_list(
     base_sql = (
         "SELECT"
         "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
+        "  f.plan_type, f.option_type,"
         "  r.rank, r.total_in_cat, r.verb_label,"
         "  m.return_1y_pct, m.return_3y_pct"
         " FROM mf.mf_funds f"
@@ -672,6 +673,9 @@ async def fund_explorer_list(
             category_total=r.total_in_cat,
             return_1y_pct=r.return_1y_pct,
             return_3y_pct=r.return_3y_pct,
+            plan_type=r.plan_type,
+            option_type=r.option_type,
+            amc_level_aum_crore=None,  # ADR-0035: endpoint unconfirmed; stays None
         )
         for r in rows
     ]

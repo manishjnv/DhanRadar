@@ -26,6 +26,7 @@ from dhanradar.mf.taxonomy import (
     canonical_for,
     classify,
     normalize,
+    parse_plan_option,
     summarize,
 )
 
@@ -328,6 +329,173 @@ def test_summarize_all_canonical() -> None:
 # ---------------------------------------------------------------------------
 # Guard test: _navrows_to_fund_upserts never mutates the raw category key
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# parse_plan_option (B67 Task 3) — pure function, no DB, no network
+# ---------------------------------------------------------------------------
+
+
+class TestParsePlanOption:
+    """parse_plan_option: case-insensitive scheme-name parsing of plan/option."""
+
+    # --- plan_type: Direct -----------------------------------------------
+
+    def test_direct_plan_hyphen_separated(self) -> None:
+        pt, ot = parse_plan_option("Nippon India Large Cap Fund - Direct Plan - Growth")
+        assert pt == "direct"
+
+    def test_direct_without_plan_word(self) -> None:
+        """'Axis ELSS Tax Saver Fund Direct Growth' — no 'Plan' separator."""
+        pt, _ = parse_plan_option("Axis ELSS Tax Saver Fund Direct Growth")
+        assert pt == "direct"
+
+    def test_direct_case_insensitive(self) -> None:
+        pt, _ = parse_plan_option("SBI NIFTY INDEX FUND DIRECT GROWTH")
+        assert pt == "direct"
+
+    def test_direct_mixed_case(self) -> None:
+        pt, _ = parse_plan_option("Mirae Asset Large Cap Fund - DiReCt Plan - Growth")
+        assert pt == "direct"
+
+    # --- plan_type: Regular -----------------------------------------------
+
+    def test_regular_plan_hyphen_separated(self) -> None:
+        pt, _ = parse_plan_option("HDFC Mid-Cap Opportunities Fund - Regular Plan - IDCW")
+        assert pt == "regular"
+
+    def test_regular_without_plan_word(self) -> None:
+        pt, _ = parse_plan_option("Aditya Birla Sun Life Regular Savings Fund - Growth")
+        assert pt == "regular"
+
+    # --- plan_type: direct wins over regular in fund name ----------------
+
+    def test_direct_wins_over_regular_in_fund_name(self) -> None:
+        """'ICICI Prudential Regular Savings Fund - Direct Plan - Growth'
+        has 'regular' in the fund name but 'direct' in the plan tag."""
+        pt, _ = parse_plan_option(
+            "ICICI Prudential Regular Savings Fund - Direct Plan - Growth"
+        )
+        assert pt == "direct"
+
+    # --- plan_type: None --------------------------------------------------
+
+    def test_no_plan_marker_returns_none(self) -> None:
+        """Legacy scheme name with no Direct/Regular tag."""
+        pt, _ = parse_plan_option("Reliance Growth Fund")
+        assert pt is None
+
+    # --- option_type: Growth ----------------------------------------------
+
+    def test_growth_option(self) -> None:
+        _, ot = parse_plan_option("Nippon India Large Cap Fund - Direct Plan - Growth")
+        assert ot == "growth"
+
+    def test_growth_no_separator(self) -> None:
+        _, ot = parse_plan_option("Axis ELSS Tax Saver Fund Direct Growth")
+        assert ot == "growth"
+
+    # --- option_type: IDCW ------------------------------------------------
+
+    def test_idcw_bare(self) -> None:
+        _, ot = parse_plan_option("HDFC Mid-Cap Opportunities Fund - Regular Plan - IDCW")
+        assert ot == "idcw"
+
+    def test_idcw_case_insensitive(self) -> None:
+        _, ot = parse_plan_option("Some Fund - Direct Plan - iDcW")
+        assert ot == "idcw"
+
+    def test_bare_dividend_maps_to_idcw(self) -> None:
+        """Pre-2021 'Dividend' option → idcw (SEBI nomenclature change)."""
+        _, ot = parse_plan_option("Aditya Birla Sun Life Frontline Equity Fund - Dividend")
+        assert ot == "idcw"
+
+    # --- option_type: dividend_reinvest -----------------------------------
+
+    def test_dividend_reinvestment_option(self) -> None:
+        _, ot = parse_plan_option(
+            "ICICI Prudential Value Discovery Fund - Regular Plan - Dividend Reinvestment"
+        )
+        assert ot == "dividend_reinvest"
+
+    def test_idcw_reinvestment_option(self) -> None:
+        _, ot = parse_plan_option("Axis Bluechip Fund - Direct Plan - IDCW Reinvestment")
+        assert ot == "dividend_reinvest"
+
+    def test_idcw_reinvest_short_form(self) -> None:
+        _, ot = parse_plan_option("Some Fund - Regular - IDCW Reinvest")
+        assert ot == "dividend_reinvest"
+
+    # --- option_type: dividend_payout -------------------------------------
+
+    def test_dividend_payout_option(self) -> None:
+        _, ot = parse_plan_option(
+            "HDFC Mid-Cap Opportunities Fund - Regular Plan - Dividend Payout"
+        )
+        assert ot == "dividend_payout"
+
+    def test_idcw_payout_option(self) -> None:
+        _, ot = parse_plan_option("Franklin India Prima Fund - Direct Plan - IDCW Payout")
+        assert ot == "dividend_payout"
+
+    # --- option_type: None ------------------------------------------------
+
+    def test_no_option_marker_returns_none(self) -> None:
+        _, ot = parse_plan_option("Reliance Gilt Securities Fund - Regular Plan")
+        assert ot is None
+
+    # --- edge cases -------------------------------------------------------
+
+    def test_none_input_returns_none_none(self) -> None:
+        assert parse_plan_option(None) == (None, None)  # type: ignore[arg-type]
+
+    def test_empty_string_returns_none_none(self) -> None:
+        assert parse_plan_option("") == (None, None)
+
+    def test_whitespace_only_returns_none_none(self) -> None:
+        assert parse_plan_option("   ") == (None, None)
+
+    def test_non_str_returns_none_none(self) -> None:
+        assert parse_plan_option(123) == (None, None)  # type: ignore[arg-type]
+
+    def test_both_none_on_bare_scheme_name(self) -> None:
+        pt, ot = parse_plan_option("UTI Nifty Index Fund")
+        assert pt is None
+        assert ot is None
+
+    def test_full_name_direct_growth(self) -> None:
+        """End-to-end: typical modern Direct Growth name."""
+        pt, ot = parse_plan_option(
+            "SBI Bluechip Fund - Direct Plan - Growth"
+        )
+        assert pt == "direct"
+        assert ot == "growth"
+
+    def test_full_name_regular_idcw(self) -> None:
+        """End-to-end: Regular IDCW."""
+        pt, ot = parse_plan_option(
+            "Kotak Bluechip Fund - Regular Plan - IDCW"
+        )
+        assert pt == "regular"
+        assert ot == "idcw"
+
+    def test_full_name_direct_dividend_reinvest(self) -> None:
+        """End-to-end: Direct + Dividend Reinvestment."""
+        pt, ot = parse_plan_option(
+            "Mirae Asset Large Cap Fund - Direct Plan - Dividend Reinvestment"
+        )
+        assert pt == "direct"
+        assert ot == "dividend_reinvest"
+
+    def test_idcw_reinvest_beats_bare_idcw(self) -> None:
+        """'IDCW Reinvestment' must map to dividend_reinvest, not plain idcw."""
+        _, ot = parse_plan_option("Any Fund - Direct - IDCW Reinvestment")
+        assert ot == "dividend_reinvest"
+
+    def test_dividend_reinvest_beats_bare_dividend(self) -> None:
+        """'Dividend Reinvestment' must map to dividend_reinvest, not plain idcw."""
+        _, ot = parse_plan_option("Any Fund - Regular - Dividend Reinvestment")
+        assert ot == "dividend_reinvest"
 
 
 def test_navrows_to_fund_upserts_cohort_key_invariant() -> None:
