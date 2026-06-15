@@ -168,11 +168,11 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
             <th scope="col" className="pb-3 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
               Volatility
             </th>
-            <SortHeader label="3M Ret" sortKey="return_3m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="6M Ret" sortKey="return_6m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="1Y Ret" sortKey="return_1y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="3Y Ret" sortKey="return_3y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="5Y Ret" sortKey="return_5y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="3M" sortKey="return_3m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="6M" sortKey="return_6m"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="1Y" sortKey="return_1y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="3Y" sortKey="return_3y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="5Y" sortKey="return_5y"  activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
           </tr>
         </thead>
 
