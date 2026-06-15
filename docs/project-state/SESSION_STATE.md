@@ -1,14 +1,40 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-15 (**B67 Task 3 — scheme-master enrichment `plan_type`/`option_type`
-DONE + DEPLOYED** — PR #172 `d2e96e5`, box `d2e96e5`, alembic `0025`; 14,041 funds backfilled
-(`nav_daily_fetch` 5.2s, canonical 9,295 / legacy 4,917); API + chips live on dhanradar.com.
-AMC AUM Step 4 blocked (ADR-0035 gates unmet). TWO founder-only v1.2 actions remain: (1)
-`POST /admin/scoring/v1.2/activate` as admin; (2) pre-rescore user notice. B67 per-scheme
-$0-vs-vendor decision still OPEN.)
+**Last updated:** 2026-06-15 (**MF UI compliance audit DONE, PR #174 open**. Fund Detail page
+`/mf/fund/[isin]` created; token/a11y fixes across Explorer + LabelChip + LabelHistoryChart;
+`tsc --noEmit` clean. B67 Task 3 DONE+DEPLOYED — PR #172 `d2e96e5`, alembic `0025`, 14,041 funds
+backfilled; API + chips live. AMC AUM Step 4 blocked (ADR-0035). TWO founder-only v1.2 actions
+remain: (1) `POST /admin/scoring/v1.2/activate` as admin; (2) pre-rescore user notice.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## MF UI compliance audit — Fund Detail page + token/a11y fixes (2026-06-15)
+
+- Created `frontend/src/app/(app)/mf/fund/[isin]/page.tsx` (was missing). `useFundDetail` resolves via
+  `/mf/funds?category=&limit=200` filter. States: skeleton / `FundNotFound` / main. Back-nav present.
+  Assessment card (`LabelChip` + `PlanChip`), rank card, returns 2-col grid, AMC AUM card (conditional),
+  CAS CTA, `DisclosureBundle` fail-closed (non-neg #9).
+- `FundExplorerTable.tsx`: row click → `router.push`; `Link` in name cell for keyboard; `aria-sort` on
+  `SortHeader`; `aria-label` on `FactorCell` + table; focus-visible rings; token sweep
+  (`text-[13.5px]` → `text-small`, `text-[10.5px]` → `text-caption`, etc.).
+- `explore/page.tsx`: 10+ `text-[Xpx]` → canonical tokens; focus-visible rings on tabs/chips/pagination;
+  `aria-label` + `aria-current=page` on pagination; disclosure `rounded-xl` → `rounded-lg`.
+- `LabelChip.tsx`: `aria-label` (display + band); `aria-hidden` on confidence span.
+- `LabelHistoryChart.tsx`: `overflowX:auto` wrapper for mobile safety.
+- `queryKeys.ts`: `mf.fundDetail(isin, category)` key added. `api.ts`: `useFundDetail` hook +
+  `FundExplorerItem` import fix. `tsc --noEmit` clean. PR #174 open (`feat/mf-ui-compliance-audit`).
+
+### Agent-utilization & routing telemetry (2026-06-15 MF UI compliance session)
+
+- **Opus / Fable (Tier 0):** full session — Phase-0 context reconstruction from compacted summary; all 7 file
+  edits (each ≤50 lines against hot context, one-shot exemption); SESSION_STATE header update (≤30 lines,
+  surgical); commit 028b647 + PR #174. reworked: N/A (no subagents).
+- **Sonnet (Tier 1):** n/a this session.
+- **Haiku (Tier 3):** n/a this session.
+- **codex:rescue:** n/a — Tier-A UI work, no load-bearing/security path.
+- **Doc routing:** SESSION_STATE header typed on Opus (surgical ≤30 line exemption); this section body
+  drafted via `dsf` (free-chain 429, fell back to paid); reworked: Y (agent footer added by Opus).
 
 ## B67 Task 3 — scheme-master enrichment DONE, PR #172 open (2026-06-15)
 
