@@ -31,4 +31,6 @@ Pillow>=10.3.0         # 1200x630 share-card PNG render (worker; lazily imported
 structlog>=24.1.0
 # --- News RSS ingestion (B56) ---
 feedparser>=6.0.10
+# --- Phase 4: Live market data (VIX + Nifty 50 breadth via Yahoo Finance) ---
+yfinance>=0.2.40
 
