@@ -166,3 +166,27 @@ class JournalOut(BaseModel):
 class JournalEntryCreatedOut(BaseModel):
     id: UUID
     created_at: datetime
+
+
+class LearningArticleOut(BaseModel):
+    slug: str
+    title: str
+    read_min: int
+    link: str
+
+
+class LearningContentOut(BaseModel):
+    articles: list[LearningArticleOut]
+
+
+class SignalNotificationOut(BaseModel):
+    id: UUID
+    message: str
+    signal_state: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationsResponse(BaseModel):
+    unread: list[SignalNotificationOut]

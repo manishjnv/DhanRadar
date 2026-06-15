@@ -28,6 +28,8 @@ from dhanradar.signal.schemas import (
     JournalEntryCreatedOut,
     JournalEntryOut,
     JournalOut,
+    LearningArticleOut,
+    LearningContentOut,
     SignalDeploymentOut,
     SignalDipFundOut,
     SignalRulesOut,
@@ -141,4 +143,41 @@ async def delete_journal_entry(
     deleted = await service.delete_journal_entry(db, user.user_id, str(entry_id))
     if not deleted:
         raise HTTPException(status_code=404, detail="Journal entry not found")
+    await db.commit()
+
+
+@router.get("/learning", response_model=LearningContentOut)
+async def get_learning_content(
+    signal_state: str = "no_signal",
+    _: None = Depends(RequireTier("free")),
+) -> LearningContentOut:
+    """Return 4 learning articles relevant to the current signal state."""
+    raw = service.get_learning_articles(signal_state)
+    return LearningContentOut(
+        articles=[LearningArticleOut(**a) for a in raw]
+    )
+
+
+@router.get("/notifications", response_model=NotificationsResponse)
+async def get_notifications(
+    _: None = Depends(RequireTier("free")),
+    user: UserContext = Depends(current_user_or_anonymous),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationsResponse:
+    """Return unread signal notifications for the caller (max 5)."""
+    rows = await service.get_unread_notifications(db, user.user_id)
+    return NotificationsResponse(
+        unread=[SignalNotificationOut.model_validate(r) for r in rows]
+    )
+
+
+@router.post("/notifications/{notification_id}/read", status_code=204)
+async def mark_notification_read(
+    notification_id: str,
+    _: None = Depends(RequireTier("free")),
+    user: UserContext = Depends(current_user_or_anonymous),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Mark a notification as read."""
+    await service.mark_notification_read(db, user.user_id, notification_id)
     await db.commit()
