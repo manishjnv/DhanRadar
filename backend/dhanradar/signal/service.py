@@ -9,7 +9,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.signal.models import SignalDeployment, SignalDipFund, SignalJournal, SignalRules
+from dhanradar.signal.models import (
+    SignalDeployment,
+    SignalDipFund,
+    SignalJournal,
+    SignalNotification,
+    SignalRules,
+)
 
 DEFAULT_RULES: dict = {
     "nifty_threshold": Decimal("-8.00"),
@@ -202,3 +208,38 @@ async def create_journal_entry(
     db.add(row)
     await db.flush()
     return row
+
+
+_LEARNING_MAP: dict[str, list[dict]] = {
+    "triggered": [
+        {"slug": "india-vix-explained",     "title": "What India VIX Tells You",              "read_min": 4},
+        {"slug": "dip-buying-discipline",   "title": "Staged Deployment: Why Not All-In",      "read_min": 5},
+        {"slug": "nifty-correction-history","title": "Nifty Corrections: What History Shows",  "read_min": 6},
+        {"slug": "sip-during-corrections",  "title": "Keep Your SIP Running in Corrections",   "read_min": 3},
+    ],
+    "watch": [
+        {"slug": "india-vix-explained",    "title": "What India VIX Tells You",               "read_min": 4},
+        {"slug": "market-breadth-basics",  "title": "Reading Market Breadth",                 "read_min": 3},
+        {"slug": "patience-in-investing",  "title": "Patience: The Compounding Edge",          "read_min": 4},
+        {"slug": "dip-buying-discipline",  "title": "Staged Deployment: Why Not All-In",       "read_min": 5},
+    ],
+    "no_signal": [
+        {"slug": "sip-discipline",         "title": "Why SIP Discipline Beats Market Timing",  "read_min": 3},
+        {"slug": "patience-in-investing",  "title": "Patience: The Compounding Edge",          "read_min": 4},
+        {"slug": "india-vix-explained",    "title": "What India VIX Tells You",               "read_min": 4},
+        {"slug": "market-breadth-basics",  "title": "Reading Market Breadth",                 "read_min": 3},
+    ],
+}
+
+
+def get_learning_articles(signal_state: str) -> list[dict]:
+    """Return 4 learning articles sorted by relevance for the given signal state.
+
+    Falls back to no_signal list for unknown states.
+    link is constructed as /learn/concepts/{slug}.
+    """
+    articles = _LEARNING_MAP.get(signal_state, _LEARNING_MAP["no_signal"])
+    return [
+        {**a, "link": f"/learn/concepts/{a['slug']}"}
+        for a in articles
+    ]
