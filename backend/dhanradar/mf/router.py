@@ -596,7 +596,7 @@ async def fund_explorer_list(
     category: Annotated[str | None, Query()] = None,
     sort: Annotated[str, Query()] = "rank",
     page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    limit: Annotated[int, Query(ge=1, le=500)] = 20,
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
 ) -> FundExplorerResponse:
     """Paginated, sortable fund list for the public Fund Explorer.

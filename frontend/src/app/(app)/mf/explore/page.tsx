@@ -25,18 +25,11 @@ import type { SortKey } from '@/components/mf/FundExplorerTable';
 type PlanFilter   = 'all' | 'direct' | 'regular';
 type OptionFilter = 'all' | 'growth' | 'idcw';
 
-// ---------------------------------------------------------------------------
-// Sort options — displayed as chip toggles (not a native <select>)
-// ---------------------------------------------------------------------------
-
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: 'rank',         label: 'Power Rank' },
-  { key: 'return_3m',   label: '3M'         },
-  { key: 'return_6m',   label: '6M'         },
-  { key: 'return_1y',   label: '1Y'         },
-  { key: 'return_3y',   label: '3Y'         },
-  { key: 'return_5y',   label: '5Y'         },
-  { key: 'max_drawdown', label: 'Stability'  },
+const PER_PAGE_OPTIONS: { value: number; label: string }[] = [
+  { value: 20,  label: '20'  },
+  { value: 50,  label: '50'  },
+  { value: 100, label: '100' },
+  { value: 500, label: 'All' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -79,52 +72,6 @@ function CategoryDropdown({
             <path d="M5 7L0.5 2.5h9L5 7z" />
           </svg>
         </span>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Sort chip group — replaces native <select> with .chip toggle pattern
-// ---------------------------------------------------------------------------
-
-function SortChips({
-  sort,
-  sortDir,
-  onSort,
-}: {
-  sort: SortKey;
-  sortDir: 'desc' | 'asc';
-  onSort: (k: SortKey) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2 flex-wrap" data-testid="sort-select">
-      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
-        Sort
-      </span>
-      <div className="flex gap-1 flex-wrap">
-        {SORT_OPTIONS.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onSort(o.key)}
-            aria-pressed={sort === o.key}
-            className={cn(
-              'inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border transition-colors whitespace-nowrap',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              sort === o.key
-                ? 'bg-ink text-bg border-ink'
-                : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
-            )}
-          >
-            {o.label}
-            {sort === o.key && (
-              <span className="ml-1 text-bg/70 text-caption" aria-hidden="true">
-                {sortDir === 'desc' ? '▾' : '▴'}
-              </span>
-            )}
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -247,7 +194,51 @@ function SearchInput({
 }
 
 // ---------------------------------------------------------------------------
-// Pagination — .chip style buttons with smart ellipsis window
+// Per-page selector — rendered in the top pagination bar left slot
+// ---------------------------------------------------------------------------
+
+function PerPageSelect({
+  perPage,
+  onChange,
+}: {
+  perPage: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className="relative inline-flex items-center gap-2">
+      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0 whitespace-nowrap">
+        Show
+      </span>
+      <div className="relative">
+        <select
+          value={perPage}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label="Funds per page"
+          className={cn(
+            'h-[28px] rounded-full border border-line bg-surface-2',
+            'pl-3 pr-7 text-caption text-ink font-medium cursor-pointer appearance-none',
+            'focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40',
+            'transition-colors',
+          )}
+        >
+          {PER_PAGE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden="true">
+          <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
+            <path d="M5 7L0.5 2.5h9L5 7z" />
+          </svg>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pagination — .chip style buttons with smart ellipsis window.
+// leftSlot: when provided, renders instead of the count text and the
+// component renders even when totalPages <= 1 (top bar needs PerPageSelect).
 // ---------------------------------------------------------------------------
 
 function getPageWindow(current: number, total: number): (number | '…')[] {
@@ -267,66 +258,72 @@ function Pagination({
   total,
   limit,
   onPage,
+  leftSlot,
 }: {
   page: number;
   total: number;
   limit: number;
   onPage: (p: number) => void;
+  leftSlot?: React.ReactNode;
 }) {
   const totalPages = Math.ceil(total / limit);
-  if (totalPages <= 1) return null;
+  if (totalPages <= 1 && !leftSlot) return null;
 
-  const window = getPageWindow(page, totalPages);
+  const pageWindow = getPageWindow(page, totalPages);
   const start = (page - 1) * limit + 1;
   const end = Math.min(page * limit, total);
 
   return (
     <div className="flex items-center justify-between mt-2 gap-3 flex-wrap">
-      <p className="font-mono text-caption text-ink-muted">
-        {start}–{end} of {total} funds
-      </p>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
-          className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
-        >
-          ‹ Prev
-        </button>
+      {leftSlot ?? (
+        <p className="font-mono text-caption text-ink-muted">
+          {start}–{end} of {total} funds
+        </p>
+      )}
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => onPage(page - 1)}
+            className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          >
+            ‹ Prev
+          </button>
 
-        {window.map((p, i) =>
-          p === '…' ? (
-            <span key={`ellipsis-${i}`} className="px-1 text-caption text-ink-muted font-mono">…</span>
-          ) : (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onPage(p as number)}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center justify-center w-7 h-7 rounded-full text-caption font-medium border transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-                p === page
-                  ? 'bg-ink text-bg border-ink'
-                  : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
-              )}
-            >
-              {p}
-            </button>
-          )
-        )}
+          {pageWindow.map((p, i) =>
+            p === '…' ? (
+              <span key={`ellipsis-${i}`} className="px-1 text-caption text-ink-muted font-mono">…</span>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onPage(p as number)}
+                aria-label={`Page ${p}`}
+                aria-current={p === page ? 'page' : undefined}
+                className={cn(
+                  'inline-flex items-center justify-center w-7 h-7 rounded-full text-caption font-medium border transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                  p === page
+                    ? 'bg-ink text-bg border-ink'
+                    : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
+                )}
+              >
+                {p}
+              </button>
+            )
+          )}
 
-        <button
-          type="button"
-          disabled={page >= totalPages}
-          onClick={() => onPage(page + 1)}
-          className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
-        >
-          Next ›
-        </button>
-      </div>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => onPage(page + 1)}
+            className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          >
+            Next ›
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -340,11 +337,11 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 
   const [activeCategory, setActiveCategory] = React.useState<string>('');
   const [sort, setSort]                     = React.useState<SortKey>('rank');
-  const [sortDir, setSortDir]               = React.useState<'desc' | 'asc'>('desc');
   const [page, setPage]                     = React.useState(1);
   const [search, setSearch]                 = React.useState('');
   const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
   const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
+  const [perPage, setPerPage]               = React.useState(20);
 
   // Set initial category once categories load — validate against known list
   React.useEffect(() => {
@@ -361,14 +358,11 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     setSearch('');
     setPlanFilter('all');
     setOptionFilter('all');
-    setSortDir('desc');
   };
+
   const handleSort = (key: SortKey) => {
-    if (key === sort) {
-      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    } else {
+    if (key !== sort) {
       setSort(key);
-      setSortDir('desc');
       setPage(1);
     }
   };
@@ -377,9 +371,10 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     category: activeCategory,
     sort,
     page,
+    limit: perPage,
   });
 
-  // Client-side filter: search + plan + option type + sort direction
+  // Client-side filter: search + plan + option type
   const filtered = React.useMemo(() => {
     if (!data?.funds) return [];
     let result = data.funds;
@@ -410,11 +405,8 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
       });
     }
 
-    // sortDir='asc' reverses the backend-ordered page
-    if (sortDir === 'asc') result = [...result].reverse();
-
     return result;
-  }, [data?.funds, search, planFilter, optionFilter, sortDir]);
+  }, [data?.funds, search, planFilter, optionFilter]);
 
   // --- Loading skeleton ---
   if (catsLoading) {
@@ -461,16 +453,29 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
         </div>
       </div>
 
-      {/* Row 3: Sort chips */}
-      <SortChips sort={sort} sortDir={sortDir} onSort={handleSort} />
-
-      {/* Row 4: Plan / Option type filters */}
+      {/* Row 2: Plan / Option type filters */}
       <FilterChips
         planFilter={planFilter}
         optionFilter={optionFilter}
         onPlanFilter={(k) => { setPlanFilter(k); setPage(1); }}
         onOptionFilter={(k) => { setOptionFilter(k); setPage(1); }}
       />
+
+      {/* Top pagination — per-page selector on left, page buttons on right */}
+      {data && (
+        <Pagination
+          page={page}
+          total={data.total}
+          limit={perPage}
+          onPage={setPage}
+          leftSlot={
+            <PerPageSelect
+              perPage={perPage}
+              onChange={(n) => { setPerPage(n); setPage(1); }}
+            />
+          }
+        />
+      )}
 
       {/* Table / loading / error */}
       {fundsLoading ? (
@@ -480,12 +485,12 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
       ) : isError ? (
         <ErrorCard title="Could not load funds" message="Please try again in a moment." />
       ) : (
-        <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} />
+        <FundExplorerTable funds={filtered} activeSort={sort} onSort={handleSort} />
       )}
 
-      {/* Pagination */}
+      {/* Bottom pagination — count on left, page buttons on right */}
       {data && (
-        <Pagination page={page} total={data.total} limit={data.limit} onPage={setPage} />
+        <Pagination page={page} total={data.total} limit={perPage} onPage={setPage} />
       )}
 
       {/* Disclosure bundle — non-neg #9: must accompany every label/AI surface */}
