@@ -51,6 +51,10 @@ from dhanradar.mf import service
 from dhanradar.mf.schemas import (
     CasJobStatus,
     CasUploadResponse,
+    FundCategoriesResponse,
+    FundCategory,
+    FundExplorerItem,
+    FundExplorerResponse,
     MFResearchAskRequest,
     MFResearchAskResponse,
     PortfolioCreateRequest,
@@ -70,7 +74,23 @@ logger = logging.getLogger(__name__)
 
 _MAX_CAS_BYTES = 15 * 1024 * 1024  # 15 MB cap on the upload
 _rl_upload = RateLimit(max_requests=10, window_seconds=60)
+_rl_explorer = RateLimit(max_requests=30, window_seconds=60)  # public explorer endpoints
 _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-processing gate
+
+# Validated sort-column whitelist — never interpolated from user input directly.
+_SORT_SQL: dict[str, str] = {
+    "rank":         "r.rank ASC",
+    "return_1y":    "m.return_1y_pct DESC NULLS LAST",
+    "return_3y":    "m.return_3y_pct DESC NULLS LAST",
+    "max_drawdown": "m.max_drawdown_pct DESC NULLS LAST",
+}
+
+
+def _sebi_display_name(full_category: str) -> str:
+    """'Equity Scheme - Large Cap Fund' → 'Large Cap Fund'"""
+    if " - " in full_category:
+        return full_category.split(" - ", 1)[1]
+    return full_category
 
 
 def _upload_dir() -> str:
@@ -523,6 +543,146 @@ async def ask_mf_research(
     )
 
     return MFResearchAskResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Fund Explorer — public endpoints (no auth, no user data)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/funds/categories", response_model=FundCategoriesResponse)
+async def fund_categories(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> FundCategoriesResponse:
+    """Return distinct SEBI categories that have at least one ranked fund.
+
+    Public — no auth required. Sourced from the most recent compute_market_ranks
+    run. Returns an empty list before the nightly task has seeded mf_fund_ranks.
+    """
+    from sqlalchemy import text as sa_text
+
+    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE  # noqa: F401
+
+    rows = (
+        await db.execute(
+            sa_text(
+                "SELECT r.sebi_category, COUNT(DISTINCT r.isin)::int AS fund_count"
+                " FROM mf.mf_fund_ranks r"
+                " WHERE r.as_of_date = (SELECT MAX(as_of_date) FROM mf.mf_fund_ranks)"
+                " GROUP BY r.sebi_category"
+                " ORDER BY r.sebi_category"
+            )
+        )
+    ).all()
+
+    cats = [
+        FundCategory(
+            key=r.sebi_category,
+            display_name=_sebi_display_name(r.sebi_category),
+            fund_count=r.fund_count,
+        )
+        for r in rows
+    ]
+    return FundCategoriesResponse(categories=cats)
+
+
+@router.get("/funds", response_model=FundExplorerResponse)
+async def fund_explorer_list(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    category: Annotated[str | None, Query()] = None,
+    sort: Annotated[str, Query()] = "rank",
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> FundExplorerResponse:
+    """Paginated, sortable fund list for the public Fund Explorer.
+
+    Filters to a single sebi_category (required). Joins mf_funds with the latest
+    mf_fund_ranks row and latest mf_fund_metrics row for each ISIN.
+
+    unified_score is NEVER included in the response (non-neg #2).
+    No user data — safe to cache at the edge and expose publicly.
+    """
+    from sqlalchemy import text as sa_text
+
+    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="category_required",
+        )
+    if sort not in _SORT_SQL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid_sort: must be one of {list(_SORT_SQL)}",
+        )
+
+    order_clause = _SORT_SQL[sort]
+    offset = (page - 1) * limit
+
+    base_sql = (
+        "SELECT"
+        "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
+        "  r.rank, r.total_in_cat, r.verb_label,"
+        "  m.return_1y_pct, m.return_3y_pct"
+        " FROM mf.mf_funds f"
+        " JOIN ("
+        "   SELECT DISTINCT ON (isin) isin, rank, total_in_cat, verb_label"
+        "   FROM mf.mf_fund_ranks"
+        "   WHERE sebi_category = :category"
+        "   ORDER BY isin, as_of_date DESC"
+        " ) r ON f.isin = r.isin"
+        " LEFT JOIN ("
+        "   SELECT DISTINCT ON (isin) isin, return_1y_pct, return_3y_pct"
+        "   FROM mf.mf_fund_metrics"
+        "   ORDER BY isin, as_of_date DESC"
+        " ) m ON f.isin = m.isin"
+        " WHERE f.sebi_category = :category"
+        f" ORDER BY {order_clause}"
+        " LIMIT :lim OFFSET :off"
+    )
+    count_sql = (
+        "SELECT COUNT(*)::int"
+        " FROM mf.mf_funds f"
+        " JOIN ("
+        "   SELECT DISTINCT ON (isin) isin"
+        "   FROM mf.mf_fund_ranks"
+        "   WHERE sebi_category = :category"
+        "   ORDER BY isin, as_of_date DESC"
+        " ) r ON f.isin = r.isin"
+        " WHERE f.sebi_category = :category"
+    )
+
+    params = {"category": category, "lim": limit, "off": offset}
+    rows = (await db.execute(sa_text(base_sql), params)).all()
+    total: int = (await db.execute(sa_text(count_sql), {"category": category})).scalar_one()
+
+    items = [
+        FundExplorerItem(
+            isin=r.isin,
+            scheme_name=r.scheme_name,
+            amc_name=r.amc_name,
+            sebi_category=r.sebi_category,
+            verb_label=r.verb_label,
+            confidence_band=None,
+            confidence_factors=None,
+            category_rank=r.rank,
+            category_total=r.total_in_cat,
+            return_1y_pct=r.return_1y_pct,
+            return_3y_pct=r.return_3y_pct,
+        )
+        for r in rows
+    ]
+    return FundExplorerResponse(
+        funds=items,
+        total=total,
+        page=page,
+        limit=limit,
+        disclosure=DISCLOSURE_BUNDLE,
+        not_advice=NOT_ADVICE,
+    )
 
 
 # ---------------------------------------------------------------------------
