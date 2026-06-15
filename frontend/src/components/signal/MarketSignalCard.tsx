@@ -138,7 +138,7 @@ export function MarketSignalCard({
             <span className="mono text-[22px] font-semibold text-ink">
               {numFmt(niftyValue)}
             </span>
-            {niftyChangePct !== undefined && (
+            {niftyChangePct != null && (
               <span
                 className={cn(
                   'mono text-small font-medium',
@@ -178,7 +178,7 @@ export function MarketSignalCard({
             >
               {vixValue.toFixed(1)}
             </span>
-            {vixChangePct !== undefined && (
+            {vixChangePct != null && (
               <span
                 className={cn(
                   'mono text-small font-medium',
@@ -227,7 +227,7 @@ export function MarketSignalCard({
               </span>
               <span className="ml-1 text-caption text-ink-muted">▼</span>
             </div>
-            {adRatio !== undefined && (
+            {adRatio != null && (
               <span className="mono ml-auto text-small text-ink-muted">
                 A/D {adRatio.toFixed(2)}
               </span>
