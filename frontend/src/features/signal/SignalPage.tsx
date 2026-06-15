@@ -113,15 +113,23 @@ function CASBanner() {
 // How Signal Works explainer
 // ---------------------------------------------------------------------------
 function HowSignalWorks() {
+  const steps = [
+    'Set your personal thresholds for Nifty 50, India VIX, and Market Breadth.',
+    'Each day, real market data is checked against your thresholds.',
+    'A weighted score (VIX 40%, Breadth 40%, Nifty 20%) determines the signal state.',
+    'Your dip fund deployment ladder shows how much to deploy at each signal level.',
+    'Your SIPs continue regardless — Signal only governs extra dip deployments.',
+  ];
   return (
     <div className="info-box">
       <p className="text-small font-medium text-ink">How Signal works</p>
-      <ul className="mt-2 flex flex-col gap-1.5 text-caption text-ink-secondary">
-        <li>1. You set your personal thresholds for Nifty, VIX, and Market Breadth.</li>
-        <li>2. Each day, real market data is checked against your thresholds.</li>
-        <li>3. A weighted score (VIX 40%, Breadth 40%, Nifty 20%) determines the signal state.</li>
-        <li>4. Your dip fund deployment ladder shows how much to deploy at each signal level.</li>
-        <li>5. Your SIPs continue regardless — Signal only governs extra dip deployments.</li>
+      <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 text-caption text-ink-secondary">
+        {steps.map((s, i) => (
+          <li key={i} className="flex gap-1.5">
+            <span className="shrink-0 font-medium text-ink-muted">{i + 1}.</span>
+            {s}
+          </li>
+        ))}
       </ul>
       <p className="mt-3 text-caption text-ink-faint">
         Signal does not recommend specific funds. It checks whether your own pre-set rules are met.
@@ -249,18 +257,11 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
 
       {/* ── Rules & Fund tab ── */}
       {activeTab === 'rules' && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {/* Left col: threshold form + dip fund */}
-          <div className="flex flex-col gap-4 lg:col-span-2">
-            <RuleThresholdForm />
-            <DipFundCard rules={rules} />
-            <DeploymentHistory />
-          </div>
-
-          {/* Right col: explainer */}
-          <div className="lg:col-span-1">
-            <HowSignalWorks />
-          </div>
+        <div className="flex flex-col gap-4">
+          <HowSignalWorks />
+          <RuleThresholdForm />
+          <DipFundCard rules={rules} />
+          <DeploymentHistory />
         </div>
       )}
     </div>
