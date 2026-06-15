@@ -52,19 +52,30 @@ export function LogTodayModal({ onClose }: LogTodayModalProps) {
     breadth?.ad_ratio != null ? String(breadth.ad_ratio.toFixed(3)) : ''
   );
 
-  // Sync market snapshot fields when data arrives
+  // Auto-fill market snapshot once when data first arrives; refs prevent re-fill on re-renders
+  const niftyFilled = React.useRef(false);
+  const vixFilled = React.useRef(false);
+  const breadthFilled = React.useRef(false);
+
   React.useEffect(() => {
-    if (nifty50?.change_pct != null && niftyPct === '')
+    if (!niftyFilled.current && nifty50?.change_pct != null) {
+      niftyFilled.current = true;
       setNiftyPct(nifty50.change_pct.toFixed(2));
+    }
   }, [nifty50?.change_pct]);
 
   React.useEffect(() => {
-    if (vix?.value != null && vixLevel === '') setVixLevel(vix.value.toFixed(2));
+    if (!vixFilled.current && vix?.value != null) {
+      vixFilled.current = true;
+      setVixLevel(vix.value.toFixed(2));
+    }
   }, [vix?.value]);
 
   React.useEffect(() => {
-    if (breadth?.ad_ratio != null && breadthRatio === '')
+    if (!breadthFilled.current && breadth?.ad_ratio != null) {
+      breadthFilled.current = true;
       setBreadthRatio(breadth.ad_ratio.toFixed(3));
+    }
   }, [breadth?.ad_ratio]);
 
   function toggleEmotion(em: JournalEmotion) {
@@ -101,17 +112,25 @@ export function LogTodayModal({ onClose }: LogTodayModalProps) {
   }
 
   return (
-    /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed inset-0 z-50"
       role="dialog"
       aria-modal="true"
       aria-label="Log today's decision"
     >
+      {/* Backdrop — button so a11y click/keyboard rules are satisfied */}
+      <button
+        type="button"
+        className="absolute inset-0 w-full h-full"
+        style={{ background: 'rgba(0,0,0,0.5)', cursor: 'default', border: 'none' }}
+        onClick={onClose}
+        aria-label="Close dialog"
+        tabIndex={-1}
+      />
+      {/* Panel — above backdrop */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <div
-        className="card card-pad w-full max-w-md mx-4 flex flex-col gap-4"
+        className="card card-pad w-full max-w-md mx-4 flex flex-col gap-4 pointer-events-auto"
         style={{ maxHeight: '90vh', overflowY: 'auto' }}
       >
         {/* Header */}
@@ -287,6 +306,7 @@ export function LogTodayModal({ onClose }: LogTodayModalProps) {
             </p>
           )}
         </form>
+      </div>
       </div>
     </div>
   );
