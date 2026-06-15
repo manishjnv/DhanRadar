@@ -11,7 +11,10 @@
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMarketIndices } from '@/hooks/useMarketIndices';
-import { useSignalRules, useVIX, useBreadth, useJournal, useSignalDeployments } from './api';
+import {
+  useSignalRules, useVIX, useBreadth, useJournal, useSignalDeployments,
+  useNotifications, useMarkNotificationRead,
+} from './api';
 import { SignalHero } from '@/components/signal/SignalHero';
 import { MarketSignalCard } from '@/components/signal/MarketSignalCard';
 import { PortfolioContext } from '@/components/signal/PortfolioContext';
@@ -154,6 +157,21 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
     rawTab === 'rules' ? 'rules' : rawTab === 'reflect' ? 'reflect' : 'today';
 
   const [logModalOpen, setLogModalOpen] = React.useState(false);
+  const [toastMessage, setToastMessage] = React.useState<string | null>(null);
+
+  // Notifications — show first unread as toast on mount, then mark it read
+  const { data: notificationsData } = useNotifications();
+  const markRead = useMarkNotificationRead();
+
+  React.useEffect(() => {
+    const first = notificationsData?.unread[0];
+    if (!first) return;
+    setToastMessage(first.message);
+    markRead.mutate(first.id);
+    const timer = setTimeout(() => setToastMessage(null), 3000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notificationsData]);
 
   function switchTab(tab: SignalTab) {
     const params = new URLSearchParams(searchParams?.toString() ?? '');
@@ -348,6 +366,13 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
       {/* Log today modal — rendered at root to escape stacking context */}
       {logModalOpen && (
         <LogTodayModal onClose={() => setLogModalOpen(false)} />
+      )}
+
+      {/* Signal notification toast */}
+      {toastMessage && (
+        <div className="toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
       )}
     </div>
   );

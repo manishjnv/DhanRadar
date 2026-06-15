@@ -10,6 +10,8 @@ import type {
   BreadthData,
   JournalEntryCreate,
   JournalResponse,
+  LearningContentResponse,
+  NotificationsResponse,
   SignalDeployment,
   SignalDipFund,
   SignalRules,
@@ -118,6 +120,41 @@ export function useAddJournal() {
       api.post<{ id: string; created_at: string }>('/signal/journal', entry),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: queryKeys.signal.journal() }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Learning content (Phase 3 Part A)
+// ---------------------------------------------------------------------------
+export function useLearningContent(signalState: string) {
+  return useQuery({
+    queryKey: queryKeys.signal.learning(signalState),
+    queryFn: () =>
+      api.get<LearningContentResponse>(`/signal/learning?signal_state=${signalState}`),
+    retry: signalRetry,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (Phase 3 Part B)
+// ---------------------------------------------------------------------------
+export function useNotifications() {
+  return useQuery({
+    queryKey: queryKeys.signal.notifications(),
+    queryFn: () => api.get<NotificationsResponse>('/signal/notifications'),
+    retry: signalRetry,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<void>(`/signal/notifications/${id}/read`, {}),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.signal.notifications() }),
   });
 }
 
