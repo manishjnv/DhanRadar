@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-15 — Broken main: partial squash merge across two PRs touching one file + auto-merge racing a failing required check
+
+- **Symptom:** after PR #185 (Fund Explorer v2) squash-merged, `main` failed `tsc`/`frontend` CI with 8 `TS2741` errors — `page.tsx` and the `SortHeader` call sites passed no `sortDir`, but `FundExplorerTableProps` + the `SortHeader` signature still *required* it.
+- **Root cause:** two concurrent PRs touched `FundExplorerTable.tsx`. PR #184 (sortable-column-indicators) *added* `sortDir`; my PR #185 *removed* it. Because #184 squash-merged into `main` first, GitHub's squash of #185 applied only the half of my diff that still differed from the new base — it took the call-site removals but dropped the type-definition removals (the definitions matched #184's just-merged content at the hunk level). Result: a self-inconsistent file. `gh pr merge --auto` then merged #185 despite the `frontend` check being red (auto-merge raced / `frontend` not enforced as a hard gate at that moment).
+- **Fix:** hotfix PR #186 (`fix/fund-explorer-sortdir-cleanup`, commit `f035bc4` → merged `4680db5`) removed `sortDir` from the `SortHeader` signature and `FundExplorerTableProps` so the definitions match the call sites. `tsc --noEmit` clean on merged `main`; redeployed fastapi+nextjs to KVM4.
+- **Prevention:** (1) after any squash merge of a PR that shared a file with another recently-merged PR, sync `main` and run `tsc` before declaring done — squash diffs are computed against the *post-merge* base, not your branch base, so partial application is possible. (2) Never trust `--auto` to honor a red required check during a race; confirm `gh pr checks` is green (or `mergeStateStatus=CLEAN`) on the *final* merge, and verify the merged `main` builds. (3) When two sessions edit the same component, rebase one onto the other before merging rather than letting both squash independently.
+- **Phase/area:** Frontend / Fund Explorer v2 / concurrent-session merge hygiene.
+
 ### 2026-06-13 — B66-f1: AMFI category carry-forward poisoned by an AMC-name line with parens ("IDF")
 
 - **Symptom:** on its first prod run, the freshly-deployed B66 taxonomy validation layer WARNed
