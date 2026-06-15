@@ -142,6 +142,18 @@ def compute_behaviour_scores(entries: list[SignalJournal]) -> dict:
     }
 
 
+async def delete_journal_entry(db: AsyncSession, user_id: str, entry_id: str) -> bool:
+    """Delete a journal entry. Returns False if not found or not owned by user."""
+    uid = uuid.UUID(user_id)
+    eid = uuid.UUID(entry_id)
+    row = await db.get(SignalJournal, eid)
+    if row is None or row.user_id != uid:
+        return False
+    await db.delete(row)
+    await db.flush()
+    return True
+
+
 async def create_journal_entry(
     db: AsyncSession,
     user_id: str,
