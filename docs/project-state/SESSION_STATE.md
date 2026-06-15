@@ -1,11 +1,49 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-15 (**Signal page Phase 1 DONE, PR #191 open, CI pending.**
-`/signal` route live: Today tab (SignalHero, 3 MarketSignalCards, PortfolioContext, LearningContent)
-and Rules & Fund tab (RuleThresholdForm, DipFundCard, DeploymentHistory, HowSignalWorks). Backend:
-`signal` schema, migration 0027, 5 endpoints, VIX/Breadth stubs. SEBI-clean: `triggered/watch/no_signal`
-only; `weighted_score` never in DOM; "NOT FINANCIAL ADVICE" in every SignalHero footer. 13 tasks, 14
-commits on `feat/signal-page-phase1`. Next: merge after CI green → KVM4 deploy → `alembic upgrade head`.)
+**Last updated:** 2026-06-15 (**Signal page crash fixed + last-known market data + Rules layout
+polish DONE. PRs #194 + #195 merged and deployed to KVM4.** `/signal` fully functional: Today tab
+shows live Nifty 50 (23,853), VIX 18.5, Breadth A/D 1.24; threshold labels render correctly;
+no crashes. Rules & Fund tab: "How Signal works" is now a full-width top strip with 2-col grid.)
+
+## Signal page — crash fix + last-known indices + layout polish (2026-06-15, PRs #194 + #195)
+
+**Root-cause crash fix (PR #194, merged + deployed).**
+`c.toFixed is not a function` crashed `/signal` on every authenticated visit. Root cause:
+`SignalRulesOut` used `Decimal` for `vix_threshold`, `breadth_threshold`, `nifty_threshold` —
+Pydantic v2 serialises `Decimal` as a JSON string (`"19.00"`). String passed through `?? 19`
+(not null/undefined) and `"19.00".toFixed(1)` threw `TypeError`. Fix: changed `SignalRulesOut`
+thresholds to `float` (Pydantic coerces DB `Decimal` → `float` on `model_validate`; round-trip
+preserved via `SignalRulesUpdate` which still validates as `Decimal`).
+
+**Also PR #194:**
+
+- Added 24-h last-known-good fallback key (`dashboard:indices:fallback`): on a successful Yahoo
+  fetch the payload is written to both the 60s live key and the 24h fallback; on Yahoo outage
+  (empty result) the fallback is returned instead of empty list.
+- Fixed index display names from all-caps (`NIFTY 50`, `SENSEX`) to title-case (`Nifty 50`,
+  `Sensex`, `Nifty Bank`, `Nifty Midcap 150`) — was causing the `find(i.name === 'Nifty 50')`
+  lookup in `SignalPage.tsx` to always return `undefined` (Nifty card blank, signal state null).
+- Fixed the 3 remaining outer null guards in `MarketSignalCard.tsx` from `!== undefined` to
+  `!= null` (PRs #192+#193 had fixed inner guards only).
+- Updated `test_dashboard.py` to expect title-case names (CI was red; all other checks green).
+
+**Rules tab layout polish (PR #195, merged + deployed).**
+Removed the 2/3+1/3 column split on the Rules & Fund tab. `HowSignalWorks` moved to a
+full-width card at the top with 5 steps in a 2-column grid. Threshold sliders, dip-fund card,
+and deployment history stack below in full width.
+
+**State:** alembic still at `0027` (no new migration); KVM4 deployed at latest main.
+
+### Agent-utilization & routing telemetry (2026-06-15 Signal crash-fix session)
+
+- **Fable (Tier 0):** orchestration; root-cause diagnosis (Decimal→JSON string + index name case
+  mismatch); all 5 direct edits (schemas, indices, test, MarketSignalCard, SignalPage — ≤30 lines
+  each, in hot cache, one-shot exemption); commit + PR + merge + KVM4 deploy chain. reworked: N/A.
+- **Sonnet (Tier 1):** n/a — all changes were small, in-cache, under the self-execute threshold.
+- **Haiku (Tier 3):** n/a.
+- **codex:rescue:** n/a — Tier-A UI bug fix, no load-bearing/security path.
+- **Doc routing:** SESSION_STATE typed on Fable directly (surgical structured-state, hot-cache,
+  ≤30-line exemption; free-chain draft would have required re-feeding all the commit/PR refs).
 
 ## Signal page Phase 1 — full `/signal` route shipped (2026-06-15)
 
