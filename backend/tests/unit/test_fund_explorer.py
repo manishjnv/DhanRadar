@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from dhanradar.mf.router import _SORT_SQL, _sebi_display_name
+from dhanradar.mf.router import _SORT_COL, _sebi_display_name
 from dhanradar.mf.schemas import (
     FundCategoriesResponse,
     FundCategory,
@@ -111,20 +111,19 @@ def test_sebi_display_name(full: str, expected: str):
 
 
 # ---------------------------------------------------------------------------
-# 4. _SORT_SQL whitelist safety
+# 4. _SORT_COL whitelist safety
 # ---------------------------------------------------------------------------
 
-def test_sort_sql_expected_keys_present():
+def test_sort_col_expected_keys_present():
     expected = {"rank", "return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"}
-    assert expected == set(_SORT_SQL.keys())
+    assert expected == set(_SORT_COL.keys())
 
 
-def test_sort_sql_no_user_input_in_values():
-    """Ensure all SQL fragments in _SORT_SQL are safe literals, not templates."""
-    for key, fragment in _SORT_SQL.items():
-        # Each fragment must contain a valid column reference, no format placeholders
-        assert "{" not in fragment, f"Unsafe template in _SORT_SQL[{key!r}]"
-        assert ";" not in fragment, f"Statement separator in _SORT_SQL[{key!r}]"
+def test_sort_col_no_user_input_in_values():
+    """Ensure all column expressions in _SORT_COL are safe literals, not templates."""
+    for key, fragment in _SORT_COL.items():
+        assert "{" not in fragment, f"Unsafe template in _SORT_COL[{key!r}]"
+        assert ";" not in fragment, f"Statement separator in _SORT_COL[{key!r}]"
 
 
 # ---------------------------------------------------------------------------

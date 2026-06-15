@@ -77,16 +77,20 @@ _rl_upload = RateLimit(max_requests=10, window_seconds=60)
 _rl_explorer = RateLimit(max_requests=30, window_seconds=60)  # public explorer endpoints
 _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-processing gate
 
-# Validated sort-column whitelist — never interpolated from user input directly.
-_SORT_SQL: dict[str, str] = {
-    "rank":         "r.rank ASC",
-    "return_3m":    "m.return_3m_pct DESC NULLS LAST",
-    "return_6m":    "m.return_6m_pct DESC NULLS LAST",
-    "return_1y":    "m.return_1y_pct DESC NULLS LAST",
-    "return_3y":    "m.return_3y_pct DESC NULLS LAST",
-    "return_5y":    "m.return_5y_pct DESC NULLS LAST",
-    "max_drawdown": "m.max_drawdown_pct ASC NULLS LAST",
+# Validated sort-column whitelist — column expressions only, never interpolated from user input.
+_SORT_COL: dict[str, str] = {
+    "rank":         "r.rank",
+    "return_3m":    "m.return_3m_pct",
+    "return_6m":    "m.return_6m_pct",
+    "return_1y":    "m.return_1y_pct",
+    "return_3y":    "m.return_3y_pct",
+    "return_5y":    "m.return_5y_pct",
+    "max_drawdown": "m.max_drawdown_pct",
 }
+# Columns where ASC = "best first" (rank 1 is best; lower drawdown is better).
+_SORT_BEST_ASC: frozenset[str] = frozenset({"rank", "max_drawdown"})
+# Columns that need NULLS LAST (metrics may be absent; rank is always present).
+_SORT_NULLS_LAST: frozenset[str] = frozenset({"return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"})
 
 
 def _sebi_display_name(full_category: str) -> str:
@@ -595,6 +599,7 @@ async def fund_explorer_list(
     db: Annotated[AsyncSession, Depends(get_db)],
     category: Annotated[str | None, Query()] = None,
     sort: Annotated[str, Query()] = "rank",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 20,
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
@@ -616,13 +621,18 @@ async def fund_explorer_list(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="category_required",
         )
-    if sort not in _SORT_SQL:
+    if sort not in _SORT_COL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"invalid_sort: must be one of {list(_SORT_SQL)}",
+            detail=f"invalid_sort: must be one of {list(_SORT_COL)}",
         )
 
-    order_clause = _SORT_SQL[sort]
+    # Build ORDER BY: sort_dir='desc' means "best first"; 'asc' means "worst first".
+    # For rank/max_drawdown, SQL ASC = best-first; for returns, SQL DESC = best-first.
+    want_sql_asc = (sort_dir == "desc") == (sort in _SORT_BEST_ASC)
+    sql_dir = "ASC" if want_sql_asc else "DESC"
+    nulls = " NULLS LAST" if sort in _SORT_NULLS_LAST else ""
+    order_clause = f"{_SORT_COL[sort]} {sql_dir}{nulls}"
     offset = (page - 1) * limit
 
     base_sql = (

@@ -51,7 +51,7 @@ export const queryKeys = {
     casStatus:          (jobId: string) => ['mf', 'cas-status', jobId] as const,
     report:             (jobId: string) => ['mf', 'report', jobId] as const,
     explorerCategories: ()              => ['mf', 'explorer', 'categories'] as const,
-    explorerFunds:      (params: { category: string; sort: string; page: number; limit?: number }) =>
+    explorerFunds:      (params: { category: string; sort: string; sortDir?: string; page: number; limit?: number }) =>
                           ['mf', 'explorer', 'funds', params] as const,
     fundDetail:         (isin: string, category: string) =>
                           ['mf', 'fund-detail', isin, category] as const,
