@@ -21,14 +21,16 @@ from dhanradar.market_data.providers.yahoo import _quote_meta, _signal_value
 logger = logging.getLogger(__name__)
 
 _CACHE_KEY = "dashboard:indices"
+_FALLBACK_KEY = "dashboard:indices:fallback"
 _TTL_SECONDS = 60
+_FALLBACK_TTL = 86400  # 24 h — last-known-good when Yahoo is unavailable
 
 # Display name → Yahoo symbol. Indian indices on Yahoo (server-reachable, unlike NSE).
 _INDICES: list[tuple[str, str]] = [
-    ("NIFTY 50", "^NSEI"),
-    ("SENSEX", "^BSESN"),
-    ("NIFTY Bank", "^NSEBANK"),
-    ("NIFTY Midcap 150", "NIFTYMIDCAP150.NS"),
+    ("Nifty 50", "^NSEI"),
+    ("Sensex", "^BSESN"),
+    ("Nifty Bank", "^NSEBANK"),
+    ("Nifty Midcap 150", "NIFTYMIDCAP150.NS"),
 ]
 
 
@@ -66,10 +68,21 @@ async def get_indices() -> list[MarketIndex]:
 
     indices = await _fetch_indices()
     if indices:
+        payload = json.dumps([i.model_dump() for i in indices])
         try:
-            await redis.set(
-                _CACHE_KEY, json.dumps([i.model_dump() for i in indices]), ex=_TTL_SECONDS
-            )
+            await redis.set(_CACHE_KEY, payload, ex=_TTL_SECONDS)
+            await redis.set(_FALLBACK_KEY, payload, ex=_FALLBACK_TTL)
         except Exception:  # noqa: BLE001 — cache write is best-effort
             logger.debug("dashboard: indices cache write failed")
-    return indices
+        return indices
+
+    # Yahoo unavailable — return last-known-good values rather than an empty list
+    try:
+        fallback = await redis.get(_FALLBACK_KEY)
+        if fallback:
+            raw = fallback if isinstance(fallback, str) else fallback.decode()
+            logger.debug("dashboard: returning stale index fallback")
+            return [MarketIndex(**d) for d in json.loads(raw)]
+    except Exception:  # noqa: BLE001
+        logger.debug("dashboard: fallback cache read failed")
+    return []

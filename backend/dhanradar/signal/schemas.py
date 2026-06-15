@@ -11,9 +11,9 @@ from pydantic import BaseModel, field_validator
 
 
 class SignalRulesOut(BaseModel):
-    nifty_threshold: Decimal
-    vix_threshold: Decimal
-    breadth_threshold: Decimal
+    nifty_threshold: float
+    vix_threshold: float
+    breadth_threshold: float
     deploy_ladder: list[int]
     alerts_on: bool
 
