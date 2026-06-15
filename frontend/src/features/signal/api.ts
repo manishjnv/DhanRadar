@@ -120,3 +120,12 @@ export function useAddJournal() {
       qc.invalidateQueries({ queryKey: queryKeys.signal.journal() }),
   });
 }
+
+export function useDeleteJournal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (entryId: string) => api.del<void>(`/signal/journal/${entryId}`),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.signal.journal() }),
+  });
+}
