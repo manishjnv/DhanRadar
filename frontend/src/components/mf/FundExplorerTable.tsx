@@ -108,12 +108,15 @@ function SortHeader({
         'pb-3 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold',
         'cursor-pointer select-none whitespace-nowrap transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal/40',
-        isActive ? 'text-ink' : 'text-ink-muted hover:text-ink-secondary',
+        isActive ? 'text-royal' : 'text-ink-muted hover:text-ink',
       )}
     >
       {label}
-      <span className={cn('ml-1 text-royal transition-opacity', isActive ? 'opacity-100' : 'opacity-0')} aria-hidden="true">
-        {sortDir === 'desc' ? '▾' : '▴'}
+      <span
+        className={cn('ml-1 transition-opacity', isActive ? 'text-royal opacity-100' : 'opacity-30')}
+        aria-hidden="true"
+      >
+        {isActive ? (sortDir === 'desc' ? '▾' : '▴') : '↕'}
       </span>
     </th>
   );
