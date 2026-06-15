@@ -349,4 +349,271 @@ CONCEPTS: list[dict] = [
             "[expense ratio (TER)](/learn/concepts/expense-ratio-ter)."
         ),
     },
+    {
+        "slug": "india-vix-explained",
+        "title": "What India VIX tells you",
+        "summary": (
+            "India VIX is the NSE's measure of how much uncertainty options markets "
+            "are pricing into the next 30 days — a real-time gauge of collective fear."
+        ),
+        "category": "Market signals",
+        "sort_order": 90,
+        "body_md": (
+            "## What VIX stands for\n\n"
+            "**India VIX** (Volatility Index) is a real-time index published by NSE. "
+            "It is derived from Nifty 50 options prices and represents the annualised "
+            "volatility that options traders are collectively pricing into the *next 30 "
+            "calendar days*. A VIX of 20 means the market is pricing in roughly "
+            "±20% annualised movement — or about ±5.8% over 30 days. " + _ILLUS + "\n\n"
+            "## Fear gauge — but of expected future moves\n\n"
+            "VIX rises when options buyers pay more for protection, which typically "
+            "happens when market participants are uncertain or fearful. "
+            "Historically, VIX spikes have coincided with sharp market falls — but VIX "
+            "measures *expected* future volatility, not actual past volatility and not "
+            "a prediction of direction.\n\n"
+            "## What the levels typically imply\n\n"
+            "- **Below 15** — relatively calm market; options are cheap; "
+            "uncertainty is low.\n"
+            "- **15–20** — normal market conditions; moderate uncertainty.\n"
+            "- **20–30** — elevated anxiety; often seen around significant events or "
+            "moderate market stress.\n"
+            "- **Above 30** — high fear; seen during major corrections or crises.\n\n"
+            "These are rough historical anchors, not thresholds with guaranteed outcomes.\n\n"
+            "## What VIX is NOT\n\n"
+            "VIX does not predict which direction markets will move. It also does not "
+            "measure how much markets have already fallen — that is measured by the "
+            "index level itself. High VIX means high uncertainty in both directions.\n\n"
+            "Related concepts: [volatility](/learn/concepts/volatility), "
+            "[market breadth](/learn/concepts/market-breadth-basics)."
+        ),
+    },
+    {
+        "slug": "dip-buying-discipline",
+        "title": "Staged deployment: why not all-in during a dip",
+        "summary": (
+            "Deploying capital in stages during a market correction manages the risk "
+            "of catching a falling knife — spreading purchases across a range of prices."
+        ),
+        "category": "Investing habits",
+        "sort_order": 95,
+        "body_md": (
+            "## The appeal — and the trap — of buying the dip\n\n"
+            "When markets fall, prices look cheaper than they did before. Deploying "
+            "capital at lower prices *can* improve long-run returns — but markets can "
+            "fall further still. The trap is going all-in at the first sign of a "
+            "correction, only to watch prices fall another 20%.\n\n"
+            "## Staged deployment: the idea\n\n"
+            "**Staged deployment** (or a deployment ladder) spreads the capital across "
+            "several tranches triggered at different levels of market stress. For "
+            "example: deploy 20% of reserved capital if the market drops 5%, another "
+            "20% if it drops 10%, and so on — reserving the final tranches for the "
+            "deepest corrections. This is a hypothetical illustration, not a "
+            "recommended strategy. " + _ILLUS + "\n\n"
+            "## Why this works behaviourally\n\n"
+            "- It removes the pressure of a single all-or-nothing decision.\n"
+            "- It ensures some capital is always available if conditions worsen.\n"
+            "- It converts panic into a pre-planned checklist executed on autopilot.\n\n"
+            "## What it does not guarantee\n\n"
+            "Staged deployment does not ensure a profit. Markets may not recover, or "
+            "may recover before all tranches are deployed. Like all systematic "
+            "approaches, its value is in the discipline it enforces, not a guaranteed "
+            "outcome.\n\n"
+            "Related concepts: [SIP & rupee-cost averaging]"
+            "(/learn/concepts/sip-rupee-cost-averaging), "
+            "[volatility](/learn/concepts/volatility)."
+        ),
+    },
+    {
+        "slug": "nifty-correction-history",
+        "title": "Nifty corrections: what history shows",
+        "summary": (
+            "Indian equity markets have seen repeated corrections throughout their "
+            "history — each felt permanent in the moment, each followed by recovery."
+        ),
+        "category": "Market signals",
+        "sort_order": 100,
+        "body_md": (
+            "## Corrections are normal, not exceptional\n\n"
+            "A **market correction** is generally defined as a fall of 10% or more "
+            "from a recent peak. Bear markets are falls of 20% or more. The Nifty 50 "
+            "has experienced both regularly since its inception — roughly every few "
+            "years.\n\n"
+            "## Historical pattern (educational overview)\n\n"
+            "Looking at Nifty 50 history, significant drawdowns have included episodes "
+            "during the dot-com bust (2001), the global financial crisis (2008–2009), "
+            "the European debt crisis (2011), demonetisation (2016), the IL&FS credit "
+            "crisis (2018), COVID-19 (2020), and global rate-hike fears (2022). "
+            "In every case, the index recovered to new highs — eventually. The time to "
+            "recovery has varied from months to years.\n\n"
+            "## What historical patterns can and cannot tell us\n\n"
+            "- Past corrections show that downturns *have always* been followed by "
+            "recovery in India's equity markets — but this does not guarantee any "
+            "future recovery will happen or on any particular timeline.\n"
+            "- The severity and duration of corrections vary enormously.\n"
+            "- Individual holdings, sectors, and small/mid-cap stocks can and do "
+            "suffer longer drawdowns than the broad index.\n\n"
+            "## The behavioural lesson\n\n"
+            "Knowing that corrections are a recurring feature — not an aberration — can "
+            "help investors avoid the common mistake of treating a fall as a signal to "
+            "exit permanently. Historical context does not remove risk; it provides "
+            "a frame for understanding it.\n\n"
+            "Related concepts: [drawdown](/learn/concepts/drawdown), "
+            "[volatility](/learn/concepts/volatility)."
+        ),
+    },
+    {
+        "slug": "sip-during-corrections",
+        "title": "Keep your SIP running in corrections",
+        "summary": (
+            "Pausing a SIP during a market fall means missing the lower prices that "
+            "are the chief arithmetic benefit of investing in instalments."
+        ),
+        "category": "Investing habits",
+        "sort_order": 105,
+        "body_md": (
+            "## The instinct to pause — and why it backfires\n\n"
+            "When markets fall sharply, the natural instinct is to pause or stop a SIP "
+            "to 'wait for stability'. But the point of a SIP is precisely to buy during "
+            "all conditions — including the uncomfortable ones.\n\n"
+            "## What happens arithmetically when you pause\n\n"
+            "Rupee-cost averaging works because a fixed instalment buys *more units* "
+            "when the NAV is lower. A correction is when NAVs are most depressed — "
+            "pausing a SIP at that moment skips the months where each rupee buys the "
+            "most units. By the time markets recover and the investor resumes, prices "
+            "are higher and fewer units are purchased per instalment. " + _ILLUS + "\n\n"
+            "## What a SIP pause costs (hypothetically)\n\n"
+            "Two investors both run a ₹10,000 SIP in a hypothetical fund. One pauses "
+            "for 3 months during a 20% drawdown; the other continues. The one who "
+            "continued bought units at depressed NAVs; the one who paused bought "
+            "nothing during those months and resumed at higher prices. The exact "
+            "difference depends on when and how fast the market recovers — these are "
+            "illustrative assumptions, not a prediction. " + _ILLUS + "\n\n"
+            "## Important caveat\n\n"
+            "Continuing a SIP during a correction only makes sense if the underlying "
+            "scheme still aligns with your goals and if you have the financial capacity "
+            "to continue the instalment. Investing beyond one's means or risk tolerance "
+            "is not advised by anyone. This page explains the concept, not your "
+            "personal situation.\n\n"
+            "Related concepts: [SIP & rupee-cost averaging]"
+            "(/learn/concepts/sip-rupee-cost-averaging), "
+            "[drawdown](/learn/concepts/drawdown)."
+        ),
+    },
+    {
+        "slug": "market-breadth-basics",
+        "title": "Reading market breadth",
+        "summary": (
+            "Market breadth measures how many stocks are participating in a move — "
+            "a narrow rally or decline tells a different story than a broad one."
+        ),
+        "category": "Market signals",
+        "sort_order": 110,
+        "body_md": (
+            "## What market breadth is\n\n"
+            "**Market breadth** refers to the number of individual stocks participating "
+            "in a market's overall move. When the index rises but most stocks are "
+            "falling, the rally is said to have *narrow* breadth — a handful of large "
+            "stocks are driving the headline number while the rest lag.\n\n"
+            "## Advances, declines, and the A/D ratio\n\n"
+            "The most common breadth measure is the **advance-decline ratio (A/D "
+            "ratio)**: the number of stocks that rose on a given day divided by the "
+            "number that fell. An A/D ratio above 1 means more stocks advanced than "
+            "declined — broad participation. An A/D ratio below 1 means the majority "
+            "of stocks fell even if the index was flat or positive.\n\n"
+            "## Why breadth matters\n\n"
+            "- A broad rally (high A/D) suggests widespread buying; narrow rallies "
+            "(low A/D) may be fragile.\n"
+            "- A broad decline (very low A/D) can signal widespread selling and "
+            "elevated fear — sometimes the condition where staged deployment makes "
+            "most historical sense.\n"
+            "- Breadth tells you *who* is participating, not *what* the market will do.\n\n"
+            "## Limitations\n\n"
+            "Breadth is one data point among many. Markets can sustain narrow rallies "
+            "for extended periods; breadth divergences do not reliably predict "
+            "reversals. Like all market signals, it describes current conditions — it "
+            "does not forecast.\n\n"
+            "Related concepts: [India VIX](/learn/concepts/india-vix-explained), "
+            "[volatility](/learn/concepts/volatility)."
+        ),
+    },
+    {
+        "slug": "patience-in-investing",
+        "title": "Patience: the compounding edge",
+        "summary": (
+            "Patience in investing is the willingness to stay invested through "
+            "uncomfortable periods — the trait that lets compounding work its full "
+            "effect."
+        ),
+        "category": "Investing habits",
+        "sort_order": 115,
+        "body_md": (
+            "## Why patience is structural, not just character\n\n"
+            "Long-run equity returns in India have historically been positive — but they "
+            "have arrived unevenly. A significant fraction of total long-run returns has "
+            "come in brief windows: missing the best few days or months in a decade "
+            "has historically cost a large share of the gain. An investor who exits "
+            "during bad periods risks missing the recovery.\n\n"
+            "## The arithmetic of staying in\n\n"
+            "Compounding accelerates with time: the later years of a long holding "
+            "period contribute more absolute growth than the early years. An investor "
+            "who exits after 7 years of a 10-year compounding curve captures only a "
+            "fraction of the curve's total rise. " + _ILLUS + "\n\n"
+            "## What patience is NOT\n\n"
+            "- Patience is not the same as inaction. Reviewing allocations periodically "
+            "and rebalancing is consistent with patience.\n"
+            "- Patience does not mean staying invested in the *wrong* instrument "
+            "indefinitely. The case for patience applies to diversified, goal-aligned "
+            "investments — not to individual stocks or thematic bets held past their "
+            "thesis.\n"
+            "- Patience does not overcome poor asset allocation or mismatch between "
+            "portfolio risk and personal situation.\n\n"
+            "## The behavioural challenge\n\n"
+            "Patience is cognitively difficult because short-term pain is vivid and "
+            "immediate while compounding gains are slow and abstract. This is precisely "
+            "why mechanical disciplines — SIPs, pre-set deployment ladders, and "
+            "pre-committed rules — are useful: they remove the decision from the "
+            "uncomfortable moment.\n\n"
+            "Related concepts: [compounding](/learn/concepts/compounding), "
+            "[SIP & rupee-cost averaging](/learn/concepts/sip-rupee-cost-averaging)."
+        ),
+    },
+    {
+        "slug": "sip-discipline",
+        "title": "Why SIP discipline beats market timing",
+        "summary": (
+            "Consistent, rule-bound investing through market cycles has historically "
+            "outperformed attempts to time when to invest — even imperfect timing."
+        ),
+        "category": "Investing habits",
+        "sort_order": 120,
+        "body_md": (
+            "## The seductive idea of market timing\n\n"
+            "Market timing — buying just before markets rise and selling just before "
+            "they fall — would be immensely valuable if it were reliably possible. "
+            "Decades of research across markets suggest it is not, at least not "
+            "consistently. Even professionals whose entire job is predicting markets "
+            "fail to do so better than chance over long horizons.\n\n"
+            "## What 'SIP discipline' means\n\n"
+            "SIP discipline means investing the same amount at the same interval — "
+            "every month, regardless of whether markets are up, down, or sideways. "
+            "It is a commitment to *not* try to time entry points, which removes the "
+            "psychological burden of constant market-watching.\n\n"
+            "## The evidence from hypothetical scenarios\n\n"
+            "Studies have repeatedly modelled different investor types — the perfect "
+            "timer, the consistent SIP investor, the investor who always buys at peaks, "
+            "and the investor who leaves money in cash waiting for the perfect moment. "
+            "The consistent SIP investor almost always beats the worst-timer and the "
+            "perennial cash-holder, and typically comes close to the perfect timer "
+            "(who does not exist in practice). " + _ILLUS + "\n\n"
+            "## Why rules beat decisions under uncertainty\n\n"
+            "Rules eliminate the worst outcomes of emotional decision-making. The "
+            "biggest risk for most investors is not a bad market — it is acting "
+            "impulsively at exactly the wrong moment. A pre-committed SIP schedule "
+            "acts as a circuit-breaker against that impulse.\n\n"
+            "Related concepts: [SIP & rupee-cost averaging]"
+            "(/learn/concepts/sip-rupee-cost-averaging), "
+            "[patience in investing](/learn/concepts/patience-in-investing), "
+            "[compounding](/learn/concepts/compounding)."
+        ),
+    },
 ]
