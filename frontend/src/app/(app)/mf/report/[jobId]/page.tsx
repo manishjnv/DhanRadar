@@ -245,7 +245,7 @@ function SchemesTable({
                         onClick={() => toggle(s.isin)}
                         aria-expanded={isOpen}
                         aria-controls={panelId}
-                        className="shrink-0 text-caption px-2 py-0.5 rounded-full bg-surface-2 text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors"
+                        className="shrink-0 min-h-[44px] inline-flex items-center text-caption px-2 py-0.5 rounded-full bg-surface-2 text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors"
                       >
                         {isOpen ? 'Hide' : 'Why?'}
                       </button>
@@ -343,6 +343,8 @@ function ReportView({ jobId }: { jobId: string }) {
   // B4: track whether the SummaryRow is visible in the viewport.
   const summaryRef = React.useRef<HTMLDivElement>(null);
   const [summaryVisible, setSummaryVisible] = React.useState(true);
+  // Depend on `data` so the observer is (re)attached after the loading skeleton
+  // resolves — summaryRef.current is null during the loading phase.
   React.useEffect(() => {
     const el = summaryRef.current;
     if (!el) return;
@@ -351,7 +353,7 @@ function ReportView({ jobId }: { jobId: string }) {
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [data]);
 
   // Feature 2: fetch label history (Plus-gated); enabled once portfolio_id is known.
   const { entries: historyEntries, isLocked: historyLocked } = useMfLabelHistory(
