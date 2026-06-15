@@ -57,6 +57,8 @@ class FundReportItem(BaseModel):
     isin: str
     scheme_name: str
     folio_number: str
+    # SEBI-canonical category from mf_funds (fills the Category column in the holdings table).
+    category: str | None = None
     units: float
     invested_amount: float | None = None
     current_value: float | None = None
