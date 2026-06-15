@@ -63,9 +63,9 @@ async def market_why_today(db: Annotated[AsyncSession, Depends(get_db)]) -> WhyT
 
 @router.get("/vix", response_model=VIXOut)
 async def market_vix() -> VIXOut:
-    return VIXOut(value=18.5, change_pct=-0.8, market_open=False)
+    return await service.get_vix()
 
 
 @router.get("/breadth", response_model=BreadthOut)
 async def market_breadth() -> BreadthOut:
-    return BreadthOut(advances=1240, declines=260, ad_ratio=1.24, market_open=False)
+    return await service.get_breadth()

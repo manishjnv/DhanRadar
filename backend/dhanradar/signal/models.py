@@ -128,3 +128,28 @@ class SignalNotification(Base):
     signal_state = sa.Column(sa.String(20), nullable=False)
     read_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))
+
+
+class SignalHistory(Base):
+    """Per-date historical signal states for the trust engine (backfill + live)."""
+
+    __tablename__ = "signal_history"
+    __table_args__ = (
+        sa.Index("ix_signal_history_date", "date"),
+        sa.UniqueConstraint("date", name="uq_signal_history_date"),
+        {"schema": "signal"},
+    )
+
+    id = sa.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    date = sa.Column(sa.Date, nullable=False)
+    signal_state = sa.Column(sa.String(20), nullable=False)
+    nifty_close = sa.Column(sa.Numeric(10, 2), nullable=False)
+    vix_close = sa.Column(sa.Numeric(6, 2), nullable=False)
+    ad_ratio_proxy = sa.Column(sa.Numeric(5, 3), nullable=False)
+    outcome_pct_90d = sa.Column(sa.Numeric(8, 4), nullable=True)
+    created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))

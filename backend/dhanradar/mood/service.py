@@ -13,12 +13,16 @@ are best-effort (a failure never breaks the snapshot).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time as _time_module
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
+from datetime import time as _time_type
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
@@ -311,6 +315,173 @@ async def get_why_today(db: Any) -> WhyToday | None:
         disclosure=DISCLOSURE_BUNDLE, not_advice=NOT_ADVICE,
         disclaimer_version=DISCLAIMER_VERSION,
     )
+
+
+# ---------------------------------------------------------------------------
+# Part A — Live VIX  |  Part B — Market Breadth  (Phase 4)
+# ---------------------------------------------------------------------------
+
+_VIX_CACHE_KEY = "signal:vix:last"
+_BREADTH_CACHE_KEY = "signal:breadth:last"
+_TTL_VIX_SEC = 24 * 3600
+_TTL_BREADTH_SEC = 3600
+
+_NIFTY50_TICKERS = [
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
+    "LT.NS", "HCLTECH.NS", "BAJFINANCE.NS", "ASIANPAINT.NS", "AXISBANK.NS",
+    "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS",
+    "NESTLEIND.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "M&M.NS",
+    "TATAMOTORS.NS", "COALINDIA.NS", "TATASTEEL.NS", "GRASIM.NS", "ADANIPORTS.NS",
+    "BAJAJ-AUTO.NS", "TECHM.NS", "DRREDDY.NS", "HINDALCO.NS", "CIPLA.NS",
+    "SBILIFE.NS", "JSWSTEEL.NS", "BPCL.NS", "BAJAJFINSV.NS", "BRITANNIA.NS",
+    "EICHERMOT.NS", "HDFCLIFE.NS", "APOLLOHOSP.NS", "INDUSINDBK.NS", "DIVISLAB.NS",
+    "TATACONSUM.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS", "BEL.NS", "ADANIENT.NS",
+]
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _market_open_now() -> bool:
+    """Return True if current IST time is Mon–Fri 09:15–15:30."""
+    now_ist = datetime.now(_IST)
+    if now_ist.weekday() >= 5:
+        return False
+    t = now_ist.time()
+    return _time_type(9, 15) <= t <= _time_type(15, 30)
+
+
+def _fetch_vix_sync() -> dict:
+    import yfinance as yf
+    hist = yf.Ticker("^INDIAVIX").history(period="2d")
+    if hist.empty or len(hist) < 1:
+        raise ValueError("empty VIX response")
+    latest = float(hist["Close"].iloc[-1])
+    prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else latest
+    change_pct = round((latest - prev) / prev * 100, 2) if prev else 0.0
+    return {
+        "value": round(latest, 2),
+        "change_pct": change_pct,
+        "fetched_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _fetch_breadth_sync() -> dict:
+    import yfinance as yf
+    start = _time_module.monotonic()
+
+    close_data = yf.download(
+        _NIFTY50_TICKERS, period="2d", progress=False, auto_adjust=True
+    )["Close"]
+
+    if close_data.empty or len(close_data) < 2:
+        raise ValueError("insufficient breadth data")
+
+    today_row = close_data.iloc[-1]
+    prev_row = close_data.iloc[-2]
+    valid = today_row.notna() & prev_row.notna()
+    advances = int((today_row[valid] > prev_row[valid]).sum())
+    declines = int(valid.sum()) - advances
+    declines = max(declines, 0)
+    ad_ratio = round(advances / max(declines, 1), 3)
+
+    # Also fetch Nifty index pct change — stored in breadth cache for signal_alert task
+    nifty_pct = 0.0
+    try:
+        nifty_hist = yf.Ticker("^NSEI").history(period="2d")
+        if not nifty_hist.empty and len(nifty_hist) >= 2:
+            n_today = float(nifty_hist["Close"].iloc[-1])
+            n_prev = float(nifty_hist["Close"].iloc[-2])
+            nifty_pct = round((n_today - n_prev) / n_prev * 100, 2) if n_prev else 0.0
+    except Exception:  # noqa: BLE001
+        pass
+
+    elapsed_ms = round((_time_module.monotonic() - start) * 1000)
+    logger.info("signal.breadth_fetch advances=%d declines=%d ad_ratio=%.3f elapsed_ms=%d",
+                advances, declines, ad_ratio, elapsed_ms)
+
+    return {
+        "advances": advances,
+        "declines": declines,
+        "ad_ratio": ad_ratio,
+        "nifty_change_pct": nifty_pct,
+    }
+
+
+async def get_vix():  # returns VIXOut but avoids a circular import at module level
+    """Fetch India VIX from Yahoo Finance; falls back to Redis cache then hardcoded default."""
+    from dhanradar.redis_client import get_redis
+    from dhanradar.signal.schemas import VIXOut
+
+    redis = get_redis()
+
+    try:
+        data = await asyncio.to_thread(_fetch_vix_sync)
+        try:
+            await redis.set(_VIX_CACHE_KEY, json.dumps(data), ex=_TTL_VIX_SEC)
+        except Exception:  # noqa: BLE001
+            pass
+        return VIXOut(value=data["value"], change_pct=data["change_pct"], market_open=_market_open_now())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("signal.vix_fetch_error: %s", type(exc).__name__)
+
+    try:
+        raw = await redis.get(_VIX_CACHE_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            fetched_at = datetime.fromisoformat(data["fetched_at"])
+            fresh = (datetime.now(UTC) - fetched_at).total_seconds() < 1800
+            return VIXOut(
+                value=data["value"],
+                change_pct=data["change_pct"],
+                market_open=_market_open_now() and fresh,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return VIXOut(value=18.5, change_pct=0.0, market_open=False)
+
+
+async def get_breadth():  # returns BreadthOut
+    """Derive A/D breadth from Nifty 50 constituents via Yahoo Finance.
+
+    NSE is geo-blocked from KVM4 (HTTP 403), so we use Yahoo Finance tickers.
+    This call takes 2–5 s; a background Celery task pre-warms the cache every 15 min.
+    """
+    from dhanradar.redis_client import get_redis
+    from dhanradar.signal.schemas import BreadthOut
+
+    redis = get_redis()
+
+    try:
+        data = await asyncio.to_thread(_fetch_breadth_sync)
+        try:
+            await redis.set(_BREADTH_CACHE_KEY, json.dumps(data), ex=_TTL_BREADTH_SEC)
+        except Exception:  # noqa: BLE001
+            pass
+        return BreadthOut(
+            advances=data["advances"],
+            declines=data["declines"],
+            ad_ratio=data["ad_ratio"],
+            market_open=_market_open_now(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("signal.breadth_fetch_error: %s", type(exc).__name__)
+
+    try:
+        raw = await redis.get(_BREADTH_CACHE_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            return BreadthOut(
+                advances=data["advances"],
+                declines=data["declines"],
+                ad_ratio=data["ad_ratio"],
+                market_open=_market_open_now(),
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return BreadthOut(advances=25, declines=25, ad_ratio=1.0, market_open=False)
 
 
 async def get_embed_html(db: Any) -> str:
