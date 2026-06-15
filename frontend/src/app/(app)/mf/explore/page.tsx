@@ -90,9 +90,11 @@ function CategoryDropdown({
 
 function SortChips({
   sort,
+  sortDir,
   onSort,
 }: {
   sort: SortKey;
+  sortDir: 'desc' | 'asc';
   onSort: (k: SortKey) => void;
 }) {
   return (
@@ -106,6 +108,7 @@ function SortChips({
             key={o.key}
             type="button"
             onClick={() => onSort(o.key)}
+            aria-pressed={sort === o.key}
             className={cn(
               'inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border transition-colors whitespace-nowrap',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
@@ -115,9 +118,93 @@ function SortChips({
             )}
           >
             {o.label}
-            {sort === o.key && <span className="ml-1 text-bg/70 text-caption" aria-hidden="true">▴</span>}
+            {sort === o.key && (
+              <span className="ml-1 text-bg/70 text-caption" aria-hidden="true">
+                {sortDir === 'desc' ? '▾' : '▴'}
+              </span>
+            )}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Filter chip group — plan type + option type (client-side filter)
+// ---------------------------------------------------------------------------
+
+const PLAN_OPTIONS: { key: PlanFilter; label: string }[] = [
+  { key: 'all',     label: 'All'     },
+  { key: 'direct',  label: 'Direct'  },
+  { key: 'regular', label: 'Regular' },
+];
+const OPTION_OPTIONS: { key: OptionFilter; label: string }[] = [
+  { key: 'all',    label: 'All'    },
+  { key: 'growth', label: 'Growth' },
+  { key: 'idcw',   label: 'IDCW'   },
+];
+
+function FilterChips({
+  planFilter,
+  optionFilter,
+  onPlanFilter,
+  onOptionFilter,
+}: {
+  planFilter: PlanFilter;
+  optionFilter: OptionFilter;
+  onPlanFilter: (k: PlanFilter) => void;
+  onOptionFilter: (k: OptionFilter) => void;
+}) {
+  return (
+    <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+          Plan
+        </span>
+        <div className="flex gap-1">
+          {PLAN_OPTIONS.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => onPlanFilter(o.key)}
+              aria-pressed={planFilter === o.key}
+              className={cn(
+                'inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border transition-colors whitespace-nowrap',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                planFilter === o.key
+                  ? 'bg-ink text-bg border-ink'
+                  : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+          Option
+        </span>
+        <div className="flex gap-1">
+          {OPTION_OPTIONS.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => onOptionFilter(o.key)}
+              aria-pressed={optionFilter === o.key}
+              className={cn(
+                'inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border transition-colors whitespace-nowrap',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                optionFilter === o.key
+                  ? 'bg-ink text-bg border-ink'
+                  : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -253,8 +340,11 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 
   const [activeCategory, setActiveCategory] = React.useState<string>('');
   const [sort, setSort]                     = React.useState<SortKey>('rank');
+  const [sortDir, setSortDir]               = React.useState<'desc' | 'asc'>('desc');
   const [page, setPage]                     = React.useState(1);
   const [search, setSearch]                 = React.useState('');
+  const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
+  const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
 
   // Set initial category once categories load — validate against known list
   React.useEffect(() => {
@@ -269,10 +359,18 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     setActiveCategory(key);
     setPage(1);
     setSearch('');
+    setPlanFilter('all');
+    setOptionFilter('all');
+    setSortDir('desc');
   };
   const handleSort = (key: SortKey) => {
-    setSort(key);
-    setPage(1);
+    if (key === sort) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSort(key);
+      setSortDir('desc');
+      setPage(1);
+    }
   };
 
   const { data, isLoading: fundsLoading, isError } = useFundExplorer({
@@ -281,17 +379,42 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     page,
   });
 
-  // Client-side search filter within the loaded page
+  // Client-side filter: search + plan + option type + sort direction
   const filtered = React.useMemo(() => {
     if (!data?.funds) return [];
+    let result = data.funds;
+
     const q = search.toLowerCase().trim();
-    if (!q) return data.funds;
-    return data.funds.filter(
-      (f) =>
-        f.scheme_name.toLowerCase().includes(q) ||
-        (f.amc_name?.toLowerCase().includes(q) ?? false),
-    );
-  }, [data?.funds, search]);
+    if (q) {
+      result = result.filter(
+        (f) =>
+          f.scheme_name.toLowerCase().includes(q) ||
+          (f.amc_name?.toLowerCase().includes(q) ?? false),
+      );
+    }
+
+    if (planFilter !== 'all') {
+      result = result.filter((f) => f.plan_type === planFilter);
+    }
+
+    if (optionFilter !== 'all') {
+      result = result.filter((f) => {
+        if (optionFilter === 'idcw') {
+          return (
+            f.option_type === 'idcw' ||
+            f.option_type === 'dividend_reinvest' ||
+            f.option_type === 'dividend_payout'
+          );
+        }
+        return f.option_type === optionFilter;
+      });
+    }
+
+    // sortDir='asc' reverses the backend-ordered page
+    if (sortDir === 'asc') result = [...result].reverse();
+
+    return result;
+  }, [data?.funds, search, planFilter, optionFilter, sortDir]);
 
   // --- Loading skeleton ---
   if (catsLoading) {
@@ -337,7 +460,15 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
       <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} />
 
       {/* Row 3: Sort chips */}
-      <SortChips sort={sort} onSort={handleSort} />
+      <SortChips sort={sort} sortDir={sortDir} onSort={handleSort} />
+
+      {/* Row 4: Plan / Option type filters */}
+      <FilterChips
+        planFilter={planFilter}
+        optionFilter={optionFilter}
+        onPlanFilter={(k) => { setPlanFilter(k); setPage(1); }}
+        onOptionFilter={(k) => { setOptionFilter(k); setPage(1); }}
+      />
 
       {/* Table / loading / error */}
       {fundsLoading ? (
@@ -347,7 +478,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
       ) : isError ? (
         <ErrorCard title="Could not load funds" message="Please try again in a moment." />
       ) : (
-        <FundExplorerTable funds={filtered} activeSort={sort} onSort={handleSort} />
+        <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} />
       )}
 
       {/* Pagination */}
