@@ -28,6 +28,8 @@ from dhanradar.signal.schemas import (
     JournalEntryCreatedOut,
     JournalEntryOut,
     JournalOut,
+    LearningArticleOut,
+    LearningContentOut,
     SignalDeploymentOut,
     SignalDipFundOut,
     SignalRulesOut,
@@ -142,3 +144,15 @@ async def delete_journal_entry(
     if not deleted:
         raise HTTPException(status_code=404, detail="Journal entry not found")
     await db.commit()
+
+
+@router.get("/learning", response_model=LearningContentOut)
+async def get_learning_content(
+    signal_state: str = "no_signal",
+    _: None = Depends(RequireTier("free")),
+) -> LearningContentOut:
+    """Return 4 learning articles relevant to the current signal state."""
+    raw = service.get_learning_articles(signal_state)
+    return LearningContentOut(
+        articles=[LearningArticleOut(**a) for a in raw]
+    )
