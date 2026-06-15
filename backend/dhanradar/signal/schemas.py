@@ -190,3 +190,20 @@ class SignalNotificationOut(BaseModel):
 
 class NotificationsResponse(BaseModel):
     unread: list[SignalNotificationOut]
+
+
+# ---------------------------------------------------------------------------
+# Trust Engine (Phase 4)
+# ---------------------------------------------------------------------------
+
+class TrustHistoryRow(BaseModel):
+    date: str
+    signal_state: str
+    your_action: str | None
+    outcome_pct_90d: float | None
+
+
+class TrustHistoryOut(BaseModel):
+    rows: list[TrustHistoryRow]
+    wins: int
+    total: int

@@ -2,13 +2,14 @@
 DhanRadar — Signal API router.
 
 Endpoints (all under /api/v1/signal, auth-gated):
-  GET  /signal/rules          — return (or seed) the caller's signal rules
-  PUT  /signal/rules          — update the caller's signal rules
-  GET  /signal/dip-fund       — return (or seed) the caller's dip-fund record
-  POST /signal/dip-fund/add   — add cash to the dip-fund balance
-  GET  /signal/deployments    — list the caller's deployment history (last 20)
-  GET  /signal/journal        — list journal entries + behaviour scores (Phase 2)
-  POST /signal/journal        — add a journal entry (Phase 2)
+  GET  /signal/rules              — return (or seed) the caller's signal rules
+  PUT  /signal/rules              — update the caller's signal rules
+  GET  /signal/dip-fund           — return (or seed) the caller's dip-fund record
+  POST /signal/dip-fund/add       — add cash to the dip-fund balance
+  GET  /signal/deployments        — list the caller's deployment history (last 20)
+  GET  /signal/journal            — list journal entries + behaviour scores (Phase 2)
+  POST /signal/journal            — add a journal entry (Phase 2)
+  GET  /signal/trust-history      — historical signal states + 90-day outcomes (Phase 4)
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from dhanradar.signal.schemas import (
     SignalNotificationOut,
     SignalRulesOut,
     SignalRulesUpdate,
+    TrustHistoryOut,
 )
 
 router = APIRouter(prefix="/signal", tags=["signal"])
@@ -193,3 +195,13 @@ async def mark_notification_read(
     """Mark a notification as read."""
     await service.mark_notification_read(db, user.user_id, notification_id)
     await db.commit()
+
+
+@router.get("/trust-history", response_model=TrustHistoryOut)
+async def get_trust_history(
+    _: None = Depends(RequireTier("free")),
+    user: UserContext = Depends(_require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> TrustHistoryOut:
+    """Return historical signal states, the caller's action on each date, and 90-day outcomes."""
+    return await service.get_trust_history(db, user.user_id)

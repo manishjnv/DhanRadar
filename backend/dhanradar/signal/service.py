@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.signal.models import (
     SignalDeployment,
     SignalDipFund,
+    SignalHistory,
     SignalJournal,
     SignalNotification,
     SignalRules,
@@ -243,3 +244,130 @@ def get_learning_articles(signal_state: str) -> list[dict]:
         {**a, "link": f"/learn/concepts/{a['slug']}"}
         for a in articles
     ]
+
+
+# ---------------------------------------------------------------------------
+# Notifications (Phase 3+)
+# ---------------------------------------------------------------------------
+
+async def has_recent_notification(db: AsyncSession, user_id: str, hours: int = 20) -> bool:
+    """Return True if the user has an unread notification created within the last `hours`."""
+    uid = uuid.UUID(user_id)
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    count = await db.scalar(
+        select(func.count())
+        .select_from(SignalNotification)
+        .where(
+            SignalNotification.user_id == uid,
+            SignalNotification.read_at.is_(None),
+            SignalNotification.created_at >= cutoff,
+        )
+    )
+    return (count or 0) > 0
+
+
+async def create_notification(
+    db: AsyncSession, user_id: str, message: str, signal_state: str
+) -> SignalNotification:
+    uid = uuid.UUID(user_id)
+    row = SignalNotification(
+        id=uuid.uuid4(),
+        user_id=uid,
+        message=message,
+        signal_state=signal_state,
+        created_at=datetime.now(UTC),
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def get_unread_notifications(
+    db: AsyncSession, user_id: str, limit: int = 5
+) -> list[SignalNotification]:
+    uid = uuid.UUID(user_id)
+    result = await db.execute(
+        select(SignalNotification)
+        .where(
+            SignalNotification.user_id == uid,
+            SignalNotification.read_at.is_(None),
+        )
+        .order_by(SignalNotification.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def mark_notification_read(
+    db: AsyncSession, user_id: str, notification_id: str
+) -> None:
+    uid = uuid.UUID(user_id)
+    nid = uuid.UUID(notification_id)
+    row = await db.get(SignalNotification, nid)
+    if row is not None and row.user_id == uid:
+        row.read_at = datetime.now(UTC)
+        await db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Trust Engine (Phase 4)
+# ---------------------------------------------------------------------------
+
+async def get_trust_history(db: AsyncSession, user_id: str):
+    """Return historical signal states with per-user deployment actions and 90-day outcomes."""
+    from dhanradar.signal.schemas import TrustHistoryOut, TrustHistoryRow
+
+    uid = uuid.UUID(user_id)
+
+    history_rows = list(
+        (
+            await db.execute(
+                select(SignalHistory).order_by(SignalHistory.date.desc()).limit(180)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    if not history_rows:
+        return TrustHistoryOut(rows=[], wins=0, total=0)
+
+    deployments = list(
+        (
+            await db.execute(
+                select(SignalDeployment).where(SignalDeployment.user_id == uid)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    deployment_by_date = {dep.date: dep for dep in deployments}
+
+    rows: list[TrustHistoryRow] = []
+    wins = 0
+    total = 0
+
+    for h in history_rows:
+        dep = deployment_by_date.get(h.date)
+        if dep:
+            your_action = "deployed"
+        elif h.signal_state in ("triggered", "watch"):
+            your_action = "watched"
+        else:
+            your_action = None
+
+        outcome = float(h.outcome_pct_90d) if h.outcome_pct_90d is not None else None
+
+        if outcome is not None and your_action in ("deployed", "watched"):
+            total += 1
+            if outcome > 0:
+                wins += 1
+
+        rows.append(TrustHistoryRow(
+            date=h.date.isoformat(),
+            signal_state=h.signal_state,
+            your_action=your_action,
+            outcome_pct_90d=outcome,
+        ))
+
+    return TrustHistoryOut(rows=rows, wins=wins, total=total)

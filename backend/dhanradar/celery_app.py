@@ -199,10 +199,29 @@ celery_app.conf.beat_schedule = {
     },
     # Signal daily alert — 09:15 IST on weekdays. Creates in-app notification for
     # users whose signal is triggered. Idempotency guard: one unread per 20 hours.
-    # Phase 4 replaces stub market data with live Yahoo Finance / NSE values.
+    # Phase 4: reads live VIX + breadth from Redis cache pre-warmed by market-data-refresh.
     "signal-daily-alert": {
         "task": "dhanradar.tasks.signal_alerts.daily_signal_alert",
-        "schedule": crontab(hour=9, minute=15),
+        "schedule": crontab(hour=9, minute=15, day_of_week="1-5"),
+    },
+    # Phase 4 — Market data refresh: pre-warm VIX + breadth cache every 15 min
+    # during trading hours (09:00–16:00 IST, Mon–Fri). Makes /market/vix and
+    # /market/breadth endpoints near-instant (serve from cache, not live fetch).
+    "market-data-refresh": {
+        "task": "dhanradar.tasks.signal_alerts.market_data_refresh",
+        "schedule": crontab(minute="*/15", hour="9-16", day_of_week="1-5"),
+    },
+    # Phase 4 — Auto-log: insert a 'skipped' journal entry at 21:00 IST for users
+    # who had a triggered/watch signal today but made no journal entry.
+    "auto-log-no-action": {
+        "task": "dhanradar.tasks.signal_alerts.auto_log_no_action",
+        "schedule": crontab(hour=21, minute=0, day_of_week="1-5"),
+    },
+    # Phase 4 — SIP reminder: insert an in-app notification at 09:00 IST every day.
+    # MVP: only fires on the 1st of each month (real SIP date from CAS is Phase 5+).
+    "sip-reminder": {
+        "task": "dhanradar.tasks.signal_alerts.sip_reminder",
+        "schedule": crontab(hour=9, minute=0),
     },
 }
 
