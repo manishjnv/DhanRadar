@@ -337,6 +337,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 
   const [activeCategory, setActiveCategory] = React.useState<string>('');
   const [sort, setSort]                     = React.useState<SortKey>('rank');
+  const [sortDir, setSortDir]               = React.useState<'asc' | 'desc'>('desc');
   const [page, setPage]                     = React.useState(1);
   const [search, setSearch]                 = React.useState('');
   const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
@@ -358,18 +359,23 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     setSearch('');
     setPlanFilter('all');
     setOptionFilter('all');
+    setSortDir('desc');
   };
 
   const handleSort = (key: SortKey) => {
-    if (key !== sort) {
+    if (key === sort) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
       setSort(key);
-      setPage(1);
+      setSortDir('desc');
     }
+    setPage(1);
   };
 
   const { data, isLoading: fundsLoading, isError } = useFundExplorer({
     category: activeCategory,
     sort,
+    sortDir,
     page,
     limit: perPage,
   });
@@ -485,7 +491,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
       ) : isError ? (
         <ErrorCard title="Could not load funds" message="Please try again in a moment." />
       ) : (
-        <FundExplorerTable funds={filtered} activeSort={sort} onSort={handleSort} />
+        <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} />
       )}
 
       {/* Bottom pagination — count on left, page buttons on right */}

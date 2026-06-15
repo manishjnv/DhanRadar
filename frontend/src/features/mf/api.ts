@@ -327,13 +327,14 @@ export function useFundCategories() {
 
 /** Fetch paginated fund list for one SEBI category.
  *  Re-fetches when category, sort, page, or limit changes. */
-export function useFundExplorer(params: { category: string; sort: string; page: number; limit?: number }) {
+export function useFundExplorer(params: { category: string; sort: string; sortDir?: 'asc' | 'desc'; page: number; limit?: number }) {
   return useQuery<FundExplorerResponse>({
     queryKey: queryKeys.mf.explorerFunds(params),
     queryFn: () => {
       const qs = new URLSearchParams({
         category: params.category,
         sort: params.sort,
+        sort_dir: params.sortDir ?? 'desc',
         page: String(params.page),
         limit: String(params.limit ?? 20),
       });
