@@ -155,6 +155,49 @@ export interface PortfolioLatestResponse {
   portfolio_name: string;
 }
 
+// ---------------------------------------------------------------------------
+// Feature 6 — Fund Explorer (public, no user data)
+// ---------------------------------------------------------------------------
+
+/** One fund row returned by GET /api/v1/mf/funds */
+export interface FundExplorerItem {
+  isin: string;
+  scheme_name: string;
+  amc_name: string | null;
+  sebi_category: string;
+  verb_label: Label;
+  /** null until mf_fund_ranks stores confidence_band (future enhancement) */
+  confidence_band: ConfidenceBand | null;
+  /** null — stored when compute_market_ranks is extended */
+  confidence_factors: Record<string, 'high' | 'medium' | 'low'> | null;
+  category_rank: number;
+  category_total: number;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+}
+
+/** Response shape for GET /api/v1/mf/funds */
+export interface FundExplorerResponse {
+  funds: FundExplorerItem[];
+  total: number;
+  page: number;
+  limit: number;
+  disclosure: string;
+  not_advice: string;
+}
+
+/** One item from GET /api/v1/mf/funds/categories */
+export interface FundCategory {
+  key: string;           // full SEBI string, e.g. "Equity Scheme - Large Cap Fund"
+  display_name: string;  // shortened, e.g. "Large Cap Fund"
+  fund_count: number;
+}
+
+/** Response shape for GET /api/v1/mf/funds/categories */
+export interface FundCategoriesResponse {
+  categories: FundCategory[];
+}
+
 export interface MfReport {
   summary: MfReportSummary;
   schemes: MfScheme[];

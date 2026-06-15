@@ -469,8 +469,14 @@ function ReportView({ jobId }: { jobId: string }) {
           </Card>
 
           <Card className="lg:col-span-2">
-            <CardHeader>
+            <CardHeader className="flex items-center justify-between gap-2">
               <CardTitle>Your Holdings</CardTitle>
+              <a
+                href="/mf/explore"
+                className="text-caption text-ink-muted hover:text-ink underline underline-offset-2 shrink-0"
+              >
+                Compare with full market &rarr;
+              </a>
             </CardHeader>
             <CardBody>
               {/* Feature 3: historyByIsin powers ↑/↓ delta; Feature 2: history shown in WhyPanel */}

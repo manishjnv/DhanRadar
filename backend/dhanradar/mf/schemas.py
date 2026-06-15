@@ -130,6 +130,39 @@ class PortfolioReport(BaseModel):
     disclaimer_version: str | None = None
 
 
+class FundExplorerItem(BaseModel):
+    isin: str
+    scheme_name: str
+    amc_name: str | None = None
+    sebi_category: str
+    verb_label: str
+    confidence_band: str | None = None
+    confidence_factors: dict[str, str] | None = None
+    category_rank: int
+    category_total: int
+    return_1y_pct: float | None = None
+    return_3y_pct: float | None = None
+
+
+class FundExplorerResponse(BaseModel):
+    funds: list[FundExplorerItem]
+    total: int
+    page: int
+    limit: int
+    disclosure: str
+    not_advice: str
+
+
+class FundCategory(BaseModel):
+    key: str
+    display_name: str
+    fund_count: int
+
+
+class FundCategoriesResponse(BaseModel):
+    categories: list[FundCategory]
+
+
 class MFResearchAskRequest(BaseModel):
     """Request body for POST /mf/report/{job_id}/ask."""
 

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Upload, Compass, BookOpen, GraduationCap, Settings, Menu, X, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Upload, Compass, BookOpen, GraduationCap, Settings, Menu, X, BarChart2, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 
@@ -20,10 +20,11 @@ interface NavItem {
 // Primary workspace destinations (built modules only — future modules like
 // Stock/Screener/Watchlist are added here as they ship).
 const WORKSPACE: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/mf/upload', label: 'Upload CAS', icon: Upload },
-  { href: '/mood', label: 'Market Mood', icon: Compass },
-  { href: '/learn/tax', label: 'Tax Guides', icon: BookOpen },
+  { href: '/dashboard',   label: 'Dashboard',       icon: LayoutDashboard },
+  { href: '/mf/upload',   label: 'Upload CAS',      icon: Upload },
+  { href: '/mf/explore',  label: 'Explore Funds',   icon: BarChart2 },
+  { href: '/mood',        label: 'Market Mood',     icon: Compass },
+  { href: '/learn/tax',   label: 'Tax Guides',      icon: BookOpen },
   { href: '/learn/concepts', label: 'Investing Basics', icon: GraduationCap },
 ];
 
