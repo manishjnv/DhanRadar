@@ -142,11 +142,11 @@ interface SignalPageProps {
 export function SignalPage({ hasCAS }: SignalPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const rawTab = searchParams.get('tab');
+  const rawTab = searchParams?.get('tab') ?? null;
   const activeTab: SignalTab = rawTab === 'rules' ? 'rules' : 'today';
 
   function switchTab(tab: SignalTab) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
     if (tab === 'today') params.delete('tab');
     else params.set('tab', tab);
     router.replace(`/signal?${params.toString()}`);
