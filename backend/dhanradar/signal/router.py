@@ -26,6 +26,8 @@ from dhanradar.signal.schemas import (
     JournalEntryCreatedOut,
     JournalEntryOut,
     JournalOut,
+    LearningArticleOut,
+    LearningContentOut,
     SignalDeploymentOut,
     SignalDipFundOut,
     SignalRulesOut,
@@ -126,3 +128,15 @@ async def create_journal_entry(
     )
     await db.commit()
     return JournalEntryCreatedOut(id=row.id, created_at=row.created_at)
+
+
+@router.get("/learning", response_model=LearningContentOut)
+async def get_learning_content(
+    signal_state: str = "no_signal",
+    _: None = Depends(RequireTier("free")),
+) -> LearningContentOut:
+    """Return 4 learning articles relevant to the current signal state."""
+    raw = service.get_learning_articles(signal_state)
+    return LearningContentOut(
+        articles=[LearningArticleOut(**a) for a in raw]
+    )

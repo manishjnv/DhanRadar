@@ -166,3 +166,14 @@ class JournalOut(BaseModel):
 class JournalEntryCreatedOut(BaseModel):
     id: UUID
     created_at: datetime
+
+
+class LearningArticleOut(BaseModel):
+    slug: str
+    title: str
+    read_min: int
+    link: str
+
+
+class LearningContentOut(BaseModel):
+    articles: list[LearningArticleOut]
