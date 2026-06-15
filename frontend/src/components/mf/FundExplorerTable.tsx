@@ -168,7 +168,7 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
                   {idx + 1}
                 </td>
 
-                {/* Fund — .tk pattern: avatar + name */}
+                {/* Fund — .tk pattern: avatar + name + plan/option chips */}
                 <td className="py-3 px-3">
                   <div className="flex items-center gap-2.5">
                     <FundAvatar name={fund.scheme_name} />
@@ -178,6 +178,28 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
                       </p>
                       {fund.amc_name && (
                         <p className="font-mono text-[10.5px] text-ink-muted mt-0.5">{fund.amc_name}</p>
+                      )}
+                      {(fund.plan_type || fund.option_type || fund.amc_level_aum_crore != null) && (
+                        <div className="flex items-center flex-wrap gap-1 mt-1">
+                          {fund.plan_type && (
+                            <span className="inline-flex items-center px-1.5 py-px rounded bg-surface-3 border border-line font-mono text-[9px] font-semibold uppercase tracking-wide text-ink-secondary">
+                              {fund.plan_type === 'direct' ? 'Direct' : 'Regular'}
+                            </span>
+                          )}
+                          {fund.option_type && (
+                            <span className="inline-flex items-center px-1.5 py-px rounded bg-surface-3 border border-line font-mono text-[9px] font-semibold uppercase tracking-wide text-ink-secondary">
+                              {fund.option_type === 'growth' ? 'Growth'
+                                : fund.option_type === 'idcw' ? 'IDCW'
+                                : fund.option_type === 'dividend_reinvest' ? 'Div Reinvest'
+                                : 'Div Payout'}
+                            </span>
+                          )}
+                          {fund.amc_level_aum_crore != null && (
+                            <span className="font-mono text-[9px] text-ink-muted">
+                              AMC AUM: ₹{fund.amc_level_aum_crore.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

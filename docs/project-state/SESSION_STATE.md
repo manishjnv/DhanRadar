@@ -1,18 +1,50 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-14 (**B66-f1 pt2 v1.2 cohort grouping ACTIVATED + DEPLOYED + LIVE on KVM4**
-— PR #138 `087c627`; `_COHORT_GROUPING_KEY`→`sebi_category` + manifest v1.2/activated; deployed under
-founder approval, box `#139`, services healthy, smoke 200, running config verified v1.2/sebi_category.
-New scoring groups on the validated SEBI leaf; existing labels flip on the next rescore (~196 / 1.40%,
-within the 5% churn gate). Prereqs **B71** + **B58-f5** merged (PR #131). **TWO founder-only actions
-remain:** (1) record the `rating_engine_changelog` v1.2 two-person row — by design the founder's
-action (the auto-mode guardrail correctly blocked the builder from writing `approved_by`); via
-`POST /admin/scoring/v1.2/activate {"backtest_passed":true}` as admin, or the on-box one-off; (2) the
-pre-rescore user notice. Runbook ADR-0034. B67 AUM option-a = ADR-0035; per-scheme $0-vs-vendor
-decision OPEN (founder leaning $0).)
+**Last updated:** 2026-06-15 (**B67 Task 3 — scheme-master enrichment `plan_type`/`option_type` DONE,
+PR #172 open**. `parse_plan_option()` in `mf/taxonomy.py` (pure, 29 unit tests); migration `0025`
+adds both nullable columns to `mf.mf_funds`; upsert ON CONFLICT SET updated; Fund Explorer API +
+chips UI (Direct/Regular/Growth/IDCW/Div Reinvest/Div Payout). AMC AUM Step 4 BLOCKED — three
+ADR-0035 pre-build gates unmet; `amc_level_aum_crore` NOT in migration/model, placeholder only.
+144 tests pass, tsc clean. TWO founder-only v1.2 actions remain: (1) `POST /admin/scoring/v1.2/activate`
+as admin; (2) pre-rescore user notice. B67 per-scheme $0-vs-vendor decision still OPEN.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## B67 Task 3 — scheme-master enrichment DONE, PR #172 open (2026-06-15)
+
+**`plan_type` + `option_type` parsed from AMFI scheme name — pure function, migration, UI chips.**
+Pure `parse_plan_option()` added to `mf/taxonomy.py`; ordered `_OPTION_PATTERNS` handles
+idcw-reinvest > bare-idcw and dividend-reinvest > bare-dividend precedence. Migration `0025`
+adds two nullable VARCHAR columns to `mf.mf_funds` (chain: 0024 → 0025). Daily upsert
+`_navrows_to_fund_upserts` populates both; ON CONFLICT SET updated (avoids B66 ON CONFLICT trap).
+`FundExplorerItem` Pydantic schema + TS type add `plan_type`, `option_type`, `amc_level_aum_crore`
+(placeholder, always `None`). Fund Explorer SQL SELECT + `FundExplorerTable` chips wired.
+
+**AMC AUM Step 4 BLOCKED.** Three ADR-0035 pre-build gates unmet (AMFI SPA endpoint URL
+not reverse-engineered, ToS review pending, data-source sanction not obtained). `amc_level_aum_crore`
+NOT in migration `0025` or `MfFund` model — placeholder only. BLOCKERS B67 updated.
+
+**Gates:** 29 `parse_plan_option` unit tests + 3 `_navrows_to_fund_upserts` integration tests;
+144 total tests pass; `tsc --noEmit` clean; ruff 29 pre-existing advisory errors in `models/mf.py`
+(file-wide `Optional`/I001 pattern, `continue-on-error` in CI, not newly introduced).
+
+**Next:** merge PR #172 + trigger `nav_daily_fetch` to backfill `plan_type`/`option_type` for 14k funds.
+
+### Agent-utilization & routing telemetry (2026-06-15 B67 Task 3 session)
+
+- **Opus / Fable (Tier 0):** full session — Phase-0 context reconstruction from compacted summary;
+  architecture decisions (AMC AUM gate evaluation against B67 memo + ADR-0035 three pre-build gates);
+  implementation of all 10 files (taxonomy pure fn, migration, model, tasks, schemas, router, tests ×2,
+  TS type, React component); BLOCKERS.md + SESSION_STATE.md updates; commit + PR #172. No subagent
+  delegation this session — all edits were ≤ 30 lines per file against already-hot context (one-shot
+  exemption). reworked: N/A (no subagents).
+- **Sonnet (Tier 1):** n/a this session.
+- **Haiku (Tier 3):** n/a this session.
+- **codex:rescue:** n/a — Tier-A additive, no load-bearing/security path; account not entitled (memory).
+- **Doc-routing note (honest):** BLOCKERS.md B67 task-3 status row and this SESSION_STATE block were
+  typed on Opus directly — structured-state edits with exact commit/PR/test refs where free-chain drift
+  would corrupt the numbers (surgical ≤30 line exemption per global playbook).
 
 ## B67 fundamentals sourcing — $0 ADR-0033(a) piggyback fills the per-scheme gap ADR-0035 leaves open; decision OPEN (2026-06-14)
 

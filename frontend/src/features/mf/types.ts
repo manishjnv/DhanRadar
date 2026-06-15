@@ -174,6 +174,12 @@ export interface FundExplorerItem {
   category_total: number;
   return_1y_pct: number | null;
   return_3y_pct: number | null;
+  /** B67 Task 3: parsed from scheme name — null for legacy schemes */
+  plan_type: 'direct' | 'regular' | null;
+  /** B67 Task 3: parsed from scheme name — null for legacy schemes */
+  option_type: 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | null;
+  /** ADR-0035: AMC-level AUM — null until AMFI SPA endpoint confirmed */
+  amc_level_aum_crore: number | null;
 }
 
 /** Response shape for GET /api/v1/mf/funds */
