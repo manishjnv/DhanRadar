@@ -115,7 +115,7 @@ def test_sebi_display_name(full: str, expected: str):
 # ---------------------------------------------------------------------------
 
 def test_sort_sql_expected_keys_present():
-    expected = {"rank", "return_1y", "return_3y", "max_drawdown"}
+    expected = {"rank", "return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"}
     assert expected == set(_SORT_SQL.keys())
 
 
