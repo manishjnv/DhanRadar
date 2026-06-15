@@ -639,7 +639,7 @@ async def fund_explorer_list(
         "   ORDER BY isin, as_of_date DESC"
         " ) r ON f.isin = r.isin"
         " LEFT JOIN ("
-        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct"
+        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct"
         "   FROM mf.mf_fund_metrics"
         "   ORDER BY isin, as_of_date DESC"
         " ) m ON f.isin = m.isin"
