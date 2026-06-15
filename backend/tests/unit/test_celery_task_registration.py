@@ -22,6 +22,7 @@ EXPECTED_TASKS = {
     "dhanradar.tasks.mf.parse_cas_job",
     "dhanradar.tasks.mf.nav_backfill",
     "dhanradar.tasks.mf.nav_daily_fetch",
+    "dhanradar.tasks.mf.compute_market_ranks",
     "dhanradar.tasks.mf.monthly_rescore_plus_users",
     "dhanradar.tasks.mf.purge_cas_files",
     "dhanradar.tasks.batch.run_nav_ingestion",

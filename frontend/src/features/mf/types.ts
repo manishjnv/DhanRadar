@@ -37,6 +37,10 @@ export interface BackendFund {
   previous_label: string | null;
   /** Feature 4: named confidence quality signals — string bands only. null on old cached reports. */
   confidence_factors?: Record<string, 'high' | 'medium' | 'low'> | null;
+  /** Feature 5: market-wide ordinal rank within sebi_category peer group.
+   *  null/absent before the nightly compute_market_ranks has run or when fund has no sebi_category. */
+  category_rank?: number | null;
+  category_total?: number | null;
 }
 
 /** Wire shape returned by GET /api/v1/mf/report/{job_id} */
@@ -91,6 +95,10 @@ export interface MfScheme {
   /** Feature 4: named confidence quality signals — "high"/"medium"/"low" only, never floats.
    *  null/absent on old cached reports; UI degrades gracefully when missing. */
   confidence_factors?: Record<string, 'high' | 'medium' | 'low'> | null;
+  /** Feature 5: market-wide ordinal rank within sebi_category peer group.
+   *  null when not yet computed or fund has no sebi_category. */
+  category_rank?: number | null;
+  category_total?: number | null;
 }
 
 export interface AllocationSlice {

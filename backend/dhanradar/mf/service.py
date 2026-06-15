@@ -74,6 +74,31 @@ async def can_return_existing(redis: Any, prior_status: str | None, job_id: str)
     return bool(await redis.exists(f"{_REPORT_PREFIX}{job_id}"))
 
 
+async def fetch_fund_ranks(db: Any, isins: list[str]) -> dict[str, dict]:
+    """Return the most recent market rank for each ISIN from mf_fund_ranks.
+
+    Uses DISTINCT ON (isin) so today's rank is returned when available, falling
+    back to the most recent prior day when compute_market_ranks has not yet run.
+    Returns {} when the table is empty (e.g. before the first nightly task fires).
+    """
+    if not isins:
+        return {}
+    from sqlalchemy import text
+
+    rows = (
+        await db.execute(
+            text(
+                "SELECT DISTINCT ON (isin) isin, rank, total_in_cat"
+                " FROM mf.mf_fund_ranks"
+                " WHERE isin = ANY(:isins)"
+                " ORDER BY isin, as_of_date DESC"
+            ),
+            {"isins": isins},
+        )
+    ).all()
+    return {r.isin: {"rank": r.rank, "total_in_cat": r.total_in_cat} for r in rows}
+
+
 def assemble_report(
     *,
     job_id: str,
@@ -85,16 +110,20 @@ def assemble_report(
     disclaimer_version: str | None = None,
     commentary: dict | None = None,
     portfolio_id: str | None = None,
+    rank_by_isin: dict[str, dict] | None = None,
 ) -> PortfolioReport:
     """Build the client report. The disclosure bundle + NOT_ADVICE are ALWAYS
     injected here; `unified_score` is never included (each fund carries only
-    verb_label + confidence_band)."""
+    verb_label + confidence_band). `rank_by_isin` is fetched fresh from DB at
+    read time — ranks are never baked into the Redis cache payload."""
     snap = snapshot or {}
+    _ranks = rank_by_isin or {}
     items = [
         FundReportItem(
             isin=f["isin"],
             scheme_name=f.get("scheme_name", ""),
             folio_number=f.get("folio_number", ""),
+            category=f.get("category"),
             units=f.get("units", 0.0),
             invested_amount=f.get("invested_amount"),
             current_value=f.get("current_value"),
@@ -104,6 +133,8 @@ def assemble_report(
             contradicting_signals=f.get("contradicting_signals", []),
             previous_label=f.get("previous_label"),
             confidence_factors=f.get("confidence_factors"),
+            category_rank=_ranks.get(f["isin"], {}).get("rank"),
+            category_total=_ranks.get(f["isin"], {}).get("total_in_cat"),
         )
         for f in funds
     ]
@@ -212,6 +243,7 @@ async def rebuild_report_from_db(
             "isin": h.isin,
             "scheme_name": fund.scheme_name if fund else h.isin,
             "folio_number": h.folio_number or "",
+            "category": (fund.sebi_category or fund.category) if fund else None,
             "units": float(h.units or 0),
             "invested_amount": invested,
             "current_value": current_value,
@@ -260,4 +292,11 @@ async def rebuild_report_from_db(
     await redis.set(f"{_REPORT_PREFIX}{job_id}", json.dumps(payload), ex=_REBUILD_TTL)
     logger.info("rebuild_report: rebuilt job=%s portfolio=%s funds=%d", job_id, portfolio_id, len(funds_payload))
 
-    return assemble_report(**payload)
+    # Fetch market ranks fresh from DB (best-effort; never let this break a rebuild).
+    rank_by_isin: dict[str, dict] = {}
+    try:
+        rank_by_isin = await fetch_fund_ranks(db, [f["isin"] for f in funds_payload])
+    except Exception:
+        logger.warning("rebuild_report: rank fetch failed (non-fatal)", exc_info=True)
+
+    return assemble_report(**payload, rank_by_isin=rank_by_isin)

@@ -240,6 +240,12 @@ function SchemesTable({
                       <LabelChip label={s.label} confidenceBand={s.confidence_band} />
                       {/* Feature 3: label change delta (↑/↓) */}
                       <DeltaBadge current={s.label} previous={s.previous_label} />
+                      {/* Feature 5: market-wide category rank — ordinal only, never score */}
+                      {s.category_rank != null && s.category_total != null && (
+                        <span className="text-caption text-ink-muted whitespace-nowrap">
+                          #{s.category_rank} of {s.category_total}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => toggle(s.isin)}
