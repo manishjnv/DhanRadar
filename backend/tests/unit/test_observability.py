@@ -245,7 +245,10 @@ def test_metrics_route_registered_at_correct_path() -> None:
     """
     from dhanradar.main import app
 
-    route_paths = {r.path for r in app.routes}  # type: ignore[union-attr]
+    # Some entries in app.routes (e.g. included sub-routers / Mounts) have no
+    # `.path` attribute — guard so route introspection stays robust as routers
+    # are added (B5/F2 added included routers; the bare comprehension crashed).
+    route_paths = {r.path for r in app.routes if hasattr(r, "path")}
     assert "/metrics" in route_paths, (
         "/metrics route missing — Prometheus scraping will not work"
     )
