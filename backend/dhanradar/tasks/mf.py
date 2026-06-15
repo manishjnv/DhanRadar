@@ -583,6 +583,7 @@ async def _build_cohort_context(
     unique_peers = sorted(set(all_peer_isins))
     stats_by_isin: dict[str, FundStats] = {}
     found_any = False
+    seen_isins: set[str] = set()
     for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
         batch = unique_peers[start : start + _COHORT_PEER_CHUNK]
         metric_rows = (
@@ -598,8 +599,22 @@ async def _build_cohort_context(
         if metric_rows:
             found_any = True
         row_map = {r.isin: (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in metric_rows}
+        seen_isins.update(row_map.keys())
         for i in batch:
             stats_by_isin[i] = row_map.get(i, (None, None, None))
+
+    # Partial-miss: some peers have metrics, others don't (e.g. new funds ingested
+    # today before mf_metrics_refresh ran). Absent peers default to (None, None, None)
+    # and may slightly skew the category median. Log for observability.
+    if found_any:
+        no_row = [i for i in unique_peers if i not in seen_isins]
+        if no_row:
+            logger.warning(
+                "_build_cohort_context: %d/%d peers have no mf_fund_metrics row "
+                "(possibly new funds added since last nightly refresh). "
+                "Category benchmark may be slightly skewed. Sample: %s",
+                len(no_row), len(unique_peers), no_row[:5],
+            )
 
     # Empty-table safety net: if mf_fund_metrics has NO row for ANY peer (a fresh
     # deploy before the first mf_metrics_refresh, or a wiped table), every benchmark
@@ -613,6 +628,11 @@ async def _build_cohort_context(
             "mf_fund_metrics empty for %d peers — falling back to live cohort "
             "computation; run mf_metrics_refresh to populate", len(unique_peers),
         )
+        # NOTE: as_of mismatch vs precomputed path — mf_metrics_refresh computes
+        # stats with as_of=date.today(); this fallback honors the caller's as_of.
+        # long_horizon_stats currently ignores as_of (windows anchor on the latest
+        # NAV point), so there is no live divergence. If as_of is ever made
+        # window-sensitive for backtesting, reconcile both paths before enabling it.
         ref_as_of = as_of or date.today()
         stats_by_isin = {}
         for start in range(0, len(unique_peers), _COHORT_PEER_CHUNK):
@@ -926,6 +946,11 @@ async def _metrics_refresh_pipeline() -> str:
 
             upsert_dicts: list[dict] = []
             for isin in chunk:
+                # as_of is currently window-irrelevant (long_horizon_stats anchors
+                # windows on the latest NAV point, not as_of). Stored for
+                # forward-compatibility only. If as_of is ever wired to anchor
+                # windows, the refresh must store per-fund as_of and the cohort
+                # builder must filter by it to stay equivalent with the live path.
                 r1, r3, dd = long_horizon_stats(series.get(isin, []), as_of=today)
                 upsert_dicts.append({
                     "isin": isin,
