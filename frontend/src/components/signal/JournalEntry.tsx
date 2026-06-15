@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import type { JournalEntry } from '@/features/signal/types';
+import { useDeleteJournal } from '@/features/signal/api';
 
 const DECISION_LABEL: Record<string, string> = {
   deployed: 'Deployed',
@@ -46,6 +47,12 @@ interface JournalEntryCardProps {
 
 export function JournalEntryCard({ entry }: JournalEntryCardProps) {
   const decisionClass = entry.decision ?? 'skipped';
+  const deleteJournal = useDeleteJournal();
+  const [confirming, setConfirming] = React.useState(false);
+
+  function handleDelete() {
+    deleteJournal.mutate(entry.id, { onSuccess: () => setConfirming(false) });
+  }
 
   return (
     <div className={`j-entry ${decisionClass}`}>
@@ -64,6 +71,39 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
             {EMOTION_LABEL[em] ?? em}
           </span>
         ))}
+
+        {/* Delete control — pushed to the right */}
+        <div className="ml-auto flex items-center gap-2">
+          {confirming ? (
+            <>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Delete?</span>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteJournal.isPending}
+                style={{ fontSize: 11, color: 'var(--dr-red)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                {deleteJournal.isPending ? '…' : 'Yes'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                No
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              aria-label="Delete entry"
+              style={{ fontSize: 13, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Note */}
