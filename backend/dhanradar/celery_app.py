@@ -41,6 +41,7 @@ celery_app = Celery(
         "dhanradar.tasks.misc",
         "dhanradar.tasks.compliance",
         "dhanradar.tasks.news",
+        "dhanradar.tasks.signal_alerts",
     ],
 )
 
@@ -113,6 +114,8 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.compliance.*": {"queue": "batch"},
     # Route news refresh to the existing batch worker (no dedicated news worker).
     "dhanradar.tasks.news.*": {"queue": "batch"},
+    # Signal daily alerts run in the batch queue (low-volume, once-daily).
+    "dhanradar.tasks.signal_alerts.*": {"queue": "batch"},
 }
 
 # ---------------------------------------------------------------------------
@@ -193,6 +196,13 @@ celery_app.conf.beat_schedule = {
     "mf-reap-stuck-cas": {
         "task": "dhanradar.tasks.mf.reap_stuck_cas_jobs",
         "schedule": crontab(minute="*/5"),
+    },
+    # Signal daily alert — 09:15 IST on weekdays. Creates in-app notification for
+    # users whose signal is triggered. Idempotency guard: one unread per 20 hours.
+    # Phase 4 replaces stub market data with live Yahoo Finance / NSE values.
+    "signal-daily-alert": {
+        "task": "dhanradar.tasks.signal_alerts.daily_signal_alert",
+        "schedule": crontab(hour=9, minute=15),
     },
 }
 
