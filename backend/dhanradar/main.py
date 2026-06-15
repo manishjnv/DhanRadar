@@ -6,8 +6,8 @@ Uses the modern lifespan context manager pattern (NOT @app.on_event).
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from dhanradar.admin.router import router as admin_router
 from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
+from dhanradar.changes.router import router as changes_router
 from dhanradar.compliance.router import router as compliance_router
 from dhanradar.concepts.router import router as concepts_router
 from dhanradar.consent.router import router as consent_router
@@ -29,21 +30,21 @@ from dhanradar.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from dhanradar.insights.router import router as insights_router
 from dhanradar.mf.router import router as mf_router
 from dhanradar.middleware import RequestIDMiddleware
 from dhanradar.mood.router import router as mood_router
-from dhanradar.insights.router import router as insights_router
-from dhanradar.changes.router import router as changes_router
-from dhanradar.transparency.router import router as transparency_router
-from dhanradar.news.router import router as news_router
 from dhanradar.news.admin_router import router as news_admin_router
+from dhanradar.news.router import router as news_router
 from dhanradar.notifications.router import router as notifications_router
 from dhanradar.observability import PrometheusMiddleware, init_sentry, metrics_endpoint
 from dhanradar.onboarding.router import router as onboarding_router
 from dhanradar.redis_client import close_redis, get_redis
 from dhanradar.routers import health
 from dhanradar.scoring.engine.router import router as internal_scoring_router
+from dhanradar.signal.router import router as signal_router
 from dhanradar.subscriptions.router import router as subscriptions_router
+from dhanradar.transparency.router import router as transparency_router
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging — must run BEFORE init_sentry() so all startup logs
@@ -124,6 +125,7 @@ app.include_router(notifications_router, prefix="/api/v1")  # Phase 6 — Notifi
 app.include_router(compliance_router, prefix="/api/v1")  # §4 — public disclaimer read
 app.include_router(admin_router, prefix="/api/v1")  # B26 — admin compliance (disclaimer activate, label-churn); RequireAdmin-gated
 app.include_router(mood_router, prefix="/api/v1")  # Mood Compass — anon market regime
+app.include_router(signal_router, prefix="/api/v1")  # Signal — dip-buy rules + dip-fund + deployments
 app.include_router(consent_router, prefix="/api/v1")  # B44 — DPDP consent grant/revoke writer
 app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile quiz (sole writer of users.risk_profile)
 app.include_router(dashboard_router, prefix="/api/v1")  # B56 — home dashboard reads (portfolio summary / indices / top-scored)

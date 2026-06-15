@@ -67,4 +67,15 @@ export const queryKeys = {
   consent: {
     state: () => ['consent', 'state'] as const,
   },
+  signal: {
+    rules:       () => ['signal', 'rules'] as const,
+    dipFund:     () => ['signal', 'dip-fund'] as const,
+    deployments: () => ['signal', 'deployments'] as const,
+  },
+  vix: {
+    current: () => ['market', 'vix'] as const,
+  },
+  breadth: {
+    current: () => ['market', 'breadth'] as const,
+  },
 } as const;
