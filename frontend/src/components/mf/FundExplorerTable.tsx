@@ -86,19 +86,18 @@ function FactorCell({ value }: { value: 'high' | 'medium' | 'low' | null | undef
 // ---------------------------------------------------------------------------
 
 function SortHeader({
-  label, sortKey, activeSort, sortDir, onSort,
+  label, sortKey, activeSort, onSort,
 }: {
   label: string;
   sortKey: SortKey;
   activeSort: SortKey;
-  sortDir: 'desc' | 'asc';
   onSort: (k: SortKey) => void;
 }) {
   const isActive = activeSort === sortKey;
   return (
     <th
       scope="col"
-      aria-sort={isActive ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+      aria-sort={isActive ? 'descending' : 'none'}
       tabIndex={0}
       onClick={() => onSort(sortKey)}
       onKeyDown={(e) => {
@@ -116,7 +115,7 @@ function SortHeader({
         className={cn('ml-1 transition-opacity', isActive ? 'text-royal opacity-100' : 'opacity-30')}
         aria-hidden="true"
       >
-        {isActive ? (sortDir === 'desc' ? '▾' : '▴') : '↕'}
+        {isActive ? '▾' : '↕'}
       </span>
     </th>
   );
@@ -129,11 +128,10 @@ function SortHeader({
 export interface FundExplorerTableProps {
   funds: FundExplorerItem[];
   activeSort: SortKey;
-  sortDir: 'desc' | 'asc';
   onSort: (key: SortKey) => void;
 }
 
-export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundExplorerTableProps) {
+export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTableProps) {
   const router = useRouter();
 
   const handleRowClick = React.useCallback((fund: FundExplorerItem) => {
