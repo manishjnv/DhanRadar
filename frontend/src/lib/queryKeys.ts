@@ -48,8 +48,11 @@ export const queryKeys = {
     all: () => ['indices'] as const,
   },
   mf: {
-    casStatus: (jobId: string) => ['mf', 'cas-status', jobId] as const,
-    report:    (jobId: string) => ['mf', 'report', jobId] as const,
+    casStatus:          (jobId: string) => ['mf', 'cas-status', jobId] as const,
+    report:             (jobId: string) => ['mf', 'report', jobId] as const,
+    explorerCategories: ()              => ['mf', 'explorer', 'categories'] as const,
+    explorerFunds:      (params: { category: string; sort: string; page: number }) =>
+                          ['mf', 'explorer', 'funds', params] as const,
   },
   notifications: {
     preferences: () => ['notifications', 'preferences'] as const,

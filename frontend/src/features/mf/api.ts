@@ -16,6 +16,8 @@ import type {
   BackendPortfolioReport,
   ResearchAskResponse,
   PortfolioLatestResponse,
+  FundExplorerResponse,
+  FundCategoriesResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -304,5 +306,40 @@ export function useLatestPortfolio() {
     queryFn: () => api.get<PortfolioLatestResponse>('/mf/portfolio/latest'),
     retry: false,
     staleTime: 5 * 60 * 1000,  // 5 min — portfolio_id is stable between uploads
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Feature 6 — Fund Explorer (public endpoints, no auth required)
+// ---------------------------------------------------------------------------
+
+/** Fetch available SEBI categories with ranked fund counts.
+ *  Stable across the session; re-fetched every 10 min. */
+export function useFundCategories() {
+  return useQuery<FundCategoriesResponse>({
+    queryKey: queryKeys.mf.explorerCategories(),
+    queryFn: () => api.get<FundCategoriesResponse>('/mf/funds/categories'),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/** Fetch paginated fund list for one SEBI category.
+ *  Re-fetches when category, sort, or page changes. */
+export function useFundExplorer(params: { category: string; sort: string; page: number }) {
+  return useQuery<FundExplorerResponse>({
+    queryKey: queryKeys.mf.explorerFunds(params),
+    queryFn: () => {
+      const qs = new URLSearchParams({
+        category: params.category,
+        sort: params.sort,
+        page: String(params.page),
+        limit: '20',
+      });
+      return api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
+    },
+    enabled: !!params.category,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 }
