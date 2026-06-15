@@ -13,9 +13,10 @@ Endpoints (all under /api/v1/signal, auth-gated):
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
@@ -41,10 +42,19 @@ from dhanradar.signal.schemas import (
 router = APIRouter(prefix="/signal", tags=["signal"])
 
 
+async def _require_auth(
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> UserContext:
+    """Raise 401 for anonymous callers — signal endpoints require a logged-in user."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return user
+
+
 @router.get("/rules", response_model=SignalRulesOut)
 async def get_rules(
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalRulesOut:
     """Return the caller's signal rules, seeding defaults on first access."""
@@ -57,7 +67,7 @@ async def get_rules(
 async def update_rules(
     body: SignalRulesUpdate,
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalRulesOut:
     """Update the caller's signal rules."""
@@ -69,7 +79,7 @@ async def update_rules(
 @router.get("/dip-fund", response_model=SignalDipFundOut)
 async def get_dip_fund(
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDipFundOut:
     """Return the caller's dip-fund record, seeding defaults on first access."""
@@ -82,7 +92,7 @@ async def get_dip_fund(
 async def add_dip_fund(
     body: AddDipFundBody,
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDipFundOut:
     """Add cash to the caller's dip-fund balance."""
@@ -94,7 +104,7 @@ async def add_dip_fund(
 @router.get("/deployments", response_model=list[SignalDeploymentOut])
 async def get_deployments(
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> list[SignalDeploymentOut]:
     """List the caller's deployment history (most recent 20)."""
@@ -106,7 +116,7 @@ async def get_deployments(
 @router.get("/journal", response_model=JournalOut)
 async def get_journal(
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> JournalOut:
     """Return journal entries and computed behaviour scores."""
@@ -122,7 +132,7 @@ async def get_journal(
 async def create_journal_entry(
     body: JournalEntryCreate,
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> JournalEntryCreatedOut:
     """Add a new journal entry; derives fomo_avoided and premature from context."""
@@ -138,7 +148,7 @@ async def create_journal_entry(
 async def delete_journal_entry(
     entry_id: UUID,
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a journal entry owned by the caller."""
@@ -163,7 +173,7 @@ async def get_learning_content(
 @router.get("/notifications", response_model=NotificationsResponse)
 async def get_notifications(
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> NotificationsResponse:
     """Return unread signal notifications for the caller (max 5)."""
@@ -177,7 +187,7 @@ async def get_notifications(
 async def mark_notification_read(
     notification_id: str,
     _: None = Depends(RequireTier("free")),
-    user: UserContext = Depends(current_user_or_anonymous),
+    user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Mark a notification as read."""
