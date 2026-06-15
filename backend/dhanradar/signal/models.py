@@ -101,3 +101,30 @@ class SignalJournal(Base):
     fomo_avoided = sa.Column(sa.Boolean)   # derived: skipped + fomo emotion
     premature = sa.Column(sa.Boolean)   # derived: deployed when signal was no_signal
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))
+
+
+class SignalNotification(Base):
+    """In-app daily alert notification for a user."""
+
+    __tablename__ = "signal_notifications"
+    __table_args__ = (
+        sa.Index(
+            "ix_signal_notifications_user_unread",
+            "user_id",
+            "read_at",
+            postgresql_where=sa.text("read_at IS NULL"),
+        ),
+        {"schema": "signal"},
+    )
+
+    id = sa.Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    user_id = sa.Column(UUID(as_uuid=True), nullable=False)
+    message = sa.Column(sa.Text, nullable=False)
+    signal_state = sa.Column(sa.String(20), nullable=False)
+    read_at = sa.Column(sa.DateTime(timezone=True), nullable=True)
+    created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))
