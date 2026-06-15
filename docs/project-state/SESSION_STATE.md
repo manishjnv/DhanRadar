@@ -1,12 +1,11 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-15 (**B67 Task 3 — scheme-master enrichment `plan_type`/`option_type` DONE,
-PR #172 open**. `parse_plan_option()` in `mf/taxonomy.py` (pure, 29 unit tests); migration `0025`
-adds both nullable columns to `mf.mf_funds`; upsert ON CONFLICT SET updated; Fund Explorer API +
-chips UI (Direct/Regular/Growth/IDCW/Div Reinvest/Div Payout). AMC AUM Step 4 BLOCKED — three
-ADR-0035 pre-build gates unmet; `amc_level_aum_crore` NOT in migration/model, placeholder only.
-144 tests pass, tsc clean. TWO founder-only v1.2 actions remain: (1) `POST /admin/scoring/v1.2/activate`
-as admin; (2) pre-rescore user notice. B67 per-scheme $0-vs-vendor decision still OPEN.)
+**Last updated:** 2026-06-15 (**B67 Task 3 — scheme-master enrichment `plan_type`/`option_type`
+DONE + DEPLOYED** — PR #172 `d2e96e5`, box `d2e96e5`, alembic `0025`; 14,041 funds backfilled
+(`nav_daily_fetch` 5.2s, canonical 9,295 / legacy 4,917); API + chips live on dhanradar.com.
+AMC AUM Step 4 blocked (ADR-0035 gates unmet). TWO founder-only v1.2 actions remain: (1)
+`POST /admin/scoring/v1.2/activate` as admin; (2) pre-rescore user notice. B67 per-scheme
+$0-vs-vendor decision still OPEN.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
