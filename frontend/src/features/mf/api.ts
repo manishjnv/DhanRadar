@@ -159,6 +159,9 @@ function mapBackendReport(r: BackendPortfolioReport): MfReport {
     previous_label: (f.previous_label ?? null) as MfScheme['previous_label'],
     // Feature 4: confidence quality signal bands — null on old cached reports (graceful).
     confidence_factors: f.confidence_factors ?? null,
+    // Feature 5: market-wide category rank — null before nightly task runs or no sebi_category.
+    category_rank: f.category_rank ?? null,
+    category_total: f.category_total ?? null,
   }));
 
   const category_allocation = Object.entries(r.category_allocation ?? {}).map(

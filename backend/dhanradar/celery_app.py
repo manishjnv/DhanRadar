@@ -133,6 +133,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.mf_metrics_refresh",
         "schedule": crontab(hour=0, minute=15),
     },
+    # Market-wide category rank — 01:00 IST; after metrics (00:15), before portfolio
+    # refresh (01:30). Computes ordinal ranks within each sebi_category peer group
+    # and upserts into mf_fund_ranks so the report surface can show "#1 of 30".
+    "mf-compute-market-ranks": {
+        "task": "dhanradar.tasks.mf.compute_market_ranks",
+        "schedule": crontab(hour=1, minute=0),
+    },
     # Portfolio daily refresh — 01:30 IST; after NAV (23:30) + metrics (00:15).
     # Rebuilds cached reports from stored holdings + today's NAV so users see a
     # fresh portfolio when they log in without re-uploading their CAS statement.
