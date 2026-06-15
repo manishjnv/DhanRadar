@@ -85,7 +85,7 @@ _SORT_SQL: dict[str, str] = {
     "return_1y":    "m.return_1y_pct DESC NULLS LAST",
     "return_3y":    "m.return_3y_pct DESC NULLS LAST",
     "return_5y":    "m.return_5y_pct DESC NULLS LAST",
-    "max_drawdown": "m.max_drawdown_pct DESC NULLS LAST",
+    "max_drawdown": "m.max_drawdown_pct ASC NULLS LAST",
 }
 
 

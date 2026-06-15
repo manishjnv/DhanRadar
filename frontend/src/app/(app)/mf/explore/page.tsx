@@ -22,6 +22,9 @@ import { useFundCategories, useFundExplorer } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
 import type { SortKey } from '@/components/mf/FundExplorerTable';
 
+type PlanFilter   = 'all' | 'direct' | 'regular';
+type OptionFilter = 'all' | 'growth' | 'idcw';
+
 // ---------------------------------------------------------------------------
 // Sort options — displayed as chip toggles (not a native <select>)
 // ---------------------------------------------------------------------------
@@ -33,7 +36,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'return_1y',   label: '1Y'         },
   { key: 'return_3y',   label: '3Y'         },
   { key: 'return_5y',   label: '5Y'         },
-  { key: 'max_drawdown', label: 'Drawdown'   },
+  { key: 'max_drawdown', label: 'Stability'  },
 ];
 
 // ---------------------------------------------------------------------------
