@@ -5,12 +5,13 @@
  * Tab state lives in ?tab= URL param so tabs are bookmarkable.
  * SEBI compliance: no advisory verbs, NOT FINANCIAL ADVICE in SignalHero footer.
  * No numeric DhanRadar score in DOM — MarketSignalState.weighted_score is never rendered.
+ * Behaviour scores (Reflect tab) are user-behaviour metrics, not fund scores.
  */
 
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMarketIndices } from '@/hooks/useMarketIndices';
-import { useSignalRules, useVIX, useBreadth } from './api';
+import { useSignalRules, useVIX, useBreadth, useJournal, useSignalDeployments } from './api';
 import { SignalHero } from '@/components/signal/SignalHero';
 import { MarketSignalCard } from '@/components/signal/MarketSignalCard';
 import { PortfolioContext } from '@/components/signal/PortfolioContext';
@@ -18,6 +19,12 @@ import { LearningContent } from '@/components/signal/LearningContent';
 import { RuleThresholdForm } from '@/components/signal/RuleThresholdForm';
 import { DipFundCard } from '@/components/signal/DipFundCard';
 import { DeploymentHistory } from '@/components/signal/DeploymentHistory';
+import { BehaviourKPIs } from '@/components/signal/BehaviourKPIs';
+import { JournalEntryCard } from '@/components/signal/JournalEntry';
+import { LogTodayModal } from '@/components/signal/LogTodayModal';
+import { BehaviourSummary } from '@/components/signal/BehaviourSummary';
+import { TrustEngine } from '@/components/signal/TrustEngine';
+import { Achievements } from '@/components/signal/Achievements';
 import type { MarketSignalState, SignalState } from './types';
 import { cn } from '@/lib/cn';
 
@@ -113,23 +120,15 @@ function CASBanner() {
 // How Signal Works explainer
 // ---------------------------------------------------------------------------
 function HowSignalWorks() {
-  const steps = [
-    'Set your personal thresholds for Nifty 50, India VIX, and Market Breadth.',
-    'Each day, real market data is checked against your thresholds.',
-    'A weighted score (VIX 40%, Breadth 40%, Nifty 20%) determines the signal state.',
-    'Your dip fund deployment ladder shows how much to deploy at each signal level.',
-    'Your SIPs continue regardless — Signal only governs extra dip deployments.',
-  ];
   return (
     <div className="info-box">
       <p className="text-small font-medium text-ink">How Signal works</p>
-      <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 text-caption text-ink-secondary">
-        {steps.map((s, i) => (
-          <li key={i} className="flex gap-1.5">
-            <span className="shrink-0 font-medium text-ink-muted">{i + 1}.</span>
-            {s}
-          </li>
-        ))}
+      <ul className="mt-2 flex flex-col gap-1.5 text-caption text-ink-secondary">
+        <li>1. You set your personal thresholds for Nifty, VIX, and Market Breadth.</li>
+        <li>2. Each day, real market data is checked against your thresholds.</li>
+        <li>3. A weighted score (VIX 40%, Breadth 40%, Nifty 20%) determines the signal state.</li>
+        <li>4. Your dip fund deployment ladder shows how much to deploy at each signal level.</li>
+        <li>5. Your SIPs continue regardless — Signal only governs extra dip deployments.</li>
       </ul>
       <p className="mt-3 text-caption text-ink-faint">
         Signal does not recommend specific funds. It checks whether your own pre-set rules are met.
@@ -141,7 +140,7 @@ function HowSignalWorks() {
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
-export type SignalTab = 'today' | 'rules';
+export type SignalTab = 'today' | 'rules' | 'reflect';
 
 interface SignalPageProps {
   hasCAS: boolean;
@@ -151,7 +150,10 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const rawTab = searchParams?.get('tab') ?? null;
-  const activeTab: SignalTab = rawTab === 'rules' ? 'rules' : 'today';
+  const activeTab: SignalTab =
+    rawTab === 'rules' ? 'rules' : rawTab === 'reflect' ? 'reflect' : 'today';
+
+  const [logModalOpen, setLogModalOpen] = React.useState(false);
 
   function switchTab(tab: SignalTab) {
     const params = new URLSearchParams(searchParams?.toString() ?? '');
@@ -166,6 +168,10 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
   const { data: breadth, isLoading: breadthLoading } = useBreadth();
   const { data: rules } = useSignalRules();
 
+  // Reflect tab data
+  const { data: journalData } = useJournal();
+  const { data: deployments = [] } = useSignalDeployments();
+
   const nifty50 = indices?.find((i) => i.name === 'Nifty 50');
   const marketLoading = indicesLoading || vixLoading || breadthLoading;
 
@@ -177,6 +183,12 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
       breadth.ad_ratio,
     );
   }, [nifty50, vix, breadth]);
+
+  const TAB_LABELS: Record<SignalTab, string> = {
+    today: 'Today',
+    rules: 'Rules & Fund',
+    reflect: 'Reflect',
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -190,7 +202,7 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
 
       {/* Tab bar */}
       <nav className="tabs" aria-label="Signal page tabs">
-        {(['today', 'rules'] as const).map((tab) => (
+        {(['today', 'rules', 'reflect'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -199,7 +211,7 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
             onClick={() => switchTab(tab)}
             className={cn('tab', activeTab === tab && 'active')}
           >
-            {tab === 'today' ? 'Today' : 'Rules & Fund'}
+            {TAB_LABELS[tab]}
           </button>
         ))}
       </nav>
@@ -209,10 +221,8 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
         <div className="flex flex-col gap-4">
           {!hasCAS && <CASBanner />}
 
-          {/* Signal Hero */}
           <SignalHero signalState={signalState} isLoading={marketLoading} />
 
-          {/* 3-column market signal grid */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <MarketSignalCard
               variant="nifty"
@@ -247,7 +257,6 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
             />
           </div>
 
-          {/* 2-column lower row: Portfolio Context + Learning Content */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <PortfolioContext hasCAS={hasCAS} rules={rules} />
             <LearningContent signalState={signalState?.state ?? 'no_signal'} />
@@ -263,6 +272,82 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
           <DipFundCard rules={rules} />
           <DeploymentHistory />
         </div>
+      )}
+
+      {/* ── Reflect tab ── */}
+      {activeTab === 'reflect' && (
+        <div className="flex flex-col gap-4">
+          {/* Behaviour KPIs */}
+          {journalData && <BehaviourKPIs scores={journalData.behaviour} />}
+
+          {/* Journal section */}
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                Investment Journal
+              </p>
+              <button
+                type="button"
+                className="btn btn-accent"
+                style={{ fontSize: 12, padding: '6px 14px' }}
+                onClick={() => setLogModalOpen(true)}
+              >
+                + Log today
+              </button>
+            </div>
+
+            {!journalData || journalData.entries.length === 0 ? (
+              <div
+                style={{
+                  padding: '24px 16px',
+                  textAlign: 'center',
+                  border: '1px dashed var(--border-strong)',
+                  borderRadius: 10,
+                }}
+              >
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  No decisions logged yet.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ marginTop: 8, fontSize: 12 }}
+                  onClick={() => setLogModalOpen(true)}
+                >
+                  + Log today&apos;s decision
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {journalData.entries.map((entry) => (
+                  <JournalEntryCard key={entry.id} entry={entry} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Behaviour summary */}
+          <BehaviourSummary entries={journalData?.entries ?? []} />
+
+          {/* Trust engine */}
+          {journalData && (
+            <TrustEngine
+              scores={journalData.behaviour}
+              entries={journalData.entries}
+            />
+          )}
+
+          {/* Achievements */}
+          <Achievements
+            entries={journalData?.entries ?? []}
+            deployments={deployments}
+          />
+        </div>
+      )}
+
+      {/* Log today modal — rendered at root to escape stacking context */}
+      {logModalOpen && (
+        <LogTodayModal onClose={() => setLogModalOpen(false)} />
       )}
     </div>
   );

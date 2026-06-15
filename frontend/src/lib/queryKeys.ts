@@ -71,6 +71,7 @@ export const queryKeys = {
     rules:       () => ['signal', 'rules'] as const,
     dipFund:     () => ['signal', 'dip-fund'] as const,
     deployments: () => ['signal', 'deployments'] as const,
+    journal:     () => ['signal', 'journal'] as const,
   },
   vix: {
     current: () => ['market', 'vix'] as const,
