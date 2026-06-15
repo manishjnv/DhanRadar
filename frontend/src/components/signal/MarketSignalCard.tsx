@@ -192,7 +192,7 @@ export function MarketSignalCard({
           </div>
           <ScoreBar score={score} state={signalState} />
           <div className="flex items-center justify-between">
-            <span className="text-caption text-ink-muted">{scoreLabel}</span>
+            <span className="text-caption text-ink-muted">{scoreLabel ?? 'Unknown'}</span>
             <span className="badge-neutral">Score {score}/4</span>
           </div>
           <div
@@ -235,7 +235,7 @@ export function MarketSignalCard({
           </div>
           <ScoreBar score={score} state={signalState} />
           <div className="flex items-center justify-between">
-            <span className="text-caption text-ink-muted">{scoreLabel}</span>
+            <span className="text-caption text-ink-muted">{scoreLabel ?? 'Unknown'}</span>
             <span className="badge-neutral">Score {score}/4</span>
           </div>
           <div className="border-t border-line pt-1">
