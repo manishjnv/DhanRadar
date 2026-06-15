@@ -72,13 +72,13 @@ class SignalDeployment(Base):
 
 
 class SignalJournal(Base):
-    """Investment journal entry (Phase 2 UI; table created in Phase 1 migration)."""
+    """Investment journal entry (Phase 2 Reflect tab)."""
 
     __tablename__ = "signal_journal"
     __table_args__ = (
         sa.Index("ix_signal_journal_user_date", "user_id", "date"),
         sa.CheckConstraint(
-            "decision IN ('deployed', 'held', 'missed', 'partial')",
+            "decision IN ('deployed', 'watched', 'skipped')",
             name="ck_signal_journal_decision",
         ),
         {"schema": "signal"},
@@ -94,7 +94,10 @@ class SignalJournal(Base):
     date = sa.Column(sa.Date, nullable=False)
     decision = sa.Column(sa.String(20))
     amount = sa.Column(sa.Numeric(14, 2))
-    emotion = sa.Column(JSONB)
+    emotion = sa.Column(JSONB)   # list[str]
     notes = sa.Column(sa.Text)
-    market_snapshot = sa.Column(JSONB)
+    market_snapshot = sa.Column(JSONB)   # {nifty_pct, vix_level, breadth_ratio}
+    signal_state = sa.Column(sa.String(20))   # signal state at time of entry (looked up)
+    fomo_avoided = sa.Column(sa.Boolean)   # derived: skipped + fomo emotion
+    premature = sa.Column(sa.Boolean)   # derived: deployed when signal was no_signal
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))

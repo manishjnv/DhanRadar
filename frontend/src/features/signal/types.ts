@@ -50,3 +50,51 @@ export interface MarketSignalState {
   weighted_score: number; // float 0–4 — NOT shown in DOM
   state: SignalState;
 }
+
+// ---------------------------------------------------------------------------
+// Journal / Reflect tab (Phase 2)
+// ---------------------------------------------------------------------------
+
+export type JournalDecision = 'deployed' | 'watched' | 'skipped';
+export type JournalEmotion = 'fearful' | 'calm' | 'excited' | 'fomo' | 'disciplined';
+
+export interface JournalEntry {
+  id: string;
+  date: string;                   // ISO date
+  decision: JournalDecision;
+  amount_deployed: number | null;
+  emotions: JournalEmotion[];
+  notes: string | null;
+  nifty_pct: number | null;
+  vix_level: number | null;
+  breadth_ratio: number | null;
+  signal_state: SignalState | null;
+  fomo_avoided: boolean | null;
+  premature: boolean | null;
+  created_at: string;
+}
+
+export interface BehaviourScores {
+  discipline_score: number;   // 0–100 integer — user behaviour metric
+  patience_score: number;     // 0–100 integer — user behaviour metric
+  investor_score: number;     // 0–100 integer — composite behaviour metric
+  trust_wins: number;
+  trust_total: number;
+  has_trust_data: boolean;    // false until 90 days of signals have elapsed
+}
+
+export interface JournalResponse {
+  entries: JournalEntry[];
+  behaviour: BehaviourScores;
+}
+
+export interface JournalEntryCreate {
+  date: string;
+  decision: JournalDecision;
+  amount_deployed?: number | null;
+  emotions: JournalEmotion[];
+  notes?: string | null;
+  nifty_pct?: number | null;
+  vix_level?: number | null;
+  breadth_ratio?: number | null;
+}

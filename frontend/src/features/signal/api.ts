@@ -8,6 +8,8 @@ import { api, ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
 import type {
   BreadthData,
+  JournalEntryCreate,
+  JournalResponse,
   SignalDeployment,
   SignalDipFund,
   SignalRules,
@@ -94,5 +96,27 @@ export function useBreadth() {
     retry: 1,
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Journal (Phase 2 — Reflect tab)
+// ---------------------------------------------------------------------------
+export function useJournal() {
+  return useQuery({
+    queryKey: queryKeys.signal.journal(),
+    queryFn: () => api.get<JournalResponse>('/signal/journal'),
+    retry: signalRetry,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useAddJournal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (entry: JournalEntryCreate) =>
+      api.post<{ id: string; created_at: string }>('/signal/journal', entry),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.signal.journal() }),
   });
 }

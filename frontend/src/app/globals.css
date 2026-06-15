@@ -225,4 +225,33 @@
     color: var(--surface);
     border-color: transparent;
   }
+
+  /* Journal entry card (Reflect tab) */
+  .j-entry {
+    border-left: 3px solid var(--border-strong);
+    padding: 12px 16px;
+    border-radius: 0 10px 10px 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .j-entry.deployed { border-left-color: var(--dr-emerald); }
+  .j-entry.watched  { border-left-color: var(--dr-amber); }
+  .j-entry.skipped  { border-left-color: var(--text-faint); }
+
+  /* Achievement cards (Reflect tab) */
+  .achievement {
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .achievement.earned {
+    background: var(--emerald-soft);
+    border-color: rgba(0, 179, 134, 0.3);
+  }
+  .achievement.locked {
+    opacity: 0.4;
+  }
 }

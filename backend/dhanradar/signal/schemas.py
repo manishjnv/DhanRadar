@@ -78,3 +78,91 @@ class BreadthOut(BaseModel):
     declines: int
     ad_ratio: float
     market_open: bool
+
+
+# ---------------------------------------------------------------------------
+# Journal (Phase 2 — Reflect tab)
+# ---------------------------------------------------------------------------
+
+VALID_DECISIONS = {"deployed", "watched", "skipped"}
+VALID_EMOTIONS = {"fearful", "calm", "excited", "fomo", "disciplined"}
+
+
+class JournalEntryCreate(BaseModel):
+    date: date
+    decision: str
+    amount_deployed: Decimal | None = None
+    emotions: list[str] = []
+    notes: str | None = None
+    nifty_pct: float | None = None
+    vix_level: float | None = None
+    breadth_ratio: float | None = None
+
+    @field_validator("decision")
+    @classmethod
+    def decision_must_be_valid(cls, v: str) -> str:
+        if v not in VALID_DECISIONS:
+            raise ValueError(f"decision must be one of: {', '.join(sorted(VALID_DECISIONS))}")
+        return v
+
+    @field_validator("emotions")
+    @classmethod
+    def emotions_must_be_valid(cls, v: list[str]) -> list[str]:
+        invalid = set(v) - VALID_EMOTIONS
+        if invalid:
+            raise ValueError(f"unknown emotions: {invalid}")
+        return v
+
+
+class JournalEntryOut(BaseModel):
+    id: UUID
+    date: date
+    decision: str
+    amount_deployed: Decimal | None = None
+    emotions: list[str] = []
+    notes: str | None = None
+    nifty_pct: float | None = None
+    vix_level: float | None = None
+    breadth_ratio: float | None = None
+    signal_state: str | None = None
+    fomo_avoided: bool | None = None
+    premature: bool | None = None
+    created_at: datetime
+
+    @classmethod
+    def from_orm_row(cls, row: Any) -> JournalEntryOut:
+        snapshot: dict[str, Any] = row.market_snapshot or {}
+        return cls(
+            id=row.id,
+            date=row.date,
+            decision=row.decision or "",
+            amount_deployed=row.amount,
+            emotions=row.emotion or [],
+            notes=row.notes,
+            nifty_pct=snapshot.get("nifty_pct"),
+            vix_level=snapshot.get("vix_level"),
+            breadth_ratio=snapshot.get("breadth_ratio"),
+            signal_state=row.signal_state,
+            fomo_avoided=row.fomo_avoided,
+            premature=row.premature,
+            created_at=row.created_at,
+        )
+
+
+class BehaviourScoresOut(BaseModel):
+    discipline_score: int
+    patience_score: int
+    investor_score: int
+    trust_wins: int
+    trust_total: int
+    has_trust_data: bool
+
+
+class JournalOut(BaseModel):
+    entries: list[JournalEntryOut]
+    behaviour: BehaviourScoresOut
+
+
+class JournalEntryCreatedOut(BaseModel):
+    id: UUID
+    created_at: datetime
