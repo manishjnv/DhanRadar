@@ -132,7 +132,7 @@ export function MarketSignalCard({
       </div>
 
       {/* Nifty value block */}
-      {variant === 'nifty' && niftyValue !== undefined && (
+      {variant === 'nifty' && niftyValue != null && (
         <>
           <div className="flex items-baseline gap-2">
             <span className="mono text-[22px] font-semibold text-ink">
@@ -167,7 +167,7 @@ export function MarketSignalCard({
       )}
 
       {/* VIX value block */}
-      {variant === 'vix' && vixValue !== undefined && (
+      {variant === 'vix' && vixValue != null && (
         <>
           <div className="flex items-baseline gap-2">
             <span
@@ -212,7 +212,7 @@ export function MarketSignalCard({
       )}
 
       {/* Breadth value block */}
-      {variant === 'breadth' && advances !== undefined && declines !== undefined && (
+      {variant === 'breadth' && advances != null && declines != null && (
         <>
           <div className="flex items-center gap-4">
             <div>
