@@ -327,7 +327,7 @@ export function useFundCategories() {
 
 /** Fetch paginated fund list for one SEBI category.
  *  Re-fetches when category, sort, page, or limit changes. */
-export function useFundExplorer(params: { category: string; sort: string; sortDir?: 'asc' | 'desc'; page: number; limit?: number }) {
+export function useFundExplorer(params: { category: string; sort: string; sortDir?: 'asc' | 'desc'; planType?: string; optionType?: string; page: number; limit?: number }) {
   return useQuery<FundExplorerResponse>({
     queryKey: queryKeys.mf.explorerFunds(params),
     queryFn: () => {
@@ -338,6 +338,8 @@ export function useFundExplorer(params: { category: string; sort: string; sortDi
         page: String(params.page),
         limit: String(params.limit ?? 20),
       });
+      if (params.planType)   qs.set('plan_type',   params.planType);
+      if (params.optionType) qs.set('option_type', params.optionType);
       return api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
     },
     enabled: !!params.category,

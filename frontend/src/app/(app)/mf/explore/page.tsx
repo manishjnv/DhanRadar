@@ -376,43 +376,23 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     category: activeCategory,
     sort,
     sortDir,
+    planType:   planFilter   !== 'all' ? planFilter   : undefined,
+    optionType: optionFilter !== 'all' ? optionFilter : undefined,
     page,
     limit: perPage,
   });
 
-  // Client-side filter: search + plan + option type
+  // Client-side filter: search only (plan/option are server-side for correct total/pagination)
   const filtered = React.useMemo(() => {
     if (!data?.funds) return [];
-    let result = data.funds;
-
     const q = search.toLowerCase().trim();
-    if (q) {
-      result = result.filter(
-        (f) =>
-          f.scheme_name.toLowerCase().includes(q) ||
-          (f.amc_name?.toLowerCase().includes(q) ?? false),
-      );
-    }
-
-    if (planFilter !== 'all') {
-      result = result.filter((f) => f.plan_type === planFilter);
-    }
-
-    if (optionFilter !== 'all') {
-      result = result.filter((f) => {
-        if (optionFilter === 'idcw') {
-          return (
-            f.option_type === 'idcw' ||
-            f.option_type === 'dividend_reinvest' ||
-            f.option_type === 'dividend_payout'
-          );
-        }
-        return f.option_type === optionFilter;
-      });
-    }
-
-    return result;
-  }, [data?.funds, search, planFilter, optionFilter]);
+    if (!q) return data.funds;
+    return data.funds.filter(
+      (f) =>
+        f.scheme_name.toLowerCase().includes(q) ||
+        (f.amc_name?.toLowerCase().includes(q) ?? false),
+    );
+  }, [data?.funds, search]);
 
   // --- Loading skeleton ---
   if (catsLoading) {
