@@ -28,16 +28,19 @@ import type { SortKey } from '@/components/mf/FundExplorerTable';
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'rank',         label: 'Power Rank' },
-  { key: 'return_1y',   label: '1Y Return'  },
-  { key: 'return_3y',   label: '3Y Return'  },
+  { key: 'return_3m',   label: '3M'         },
+  { key: 'return_6m',   label: '6M'         },
+  { key: 'return_1y',   label: '1Y'         },
+  { key: 'return_3y',   label: '3Y'         },
+  { key: 'return_5y',   label: '5Y'         },
   { key: 'max_drawdown', label: 'Drawdown'   },
 ];
 
 // ---------------------------------------------------------------------------
-// Category tabs — .chip / .chip.active pattern from component library
+// Category dropdown — native <select> with chevron overlay
 // ---------------------------------------------------------------------------
 
-function CategoryTabs({
+function CategoryDropdown({
   categories,
   activeKey,
   onSelect,
@@ -47,31 +50,32 @@ function CategoryTabs({
   onSelect: (key: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto pb-1 -mx-1 px-1">
-      <div className="flex gap-1.5 min-w-max">
-        {categories.map((cat) => (
-          <button
-            key={cat.key}
-            type="button"
-            onClick={() => onSelect(cat.key)}
-            className={cn(
-              'inline-flex items-center gap-1 px-3 py-1.5 rounded-full whitespace-nowrap',
-              'text-small font-medium border transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              activeKey === cat.key
-                ? 'bg-ink text-bg border-ink'
-                : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
-            )}
-          >
-            {cat.display_name}
-            <span className={cn(
-              'font-mono text-caption',
-              activeKey === cat.key ? 'text-bg/60' : 'text-ink-muted',
-            )}>
-              {cat.fund_count}
-            </span>
-          </button>
-        ))}
+    <div className="relative inline-flex items-center gap-2">
+      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+        Category
+      </span>
+      <div className="relative">
+        <select
+          value={activeKey}
+          onChange={(e) => onSelect(e.target.value)}
+          className={cn(
+            'h-[34px] rounded-lg border border-line bg-surface-2',
+            'pl-3 pr-8 text-small text-ink font-medium cursor-pointer appearance-none',
+            'focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40',
+            'transition-colors max-w-[320px]',
+          )}
+        >
+          {categories.map((cat) => (
+            <option key={cat.key} value={cat.key}>
+              {cat.display_name} ({cat.fund_count})
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+            <path d="M5 7L0.5 2.5h9L5 7z" />
+          </svg>
+        </span>
       </div>
     </div>
   );
@@ -290,11 +294,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
   if (catsLoading) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="flex gap-2 overflow-hidden">
-          {[...Array(7)].map((_, i) => (
-            <Skeleton key={i} className="h-8 w-24 rounded-full shrink-0" />
-          ))}
-        </div>
+        <Skeleton className="h-[34px] w-64 rounded-lg" />
         <Skeleton className="h-10 rounded-lg" />
         <div className="flex flex-col gap-2">
           {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
@@ -315,26 +315,28 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Category chip tabs */}
-      <CategoryTabs
-        categories={catData.categories}
-        activeKey={activeCategory}
-        onSelect={handleCategoryChange}
-      />
-
-      {/* Controls bar: search + sort chips + count */}
-      <div className="flex flex-wrap items-center gap-3">
-        <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} />
-        <SortChips sort={sort} onSort={handleSort} />
+    <div className="flex flex-col gap-3">
+      {/* Row 1: Category selector + fund count */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <CategoryDropdown
+          categories={catData.categories}
+          activeKey={activeCategory}
+          onSelect={handleCategoryChange}
+        />
         {data && (
-          <span className="font-mono text-caption text-ink-muted ml-auto whitespace-nowrap">
+          <span className="font-mono text-caption text-ink-muted whitespace-nowrap">
             {data.total} funds
           </span>
         )}
       </div>
 
-      {/* Table / loading rows / error */}
+      {/* Row 2: Search */}
+      <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} />
+
+      {/* Row 3: Sort chips */}
+      <SortChips sort={sort} onSort={handleSort} />
+
+      {/* Table / loading / error */}
       {fundsLoading ? (
         <div className="flex flex-col gap-2">
           {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}

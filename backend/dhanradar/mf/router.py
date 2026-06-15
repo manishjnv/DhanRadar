@@ -80,8 +80,11 @@ _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-proces
 # Validated sort-column whitelist — never interpolated from user input directly.
 _SORT_SQL: dict[str, str] = {
     "rank":         "r.rank ASC",
+    "return_3m":    "m.return_3m_pct DESC NULLS LAST",
+    "return_6m":    "m.return_6m_pct DESC NULLS LAST",
     "return_1y":    "m.return_1y_pct DESC NULLS LAST",
     "return_3y":    "m.return_3y_pct DESC NULLS LAST",
+    "return_5y":    "m.return_5y_pct DESC NULLS LAST",
     "max_drawdown": "m.max_drawdown_pct DESC NULLS LAST",
 }
 
@@ -627,7 +630,7 @@ async def fund_explorer_list(
         "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
         "  f.plan_type, f.option_type,"
         "  r.rank, r.total_in_cat, r.verb_label,"
-        "  m.return_1y_pct, m.return_3y_pct"
+        "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct"
         " FROM mf.mf_funds f"
         " JOIN ("
         "   SELECT DISTINCT ON (isin) isin, rank, total_in_cat, verb_label"
@@ -636,7 +639,7 @@ async def fund_explorer_list(
         "   ORDER BY isin, as_of_date DESC"
         " ) r ON f.isin = r.isin"
         " LEFT JOIN ("
-        "   SELECT DISTINCT ON (isin) isin, return_1y_pct, return_3y_pct"
+        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct"
         "   FROM mf.mf_fund_metrics"
         "   ORDER BY isin, as_of_date DESC"
         " ) m ON f.isin = m.isin"
@@ -671,8 +674,11 @@ async def fund_explorer_list(
             confidence_factors=None,
             category_rank=r.rank,
             category_total=r.total_in_cat,
+            return_3m_pct=r.return_3m_pct,
+            return_6m_pct=r.return_6m_pct,
             return_1y_pct=r.return_1y_pct,
             return_3y_pct=r.return_3y_pct,
+            return_5y_pct=r.return_5y_pct,
             plan_type=r.plan_type,
             option_type=r.option_type,
             amc_level_aum_crore=None,  # ADR-0035: endpoint unconfirmed; stays None

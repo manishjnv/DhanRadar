@@ -172,8 +172,11 @@ export interface FundExplorerItem {
   confidence_factors: Record<string, 'high' | 'medium' | 'low'> | null;
   category_rank: number;
   category_total: number;
+  return_3m_pct: number | null;
+  return_6m_pct: number | null;
   return_1y_pct: number | null;
   return_3y_pct: number | null;
+  return_5y_pct: number | null;
   /** B67 Task 3: parsed from scheme name — null for legacy schemes */
   plan_type: 'direct' | 'regular' | null;
   /** B67 Task 3: parsed from scheme name — null for legacy schemes */
