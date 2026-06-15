@@ -439,6 +439,9 @@ async def _load_nav_series(
 # > 3 years of NAV, unlike the 400-day momentum/risk load.
 _COHORT_LOOKBACK_DAYS = 1200
 
+# Lookback for mf_metrics_refresh — needs 5Y window (vs 3Y for cohort builder).
+_METRICS_LOOKBACK_DAYS = 1900
+
 # B63: peers' NAV series are loaded in batches of this many ISINs. Loading every
 # peer's 1200-day series at once OOM-killed (SIGKILL) the 640M batch worker the
 # moment the NAV table became complete (5.9M rows; hundreds of peers per
@@ -923,7 +926,7 @@ async def _metrics_refresh_pipeline() -> str:
     from sqlalchemy.dialects.postgresql import insert
 
     from dhanradar.db import TaskSessionLocal
-    from dhanradar.mf.signals import long_horizon_stats
+    from dhanradar.mf.signals import extended_horizon_stats
     from dhanradar.models.mf import MfFundMetrics, MfNavHistory
 
     today = date.today()
@@ -946,8 +949,8 @@ async def _metrics_refresh_pipeline() -> str:
             continue
 
         async with TaskSessionLocal() as db:
-            # Load long NAV series for this chunk (same lookback as cohort builder).
-            series, _ = await _load_nav_series(db, chunk, lookback_days=_COHORT_LOOKBACK_DAYS)
+            # Load long NAV series for this chunk (5Y window for extended metrics).
+            series, _ = await _load_nav_series(db, chunk, lookback_days=_METRICS_LOOKBACK_DAYS)
 
             upsert_dicts: list[dict] = []
             for isin in chunk:
@@ -956,11 +959,14 @@ async def _metrics_refresh_pipeline() -> str:
                 # forward-compatibility only. If as_of is ever wired to anchor
                 # windows, the refresh must store per-fund as_of and the cohort
                 # builder must filter by it to stay equivalent with the live path.
-                r1, r3, dd = long_horizon_stats(series.get(isin, []), as_of=today)
+                r3m, r6m, r1, r3, r5, dd = extended_horizon_stats(series.get(isin, []))
                 upsert_dicts.append({
                     "isin": isin,
+                    "return_3m_pct": r3m,
+                    "return_6m_pct": r6m,
                     "return_1y_pct": r1,
                     "return_3y_pct": r3,
+                    "return_5y_pct": r5,
                     "max_drawdown_pct": dd,
                     "nav_points": len(series.get(isin, [])),
                     "as_of_date": today,
@@ -974,8 +980,11 @@ async def _metrics_refresh_pipeline() -> str:
                 stmt = insert(MfFundMetrics).values(sub).on_conflict_do_update(
                     index_elements=["isin"],
                     set_={
+                        "return_3m_pct": insert(MfFundMetrics).excluded.return_3m_pct,
+                        "return_6m_pct": insert(MfFundMetrics).excluded.return_6m_pct,
                         "return_1y_pct": insert(MfFundMetrics).excluded.return_1y_pct,
                         "return_3y_pct": insert(MfFundMetrics).excluded.return_3y_pct,
+                        "return_5y_pct": insert(MfFundMetrics).excluded.return_5y_pct,
                         "max_drawdown_pct": insert(MfFundMetrics).excluded.max_drawdown_pct,
                         "nav_points": insert(MfFundMetrics).excluded.nav_points,
                         "as_of_date": insert(MfFundMetrics).excluded.as_of_date,

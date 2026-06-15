@@ -23,7 +23,7 @@ import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 // Sort types (exported so page.tsx can import SortKey)
 // ---------------------------------------------------------------------------
 
-export type SortKey = 'rank' | 'return_1y' | 'return_3y' | 'max_drawdown';
+export type SortKey = 'rank' | 'return_3m' | 'return_6m' | 'return_1y' | 'return_3y' | 'return_5y' | 'max_drawdown';
 
 // ---------------------------------------------------------------------------
 // Fund avatar — deterministic color from scheme name.
@@ -140,7 +140,7 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
     <div className="overflow-x-auto">
       {/* min-w ensures horizontal scroll on mobile — never collapses columns */}
       <table
-        className="w-full border-collapse text-small min-w-[800px]"
+        className="w-full border-collapse text-small min-w-[1100px]"
         aria-label="Fund rankings — educational data only, not investment advice"
         data-testid="fund-explorer-table"
       >
@@ -166,8 +166,11 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
             <th scope="col" className="pb-3 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
               Volatility
             </th>
-            <SortHeader label="1Y Ret" sortKey="return_1y"   activeSort={activeSort} onSort={onSort} />
-            <SortHeader label="3Y Ret" sortKey="return_3y"   activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="3M Ret" sortKey="return_3m"  activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="6M Ret" sortKey="return_6m"  activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="1Y Ret" sortKey="return_1y"  activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="3Y Ret" sortKey="return_3y"  activeSort={activeSort} onSort={onSort} />
+            <SortHeader label="5Y Ret" sortKey="return_5y"  activeSort={activeSort} onSort={onSort} />
           </tr>
         </thead>
 
@@ -261,28 +264,69 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
                 </td>
 
                 {/* Returns — mono, colored, +/- prefix */}
+                {/* 3M return */}
+                <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
+                  {fund.return_3m_pct != null ? (
+                    <span className={cn(
+                      'font-mono text-[13px] font-semibold',
+                      fund.return_3m_pct >= 0 ? 'text-emerald' : 'text-red',
+                    )}>
+                      {fund.return_3m_pct >= 0 ? '+' : ''}{fund.return_3m_pct.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                  )}
+                </td>
+                {/* 6M return */}
+                <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
+                  {fund.return_6m_pct != null ? (
+                    <span className={cn(
+                      'font-mono text-[13px] font-semibold',
+                      fund.return_6m_pct >= 0 ? 'text-emerald' : 'text-red',
+                    )}>
+                      {fund.return_6m_pct >= 0 ? '+' : ''}{fund.return_6m_pct.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                  )}
+                </td>
+                {/* 1Y return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_1y_pct != null ? (
                     <span className={cn(
-                      'font-mono text-small font-semibold',
+                      'font-mono text-[13px] font-semibold',
                       fund.return_1y_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_1y_pct >= 0 ? '+' : ''}{fund.return_1y_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-caption text-ink-muted">—</span>
+                    <span className="font-mono text-[11px] text-ink-muted">—</span>
                   )}
                 </td>
+                {/* 3Y return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_3y_pct != null ? (
                     <span className={cn(
-                      'font-mono text-small font-semibold',
+                      'font-mono text-[13px] font-semibold',
                       fund.return_3y_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_3y_pct >= 0 ? '+' : ''}{fund.return_3y_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-caption text-ink-muted">—</span>
+                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                  )}
+                </td>
+                {/* 5Y return */}
+                <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
+                  {fund.return_5y_pct != null ? (
+                    <span className={cn(
+                      'font-mono text-[13px] font-semibold',
+                      fund.return_5y_pct >= 0 ? 'text-emerald' : 'text-red',
+                    )}>
+                      {fund.return_5y_pct >= 0 ? '+' : ''}{fund.return_5y_pct.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[11px] text-ink-muted">—</span>
                   )}
                 </td>
               </tr>
@@ -291,7 +335,7 @@ export function FundExplorerTable({ funds, activeSort, onSort }: FundExplorerTab
 
           {funds.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-16 text-center">
+              <td colSpan={12} className="py-16 text-center">
                 <p className="text-small font-medium text-ink">No funds match your search</p>
                 <p className="text-caption text-ink-muted mt-1">Try a different name or clear the search</p>
               </td>
