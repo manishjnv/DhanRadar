@@ -1,13 +1,47 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-15 (**MF UI compliance audit DONE, PR #174 open**. Fund Detail page
-`/mf/fund/[isin]` created; token/a11y fixes across Explorer + LabelChip + LabelHistoryChart;
-`tsc --noEmit` clean. B67 Task 3 DONE+DEPLOYED — PR #172 `d2e96e5`, alembic `0025`, 14,041 funds
-backfilled; API + chips live. AMC AUM Step 4 blocked (ADR-0035). TWO founder-only v1.2 actions
-remain: (1) `POST /admin/scoring/v1.2/activate` as admin; (2) pre-rescore user notice.)
+**Last updated:** 2026-06-15 (**Fund Explorer UX — bidirectional sort + server-side filters DONE,
+PRs #188 + #189 merged + KVM4 deployed**. Column headers sort full dataset asc/desc; plan/option
+filter count + pagination now accurate. MF UI compliance audit PR #174 still open. B67 Task 3
+DONE+DEPLOYED `0025`. TWO founder-only v1.2 actions remain.)
 
 Living status doc. Update at every session exit (global playbook Phase 6). Keep it short; detail
 lives in the linked docs.
+
+## Fund Explorer UX — bidirectional sort + server-side filters (2026-06-15)
+
+Three UX bugs fixed across two PRs, both deployed to KVM4.
+
+**PR #188 — bidirectional column sort (`feat/fund-explorer-bidirectional-sort`, `4951956`).**
+Column click once → best-first (▾). Same column again → worst-first (▴). Different column resets
+to best-first. Backend re-sorts the full dataset on every direction change (no client-side reversal).
+Backend: `_SORT_SQL` dict replaced by `_SORT_COL` (column expressions) + `_SORT_BEST_ASC`
+frozenset (rank/max\_drawdown lower=better → SQL ASC = best-first) + `_SORT_NULLS_LAST`.
+New `sort_dir=asc|desc` query param; logic: `want_sql_asc = (sort_dir=="desc") == (sort in _SORT_BEST_ASC)`.
+Frontend: `sortDir` state in `ExplorerBody`; `SortHeader` shows ▾/▴/↕; `aria-sort` correct.
+Test: `test_fund_explorer.py` import updated from `_SORT_SQL` → `_SORT_COL`.
+
+**PR #189 — server-side plan/option filters (`feat/fund-explorer-server-side-filters`, `e602bd7`).**
+Plan (direct/regular) and Option (growth/idcw) filters sent as `plan_type`/`option_type` backend query
+params. `COUNT(*)` recalculated on the filtered dataset — selecting "Regular" shows the actual count
+(e.g. 39/96 for Value Fund), not the category total. Pagination page count correct for the filtered
+subset. `option_type=idcw` maps to `IN ('idcw', 'dividend_reinvest', 'dividend_payout')` in SQL
+(hardcoded literal; user input is regex-validated). Client-side `filtered` useMemo reduced to
+name/AMC search only. Verified live: `All=96 Regular=39 Regular+Growth=17` for Value Fund.
+
+**CI queue stall note.** PR #189 had no CI event for ~20 min due to a rebase-conflict
+(`bd1319c` squash-merged as `4951956`). Resolved by `git rebase origin/main` + force-push; CI
+queued immediately. Local gates (guards ✅ ruff ✅ tsc ✅) verified before merge.
+
+### Agent-utilization & routing telemetry (2026-06-15 Fund Explorer UX session)
+
+- **Fable (Tier 0):** full session — all file edits (6 files PR #188, 4 files PR #189; all ≤30 lines
+  per file against hot context, one-shot exemption); backend direction logic + SQL injection review;
+  CI-stall diagnosis + rebase; local gate verification; deploy + prod smoke check;
+  SESSION\_STATE update. reworked: N/A (no subagents).
+- **Sonnet (Tier 1):** n/a this session.
+- **Haiku (Tier 3):** n/a this session.
+- **codex:rescue:** n/a — Tier-A UI + non-load-bearing backend param; account not entitled (memory).
 
 ## MF UI compliance audit — Fund Detail page + token/a11y fixes (2026-06-15)
 
