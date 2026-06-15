@@ -291,13 +291,46 @@ class TestNavrowsToFundUpserts:
         """Must NOT include columns the feed does not own (expense_ratio, aum, etc.).
 
         `sebi_category` is the validated/canonical form of the feed's own `category`
-        (B66 taxonomy layer) — it is derived from feed data, so it belongs here while
-        scheme-master columns like aum/expense_ratio (a different source) do not."""
+        (B66 taxonomy layer). `plan_type` and `option_type` are parsed from the
+        feed's own `scheme_name` (B67 Task 3) — derived, not a different source.
+        Scheme-master columns that require a separate data source (aum, expense_ratio,
+        benchmark_index) must NOT appear here."""
         rows = [_row()]
         out = _navrows_to_fund_upserts(rows)
         assert set(out[0].keys()) == {
             "isin", "amfi_code", "scheme_name", "category", "sebi_category",
+            "plan_type", "option_type",
         }
+
+    def test_plan_type_and_option_type_populated(self):
+        """plan_type and option_type are parsed from the scheme_name."""
+        row = NavRow(
+            amfi_code="119551",
+            isin_growth="INF179KB1HA2",
+            isin_reinvest=None,
+            scheme_name="Nippon India Large Cap Fund - Direct Plan - Growth",
+            nav=78.43,
+            nav_date=datetime.date(2026, 6, 1),
+            category="Equity Scheme - Large Cap Fund",
+        )
+        out = _navrows_to_fund_upserts([row])
+        assert out[0]["plan_type"] == "direct"
+        assert out[0]["option_type"] == "growth"
+
+    def test_plan_type_none_for_legacy_scheme(self):
+        """Legacy scheme names without Direct/Regular produce plan_type=None."""
+        row = NavRow(
+            amfi_code="100033",
+            isin_growth="INF209K01YQ6",
+            isin_reinvest=None,
+            scheme_name="Reliance Growth Fund",
+            nav=92.12,
+            nav_date=datetime.date(2026, 6, 1),
+            category="Equity Scheme - Large Cap Fund",
+        )
+        out = _navrows_to_fund_upserts([row])
+        assert out[0]["plan_type"] is None
+        assert out[0]["option_type"] == "growth"
 
 
 # ===========================================================================

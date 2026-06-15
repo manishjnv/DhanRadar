@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -55,6 +56,8 @@ class MfFund(Base):
     benchmark_index: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sebi_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     risk_o_meter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plan_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    option_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 class MfNavHistory(Base):

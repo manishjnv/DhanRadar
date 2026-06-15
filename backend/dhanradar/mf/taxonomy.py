@@ -253,6 +253,64 @@ def canonical_for(raw: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Plan / option parsing (B67 Task 3)
+# ---------------------------------------------------------------------------
+
+# Order matters — more-specific patterns before their substrings.
+# "idcw reinvest" matches before "idcw" so "IDCW Reinvestment" maps correctly.
+# "dividend reinvest" similarly before bare "dividend".
+# "growth" is last — it appears in many fund names (e.g. "Growth Fund"); we
+# only fall through to it when no IDCW/dividend variant is present.
+_OPTION_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("idcw reinvest",    "dividend_reinvest"),
+    ("idcw re-invest",   "dividend_reinvest"),
+    ("idcw payout",      "dividend_payout"),
+    ("idcw",             "idcw"),
+    ("dividend reinvest","dividend_reinvest"),
+    ("dividend re-invest","dividend_reinvest"),
+    ("dividend payout",  "dividend_payout"),
+    ("dividend",         "idcw"),   # bare 'dividend' → idcw (post-2021 SEBI rename)
+    ("growth",           "growth"),
+)
+
+
+def parse_plan_option(scheme_name: str | None) -> tuple[str | None, str | None]:
+    """Return (plan_type, option_type) parsed from an AMFI scheme name.
+
+    Pure function — no DB access, no network calls.
+
+    plan_type : ``'direct'`` | ``'regular'`` | ``None``
+    option_type: ``'growth'`` | ``'idcw'`` | ``'dividend_reinvest'`` |
+                 ``'dividend_payout'`` | ``None``
+
+    Rules are applied case-insensitively. ``None`` is returned when the
+    scheme name does not contain a recognisable marker — common for legacy
+    schemes whose names predate the Direct/Regular bifurcation (2013).
+    Neither raises nor modifies the input.
+    """
+    if not isinstance(scheme_name, str) or not scheme_name.strip():
+        return None, None
+
+    lower = scheme_name.lower()
+
+    # plan_type: first match wins
+    plan_type: str | None = None
+    if "direct" in lower:
+        plan_type = "direct"
+    elif "regular" in lower:
+        plan_type = "regular"
+
+    # option_type: first pattern in _OPTION_PATTERNS wins
+    option_type: str | None = None
+    for pattern, value in _OPTION_PATTERNS:
+        if pattern in lower:
+            option_type = value
+            break
+
+    return plan_type, option_type
+
+
+# ---------------------------------------------------------------------------
 # Batch summarizer
 # ---------------------------------------------------------------------------
 
