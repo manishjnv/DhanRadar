@@ -143,7 +143,7 @@ export function LabelHistoryChart({ history, isLocked }: LabelHistoryChartProps)
     // Cap the width: the chart is a fixed 400×96 viewBox SVG at width:100%, so in a
     // full-width panel it upscaled ~2.6× and the band labels rendered huge. Capping
     // keeps it ~1:1 (band labels ~10px), matching the rest of the report.
-    <div style={{ marginTop: 12, maxWidth: 440 }}>
+    <div style={{ marginTop: 12, maxWidth: 440, overflowX: 'auto' }}>
       {/* Header row + period toggle */}
       <div
         style={{

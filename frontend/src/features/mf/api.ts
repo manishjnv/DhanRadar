@@ -18,6 +18,7 @@ import type {
   PortfolioLatestResponse,
   FundExplorerResponse,
   FundCategoriesResponse,
+  FundExplorerItem,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -339,6 +340,29 @@ export function useFundExplorer(params: { category: string; sort: string; page: 
       return api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
     },
     enabled: !!params.category,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/** Fetch a single fund's detail by ISIN, resolved via the category fund list.
+ *  Returns null when the ISIN isn't in the category's top 200 results.
+ *  category comes from the URL query param set by FundExplorerTable navigation. */
+export function useFundDetail(isin: string, category: string | null) {
+  return useQuery<FundExplorerItem | null>({
+    queryKey: queryKeys.mf.fundDetail(isin, category ?? ''),
+    queryFn: async () => {
+      if (!category) return null;
+      const qs = new URLSearchParams({
+        category,
+        sort: 'rank',
+        page: '1',
+        limit: '200',
+      });
+      const res = await api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
+      return res.funds.find((f) => f.isin === isin) ?? null;
+    },
+    enabled: !!isin && !!category,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
