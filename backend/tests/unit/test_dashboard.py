@@ -28,8 +28,8 @@ async def test_indices_happy_path_from_yahoo(patch_redis, monkeypatch):
     monkeypatch.setattr(indices_mod, "_quote_meta", fake_meta)
     out = await get_indices()
 
-    assert {i.name for i in out} == {"NIFTY 50", "SENSEX", "NIFTY Bank", "NIFTY Midcap 150"}
-    nifty = next(i for i in out if i.name == "NIFTY 50")
+    assert {i.name for i in out} == {"Nifty 50", "Sensex", "Nifty Bank", "Nifty Midcap 150"}
+    nifty = next(i for i in out if i.name == "Nifty 50")
     assert nifty.value == 24832.65
     assert nifty.change_pct == round((0.01 / 0.99) * 100, 2)  # ~+1.01% vs prev close
 
