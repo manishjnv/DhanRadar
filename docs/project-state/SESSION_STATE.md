@@ -1,11 +1,10 @@
 # DhanRadar — Session State
 
-**Last updated:** 2026-06-16 (**Signal Phase 2 + Phase 3 + journal delete all on main. Production
-at PR #198 — Phase 3 (#199, migration 0029) not yet deployed.** Reflect tab live (journal,
-behaviour scores, trust engine, achievements). Journal delete live on prod. Phase 3 (contextual
-learning + daily notification toast + `signal_notifications` table) merged to main but NOT deployed.
-Next: `git pull` + `docker compose up -d --build` fastapi/nextjs + `alembic upgrade head` +
-restart Celery beat on KVM4.)
+**Last updated:** 2026-06-16 (**All Signal features fully live on KVM4 — Phase 3 deployed.**
+Production at `6f687bd` (PR #202 schema-import fix). Alembic at 0029 (head);
+`signal_notifications` table live; `signal-daily-alert` Celery beat registered (09:15 IST).
+Signal features operational: Today tab, Rules & Fund tab, Reflect tab (journal + delete),
+Phase 3 (contextual learning + notification toast). No open Signal blockers.)
 
 ## Signal journal delete + Phase 3 on main — handoff (2026-06-16)
 
@@ -41,6 +40,26 @@ Headline: carry-over session — PR #198 merged + deployed; PR #199 on main, Pha
 + Per-delegation (telemetry): session-section draft · dsf (Tier 2 paid, free-chain 429) ·
   reworked: Y (Opus corrected PR #198/#199 conflation, added Phase 3 deploy steps,
   corrected "no migration" for #198, added telemetry line).
+
+### Phase 3 deploy addendum (2026-06-16)
+
++ Phase 3 (PR #199, `85f1476`) deployed to KVM4; prod now at `6f687bd` (PR #202 schema-import
+  hotfix — missing `NotificationsResponse` + `SignalNotificationOut` imports in `router.py`,
+  shipped by concurrent session).
++ Alembic confirmed at 0029 (head); `signal_notifications` table live. `signal-daily-alert`
+  registered in Celery beat, fires 09:15 IST daily.
++ PR #202 already on prod — no further action needed.
+
+### Agent-utilization footer — Phase 3 deploy (2026-06-16)
+
+Headline: Phase 3 deployed; verified migration + beat schedule; all Signal features live.
+
++ **Fable (Tier 0):** `docker compose up --build` + alembic verify + beat task confirm + session exit.
++ **Sonnet (Tier 1):** n/a — deploy was a shell sequence, no code changes this session.
++ **Haiku (Tier 3):** n/a.
++ **codex:rescue:** n/a — not entitled; no load-bearing code changes.
++ Per-delegation (telemetry): header + addendum draft · dsf (Tier 2 paid, free-chain 429) ·
+  reworked: Y (Opus reformatted header to match file pattern, fixed typographic dashes).
 
 ## Signal page Phase 1 — full `/signal` route shipped (2026-06-15)
 
