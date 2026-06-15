@@ -3,7 +3,7 @@
  * All calls go through apiClient (cookie auth, /api/v1 base, RFC7807 errors).
  */
 import * as React from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
 import type {
@@ -345,22 +345,40 @@ export function useFundExplorer(params: { category: string; sort: string; page: 
   });
 }
 
-/** Fetch a single fund's detail by ISIN, resolved via the category fund list.
- *  Returns null when the ISIN isn't in the category's top 200 results.
+/** Fetch a single fund's detail by ISIN.
+ *  Strategy: check Explorer cache first (covers normal click-through flow),
+ *  then paginate /mf/funds (backend limit=50 max) until ISIN found or exhausted.
  *  category comes from the URL query param set by FundExplorerTable navigation. */
 export function useFundDetail(isin: string, category: string | null) {
+  const queryClient = useQueryClient();
   return useQuery<FundExplorerItem | null>({
     queryKey: queryKeys.mf.fundDetail(isin, category ?? ''),
     queryFn: async () => {
       if (!category) return null;
-      const qs = new URLSearchParams({
-        category,
-        sort: 'rank',
-        page: '1',
-        limit: '200',
+
+      // 1. Cache hit — fund was already loaded in the Explorer table.
+      const cached = queryClient.getQueriesData<FundExplorerResponse>({
+        queryKey: ['mf', 'explorer', 'funds'],
       });
-      const res = await api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
-      return res.funds.find((f) => f.isin === isin) ?? null;
+      for (const [, data] of cached) {
+        const hit = data?.funds?.find((f) => f.isin === isin);
+        if (hit) return hit;
+      }
+
+      // 2. Paginate fallback (backend caps limit at 50).
+      let page = 1;
+      let total = Infinity;
+      while ((page - 1) * 50 < total) {
+        const qs = new URLSearchParams({ category, sort: 'rank', page: String(page), limit: '50' });
+        const res = await api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
+        if (page === 1) total = res.total;
+        const hit = res.funds.find((f) => f.isin === isin);
+        if (hit) return hit;
+        if (res.funds.length < 50) break;
+        page++;
+        if (page > 30) break; // safety: 30 pages × 50 = 1 500 funds max
+      }
+      return null;
     },
     enabled: !!isin && !!category,
     staleTime: 5 * 60 * 1000,
