@@ -22,6 +22,7 @@
   --dr-space-2:  8px;
   --dr-space-3:  12px;
   --dr-space-4:  16px;
+  --dr-space-5:  20px;
   --dr-space-6:  24px;
   --dr-space-8:  32px;
   --dr-space-12: 48px;
@@ -39,6 +40,26 @@
   --shadow-sm: 0 1px 2px rgba(15,20,35,0.04);
   --shadow-md: 0 4px 16px rgba(15,20,35,0.06);
   --shadow-lg: 0 24px 60px -20px rgba(15,20,35,0.18);
+
+  /* --- Motion --- */
+  --duration-fast: 120ms;
+  --duration-base: 240ms;
+  --duration-slow: 400ms;
+  --ease-out:      cubic-bezier(0.16,1,0.3,1);
+  --ease-in-out:   cubic-bezier(0.4,0,0.2,1);
+
+  /* --- Z-index scale --- */
+  --z-dropdown: 10;
+  --z-sticky:   20;
+  --z-overlay:  30;
+  --z-modal:    40;
+  --z-toast:    50;
+
+  /* --- Soft / tinted fills (light) --- */
+  --emerald-soft:    rgba(0,158,120,0.10);
+  --royal-blue-soft: rgba(30,94,255,0.08);
+  --red-soft:        rgba(208,58,63,0.08);
+  --amber-soft:      rgba(245,166,35,0.12);
 
   /* --- Semantic / theme vars (light defaults in :root) --- */
   --bg:             #F7F6F2;
@@ -72,4 +93,10 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
   --shadow-lg: 0 32px 80px -20px rgba(0,0,0,0.7);
+
+  /* Soft / tinted fills (dark) */
+  --emerald-soft:    rgba(31,215,154,0.14);
+  --royal-blue-soft: rgba(77,128,255,0.14);
+  --red-soft:        rgba(255,97,102,0.14);
+  --amber-soft:      rgba(255,179,71,0.14);
 }

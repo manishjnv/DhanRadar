@@ -14,9 +14,16 @@ module.exports = {
         amber:   '#F5A623',
         red:     { DEFAULT: '#E5484D', dark: '#FF6166' },
 
+        // Soft / tinted fills — CSS-var-backed for theme switching
+        'emerald-soft':    'var(--emerald-soft)',
+        'royal-blue-soft': 'var(--royal-blue-soft)',
+        'red-soft':        'var(--red-soft)',
+        'amber-soft':      'var(--amber-soft)',
+
         // Semantic surface/ink/line keys — CSS-var-backed for theme switching
         // Must match the var names emitted in tokens.css above
         bg:              'var(--bg)',
+        'bg-elev':       'var(--bg-elev)',
         surface:         'var(--surface)',
         'surface-2':     'var(--surface-2)',
         'surface-3':     'var(--surface-3)',
@@ -41,6 +48,9 @@ module.exports = {
         small:   ['13px',   { lineHeight: '1.45' }],
         caption: ['11px', { lineHeight: '1.3', letterSpacing: '0.08em', fontWeight: '500' }],
       },
+      spacing: {
+        '5': '20px',
+      },
       borderRadius: {
         sm:   '4px',
         md:   '8px',
@@ -52,6 +62,22 @@ module.exports = {
         sm: '0 1px 2px rgba(15,20,35,0.04)',
         md: '0 4px 16px rgba(15,20,35,0.06)',
         lg: '0 24px 60px -20px rgba(15,20,35,0.18)',
+      },
+      transitionDuration: {
+        fast: '120ms',
+        base: '240ms',
+        slow: '400ms',
+      },
+      transitionTimingFunction: {
+        out:    'cubic-bezier(0.16,1,0.3,1)',
+        'in-out': 'cubic-bezier(0.4,0,0.2,1)',
+      },
+      zIndex: {
+        dropdown: '10',
+        sticky:   '20',
+        overlay:  '30',
+        modal:    '40',
+        toast:    '50',
       },
     },
   },

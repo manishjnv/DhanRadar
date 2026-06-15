@@ -283,7 +283,45 @@ A screen is done only when it passes all of:
 - **v1.2 scoring audit row:** v1.2 labels are live, but `compliance.rating_engine_changelog` has no
   v1.2 row (engine uses the config-file `activated` flag at score time, not the registry). Write the
   row via the admin activation endpoint (two-person gate) if/when the SEBI audit trail must be clean.
-- **Motion tokens:** absent from the token files; using Tailwind built-ins for now (acceptable).
+- **Motion tokens:** added to the token files in PR chore/kit-token-additions (see design-system gaps section below).
 - **CI path-filters + required-status-checks on the `main` ruleset:** deferred. Required checks were
   NOT added (would gate merges; the auto-deploy poller re-verifies CI before deploying, so this is a
   belt-and-braces nicety, not a safety requirement).
+
+## Design-system gaps vs the ui-system kit (audit 2026-06-15)
+
+### Token gaps — DONE this PR
+
+- **Soft / tinted colours** — `emeraldSoft`, `royalBlueSoft`, `redSoft`, `amberSoft` (light + dark
+  variants; CSS vars + Tailwind color utilities).
+- **Spacing step 5** — `20px` added to fill the gap between `16px` and `24px`.
+- **Motion** — `duration` (`fast 120ms` / `base 240ms` / `slow 400ms`) and `easing`
+  (`out cubic-bezier(0.16,1,0.3,1)` / `inOut cubic-bezier(0.4,0,0.2,1)`); emitted as CSS vars and
+  Tailwind `transitionDuration` / `transitionTimingFunction` extensions.
+- **Z-index scale** — `dropdown 10` / `sticky 20` / `overlay 30` / `modal 40` / `toast 50`; emitted
+  as CSS vars and Tailwind `zIndex` extension.
+- **`bg-elev` Tailwind utility** — `--bg-elev` CSS var was already emitted but not exposed as a
+  named Tailwind color; added `'bg-elev': 'var(--bg-elev)'` to the colors section.
+
+### Component backlog (kit has, live lacks — in-scope)
+
+| Component | What it is | Screen it helps |
+|---|---|---|
+| Global search (Cmd-K) | Command-palette overlay for instant fund/scheme lookup | Every page — reduces navigation friction |
+| Sparkline | Inline mini NAV trend chart (16px tall) in scheme rows | Report page scheme table — adds visual signal |
+| Stat / KPI row | Horizontal strip of key numbers with label + value + delta | Report summary — replaces the current plain text row |
+| Tab bar | Pill-style tab switcher with animated underline | Report page sections, portfolio X-ray |
+| Sidebar Plus-upgrade card | Persistent upsell card in the nav footer with CTA | All app pages — conversion surface |
+| Pricing page / plan cards | Tiered plan comparison with feature lists and CTA | `/pricing` — freemium conversion |
+| FAQ accordion | Expand/collapse Q&A with smooth height transition | Pricing page, landing page |
+
+### Out-of-scope (kit shows the future stocks product — do NOT build now)
+
+- Radar chart, price/area chart, sector heatmap, fair-value gauge, candlestick chart.
+- Stock screener, individual stock page, stocks landing screen.
+
+### Already matching / intentionally different
+
+Fonts (Geist / Instrument Serif), warm colour palette, shadows, and border radii match the kit
+exactly. Score-ring shows a label band, not a numeric score, and advisory verbs (`buy/sell/hold`) are
+absent — both are deliberate SEBI-education compliance corrections, not gaps.
