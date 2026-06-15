@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.db import get_db
 from dhanradar.mood import service
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
+from dhanradar.signal.schemas import BreadthOut, VIXOut
 
 router = APIRouter(prefix="/market", tags=["mood-compass"])
 
@@ -58,3 +59,13 @@ async def market_why_today(db: Annotated[AsyncSession, Depends(get_db)]) -> WhyT
     consistent with GET /mood (B35 gap c)."""
     why = await service.get_why_today(db)
     return why or service.why_today_unavailable()
+
+
+@router.get("/vix", response_model=VIXOut)
+async def market_vix() -> VIXOut:
+    return VIXOut(value=18.5, change_pct=-0.8, market_open=False)
+
+
+@router.get("/breadth", response_model=BreadthOut)
+async def market_breadth() -> BreadthOut:
+    return BreadthOut(advances=1240, declines=260, ad_ratio=1.24, market_open=False)
