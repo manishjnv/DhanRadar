@@ -41,8 +41,12 @@ export interface LabelChipProps {
 }
 
 export function LabelChip({ label, confidenceBand, className }: LabelChipProps) {
+  const ariaLabel = confidenceBand
+    ? `${LABEL_DISPLAY[label]}, ${BAND_DISPLAY[confidenceBand]} confidence`
+    : LABEL_DISPLAY[label];
   return (
     <span
+      aria-label={ariaLabel}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-caption font-medium',
         LABEL_CLASSES[label],
@@ -51,7 +55,7 @@ export function LabelChip({ label, confidenceBand, className }: LabelChipProps) 
     >
       {LABEL_DISPLAY[label]}
       {confidenceBand && (
-        <span className="opacity-70">· {BAND_DISPLAY[confidenceBand]}</span>
+        <span className="opacity-70" aria-hidden="true">· {BAND_DISPLAY[confidenceBand]}</span>
       )}
     </span>
   );

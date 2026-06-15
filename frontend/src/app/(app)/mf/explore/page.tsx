@@ -56,7 +56,8 @@ function CategoryTabs({
             onClick={() => onSelect(cat.key)}
             className={cn(
               'inline-flex items-center gap-1 px-3 py-1.5 rounded-full whitespace-nowrap',
-              'text-[12px] font-medium border transition-colors',
+              'text-small font-medium border transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
               activeKey === cat.key
                 ? 'bg-ink text-bg border-ink'
                 : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
@@ -64,7 +65,7 @@ function CategoryTabs({
           >
             {cat.display_name}
             <span className={cn(
-              'font-mono text-[10px]',
+              'font-mono text-caption',
               activeKey === cat.key ? 'text-bg/60' : 'text-ink-muted',
             )}>
               {cat.fund_count}
@@ -89,7 +90,7 @@ function SortChips({
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap" data-testid="sort-select">
-      <span className="font-mono text-[10px] uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
         Sort
       </span>
       <div className="flex gap-1 flex-wrap">
@@ -99,14 +100,15 @@ function SortChips({
             type="button"
             onClick={() => onSort(o.key)}
             className={cn(
-              'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors whitespace-nowrap',
+              'inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border transition-colors whitespace-nowrap',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
               sort === o.key
                 ? 'bg-ink text-bg border-ink'
                 : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
             )}
           >
             {o.label}
-            {sort === o.key && <span className="ml-1 text-bg/70 text-[9px]">▴</span>}
+            {sort === o.key && <span className="ml-1 text-bg/70 text-caption" aria-hidden="true">▴</span>}
           </button>
         ))}
       </div>
@@ -141,7 +143,7 @@ function SearchInput({
         className={cn(
           'w-full h-[38px] rounded-lg border border-line bg-surface-2',
           'pl-9 pr-3 text-small text-ink placeholder:text-ink-muted',
-          'focus:outline-none focus:border-royal focus:ring-2 focus:ring-royal/20',
+          'focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40',
           'transition-colors',
         )}
         data-testid="fund-search"
@@ -186,7 +188,7 @@ function Pagination({
 
   return (
     <div className="flex items-center justify-between mt-2 gap-3 flex-wrap">
-      <p className="font-mono text-[11px] text-ink-muted">
+      <p className="font-mono text-caption text-ink-muted">
         {start}–{end} of {total} funds
       </p>
       <div className="flex items-center gap-1">
@@ -194,21 +196,24 @@ function Pagination({
           type="button"
           disabled={page <= 1}
           onClick={() => onPage(page - 1)}
-          className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
         >
           ‹ Prev
         </button>
 
         {window.map((p, i) =>
           p === '…' ? (
-            <span key={`ellipsis-${i}`} className="px-1 text-[11px] text-ink-muted font-mono">…</span>
+            <span key={`ellipsis-${i}`} className="px-1 text-caption text-ink-muted font-mono">…</span>
           ) : (
             <button
               key={p}
               type="button"
               onClick={() => onPage(p as number)}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? 'page' : undefined}
               className={cn(
-                'inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-medium border transition-colors',
+                'inline-flex items-center justify-center w-7 h-7 rounded-full text-caption font-medium border transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
                 p === page
                   ? 'bg-ink text-bg border-ink'
                   : 'bg-surface-2 text-ink-secondary border-line hover:text-ink',
@@ -223,7 +228,7 @@ function Pagination({
           type="button"
           disabled={page >= totalPages}
           onClick={() => onPage(page + 1)}
-          className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center px-2.5 py-1 rounded-full text-caption font-medium border border-line bg-surface-2 text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
         >
           Next ›
         </button>
@@ -323,7 +328,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
         <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} />
         <SortChips sort={sort} onSort={handleSort} />
         {data && (
-          <span className="font-mono text-[11px] text-ink-muted ml-auto whitespace-nowrap">
+          <span className="font-mono text-caption text-ink-muted ml-auto whitespace-nowrap">
             {data.total} funds
           </span>
         )}
@@ -347,7 +352,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 
       {/* Disclosure bundle — non-neg #9: must accompany every label/AI surface */}
       {data && (
-        <div className="rounded-xl border border-line bg-surface-2 p-4 mt-1">
+        <div className="rounded-lg border border-line bg-surface-2 p-4 mt-1">
           <DisclosureBundle
             disclosure={data.disclosure || undefined}
             notAdvice={data.not_advice || 'For education only — not investment advice.'}
@@ -369,7 +374,7 @@ export default function ExplorePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <p className="font-mono text-[10px] uppercase tracking-[0.14em] font-semibold text-royal mb-1">
+        <p className="font-mono text-caption uppercase tracking-[0.14em] font-semibold text-royal mb-1">
           Mutual Funds
         </p>
         <h1 className="text-h2 font-medium text-ink">Fund Explorer</h1>
