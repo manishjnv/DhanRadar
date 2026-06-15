@@ -9,7 +9,7 @@
 
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useIndices } from '@/features/dashboard/api';
+import { useMarketIndices } from '@/hooks/useMarketIndices';
 import { useSignalRules, useVIX, useBreadth } from './api';
 import { SignalHero } from '@/components/signal/SignalHero';
 import { MarketSignalCard } from '@/components/signal/MarketSignalCard';
@@ -153,7 +153,7 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
   }
 
   // Market data
-  const { data: indices, isLoading: indicesLoading } = useIndices();
+  const { data: indices, isLoading: indicesLoading } = useMarketIndices();
   const { data: vix, isLoading: vixLoading } = useVIX();
   const { data: breadth, isLoading: breadthLoading } = useBreadth();
   const { data: rules } = useSignalRules();

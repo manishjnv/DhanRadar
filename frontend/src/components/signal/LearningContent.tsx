@@ -68,7 +68,7 @@ export function LearningContent({ signalState = 'no_signal' }: LearningContentPr
   return (
     <div className="card-pad flex flex-col gap-3">
       <p className="text-small font-medium text-ink">Learn</p>
-      <ul className="flex flex-col gap-3" role="list">
+      <ul className="flex flex-col gap-3">
         {sorted.slice(0, 4).map((article) => (
           <li key={article.slug}>
             <Link
