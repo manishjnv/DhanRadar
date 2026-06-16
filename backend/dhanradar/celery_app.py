@@ -236,6 +236,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.mf_constituents_fetch",
         "schedule": crontab(day_of_month=10, hour=4, minute=0),
     },
+    # Kite MF instrument enrichment — weekly, Saturday 03:00 IST (low-load window).
+    # Fills plan_type / option_type on mf_funds rows where AMFI name-parsing left NULL.
+    # No-op when KITE_* env vars are absent; access_token is TOTP-refreshed automatically.
+    "mf-kite-enrich": {
+        "task": "dhanradar.tasks.mf.mf_kite_enrich",
+        "schedule": crontab(day_of_week=6, hour=3, minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------
