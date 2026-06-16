@@ -25,6 +25,7 @@ pyyaml>=6.0.1
 # --- Phase 5: Mutual Fund module (CAS parsing + XIRR) ---
 casparser>=0.7.0       # CAMS/KFintech CAS PDF parsing (worker; lazily imported)
 scipy>=1.11.0          # XIRR via brentq
+openpyxl>=3.1.0        # SEBI monthly portfolio disclosure XLSX parser (ADR-0033(a); worker; lazily imported)
 # --- Phase 6: Notification module (Telegram + Resend email + Pillow share-cards) ---
 Pillow>=10.3.0         # 1200x630 share-card PNG render (worker; lazily imported)
 # --- Logging: structured JSON + redaction (P1) ---
@@ -33,4 +34,6 @@ structlog>=24.1.0
 feedparser>=6.0.10
 # --- Phase 4: Live market data (VIX + Nifty 50 breadth via Yahoo Finance) ---
 yfinance>=0.2.40
+# --- ADR-0033(a): SEBI disclosure SPA URL discovery (celery-batch only) ---
+playwright>=1.44.0
 
