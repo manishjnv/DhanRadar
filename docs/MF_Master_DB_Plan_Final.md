@@ -17,6 +17,7 @@ sequencing).
 | `mf.mf_fund_metrics` | LIVE | 0021 | Nightly return_1y/3y + max_drawdown; 14 452 funds, 9 277 with 1y |
 | `mf.mf_fund_constituents` | LIVE | 0024 | Top-10 AMC SEBI XLSX scraper; UTI+NIPPON working; 5 AMCs bot-blocked; MIRAE format mismatch |
 | `mf.mf_fund_ranks` | LIVE | 0024 | Percentile ranks cached |
+| Phase 3 lineage + audit tables | **LIVE** | 0035 | ingestion_runs, field_lineage, source_health, scheme_lineage, fund_manager_history + source_run_id on mf_fund_metrics |
 | Task 3 scheme-master enrichment | **PENDING** | next = 0025 | plan_type / option_type / fund_manager / scheme_lineage |
 | AMC-level AUM (ADR-0035) | **PENDING** | — | AMFI SPA endpoint; needs legal sanction + ADR pre-build gates |
 | Per-scheme AUM via SEBI XLSX piggyback | **PENDING** | — | B67 route (d); rides the constituents scraper extension (ADR-0033 amendment needed) |
@@ -998,7 +999,7 @@ verified.
 | DSP / FRANKLIN | Disclosure URL discovery returns 0 links | PENDING | CDN pattern investigation; may need direct AMC outreach |
 | TRI / Benchmark | Legal artifact filing | PENDING | Founder files under `docs/legal/` |
 | Scheme lineage | No automated merger detection yet | PENDING | Phase 3; manual from SEBI circulars until Phase 3 lands |
-| B72 | Audit-trail provenance gap in mf_fund_metrics | FILED | Add `as_of_date` + source_run_id to metrics rows (Phase 3 migration) |
+| B72 | Audit-trail provenance gap in mf_fund_metrics | **DONE (0035)** | source_run_id added to mf_fund_metrics + mf_metrics_refresh writes UUID per run; deployed 2026-06-17 |
 
 ---
 
