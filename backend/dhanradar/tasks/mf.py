@@ -1702,6 +1702,13 @@ async def _process_amc_direct(
         logger.info("mf_constituents_fetch amc=%s url=%s", amc_name, file_url)
         file_bytes = resp.content
         content_type = resp.headers.get("content-type", "")
+        if "html" in content_type:
+            logger.warning(
+                "mf_constituents_fetch amc=%s url=%s returned text/html — CDN 404 or file not published yet",
+                amc_name,
+                file_url,
+            )
+            continue
         if "spreadsheetml" in content_type or file_url.lower().endswith(".xlsx"):
             parsed = _parse_sebi_xlsx(file_bytes, amc_name)
         else:
