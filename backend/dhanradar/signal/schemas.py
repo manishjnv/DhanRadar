@@ -21,6 +21,11 @@ class SignalRulesOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("earned_achievements", mode="before")
+    @classmethod
+    def coerce_none_to_list(cls, v: object) -> list[str]:
+        return v if v is not None else []
+
 
 class SignalRulesUpdate(BaseModel):
     nifty_threshold: Decimal
