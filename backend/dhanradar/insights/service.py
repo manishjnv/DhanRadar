@@ -61,7 +61,33 @@ def _safe_disclosure() -> dict[str, str]:
 # Overlap framing helpers (pure — no I/O)
 # ---------------------------------------------------------------------------
 
-def _fund_pair_observation(name_a: str, name_b: str, overlap_pct: float) -> str:
+def _fund_pair_observation(
+    name_a: str,
+    name_b: str,
+    overlap_pct: float,
+    shared_names: list[str] | None = None,
+) -> str:
+    """Return an observational (non-advisory) description of fund pair overlap.
+
+    If shared_names is provided the observation is constituent-level (actual holdings).
+    Otherwise it falls back to the category-level approximation.
+    """
+    if shared_names is not None:
+        # Constituent-level: factual shared-holding observation
+        if not shared_names:
+            return (
+                f"{name_a} and {name_b} have no holdings in common in the "
+                "latest available monthly disclosure."
+            )
+        top = shared_names[:3]
+        names_str = ", ".join(top)
+        suffix = f" and {len(shared_names) - 3} others" if len(shared_names) > 3 else ""
+        return (
+            f"{name_a} and {name_b} share {len(shared_names)} holding"
+            f"{'s' if len(shared_names) != 1 else ''} in common "
+            f"({overlap_pct:.1f}% overlap by weight): {names_str}{suffix}."
+        )
+    # Category-level approximation (fallback)
     if overlap_pct >= 60:
         return (
             f"{name_a} and {name_b} are in the same category and account for "
@@ -117,18 +143,73 @@ def _concentration_context(dimension: str, name: str, pct: float) -> str:
 # DB-backed aggregation
 # ---------------------------------------------------------------------------
 
+_CONSTITUENT_COMPLETENESS = "constituent_data"
+
+
+def _compute_constituent_overlap(
+    constituents: dict[str, list[tuple[str | None, str, float]]],
+) -> dict[tuple[str, str], tuple[float, list[str]]]:
+    """Compute pairwise stock-level overlap from constituent holdings.
+
+    Args:
+        constituents: isin → list of (constituent_isin, constituent_name, weight_pct)
+
+    Returns:
+        (isin_a, isin_b) → (overlap_pct, shared_constituent_names sorted by min-weight desc)
+
+    overlap_pct = Σ min(weight_A, weight_B) for all shared constituent_isin values.
+    Only constituents with a non-null constituent_isin are matched — name-only rows
+    are excluded from the overlap calculation (matching by name is ambiguous).
+    """
+    result: dict[tuple[str, str], tuple[float, list[str]]] = {}
+    isins = list(constituents.keys())
+    for i in range(len(isins)):
+        for j in range(i + 1, len(isins)):
+            isin_a, isin_b = isins[i], isins[j]
+            # Build constituent_isin → (name, weight) maps; skip null-isin rows
+            map_a = {
+                c_isin: (name, w)
+                for c_isin, name, w in constituents[isin_a]
+                if c_isin is not None
+            }
+            map_b = {
+                c_isin: (name, w)
+                for c_isin, name, w in constituents[isin_b]
+                if c_isin is not None
+            }
+            shared = set(map_a) & set(map_b)
+            if not shared:
+                result[(isin_a, isin_b)] = (0.0, [])
+                continue
+            items = sorted(
+                [(cid, min(map_a[cid][1], map_b[cid][1]), map_a[cid][0]) for cid in shared],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            overlap_pct = round(sum(w for _, w, _ in items), 2)
+            shared_names = [name for _, _, name in items]
+            result[(isin_a, isin_b)] = (overlap_pct, shared_names)
+    return result
+
+
 async def get_overlap(db: Any, user_id: str, portfolio_id: str) -> OverlapResponse:
     """
     Build the overlap response for the given portfolio.
 
     - Verifies portfolio belongs to user (IDOR guard → ValueError on mismatch).
     - Reads holdings + fund metadata.
-    - Delegates allocation math to snapshot.category_allocation.
+    - If mf_fund_constituents data covers ≥2 portfolio funds: computes actual
+      stock-level pairwise overlap (sum of min(weight_A, weight_B) for shared
+      constituent_isin values). data_completeness = "constituent_data".
+    - Fallback when constituent data absent/covers <2 funds: distributes
+      category allocation equally among co-category funds (existing behavior).
+      data_completeness = "complete" (legacy).
     - Cold-start / single-fund / empty → valid 200 with empty lists.
     """
+    from sqlalchemy import func as sqlfunc
     from sqlalchemy import select
 
-    from dhanradar.models.mf import MfFund, MfPortfolio, MfUserHolding
+    from dhanradar.models.mf import MfFund, MfFundConstituent, MfPortfolio, MfUserHolding
 
     uid = _parse_uid(user_id)
     try:
@@ -228,7 +309,7 @@ async def get_overlap(db: Any, user_id: str, portfolio_id: str) -> OverlapRespon
         cat = fund_meta.get(isin, {}).get("category", "Uncategorized")
         category_to_funds.setdefault(cat, []).append(isin)
 
-    # Build category_distribution
+    # Build category_distribution (always present regardless of overlap method)
     category_distribution = [
         CategoryOverlap(
             category=cat,
@@ -239,13 +320,122 @@ async def get_overlap(db: Any, user_id: str, portfolio_id: str) -> OverlapRespon
         for cat, pct in sorted(alloc.items(), key=lambda x: x[1], reverse=True)
     ]
 
-    # Fund pairs in the same category (observable category-level overlap)
+    # ------------------------------------------------------------------
+    # Constituent-level overlap (preferred path — ADR-0033(a))
+    # Query the latest as_of_month for each portfolio ISIN from the
+    # mf_fund_constituents table. If ≥2 funds have constituent data,
+    # compute actual stock-level overlap; otherwise fall back to category.
+    # ------------------------------------------------------------------
+    fund_pairs: list[FundPairOverlap] = []
+    completeness: str
+
+    # For each portfolio ISIN, find the most recent disclosure month
+    latest_months_result = await db.execute(
+        select(MfFundConstituent.isin, sqlfunc.max(MfFundConstituent.as_of_month).label("latest"))
+        .where(MfFundConstituent.isin.in_(isins))
+        .group_by(MfFundConstituent.isin)
+    )
+    latest_months: dict[str, object] = {
+        r.isin: r.latest for r in latest_months_result.fetchall()
+    }
+
+    covered_isins = list(latest_months.keys())
+
+    if len(covered_isins) >= 2:
+        # Fetch constituents filtered to each ISIN's own latest disclosure month.
+        # tuple_(isin, as_of_month).in_(pairs) is cleaner than a LATERAL JOIN.
+        from sqlalchemy import tuple_ as sql_tuple
+        isin_month_pairs = [(isin, latest_months[isin]) for isin in covered_isins]
+        filtered_result = await db.execute(
+            select(
+                MfFundConstituent.isin,
+                MfFundConstituent.constituent_isin,
+                MfFundConstituent.constituent_name,
+                MfFundConstituent.weight_pct,
+            ).where(
+                sql_tuple(MfFundConstituent.isin, MfFundConstituent.as_of_month).in_(
+                    isin_month_pairs
+                )
+            )
+        )
+        # Rebuild from the filtered result
+        constituent_rows = {isin: [] for isin in covered_isins}
+        for r in filtered_result.fetchall():
+            constituent_rows[r.isin].append(
+                (r.constituent_isin, r.constituent_name, float(r.weight_pct or 0.0))
+            )
+
+        # Only include ISINs that actually have constituent rows
+        constituent_rows = {k: v for k, v in constituent_rows.items() if v}
+
+        if len(constituent_rows) >= 2:
+            overlap_map = _compute_constituent_overlap(constituent_rows)
+            all_isins = list(constituent_rows.keys())
+            for i in range(len(all_isins)):
+                for j in range(i + 1, len(all_isins)):
+                    isin_a, isin_b = all_isins[i], all_isins[j]
+                    overlap_pct, shared_names = overlap_map.get((isin_a, isin_b), (0.0, []))
+                    name_a = fund_meta.get(isin_a, {}).get("name", isin_a)
+                    name_b = fund_meta.get(isin_b, {}).get("name", isin_b)
+                    fund_pairs.append(
+                        FundPairOverlap(
+                            fund_a_isin=isin_a,
+                            fund_a_name=name_a,
+                            fund_b_isin=isin_b,
+                            fund_b_name=name_b,
+                            overlap_pct=overlap_pct,
+                            observation=_fund_pair_observation(
+                                name_a, name_b, overlap_pct, shared_names
+                            ),
+                        )
+                    )
+            completeness = _CONSTITUENT_COMPLETENESS
+            logger.info(
+                "overlap: constituent path — covered=%d/%d funds",
+                len(constituent_rows),
+                len(isins),
+            )
+        else:
+            # Covered ISINs found but no actual rows after month filter — fall back
+            fund_pairs, completeness = _category_fund_pairs(
+                category_to_funds, alloc, fund_meta
+            )
+    else:
+        # Constituent data absent — fall back to category-level
+        fund_pairs, completeness = _category_fund_pairs(
+            category_to_funds, alloc, fund_meta
+        )
+
+    fund_count = len(isins)
+    cat_count = len(alloc)
+    summary = (
+        f"Your portfolio contains {fund_count} "
+        f"{'fund' if fund_count == 1 else 'funds'} "
+        f"across {cat_count} {'category' if cat_count == 1 else 'categories'}."
+    )
+
+    return OverlapResponse(
+        portfolio_id=portfolio_id,
+        as_of_date=as_of_date_str,
+        fund_pairs=fund_pairs,
+        category_distribution=category_distribution,
+        observation_summary=summary,
+        data_completeness=completeness,
+        **disc,
+    )
+
+
+def _category_fund_pairs(
+    category_to_funds: dict[str, list[str]],
+    alloc: dict[str, float],
+    fund_meta: dict[str, dict[str, str]],
+) -> tuple[list[FundPairOverlap], str]:
+    """Build fund pairs using category-level overlap approximation (fallback path)."""
     fund_pairs: list[FundPairOverlap] = []
     for cat, cat_isins in category_to_funds.items():
         if len(cat_isins) < 2:
             continue
         cat_alloc_pct = alloc.get(cat, 0.0)
-        # Distribute category allocation equally among co-category funds (honest observable estimate)
         per_fund_pct = round(cat_alloc_pct / len(cat_isins), 2)
         for i in range(len(cat_isins)):
             for j in range(i + 1, len(cat_isins)):
@@ -263,25 +453,8 @@ async def get_overlap(db: Any, user_id: str, portfolio_id: str) -> OverlapRespon
                         observation=_fund_pair_observation(name_a, name_b, per_fund_pct),
                     )
                 )
-
-    fund_count = len(isins)
-    cat_count = len(alloc)
-    summary = (
-        f"Your portfolio contains {fund_count} "
-        f"{'fund' if fund_count == 1 else 'funds'} "
-        f"across {cat_count} {'category' if cat_count == 1 else 'categories'}."
-    )
-    completeness = _COMPLETE_COMPLETENESS if fund_count > 0 else _EMPTY_COMPLETENESS
-
-    return OverlapResponse(
-        portfolio_id=portfolio_id,
-        as_of_date=as_of_date_str,
-        fund_pairs=fund_pairs,
-        category_distribution=category_distribution,
-        observation_summary=summary,
-        data_completeness=completeness,
-        **disc,
-    )
+    completeness = _COMPLETE_COMPLETENESS if fund_pairs or category_to_funds else _EMPTY_COMPLETENESS
+    return fund_pairs, completeness
 
 
 async def get_concentration(db: Any, user_id: str, portfolio_id: str) -> ConcentrationResponse:
