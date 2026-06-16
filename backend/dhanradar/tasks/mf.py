@@ -2006,10 +2006,22 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
 
         # For per-scheme files (e.g. MIRAE), infer scheme name from sheet name
         # if the sheet name looks like a scheme (contains "fund", "plan", etc.).
+        # Also accept "Portfolio" which is common in MIRAE files.
         sheet_scheme: str | None = None
         if sheet and any(
             kw in sheet.lower()
-            for kw in ("fund", "scheme", "plan", "etf", "index", "growth", "idcw", "direct", "regular")
+            for kw in (
+                "fund",
+                "scheme",
+                "plan",
+                "etf",
+                "index",
+                "growth",
+                "idcw",
+                "direct",
+                "regular",
+                "portfolio",
+            )
         ):
             sheet_scheme = sheet
 
@@ -2083,10 +2095,16 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     current_scheme = candidate
 
             # Fallback for per-scheme files (e.g. MIRAE): use sheet name as scheme if no scheme detected yet.
+            # For MIRAE, also use sheet name if header was detected but no explicit scheme row was found.
             if not current_scheme and sheet_scheme and col_map:
                 current_scheme = sheet_scheme
                 if amc_name == "MIRAE":
                     logger.info("mf_constituents_fetch MIRAE using sheet_scheme: '%s'", current_scheme)
+            # For MIRAE specifically, if we have a header but still no scheme name,
+            # and the sheet looks like a scheme name, use the sheet name directly.
+            if not current_scheme and amc_name == "MIRAE" and sheet and col_map:
+                current_scheme = sheet
+                logger.info("mf_constituents_fetch MIRAE fallback using sheet name directly: '%s'", sheet)
 
             # Detect header row (contains "Name of Instrument" or similar).
             if not col_map and any(
