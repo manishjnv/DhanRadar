@@ -1569,7 +1569,7 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
                     "b_is_segregated": "segregated portfolio" in name,
                     "b_launch_date": min_date_map.get(fund.isin),
                 })
-            await db.execute(update_stmt, params)
+            await db.execute(update_stmt, params, execution_options={"synchronize_session": False})
             n += len(chunk)
         await db.commit()
 
