@@ -17,6 +17,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -58,6 +59,8 @@ class MfFund(Base):
     risk_o_meter: Mapped[str | None] = mapped_column(Text, nullable=True)
     plan_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     option_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    launch_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_segregated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class MfNavHistory(Base):

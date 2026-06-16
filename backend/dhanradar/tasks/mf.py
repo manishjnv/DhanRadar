@@ -132,6 +132,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
         if isin is None:
             continue
         plan_type, option_type = parse_plan_option(row.scheme_name)
+        is_segregated = "segregated portfolio" in row.scheme_name.lower()
         out[isin] = {
             "isin": isin,
             "amfi_code": row.amfi_code,
@@ -140,6 +141,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             "sebi_category": canonical_for(row.category),
             "plan_type": plan_type,
             "option_type": option_type,
+            "is_segregated": is_segregated,
         }
     return list(out.values())
 
@@ -825,6 +827,7 @@ async def _nav_daily_pipeline() -> str:
                     "sebi_category": insert(MfFund).excluded.sebi_category,
                     "plan_type": insert(MfFund).excluded.plan_type,
                     "option_type": insert(MfFund).excluded.option_type,
+                    "is_segregated": insert(MfFund).excluded.is_segregated,
                 },
             )
             await db.execute(stmt)
@@ -1502,3 +1505,74 @@ def purge_cas_files() -> str:
         except OSError:
             pass
     return f"purge: removed {removed}"
+
+
+@celery_app.task(name="dhanradar.tasks.mf.mf_fund_metadata_backfill")
+def mf_fund_metadata_backfill() -> str:
+    """One-shot backfill: stamp plan_type, option_type, is_segregated, launch_date on all MfFund rows.
+
+    NOT in the beat schedule — invoke manually via Celery CLI or admin panel.
+    """
+    try:
+        return asyncio.run(_mf_fund_metadata_backfill_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("mf_fund_metadata_backfill pipeline error")
+        return "mf_fund_metadata_backfill: failed — see worker logs"
+
+
+async def _mf_fund_metadata_backfill_pipeline() -> str:
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfFund, MfNavHistory
+
+    _CHUNK = 500
+
+    async with TaskSessionLocal() as db:
+        # Bulk load min(nav_date) per isin from nav history — used as launch_date proxy.
+        min_date_rows = (
+            await db.execute(
+                select(MfNavHistory.isin, sa_func.min(MfNavHistory.nav_date).label("min_date"))
+                .group_by(MfNavHistory.isin)
+            )
+        ).all()
+        min_date_map: dict[str, Any] = {r.isin: r.min_date for r in min_date_rows}
+
+        funds = (await db.execute(select(MfFund))).scalars().all()
+        n = 0
+        for i in range(0, len(funds), _CHUNK):
+            chunk = funds[i : i + _CHUNK]
+            updates = []
+            for fund in chunk:
+                plan_type, option_type = parse_plan_option(fund.scheme_name)
+                name = (fund.scheme_name or "").lower()
+                is_segregated = "segregated portfolio" in name
+                launch_date = min_date_map.get(fund.isin)
+                updates.append({
+                    "isin": fund.isin,
+                    "plan_type": plan_type,
+                    "option_type": option_type,
+                    "is_segregated": is_segregated,
+                    "launch_date": launch_date,
+                })
+            stmt = (
+                insert(MfFund)
+                .values(updates)
+                .on_conflict_do_update(
+                    index_elements=["isin"],
+                    set_={
+                        "plan_type": insert(MfFund).excluded.plan_type,
+                        "option_type": insert(MfFund).excluded.option_type,
+                        "is_segregated": insert(MfFund).excluded.is_segregated,
+                        "launch_date": insert(MfFund).excluded.launch_date,
+                    },
+                )
+            )
+            await db.execute(stmt)
+            n += len(chunk)
+        await db.commit()
+
+    return f"mf_fund_metadata_backfill: updated {n} funds"
+
