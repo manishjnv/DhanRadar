@@ -229,6 +229,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.signal_alerts.check_achievements",
         "schedule": crontab(hour=22, minute=0),
     },
+    # ADR-0033(a) — SEBI monthly portfolio disclosure scraper — 10th of each month, 04:00 IST.
+    # AMCs must publish by the 10th; running on the 10th catches all but the latest laggards.
+    # Playwright URL-discovery results are Redis-cached 25 days so re-runs are cheap.
+    "mf-constituents-fetch": {
+        "task": "dhanradar.tasks.mf.mf_constituents_fetch",
+        "schedule": crontab(day_of_month=10, hour=4, minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------
