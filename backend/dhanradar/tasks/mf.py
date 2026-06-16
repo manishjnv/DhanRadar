@@ -2085,6 +2085,8 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # Fallback for per-scheme files (e.g. MIRAE): use sheet name as scheme if no scheme detected yet.
             if not current_scheme and sheet_scheme and col_map:
                 current_scheme = sheet_scheme
+                if amc_name == "MIRAE":
+                    logger.info("mf_constituents_fetch MIRAE using sheet_scheme: '%s'", current_scheme)
 
             # Detect header row (contains "Name of Instrument" or similar).
             if not col_map and any(
@@ -2309,20 +2311,34 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
             # same-AMC funds to prevent false positives across AMC name overlap.
             result = await db.execute(
                 sa_text(
-                    "SELECT isin FROM mf.mf_funds "
+                    "SELECT isin, scheme_name, similarity(scheme_name, :sname) as sim FROM mf.mf_funds "
                     "WHERE scheme_name ILIKE :prefix "
-                    "AND similarity(scheme_name, :sname) > 0.35 "
                     "ORDER BY similarity(scheme_name, :sname) DESC "
-                    "LIMIT 1"
+                    "LIMIT 3"
                 ),
                 {"sname": sname, "prefix": amc_prefix},
             )
-            row = result.fetchone()
-            if row:
-                scheme_isin_map[sname] = row[0]
+            rows = result.fetchall()
+            if rows:
+                # Log top matches for debugging
+                if amc_name == "MIRAE":
+                    logger.info(
+                        "mf_constituents_fetch amc=MIRAE scheme='%s' matches: %s",
+                        sname,
+                        [(r[1], f"{r[2]:.2f}") for r in rows]
+                    )
+                # Use first match if similarity > 0.35
+                if rows[0][2] > 0.35:
+                    scheme_isin_map[sname] = rows[0][0]
+                else:
+                    logger.debug(
+                        "mf_constituents_fetch amc=%s scheme '%s' top match similarity=%.2f (too low)",
+                        amc_name, sname, rows[0][2]
+                    )
             else:
                 logger.debug(
-                    "mf_constituents_fetch amc=%s no isin match for '%s'", amc_name, sname
+                    "mf_constituents_fetch amc=%s no matches for scheme '%s' with prefix '%s'",
+                    amc_name, sname, amc_prefix
                 )
 
     # Resolve ISINs and split into constituent rows vs aum updates.
