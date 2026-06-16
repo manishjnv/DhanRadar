@@ -92,6 +92,12 @@ _SORT_BEST_ASC: frozenset[str] = frozenset({"rank", "max_drawdown"})
 # Columns that need NULLS LAST (metrics may be absent; rank is always present).
 _SORT_NULLS_LAST: frozenset[str] = frozenset({"return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"})
 
+# Minimum NAV data-points required to surface a return figure.
+# Below the threshold the field is suppressed (set to None) to avoid misleading
+# partial-period return figures for young or very recently-launched funds.
+_MIN_NAV_POINTS_1Y = 252   # ~1 trading year
+_MIN_NAV_POINTS_3Y = 756   # ~3 trading years
+
 
 def _sebi_display_name(full_category: str) -> str:
     """'Equity Scheme - Large Cap Fund' → 'Large Cap Fund'"""
@@ -655,7 +661,7 @@ async def fund_explorer_list(
         "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
         "  f.plan_type, f.option_type,"
         "  r.rank, r.total_in_cat, r.verb_label,"
-        "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct"
+        "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct, m.nav_points"
         " FROM mf.mf_funds f"
         " JOIN ("
         "   SELECT DISTINCT ON (isin) isin, rank, total_in_cat, verb_label"
@@ -664,7 +670,7 @@ async def fund_explorer_list(
         "   ORDER BY isin, as_of_date DESC"
         " ) r ON f.isin = r.isin"
         " LEFT JOIN ("
-        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct"
+        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct, nav_points"
         "   FROM mf.mf_fund_metrics"
         "   ORDER BY isin, as_of_date DESC"
         " ) m ON f.isin = m.isin"
@@ -701,8 +707,8 @@ async def fund_explorer_list(
             category_total=r.total_in_cat,
             return_3m_pct=r.return_3m_pct,
             return_6m_pct=r.return_6m_pct,
-            return_1y_pct=r.return_1y_pct,
-            return_3y_pct=r.return_3y_pct,
+            return_1y_pct=r.return_1y_pct if (r.nav_points or 0) >= _MIN_NAV_POINTS_1Y else None,
+            return_3y_pct=r.return_3y_pct if (r.nav_points or 0) >= _MIN_NAV_POINTS_3Y else None,
             return_5y_pct=r.return_5y_pct,
             plan_type=r.plan_type,
             option_type=r.option_type,
