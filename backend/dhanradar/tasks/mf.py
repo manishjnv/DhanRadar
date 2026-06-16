@@ -1621,25 +1621,32 @@ def mf_constituents_fetch() -> str:
 
 async def _mf_constituents_pipeline() -> str:
     """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents."""
+    from playwright.async_api import async_playwright
+
     total_rows = 0
     aum_updates = 0
 
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        for amc in _AMC_DISCLOSURE_ROOTS:
-            amc_name: str = amc["name"]
-            try:
-                rows, aum_cnt = await _process_amc(client, amc_name, amc["url"])
-                total_rows += rows
-                aum_updates += aum_cnt
-                logger.info(
-                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
-                    amc_name,
-                    rows,
-                    aum_cnt,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
-                continue
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                for amc in _AMC_DISCLOSURE_ROOTS:
+                    amc_name: str = amc["name"]
+                    try:
+                        rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
+                        total_rows += rows
+                        aum_updates += aum_cnt
+                        logger.info(
+                            "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
+                            amc_name,
+                            rows,
+                            aum_cnt,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+                        continue
+        finally:
+            await browser.close()
 
     return (
         f"mf_constituents_fetch done: "
@@ -1649,14 +1656,14 @@ async def _mf_constituents_pipeline() -> str:
 
 
 async def _process_amc(
-    client: httpx.AsyncClient, amc_name: str, discovery_url: str
+    client: httpx.AsyncClient, browser: Any, amc_name: str, discovery_url: str
 ) -> tuple[int, int]:
     """Discover and parse the latest monthly disclosure file for one AMC.
 
     Returns (rows_upserted, aum_updates).
     """
-    # Step 1: Fetch the discovery page to find the latest disclosure file link.
-    file_url = await _discover_latest_disclosure_url(client, discovery_url, amc_name)
+    # Step 1: Discover the latest disclosure file URL via Playwright.
+    file_url = await _discover_url_playwright(browser, discovery_url, amc_name)
     if file_url is None:
         logger.warning("mf_constituents_fetch amc=%s no disclosure file found", amc_name)
         return 0, 0
@@ -1692,55 +1699,58 @@ async def _process_amc(
     return await _upsert_constituents(parsed, amc_name)
 
 
-async def _discover_latest_disclosure_url(
-    client: httpx.AsyncClient, discovery_url: str, amc_name: str
+async def _discover_url_playwright(
+    browser: Any, discovery_url: str, amc_name: str
 ) -> str | None:
-    """Parse the AMC's disclosure page HTML to find the latest .xlsx/.csv link.
+    """Render the AMC disclosure SPA with Playwright and extract the latest XLSX/CSV URL.
 
-    Looks for href links ending in .xlsx or .csv, returns the first (most recent).
-    Falls back to AMFI's central disclosure page if the AMC page fails.
+    Caches the discovered URL in Redis for 25 days (key mf:disclosure_url:{amc}:{YYYY-MM})
+    so Playwright runs once per month per AMC on cache miss only.
     """
-    import re
+    from dhanradar.redis_client import get_redis
 
-    for url in [
-        discovery_url,
-        "https://www.amfiindia.com/investor-corner/knowledge-center/portfolio-disclosure.html",
-    ]:
-        try:
-            resp = await client.get(
-                url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
-                timeout=30.0,
-            )
-            if resp.status_code != 200:
-                continue
-            html = resp.text
-            # Find all href values pointing to XLSX or CSV files.
-            hrefs = re.findall(
-                r'href=["\']([^"\']*\.(?:xlsx|csv))["\']', html, re.IGNORECASE
-            )
-            if not hrefs:
-                continue
-            # Filter for links that look like portfolio disclosures (not factsheets/etc).
-            # Prefer links containing "portfolio" in the path.
-            portfolio_links = [
-                h for h in hrefs if "portfolio" in h.lower() or "disclosure" in h.lower()
-            ]
-            candidates = portfolio_links if portfolio_links else hrefs
-            # Return the first candidate, resolved against the page URL.
-            link = candidates[0]
-            if link.startswith("http"):
-                return link
-            # Relative URL — resolve against page base.
-            from urllib.parse import urljoin
+    now = datetime.now(UTC)
+    cache_key = f"mf:disclosure_url:{amc_name}:{now.strftime('%Y-%m')}"
 
-            return urljoin(url, link)
-        except Exception:  # noqa: BLE001
-            logger.debug(
-                "mf_constituents_fetch amc=%s discovery url=%s failed", amc_name, url
+    redis = get_redis()
+    cached = await redis.get(cache_key)
+    if cached:
+        return cached.decode() if isinstance(cached, bytes) else str(cached)
+
+    page = await browser.new_page()
+    try:
+        await page.goto(discovery_url, wait_until="networkidle", timeout=60_000)
+        hrefs: list[str] = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href)"
+        )
+        # Prefer links labelled portfolio/disclosure; fall back to any xlsx/csv.
+        candidates = [
+            h for h in hrefs
+            if h.lower().endswith((".xlsx", ".csv"))
+            and ("portfolio" in h.lower() or "disclosure" in h.lower())
+        ]
+        if not candidates:
+            candidates = [h for h in hrefs if h.lower().endswith((".xlsx", ".csv"))]
+        if not candidates:
+            logger.warning(
+                "mf_constituents_fetch amc=%s playwright found no xlsx/csv links at %s",
+                amc_name,
+                discovery_url,
             )
-            continue
-    return None
+            return None
+        url = candidates[0]
+        await redis.set(cache_key, url, ex=25 * 86400)
+        return url
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "mf_constituents_fetch amc=%s playwright discovery failed url=%s",
+            amc_name,
+            discovery_url,
+            exc_info=True,
+        )
+        return None
+    finally:
+        await page.close()
 
 
 def _normalize_col(name: str) -> str:

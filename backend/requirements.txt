@@ -34,4 +34,6 @@ structlog>=24.1.0
 feedparser>=6.0.10
 # --- Phase 4: Live market data (VIX + Nifty 50 breadth via Yahoo Finance) ---
 yfinance>=0.2.40
+# --- ADR-0033(a): SEBI disclosure SPA URL discovery (celery-batch only) ---
+playwright>=1.44.0
 
