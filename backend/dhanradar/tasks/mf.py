@@ -21,6 +21,8 @@ Pure mapping helpers are factored out for unit testing without a worker.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
@@ -29,6 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 from structlog.contextvars import bind_contextvars
 
 from dhanradar.celery_app import celery_app
@@ -49,6 +52,23 @@ _UPLOAD_TTL_SECONDS = 24 * 3600
 
 # Batch size for bulk-upsert statements — bounds memory and statement size.
 _UPSERT_CHUNK = 2000
+
+# Top-10 AMCs by AUM — SEBI monthly portfolio disclosure discovery roots.
+# These are the SEBI-mandated scheme-portfolio disclosure landing pages.
+# Each AMC publishes monthly disclosure XLSX/CSV under these paths.
+# Format: name (for source_amc provenance) + discovery URL.
+_AMC_DISCLOSURE_ROOTS: list[dict] = [
+    {"name": "HDFC", "url": "https://www.hdfcfund.com/investor-relations/portfolio-disclosure"},
+    {"name": "SBI", "url": "https://www.sbimf.com/en-us/portfolio-disclosures"},
+    {"name": "ICICI_PRU", "url": "https://www.icicipruamc.com/portfolio-disclosure"},
+    {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/portfolio-disclosure"},
+    {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
+    {"name": "AXIS", "url": "https://www.axismf.com/portfolio-disclosure"},
+    {"name": "MIRAE", "url": "https://miraeassetmf.co.in/portfolio-disclosure"},
+    {"name": "DSP", "url": "https://www.dspmf.com/portfolio-disclosure"},
+    {"name": "UTI", "url": "https://www.utimf.com/portfolio-disclosure"},
+    {"name": "FRANKLIN", "url": "https://www.franklintempletonmutualfund.com/portfolio-disclosure"},
+]
 
 
 def parsed_to_snapshot_holdings(
@@ -1577,4 +1597,538 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
         await db.commit()
 
     return f"mf_fund_metadata_backfill: updated {n} funds"
+
+
+# ---------------------------------------------------------------------------
+# mf_constituents_fetch — ADR-0033(a) SEBI Monthly Portfolio Disclosure Scraper
+# ---------------------------------------------------------------------------
+# Manual-only task (NOT in beat schedule).  Fetches SEBI-format monthly
+# portfolio disclosure files from top-10 AMCs, upserts constituent rows into
+# mf.mf_fund_constituents, and updates mf_funds.aum_crore from the net-assets
+# column.  Coverage: top-10 AMCs (~75-80% market AUM); remainder is a logged
+# gap (§8.4 — never imputed from AMC aggregate).
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(name="dhanradar.tasks.mf.mf_constituents_fetch")
+def mf_constituents_fetch() -> str:
+    try:
+        return asyncio.run(_mf_constituents_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("mf_constituents_fetch pipeline error")
+        return "mf_constituents_fetch: failed — see worker logs"
+
+
+async def _mf_constituents_pipeline() -> str:
+    """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents."""
+    total_rows = 0
+    aum_updates = 0
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        for amc in _AMC_DISCLOSURE_ROOTS:
+            amc_name: str = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc(client, amc_name, amc["url"])
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
+                    amc_name,
+                    rows,
+                    aum_cnt,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+                continue
+
+    return (
+        f"mf_constituents_fetch done: "
+        f"total_rows={total_rows} aum_updates={aum_updates} "
+        f"amcs={len(_AMC_DISCLOSURE_ROOTS)}"
+    )
+
+
+async def _process_amc(
+    client: httpx.AsyncClient, amc_name: str, discovery_url: str
+) -> tuple[int, int]:
+    """Discover and parse the latest monthly disclosure file for one AMC.
+
+    Returns (rows_upserted, aum_updates).
+    """
+    # Step 1: Fetch the discovery page to find the latest disclosure file link.
+    file_url = await _discover_latest_disclosure_url(client, discovery_url, amc_name)
+    if file_url is None:
+        logger.warning("mf_constituents_fetch amc=%s no disclosure file found", amc_name)
+        return 0, 0
+
+    # Step 2: Download the file bytes.
+    logger.info("mf_constituents_fetch amc=%s fetching %s", amc_name, file_url)
+    resp = await client.get(
+        file_url,
+        headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+    )
+    resp.raise_for_status()
+
+    content_type = resp.headers.get("content-type", "")
+    file_bytes = resp.content
+
+    # Step 3: Parse the file into constituent rows.
+    if "spreadsheetml" in content_type or file_url.lower().endswith(".xlsx"):
+        parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+    elif "csv" in content_type or file_url.lower().endswith(".csv"):
+        parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+    else:
+        # Try XLSX first, fall back to CSV.
+        try:
+            parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+        except Exception:  # noqa: BLE001
+            parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+
+    if not parsed:
+        logger.warning("mf_constituents_fetch amc=%s parsed 0 rows", amc_name)
+        return 0, 0
+
+    # Step 4: Resolve scheme names → ISINs and upsert.
+    return await _upsert_constituents(parsed, amc_name)
+
+
+async def _discover_latest_disclosure_url(
+    client: httpx.AsyncClient, discovery_url: str, amc_name: str
+) -> str | None:
+    """Parse the AMC's disclosure page HTML to find the latest .xlsx/.csv link.
+
+    Looks for href links ending in .xlsx or .csv, returns the first (most recent).
+    Falls back to AMFI's central disclosure page if the AMC page fails.
+    """
+    import re
+
+    for url in [
+        discovery_url,
+        "https://www.amfiindia.com/investor-corner/knowledge-center/portfolio-disclosure.html",
+    ]:
+        try:
+            resp = await client.get(
+                url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                timeout=30.0,
+            )
+            if resp.status_code != 200:
+                continue
+            html = resp.text
+            # Find all href values pointing to XLSX or CSV files.
+            hrefs = re.findall(
+                r'href=["\']([^"\']*\.(?:xlsx|csv))["\']', html, re.IGNORECASE
+            )
+            if not hrefs:
+                continue
+            # Filter for links that look like portfolio disclosures (not factsheets/etc).
+            # Prefer links containing "portfolio" in the path.
+            portfolio_links = [
+                h for h in hrefs if "portfolio" in h.lower() or "disclosure" in h.lower()
+            ]
+            candidates = portfolio_links if portfolio_links else hrefs
+            # Return the first candidate, resolved against the page URL.
+            link = candidates[0]
+            if link.startswith("http"):
+                return link
+            # Relative URL — resolve against page base.
+            from urllib.parse import urljoin
+
+            return urljoin(url, link)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "mf_constituents_fetch amc=%s discovery url=%s failed", amc_name, url
+            )
+            continue
+    return None
+
+
+def _normalize_col(name: str) -> str:
+    """Lowercase + strip a column header for loose matching."""
+    return name.lower().strip()
+
+
+def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
+    """Parse a SEBI-format monthly portfolio disclosure XLSX.
+
+    SEBI circular SEBI/HO/IMD/IMD-II DOF3/P/CIR/2021/024 mandates a standard
+    format. Column names vary slightly per AMC; we match loosely.
+
+    Returns list of dicts with keys:
+        scheme_name, constituent_name, constituent_isin,
+        sector, rating, weight_pct, market_value_cr, as_of_month
+    """
+    import openpyxl  # lazily imported — not installed everywhere
+
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    result: list[dict] = []
+    current_scheme: str | None = None
+    as_of_month: date | None = None
+
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            continue
+
+        col_map: dict[str, int] = {}
+
+        for idx, row in enumerate(rows):  # noqa: B007
+            row_strs = [str(c).strip() if c is not None else "" for c in row]
+
+            # Detect as_of_month from header rows (e.g. "Portfolio as on 31-May-2025")
+            joined = " ".join(row_strs).lower()
+            if as_of_month is None and (
+                "portfolio as on" in joined or "as at" in joined or "month end" in joined
+            ):
+                import re
+
+                date_m = re.search(
+                    r"(\d{1,2})[- ](\w+)[- ](\d{4})",
+                    " ".join(row_strs),
+                    re.IGNORECASE,
+                )
+                if date_m:
+                    try:
+                        from datetime import datetime as _dt
+
+                        as_of_month = _dt.strptime(
+                            f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y"
+                        ).date().replace(day=1)
+                    except ValueError:
+                        pass
+
+            # Detect scheme name rows (usually bold / standalone text rows).
+            non_empty = [s for s in row_strs if s and s.lower() not in ("none", "")]
+            if len(non_empty) == 1 and non_empty[0] and not col_map:
+                candidate = non_empty[0]
+                # Scheme rows often start with scheme-type keywords.
+                if any(
+                    kw in candidate.lower()
+                    for kw in (
+                        "fund",
+                        "scheme",
+                        "plan",
+                        "etf",
+                        "index",
+                        "growth",
+                        "idcw",
+                        "direct",
+                        "regular",
+                    )
+                ):
+                    current_scheme = candidate
+
+            # Detect header row (contains "Name of Instrument" or similar).
+            if not col_map and any(
+                "name" in s.lower()
+                and (
+                    "instrument" in s.lower()
+                    or "security" in s.lower()
+                    or "stock" in s.lower()
+                )
+                for s in row_strs
+            ):
+                for ci, cell in enumerate(row_strs):
+                    col_map[_normalize_col(cell)] = ci
+                continue
+
+            # Data rows — only after header detected.
+            if col_map and current_scheme:
+                row_dict = _extract_sebi_row(
+                    row_strs, col_map, current_scheme, amc_name, as_of_month
+                )
+                if row_dict:
+                    result.append(row_dict)
+
+                # Reset on blank rows (new scheme section upcoming).
+                if not any(s for s in row_strs if s and s.lower() not in ("none", "")):
+                    col_map = {}
+
+    return result
+
+
+def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
+    """Parse a SEBI-format monthly portfolio disclosure CSV.
+
+    Same column-matching logic as the XLSX parser.
+    """
+    result: list[dict] = []
+    current_scheme: str | None = None
+    as_of_month: date | None = None
+    col_map: dict[str, int] = {}
+
+    reader = csv.reader(io.StringIO(csv_text))
+    for row in reader:
+        row_strs = [c.strip() for c in row]
+
+        joined = " ".join(row_strs).lower()
+        if as_of_month is None and (
+            "portfolio as on" in joined or "as at" in joined
+        ):
+            import re
+
+            date_m = re.search(
+                r"(\d{1,2})[- ](\w+)[- ](\d{4})", " ".join(row_strs), re.IGNORECASE
+            )
+            if date_m:
+                try:
+                    from datetime import datetime as _dt
+
+                    as_of_month = _dt.strptime(
+                        f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y"
+                    ).date().replace(day=1)
+                except ValueError:
+                    pass
+
+        non_empty = [s for s in row_strs if s]
+        if len(non_empty) == 1 and not col_map:
+            candidate = non_empty[0]
+            if any(
+                kw in candidate.lower()
+                for kw in (
+                    "fund",
+                    "scheme",
+                    "plan",
+                    "etf",
+                    "index",
+                    "growth",
+                    "idcw",
+                    "direct",
+                    "regular",
+                )
+            ):
+                current_scheme = candidate
+
+        if not col_map and any(
+            "name" in s.lower()
+            and ("instrument" in s.lower() or "security" in s.lower())
+            for s in row_strs
+        ):
+            for ci, cell in enumerate(row_strs):
+                col_map[_normalize_col(cell)] = ci
+            continue
+
+        if col_map and current_scheme:
+            row_dict = _extract_sebi_row(
+                row_strs, col_map, current_scheme, amc_name, as_of_month
+            )
+            if row_dict:
+                result.append(row_dict)
+
+            if not any(s for s in row_strs if s):
+                col_map = {}
+
+    return result
+
+
+def _extract_sebi_row(
+    row_strs: list[str],
+    col_map: dict[str, int],
+    scheme_name: str,
+    amc_name: str,
+    as_of_month: date | None,
+) -> dict | None:
+    """Extract one constituent row from a parsed SEBI row using loose column matching.
+
+    Returns None if the row has no constituent name (blank/total/header rows).
+    §8.4: market_value_cr and weight_pct are taken directly from the file — never computed
+    from AMC-level totals.
+    """
+    # amc_name is carried through for source provenance on the returned dict.
+    def _get(keys: list[str]) -> str:
+        for key in keys:
+            for col_name, ci in col_map.items():
+                if key in col_name and ci < len(row_strs):
+                    val = row_strs[ci]
+                    if val and val.lower() not in ("none", "n/a", "-", ""):
+                        return val
+        return ""
+
+    constituent_name = _get(
+        [
+            "name of instrument",
+            "name of security",
+            "name of stock",
+            "name of the instrument",
+        ]
+    )
+    if not constituent_name:
+        return None
+
+    # Skip total/sub-total rows.
+    if any(
+        kw in constituent_name.lower()
+        for kw in ("total", "sub-total", "grand total", "net assets")
+    ):
+        return None
+
+    isin_col = _get(["isin", "isin code"])
+    sector = _get(["sector", "industry", "industry/sector"])
+    rating = _get(["rating", "credit rating", "instrument rating"])
+
+    weight_pct_raw = _get(
+        ["% to nav", "% of net assets", "% to net assets", "weight", "% of nav"]
+    )
+    weight_pct: float | None = None
+    if weight_pct_raw:
+        try:
+            weight_pct = float(weight_pct_raw.replace(",", "").replace("%", "").strip())
+        except ValueError:
+            pass
+
+    market_value_raw = _get(
+        [
+            "market value",
+            "market val",
+            "value (rs. in lakhs)",
+            "value (lakhs)",
+            "mkt value",
+        ]
+    )
+    market_value_cr: float | None = None
+    if market_value_raw:
+        try:
+            # SEBI files report in Lakhs; convert to Crores (÷100).
+            market_value_cr = float(market_value_raw.replace(",", "").strip()) / 100.0
+        except ValueError:
+            pass
+
+    # Use first-of-month date if as_of_month was parsed, else None (never fabricated).
+    effective_month = as_of_month
+
+    return {
+        "scheme_name": scheme_name,
+        "constituent_name": constituent_name,
+        "constituent_isin": isin_col or None,
+        "sector": sector or None,
+        "rating": rating or None,
+        "weight_pct": weight_pct,
+        "market_value_cr": market_value_cr,
+        "as_of_month": effective_month,
+        "source_amc": amc_name,
+    }
+
+
+async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[int, int]:
+    """Resolve scheme names → ISINs via pg_trgm, upsert constituent rows.
+
+    Returns (rows_upserted, aum_updates).
+    §8.4: aum_crore is written from the file's per-scheme net-assets row only;
+    never derived from AMC-level totals.
+    """
+    from sqlalchemy import func
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfFundConstituent
+
+    # Group rows by scheme_name to resolve ISINs in bulk.
+    scheme_names: set[str] = {r["scheme_name"] for r in parsed_rows if r.get("scheme_name")}
+    if not scheme_names:
+        return 0, 0
+
+    scheme_isin_map: dict[str, str] = {}
+    async with TaskSessionLocal() as db:
+        for sname in scheme_names:
+            # Use pg_trgm similarity to fuzzy-match scheme names.
+            result = await db.execute(
+                sa_text(
+                    "SELECT isin FROM mf.mf_funds "
+                    "WHERE similarity(scheme_name, :sname) > 0.4 "
+                    "ORDER BY similarity(scheme_name, :sname) DESC "
+                    "LIMIT 1"
+                ),
+                {"sname": sname},
+            )
+            row = result.fetchone()
+            if row:
+                scheme_isin_map[sname] = row[0]
+            else:
+                logger.debug(
+                    "mf_constituents_fetch amc=%s no isin match for '%s'", amc_name, sname
+                )
+
+    # Resolve ISINs and split into constituent rows vs aum updates.
+    constituent_batch: list[dict] = []
+    # Map isin → net_assets_cr for aum updates (from "Total" / "Net Assets" rows in file).
+    aum_map: dict[str, float] = {}
+
+    # Detect AUM from rows where constituent_name signals a net-assets total.
+    # (These are rows like "Net Assets" or "Total" with a market_value_cr.)
+    for row in parsed_rows:
+        sname = row.get("scheme_name")
+        isin = scheme_isin_map.get(sname or "")
+        if not isin:
+            continue
+
+        cname = row.get("constituent_name", "")
+        if any(kw in cname.lower() for kw in ("net assets", "total net assets")):
+            mv = row.get("market_value_cr")
+            if mv is not None and sname:
+                aum_map[isin] = mv
+            continue
+
+        if row.get("as_of_month") is None:
+            continue
+
+        constituent_batch.append(
+            {
+                "isin": isin,
+                "constituent_name": cname,
+                "as_of_month": row["as_of_month"],
+                "constituent_isin": row.get("constituent_isin"),
+                "sector": row.get("sector"),
+                "rating": row.get("rating"),
+                "weight_pct": row.get("weight_pct"),
+                "market_value_cr": row.get("market_value_cr"),
+                "source_amc": amc_name,
+            }
+        )
+
+    rows_upserted = 0
+    aum_updates = 0
+
+    async with TaskSessionLocal() as db:
+        # Upsert constituent rows in chunks.
+        for i in range(0, len(constituent_batch), _UPSERT_CHUNK):
+            chunk = constituent_batch[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = (
+                pg_insert(MfFundConstituent)
+                .values(chunk)
+                .on_conflict_do_update(
+                    index_elements=["isin", "constituent_name", "as_of_month"],
+                    set_={
+                        "constituent_isin": pg_insert(
+                            MfFundConstituent
+                        ).excluded.constituent_isin,
+                        "sector": pg_insert(MfFundConstituent).excluded.sector,
+                        "rating": pg_insert(MfFundConstituent).excluded.rating,
+                        "weight_pct": pg_insert(MfFundConstituent).excluded.weight_pct,
+                        "market_value_cr": pg_insert(
+                            MfFundConstituent
+                        ).excluded.market_value_cr,
+                        "source_amc": pg_insert(MfFundConstituent).excluded.source_amc,
+                        "ingested_at": func.now(),
+                    },
+                )
+            )
+            await db.execute(stmt)
+            rows_upserted += len(chunk)
+        await db.commit()
+
+        # Update aum_crore from per-scheme net-assets (§8.4 — genuine scheme-level data only).
+        for isin, net_assets_cr in aum_map.items():
+            await db.execute(
+                sa_text("UPDATE mf.mf_funds SET aum_crore = :v WHERE isin = :isin"),
+                {"v": net_assets_cr, "isin": isin},
+            )
+            aum_updates += 1
+        if aum_map:
+            await db.commit()
+
+    return rows_upserted, aum_updates
 
