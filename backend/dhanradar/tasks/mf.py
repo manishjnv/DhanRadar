@@ -142,6 +142,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             "plan_type": plan_type,
             "option_type": option_type,
             "is_segregated": is_segregated,
+            "launch_date": row.nav_date,
         }
     return list(out.values())
 
@@ -828,6 +829,11 @@ async def _nav_daily_pipeline() -> str:
                     "plan_type": insert(MfFund).excluded.plan_type,
                     "option_type": insert(MfFund).excluded.option_type,
                     "is_segregated": insert(MfFund).excluded.is_segregated,
+                    # Keep the earliest date seen — LEAST ignores NULL so a NULL
+                    # existing launch_date gets replaced by the incoming nav_date.
+                    "launch_date": func.least(
+                        MfFund.launch_date, insert(MfFund).excluded.launch_date
+                    ),
                 },
             )
             await db.execute(stmt)
