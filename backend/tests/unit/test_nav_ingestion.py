@@ -293,13 +293,14 @@ class TestNavrowsToFundUpserts:
         `sebi_category` is the validated/canonical form of the feed's own `category`
         (B66 taxonomy layer). `plan_type` and `option_type` are parsed from the
         feed's own `scheme_name` (B67 Task 3) — derived, not a different source.
+        `launch_date` and `is_segregated` are derived from the feed's own data (PR #213).
         Scheme-master columns that require a separate data source (aum, expense_ratio,
         benchmark_index) must NOT appear here."""
         rows = [_row()]
         out = _navrows_to_fund_upserts(rows)
         assert set(out[0].keys()) == {
             "isin", "amfi_code", "scheme_name", "category", "sebi_category",
-            "plan_type", "option_type",
+            "plan_type", "option_type", "launch_date", "is_segregated",
         }
 
     def test_plan_type_and_option_type_populated(self):
