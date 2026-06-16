@@ -1796,14 +1796,20 @@ async def _process_amc_json_api(
             continue
 
         try:
-            rows_json: list[dict] = resp.json()
+            data = resp.json()
         except Exception:  # noqa: BLE001
             logger.warning("mf_constituents_fetch amc=%s json-api response is not JSON url=%s", amc_name, api_url)
             continue
 
-        if not isinstance(rows_json, list):
-            logger.warning("mf_constituents_fetch amc=%s json-api returned non-list type=%s", amc_name, type(rows_json))
+        # UTI (and possibly others) wrap the rows list under a top-level key.
+        if isinstance(data, dict):
+            data = data.get("rows", data.get("data", []))
+
+        if not isinstance(data, list):
+            logger.warning("mf_constituents_fetch amc=%s json-api returned non-list type=%s", amc_name, type(data))
             continue
+
+        rows_json: list[dict] = data
 
         # Find the row for the target month (case-insensitive).
         zip_url: str | None = None
@@ -2310,6 +2316,18 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
                 "source_amc": amc_name,
             }
         )
+
+    # Deduplicate by ON CONFLICT key — some AMC files (e.g. NIPPON) have duplicate
+    # rows for the same (isin, constituent_name, as_of_month); a single upsert
+    # statement cannot update the same row twice (CardinalityViolationError).
+    seen_keys: set[tuple] = set()
+    deduped: list[dict] = []
+    for r in constituent_batch:
+        key = (r["isin"], r["constituent_name"], r["as_of_month"])
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append(r)
+    constituent_batch = deduped
 
     rows_upserted = 0
     aum_updates = 0
