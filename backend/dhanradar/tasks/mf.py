@@ -2006,13 +2006,16 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
         for idx, row in enumerate(rows):  # noqa: B007
             row_strs = [str(c).strip() if c is not None else "" for c in row]
 
-            # Detect as_of_month from header rows (e.g. "Portfolio as on 31-May-2025")
+            # Detect as_of_month from header rows (e.g. "Portfolio as on 31-May-2025"
+            # or "AS OF 31/05/2026").
             joined = " ".join(row_strs).lower()
             if as_of_month is None and (
                 "portfolio as on" in joined or "as at" in joined or "month end" in joined
+                or "as of" in joined
             ):
                 import re
 
+                # Try "DD-Mon-YYYY" or "DD Mon YYYY" format first.
                 date_m = re.search(
                     r"(\d{1,2})[- ](\w+)[- ](\d{4})",
                     " ".join(row_strs),
@@ -2027,13 +2030,30 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         ).date().replace(day=1)
                     except ValueError:
                         pass
+                # Fallback: "DD/MM/YYYY" format (UTI style).
+                if as_of_month is None:
+                    slash_m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", " ".join(row_strs))
+                    if slash_m:
+                        try:
+                            from datetime import date as _date
+                            as_of_month = _date(
+                                int(slash_m.group(3)), int(slash_m.group(2)), 1
+                            )
+                        except ValueError:
+                            pass
 
             # Detect scheme name rows (usually bold / standalone text rows).
             non_empty = [s for s in row_strs if s and s.lower() not in ("none", "")]
             if len(non_empty) == 1 and non_empty[0] and not col_map:
                 candidate = non_empty[0]
+                # Strip "SCHEME:" prefix used by UTI and some other AMCs.
+                if candidate.upper().startswith("SCHEME:"):
+                    candidate = candidate[7:].strip()
+                # Reject noise rows like "SCHEME CODE002STARTS" that aren't real names.
+                if any(kw in candidate.upper() for kw in ("CODE002", "STARTS", "ENDS")):
+                    candidate = ""
                 # Scheme rows often start with scheme-type keywords.
-                if any(
+                if candidate and any(
                     kw in candidate.lower()
                     for kw in (
                         "fund",
@@ -2260,17 +2280,23 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
         return 0, 0
 
     scheme_isin_map: dict[str, str] = {}
+    # Restrict similarity search to the same AMC to avoid cross-AMC false matches
+    # (e.g. "UTI - Liquid Fund" vs "HSBC Liquid Fund"). amc_name may be "UTI",
+    # "NIPPON", etc.; fund names in mf_funds start with the AMC's short prefix.
+    amc_prefix = amc_name.split("_")[0] + "%"  # "ICICI_PRU" → "ICICI%"
     async with TaskSessionLocal() as db:
         for sname in scheme_names:
-            # Use pg_trgm similarity to fuzzy-match scheme names.
+            # Use pg_trgm similarity to fuzzy-match scheme names, restricted to
+            # same-AMC funds to prevent false positives across AMC name overlap.
             result = await db.execute(
                 sa_text(
                     "SELECT isin FROM mf.mf_funds "
-                    "WHERE similarity(scheme_name, :sname) > 0.4 "
+                    "WHERE scheme_name ILIKE :prefix "
+                    "AND similarity(scheme_name, :sname) > 0.35 "
                     "ORDER BY similarity(scheme_name, :sname) DESC "
                     "LIMIT 1"
                 ),
-                {"sname": sname},
+                {"sname": sname, "prefix": amc_prefix},
             )
             row = result.fetchone()
             if row:
