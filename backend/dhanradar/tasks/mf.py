@@ -2062,6 +2062,9 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # Reject noise rows like "SCHEME CODE002STARTS" that aren't real names.
                 if any(kw in candidate.upper() for kw in ("CODE002", "STARTS", "ENDS")):
                     candidate = ""
+                # Reject rows starting with parentheses or other indicators of descriptions (e.g. MIRAE).
+                if candidate and not candidate[0].isalnum():
+                    candidate = ""
                 # Scheme rows often start with scheme-type keywords.
                 if candidate and any(
                     kw in candidate.lower()
