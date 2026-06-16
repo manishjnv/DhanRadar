@@ -1,0 +1,57 @@
+<h2>Signal — Architecture Approach</h2>
+<p class="subtitle">How should the Signal feature be structured in DhanRadar's navigation?</p>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Single Scrollable Page <code>/signal</code></h3>
+      <p>One route. All sections stacked vertically with anchor links — Today's Signal → My Rules → Dip Fund → Journal → Analytics.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Simplest routing</li><li>Mobile scroll-native</li><li>One sidebar entry</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Very long page</li><li>Hard to jump between Journal and Today</li><li>No deep links</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Tabbed Page <code>/signal?tab=rules</code> <span style="background:#2563eb;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px">Recommended</span></h3>
+      <p>One sidebar entry. Tabs within the page: <strong>Today · Rules · Dip Fund · Journal · Analytics</strong>. Tab persisted in URL query param.</p>
+      <div style="border:1px solid #334155;border-radius:8px;margin:10px 0;overflow:hidden">
+        <div style="background:#0f172a;padding:8px 12px;font-size:12px;color:#94a3b8">Signal page preview</div>
+        <div style="background:#1e293b;padding:10px 12px">
+          <div style="display:flex;gap:6px;border-bottom:1px solid #334155;padding-bottom:8px;margin-bottom:10px">
+            <span style="background:#2563eb;color:#fff;padding:3px 10px;border-radius:4px;font-size:12px">Today</span>
+            <span style="color:#64748b;padding:3px 10px;font-size:12px">Rules</span>
+            <span style="color:#64748b;padding:3px 10px;font-size:12px">Dip Fund</span>
+            <span style="color:#64748b;padding:3px 10px;font-size:12px">Journal</span>
+            <span style="color:#64748b;padding:3px 10px;font-size:12px">Analytics</span>
+          </div>
+          <div style="font-size:12px;color:#94a3b8">Market signals · Portfolio context · Rule check · Learning content</div>
+        </div>
+      </div>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Matches existing DhanRadar patterns</li><li>Each section has full space</li><li>URL-shareable per tab</li><li>Clean single sidebar item</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Tab count (5) is on the higher side</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Sub-routes <code>/signal/today</code>, <code>/signal/rules</code>…</h3>
+      <p>Signal becomes a mini-section in the sidebar with 5 nested nav items — Today, Rules, Dip Fund, Journal, Analytics.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Fully bookmarkable URLs</li><li>Each page independently routable</li><li>Maximum room per section</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Expands sidebar significantly (already 6 items)</li><li>More routing boilerplate</li><li>Feels like a separate app, not a feature</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">Click to select your preferred approach, then respond in the terminal.</p>
