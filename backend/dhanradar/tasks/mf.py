@@ -2013,6 +2013,8 @@ async def _discover_all_urls_playwright(
         ]
         if not candidates:
             candidates = [h for h in hrefs if h.lower().endswith((".xlsx", ".xls", ".csv"))]
+        # Deduplicate while preserving order.
+        candidates = list(dict.fromkeys(candidates))
         if not candidates:
             logger.warning(
                 "mf_constituents_fetch amc=%s playwright found no xlsx/xls/csv links at %s",
@@ -2204,6 +2206,19 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             )
                         except ValueError:
                             pass
+                # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
+                if as_of_month is None:
+                    month_m = re.search(
+                        r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs)
+                    )
+                    if month_m:
+                        try:
+                            from datetime import datetime as _dt
+                            as_of_month = _dt.strptime(
+                                f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
+                            ).date().replace(day=1)
+                        except ValueError:
+                            pass
 
             # Detect scheme name rows (usually bold / standalone text rows).
             non_empty = [s for s in row_strs if s and s.lower() not in ("none", "")]
@@ -2293,6 +2308,7 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
         joined = " ".join(row_strs).lower()
         if as_of_month is None and (
             "portfolio as on" in joined or "as at" in joined
+            or "as of" in joined or "as on" in joined or "month end" in joined
         ):
             import re
 
@@ -2308,6 +2324,19 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                     ).date().replace(day=1)
                 except ValueError:
                     pass
+            # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
+            if as_of_month is None:
+                month_m = re.search(
+                    r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs)
+                )
+                if month_m:
+                    try:
+                        from datetime import datetime as _dt
+                        as_of_month = _dt.strptime(
+                            f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
+                        ).date().replace(day=1)
+                    except ValueError:
+                        pass
 
         non_empty = [s for s in row_strs if s]
         if len(non_empty) == 1 and not col_map:
