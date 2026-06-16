@@ -58,6 +58,11 @@ _UPSERT_CHUNK = 2000
 # Each AMC publishes monthly disclosure XLSX/CSV under these paths.
 # Format: name (for source_amc provenance) + discovery URL.
 _AMC_DISCLOSURE_ROOTS: list[dict] = [
+    # direct_url_template: predictable static paths discovered via HTTP (no Playwright needed).
+    # {month_full} = full month name (e.g. "May"), {year} = 4-digit year.
+    # Remaining AMCs use Playwright discovery (requires chromium in container).
+    {"name": "DSP", "direct_url_template": "https://www.dspmf.com/content/dam/dsp/portfolio/DSP_Portfolio_{month_full}{year}.xlsx"},
+    {"name": "UTI", "direct_url_template": "https://www.utimf.com/content/dam/uti/portfolio/UTI_Portfolio_{month_full}_{year}.xlsx"},
     {"name": "HDFC", "url": "https://www.hdfcfund.com/investor-relations/portfolio-disclosure"},
     {"name": "SBI", "url": "https://www.sbimf.com/en-us/portfolio-disclosures"},
     {"name": "ICICI_PRU", "url": "https://www.icicipruamc.com/portfolio-disclosure"},
@@ -65,8 +70,6 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
     {"name": "AXIS", "url": "https://www.axismf.com/portfolio-disclosure"},
     {"name": "MIRAE", "url": "https://miraeassetmf.co.in/portfolio-disclosure"},
-    {"name": "DSP", "url": "https://www.dspmf.com/portfolio-disclosure"},
-    {"name": "UTI", "url": "https://www.utimf.com/portfolio-disclosure"},
     {"name": "FRANKLIN", "url": "https://www.franklintempletonmutualfund.com/portfolio-disclosure"},
 ]
 
@@ -1621,38 +1624,97 @@ def mf_constituents_fetch() -> str:
 
 async def _mf_constituents_pipeline() -> str:
     """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents."""
-    from playwright.async_api import async_playwright
-
     total_rows = 0
     aum_updates = 0
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        try:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                for amc in _AMC_DISCLOSURE_ROOTS:
-                    amc_name: str = amc["name"]
+    # Separate AMCs by resolution strategy.
+    template_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("direct_url_template")]
+    playwright_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if not a.get("direct_url_template")]
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        # --- Direct-URL AMCs (no browser needed) ---
+        for amc in template_amcs:
+            amc_name: str = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_direct(client, amc_name, amc["direct_url_template"])
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
+        # --- Playwright AMCs (JS SPA discovery) ---
+        if playwright_amcs:
+            try:
+                from playwright.async_api import async_playwright
+
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
                     try:
-                        rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
-                        total_rows += rows
-                        aum_updates += aum_cnt
-                        logger.info(
-                            "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
-                            amc_name,
-                            rows,
-                            aum_cnt,
-                        )
-                    except Exception:  # noqa: BLE001
-                        logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
-                        continue
-        finally:
-            await browser.close()
+                        for amc in playwright_amcs:
+                            amc_name = amc["name"]
+                            try:
+                                rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
+                                total_rows += rows
+                                aum_updates += aum_cnt
+                                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+                            except Exception:  # noqa: BLE001
+                                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+                    finally:
+                        await browser.close()
+            except ImportError:
+                logger.warning(
+                    "mf_constituents_fetch playwright not installed — skipping %d JS-SPA AMCs: %s",
+                    len(playwright_amcs),
+                    [a["name"] for a in playwright_amcs],
+                )
 
     return (
         f"mf_constituents_fetch done: "
         f"total_rows={total_rows} aum_updates={aum_updates} "
         f"amcs={len(_AMC_DISCLOSURE_ROOTS)}"
     )
+
+
+async def _process_amc_direct(
+    client: httpx.AsyncClient, amc_name: str, url_template: str
+) -> tuple[int, int]:
+    """Download and parse a disclosure file whose URL is known via a predictable template.
+
+    Tries the previous month first, then 2 months back (handles the 10-day publication lag).
+    """
+    now = datetime.now(UTC)
+    for months_back in (1, 2):
+        # Subtract months_back months.
+        target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
+        file_url = url_template.format(month_full=target.strftime("%B"), year=target.strftime("%Y"))
+        try:
+            resp = await client.get(
+                file_url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            )
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            continue
+
+        logger.info("mf_constituents_fetch amc=%s url=%s", amc_name, file_url)
+        file_bytes = resp.content
+        content_type = resp.headers.get("content-type", "")
+        if "spreadsheetml" in content_type or file_url.lower().endswith(".xlsx"):
+            parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+        else:
+            parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+
+        if not parsed:
+            logger.warning("mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url)
+            return 0, 0
+
+        return await _upsert_constituents(parsed, amc_name)
+
+    logger.warning("mf_constituents_fetch amc=%s no disclosure file found (tried template)", amc_name)
+    return 0, 0
 
 
 async def _process_amc(
