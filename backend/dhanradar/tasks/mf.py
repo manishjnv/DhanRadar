@@ -2002,6 +2002,16 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             continue
 
         col_map: dict[str, int] = {}
+        current_scheme: str | None = None  # Reset per sheet for per-scheme files.
+
+        # For per-scheme files (e.g. MIRAE), infer scheme name from sheet name
+        # if the sheet name looks like a scheme (contains "fund", "plan", etc.).
+        sheet_scheme: str | None = None
+        if sheet and any(
+            kw in sheet.lower()
+            for kw in ("fund", "scheme", "plan", "etf", "index", "growth", "idcw", "direct", "regular")
+        ):
+            sheet_scheme = sheet
 
         for idx, row in enumerate(rows):  # noqa: B007
             row_strs = [str(c).strip() if c is not None else "" for c in row]
@@ -2068,6 +2078,10 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     )
                 ):
                     current_scheme = candidate
+
+            # Fallback for per-scheme files (e.g. MIRAE): use sheet name as scheme if no scheme detected yet.
+            if not current_scheme and sheet_scheme and col_map:
+                current_scheme = sheet_scheme
 
             # Detect header row (contains "Name of Instrument" or similar).
             if not col_map and any(
