@@ -79,8 +79,8 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
     # Axis: correct path is /downloads/portfolio-disclosure (not /portfolio-disclosure which 404s).
     {"name": "AXIS", "url": "https://www.axismf.com/downloads/portfolio-disclosure"},
-    # Mirae: SPA at /downloads/portfolio; one XLSX per scheme — discover ALL links.
-    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio", "discover_all": True},
+    # Mirae: static HTML page; one XLSX per scheme — discover all links via plain HTTP.
+    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio", "static_multi": True},
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
     {"name": "FRANKLIN", "url": "https://www.franklintempletonindia.com/investor/portfolio-disclosure"},
     # DSP: domain moved from dspmf.com (GoDaddy) to dspim.com; disclosure page is JS-rendered.
@@ -1644,9 +1644,12 @@ async def _mf_constituents_pipeline() -> str:
     # Separate AMCs by resolution strategy.
     template_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("direct_url_template")]
     json_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("json_api_url_template")]
+    static_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("static_multi")]
     playwright_amcs = [
         a for a in _AMC_DISCLOSURE_ROOTS
-        if not a.get("direct_url_template") and not a.get("json_api_url_template")
+        if not a.get("direct_url_template")
+        and not a.get("json_api_url_template")
+        and not a.get("static_multi")
     ]
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
@@ -1677,21 +1680,45 @@ async def _mf_constituents_pipeline() -> str:
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
+        # --- Static-multi AMCs (plain HTML page, one XLSX per scheme, no JS rendering) ---
+        for amc in static_multi_amcs:
+            amc_name = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_static_multi(client, amc_name, amc["url"])
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
         # --- Playwright AMCs (JS SPA discovery) ---
         if playwright_amcs:
+            import tracemalloc
+
+            tracemalloc.start()
             try:
                 from playwright.async_api import async_playwright
 
                 async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--memory-pressure-off",
+                            "--disable-extensions",
+                        ],
+                    )
                     try:
+                        first_amc = True
                         for amc in playwright_amcs:
                             amc_name = amc["name"]
+                            if not first_amc:
+                                await asyncio.sleep(10)
+                            first_amc = False
                             try:
-                                if amc.get("discover_all"):
-                                    rows, aum_cnt = await _process_amc_multi(client, browser, amc_name, amc["url"])
-                                else:
-                                    rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
+                                rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
                                 total_rows += rows
                                 aum_updates += aum_cnt
                                 logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
@@ -1707,6 +1734,19 @@ async def _mf_constituents_pipeline() -> str:
                     len(playwright_amcs),
                     [a["name"] for a in playwright_amcs],
                 )
+            finally:
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                logger.info(
+                    "mf_constituents_fetch playwright_memory_peak peak_mb=%.1f",
+                    peak / 1_048_576,
+                )
+                if peak > 500 * 1_048_576:
+                    logger.warning(
+                        "mf_constituents_fetch playwright_memory_ceiling_risk peak_mb=%.1f"
+                        " — approaching 640MB celery-batch ceiling",
+                        peak / 1_048_576,
+                    )
 
     return (
         f"mf_constituents_fetch done: "
@@ -2096,6 +2136,139 @@ async def _process_amc_multi(
 def _normalize_col(name: str) -> str:
     """Lowercase + strip a column header for loose matching."""
     return name.lower().strip()
+
+
+async def _discover_all_urls_static(
+    client: httpx.AsyncClient,
+    url: str,
+    amc_name: str,
+    target_month: date | None = None,
+) -> list[str]:
+    """Discover all XLSX download links from a plain HTML disclosure page.
+
+    Used for AMCs like MIRAE whose landing page renders static HTML (no JS).
+    If target_month is provided, links are filtered to those whose URL contains
+    the abbreviated month name and year (e.g. "may" + "2026").
+    """
+    import re
+    from urllib.parse import urljoin
+
+    try:
+        resp = await client.get(
+            url,
+            headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+        )
+        resp.raise_for_status()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "mf_constituents_fetch amc=%s static discovery failed url=%s", amc_name, url, exc_info=True
+        )
+        return []
+
+    raw_hrefs = re.findall(r'href=["\']([^"\']+\.xlsx[^"\']*)["\']', resp.text, re.IGNORECASE)
+    links: list[str] = list(dict.fromkeys(urljoin(url, h) for h in raw_hrefs))
+
+    if target_month and links:
+        month_abbr = target_month.strftime("%b").lower()  # e.g. "may"
+        year_str = target_month.strftime("%Y")            # e.g. "2026"
+        filtered = [lnk for lnk in links if month_abbr in lnk.lower() and year_str in lnk]
+        if filtered:
+            links = filtered
+
+    logger.info(
+        "mf_constituents_fetch amc=%s static discovery found %d links url=%s",
+        amc_name,
+        len(links),
+        url,
+    )
+    return links
+
+
+async def _process_amc_static_multi(
+    client: httpx.AsyncClient, amc_name: str, discovery_url: str
+) -> tuple[int, int]:
+    """Download and parse all disclosure files for an AMC with a plain HTML index page.
+
+    Tries the previous month first, then 2 months back (SEBI publication lag).
+    Used for MIRAE, which publishes one XLSX per scheme on a static page.
+    """
+    now = datetime.now(UTC)
+    for months_back in (1, 2):
+        target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
+        file_urls = await _discover_all_urls_static(
+            client, discovery_url, amc_name, target_month=target.date()
+        )
+        if not file_urls:
+            logger.debug(
+                "mf_constituents_fetch amc=%s static multi: no links for month=%s",
+                amc_name,
+                target.strftime("%B %Y"),
+            )
+            continue
+
+        logger.info(
+            "mf_constituents_fetch amc=%s static multi: %d scheme files for %s",
+            amc_name,
+            len(file_urls),
+            target.strftime("%B %Y"),
+        )
+        total_rows = 0
+        total_aum = 0
+        parsed_files = 0
+
+        for file_url in file_urls:
+            try:
+                resp = await client.get(
+                    file_url,
+                    headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                )
+                resp.raise_for_status()
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "mf_constituents_fetch amc=%s failed to fetch %s",
+                    amc_name,
+                    file_url,
+                    exc_info=True,
+                )
+                continue
+
+            content_type = resp.headers.get("content-type", "")
+            file_bytes = resp.content
+
+            if "spreadsheetml" in content_type or file_url.lower().endswith((".xlsx", ".xls")):
+                parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+            elif "csv" in content_type or file_url.lower().endswith(".csv"):
+                parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+            else:
+                try:
+                    parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+                except Exception:  # noqa: BLE001
+                    parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+
+            if not parsed:
+                logger.debug(
+                    "mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url
+                )
+                continue
+
+            rows, aum_cnt = await _upsert_constituents(parsed, amc_name)
+            total_rows += rows
+            total_aum += aum_cnt
+            parsed_files += 1
+
+        logger.info(
+            "mf_constituents_fetch amc=%s static multi: parsed %d/%d files rows=%d",
+            amc_name,
+            parsed_files,
+            len(file_urls),
+            total_rows,
+        )
+        return total_rows, total_aum
+
+    logger.warning(
+        "mf_constituents_fetch amc=%s static multi: no disclosure files found", amc_name
+    )
+    return 0, 0
 
 
 def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
@@ -2630,4 +2803,227 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
             await db.commit()
 
     return rows_upserted, aum_updates
+
+
+# ---------------------------------------------------------------------------
+# Kite Connect MF instrument enrichment (ADR-0033 extension)
+# ---------------------------------------------------------------------------
+# Redis keys for the daily Kite access_token cache + refresh lock.
+# Token lifetime: Kite invalidates all tokens at 06:00 IST each morning.
+_KITE_TOKEN_KEY = "kite:mf:access_token"
+_KITE_LOCK_KEY = "kite:mf:token_lock"
+
+
+async def _kite_login_and_get_token() -> str:
+    """TOTP-automated Zerodha login → fresh Kite Connect access_token.
+
+    Flow: POST /api/login → POST /api/twofa (TOTP) → follow redirects to
+    extract request_token from callback URL → generate_session.
+    """
+    import pyotp
+    from urllib.parse import parse_qs, urlparse
+
+    from kiteconnect import KiteConnect
+
+    from dhanradar.config import settings as _s
+
+    kite = KiteConnect(api_key=_s.KITE_API_KEY)
+    base = "https://kite.zerodha.com"
+
+    async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
+        # 1. POST credentials
+        r1 = await client.post(
+            f"{base}/api/login",
+            data={"user_id": _s.KITE_USER_ID, "password": _s.KITE_USER_PASSWORD},
+        )
+        r1.raise_for_status()
+        d1 = r1.json()
+        if d1.get("status") != "success":
+            raise RuntimeError(f"Kite login failed: {d1.get('message')}")
+        request_id = d1["data"]["request_id"]
+
+        # 2. POST TOTP 2FA
+        totp_code = pyotp.TOTP(_s.KITE_TOTP_SECRET).now()
+        r2 = await client.post(
+            f"{base}/api/twofa",
+            data={
+                "request_id": request_id,
+                "twofa_value": totp_code,
+                "twofa_type": "totp",
+                "user_id": _s.KITE_USER_ID,
+            },
+        )
+        r2.raise_for_status()
+        d2 = r2.json()
+        if d2.get("status") != "success":
+            raise RuntimeError(f"Kite 2FA failed: {d2.get('message')}")
+
+        # 3. Follow redirect chain from connect/login (with active session cookies)
+        #    until the callback URL carries ?request_token=...
+        location: str | None = (
+            f"{base}/connect/login?api_key={_s.KITE_API_KEY}&v=3"
+        )
+        request_token: str | None = None
+        for _ in range(8):
+            if not location:
+                break
+            qs = parse_qs(urlparse(location).query)
+            if "request_token" in qs:
+                request_token = qs["request_token"][0]
+                break
+            rn = await client.get(location)
+            location = rn.headers.get("location")
+
+        if request_token is None:
+            raise RuntimeError(
+                "Kite TOTP login: request_token not found in redirect chain"
+            )
+
+        # 4. Exchange for access_token (synchronous SDK call is fine here)
+        session = kite.generate_session(request_token, api_secret=_s.KITE_API_SECRET)
+        return str(session["access_token"])
+
+
+async def _kite_get_access_token() -> str:
+    """Return a valid Kite access_token from Redis cache; refresh via TOTP if absent.
+
+    TTL is computed to 06:00 IST next morning (Kite's daily invalidation boundary).
+    TOCTOU guard: one worker holds a 60-second NX lock; others wait then re-read.
+    """
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+
+    cached = await redis.get(_KITE_TOKEN_KEY)
+    if cached:
+        return cached.decode() if isinstance(cached, bytes) else cached
+
+    # Acquire refresh lock so only one worker calls Zerodha at a time.
+    lock_id = os.urandom(8).hex()
+    acquired = await redis.set(_KITE_LOCK_KEY, lock_id, nx=True, ex=60)
+    if not acquired:
+        await asyncio.sleep(6)
+        val = await redis.get(_KITE_TOKEN_KEY)
+        if val:
+            return val.decode() if isinstance(val, bytes) else val
+        raise RuntimeError("Kite token refresh lock held too long; retry later")
+
+    try:
+        token = await _kite_login_and_get_token()
+        # TTL: seconds until next 06:00 IST (minimum 5 min for safety).
+        now_ist = datetime.now(tz=timezone(timedelta(hours=5, minutes=30)))
+        next_reset = now_ist.replace(hour=6, minute=0, second=0, microsecond=0)
+        if now_ist.hour >= 6:
+            next_reset += timedelta(days=1)
+        ttl = max(int((next_reset - now_ist).total_seconds()), 300)
+        await redis.set(_KITE_TOKEN_KEY, token, ex=ttl)
+        return token
+    finally:
+        val = await redis.get(_KITE_LOCK_KEY)
+        if val and (val.decode() if isinstance(val, bytes) else val) == lock_id:
+            await redis.delete(_KITE_LOCK_KEY)
+
+
+def _kite_norm_name(name: str) -> str:
+    """Lowercase + collapse whitespace for scheme-name matching."""
+    import re
+    return re.sub(r"\s+", " ", name.lower().strip())
+
+
+@celery_app.task(name="dhanradar.tasks.mf.mf_kite_enrich")
+def mf_kite_enrich() -> str:
+    """Enrich mf_funds.plan_type / option_type via Kite MF instruments for NULL rows.
+
+    Access token is refreshed automatically via TOTP when expired (cached in Redis).
+    No-op when KITE_* credentials are not configured.
+    """
+    try:
+        return asyncio.run(_mf_kite_enrich_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("mf_kite_enrich pipeline error")
+        return "mf_kite_enrich: failed — see worker logs"
+
+
+async def _mf_kite_enrich_pipeline() -> str:
+    from sqlalchemy import text as sa_text
+
+    from dhanradar.config import settings as _s
+    from dhanradar.db import TaskSessionLocal
+
+    if not all([_s.KITE_API_KEY, _s.KITE_API_SECRET, _s.KITE_TOTP_SECRET,
+                _s.KITE_USER_ID, _s.KITE_USER_PASSWORD]):
+        logger.info("mf_kite_enrich: Kite credentials not configured, skipping")
+        return "mf_kite_enrich: skipped (credentials not configured)"
+
+    # Fetch MF instruments from Kite (blocking SDK call; only one coroutine running).
+    from kiteconnect import KiteConnect
+
+    access_token = await _kite_get_access_token()
+    kite = KiteConnect(api_key=_s.KITE_API_KEY)
+    kite.set_access_token(access_token)
+    instruments: list[dict] = kite.mf_instruments()  # type: ignore[assignment]
+
+    # Build normalised-name → {plan_type, option_type} lookup from Kite data.
+    kite_lookup: dict[str, dict] = {}
+    for inst in instruments:
+        name = (inst.get("name") or "").strip()
+        if not name:
+            continue
+        scheme_type = str(inst.get("scheme_type") or "").lower()
+        div_type = str(inst.get("dividend_type") or "").lower()
+        plan_type = "direct" if "direct" in scheme_type else "regular"
+        option_type = "growth" if "growth" in div_type else "idcw"
+        kite_lookup[_kite_norm_name(name)] = {
+            "plan_type": plan_type,
+            "option_type": option_type,
+        }
+
+    if not kite_lookup:
+        return "mf_kite_enrich: no instruments returned from Kite"
+
+    # Load mf_funds rows with any NULL plan/option field.
+    async with TaskSessionLocal() as db:
+        result = await db.execute(
+            sa_text(
+                "SELECT isin, scheme_name FROM mf.mf_funds"
+                " WHERE plan_type IS NULL OR option_type IS NULL"
+            )
+        )
+        null_rows: list[tuple[str, str]] = result.fetchall()
+
+    if not null_rows:
+        return "mf_kite_enrich: no NULL rows to enrich"
+
+    # Match by normalised scheme name; only enrich where we have a confident hit.
+    updates: list[dict] = []
+    for isin, scheme_name in null_rows:
+        match = kite_lookup.get(_kite_norm_name(scheme_name))
+        if match:
+            updates.append({"isin": isin, **match})
+
+    if updates:
+        async with TaskSessionLocal() as db:
+            for chunk in [updates[i:i + 500] for i in range(0, len(updates), 500)]:
+                for row in chunk:
+                    await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds"
+                            " SET plan_type = :plan_type, option_type = :option_type"
+                            " WHERE isin = :isin"
+                            "   AND (plan_type IS NULL OR option_type IS NULL)"
+                        ),
+                        row,
+                    )
+            await db.commit()
+
+    logger.info(
+        "mf_kite_enrich complete",
+        null_rows=len(null_rows),
+        kite_instruments=len(kite_lookup),
+        enriched=len(updates),
+    )
+    return (
+        f"mf_kite_enrich: enriched {len(updates)}/{len(null_rows)} NULL rows"
+        f" ({len(kite_lookup)} Kite instruments)"
+    )
 
