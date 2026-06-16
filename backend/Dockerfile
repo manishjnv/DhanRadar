@@ -23,6 +23,10 @@ COPY alembic.ini ./
 # makes the volume writable by appuser instead of root-owned (EACCES).
 RUN mkdir -p /tmp/dhanradar_cas && chown appuser:appgroup /tmp/dhanradar_cas
 
+# Playwright: install Chromium + system deps for ADR-0033(a) SEBI SPA scraping.
+# Must run as root before USER switch (apt installs require root).
+RUN playwright install --with-deps chromium
+
 # Switch to non-root user
 USER appuser
 
