@@ -201,6 +201,40 @@ for p in ROOT.rglob("*"):
             fails.append(f"{rel}: possible secret matching /{rgx.pattern[:32]}.../")
             break
 
+# 8. VerbLabel allowlist — approved label phrasings only (B58-f1) ----------
+# The 5 phrasings below are the ONLY valid label values per the SEBI-educational
+# boundary. If someone adds or renames a VerbLabel member, CI fails here.
+_VERB_LABEL_APPROVED = {
+    "in_form", "on_track", "off_track", "out_of_form", "insufficient_data"
+}
+_schemas_py = ROOT / "backend" / "dhanradar" / "scoring" / "engine" / "schemas.py"
+if _schemas_py.exists():
+    _in_verb_label = False
+    _found_labels: set[str] = set()
+    for _line in read(_schemas_py).splitlines():
+        if "class VerbLabel" in _line:
+            _in_verb_label = True
+            continue
+        if _in_verb_label:
+            if _line.strip().startswith("class "):
+                break  # next class — done
+            _m = re.match(r"\s+(\w+)\s*=", _line)
+            if _m:
+                _found_labels.add(_m.group(1))
+    _extra = _found_labels - _VERB_LABEL_APPROVED
+    _missing = _VERB_LABEL_APPROVED - _found_labels
+    if _extra:
+        fails.append(
+            f"scoring/engine/schemas.py: VerbLabel has unapproved label(s): {sorted(_extra)} "
+            "(non-neg #1 — only approved phrasings allowed)"
+        )
+    if _missing:
+        fails.append(
+            f"scoring/engine/schemas.py: VerbLabel is missing expected label(s): {sorted(_missing)}"
+        )
+else:
+    fails.append("scoring/engine/schemas.py not found — VerbLabel allowlist check skipped")
+
 # Result --------------------------------------------------------------------
 if fails:
     print("CI GUARDS FAILED:")
