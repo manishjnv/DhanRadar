@@ -346,3 +346,33 @@ class MfSipTransaction(Base):
     )
     txn_date: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+
+
+class MfFundConstituent(Base):
+    """Per-scheme top-10 holding constituents from SEBI monthly portfolio disclosures.
+
+    Source: SEBI-format XLSX/CSV from top-10 AMC sites (ADR-0033(a)).
+    Coverage: top-10 AMCs only (~75-80% market AUM); remainder is a logged gap,
+    never imputed (§8.4).
+    Provenance: source_amc + as_of_month + ingested_at on every row (six-question rule).
+    """
+
+    __tablename__ = "mf_fund_constituents"
+    __table_args__ = (
+        Index("ix_mf_fund_constituents_isin_month", "isin", "as_of_month"),
+        Index("ix_mf_fund_constituents_constituent_isin", "constituent_isin"),
+        _SCHEMA,
+    )
+
+    isin: Mapped[str] = mapped_column(Text, primary_key=True)
+    constituent_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    as_of_month: Mapped[date] = mapped_column(Date, primary_key=True)
+    constituent_isin: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weight_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
+    market_value_cr: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    source_amc: Mapped[str] = mapped_column(Text, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
