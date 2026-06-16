@@ -218,10 +218,16 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=21, minute=0, day_of_week="1-5"),
     },
     # Phase 4 — SIP reminder: insert an in-app notification at 09:00 IST every day.
-    # MVP: only fires on the 1st of each month (real SIP date from CAS is Phase 5+).
+    # Phase 5: uses user's real sip_day from CAS; falls back to 1st of month.
     "sip-reminder": {
         "task": "dhanradar.tasks.signal_alerts.sip_reminder",
         "schedule": crontab(hour=9, minute=0),
+    },
+    # Phase 5 — Check achievements: evaluate unlock conditions for all users at 22:00 IST.
+    # Idempotent — only adds achievements not already in earned_achievements[].
+    "check-achievements": {
+        "task": "dhanradar.tasks.signal_alerts.check_achievements",
+        "schedule": crontab(hour=22, minute=0),
     },
 }
 

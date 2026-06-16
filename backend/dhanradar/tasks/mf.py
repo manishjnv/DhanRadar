@@ -231,6 +231,29 @@ async def _run_pipeline(
         await db.commit()
 
         await _upsert_holdings(db, user_id, parsed, portfolio_id)
+
+        # Persist SIP transactions so get_sip_day() can infer the user's SIP date
+        from dhanradar.models.mf import MfSipTransaction
+        sip_rows = [
+            MfSipTransaction(
+                portfolio_id=portfolio_id,
+                user_id=user_id,
+                txn_date=h_txn.when,
+                amount=abs(h_txn.amount),
+            )
+            for h in parsed
+            for h_txn in h.txns
+            if h_txn.is_sip
+        ]
+        if sip_rows:
+            # replace all rows for this portfolio so re-uploads stay idempotent
+            from sqlalchemy import delete
+
+            from dhanradar.models.mf import MfSipTransaction as _Sip
+            await db.execute(delete(_Sip).where(_Sip.portfolio_id == portfolio_id))
+            db.add_all(sip_rows)
+            await db.flush()
+
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="scoring", progress_pct=70)
         )

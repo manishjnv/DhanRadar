@@ -16,6 +16,8 @@ class SignalRulesOut(BaseModel):
     breadth_threshold: float
     deploy_ladder: list[int]
     alerts_on: bool
+    sip_day: int | None = None
+    earned_achievements: list[str] = []
 
     model_config = {"from_attributes": True}
 
@@ -26,6 +28,7 @@ class SignalRulesUpdate(BaseModel):
     breadth_threshold: Decimal
     deploy_ladder: list[int]
     alerts_on: bool
+    sip_day: int | None = None
 
     @field_validator("deploy_ladder")
     @classmethod

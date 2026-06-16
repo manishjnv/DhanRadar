@@ -300,3 +300,27 @@ async def rebuild_report_from_db(
         logger.warning("rebuild_report: rank fetch failed (non-fatal)", exc_info=True)
 
     return assemble_report(**payload, rank_by_isin=rank_by_isin)
+
+
+
+async def get_sip_day(db: Any, portfolio_id: Any) -> int | None:
+    """Return the most common calendar day-of-month for SIP transactions in this portfolio.
+
+    Returns None if no SIP transactions exist yet (CAS not uploaded or no SIPs found).
+    """
+    from collections import Counter
+
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfSipTransaction
+
+    result = await db.execute(
+        select(MfSipTransaction.txn_date).where(
+            MfSipTransaction.portfolio_id == portfolio_id
+        )
+    )
+    dates = result.scalars().all()
+    if not dates:
+        return None
+    day_counts: Counter[int] = Counter(d.day for d in dates)
+    return day_counts.most_common(1)[0][0]

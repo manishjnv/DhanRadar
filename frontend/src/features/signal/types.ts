@@ -8,6 +8,8 @@ export interface SignalRules {
   breadth_threshold: number;
   deploy_ladder: number[]; // exactly 5 entries summing to ≤100
   alerts_on: boolean;
+  sip_day?: number | null;
+  earned_achievements?: string[];
 }
 
 export interface SignalDipFund {
