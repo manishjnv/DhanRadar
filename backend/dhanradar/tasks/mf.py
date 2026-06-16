@@ -79,8 +79,8 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
     # Axis: correct path is /downloads/portfolio-disclosure (not /portfolio-disclosure which 404s).
     {"name": "AXIS", "url": "https://www.axismf.com/downloads/portfolio-disclosure"},
-    # Mirae: SPA at /downloads/portfolio; per-scheme XLSX (not consolidated SEBI format).
-    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio"},
+    # Mirae: SPA at /downloads/portfolio; one XLSX per scheme — discover ALL links.
+    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio", "discover_all": True},
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
     {"name": "FRANKLIN", "url": "https://www.franklintempletonindia.com/investor/portfolio-disclosure"},
     # DSP: domain moved from dspmf.com (GoDaddy) to dspim.com; disclosure page is JS-rendered.
@@ -1688,7 +1688,10 @@ async def _mf_constituents_pipeline() -> str:
                         for amc in playwright_amcs:
                             amc_name = amc["name"]
                             try:
-                                rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
+                                if amc.get("discover_all"):
+                                    rows, aum_cnt = await _process_amc_multi(client, browser, amc_name, amc["url"])
+                                else:
+                                    rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
                                 total_rows += rows
                                 aum_updates += aum_cnt
                                 logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
@@ -1973,6 +1976,121 @@ async def _discover_url_playwright(
         await page.close()
 
 
+async def _discover_all_urls_playwright(
+    browser: Any, discovery_url: str, amc_name: str
+) -> list[str]:
+    """Like _discover_url_playwright but returns ALL matching file URLs.
+
+    Used for AMCs like MIRAE that publish one XLSX per scheme on a single SPA page.
+    Caches the full list as a JSON string in Redis for 25 days.
+    """
+    import json
+
+    from dhanradar.redis_client import get_redis
+
+    now = datetime.now(UTC)
+    cache_key = f"mf:disclosure_urls:{amc_name}:{now.strftime('%Y-%m')}"
+
+    redis = get_redis()
+    cached = await redis.get(cache_key)
+    if cached:
+        raw = cached.decode() if isinstance(cached, bytes) else str(cached)
+        try:
+            return json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return [raw] if raw else []
+
+    page = await browser.new_page()
+    try:
+        await page.goto(discovery_url, wait_until="networkidle", timeout=60_000)
+        hrefs: list[str] = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href)"
+        )
+        candidates = [
+            h for h in hrefs
+            if h.lower().endswith((".xlsx", ".xls", ".csv"))
+            and ("portfolio" in h.lower() or "disclosure" in h.lower())
+        ]
+        if not candidates:
+            candidates = [h for h in hrefs if h.lower().endswith((".xlsx", ".xls", ".csv"))]
+        if not candidates:
+            logger.warning(
+                "mf_constituents_fetch amc=%s playwright found no xlsx/xls/csv links at %s",
+                amc_name,
+                discovery_url,
+            )
+            return []
+        logger.info(
+            "mf_constituents_fetch amc=%s playwright found %d file links", amc_name, len(candidates)
+        )
+        await redis.set(cache_key, json.dumps(candidates), ex=25 * 86400)
+        return candidates
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "mf_constituents_fetch amc=%s playwright multi-url discovery failed url=%s",
+            amc_name,
+            discovery_url,
+            exc_info=True,
+        )
+        return []
+    finally:
+        await page.close()
+
+
+async def _process_amc_multi(
+    client: httpx.AsyncClient, browser: Any, amc_name: str, discovery_url: str
+) -> tuple[int, int]:
+    """Like _process_amc but processes ALL discovered files (for AMCs like MIRAE).
+
+    Returns (total_rows_upserted, total_aum_updates).
+    """
+    file_urls = await _discover_all_urls_playwright(browser, discovery_url, amc_name)
+    if not file_urls:
+        logger.warning("mf_constituents_fetch amc=%s no files found (multi)", amc_name)
+        return 0, 0
+
+    total_rows = 0
+    total_aum = 0
+    for file_url in file_urls:
+        logger.info("mf_constituents_fetch amc=%s multi fetching %s", amc_name, file_url)
+        try:
+            resp = await client.get(
+                file_url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            )
+            resp.raise_for_status()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "mf_constituents_fetch amc=%s failed to fetch %s", amc_name, file_url, exc_info=True
+            )
+            continue
+
+        content_type = resp.headers.get("content-type", "")
+        file_bytes = resp.content
+
+        if "spreadsheetml" in content_type or file_url.lower().endswith((".xlsx", ".xls")):
+            parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+        elif "csv" in content_type or file_url.lower().endswith(".csv"):
+            parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+        else:
+            try:
+                parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+            except Exception:  # noqa: BLE001
+                parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+
+        if not parsed:
+            logger.debug(
+                "mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url
+            )
+            continue
+
+        rows, aum_cnt = await _upsert_constituents(parsed, amc_name)
+        total_rows += rows
+        total_aum += aum_cnt
+
+    return total_rows, total_aum
+
+
 def _normalize_col(name: str) -> str:
     """Lowercase + strip a column header for loose matching."""
     return name.lower().strip()
@@ -1995,7 +2113,27 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
     current_scheme: str | None = None
     as_of_month: date | None = None
 
+    # NIPPON May-2026+ multi-sheet format: "Index" sheet maps 2-letter codes → scheme names.
+    nippon_code_map: dict[str, str] = {}
+    if amc_name == "NIPPON":
+        for sn in wb.sheetnames:
+            if sn.lower() == "index":
+                import re as _re
+                for irow in wb[sn].iter_rows(values_only=True):
+                    cells = [str(c).strip() if c is not None else "" for c in irow]
+                    non_empty = [c for c in cells if c and c.lower() not in ("none", "")]
+                    if len(non_empty) >= 2 and _re.fullmatch(r"[A-Za-z]{2,5}", non_empty[0]):
+                        nippon_code_map[non_empty[0].upper()] = non_empty[1]
+                break
+        if nippon_code_map:
+            logger.info(
+                "mf_constituents_fetch NIPPON index map: %d entries", len(nippon_code_map)
+            )
+
     for sheet in wb.sheetnames:
+        # Skip NIPPON's "Index" sheet — it's a code→name lookup, not portfolio data.
+        if amc_name == "NIPPON" and sheet.lower() == "index":
+            continue
         ws = wb[sheet]
         rows = list(ws.iter_rows(values_only=True))
         if not rows:
@@ -2008,7 +2146,10 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
         # if the sheet name looks like a scheme (contains "fund", "plan", etc.).
         # Also accept "Portfolio" which is common in MIRAE files.
         sheet_scheme: str | None = None
-        if sheet and any(
+        # NIPPON multi-sheet: map 2-letter abbreviation to full scheme name via index.
+        if amc_name == "NIPPON" and nippon_code_map.get(sheet.upper()):
+            sheet_scheme = nippon_code_map[sheet.upper()]
+        elif sheet and any(
             kw in sheet.lower()
             for kw in (
                 "fund",
@@ -2033,7 +2174,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             joined = " ".join(row_strs).lower()
             if as_of_month is None and (
                 "portfolio as on" in joined or "as at" in joined or "month end" in joined
-                or "as of" in joined
+                or "as of" in joined or "as on" in joined
             ):
                 import re
 
