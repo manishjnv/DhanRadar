@@ -1,9 +1,9 @@
 # Investor OS
 ## Rule-Based Investment Decision Support System
 
-**Author:** Amit Mehta
+**Author:** Manish Kumar
 **Version:** 1.0
-**Status:** Product Requirement Document (PRD)
+**Status:** Product Requirement Document 
 
 ---
 
