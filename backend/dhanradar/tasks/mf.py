@@ -72,7 +72,7 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     # HDFC, ICICI_PRU, KOTAK: known bot-protection in place (Akamai/Radware); Playwright
     # attempts are kept in the schedule — future-proof for when protections change.
     {"name": "HDFC", "url": "https://www.hdfcfund.com/investor-relations/portfolio-disclosure"},
-    {"name": "SBI", "url": "https://www.sbimf.com/en-us/portfolio-disclosures"},
+    {"name": "SBI", "url": "https://www.sbimf.com/portfolios"},
     {"name": "ICICI_PRU", "url": "https://www.icicipruamc.com/portfolio-disclosure"},
     # Nippon publishes .xls (legacy Excel 97-2004) via its download centre.
     {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"},
