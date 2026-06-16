@@ -58,9 +58,12 @@ async def get_or_create_rules(db: AsyncSession, user_id: str) -> SignalRules:
         row = SignalRules(user_id=uid, **DEFAULT_RULES)
         db.add(row)
         await db.flush()
-    # Auto-populate sip_day from CAS data if not yet set
+    # Auto-populate sip_day from CAS data if not yet set (best-effort; never blocks)
     if row.sip_day is None:
-        await _refresh_sip_day(db, row)
+        try:
+            await _refresh_sip_day(db, row)
+        except Exception:  # noqa: BLE001
+            pass
     return row
 
 
