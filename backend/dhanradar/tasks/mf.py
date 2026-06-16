@@ -1521,9 +1521,9 @@ def mf_fund_metadata_backfill() -> str:
 
 
 async def _mf_fund_metadata_backfill_pipeline() -> str:
+    import sqlalchemy as sa
     from sqlalchemy import func as sa_func
-    from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy import select, update
 
     from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfFund, MfNavHistory
@@ -1542,35 +1542,34 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
 
         funds = (await db.execute(select(MfFund))).scalars().all()
         n = 0
+
+        # Use UPDATE (not INSERT ON CONFLICT) — rows already exist; INSERT would require
+        # all NOT NULL columns in the VALUES clause, which we deliberately omit.
+        update_stmt = (
+            update(MfFund)
+            .where(MfFund.isin == sa.bindparam("b_isin"))
+            .values(
+                plan_type=sa.bindparam("b_plan_type"),
+                option_type=sa.bindparam("b_option_type"),
+                is_segregated=sa.bindparam("b_is_segregated"),
+                launch_date=sa.bindparam("b_launch_date"),
+            )
+        )
+
         for i in range(0, len(funds), _CHUNK):
             chunk = funds[i : i + _CHUNK]
-            updates = []
+            params = []
             for fund in chunk:
                 plan_type, option_type = parse_plan_option(fund.scheme_name)
                 name = (fund.scheme_name or "").lower()
-                is_segregated = "segregated portfolio" in name
-                launch_date = min_date_map.get(fund.isin)
-                updates.append({
-                    "isin": fund.isin,
-                    "plan_type": plan_type,
-                    "option_type": option_type,
-                    "is_segregated": is_segregated,
-                    "launch_date": launch_date,
+                params.append({
+                    "b_isin": fund.isin,
+                    "b_plan_type": plan_type,
+                    "b_option_type": option_type,
+                    "b_is_segregated": "segregated portfolio" in name,
+                    "b_launch_date": min_date_map.get(fund.isin),
                 })
-            stmt = (
-                insert(MfFund)
-                .values(updates)
-                .on_conflict_do_update(
-                    index_elements=["isin"],
-                    set_={
-                        "plan_type": insert(MfFund).excluded.plan_type,
-                        "option_type": insert(MfFund).excluded.option_type,
-                        "is_segregated": insert(MfFund).excluded.is_segregated,
-                        "launch_date": insert(MfFund).excluded.launch_date,
-                    },
-                )
-            )
-            await db.execute(stmt)
+            await db.execute(update_stmt, params)
             n += len(chunk)
         await db.commit()
 
