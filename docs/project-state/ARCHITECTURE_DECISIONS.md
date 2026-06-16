@@ -848,6 +848,38 @@ at build time. The "relative-only" benchmark rule is binding on all future bench
 `DhanRadar-SEBI-Compliance-Guardrail` (advice/redistribution boundary). Counsel artifact: TO FILE
 under `docs/legal/`.
 
+### ADR-0033-A — Amendment: extend SEBI XLSX scraper to capture per-scheme AUM, fund manager, and derived credit quality (B67 route d)
+
+**Date:** 2026-06-14 · **Status:** Accepted (founder decision 2026-06-14)
+
+**Context:** B67 identified three fund-fundamentals gaps: per-scheme AUM, current fund manager,
+and credit quality signal. AMFI has no free per-scheme AUM file (AMC-level only; §8.4 forbids
+imputation — ADR-0035 covers the AMC-level slice separately). The top-10 AMC monthly SEBI
+portfolio disclosure files approved under ADR-0033(a) for constituents also contain all three:
+a net-assets/AUM row per scheme, a fund manager line, and per-holding ISIN + credit rating data.
+Founder chose route (d) — $0 piggyback — over paid vendor (CRISIL/ICRA MFI360/Accord ACE).
+
+**Decision:** Extend the ADR-0033(a) SEBI XLSX scraper to extract alongside constituents:
+
+- `aum_crore` — per-scheme net assets from the monthly disclosure net-assets row.
+- `fund_manager` — current manager name(s); change history accrues across monthly snapshots
+  (current manager available immediately; manager-change detection requires ≥2 snapshots).
+- Derived credit quality — weight per-holding ISIN credit ratings to a portfolio-level signal;
+  this is a derived field, not a direct agency-rating-change feed.
+
+**Constraints:** §8.4 no-imputation: funds outside top-10 scraper coverage get a `logger.warning`
+gap; `aum_crore` is never back-filled from AMC-level totals. Coverage is honest: top-10 ≈ 75–80%
+of industry AUM; the rest is a documented gap. The Tier-B/Compliance + ToS/DPDP gate already
+required for ADR-0033(a) covers these fields — same scraper, same files, but the review scope
+must explicitly call out AUM, manager, and credit. Sequencing unchanged: Task 2 → Task 3 →
+P2a constituents (with this piggyback) → P2b benchmark.
+
+**Alternatives rejected:** paid vendor deferred to revenue stage; ADR-0035 (AMFI SPA AMC-level
+AUM) is complementary, not a substitute — different granularity.
+
+**Source:** memory `b67-aum-no-clean-per-scheme-source` (2026-06-14 update); `BLOCKERS.md` B67
+route (d) decision; `docs/MF_Master_DB_Plan_Final.md` §19.
+
 ## ADR-0034 — Cohort grouping rewire to validated `sebi_category` (model v1.2, B66-f1 pt2)
 
 **Date:** 2026-06-14 · **Status:** Proposed (activation GATED on the B6/B28 two-person gate + founder deploy approval — NOT yet active; v1.1 remains the active prod methodology)

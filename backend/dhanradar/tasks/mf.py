@@ -31,6 +31,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from structlog.contextvars import bind_contextvars
@@ -999,8 +1000,7 @@ async def _metrics_refresh_pipeline() -> str:
     from dhanradar.models.mf import MfFundMetrics, MfNavHistory
 
     today = date.today()
-
-    async with TaskSessionLocal() as db:
+    run_id = str(uuid4())
         # Load all ISINs that have any NAV data.
         isin_rows = (
             await db.execute(
@@ -1039,6 +1039,7 @@ async def _metrics_refresh_pipeline() -> str:
                     "max_drawdown_pct": dd,
                     "nav_points": len(series.get(isin, [])),
                     "as_of_date": today,
+                    "source_run_id": run_id,
                 })
 
             # Bulk upsert in sub-chunks to bound statement size.
@@ -1057,6 +1058,7 @@ async def _metrics_refresh_pipeline() -> str:
                         "max_drawdown_pct": insert(MfFundMetrics).excluded.max_drawdown_pct,
                         "nav_points": insert(MfFundMetrics).excluded.nav_points,
                         "as_of_date": insert(MfFundMetrics).excluded.as_of_date,
+                        "source_run_id": insert(MfFundMetrics).excluded.source_run_id,
                         "computed_at": func.now(),
                     },
                 )

@@ -17,6 +17,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -107,6 +108,7 @@ class MfFundMetrics(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class MfPortfolio(Base):
@@ -373,6 +375,136 @@ class MfFundConstituent(Base):
     weight_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     market_value_cr: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     source_amc: Mapped[str] = mapped_column(Text, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfIngestionRun(Base):
+    """Audit row opened at the start of every ingestion Celery task.
+
+    Satisfies P5 (six-question rule): run_id links every downstream row back to
+    the exact fetch event that produced it.
+    """
+
+    __tablename__ = "ingestion_runs"
+    __table_args__ = (
+        Index("ix_mf_ingestion_runs_task_started", "task_name", "started_at"),
+        Index("ix_mf_ingestion_runs_source_started", "source", "started_at"),
+        _SCHEMA,
+    )
+
+    run_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_name: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="running")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    records_fetched: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
+    records_written: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
+    records_failed: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
+    error_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class MfFieldLineage(Base):
+    """Per-field provenance record for any value written by an ingestion run."""
+
+    __tablename__ = "field_lineage"
+    __table_args__ = (
+        Index("ix_mf_field_lineage_entity", "entity_type", "entity_key"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfSourceHealth(Base):
+    """Per-source reachability log written by mf_source_health_check task."""
+
+    __tablename__ = "source_health"
+    __table_args__ = (
+        Index("ix_mf_source_health_source_time", "source", "check_time"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    check_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    reachable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consecutive_failures: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, server_default="0"
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MfSchemeLineage(Base):
+    """Merger / rename / closure audit trail for scheme identity changes.
+
+    Any return window spanning a merger event must stitch via this table
+    or surface insufficient_data — silently ignoring lineage fabricates returns.
+    """
+
+    __tablename__ = "scheme_lineage"
+    __table_args__ = (
+        Index("ix_mf_scheme_lineage_old_uid", "old_scheme_uid"),
+        Index("ix_mf_scheme_lineage_new_uid", "new_scheme_uid"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    old_scheme_uid: Mapped[str] = mapped_column(Text, nullable=False)
+    new_scheme_uid: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    sebi_circular: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfFundManagerHistory(Base):
+    """Slowly-changing dimension for fund manager tenure.
+
+    Current manager = row where end_date IS NULL. Change detection requires
+    ≥2 consecutive monthly snapshots — do not surface tenure until 3 months exist.
+    """
+
+    __tablename__ = "fund_manager_history"
+    __table_args__ = (
+        Index("ix_mf_fund_manager_history_uid_date", "scheme_uid", "start_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scheme_uid: Mapped[str] = mapped_column(Text, nullable=False)
+    manager_name: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
