@@ -368,42 +368,42 @@ def sip_reminder() -> str:
 # Task 4 — check_achievements (Part B)
 # ---------------------------------------------------------------------------
 
-# Achievement slugs and their unlock predicates.
-# Each predicate receives (entries, trust_wins, trust_total, sip_day_set) and returns bool.
+# Achievement slugs matching the 6 milestones defined in frontend/src/components/signal/Achievements.tsx.
 _ACHIEVEMENTS: list[tuple[str, str]] = [
-    ("first_entry",     "Logged your first journal entry"),
-    ("fomo_fighter",    "Avoided FOMO 3+ times"),
-    ("discipline_10",   "10 journal entries without a premature deployment"),
-    ("trust_believer",  "Signal was right ≥5 times in your trust history"),
-    ("sip_detective",   "SIP date auto-detected from your CAS upload"),
+    ("disciplined",      "Disciplined Investor — 90 non-premature deployments"),
+    ("bear-hunter",      "Bear Market Hunter — deployed when VIX > 20"),
+    ("patience",         "Patience Master — avoided FOMO 3+ times"),
+    ("crash-collector",  "Crash Collector — deployed when Nifty dropped ≥15%"),
+    ("long-term",        "Long-Term Legend — placeholder (future milestone)"),
+    ("survivor",         "Market Survivor — deployed when VIX > 25"),
 ]
 
 
-def _evaluate_achievements(
-    entries: list,
-    trust_wins: int,
-    trust_total: int,
-    sip_day_set: bool,
-) -> set[str]:
+def _evaluate_achievements(entries: list) -> set[str]:
     earned: set[str] = set()
 
-    if entries:
-        earned.add("first_entry")
+    disciplined_count = sum(1 for e in entries if not e.premature)
+    if disciplined_count >= 90:
+        earned.add("disciplined")
 
     fomo_avoided = sum(1 for e in entries if e.fomo_avoided)
     if fomo_avoided >= 3:
-        earned.add("fomo_fighter")
+        earned.add("patience")
 
-    premature_count = sum(1 for e in entries if e.premature)
-    if len(entries) >= 10 and premature_count == 0:
-        earned.add("discipline_10")
+    for e in entries:
+        if e.decision != "deployed":
+            continue
+        snapshot: dict = e.market_snapshot or {}
+        vix = snapshot.get("vix_level") or 0.0
+        nifty = snapshot.get("nifty_pct") or 0.0
+        if vix > 20:
+            earned.add("bear-hunter")
+        if vix > 25:
+            earned.add("survivor")
+        if nifty <= -15:
+            earned.add("crash-collector")
 
-    if trust_total > 0 and trust_wins >= 5:
-        earned.add("trust_believer")
-
-    if sip_day_set:
-        earned.add("sip_detective")
-
+    # long-term is a placeholder — never unlocked automatically
     return earned
 
 
@@ -432,14 +432,8 @@ def check_achievements() -> str:
                 user_id_str = str(uid)
 
                 journal_rows = await service.get_journal(db, user_id_str, limit=500)
-                trust = await service.get_trust_history(db, user_id_str)
 
-                newly_earned = _evaluate_achievements(
-                    entries=journal_rows,
-                    trust_wins=trust.wins,
-                    trust_total=trust.total,
-                    sip_day_set=bool(rules_row.sip_day),
-                )
+                newly_earned = _evaluate_achievements(entries=journal_rows)
 
                 existing = set(rules_row.earned_achievements or [])
                 new_unlocks = newly_earned - existing
