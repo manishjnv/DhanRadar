@@ -1521,17 +1521,25 @@ def mf_fund_metadata_backfill() -> str:
 
 
 async def _mf_fund_metadata_backfill_pipeline() -> str:
-    import sqlalchemy as sa
     from sqlalchemy import func as sa_func
-    from sqlalchemy import select, update
+    from sqlalchemy import select, text
 
     from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfFund, MfNavHistory
 
     _CHUNK = 500
 
+    # Core-level text() UPDATE avoids the "ORM Bulk UPDATE by Primary Key" path
+    # that SQLAlchemy takes for update(Model) + list-of-params, which would require
+    # the PK column name in every params dict instead of the bindparam alias.
+    update_stmt = text(
+        "UPDATE mf.mf_funds"
+        " SET plan_type = :b_plan_type, option_type = :b_option_type,"
+        " is_segregated = :b_is_segregated, launch_date = :b_launch_date"
+        " WHERE isin = :b_isin"
+    )
+
     async with TaskSessionLocal() as db:
-        # Bulk load min(nav_date) per isin from nav history — used as launch_date proxy.
         min_date_rows = (
             await db.execute(
                 select(MfNavHistory.isin, sa_func.min(MfNavHistory.nav_date).label("min_date"))
@@ -1540,24 +1548,13 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
         ).all()
         min_date_map: dict[str, Any] = {r.isin: r.min_date for r in min_date_rows}
 
-        funds = (await db.execute(select(MfFund))).scalars().all()
+        # Select only scalar columns — avoids loading ORM instances into the identity map,
+        # which would conflict with the subsequent bulk update.
+        fund_rows = (await db.execute(select(MfFund.isin, MfFund.scheme_name))).all()
         n = 0
 
-        # Use UPDATE (not INSERT ON CONFLICT) — rows already exist; INSERT would require
-        # all NOT NULL columns in the VALUES clause, which we deliberately omit.
-        update_stmt = (
-            update(MfFund)
-            .where(MfFund.isin == sa.bindparam("b_isin"))
-            .values(
-                plan_type=sa.bindparam("b_plan_type"),
-                option_type=sa.bindparam("b_option_type"),
-                is_segregated=sa.bindparam("b_is_segregated"),
-                launch_date=sa.bindparam("b_launch_date"),
-            )
-        )
-
-        for i in range(0, len(funds), _CHUNK):
-            chunk = funds[i : i + _CHUNK]
+        for i in range(0, len(fund_rows), _CHUNK):
+            chunk = fund_rows[i : i + _CHUNK]
             params = []
             for fund in chunk:
                 plan_type, option_type = parse_plan_option(fund.scheme_name)
