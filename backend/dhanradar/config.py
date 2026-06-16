@@ -117,6 +117,20 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = True     # Set False only in dev without HTTPS
 
     # ------------------------------------------------------------------
+    # Kite Connect (MF instrument enrichment — ADR-0033 extension)
+    # access_token expires daily at 06:00 IST; mf_kite_enrich refreshes it
+    # automatically via TOTP (pyotp).  All five fields empty ⇒ task is a
+    # no-op.  KITE_API_KEY / KITE_API_SECRET may already be in .env from
+    # the equity stub; KITE_USER_ID / KITE_USER_PASSWORD / KITE_TOTP_SECRET
+    # are the three NEW vars required for unattended token refresh.
+    # ------------------------------------------------------------------
+    KITE_API_KEY: str = ""
+    KITE_API_SECRET: str = ""
+    KITE_USER_ID: str = ""
+    KITE_USER_PASSWORD: str = ""
+    KITE_TOTP_SECRET: str = ""
+
+    # ------------------------------------------------------------------
     # Razorpay
     # ------------------------------------------------------------------
     RAZORPAY_KEY_ID: str = ""
