@@ -128,12 +128,13 @@ async def create_checkout(
         # A lock is held: either a genuinely concurrent request, or a prior
         # attempt that failed at the gateway (the lock is held for _LOCK_TTL so a
         # transient failure isn't immediately retried into a double-charge, B9).
-        # This is self-resolving, so advertise Retry-After = the lock TTL — the
-        # RFC7807 handler forwards exc.headers verbatim.
+        # Advertise remaining TTL so the client doesn't over-wait.
+        remaining = await redis.ttl(lock_key)
+        retry_after = str(remaining) if remaining > 0 else str(_LOCK_TTL)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="checkout_in_progress",
-            headers={"Retry-After": str(_LOCK_TTL)},
+            headers={"Retry-After": retry_after},
         )
 
     # 4. Create the Razorpay subscription. user_id is pinned in notes from the
@@ -151,7 +152,7 @@ async def create_checkout(
             ),
             timeout=_CALL_TIMEOUT,
         )
-    except (Exception, asyncio.TimeoutError) as exc:  # gateway error or timeout
+    except (TimeoutError, Exception) as exc:  # gateway error or timeout
         # Lock is intentionally NOT released here: it expires with _LOCK_TTL so
         # an immediate retry is blocked (409) rather than risking a duplicate.
         # user_ref hashed (never the raw user_id in logs); exc is regex-scrubbed
