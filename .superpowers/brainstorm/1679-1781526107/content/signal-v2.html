@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal — DhanRadar v2 (3 Tabs, UI-System Aligned)</title>
+<style>
+/* =============================================
+   DhanRadar Design System — Exact Token Values
+   Source: docs/ui-system/html/dhanradar-design-system.html
+   ============================================= */
+:root {
+  /* Brand (static) */
+  --dr-navy:#0B1F3A; --dr-blue:#1E5EFF; --dr-emerald:#00B386;
+  --dr-cyan:#00C2FF; --dr-amber:#F5A623; --dr-red:#E5484D;
+  --dr-r-sm:4px; --dr-r-md:8px; --dr-r-lg:12px; --dr-r-xl:14px; --dr-r-2xl:18px;
+  --dr-font-sans:'Inter','Geist',ui-sans-serif,system-ui,sans-serif;
+  --dr-font-mono:'JetBrains Mono','Geist Mono',ui-monospace,monospace;
+  --dr-font-serif:'Instrument Serif',Georgia,serif;
+
+  /* Theme — Dark */
+  --bg:#07090F; --bg-elev:#0B0F1A; --bg-alt:#0E121E;
+  --surface:#0E121E; --surface-2:#141928; --surface-3:#1B2133;
+  --border:rgba(255,255,255,0.06); --border-strong:rgba(255,255,255,0.12);
+  --text:#ECEEF5; --text-secondary:#B9BFCF; --text-muted:#7E8699; --text-faint:#525868;
+  --positive:#1FD79A; --negative:#FF6166; --warn:#F5A623; --info:#00C2FF;
+  --blue-soft:rgba(77,128,255,0.14); --pos-soft:rgba(31,215,154,0.14);
+  --neg-soft:rgba(255,97,102,0.14); --warn-soft:rgba(255,179,71,0.14);
+  --cyan-soft:rgba(0,194,255,0.12);
+  --score-ring-bg:rgba(255,255,255,0.08);
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md:0 8px 24px rgba(0,0,0,0.4);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--dr-font-sans);font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+
+/* ---- Utility (from ui-system) ---- */
+.row{display:flex;align-items:center;}
+.col{display:flex;flex-direction:column;}
+.grow{flex:1;}
+.gap-1{gap:4px;} .gap-2{gap:8px;} .gap-3{gap:12px;} .gap-4{gap:16px;} .gap-6{gap:24px;}
+.between{justify-content:space-between;}
+.right{text-align:right;}
+.mt-2{margin-top:8px;} .mt-3{margin-top:12px;} .mt-4{margin-top:16px;}
+.mb-2{margin-bottom:8px;} .mb-3{margin-bottom:12px;} .mb-4{margin-bottom:16px;}
+.mono{font-family:var(--dr-font-mono);font-feature-settings:'tnum';}
+.upper{text-transform:uppercase;letter-spacing:0.08em;}
+.muted{color:var(--text-muted);} .sec{color:var(--text-secondary);}
+.pos{color:var(--positive);} .neg{color:var(--negative);}
+.t10{font-size:10px;} .t11{font-size:11px;} .t12{font-size:12px;} .t13{font-size:13px;}
+.t14{font-size:14px;} .t15{font-size:15px;} .t16{font-size:16px;}
+.t18{font-size:18px;} .t22{font-size:22px;} .t24{font-size:24px;} .t28{font-size:28px;}
+.w-500{font-weight:500;} .w-600{font-weight:600;} .w-700{font-weight:700;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+.grid-21{display:grid;grid-template-columns:1.65fr 1fr;gap:12px;}
+.grid-12{display:grid;grid-template-columns:1fr 1.65fr;gap:12px;}
+
+/* ---- Card ---- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--dr-r-xl);} /* 14px */
+.card-pad{padding:20px 22px;}
+.card.elevated{box-shadow:var(--shadow-md);}
+.kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--dr-r-xl);padding:16px 18px;}
+
+/* ---- Badge ---- */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;font-family:var(--dr-font-mono);}
+.badge-pos{background:var(--pos-soft);color:var(--positive);}
+.badge-neg{background:var(--neg-soft);color:var(--negative);}
+.badge-warn{background:var(--warn-soft);color:var(--warn);}
+.badge-info{background:var(--cyan-soft);color:var(--info);}
+.badge-neutral{background:var(--surface-2);color:var(--text-muted);border:1px solid var(--border);}
+.signal-triggered{background:var(--pos-soft);color:var(--positive);}
+.signal-watch{background:var(--warn-soft);color:var(--warn);}
+.signal-idle{background:var(--surface-2);color:var(--text-faint);}
+
+/* ---- Button ---- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:500;padding:8px 14px;border-radius:var(--dr-r-md);border:none;cursor:pointer;font-size:13px;transition:opacity 120ms;}
+.btn-primary{background:var(--text);color:var(--bg);}
+.btn-accent{background:var(--dr-blue);color:white;}
+.btn-ghost{background:var(--surface-2);color:var(--text-secondary);border:1px solid var(--border);}
+.btn-outline{background:transparent;color:var(--text-muted);border:1px solid var(--border-strong);}
+.btn-sm{padding:6px 12px;font-size:12px;}
+.btn-lg{padding:11px 20px;font-size:14px;}
+.btn:hover{opacity:0.85;}
+
+/* ---- Chip ---- */
+.chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);font-size:12px;cursor:pointer;}
+.chip.active{background:var(--text);color:var(--bg);}
+
+/* ---- Tabs (canonical from ui-system) ---- */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);}
+.tab{padding:9px 14px;font-size:13px;color:var(--text-muted);border-bottom:1.5px solid transparent;margin-bottom:-1px;cursor:pointer;background:none;border-left:none;border-right:none;border-top:none;}
+.tab.active{color:var(--text);border-bottom-color:var(--text);font-weight:500;}
+.tab:hover:not(.active){color:var(--text-secondary);}
+
+/* ---- Input / Form ---- */
+.label{font-family:var(--dr-font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:5px;display:block;}
+.input{height:38px;padding:0 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--dr-r-md);color:var(--text);font-size:13px;width:100%;}
+.input:focus{outline:none;border-color:var(--dr-blue);box-shadow:0 0 0 3px var(--blue-soft);}
+.slider{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--surface-3);cursor:pointer;}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--dr-blue);border:2px solid var(--bg);box-shadow:0 0 0 2px var(--blue-soft);}
+.toggle{display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--surface-3);cursor:pointer;padding:2px;transition:background 200ms;}
+.toggle.on{background:var(--dr-blue);}
+.knob{width:18px;height:18px;border-radius:50%;background:white;transition:transform 200ms;}
+.toggle.on .knob{transform:translateX(18px);}
+.help{font-size:11px;color:var(--text-muted);margin-top:4px;}
+
+/* ---- Table ---- */
+.dt{width:100%;border-collapse:collapse;font-size:13px;}
+.dt th{font-weight:500;color:var(--text-muted);padding:10px 14px;font-family:var(--dr-font-mono);text-transform:uppercase;letter-spacing:0.06em;font-size:10px;border-bottom:1px solid var(--border);text-align:left;}
+.dt td{padding:11px 14px;border-bottom:1px solid var(--border);}
+.dt tr.hov:hover td{background:var(--surface-2);}
+.dt tr:last-child td{border-bottom:none;}
+
+/* ---- Score Ring ---- */
+.ring-wrap{position:relative;flex-shrink:0;}
+.ring-wrap svg{display:block;}
+.ring-n{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--dr-font-mono);}
+
+/* ---- Empty State ---- */
+.empty{padding:48px 24px;text-align:center;border:1px dashed var(--border);border-radius:var(--dr-r-xl);}
+
+/* ---- Rec card (signal hero) ---- */
+.rec{border:1px solid var(--border);border-radius:16px;background:var(--surface);}
+.rec-top{display:flex;align-items:center;gap:14px;padding:18px 20px 14px;}
+.rec-body{padding:0 20px 16px;}
+.rec-reason{background:var(--bg-alt, #07090F);border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.55;color:var(--text-secondary);}
+.rec-foot{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--border);}
+
+/* ---- App Shell ---- */
+.shell{display:flex;height:100vh;}
+.sidebar{width:186px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:14px 8px;gap:2px;}
+.sidebar-logo{padding:6px 12px 14px;font-size:16px;font-weight:600;letter-spacing:-0.02em;border-bottom:1px solid var(--border);margin-bottom:6px;}
+.sidebar-logo span{color:var(--positive);}
+.nav-item{display:flex;align-items:center;gap:9px;padding:7px 12px;border-radius:var(--dr-r-md);font-size:12px;color:var(--text-muted);cursor:pointer;text-decoration:none;}
+.nav-item:hover{background:var(--surface-2);}
+.nav-item.active{background:var(--blue-soft);color:#7DA8FF;font-weight:500;}
+.nav-icon{width:15px;text-align:center;flex-shrink:0;font-size:14px;}
+
+.main{flex:1;overflow:auto;display:flex;flex-direction:column;}
+.page-header{padding:16px 22px 0;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;}
+.header-row{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:13px;}
+.timestamp-pill{font-size:10px;color:var(--text-faint);font-family:var(--dr-font-mono);background:var(--surface-2);padding:4px 10px;border-radius:999px;border:1px solid var(--border);white-space:nowrap;margin-top:4px;}
+.body{padding:18px 22px;}
+
+/* ---- Signal Hero accent line ---- */
+.signal-accent-watch{border-top:2px solid var(--warn);}
+.signal-accent-triggered{border-top:2px solid var(--positive);}
+.signal-accent-idle{border-top:2px solid var(--border-strong);}
+
+/* ---- Progress bar ---- */
+.prog-track{height:5px;background:var(--surface-3);border-radius:3px;}
+.prog-fill{height:5px;border-radius:3px;}
+
+/* ---- Divider ---- */
+.divider{height:1px;background:var(--border);margin:12px 0;}
+
+/* ---- Section label ---- */
+.section-label{font-size:10px;font-weight:600;font-family:var(--dr-font-mono);text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* ---- Deployment ladder ---- */
+.ladder{display:flex;gap:6px;margin-top:10px;}
+.ld-step{flex:1;padding:8px 6px;text-align:center;border-radius:var(--dr-r-md);border:1px solid var(--border);background:var(--surface-2);}
+.ld-step.active{border-color:var(--warn);background:var(--warn-soft);}
+.ld-step.used{border-color:var(--positive);background:var(--pos-soft);}
+
+/* ---- Journal entry ---- */
+.j-entry{border-radius:var(--dr-r-lg);padding:14px;margin-bottom:10px;border-left:3px solid var(--border-strong);background:var(--surface-2);}
+.j-entry.deployed{border-left-color:var(--positive);}
+.j-entry.watched{border-left-color:var(--warn);}
+.j-entry.skipped{border-left-color:var(--text-faint);}
+
+/* ---- Achievement badge ---- */
+.achievement{padding:10px 14px;border-radius:var(--dr-r-lg);text-align:center;border:1px solid var(--border);background:var(--surface-2);}
+.achievement.earned{border-color:rgba(31,215,154,0.25);background:var(--pos-soft);}
+.achievement.locked{opacity:0.45;}
+
+/* scrollbar */
+::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:2px;}
+
+/* tab content visibility */
+.tab-content{display:none;} .tab-content.active{display:block;}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ===== SIDEBAR ===== -->
+  <div class="sidebar">
+    <div class="sidebar-logo">Dhan<span>Radar</span></div>
+    <a class="nav-item" href="#"><span class="nav-icon">⬛</span>Dashboard</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📁</span>Upload CAS</a>
+    <a class="nav-item" href="#"><span class="nav-icon">🔍</span>Explore Funds</a>
+    <a class="nav-item" href="#"><span class="nav-icon">🌡</span>Market Mood</a>
+    <a class="nav-item active" href="#"><span class="nav-icon">📡</span>Signal</a>
+    <a class="nav-item" href="#"><span class="nav-icon">📚</span>Tax Guides</a>
+    <a class="nav-item" href="#"><span class="nav-icon">💡</span>Investing Basics</a>
+  </div>
+
+  <!-- ===== MAIN ===== -->
+  <div class="main">
+
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="header-row">
+        <div>
+          <div class="t18 w-500" style="letter-spacing:-0.02em;">Signal</div>
+          <div class="t11 muted mt-2">Rule-based market check · Educational use only · Not financial advice</div>
+        </div>
+        <span class="timestamp-pill">Updated 3:47 PM · Jun 15</span>
+      </div>
+      <div class="tabs" id="main-tabs">
+        <button class="tab active" onclick="switchTab('today',this)">Today</button>
+        <button class="tab" onclick="switchTab('rules',this)">Rules & Fund</button>
+        <button class="tab" onclick="switchTab('reflect',this)">Reflect</button>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TAB 1: TODAY
+    ============================================================ -->
+    <div class="body tab-content active" id="tab-today">
+
+      <!-- CAS prompt banner -->
+      <div class="row gap-3 mb-4" style="padding:12px 16px;background:color-mix(in srgb,var(--dr-blue) 8%,var(--surface));border:1px solid rgba(30,94,255,0.18);border-radius:var(--dr-r-lg);">
+        <div class="t18">📊</div>
+        <div class="grow">
+          <div class="t13 w-500">Link your portfolio for deeper context</div>
+          <div class="t11 muted mt-2">Upload your CAS to see how today's market conditions align with your specific funds.</div>
+        </div>
+        <button class="btn btn-accent btn-sm">Upload CAS</button>
+        <button class="btn btn-ghost btn-sm">Later</button>
+      </div>
+
+      <!-- Signal Hero (Rec card pattern) -->
+      <div class="rec signal-accent-watch mb-3">
+        <div class="rec-top">
+          <!-- "score ring" repurposed as signal indicator -->
+          <div class="ring-wrap" style="width:64px;height:64px;">
+            <svg width="64" height="64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--score-ring-bg)" stroke-width="6"/>
+            <circle cx="32" cy="32" r="26" fill="none" stroke="var(--warn)" stroke-width="6" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="81.7" transform="rotate(-90 32 32)"/></svg>
+            <div class="ring-n" style="font-size:20px;">⚠️</div>
+          </div>
+
+          <div class="grow">
+            <div class="t11 upper muted mono mb-2">Your Rule Check · Right now</div>
+            <div class="row gap-2 mb-2">
+              <span class="t15 w-600" style="color:var(--warn);">Watch — Mixed conditions</span>
+              <span class="badge badge-warn">MEDIUM confidence</span>
+            </div>
+            <div class="t12 sec">VIX is elevated at 18.4 but hasn't crossed your 19.0 threshold yet. Nifty is down 1.2%. Breadth is neutral. 2 of 3 rules are close — not triggered.</div>
+          </div>
+
+          <div class="col gap-2" style="align-items:flex-end;flex-shrink:0;">
+            <div style="text-align:center;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--dr-r-lg);padding:10px 14px;">
+              <div class="t22 w-700 mono" style="color:var(--warn);">2/3</div>
+              <div class="t10 upper muted mono mt-2">Rules close</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rec-body">
+          <div class="rec-reason">
+            <strong style="color:var(--text);">What this means for your SIPs:</strong> Continue all SIPs as scheduled — market dips don't change SIP plans. Your dip fund entry rules are not fully triggered yet. Patience is the rule here.
+          </div>
+        </div>
+
+        <div class="rec-foot">
+          <div class="t10 muted" style="align-self:center;">📋 NOT FINANCIAL ADVICE — Based on your own configured thresholds</div>
+          <div class="grow"></div>
+          <button class="btn btn-ghost btn-sm">Edit my rules →</button>
+        </div>
+      </div>
+
+      <!-- 3 Market Signal Cards -->
+      <div class="grid-3 mb-3">
+
+        <!-- Nifty 50 -->
+        <div class="card card-pad">
+          <div class="row between mb-3">
+            <div class="t10 upper muted mono">Nifty 50</div>
+            <span class="badge badge-warn">Bearish</span>
+          </div>
+          <div class="t22 w-500 mono" style="letter-spacing:-0.02em;">24,316</div>
+          <div class="t11 mono neg mt-2">−296 pts &nbsp;·&nbsp; −1.2%</div>
+          <div class="prog-track mt-3 mb-2">
+            <div class="prog-fill" style="width:60%;background:var(--warn);"></div>
+          </div>
+          <div class="row between t10 muted">
+            <span>Score 3/4</span>
+            <span class="badge-neutral badge t10">Wt 20%</span>
+          </div>
+          <div class="divider"></div>
+          <div class="t11 muted">Gap-down open · Below 50-day MA · Short-term downtrend</div>
+          <div class="t11 mt-2" style="color:var(--text-faint);">Your threshold: <span style="color:var(--warn);">−8% from high · At −5.1%</span></div>
+        </div>
+
+        <!-- India VIX -->
+        <div class="card card-pad" style="border-color:rgba(245,166,35,0.22);">
+          <div class="row between mb-3">
+            <div class="t10 upper muted mono">India VIX</div>
+            <span class="badge badge-warn">Elevated Fear</span>
+          </div>
+          <div class="t22 w-500 mono" style="letter-spacing:-0.02em;color:var(--warn);">18.4</div>
+          <div class="t11 mono" style="color:var(--warn);">+2.1 this week ↑</div>
+          <div class="prog-track mt-3 mb-2">
+            <div class="prog-fill" style="width:65%;background:var(--warn);"></div>
+          </div>
+          <div class="row between t10 muted">
+            <span>Score 2/4</span>
+            <span class="badge-neutral badge t10">Wt 40%</span>
+          </div>
+          <div class="divider"></div>
+          <div class="t11 muted">15–19 = Elevated fear zone</div>
+          <div style="padding:8px 10px;background:var(--warn-soft);border-radius:var(--dr-r-md);border-left:2px solid var(--warn);margin-top:8px;">
+            <div class="t11 w-500" style="color:var(--warn);">Your threshold: VIX &gt; 19.0</div>
+            <div class="t10 muted mt-2">Currently 18.4 — close but not triggered</div>
+          </div>
+        </div>
+
+        <!-- Market Breadth -->
+        <div class="card card-pad">
+          <div class="row between mb-3">
+            <div class="t10 upper muted mono">Market Breadth</div>
+            <span class="badge badge-neutral">Neutral</span>
+          </div>
+          <div class="row gap-4">
+            <div>
+              <div class="t10 muted mono upper">Advances</div>
+              <div class="t18 w-600 mono pos">1,214</div>
+            </div>
+            <div class="t16 muted" style="padding-top:10px;">/</div>
+            <div>
+              <div class="t10 muted mono upper">Declines</div>
+              <div class="t18 w-600 mono neg">1,048</div>
+            </div>
+          </div>
+          <div class="t11 muted mt-2">A/D Ratio: <span class="mono w-600" style="color:var(--text);">1.16</span></div>
+          <div class="prog-track mt-3 mb-2">
+            <div class="prog-fill" style="width:50%;background:var(--text-faint);"></div>
+          </div>
+          <div class="row between t10 muted">
+            <span>Score 2/4</span>
+            <span class="badge-neutral badge t10">Wt 40%</span>
+          </div>
+          <div class="divider"></div>
+          <div class="t11 muted">Your threshold: A/D &lt; 0.80</div>
+          <div class="t11" style="color:var(--text-faint);">Currently 1.16 — healthy, not triggered</div>
+        </div>
+      </div>
+
+      <!-- Portfolio Context + Learning -->
+      <div class="grid-21 mb-3">
+
+        <!-- Portfolio Context -->
+        <div class="card card-pad">
+          <div class="section-label">Portfolio Context</div>
+
+          <!-- SIP progress -->
+          <div class="mb-3">
+            <div class="row between mb-2">
+              <div class="t12 sec">Monthly SIP progress</div>
+              <div class="t12 mono w-600">₹90,000 / ₹1,12,000</div>
+            </div>
+            <div class="prog-track">
+              <div class="prog-fill" style="width:80%;background:linear-gradient(90deg,var(--dr-blue),var(--info));"></div>
+            </div>
+            <div class="t11 muted mt-2">₹22,000 pending · Next SIP: 20 Jun</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Stats table -->
+          <table class="dt">
+            <tbody>
+              <tr class="hov">
+                <td class="t12 sec">Portfolio value</td>
+                <td class="right mono w-600 t13">₹18,24,300</td>
+              </tr>
+              <tr class="hov">
+                <td class="t12 sec">Overall gain</td>
+                <td class="right t12"><span class="badge badge-pos">+16.9%</span></td>
+              </tr>
+              <tr class="hov">
+                <td class="t12 sec">Drawdown from peak</td>
+                <td class="right mono t12" style="color:var(--warn);">−3.2%</td>
+              </tr>
+              <tr class="hov">
+                <td class="t12 sec">Funds in correction (&gt;5%)</td>
+                <td class="right mono t12 muted">2 of 7</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mt-3" style="padding:10px 12px;background:color-mix(in srgb,var(--dr-blue) 8%,var(--bg));border-radius:var(--dr-r-md);border-left:2px solid var(--dr-blue);">
+            <div class="t11 sec">Today's 1.2% correction moved 2 midcap funds from <span class="badge badge-info t10">on_track</span> to <span class="badge badge-warn t10">off_track</span>. SIPs in these funds continue as scheduled.</div>
+          </div>
+
+          <!-- Deployment ladder -->
+          <div class="mt-3">
+            <div class="section-label">Capital Deployment Ladder</div>
+            <div class="t11 muted mb-2">Dip fund available: <span class="mono w-600" style="color:var(--text);">₹3,50,000</span></div>
+            <div class="ladder">
+              <div class="ld-step active">
+                <div class="t13 w-700 mono" style="color:var(--warn);">10%</div>
+                <div class="t10 muted upper">S1</div>
+              </div>
+              <div class="ld-step">
+                <div class="t13 w-700 mono">15%</div>
+                <div class="t10 muted upper">S2</div>
+              </div>
+              <div class="ld-step">
+                <div class="t13 w-700 mono">20%</div>
+                <div class="t10 muted upper">S3</div>
+              </div>
+              <div class="ld-step">
+                <div class="t13 w-700 mono">25%</div>
+                <div class="t10 muted upper">S4</div>
+              </div>
+              <div class="ld-step">
+                <div class="t13 w-700 mono">30%</div>
+                <div class="t10 muted upper">S5</div>
+              </div>
+            </div>
+            <div class="t10 muted mt-2" style="color:var(--text-faint);">S1 is close (VIX 18.4 → needs 19.0). <strong style="color:var(--warn)">Not triggered yet.</strong></div>
+          </div>
+        </div>
+
+        <!-- Learning Content -->
+        <div class="card card-pad">
+          <div class="section-label">Learn · Contextual</div>
+
+          <div style="display:flex;flex-direction:column;gap:0;">
+            <div class="row gap-3" style="padding:10px 0;border-bottom:1px solid var(--border);">
+              <div style="width:32px;height:32px;border-radius:var(--dr-r-md);background:var(--warn-soft);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">📉</div>
+              <div class="grow">
+                <div class="t12 w-500">What is India VIX? <span class="badge badge-neutral t10">2 min</span></div>
+                <div class="t11 muted mt-2">Why fear index matters for long-term investors</div>
+              </div>
+            </div>
+            <div class="row gap-3" style="padding:10px 0;border-bottom:1px solid var(--border);">
+              <div style="width:32px;height:32px;border-radius:var(--dr-r-md);background:var(--pos-soft);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">🧘</div>
+              <div class="grow">
+                <div class="t12 w-500">The cost of missing corrections</div>
+                <div class="t11 muted mt-2">Historical data on SIP consistency during falls</div>
+              </div>
+            </div>
+            <div class="row gap-3" style="padding:10px 0;border-bottom:1px solid var(--border);">
+              <div style="width:32px;height:32px;border-radius:var(--dr-r-md);background:var(--blue-soft);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">💰</div>
+              <div class="grow">
+                <div class="t12 w-500">Dip fund sizing: how much is right?</div>
+                <div class="t11 muted mt-2">A rule-based framework for capital allocation</div>
+              </div>
+            </div>
+            <div class="row gap-3" style="padding:10px 0;">
+              <div style="width:32px;height:32px;border-radius:var(--dr-r-md);background:var(--cyan-soft);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;">📊</div>
+              <div class="grow">
+                <div class="t12 w-500">Reading market breadth signals</div>
+                <div class="t11 muted mt-2">Advance/Decline ratio explained simply</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3 row" style="justify-content:center;">
+            <a href="#" style="font-size:12px;color:var(--dr-blue);text-decoration:none;font-weight:500;">View all investing guides →</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TAB 2: RULES & FUND
+    ============================================================ -->
+    <div class="body tab-content" id="tab-rules">
+
+      <div class="grid-21">
+
+        <!-- Left: Signal Thresholds + Deployment Ladder -->
+        <div>
+          <div class="card card-pad mb-3">
+            <div class="section-label">Signal Thresholds</div>
+            <div class="t11 muted mb-4">Set the market conditions that define <em>your</em> entry opportunity. Signal checks against these automatically each trading day.</div>
+
+            <!-- Nifty threshold -->
+            <div style="padding:14px 0;border-bottom:1px solid var(--border);">
+              <div class="row between mb-2">
+                <div>
+                  <div class="t13 w-500">Nifty 50 — Correction depth</div>
+                  <div class="t11 muted mt-2">Trigger when Nifty falls this much from 52-week high</div>
+                </div>
+                <div class="t22 w-700 mono" style="color:var(--warn);">−8%</div>
+              </div>
+              <input type="range" class="slider" min="3" max="20" value="8"/>
+              <div class="row between t10 muted mt-2">
+                <span>Mild (−3%)</span>
+                <span class="badge badge-neutral">Weight: 20%</span>
+                <span>Deep (−20%)</span>
+              </div>
+            </div>
+
+            <!-- VIX threshold -->
+            <div style="padding:14px 0;border-bottom:1px solid var(--border);">
+              <div class="row between mb-2">
+                <div>
+                  <div class="t13 w-500">India VIX — Fear level</div>
+                  <div class="t11 muted mt-2">Trigger when VIX exceeds this level (fear in market)</div>
+                </div>
+                <div class="t22 w-700 mono" style="color:var(--negative);">19.0</div>
+              </div>
+              <input type="range" class="slider" min="12" max="35" value="19"/>
+              <div class="row between t10 muted mt-2">
+                <span>Low fear (12)</span>
+                <span class="badge badge-neutral">Weight: 40%</span>
+                <span>Panic (35)</span>
+              </div>
+            </div>
+
+            <!-- Breadth threshold -->
+            <div style="padding:14px 0;">
+              <div class="row between mb-2">
+                <div>
+                  <div class="t13 w-500">Market Breadth — A/D Ratio</div>
+                  <div class="t11 muted mt-2">Trigger when advance/decline ratio drops below this</div>
+                </div>
+                <div class="t22 w-700 mono" style="color:var(--info);">0.80</div>
+              </div>
+              <input type="range" class="slider" min="0.4" max="1.5" step="0.05" value="0.80"/>
+              <div class="row between t10 muted mt-2">
+                <span>Panic (0.4)</span>
+                <span class="badge badge-neutral">Weight: 40%</span>
+                <span>Bullish (1.5)</span>
+              </div>
+            </div>
+
+            <div class="row gap-2 mt-4" style="border-top:1px solid var(--border);padding-top:14px;">
+              <button class="btn btn-accent">Save Rules</button>
+              <button class="btn btn-ghost">Reset to defaults</button>
+              <div class="grow"></div>
+              <label class="t11 muted row gap-2">
+                <span class="toggle on"><span class="knob"></span></span>
+                Daily alerts
+              </label>
+            </div>
+          </div>
+
+          <!-- Dip Fund Capital -->
+          <div class="card card-pad">
+            <div class="section-label">Dip Fund Capital</div>
+
+            <div class="grid-2 mb-4">
+              <div class="kpi-card" style="background:var(--pos-soft);border-color:rgba(31,215,154,0.2);">
+                <div class="t10 upper muted mono mb-2">Available</div>
+                <div class="t22 w-700 mono pos">₹3,50,000</div>
+                <div class="t11 muted mt-2">Ready to deploy</div>
+              </div>
+              <div class="kpi-card">
+                <div class="t10 upper muted mono mb-2">Monthly addition</div>
+                <div class="t22 w-700 mono">₹25,000</div>
+                <div class="t11 muted mt-2">Added 1st of month</div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="section-label mt-3">Deployment Ladder</div>
+            <div class="t11 muted mb-3">Max % to deploy per signal — protects against going all-in early.</div>
+
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div class="row gap-3">
+                <div class="t11 muted" style="width:56px;">Signal 1</div>
+                <div class="grow"><div class="prog-track"><div class="prog-fill" style="width:10%;background:var(--dr-blue);"></div></div></div>
+                <div class="t13 w-700 mono" style="width:32px;text-align:right;">10%</div>
+                <div class="t11 muted mono" style="width:52px;text-align:right;">₹35,000</div>
+              </div>
+              <div class="row gap-3">
+                <div class="t11 muted" style="width:56px;">Signal 2</div>
+                <div class="grow"><div class="prog-track"><div class="prog-fill" style="width:15%;background:var(--dr-blue);"></div></div></div>
+                <div class="t13 w-700 mono" style="width:32px;text-align:right;">15%</div>
+                <div class="t11 muted mono" style="width:52px;text-align:right;">₹52,500</div>
+              </div>
+              <div class="row gap-3">
+                <div class="t11 muted" style="width:56px;">Signal 3</div>
+                <div class="grow"><div class="prog-track"><div class="prog-fill" style="width:20%;background:var(--dr-blue);"></div></div></div>
+                <div class="t13 w-700 mono" style="width:32px;text-align:right;">20%</div>
+                <div class="t11 muted mono" style="width:52px;text-align:right;">₹70,000</div>
+              </div>
+              <div class="row gap-3">
+                <div class="t11 muted" style="width:56px;">Signal 4</div>
+                <div class="grow"><div class="prog-track"><div class="prog-fill" style="width:25%;background:var(--dr-blue);"></div></div></div>
+                <div class="t13 w-700 mono" style="width:32px;text-align:right;">25%</div>
+                <div class="t11 muted mono" style="width:52px;text-align:right;">₹87,500</div>
+              </div>
+              <div class="row gap-3">
+                <div class="t11 muted" style="width:56px;">Signal 5</div>
+                <div class="grow"><div class="prog-track"><div class="prog-fill" style="width:30%;background:var(--dr-blue);"></div></div></div>
+                <div class="t13 w-700 mono" style="width:32px;text-align:right;">30%</div>
+                <div class="t11 muted mono" style="width:52px;text-align:right;">₹1,05,000</div>
+              </div>
+            </div>
+            <div class="t10 muted mt-3" style="color:var(--text-faint);">Total max deployment: 100% across 5 deepening signals. Never go all-in on a single trigger.</div>
+
+            <div class="row gap-2 mt-4" style="border-top:1px solid var(--border);padding-top:12px;">
+              <button class="btn btn-ghost btn-sm">Edit amounts</button>
+              <button class="btn btn-ghost btn-sm">Add cash manually</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Explainer + Deployment History -->
+        <div>
+          <div class="card card-pad mb-3" style="background:color-mix(in srgb,var(--dr-blue) 6%,var(--surface));border-color:rgba(30,94,255,0.18);">
+            <div class="t13 w-600" style="color:#7DA8FF;margin-bottom:8px;">💡 How Signal works</div>
+            <div class="t12 sec" style="line-height:1.6;">
+              DhanRadar checks your 3 thresholds against live NSE data every trading day. When 2 or more conditions are met, confidence becomes <span class="badge badge-pos">HIGH</span>. All 3 met = <span class="badge badge-pos">TRIGGERED</span>.<br/><br/>
+              The system surfaces what <em>your rules</em> say about today's market. No prediction. No advice. You decide what to do.
+            </div>
+          </div>
+
+          <!-- Deployment History Table -->
+          <div class="card" style="overflow:hidden;">
+            <div style="padding:16px 18px 12px;">
+              <div class="section-label">Deployment History</div>
+            </div>
+            <table class="dt">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Action</th>
+                  <th>Amount</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="hov">
+                  <td class="mono t11 muted">Oct 26</td>
+                  <td class="t12">Deployed</td>
+                  <td class="mono t12 right">₹35,000</td>
+                  <td><span class="badge badge-pos">Triggered</span></td>
+                </tr>
+                <tr class="hov">
+                  <td class="mono t11 muted">Aug 05</td>
+                  <td class="t12">Deployed</td>
+                  <td class="mono t12 right">₹52,500</td>
+                  <td><span class="badge badge-pos">Triggered</span></td>
+                </tr>
+                <tr class="hov">
+                  <td class="mono t11 muted">May 18</td>
+                  <td class="t12 muted">Skipped</td>
+                  <td class="mono t12 right muted">—</td>
+                  <td><span class="badge badge-warn">Watch</span></td>
+                </tr>
+                <tr class="hov">
+                  <td class="mono t11 muted">Feb 12</td>
+                  <td class="t12">Deployed</td>
+                  <td class="mono t12 right">₹52,500</td>
+                  <td><span class="badge badge-pos">Triggered</span></td>
+                </tr>
+                <tr class="hov">
+                  <td class="mono t11 muted">Jan 04</td>
+                  <td class="t12 muted">Skipped</td>
+                  <td class="mono t12 right muted">—</td>
+                  <td><span class="badge badge-neutral">No signal</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         TAB 3: REFLECT
+    ============================================================ -->
+    <div class="body tab-content" id="tab-reflect">
+
+      <!-- Behaviour KPIs -->
+      <div class="grid-3 mb-3">
+        <div class="kpi-card row gap-3">
+          <div class="ring-wrap" style="width:56px;height:56px;flex-shrink:0;">
+            <svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="var(--score-ring-bg)" stroke-width="5"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--positive)" stroke-width="5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="18.0" transform="rotate(-90 28 28)"/></svg>
+            <div class="ring-n t14 w-700" style="color:var(--positive);">87</div>
+          </div>
+          <div>
+            <div class="t15 w-600 mono pos">87</div>
+            <div class="t11 muted">Investor Score</div>
+            <div class="t10 muted mt-2" style="color:var(--text-faint);">Top 12% of users</div>
+          </div>
+        </div>
+        <div class="kpi-card row gap-3">
+          <div class="ring-wrap" style="width:56px;height:56px;flex-shrink:0;">
+            <svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="var(--score-ring-bg)" stroke-width="5"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--info)" stroke-width="5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="8.3" transform="rotate(-90 28 28)"/></svg>
+            <div class="ring-n t14 w-700" style="color:var(--info);">94</div>
+          </div>
+          <div>
+            <div class="t15 w-600 mono" style="color:var(--info);">94</div>
+            <div class="t11 muted">Discipline Score</div>
+            <div class="t10 muted mt-2" style="color:var(--text-faint);">16 of 17 days on rules</div>
+          </div>
+        </div>
+        <div class="kpi-card row gap-3">
+          <div class="ring-wrap" style="width:56px;height:56px;flex-shrink:0;">
+            <svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="var(--score-ring-bg)" stroke-width="5"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--warn)" stroke-width="5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="38.7" transform="rotate(-90 28 28)"/></svg>
+            <div class="ring-n t14 w-700" style="color:var(--warn);">72</div>
+          </div>
+          <div>
+            <div class="t15 w-600 mono" style="color:var(--warn);">72</div>
+            <div class="t11 muted">Patience Score</div>
+            <div class="t10 muted mt-2" style="color:var(--text-faint);">Skipped 3 FOMO traps</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-21">
+
+        <!-- Journal -->
+        <div>
+          <div class="row between mb-3">
+            <div class="section-label" style="margin-bottom:0;">Investment Journal</div>
+            <button class="btn btn-accent btn-sm">+ Log today</button>
+          </div>
+
+          <div class="j-entry deployed">
+            <div class="row gap-2 mb-2" style="flex-wrap:wrap;">
+              <span class="t11 mono muted">Jun 10, 2025</span>
+              <span class="badge badge-pos">Deployed ₹35,000</span>
+              <span class="chip t10">😤 Fearful but disciplined</span>
+            </div>
+            <div class="t12 sec mb-2">VIX crossed 22. All 3 rules triggered. Deployed Signal 1 tranche as planned. Market felt terrible but I followed my rules.</div>
+            <div class="row gap-4 t10 muted">
+              <span>Nifty <span class="mono" style="color:var(--text-muted);">22,842 (−9.2%)</span></span>
+              <span>VIX <span class="mono" style="color:var(--text-muted);">22.1</span></span>
+              <span>A/D <span class="mono" style="color:var(--text-muted);">0.61</span></span>
+              <span class="badge badge-pos t10">Triggered</span>
+            </div>
+          </div>
+
+          <div class="j-entry watched">
+            <div class="row gap-2 mb-2" style="flex-wrap:wrap;">
+              <span class="t11 mono muted">May 18, 2025</span>
+              <span class="badge badge-warn">Watched — skipped</span>
+              <span class="chip t10">😰 Tempted to invest</span>
+            </div>
+            <div class="t12 sec mb-2">Nifty was down 5% and I really wanted to deploy. Signal said WATCH — VIX only 18.2. Held back. Right call.</div>
+            <div class="row gap-4 t10 muted">
+              <span>Nifty <span class="mono" style="color:var(--text-muted);">23,410 (−5.1%)</span></span>
+              <span>VIX <span class="mono" style="color:var(--text-muted);">18.2</span></span>
+              <span>A/D <span class="mono" style="color:var(--text-muted);">0.88</span></span>
+              <span class="badge badge-warn t10">Partial</span>
+            </div>
+          </div>
+
+          <div class="j-entry skipped">
+            <div class="row gap-2 mb-2" style="flex-wrap:wrap;">
+              <span class="t11 mono muted">Jan 04, 2025</span>
+              <span class="badge badge-neutral">No action</span>
+              <span class="chip t10">😌 Calm</span>
+            </div>
+            <div class="t12 sec mb-2">Market stable. SIPs running. No signal. Did nothing — felt good about it.</div>
+            <div class="row gap-4 t10 muted">
+              <span>Nifty <span class="mono" style="color:var(--text-muted);">24,986 (−3.2%)</span></span>
+              <span>VIX <span class="mono" style="color:var(--text-muted);">16.4</span></span>
+              <span class="badge badge-neutral t10">No signal</span>
+            </div>
+          </div>
+
+          <button style="width:100%;padding:10px;border:1px dashed var(--border-strong);border-radius:var(--dr-r-lg);background:transparent;color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add a past entry</button>
+        </div>
+
+        <!-- Analytics + Trust Engine + Achievements -->
+        <div>
+          <!-- Behaviour stats -->
+          <div class="card card-pad mb-3">
+            <div class="section-label">Behaviour Summary</div>
+            <table class="dt">
+              <tbody>
+                <tr class="hov">
+                  <td class="t12 sec">Days following rules</td>
+                  <td class="right t15 w-700 mono pos">142</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">FOMO moments avoided</td>
+                  <td class="right t15 w-700 mono" style="color:var(--info);">8</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">Premature deployments avoided</td>
+                  <td class="right t15 w-700 mono" style="color:var(--warn);">3</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">Cash preserved</td>
+                  <td class="right t13 w-600 mono">₹1,15,000</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">SIP streak</td>
+                  <td class="right t13 w-600 mono pos">18 months</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Trust Engine -->
+          <div class="card card-pad mb-3">
+            <div class="section-label">Trust Engine</div>
+            <div class="t11 muted mb-3">Your past signals vs market outcomes 3 months later.</div>
+
+            <table class="dt">
+              <tbody>
+                <tr class="hov">
+                  <td class="t12 sec">Aug 2025 · Triggered</td>
+                  <td><span class="badge badge-pos t10">Deployed</span></td>
+                  <td class="right mono t11 pos">+11.4%</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">May 2025 · Watch</td>
+                  <td><span class="badge badge-warn t10">Waited</span></td>
+                  <td class="right mono t11 muted">+3.2%</td>
+                </tr>
+                <tr class="hov">
+                  <td class="t12 sec">Feb 2025 · Triggered</td>
+                  <td><span class="badge badge-pos t10">Deployed</span></td>
+                  <td class="right mono t11 pos">+9.7%</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="mt-3" style="padding:10px;background:var(--pos-soft);border-radius:var(--dr-r-md);border:1px solid rgba(31,215,154,0.2);">
+              <div class="t11 w-600 pos mb-2">3 of 3 triggered signals beat waiting</div>
+              <div class="t10 muted">Past accuracy does not predict future outcomes. Educational context only.</div>
+            </div>
+          </div>
+
+          <!-- Achievements -->
+          <div class="card card-pad">
+            <div class="section-label">Achievements</div>
+            <div class="grid-2" style="gap:8px;">
+              <div class="achievement earned">
+                <div style="font-size:20px;margin-bottom:4px;">🏆</div>
+                <div class="t11 w-600 pos">Disciplined Investor</div>
+                <div class="t10 muted mt-2">90+ days on rules</div>
+              </div>
+              <div class="achievement earned">
+                <div style="font-size:20px;margin-bottom:4px;">🐻</div>
+                <div class="t11 w-600" style="color:var(--info);">Bear Hunter</div>
+                <div class="t10 muted mt-2">Deployed at VIX &gt;20</div>
+              </div>
+              <div class="achievement earned">
+                <div style="font-size:20px;margin-bottom:4px;">🧘</div>
+                <div class="t11 w-600" style="color:var(--warn);">Patience Master</div>
+                <div class="t10 muted mt-2">Avoided 3 FOMO traps</div>
+              </div>
+              <div class="achievement locked">
+                <div style="font-size:20px;margin-bottom:4px;">🔒</div>
+                <div class="t11 w-500 muted">Crash Collector</div>
+                <div class="t10 muted mt-2">Deploy at Nifty −15%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
