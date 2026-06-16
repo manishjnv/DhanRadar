@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal — DhanRadar UI Mockup</title>
+<style>
+  /* === DhanRadar Design Tokens (Dark Mode) === */
+  :root {
+    --bg:          #07090F;
+    --bg-elev:     #0B0F1A;
+    --surface:     #0E121E;
+    --surface-2:   #141928;
+    --surface-3:   #1B2133;
+    --border:      rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.12);
+    --ink:         #ECEEF5;
+    --ink-secondary: #B9BFCF;
+    --ink-muted:   #7E8699;
+    --ink-faint:   #525868;
+    --royal:       #1E5EFF;
+    --royal-soft:  rgba(77,128,255,0.14);
+    --emerald:     #1FD79A;
+    --emerald-soft: rgba(31,215,154,0.14);
+    --cyan:        #00C2FF;
+    --cyan-soft:   rgba(0,194,255,0.12);
+    --amber:       #F5A623;
+    --amber-soft:  rgba(255,179,71,0.14);
+    --red:         #FF6166;
+    --red-soft:    rgba(255,97,102,0.14);
+    --navy:        #0B1F3A;
+
+    --font-sans: 'Inter', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 14px;
+    --radius-2xl: 18px;
+    --radius-full: 999px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* === App Shell === */
+  .app-shell { display: flex; height: 100vh; }
+
+  /* === Sidebar === */
+  .sidebar {
+    width: 200px; flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 16px 8px;
+    gap: 2px;
+  }
+  .sidebar-logo {
+    padding: 8px 12px 16px;
+    font-size: 17px; font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .sidebar-logo span { color: var(--emerald); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: var(--radius-md);
+    font-size: 13px; color: var(--ink-secondary);
+    cursor: pointer; transition: all 120ms;
+    text-decoration: none;
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item.active {
+    background: var(--royal-soft); color: #7DA8FF;
+    font-weight: 500;
+  }
+  .nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+
+  /* === Main Content === */
+  .main { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+
+  /* === Page Header === */
+  .page-header {
+    padding: 20px 24px 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .page-title-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .page-title { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); }
+  .page-subtitle { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .last-updated {
+    font-size: 11px; color: var(--ink-faint);
+    font-family: var(--font-mono);
+    background: var(--surface-2);
+    padding: 4px 10px; border-radius: var(--radius-full);
+    border: 1px solid var(--border);
+  }
+
+  /* === Tabs === */
+  .tabs { display: flex; gap: 0; }
+  .tab {
+    padding: 10px 16px; font-size: 13px; font-weight: 500;
+    color: var(--ink-muted); cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 120ms;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--ink-secondary); }
+  .tab.active {
+    color: var(--royal);
+    border-bottom-color: var(--royal);
+  }
+
+  /* === Page Body === */
+  .page-body { padding: 20px 24px; flex: 1; }
+
+  /* === Signal Hero Card === */
+  .signal-hero {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 20px;
+    position: relative; overflow: hidden;
+  }
+  .signal-hero::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--amber) 0%, transparent 60%);
+  }
+  .signal-indicator {
+    width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+  }
+  .signal-indicator.watch { background: var(--amber-soft); }
+  .signal-indicator.triggered { background: var(--emerald-soft); }
+  .signal-indicator.idle { background: var(--surface-2); }
+
+  .signal-text { flex: 1; }
+  .signal-status {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-muted);
+    margin-bottom: 3px;
+  }
+  .signal-label {
+    font-size: 20px; font-weight: 600; letter-spacing: -0.01em;
+    color: var(--amber);
+    margin-bottom: 4px;
+  }
+  .signal-label.triggered { color: var(--emerald); }
+  .signal-label.idle { color: var(--ink-muted); }
+  .signal-reason { font-size: 13px; color: var(--ink-secondary); line-height: 1.5; }
+
+  .signal-confidence {
+    text-align: center; flex-shrink: 0; padding: 12px 16px;
+    background: var(--surface-2); border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+  }
+  .confidence-band {
+    font-size: 13px; font-weight: 600; color: var(--amber);
+    margin-bottom: 2px;
+  }
+  .confidence-band.high { color: var(--emerald); }
+  .confidence-band.low { color: var(--ink-muted); }
+  .confidence-label { font-size: 10px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+
+  .not-advice {
+    font-size: 10px; color: var(--ink-faint);
+    padding: 8px 12px; background: var(--surface-2);
+    border-radius: var(--radius-md); border: 1px solid var(--border);
+    text-align: center; letter-spacing: 0.02em;
+  }
+
+  /* === Grid layouts === */
+  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 16px; }
+
+  /* === Market Signal Card === */
+  .signal-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px;
+    position: relative;
+  }
+  .signal-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .signal-card-name { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
+  .signal-card-score {
+    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    border-radius: var(--radius-full);
+  }
+  .score-bearish { background: var(--amber-soft); color: var(--amber); }
+  .score-bullish { background: var(--emerald-soft); color: var(--emerald); }
+  .score-neutral { background: var(--surface-2); color: var(--ink-muted); }
+  .score-panic { background: var(--red-soft); color: var(--red); }
+
+  .signal-value {
+    font-size: 26px; font-weight: 500; font-family: var(--font-mono);
+    letter-spacing: -0.02em; color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .signal-change {
+    font-size: 12px; font-family: var(--font-mono); font-weight: 500;
+    margin-bottom: 10px;
+  }
+  .signal-change.down { color: var(--red); }
+  .signal-change.up { color: var(--emerald); }
+
+  .signal-bar-track {
+    height: 4px; background: var(--surface-2); border-radius: 2px; margin-bottom: 6px;
+  }
+  .signal-bar-fill { height: 4px; border-radius: 2px; }
+  .bar-bearish { background: var(--amber); }
+  .bar-bullish { background: var(--emerald); }
+  .bar-neutral { background: var(--ink-faint); }
+  .bar-panic { background: var(--red); }
+
+  .signal-card-footer {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--ink-faint);
+  }
+  .weight-pill {
+    font-size: 10px; font-weight: 600; padding: 2px 7px;
+    border-radius: var(--radius-full); border: 1px solid var(--border);
+    color: var(--ink-muted);
+  }
+
+  /* === Portfolio Context Card === */
+  .portfolio-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 20px;
+  }
+  .card-section-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-section-title::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  .portfolio-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .portfolio-row:last-child { border-bottom: none; }
+  .portfolio-label { font-size: 13px; color: var(--ink-secondary); }
+  .portfolio-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--ink); }
+  .portfolio-value.positive { color: var(--emerald); }
+  .portfolio-value.muted { color: var(--ink-muted); }
+
+  .sip-progress-track {
+    height: 6px; background: var(--surface-2); border-radius: 3px; margin: 8px 0;
+  }
+  .sip-progress-fill {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--royal) 0%, var(--cyan) 100%);
+    width: 80%;
+  }
+
+  /* === Learning Card === */
+  .learn-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 20px;
+  }
+  .learn-item {
+    display: flex; gap: 10px; padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+  }
+  .learn-item:last-child { border-bottom: none; }
+  .learn-icon {
+    width: 32px; height: 32px; border-radius: var(--radius-md);
+    background: var(--royal-soft); display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0; margin-top: 1px;
+  }
+  .learn-title { font-size: 13px; font-weight: 500; color: var(--ink); margin-bottom: 2px; }
+  .learn-desc { font-size: 12px; color: var(--ink-muted); line-height: 1.4; }
+  .learn-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 7px;
+    border-radius: var(--radius-full); background: var(--cyan-soft); color: var(--cyan);
+    margin-left: 6px; letter-spacing: 0.04em;
+  }
+
+  /* === CAS Prompt Banner === */
+  .cas-prompt {
+    background: linear-gradient(135deg, rgba(30,94,255,0.08) 0%, rgba(0,194,255,0.06) 100%);
+    border: 1px solid rgba(30,94,255,0.2);
+    border-radius: var(--radius-lg); padding: 14px 18px;
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 16px;
+  }
+  .cas-prompt-text { flex: 1; }
+  .cas-prompt-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+  .cas-prompt-desc { font-size: 12px; color: var(--ink-secondary); }
+  .btn-primary {
+    padding: 7px 14px; background: var(--royal); color: white;
+    border-radius: var(--radius-md); font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: opacity 120ms;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-ghost {
+    padding: 7px 12px; background: transparent; color: var(--ink-muted);
+    border-radius: var(--radius-md); font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* === Deployment Ladder === */
+  .ladder { display: flex; gap: 6px; margin-top: 8px; }
+  .ladder-step {
+    flex: 1; padding: 6px 4px; text-align: center;
+    border-radius: var(--radius-md); border: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .ladder-step.active { border-color: var(--amber); background: var(--amber-soft); }
+  .ladder-step-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); color: var(--ink); }
+  .ladder-step.active .ladder-step-pct { color: var(--amber); }
+  .ladder-step-label { font-size: 9px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-faint); margin-top: 1px; }
+
+  /* === Misc === */
+  .row { display: flex; align-items: center; gap: 8px; }
+  .spacer { flex: 1; }
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+  .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: var(--radius-full);
+    background: var(--surface-2); color: var(--ink-faint);
+    border: 1px solid var(--border);
+  }
+  .highlight-box {
+    background: var(--surface-2); border-radius: var(--radius-md); padding: 10px 12px;
+    margin-top: 8px;
+  }
+  .highlight-box p { font-size: 12px; color: var(--ink-secondary); line-height: 1.5; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-logo">Dhan<span>Radar</span></div>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">⬜</span> Dashboard
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">📂</span> Upload CAS
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">🔍</span> Explore Funds
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">🌡</span> Market Mood
+    </a>
+    <a class="nav-item active" href="#">
+      <span class="nav-icon">📡</span> Signal
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">📚</span> Tax Guides
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">💡</span> Investing Basics
+    </a>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Page Header + Tabs -->
+    <div class="page-header">
+      <div class="page-title-row">
+        <div>
+          <div class="page-title">Signal</div>
+          <div class="page-subtitle">Your rule-based market check · Educational use only</div>
+        </div>
+        <div class="last-updated">Updated 3:47 PM · Jun 15</div>
+      </div>
+      <div class="tabs">
+        <div class="tab active">Today</div>
+        <div class="tab">My Rules</div>
+        <div class="tab">Dip Fund</div>
+        <div class="tab">Journal</div>
+        <div class="tab">Analytics</div>
+      </div>
+    </div>
+
+    <!-- TODAY TAB CONTENT -->
+    <div class="page-body">
+
+      <!-- CAS Upload Prompt (shown when no portfolio linked) -->
+      <div class="cas-prompt">
+        <div style="font-size:22px">📊</div>
+        <div class="cas-prompt-text">
+          <div class="cas-prompt-title">Link your portfolio for deeper context</div>
+          <div class="cas-prompt-desc">Upload your CAS to see how current market conditions align with your specific funds and SIP history.</div>
+        </div>
+        <button class="btn-primary">Upload CAS</button>
+        <button class="btn-ghost">Later</button>
+      </div>
+
+      <!-- Signal Hero -->
+      <div class="signal-hero">
+        <div class="signal-indicator watch">⚠️</div>
+        <div class="signal-text">
+          <div class="signal-status">Your Rule Check · Right now</div>
+          <div class="signal-label">Watch — Mixed conditions</div>
+          <div class="signal-reason">VIX is elevated (18.4) but breadth is holding neutral. Your entry threshold needs VIX above 19 or advance/decline below 0.8. Not there yet.</div>
+        </div>
+        <div class="signal-confidence">
+          <div class="confidence-band">MEDIUM</div>
+          <div class="confidence-label">Confidence</div>
+          <div class="divider" style="margin:6px 0;"></div>
+          <div class="confidence-band high">2 of 3</div>
+          <div class="confidence-label">Rules checked</div>
+        </div>
+      </div>
+      <div class="not-advice" style="margin-bottom:16px;">
+        📋 This is a check of your self-defined rules against today's market data — not financial advice. Continue your SIPs regardless.
+      </div>
+
+      <!-- 3 Signal Cards -->
+      <div class="grid-3">
+
+        <!-- Nifty 50 -->
+        <div class="signal-card">
+          <div class="signal-card-header">
+            <div class="signal-card-name">Nifty 50</div>
+            <div class="signal-card-score score-bearish">Bearish</div>
+          </div>
+          <div class="signal-value">24,316</div>
+          <div class="signal-change down">−1.2% · ↓ 296 pts</div>
+          <div class="signal-bar-track">
+            <div class="signal-bar-fill bar-bearish" style="width:60%;"></div>
+          </div>
+          <div class="signal-card-footer">
+            <span>Score: 3 / 4</span>
+            <span class="weight-pill">Wt: 20%</span>
+          </div>
+          <div class="highlight-box" style="margin-top:10px;">
+            <p>Gap-down open. Trading below 50-day MA. Trend: short-term bearish.</p>
+          </div>
+        </div>
+
+        <!-- India VIX -->
+        <div class="signal-card" style="border-color: rgba(245,166,35,0.25);">
+          <div class="signal-card-header">
+            <div class="signal-card-name">India VIX</div>
+            <div class="signal-card-score score-bearish">Elevated Fear</div>
+          </div>
+          <div class="signal-value" style="color:var(--amber);">18.4</div>
+          <div class="signal-change down">+2.1 · ↑ this week</div>
+          <div class="signal-bar-track">
+            <div class="signal-bar-fill bar-bearish" style="width:65%;"></div>
+          </div>
+          <div class="signal-card-footer">
+            <span>Score: 2 / 4</span>
+            <span class="weight-pill">Wt: 40%</span>
+          </div>
+          <div class="highlight-box" style="margin-top:10px; border-left: 2px solid var(--amber);">
+            <p>Your threshold: VIX &gt; 19. Currently 18.4. <strong style="color:var(--amber)">Close but not triggered.</strong></p>
+          </div>
+        </div>
+
+        <!-- Market Breadth -->
+        <div class="signal-card">
+          <div class="signal-card-header">
+            <div class="signal-card-name">Market Breadth</div>
+            <div class="signal-card-score score-neutral">Neutral</div>
+          </div>
+          <div style="display:flex; gap:12px; margin-bottom:4px;">
+            <div>
+              <div style="font-size:11px;color:var(--ink-muted);">Advances</div>
+              <div style="font-size:20px;font-family:var(--font-mono);font-weight:600;color:var(--emerald);">1,214</div>
+            </div>
+            <div style="font-size:20px;color:var(--ink-faint);margin-top:14px;">/</div>
+            <div>
+              <div style="font-size:11px;color:var(--ink-muted);">Declines</div>
+              <div style="font-size:20px;font-family:var(--font-mono);font-weight:600;color:var(--red);">1,048</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--ink-muted);margin-bottom:8px;">A/D Ratio: <span style="color:var(--ink);font-weight:600;font-family:var(--font-mono);">1.16</span></div>
+          <div class="signal-bar-track">
+            <div class="signal-bar-fill bar-neutral" style="width:50%;"></div>
+          </div>
+          <div class="signal-card-footer">
+            <span>Score: 2 / 4</span>
+            <span class="weight-pill">Wt: 40%</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Portfolio Context + Learning -->
+      <div class="grid-2-1">
+
+        <!-- Portfolio Context (with CAS) -->
+        <div class="portfolio-card">
+          <div class="card-section-title">Portfolio Context</div>
+
+          <!-- SIP Progress -->
+          <div style="margin-bottom:14px;">
+            <div class="row" style="margin-bottom:4px;">
+              <span style="font-size:12px;color:var(--ink-secondary);">Monthly SIP progress</span>
+              <span class="spacer"></span>
+              <span style="font-size:12px;font-weight:600;font-family:var(--font-mono);color:var(--ink);">₹90,000 / ₹1,12,000</span>
+            </div>
+            <div class="sip-progress-track"><div class="sip-progress-fill"></div></div>
+            <div style="font-size:11px;color:var(--ink-muted);">₹22,000 pending · Next SIP: 20 Jun</div>
+          </div>
+
+          <!-- Portfolio rows -->
+          <div class="portfolio-row">
+            <div class="portfolio-label">Portfolio value</div>
+            <div class="portfolio-value">₹18,24,300</div>
+          </div>
+          <div class="portfolio-row">
+            <div class="portfolio-label">Invested</div>
+            <div class="portfolio-value">₹15,60,000</div>
+          </div>
+          <div class="portfolio-row">
+            <div class="portfolio-label">Overall gain</div>
+            <div class="portfolio-value positive">+₹2,64,300 (16.9%)</div>
+          </div>
+          <div class="portfolio-row">
+            <div class="portfolio-label">Drawdown from peak</div>
+            <div class="portfolio-value" style="color:var(--amber);">−3.2%</div>
+          </div>
+          <div class="portfolio-row">
+            <div class="portfolio-label">Funds in correction (&gt;5%)</div>
+            <div class="portfolio-value" style="color:var(--ink-muted);">2 of 7</div>
+          </div>
+
+          <!-- Today's impact note -->
+          <div class="highlight-box" style="margin-top:12px; border-left:2px solid var(--royal);">
+            <p>Today's correction has moved 2 of your midcap funds from <em>on_track</em> to <em>off_track</em>. Your SIPs in these funds continue as scheduled.</p>
+          </div>
+        </div>
+
+        <!-- Learning Content -->
+        <div class="learn-card">
+          <div class="card-section-title">Learn</div>
+
+          <div class="learn-item">
+            <div class="learn-icon">📉</div>
+            <div>
+              <div class="learn-title">What is India VIX? <span class="learn-badge">2 MIN</span></div>
+              <div class="learn-desc">Why fear index matters for long-term investors</div>
+            </div>
+          </div>
+
+          <div class="learn-item">
+            <div class="learn-icon">🧘</div>
+            <div>
+              <div class="learn-title">The cost of missing corrections</div>
+              <div class="learn-desc">Historical data on SIP consistency during market falls</div>
+            </div>
+          </div>
+
+          <div class="learn-item">
+            <div class="learn-icon">💰</div>
+            <div>
+              <div class="learn-title">Dip fund sizing: how much is right?</div>
+              <div class="learn-desc">A rule-based framework for capital allocation</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px; text-align:center;">
+            <a href="#" style="font-size:12px;color:var(--royal);text-decoration:none;">See all guides →</a>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Deployment Ladder (shown when VIX is elevated) -->
+      <div class="portfolio-card" style="margin-bottom:16px;">
+        <div class="card-section-title">Capital Protection — Deployment Ladder</div>
+        <div style="font-size:12px;color:var(--ink-muted);margin-bottom:10px;">
+          Your dip fund: <strong style="color:var(--ink);font-family:var(--font-mono)">₹3,50,000</strong> available.
+          Deploy in stages — never all at once.
+        </div>
+        <div class="ladder">
+          <div class="ladder-step active">
+            <div class="ladder-step-pct">10%</div>
+            <div class="ladder-step-label">Signal 1</div>
+          </div>
+          <div class="ladder-step">
+            <div class="ladder-step-pct">15%</div>
+            <div class="ladder-step-label">Signal 2</div>
+          </div>
+          <div class="ladder-step">
+            <div class="ladder-step-pct">20%</div>
+            <div class="ladder-step-label">Signal 3</div>
+          </div>
+          <div class="ladder-step">
+            <div class="ladder-step-pct">25%</div>
+            <div class="ladder-step-label">Signal 4</div>
+          </div>
+          <div class="ladder-step">
+            <div class="ladder-step-pct">30%</div>
+            <div class="ladder-step-label">Signal 5</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--ink-faint);margin-top:8px;">
+          Signal 1 threshold is <span style="color:var(--amber)">close</span> (VIX 18.4 → needs 19.0). SIPs continue regardless.
+        </div>
+      </div>
+
+    </div><!-- /page-body -->
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+</body>
+</html>

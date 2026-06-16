@@ -2297,7 +2297,9 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
     # Restrict similarity search to the same AMC to avoid cross-AMC false matches
     # (e.g. "UTI - Liquid Fund" vs "HSBC Liquid Fund"). amc_name may be "UTI",
     # "NIPPON", etc.; fund names in mf_funds start with the AMC's short prefix.
-    amc_prefix = amc_name.split("_")[0] + "%"  # "ICICI_PRU" → "ICICI%"
+    # MIRAE funds are prefixed "Mirae Asset", not "MIRAE", so map that explicitly.
+    amc_prefix_map = {"MIRAE": "Mirae Asset%"}
+    amc_prefix = amc_prefix_map.get(amc_name) or (amc_name.split("_")[0] + "%")  # "ICICI_PRU" → "ICICI%"
     async with TaskSessionLocal() as db:
         for sname in scheme_names:
             # Use pg_trgm similarity to fuzzy-match scheme names, restricted to
