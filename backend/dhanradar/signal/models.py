@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 from dhanradar.models.base import Base
 
@@ -22,6 +22,8 @@ class SignalRules(Base):
     breadth_threshold = sa.Column(sa.Numeric(4, 3), nullable=False)
     deploy_ladder = sa.Column(JSONB, nullable=False)
     alerts_on = sa.Column(sa.Boolean, nullable=False, server_default=sa.text("true"))
+    sip_day = sa.Column(sa.SmallInteger, nullable=True)
+    earned_achievements = sa.Column(ARRAY(sa.Text), nullable=False, server_default=sa.text("'{}'"))
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))
     updated_at = sa.Column(
         sa.DateTime(timezone=True),
