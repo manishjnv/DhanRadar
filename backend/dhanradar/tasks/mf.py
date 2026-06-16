@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import time
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -58,19 +59,32 @@ _UPSERT_CHUNK = 2000
 # Each AMC publishes monthly disclosure XLSX/CSV under these paths.
 # Format: name (for source_amc provenance) + discovery URL.
 _AMC_DISCLOSURE_ROOTS: list[dict] = [
+    # json_api_url_template: Drupal/CMS JSON API returning rows with ZIP download URLs.
+    # {year} = 4-digit year.  zip_xlsx_member_pattern = filename substring to match inside the ZIP.
+    {
+        "name": "UTI",
+        "json_api_url_template": "https://www.utimf.com/api/get-consolidate-portfolio-disclosure?year={year}",
+        "zip_xlsx_member_pattern": "Sebi Exposure",
+    },
     # direct_url_template: predictable static paths discovered via HTTP (no Playwright needed).
     # {month_full} = full month name (e.g. "May"), {year} = 4-digit year.
     # Remaining AMCs use Playwright discovery (requires chromium in container).
-    {"name": "DSP", "direct_url_template": "https://www.dspmf.com/content/dam/dsp/portfolio/DSP_Portfolio_{month_full}{year}.xlsx"},
-    {"name": "UTI", "direct_url_template": "https://www.utimf.com/content/dam/uti/portfolio/UTI_Portfolio_{month_full}_{year}.xlsx"},
+    # HDFC, ICICI_PRU, KOTAK: known bot-protection in place (Akamai/Radware); Playwright
+    # attempts are kept in the schedule — future-proof for when protections change.
     {"name": "HDFC", "url": "https://www.hdfcfund.com/investor-relations/portfolio-disclosure"},
     {"name": "SBI", "url": "https://www.sbimf.com/en-us/portfolio-disclosures"},
     {"name": "ICICI_PRU", "url": "https://www.icicipruamc.com/portfolio-disclosure"},
-    {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/portfolio-disclosure"},
+    # Nippon publishes .xls (legacy Excel 97-2004) via its download centre.
+    {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"},
     {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
-    {"name": "AXIS", "url": "https://www.axismf.com/portfolio-disclosure"},
-    {"name": "MIRAE", "url": "https://miraeassetmf.co.in/portfolio-disclosure"},
-    {"name": "FRANKLIN", "url": "https://www.franklintempletonmutualfund.com/portfolio-disclosure"},
+    # Axis: correct path is /downloads/portfolio-disclosure (not /portfolio-disclosure which 404s).
+    {"name": "AXIS", "url": "https://www.axismf.com/downloads/portfolio-disclosure"},
+    # Mirae: SPA at /downloads/portfolio; per-scheme XLSX (not consolidated SEBI format).
+    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio"},
+    # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
+    {"name": "FRANKLIN", "url": "https://www.franklintempletonindia.com/investor/portfolio-disclosure"},
+    # DSP: domain moved from dspmf.com (GoDaddy) to dspim.com; disclosure page is JS-rendered.
+    {"name": "DSP", "url": "https://www.dspim.com/downloads"},
 ]
 
 
@@ -1629,7 +1643,11 @@ async def _mf_constituents_pipeline() -> str:
 
     # Separate AMCs by resolution strategy.
     template_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("direct_url_template")]
-    playwright_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if not a.get("direct_url_template")]
+    json_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("json_api_url_template")]
+    playwright_amcs = [
+        a for a in _AMC_DISCLOSURE_ROOTS
+        if not a.get("direct_url_template") and not a.get("json_api_url_template")
+    ]
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         # --- Direct-URL AMCs (no browser needed) ---
@@ -1637,6 +1655,22 @@ async def _mf_constituents_pipeline() -> str:
             amc_name: str = amc["name"]
             try:
                 rows, aum_cnt = await _process_amc_direct(client, amc_name, amc["direct_url_template"])
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
+        # --- JSON-API AMCs (Drupal/CMS API returns ZIP URL, no browser needed) ---
+        for amc in json_api_amcs:
+            amc_name = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_json_api(
+                    client,
+                    amc_name,
+                    amc["json_api_url_template"],
+                    amc.get("zip_xlsx_member_pattern", ""),
+                )
                 total_rows += rows
                 aum_updates += aum_cnt
                 logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
@@ -1726,6 +1760,115 @@ async def _process_amc_direct(
     return 0, 0
 
 
+async def _process_amc_json_api(
+    client: httpx.AsyncClient,
+    amc_name: str,
+    api_url_template: str,
+    zip_member_pattern: str,
+) -> tuple[int, int]:
+    """Fetch the SEBI disclosure for AMCs that publish a JSON API returning ZIP URLs.
+
+    Strategy (confirmed for UTI Drupal CMS):
+      1. GET ``api_url_template.format(year=YYYY)`` — returns a JSON array of rows,
+         each row has a ``file`` field containing a CloudFront/CDN ZIP URL.
+      2. Match the row whose ``month`` field equals the target month name.
+      3. Download the ZIP; extract the member whose filename contains
+         ``zip_member_pattern`` (e.g. "Sebi Exposure").
+      4. Parse the extracted XLSX with ``_parse_sebi_xlsx()``.
+
+    Tries 1 month back first, then 2 months back (handles publication lag).
+    """
+    now = datetime.now(UTC)
+    for months_back in (1, 2):
+        target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
+        target_month = target.strftime("%B")   # e.g. "May"
+        target_year = target.strftime("%Y")    # e.g. "2026"
+
+        api_url = api_url_template.format(year=target_year)
+        try:
+            resp = await client.get(
+                api_url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            )
+            resp.raise_for_status()
+        except Exception:  # noqa: BLE001
+            logger.debug("mf_constituents_fetch amc=%s json-api call failed url=%s", amc_name, api_url, exc_info=True)
+            continue
+
+        try:
+            rows_json: list[dict] = resp.json()
+        except Exception:  # noqa: BLE001
+            logger.warning("mf_constituents_fetch amc=%s json-api response is not JSON url=%s", amc_name, api_url)
+            continue
+
+        if not isinstance(rows_json, list):
+            logger.warning("mf_constituents_fetch amc=%s json-api returned non-list type=%s", amc_name, type(rows_json))
+            continue
+
+        # Find the row for the target month (case-insensitive).
+        zip_url: str | None = None
+        for row in rows_json:
+            row_month = str(row.get("month", row.get("Month", ""))).strip()
+            if row_month.lower() == target_month.lower():
+                zip_url = str(row.get("file", row.get("File", row.get("url", ""))))
+                break
+
+        if not zip_url:
+            logger.debug(
+                "mf_constituents_fetch amc=%s json-api: no row for month=%s year=%s (rows=%d)",
+                amc_name, target_month, target_year, len(rows_json),
+            )
+            continue
+
+        # Download the ZIP.
+        logger.info("mf_constituents_fetch amc=%s downloading zip=%s", amc_name, zip_url)
+        try:
+            zip_resp = await client.get(
+                zip_url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            )
+            zip_resp.raise_for_status()
+        except Exception:  # noqa: BLE001
+            logger.warning("mf_constituents_fetch amc=%s zip download failed url=%s", amc_name, zip_url, exc_info=True)
+            continue
+
+        # Extract the target XLSX member from the ZIP.
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+                member_names = zf.namelist()
+                target_member: str | None = None
+                for name in member_names:
+                    if zip_member_pattern.lower() in name.lower() and name.lower().endswith((".xlsx", ".xls")):
+                        target_member = name
+                        break
+                if target_member is None:
+                    # Fall back to first XLSX in archive.
+                    for name in member_names:
+                        if name.lower().endswith((".xlsx", ".xls")):
+                            target_member = name
+                            break
+                if target_member is None:
+                    logger.warning(
+                        "mf_constituents_fetch amc=%s zip has no xlsx member (members=%s)",
+                        amc_name, member_names,
+                    )
+                    continue
+                file_bytes = zf.read(target_member)
+        except zipfile.BadZipFile:
+            logger.warning("mf_constituents_fetch amc=%s zip response is not a valid ZIP url=%s", amc_name, zip_url)
+            continue
+
+        parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+        if not parsed:
+            logger.warning("mf_constituents_fetch amc=%s parsed 0 rows from zip member=%s", amc_name, target_member)
+            return 0, 0
+
+        return await _upsert_constituents(parsed, amc_name)
+
+    logger.warning("mf_constituents_fetch amc=%s no disclosure file found (tried json-api)", amc_name)
+    return 0, 0
+
+
 async def _process_amc(
     client: httpx.AsyncClient, browser: Any, amc_name: str, discovery_url: str
 ) -> tuple[int, int]:
@@ -1751,7 +1894,7 @@ async def _process_amc(
     file_bytes = resp.content
 
     # Step 3: Parse the file into constituent rows.
-    if "spreadsheetml" in content_type or file_url.lower().endswith(".xlsx"):
+    if "spreadsheetml" in content_type or file_url.lower().endswith((".xlsx", ".xls")):
         parsed = _parse_sebi_xlsx(file_bytes, amc_name)
     elif "csv" in content_type or file_url.lower().endswith(".csv"):
         parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
@@ -1794,17 +1937,17 @@ async def _discover_url_playwright(
         hrefs: list[str] = await page.evaluate(
             "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href)"
         )
-        # Prefer links labelled portfolio/disclosure; fall back to any xlsx/csv.
+        # Prefer links labelled portfolio/disclosure; fall back to any xlsx/xls/csv.
         candidates = [
             h for h in hrefs
-            if h.lower().endswith((".xlsx", ".csv"))
+            if h.lower().endswith((".xlsx", ".xls", ".csv"))
             and ("portfolio" in h.lower() or "disclosure" in h.lower())
         ]
         if not candidates:
-            candidates = [h for h in hrefs if h.lower().endswith((".xlsx", ".csv"))]
+            candidates = [h for h in hrefs if h.lower().endswith((".xlsx", ".xls", ".csv"))]
         if not candidates:
             logger.warning(
-                "mf_constituents_fetch amc=%s playwright found no xlsx/csv links at %s",
+                "mf_constituents_fetch amc=%s playwright found no xlsx/xls/csv links at %s",
                 amc_name,
                 discovery_url,
             )
