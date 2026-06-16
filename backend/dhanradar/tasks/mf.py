@@ -1662,9 +1662,11 @@ async def _mf_constituents_pipeline() -> str:
                                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
                     finally:
                         await browser.close()
-            except ImportError:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(
-                    "mf_constituents_fetch playwright not installed — skipping %d JS-SPA AMCs: %s",
+                    "mf_constituents_fetch playwright unavailable (%s: %s) — skipping %d JS-SPA AMCs: %s",
+                    type(e).__name__,
+                    e,
                     len(playwright_amcs),
                     [a["name"] for a in playwright_amcs],
                 )
