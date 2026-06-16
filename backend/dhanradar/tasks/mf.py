@@ -2849,7 +2849,7 @@ async def _kite_login_and_get_token() -> str:
             data={
                 "request_id": request_id,
                 "twofa_value": totp_code,
-                "twofa_type": "totp",
+                "twofa_type": "app_code",
                 "user_id": _s.KITE_USER_ID,
             },
         )
