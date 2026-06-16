@@ -66,6 +66,7 @@ class CasParseError(Exception):
 class ParsedTxn:
     when: date
     amount: float  # signed INVESTOR convention: outflows negative, inflows positive (normalized in parse_cas, B65)
+    is_sip: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,7 @@ def parse_cas(
                     excluded_txns += 1
                     continue
                 amount = float(amt) if ttype in _TXN_INFLOW_AS_PRINTED else -float(amt)
-                txns.append(ParsedTxn(when=when, amount=amount))
+                txns.append(ParsedTxn(when=when, amount=amount, is_sip=(ttype == "PURCHASE_SIP")))
             holdings.append(
                 ParsedHolding(
                     isin=isin,

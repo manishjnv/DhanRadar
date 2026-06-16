@@ -318,9 +318,6 @@ def sip_reminder() -> str:
 
     async def _go() -> str:
         now_utc = datetime.now(UTC)
-        if now_utc.day != 1:
-            return "sip_reminder: skipped (not 1st of month)"
-
         cutoff = now_utc - timedelta(days=25)
         sent = 0
 
@@ -330,6 +327,12 @@ def sip_reminder() -> str:
 
             for rules_row in all_rules:
                 uid = rules_row.user_id
+
+                # Use user's SIP day from CAS if known; fall back to 1st of month
+                target_day: int = rules_row.sip_day if rules_row.sip_day else 1
+                if now_utc.day != target_day:
+                    continue
+
                 existing = await db.scalar(
                     select(func.count()).select_from(SignalNotification).where(
                         and_(
@@ -357,5 +360,109 @@ def sip_reminder() -> str:
 
         log.info("sip_reminder.done", sent=sent)
         return f"sip_reminder: sent={sent}"
+
+    return asyncio.run(_go())
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — check_achievements (Part B)
+# ---------------------------------------------------------------------------
+
+# Achievement slugs and their unlock predicates.
+# Each predicate receives (entries, trust_wins, trust_total, sip_day_set) and returns bool.
+_ACHIEVEMENTS: list[tuple[str, str]] = [
+    ("first_entry",     "Logged your first journal entry"),
+    ("fomo_fighter",    "Avoided FOMO 3+ times"),
+    ("discipline_10",   "10 journal entries without a premature deployment"),
+    ("trust_believer",  "Signal was right ≥5 times in your trust history"),
+    ("sip_detective",   "SIP date auto-detected from your CAS upload"),
+]
+
+
+def _evaluate_achievements(
+    entries: list,
+    trust_wins: int,
+    trust_total: int,
+    sip_day_set: bool,
+) -> set[str]:
+    earned: set[str] = set()
+
+    if entries:
+        earned.add("first_entry")
+
+    fomo_avoided = sum(1 for e in entries if e.fomo_avoided)
+    if fomo_avoided >= 3:
+        earned.add("fomo_fighter")
+
+    premature_count = sum(1 for e in entries if e.premature)
+    if len(entries) >= 10 and premature_count == 0:
+        earned.add("discipline_10")
+
+    if trust_total > 0 and trust_wins >= 5:
+        earned.add("trust_believer")
+
+    if sip_day_set:
+        earned.add("sip_detective")
+
+    return earned
+
+
+@celery_app.task(name="dhanradar.tasks.signal_alerts.check_achievements")
+def check_achievements() -> str:
+    """Evaluate achievement conditions for all users; unlock newly earned achievements.
+
+    Scheduled nightly at 22:00 IST. Idempotent — only adds achievements that are not
+    already in earned_achievements[].
+    """
+    from sqlalchemy import select
+
+    from dhanradar.db import task_session
+    from dhanradar.signal import service
+    from dhanradar.signal.models import SignalRules
+
+    async def _go() -> str:
+        unlocked_total = 0
+
+        async with task_session() as db:
+            result = await db.execute(select(SignalRules))
+            all_rules = list(result.scalars().all())
+
+            for rules_row in all_rules:
+                uid = rules_row.user_id
+                user_id_str = str(uid)
+
+                journal_rows = await service.get_journal(db, user_id_str, limit=500)
+                trust = await service.get_trust_history(db, user_id_str)
+
+                newly_earned = _evaluate_achievements(
+                    entries=journal_rows,
+                    trust_wins=trust.wins,
+                    trust_total=trust.total,
+                    sip_day_set=bool(rules_row.sip_day),
+                )
+
+                existing = set(rules_row.earned_achievements or [])
+                new_unlocks = newly_earned - existing
+                if not new_unlocks:
+                    continue
+
+                rules_row.earned_achievements = list(existing | new_unlocks)
+
+                # Notify for each new unlock
+                slug_to_label = dict(_ACHIEVEMENTS)
+                for slug in new_unlocks:
+                    label = slug_to_label.get(slug, slug)
+                    await service.create_notification(
+                        db,
+                        user_id_str,
+                        message=f"Achievement unlocked: {label}",
+                        signal_state="no_signal",
+                    )
+                    unlocked_total += 1
+
+            await db.commit()
+
+        log.info("check_achievements.done", unlocked=unlocked_total)
+        return f"check_achievements: unlocked={unlocked_total}"
 
     return asyncio.run(_go())

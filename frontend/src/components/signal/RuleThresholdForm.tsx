@@ -11,6 +11,7 @@ const DEFAULTS: SignalRules = {
   breadth_threshold: 0.8,
   deploy_ladder: [20, 20, 20, 20, 20],
   alerts_on: true,
+  sip_day: null,
 };
 
 function SliderRow({
@@ -175,6 +176,32 @@ export function RuleThresholdForm() {
           weight="40% weight"
           onChange={(v) => update({ breadth_threshold: v })}
         />
+      </div>
+
+      {/* SIP Day */}
+      <div className="flex items-center justify-between border-b border-line py-4">
+        <div>
+          <p className="text-caption font-medium uppercase tracking-wide text-ink-muted">SIP Date</p>
+          <p className="mt-0.5 text-caption text-ink-secondary">
+            Day of month your SIP runs — auto-detected from CAS
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={31}
+            placeholder="Auto"
+            value={local.sip_day ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              update({ sip_day: raw === '' ? null : Math.min(31, Math.max(1, Number(raw))) });
+            }}
+            className="w-16 rounded-lg border border-line bg-surface-2 px-2 py-1 text-center mono text-[18px] font-semibold text-ink focus:border-royal focus:outline-none"
+            aria-label="SIP day of month"
+          />
+          <span className="text-caption text-ink-faint">of month</span>
+        </div>
       </div>
 
       {/* Footer actions */}

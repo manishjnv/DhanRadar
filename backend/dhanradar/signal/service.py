@@ -27,6 +27,30 @@ DEFAULT_RULES: dict = {
 }
 
 
+async def _refresh_sip_day(db: AsyncSession, rules_row: SignalRules) -> None:
+    """Populate sip_day on rules_row from the most recent CAS portfolio, if available."""
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.mf import service as mf_service
+
+    # Find the user's most recent portfolio_id
+    from dhanradar.models.mf import MfPortfolio
+    port_row = (
+        await db.execute(
+            sa_select(MfPortfolio.id)
+            .where(MfPortfolio.user_id == rules_row.user_id)
+            .order_by(MfPortfolio.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if port_row is None:
+        return
+    day = await mf_service.get_sip_day(db, port_row)
+    if day is not None:
+        rules_row.sip_day = day
+        await db.flush()
+
+
 async def get_or_create_rules(db: AsyncSession, user_id: str) -> SignalRules:
     uid = uuid.UUID(user_id)
     row = await db.get(SignalRules, uid)
@@ -34,6 +58,9 @@ async def get_or_create_rules(db: AsyncSession, user_id: str) -> SignalRules:
         row = SignalRules(user_id=uid, **DEFAULT_RULES)
         db.add(row)
         await db.flush()
+    # Auto-populate sip_day from CAS data if not yet set
+    if row.sip_day is None:
+        await _refresh_sip_day(db, row)
     return row
 
 
