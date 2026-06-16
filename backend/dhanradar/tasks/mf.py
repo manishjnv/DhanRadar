@@ -2348,6 +2348,14 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
                 # Use first match if similarity > 0.35
                 if rows[0][2] > 0.35:
                     scheme_isin_map[sname] = rows[0][0]
+                elif amc_name == "MIRAE" and rows[0][2] > 0.25:
+                    # MIRAE per-scheme files produce shorter extracted names; relax threshold.
+                    logger.info(
+                        "mf_constituents_fetch MIRAE scheme '%s' matched via relaxed threshold: %s",
+                        sname,
+                        [(r[1], f"{r[2]:.2f}") for r in rows[:3]],
+                    )
+                    scheme_isin_map[sname] = rows[0][0]
                 else:
                     logger.debug(
                         "mf_constituents_fetch amc=%s scheme '%s' top match similarity=%.2f (too low)",
