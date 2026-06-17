@@ -991,7 +991,7 @@ verified.
 
 | ID | Item | Status | Next action |
 |---|---|---|---|
-| Kite access token | TOTP-automated (pyotp) vs manual daily refresh | **DECIDE** | Choose before implementing `mf_kite_enrich`; TOTP secret stored in `.env` as `KITE_TOTP_SECRET` |
+| Kite access token | TOTP-automated (pyotp) vs manual daily refresh | **DECIDED: TOTP-automated** | pyotp-based daily token refresh; TOTP secret stored in `.env` as `KITE_TOTP_SECRET`; ready to implement `mf_kite_enrich` |
 | B67 route (d) | ADR-0033 amendment (extend SEBI XLSX parser to AUM + manager + derived credit) | **FILED — ADR-0033-A (2026-06-16)** | Tier-B/ToS/DPDP gate runs at scraper build time; sequenced behind P2a |
 | ADR-0035 | AMFI SPA AMC-level AUM — gates: endpoint RE + legal sanction | PENDING | Reverse-engineer AMFI SPA endpoint; counsel sign-off |
 | Playwright | Bot-protected AMC scraping — B63 memory ceiling constraint | PENDING | Memory profiling; Tier-B + codex:rescue adversarial review before activation |
