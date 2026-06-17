@@ -1001,6 +1001,8 @@ async def _metrics_refresh_pipeline() -> str:
 
     today = date.today()
     run_id = str(uuid4())
+
+    async with TaskSessionLocal() as db:
         # Load all ISINs that have any NAV data.
         isin_rows = (
             await db.execute(
