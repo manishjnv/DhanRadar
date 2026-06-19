@@ -73,7 +73,7 @@ export default function UploadCasPage() {
         </Link>
       )}
 
-      <h1 className="text-h2 font-medium text-ink">
+      <h1 className="text-h2 text-ink">
         {latestPortfolio ? 'Upload a new CAS' : 'Get your portfolio report in 60 seconds'}
       </h1>
       <p className="mt-2 text-body text-ink-secondary">
@@ -91,7 +91,7 @@ export default function UploadCasPage() {
             {file && (
               <p className="mt-3 text-small text-ink-secondary">
                 Selected: <span className="font-medium text-ink">{file.name}</span>{' '}
-                ({(file.size / 1024).toFixed(0)} KB)
+                (<span className="font-mono tabular-nums">{(file.size / 1024).toFixed(0)} KB</span>)
               </p>
             )}
           </CardBody>

@@ -114,7 +114,7 @@ export default function MoodPage() {
     <MaybeShell>
       {/* Page heading */}
       <div className="mb-6">
-        <h1 className="text-h2 font-medium text-ink">Market Mood</h1>
+        <h1 className="text-h2 text-ink">Market Mood</h1>
         <p className="text-small text-ink-secondary mt-1">
           An educational read of market sentiment, updated twice daily.
         </p>
@@ -187,7 +187,7 @@ export default function MoodPage() {
               {(data.contributing_factors.length > 0 ||
                 data.contradicting_factors.length > 0) && (
                 <div className="mt-6 border-t border-line pt-4">
-                  <p className="text-small font-semibold text-ink mb-3">
+                  <p className="text-small font-medium text-ink mb-3">
                     What&rsquo;s driving this
                   </p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -214,7 +214,7 @@ export default function MoodPage() {
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}
           {/* ------------------------------------------------------------ */}
           <footer className="space-y-2">
-            <p className="text-caption text-ink-muted">
+            <p className="font-mono text-caption tabular-nums text-ink-muted">
               As of {data.snapshot_date}
             </p>
             {/* Contextual #9 disclosure from API (next to the mood read). */}

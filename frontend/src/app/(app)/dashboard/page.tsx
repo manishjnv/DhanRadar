@@ -41,13 +41,13 @@ function IndexKPICard({
   const positive = changePct >= 0;
   return (
     <Card className="flex flex-col gap-1 p-4">
-      <span className="text-caption text-ink-muted uppercase tracking-wide">{name}</span>
-      <span className="text-h3 font-medium text-ink tabular-nums">
+      <span className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">{name}</span>
+      <span className="font-mono text-h3 text-ink tabular-nums">
         {value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
       </span>
       <span
         className={cn(
-          'text-small font-medium tabular-nums',
+          'font-mono text-small font-medium tabular-nums',
           positive ? 'text-emerald' : 'text-red',
         )}
       >
@@ -120,10 +120,10 @@ function TopScoredTable() {
         <div className="overflow-x-auto">
           <table className="w-full text-small">
             <thead>
-              <tr className="border-b border-line text-caption text-ink-muted">
-                <th className="pb-2 text-left font-medium">Fund</th>
-                <th className="pb-2 text-left font-medium">Category</th>
-                <th className="pb-2 text-left font-medium">Assessment</th>
+              <tr className="border-b border-line">
+                <th scope="col" className="pb-2 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">Fund</th>
+                <th scope="col" className="pb-2 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">Category</th>
+                <th scope="col" className="pb-2 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">Assessment</th>
               </tr>
             </thead>
             <tbody>
@@ -191,7 +191,7 @@ function PortfolioSnapshot() {
     return (
       <Card className="flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center">
         <div className="flex-1">
-          <p className="text-h3 font-medium text-ink">Get started in 60 seconds</p>
+          <p className="text-h3 text-ink">Get started in 60 seconds</p>
           <p className="mt-1 text-small text-ink-secondary">
             Upload your Consolidated Account Statement (CAS) and get a fully labelled
             educational analysis of your mutual fund portfolio.
@@ -215,18 +215,18 @@ function PortfolioSnapshot() {
       {/* KPI row */}
       <div className="flex flex-wrap items-center gap-6 sm:gap-10">
         <div>
-          <p className="text-caption text-ink-muted uppercase tracking-wide">Current value</p>
-          <p className="text-h2 font-medium text-ink tabular-nums">
+          <p className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">Current value</p>
+          <p className="font-mono text-h2 text-ink tabular-nums">
             {summary.current_value != null
               ? `₹${summary.current_value.toLocaleString('en-IN')}`
               : '—'}
           </p>
         </div>
         <div>
-          <p className="text-caption text-ink-muted uppercase tracking-wide">XIRR</p>
+          <p className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">XIRR</p>
           <p
             className={cn(
-              'text-h3 font-medium tabular-nums',
+              'font-mono text-h3 tabular-nums',
               summary.xirr_pct == null
                 ? 'text-ink-muted'
                 : summary.xirr_pct >= 0
@@ -240,8 +240,8 @@ function PortfolioSnapshot() {
           </p>
         </div>
         <div>
-          <p className="text-caption text-ink-muted uppercase tracking-wide">Funds</p>
-          <p className="text-h3 font-medium text-ink tabular-nums">{summary.fund_count}</p>
+          <p className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">Funds</p>
+          <p className="font-mono text-h3 text-ink tabular-nums">{summary.fund_count}</p>
         </div>
         <div className="sm:ml-auto">
           <Button variant="outline" size="sm" asChild>
@@ -255,9 +255,9 @@ function PortfolioSnapshot() {
         <div className="overflow-x-auto">
           <table className="w-full text-small">
             <thead>
-              <tr className="border-b border-line text-caption text-ink-muted">
-                <th className="pb-2 text-left font-medium">Fund</th>
-                <th className="pb-2 text-left font-medium">Assessment</th>
+              <tr className="border-b border-line">
+                <th scope="col" className="pb-2 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">Fund</th>
+                <th scope="col" className="pb-2 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">Assessment</th>
               </tr>
             </thead>
             <tbody>
@@ -291,7 +291,7 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-h2 font-medium text-ink">Dashboard</h1>
+        <h1 className="text-h2 text-ink">Dashboard</h1>
         <p className="mt-1 text-small text-ink-secondary">
           Indian market overview
         </p>
