@@ -10,6 +10,8 @@
 
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Upload } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useMarketIndices } from '@/hooks/useMarketIndices';
 import {
   useSignalRules, useVIX, useBreadth, useJournal, useSignalDeployments,
@@ -98,7 +100,7 @@ function CASBanner() {
 
   return (
     <div className="cas-banner" role="complementary" aria-label="Portfolio link prompt">
-      <span className="shrink-0 text-royal" aria-hidden="true">📁</span>
+      <Upload size={16} className="shrink-0 text-royal" aria-hidden="true" />
       <p className="flex-1 text-small text-ink-secondary">
         Link your portfolio for deeper context
       </p>
@@ -301,39 +303,33 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
           {/* Journal section */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              <p className="text-small font-semibold text-ink">
                 Investment Journal
               </p>
-              <button
+              <Button
                 type="button"
-                className="btn btn-accent"
-                style={{ fontSize: 12, padding: '6px 14px' }}
+                size="sm"
+                variant="primary"
                 onClick={() => setLogModalOpen(true)}
               >
                 + Log today
-              </button>
+              </Button>
             </div>
 
             {!journalData || journalData.entries.length === 0 ? (
-              <div
-                style={{
-                  padding: '24px 16px',
-                  textAlign: 'center',
-                  border: '1px dashed var(--border-strong)',
-                  borderRadius: 10,
-                }}
-              >
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              <div className="rounded-lg border border-dashed border-line-strong px-4 py-6 text-center">
+                <p className="text-small text-ink-secondary">
                   No decisions logged yet.
                 </p>
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost"
-                  style={{ marginTop: 8, fontSize: 12 }}
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2"
                   onClick={() => setLogModalOpen(true)}
                 >
                   + Log today&apos;s decision
-                </button>
+                </Button>
               </div>
             ) : (
               <div className="flex flex-col gap-2">

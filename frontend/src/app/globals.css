@@ -261,8 +261,8 @@
     bottom: 24px;
     right: 24px;
     z-index: 1000;
-    background: var(--pos-soft);
-    border: 1px solid var(--positive);
+    background: var(--emerald-soft);
+    border: 1px solid var(--dr-emerald);
     border-radius: 10px;
     padding: 12px 16px;
     max-width: 320px;

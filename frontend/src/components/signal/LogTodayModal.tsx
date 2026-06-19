@@ -1,6 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import { X } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useAddJournal } from '@/features/signal/api';
 import { useVIX, useBreadth } from '@/features/signal/api';
 import { useMarketIndices } from '@/hooks/useMarketIndices';
@@ -19,6 +21,12 @@ const EMOTIONS: { value: JournalEmotion; label: string }[] = [
   { value: 'fomo', label: 'FOMO' },
   { value: 'disciplined', label: 'Disciplined' },
 ];
+
+// Shared field / label classes — token-only, mirrors the Rules form inputs.
+const FIELD_CLS =
+  'mono rounded-md border border-line bg-surface-2 px-2.5 py-2 text-small text-ink focus:border-royal focus:outline-none';
+const LABEL_CLS =
+  'text-caption font-medium uppercase tracking-wide text-ink-muted';
 
 function todayISO(): string {
   const d = new Date();
@@ -121,192 +129,146 @@ export function LogTodayModal({ onClose }: LogTodayModalProps) {
       {/* Backdrop — button so a11y click/keyboard rules are satisfied */}
       <button
         type="button"
-        className="absolute inset-0 w-full h-full"
-        style={{ background: 'rgba(0,0,0,0.5)', cursor: 'default', border: 'none' }}
+        className="absolute inset-0 h-full w-full cursor-default border-0 bg-black/50"
         onClick={onClose}
         aria-label="Close dialog"
         tabIndex={-1}
       />
       {/* Panel — above backdrop */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-      <div
-        className="card card-pad w-full max-w-md mx-4 flex flex-col gap-4 pointer-events-auto"
-        style={{ maxHeight: '90vh', overflowY: 'auto' }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
-            Log today&apos;s decision
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ fontSize: 18, color: 'var(--text-muted)', lineHeight: 1 }}
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Date */}
-          <label className="flex flex-col gap-1">
-            <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-              Date
-            </span>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--surface-2)',
-                color: 'var(--text)',
-                fontSize: 13,
-                fontFamily: 'var(--dr-font-mono)',
-              }}
-            />
-          </label>
-
-          {/* Decision */}
-          <div className="flex flex-col gap-1">
-            <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-              Decision
-            </span>
-            <div className="flex gap-2">
-              {DECISIONS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setDecision(value)}
-                  className={decision === value ? 'btn btn-accent' : 'btn btn-outline'}
-                  style={{ flex: 1, fontSize: 13 }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+        <div className="card card-pad mx-4 flex w-full max-w-md flex-col gap-4 pointer-events-auto max-h-[90vh] overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <p className="text-body font-semibold text-ink">
+              Log today&apos;s decision
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="leading-none text-ink-muted hover:text-ink"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
           </div>
 
-          {/* Amount deployed (only when deployed) */}
-          {decision === 'deployed' && (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* Date */}
             <label className="flex flex-col gap-1">
-              <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-                Amount deployed (₹)
-              </span>
+              <span className={LABEL_CLS}>Date</span>
               <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min={0}
-                placeholder="0"
-                style={{
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-2)',
-                  color: 'var(--text)',
-                  fontSize: 13,
-                  fontFamily: 'var(--dr-font-mono)',
-                }}
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+                className={FIELD_CLS}
               />
             </label>
-          )}
 
-          {/* How did you feel? — SEBI: personal reflection, not performance judgement */}
-          <div className="flex flex-col gap-1">
-            <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-              How did you feel?
-            </span>
-            <div className="flex flex-wrap gap-2">
-              {EMOTIONS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => toggleEmotion(value)}
-                  className={`chip${emotions.has(value) ? ' active' : ''}`}
-                >
-                  {label}
-                </button>
-              ))}
+            {/* Decision */}
+            <div className="flex flex-col gap-1">
+              <span className={LABEL_CLS}>Decision</span>
+              <div className="flex gap-2">
+                {DECISIONS.map(({ value, label }) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={decision === value ? 'primary' : 'outline'}
+                    className="flex-1"
+                    onClick={() => setDecision(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Notes */}
-          <label className="flex flex-col gap-1">
-            <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-              Notes (optional)
-            </span>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="What were you thinking?"
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--surface-2)',
-                color: 'var(--text)',
-                fontSize: 13,
-                resize: 'vertical',
-              }}
-            />
-          </label>
+            {/* Amount deployed (only when deployed) */}
+            {decision === 'deployed' && (
+              <label className="flex flex-col gap-1">
+                <span className={LABEL_CLS}>Amount deployed (₹)</span>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  min={0}
+                  placeholder="0"
+                  className={FIELD_CLS}
+                />
+              </label>
+            )}
 
-          {/* Market snapshot (auto-filled, user-editable) */}
-          <div className="flex flex-col gap-1">
-            <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>
-              Market snapshot (auto-filled)
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: 'Nifty %', value: niftyPct, set: setNiftyPct, placeholder: '0.00' },
-                { label: 'VIX', value: vixLevel, set: setVixLevel, placeholder: '0.00' },
-                { label: 'A/D', value: breadthRatio, set: setBreadthRatio, placeholder: '0.000' },
-              ].map(({ label, value, set, placeholder }) => (
-                <label key={label} className="flex flex-col gap-1">
-                  <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{label}</span>
-                  <input
-                    type="number"
-                    step="any"
-                    value={value}
-                    onChange={(e) => set(e.target.value)}
-                    placeholder={placeholder}
-                    style={{
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      border: '1px solid var(--border)',
-                      background: 'var(--surface-2)',
-                      color: 'var(--text)',
-                      fontSize: 12,
-                      fontFamily: 'var(--dr-font-mono)',
-                    }}
-                  />
-                </label>
-              ))}
+            {/* How did you feel? — SEBI: personal reflection, not performance judgement */}
+            <div className="flex flex-col gap-1">
+              <span className={LABEL_CLS}>How did you feel?</span>
+              <div className="flex flex-wrap gap-2">
+                {EMOTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => toggleEmotion(value)}
+                    className={`chip${emotions.has(value) ? ' active' : ''}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Submit */}
-          <button
-            type="submit"
-            className="btn btn-accent"
-            disabled={addJournal.isPending}
-          >
-            {addJournal.isPending ? 'Saving…' : 'Save entry'}
-          </button>
+            {/* Notes */}
+            <label className="flex flex-col gap-1">
+              <span className={LABEL_CLS}>Notes (optional)</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                placeholder="What were you thinking?"
+                className="resize-y rounded-md border border-line bg-surface-2 px-2.5 py-2 text-small text-ink focus:border-royal focus:outline-none"
+              />
+            </label>
 
-          {addJournal.isError && (
-            <p style={{ fontSize: 12, color: 'var(--dr-red)' }}>
-              Failed to save. Please try again.
-            </p>
-          )}
-        </form>
-      </div>
+            {/* Market snapshot (auto-filled, user-editable) */}
+            <div className="flex flex-col gap-1">
+              <span className={LABEL_CLS}>Market snapshot (auto-filled)</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: 'Nifty %', value: niftyPct, set: setNiftyPct, placeholder: '0.00' },
+                  { label: 'VIX', value: vixLevel, set: setVixLevel, placeholder: '0.00' },
+                  { label: 'A/D', value: breadthRatio, set: setBreadthRatio, placeholder: '0.000' },
+                ].map(({ label, value, set, placeholder }) => (
+                  <label key={label} className="flex flex-col gap-1">
+                    <span className="text-caption text-ink-faint">{label}</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={value}
+                      onChange={(e) => set(e.target.value)}
+                      placeholder={placeholder}
+                      className="mono rounded-md border border-line bg-surface-2 px-2 py-1.5 text-small text-ink focus:border-royal focus:outline-none"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Submit */}
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full"
+              disabled={addJournal.isPending}
+            >
+              {addJournal.isPending ? 'Saving…' : 'Save entry'}
+            </Button>
+
+            {addJournal.isError && (
+              <p className="text-caption text-red">
+                Failed to save. Please try again.
+              </p>
+            )}
+          </form>
+        </div>
       </div>
     </div>
   );

@@ -2,13 +2,17 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { BookOpen } from 'lucide-react';
 import { useLearningContent } from '@/features/signal/api';
 import type { SignalState } from '@/features/signal/types';
 
+// Map each signal state to a real theme token. The previous --warn / --info /
+// --positive vars are NOT defined in tokens.css, so the icon tint resolved to
+// an invalid color-mix and rendered untinted. Use the canonical --dr-* vars.
 const ICON_COLOR: Record<SignalState, string> = {
-  triggered: 'var(--warn)',
-  watch:     'var(--info)',
-  no_signal: 'var(--positive)',
+  triggered: 'var(--dr-amber)',
+  watch:     'var(--dr-royal)',
+  no_signal: 'var(--dr-emerald)',
 };
 
 interface LearningContentProps {
@@ -55,7 +59,7 @@ export function LearningContent({ signalState = 'no_signal' }: LearningContentPr
                     style={{ background: `color-mix(in srgb, ${iconColor} 15%, transparent)`, color: iconColor }}
                     aria-hidden="true"
                   >
-                    📖
+                    <BookOpen size={16} />
                   </div>
                   <div className="flex-1">
                     <p className="text-small font-medium text-ink">{article.title}</p>

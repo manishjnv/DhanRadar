@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Trophy, Lock } from 'lucide-react';
 import type { JournalEntry, SignalDeployment } from '@/features/signal/types';
 
 interface Achievement {
@@ -63,7 +64,7 @@ interface AchievementsProps {
 export function Achievements({ entries, deployments }: AchievementsProps) {
   return (
     <div className="card card-pad flex flex-col gap-3">
-      <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Milestones</p>
+      <p className="text-small font-semibold text-ink">Milestones</p>
 
       <div className="grid grid-cols-2 gap-3">
         {ACHIEVEMENTS.map((a) => {
@@ -75,16 +76,14 @@ export function Achievements({ entries, deployments }: AchievementsProps) {
               aria-label={earned ? `${a.title} — earned` : `${a.title} — locked`}
             >
               <div className="flex items-start gap-2">
-                <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden="true">
-                  {earned ? '🏆' : '🔒'}
-                </span>
+                {earned ? (
+                  <Trophy size={18} className="shrink-0 text-emerald" aria-hidden="true" />
+                ) : (
+                  <Lock size={18} className="shrink-0 text-ink-faint" aria-hidden="true" />
+                )}
                 <div>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                    {a.title}
-                  </p>
-                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                    {a.description}
-                  </p>
+                  <p className="text-small font-semibold text-ink">{a.title}</p>
+                  <p className="mt-0.5 text-caption text-ink-secondary">{a.description}</p>
                 </div>
               </div>
             </div>

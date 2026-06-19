@@ -49,17 +49,11 @@ function KPICard({ label, score, color }: KPICardProps) {
     <div className="kpi-card flex flex-col items-center gap-2 py-4">
       <div className="relative flex items-center justify-center">
         <ScoreRing score={score} color={color} />
-        <span
-          className="absolute t16 w-700 mono"
-          style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--dr-font-mono)', fontFeatureSettings: "'tnum'" }}
-        >
+        <span className="mono absolute text-small font-bold text-ink">
           {score}
         </span>
       </div>
-      <span
-        className="t11 upper muted"
-        style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}
-      >
+      <span className="text-caption font-medium uppercase tracking-wide text-ink-muted">
         {label}
       </span>
     </div>
@@ -92,10 +86,7 @@ export function BehaviourKPIs({ scores }: BehaviourKPIsProps) {
       </div>
 
       {!scores.has_trust_data && (
-        <p
-          className="text-center"
-          style={{ fontSize: 11, color: 'var(--text-faint)' }}
-        >
+        <p className="text-center text-caption text-ink-faint">
           Trust score activates after 90 days of signals
         </p>
       )}
