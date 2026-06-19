@@ -24,6 +24,7 @@ from datetime import time as _time_type
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from dhanradar.market_data.breadth import fetch_nifty50_advances_declines_sync
 from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
 from dhanradar.scoring.engine.schemas import (
@@ -326,19 +327,6 @@ _BREADTH_CACHE_KEY = "signal:breadth:last"
 _TTL_VIX_SEC = 24 * 3600
 _TTL_BREADTH_SEC = 3600
 
-_NIFTY50_TICKERS = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
-    "LT.NS", "HCLTECH.NS", "BAJFINANCE.NS", "ASIANPAINT.NS", "AXISBANK.NS",
-    "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS",
-    "NESTLEIND.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "M&M.NS",
-    "TATAMOTORS.NS", "COALINDIA.NS", "TATASTEEL.NS", "GRASIM.NS", "ADANIPORTS.NS",
-    "BAJAJ-AUTO.NS", "TECHM.NS", "DRREDDY.NS", "HINDALCO.NS", "CIPLA.NS",
-    "SBILIFE.NS", "JSWSTEEL.NS", "BPCL.NS", "BAJAJFINSV.NS", "BRITANNIA.NS",
-    "EICHERMOT.NS", "HDFCLIFE.NS", "APOLLOHOSP.NS", "INDUSINDBK.NS", "DIVISLAB.NS",
-    "TATACONSUM.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS", "BEL.NS", "ADANIENT.NS",
-]
-
 _IST = ZoneInfo("Asia/Kolkata")
 
 
@@ -370,19 +358,7 @@ def _fetch_breadth_sync() -> dict:
     import yfinance as yf
     start = _time_module.monotonic()
 
-    close_data = yf.download(
-        _NIFTY50_TICKERS, period="2d", progress=False, auto_adjust=True
-    )["Close"]
-
-    if close_data.empty or len(close_data) < 2:
-        raise ValueError("insufficient breadth data")
-
-    today_row = close_data.iloc[-1]
-    prev_row = close_data.iloc[-2]
-    valid = today_row.notna() & prev_row.notna()
-    advances = int((today_row[valid] > prev_row[valid]).sum())
-    declines = int(valid.sum()) - advances
-    declines = max(declines, 0)
+    advances, declines = fetch_nifty50_advances_declines_sync()
     ad_ratio = round(advances / max(declines, 1), 3)
 
     # Also fetch Nifty index pct change — stored in breadth cache for signal_alert task
