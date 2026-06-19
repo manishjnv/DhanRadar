@@ -2492,3 +2492,19 @@ to prod. Root cause from prod evidence (not a parse failure): dedup key TTL 24h 
 - Deploy gate: the prod deploy was correctly blocked by the auto-mode classifier on the first
   attempt (user's "go" scoped to fix+merge); ran only after explicit "continue" approval — the
   project overlay's separate-human-approval deploy gate held as designed.
+
+
+### Agent-utilization footer — ADMIN UI CRASH FIXES session (2026-06-19)
+Headline: 3 runtime crashes on admin Billing + Operations fixed (frontend type/field-name mismatches
+with backend API). Commit 93514b8 merged to main as PR 263 (squash ad10947).
+- **Opus** — root-cause: run_id int/string crash, WebhookHealth field names, paymentsQ.refetch.
+Diffs vs ops_schemas.py + billing_schemas.py; all 4 fixes confirmed; pushed fix/admin-ui-crashes,
+PR 263 merged. Self-executed all edits (3 files, 15 lines, hot cache).
+- **Sonnet** — n/a (<=15 lines, 3 files in hot context; cold-start > Opus token cost).
+- **Haiku** — n/a.
+- **codex:rescue** — n/a — frontend-only; no security/auth/AI-classifier path touched.
+- **claude-mem** — n/a; noreply email, TMPDIR=/e/tmp, no Admin.md commit, ADMIN_USER_IDS env-only.
+- Per-delegation: no non-trivial delegations; Opus self-executed all edits from hot cache.
+- Open: sebi_circulars parser (0 rows), rbi_dbie 404, Admin nav link.
+- Tests: frontend-only; build CI gate on VPS deploy.
+- Next action: auto-deploy picks up ad10947; verify admin pages render correctly.
