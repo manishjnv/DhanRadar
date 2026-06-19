@@ -65,7 +65,7 @@ export interface AdminTask {
 }
 
 export interface AdminRun {
-  run_id: string;
+  run_id: number;
   source: string;
   task_name: string;
   started_at: string;
@@ -328,9 +328,9 @@ export interface AdminBillingSubMetrics {
 }
 
 export interface AdminBillingWebhookHealth {
-  recent_events: number;
-  success: number;
-  failed: number;
+  recent_count: number;
+  success_count: number;
+  failed_count: number;
   last_event_at: string | null;
 }
 

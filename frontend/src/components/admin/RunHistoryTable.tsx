@@ -7,7 +7,7 @@ import { formatRelative, formatDuration } from './utils';
 import { cn } from '@/lib/cn';
 
 export interface AdminRun {
-  run_id: string;
+  run_id: number;
   source: string;
   task_name: string;
   started_at: string;
@@ -50,10 +50,10 @@ export function RunHistoryTable({ runs, onViewDetail }: RunHistoryTableProps) {
             <tr
               key={run.run_id}
               className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors cursor-pointer"
-              onClick={() => onViewDetail(run.run_id)}
+              onClick={() => onViewDetail(String(run.run_id))}
             >
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {run.run_id.slice(0, 8)}…
+                #{run.run_id}
               </td>
               <td className="py-2.5 pr-4 text-ink font-medium">{run.source}</td>
               <td className="py-2.5 pr-4 text-ink-muted font-mono text-[11px]">{formatRelative(run.started_at)}</td>
@@ -72,7 +72,7 @@ export function RunHistoryTable({ runs, onViewDetail }: RunHistoryTableProps) {
                 <HealthBadge status={run.status as Parameters<typeof HealthBadge>[0]['status']} />
               </td>
               <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
-                <Button size="sm" variant="ghost" onClick={() => onViewDetail(run.run_id)}>
+                <Button size="sm" variant="ghost" onClick={() => onViewDetail(String(run.run_id))}>
                   Detail
                 </Button>
               </td>
