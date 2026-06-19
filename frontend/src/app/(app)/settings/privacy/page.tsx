@@ -127,7 +127,7 @@ export default function PrivacyConsentPage() {
     <div className="flex flex-col gap-6 max-w-2xl">
       {/* Page heading */}
       <div className="flex flex-col gap-1">
-        <h1 className="text-h2 font-medium text-ink">Privacy &amp; consent</h1>
+        <h1 className="text-h2 text-ink">Privacy &amp; consent</h1>
         <p className="text-small text-ink-secondary">
           Choose how DhanRadar may process your data. You can withdraw any consent at
           any time; withdrawal applies to future processing.
