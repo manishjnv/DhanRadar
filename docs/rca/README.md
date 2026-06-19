@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-19 — Admin Phase 6: AMFI scheme-master ingested 0 rows (wrong delimiter assumption; test masked it)
+
+- **Symptom:** post-deploy, the `mf_scheme_master_refresh` task ran to `status=success` but wrote **0 rows** (`0 written, 0 failed`) against the live AMFI feed — a false-healthy source. Unit tests were green (27 passed).
+- **Root cause:** the builder assumed AMFI `DownloadSchemeData_Po.aspx?mf=0` is **semicolon**-delimited with 11 columns (copied from the `NAVAll.txt` shape). The live feed is **comma**-delimited with **10** columns, and the final field concatenates the Growth + Reinvest ISINs with **no separator** (`INF…157INF…CE5`). `parse_scheme_master` split on `;`, got 1 field/line, found no ISIN, skipped every row. The unit test passed only because its fixture was *also* hand-written in the wrong semicolon format — the test validated the assumption, not reality (no real-feed sample was ever captured).
+- **Fix:** rewrote `parse_scheme_master` for the real format — comma split, numeric-`Code` data-row detection, trailing columns anchored from the **right** (so a comma inside a scheme name can't shift the ISIN/date columns), and ISINs extracted via `re.findall(r"INF[A-Z0-9]{9}")` on the concatenated blob (1 token → growth only; 2 → growth+reinvest). `backend/dhanradar/market_data/amfi_scheme_master.py`. Rewrote the test fixtures to the verified live format + added a comma-in-name robustness test. Verified live: fetch returns 16,244 lines and the parser yields rows.
+- **Prevention:** a parser fixture MUST be a captured sample of the **real** source, never hand-authored to match the parser's assumption — otherwise the test green-lights the bug. For any new ingestion source, the acceptance gate is **`records_written > 0` against the live feed**, not just `status=success` (a 0-row success is a false-healthy and should be treated as a failure). Capture a byte sample of every new feed before writing the parser.
+- **Phase/area:** Admin Console Phase 6 / data ingestion (AMFI scheme master).
+
 ### 2026-06-15 — Broken main: partial squash merge across two PRs touching one file + auto-merge racing a failing required check
 
 - **Symptom:** after PR #185 (Fund Explorer v2) squash-merged, `main` failed `tsc`/`frontend` CI with 8 `TS2741` errors — `page.tsx` and the `SortHeader` call sites passed no `sortDir`, but `FundExplorerTableProps` + the `SortHeader` signature still *required* it.

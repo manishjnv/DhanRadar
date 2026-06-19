@@ -31,24 +31,26 @@ from dhanradar.market_data.exceptions import ProviderError
 # Fixtures
 # ---------------------------------------------------------------------------
 
-# Realistic semicolon-delimited scheme master fixture (11 fields per row).
-# Header row + 3 data rows + 1 no-ISIN row + 1 closure_date row.
+# Realistic COMMA-delimited scheme master fixture matching the LIVE AMFI feed
+# (verified 2026-06-19): 10 fields per row, and the final field concatenates the
+# Growth + Reinvest ISINs with NO separator (e.g. "INF204K01EY6INF204K01EZ3").
+# A single 12-char ISIN means growth-only. Header + 3 valid + 1 no-ISIN + 1 closure.
 SCHEME_MASTER_FIXTURE = """\
-AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;Scheme Minimum Amount;Launch Date;Closure Date;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment
-HDFC Mutual Fund;119551;HDFC Top 100 Fund - Direct Plan - Growth;Open Ended Schemes;Equity Scheme - Large Cap Fund;HDFC Top 100 Fund - Direct Plan - Growth Option;100;01-Jan-2013;;INF179KB1HA2;-
-Nippon India Mutual Fund;118701;Nippon India Large Cap Fund - Regular Plan - Dividend;Open Ended Schemes;Equity Scheme - Large Cap Fund;Nippon Large Cap - Regular - Div;500;01-Aug-2004;;INF204K01EY6;INF204K01EZ3
-No ISIN Fund Limited;999001;Ghost Fund - Growth;Open Ended Schemes;Equity Scheme;Ghost Fund NAV;500;01-Jun-2020;;-;-
-Taurus Mutual Fund;140005;Taurus Bonanza Fund - Growth;Close Ended Schemes;Income;Taurus Bonanza - Growth;5000;15-Jan-2000;31-Mar-2019;INF090I01AA1;-
+AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,Scheme Minimum Amount,Launch Date,Closure Date,ISIN Div Payout/ISIN GrowthISIN Div Reinvestment
+HDFC Mutual Fund,119551,HDFC Top 100 Fund - Direct Plan - Growth,Open Ended Schemes,Equity Scheme - Large Cap Fund,HDFC Top 100 Fund - Direct Plan - Growth Option,100,01-Jan-2013,,INF179KB1HA2
+Nippon India Mutual Fund,118701,Nippon India Large Cap Fund - Regular Plan - Dividend,Open Ended Schemes,Equity Scheme - Large Cap Fund,Nippon Large Cap - Regular - Div,500,01-Aug-2004,,INF204K01EY6INF204K01EZ3
+No ISIN Fund Limited,999001,Ghost Fund - Growth,Open Ended Schemes,Equity Scheme,Ghost Fund NAV,500,01-Jun-2020,,-
+Taurus Mutual Fund,140005,Taurus Bonanza Fund - Growth,Close Ended Schemes,Income,Taurus Bonanza - Growth,5000,15-Jan-2000,31-Mar-2019,INF090I01AA1
 """
 
 # Minimal fixture with only the header and one valid row (no trailing newline edge).
 MINIMAL_FIXTURE = (
-    "AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;"
-    "Scheme Minimum Amount;Launch Date;Closure Date;"
-    "ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment\n"
-    "SBI Mutual Fund;119300;SBI Blue Chip Fund - Direct Plan - Growth;"
-    "Open Ended Schemes;Equity Scheme - Large Cap Fund;"
-    "SBI Blue Chip Direct Growth;500;14-Feb-2006;;INF200KA1UC0;INF200KA1UD8\n"
+    "AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,"
+    "Scheme Minimum Amount,Launch Date,Closure Date,"
+    "ISIN Div Payout/ISIN GrowthISIN Div Reinvestment\n"
+    "SBI Mutual Fund,119300,SBI Blue Chip Fund - Direct Plan - Growth,"
+    "Open Ended Schemes,Equity Scheme - Large Cap Fund,"
+    "SBI Blue Chip Direct Growth,500,14-Feb-2006,,INF200KA1UC0INF200KA1UD8\n"
 )
 
 
@@ -130,30 +132,32 @@ class TestParseSchemeMaster:
         assert hdfc.scheme_name == "HDFC Top 100 Fund - Direct Plan - Growth"
 
     def test_invalid_isin_format_skipped(self):
-        """An ISIN that doesn't match ^INF[A-Z0-9]{9}$ must cause row skip."""
+        """A final field with no INF-ISIN token must cause the row to be skipped."""
         bad_fixture = (
-            "AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;"
-            "Scheme Minimum Amount;Launch Date;Closure Date;"
-            "ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment\n"
-            "TestAMC;99999;Bad ISIN Fund;Open;Equity;Nav;500;01-Jun-2020;;"
-            "BADFORMAT;-\n"
+            "AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,"
+            "Scheme Minimum Amount,Launch Date,Closure Date,"
+            "ISIN Div Payout/ISIN GrowthISIN Div Reinvestment\n"
+            "TestAMC,99999,Bad ISIN Fund,Open,Equity,Nav,500,01-Jun-2020,,BADFORMAT\n"
         )
         rows = parse_scheme_master(bad_fixture)
         assert rows == []
 
-    def test_reinvest_isin_used_when_growth_invalid(self):
-        """When isin_growth is '-' but isin_reinvest is valid, reinvest is used."""
-        reinvest_only = (
-            "AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;"
-            "Scheme Minimum Amount;Launch Date;Closure Date;"
-            "ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment\n"
-            "SomeAMC;77001;Reinvest Only Fund;Open;Equity;Nav;500;01-Jun-2020;;"
-            "-;INF090I01RR5\n"
+    def test_comma_in_scheme_name_is_preserved(self):
+        """A comma inside the scheme name must NOT shift the ISIN/date columns
+        (trailing columns are anchored from the right; name re-joined from middle)."""
+        comma_name = (
+            "AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,"
+            "Scheme Minimum Amount,Launch Date,Closure Date,"
+            "ISIN Div Payout/ISIN GrowthISIN Div Reinvestment\n"
+            "SomeAMC,77001,Equity Fund - Direct, Growth,Open Ended Schemes,"
+            "Equity Scheme,Equity Fund Direct Growth,500,01-Jun-2020,,INF090I01RR5\n"
         )
-        rows = parse_scheme_master(reinvest_only)
+        rows = parse_scheme_master(comma_name)
         assert len(rows) == 1
-        assert rows[0].isin_growth is None
-        assert rows[0].isin_reinvest == "INF090I01RR5"
+        assert rows[0].scheme_name == "Equity Fund - Direct, Growth"
+        assert rows[0].isin_growth == "INF090I01RR5"
+        assert rows[0].isin_reinvest is None
+        assert rows[0].launch_date == datetime.date(2020, 6, 1)
 
     def test_returns_scheme_master_row_instances(self):
         rows = parse_scheme_master(MINIMAL_FIXTURE)
@@ -170,9 +174,9 @@ class TestParseSchemeMaster:
 
     def test_only_header_returns_empty_list(self):
         header = (
-            "AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;"
-            "Scheme Minimum Amount;Launch Date;Closure Date;"
-            "ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment"
+            "AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,"
+            "Scheme Minimum Amount,Launch Date,Closure Date,"
+            "ISIN Div Payout/ISIN GrowthISIN Div Reinvestment"
         )
         assert parse_scheme_master(header) == []
 
