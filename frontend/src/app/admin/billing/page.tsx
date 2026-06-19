@@ -403,29 +403,29 @@ function WebhookHealthCard() {
   }
   if (!data) return null;
 
-  const healthStatus = data.failed > 0 ? 'warning' : 'healthy';
-  const successRate  = data.recent_events > 0
-    ? Math.round((data.success / data.recent_events) * 100)
+  const healthStatus = data.failed_count > 0 ? 'warning' : 'healthy';
+  const successRate  = data.recent_count > 0
+    ? Math.round((data.success_count / data.recent_count) * 100)
     : 100;
 
   return (
     <div className="flex flex-wrap gap-3">
       <StatCard
         title="Recent Events"
-        value={data.recent_events.toLocaleString('en-IN')}
+        value={data.recent_count.toLocaleString('en-IN')}
         status="neutral"
         className="min-w-[140px]"
       />
       <StatCard
         title="Succeeded"
-        value={data.success.toLocaleString('en-IN')}
+        value={data.success_count.toLocaleString('en-IN')}
         status="healthy"
         className="min-w-[140px]"
       />
       <StatCard
         title="Failed"
-        value={data.failed.toLocaleString('en-IN')}
-        status={data.failed > 0 ? 'critical' : 'healthy'}
+        value={data.failed_count.toLocaleString('en-IN')}
+        status={data.failed_count > 0 ? 'critical' : 'healthy'}
         className="min-w-[140px]"
       />
       <StatCard
