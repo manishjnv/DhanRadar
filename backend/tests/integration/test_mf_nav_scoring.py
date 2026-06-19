@@ -27,7 +27,12 @@ from dhanradar.scoring.engine.schemas import ConfidenceBand
 from dhanradar.tasks.mf import _load_nav_series
 
 _DEMO_ISIN = "INF_B29TEST01"
-_AS_OF = datetime.date(2026, 6, 6)
+# Anchor to "today" so the seeded NAV window always sits inside _load_nav_series's
+# now()-relative 400-day lookback. A fixed past date is a time-bomb: as real time
+# advances, the earliest seeded row eventually ages out of the window and the row
+# count drops below 14. The scoring outcome depends on the series SHAPE, not on
+# absolute dates, so anchoring to today is behaviour-preserving and time-stable.
+_AS_OF = datetime.datetime.now(datetime.UTC).date()
 
 
 class _FakeHystStore:
