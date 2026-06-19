@@ -2,6 +2,12 @@
  * Admin component utility helpers.
  */
 
+/** Format a number as Indian Rupee currency (₹1,23,456). */
+export function formatCurrency(amount: number | null | undefined): string {
+  if (amount == null) return '—';
+  return '₹' + amount.toLocaleString('en-IN');
+}
+
 /** Format an ISO8601 timestamp as a relative string (e.g. "2h ago"). */
 export function formatRelative(iso: string | null | undefined): string {
   if (!iso) return '—';

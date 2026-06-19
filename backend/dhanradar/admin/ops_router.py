@@ -325,7 +325,7 @@ async def get_health(
     user_counts = await db.execute(
         text(
             "SELECT COUNT(*) AS total, "
-            "COUNT(*) FILTER (WHERE tier = 'plus') AS premium "
+            "COUNT(*) FILTER (WHERE tier IN ('pro','pro_plus','founder_lifetime')) AS premium "
             "FROM auth.users "
             "WHERE deletion_requested_at IS NULL"
         )

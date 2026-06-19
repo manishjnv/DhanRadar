@@ -219,3 +219,248 @@ export function useQualityAcknowledge() {
     onSettled: () => qc.invalidateQueries({ queryKey: adminKeys.quality() }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Users & Billing — extended query keys
+// ---------------------------------------------------------------------------
+export const adminKeysExt = {
+  userSummary:           () => ['admin', 'users', 'summary'] as const,
+  users:   (params?: Record<string, unknown>) => ['admin', 'users', 'list', params] as const,
+  user:    (id: string)  => ['admin', 'users', 'detail', id] as const,
+  billingOverview:       () => ['admin', 'billing', 'overview'] as const,
+  billingSubscriptions:  (params?: Record<string, unknown>) => ['admin', 'billing', 'subscriptions', params] as const,
+  billingPayments:       (params?: Record<string, unknown>) => ['admin', 'billing', 'payments', params] as const,
+  billingSubMetrics:     () => ['admin', 'billing', 'sub-metrics'] as const,
+  billingWebhookHealth:  () => ['admin', 'billing', 'webhook-health'] as const,
+  audit:  (params?: Record<string, unknown>) => ['admin', 'audit', params] as const,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Types — Users
+// ---------------------------------------------------------------------------
+
+export interface AdminUserSummary {
+  total: number;
+  active: number;
+  premium: number;
+  trials: number;
+  blocked: number;
+}
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  display_name: string;
+  tier: string;
+  status: string;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface AdminUsersListResponse {
+  total: number;
+  users: AdminUserRow[];
+}
+
+export interface AdminUserPayment {
+  user_id: string;
+  razorpay_payment_id: string | null;
+  status: string;
+  ts: string;
+  request_id: string | null;
+}
+
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  display_name: string;
+  tier: string;
+  status: string;
+  created_at: string;
+  pro_access_until: string | null;
+  pro_access_reason: string | null;
+  risk_profile: string | null;
+  dpdp_consent_version: string | null;
+  subscription: {
+    plan: string;
+    status: string;
+    current_period_end: string | null;
+  } | null;
+  payments: AdminUserPayment[];
+  login_history: unknown[];
+  cas_uploads: unknown[];
+}
+
+// ---------------------------------------------------------------------------
+// Types — Billing
+// ---------------------------------------------------------------------------
+
+export interface AdminBillingOverview {
+  mrr_inr: number;
+  arpu_inr: number;
+  active_subscriptions: number;
+  past_due: number;
+  trials: number;
+}
+
+export interface AdminSubscriptionRow {
+  user_id: string;
+  email: string;
+  plan: string;
+  status: string;
+  current_period_end: string | null;
+  price_inr: number;
+}
+
+export interface AdminPaymentRow {
+  user_id: string;
+  razorpay_payment_id: string | null;
+  status: string;
+  ts: string;
+  request_id: string | null;
+}
+
+export interface AdminBillingSubMetrics {
+  premium_count: number;
+  trials: number;
+  renewals_30d: number;
+  churn_30d: number;
+}
+
+export interface AdminBillingWebhookHealth {
+  recent_events: number;
+  success: number;
+  failed: number;
+  last_event_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Types — Audit
+// ---------------------------------------------------------------------------
+
+export interface AdminAuditRow {
+  id: string;
+  ts: string;
+  admin_id: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  result: string;
+  request_id: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// User hooks
+// ---------------------------------------------------------------------------
+
+export function useAdminUserSummary() {
+  return useQuery({
+    queryKey: adminKeysExt.userSummary(),
+    queryFn: () => api.get<AdminUserSummary>('/admin/users/summary'),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAdminUsers(params?: { plan?: string; status?: string; search?: string; limit?: number; offset?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.plan)   qs.set('plan',   params.plan);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.search) qs.set('search', params.search);
+  if (params?.limit)  qs.set('limit',  String(params.limit));
+  if (params?.offset) qs.set('offset', String(params.offset));
+  const path = `/admin/users${qs.toString() ? '?' + qs.toString() : ''}`;
+  return useQuery({
+    queryKey: adminKeysExt.users(params),
+    queryFn: () => api.get<AdminUsersListResponse>(path),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminUserDetail(userId: string) {
+  return useQuery({
+    queryKey: adminKeysExt.user(userId),
+    queryFn: () => api.get<AdminUserDetail>(`/admin/users/${userId}`),
+    enabled: !!userId,
+    staleTime: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Billing hooks
+// ---------------------------------------------------------------------------
+
+export function useAdminBillingOverview() {
+  return useQuery({
+    queryKey: adminKeysExt.billingOverview(),
+    queryFn: () => api.get<AdminBillingOverview>('/admin/billing/overview'),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAdminSubscriptions(params?: { status?: string; limit?: number; offset?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.limit)  qs.set('limit',  String(params.limit));
+  if (params?.offset) qs.set('offset', String(params.offset));
+  const path = `/admin/billing/subscriptions${qs.toString() ? '?' + qs.toString() : ''}`;
+  return useQuery({
+    queryKey: adminKeysExt.billingSubscriptions(params),
+    queryFn: () => api.get<AdminSubscriptionRow[]>(path),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminBillingPayments(params?: { limit?: number; offset?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.limit)  qs.set('limit',  String(params.limit));
+  if (params?.offset) qs.set('offset', String(params.offset));
+  const path = `/admin/billing/payments${qs.toString() ? '?' + qs.toString() : ''}`;
+  return useQuery({
+    queryKey: adminKeysExt.billingPayments(params),
+    queryFn: () => api.get<AdminPaymentRow[]>(path),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminBillingSubMetrics() {
+  return useQuery({
+    queryKey: adminKeysExt.billingSubMetrics(),
+    queryFn: () => api.get<AdminBillingSubMetrics>('/admin/billing/subscription-metrics'),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAdminBillingWebhookHealth() {
+  return useQuery({
+    queryKey: adminKeysExt.billingWebhookHealth(),
+    queryFn: () => api.get<AdminBillingWebhookHealth>('/admin/billing/webhook-health'),
+    staleTime: 30 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Audit hook
+// ---------------------------------------------------------------------------
+
+export function useAdminAudit(params?: {
+  since?: string;
+  until?: string;
+  action?: string;
+  admin_id?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.since)    qs.set('since',    params.since);
+  if (params?.until)    qs.set('until',    params.until);
+  if (params?.action)   qs.set('action',   params.action);
+  if (params?.admin_id) qs.set('admin_id', params.admin_id);
+  if (params?.limit)    qs.set('limit',    String(params.limit));
+  if (params?.offset)   qs.set('offset',   String(params.offset));
+  const path = `/admin/audit${qs.toString() ? '?' + qs.toString() : ''}`;
+  return useQuery({
+    queryKey: adminKeysExt.audit(params),
+    queryFn: () => api.get<AdminAuditRow[]>(path),
+    staleTime: 30 * 1000,
+  });
+}

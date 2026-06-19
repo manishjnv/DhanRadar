@@ -50,8 +50,8 @@ interface AdminNavItem {
 const ADMIN_NAV: AdminNavItem[] = [
   { href: '/admin',            label: 'Overview',        icon: LayoutDashboard, live: true  },
   { href: '/admin/operations', label: 'Operations',      icon: Activity,        live: true  },
-  { href: '/admin/users',      label: 'Users & Audit',   icon: Users,           live: false },
-  { href: '/admin/billing',    label: 'Billing Ops',     icon: CreditCard,      live: false },
+  { href: '/admin/users',      label: 'Users & Audit',   icon: Users,           live: true  },
+  { href: '/admin/billing',    label: 'Billing Ops',     icon: CreditCard,      live: true  },
   { href: '/admin/scoring',    label: 'Score Model',     icon: BarChart3,       live: false },
   { href: '/admin/flags',      label: 'Feature Flags',   icon: Flag,            live: false },
   { href: '/admin/support',    label: 'Support',         icon: HeadphonesIcon,  live: false },

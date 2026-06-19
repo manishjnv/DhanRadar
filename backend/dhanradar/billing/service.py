@@ -20,15 +20,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import razorpay
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.config import settings
 from dhanradar.core.logging import hash_user_ref
+from dhanradar.models.auth import Subscription, User
 from dhanradar.models.billing import Plan
 from dhanradar.redis_client import get_redis
 
@@ -175,3 +177,191 @@ async def create_checkout(
     # 5. Cache the (plan-bound) result so a retry with the same key is idempotent.
     await redis.set(result_key, json.dumps({"plan_id": plan_id, "resp": resp}), ex=_RESULT_TTL)
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Admin read helpers (Phase 2 — billing overview & subscription reads)
+# Module isolation: billing MRR/sub logic lives here; routers orchestrate only.
+# NO mutations — read-only.
+# ---------------------------------------------------------------------------
+
+# Razorpay statuses treated as "active paying"
+_ACTIVE_STATUSES = frozenset({"active", "authenticated"})
+# Statuses treated as "past-due / pending payment"
+_PAST_DUE_STATUSES = frozenset({"halted", "pending"})
+# Statuses treated as churned
+_CHURN_STATUSES = frozenset({"cancelled", "expired", "completed"})
+
+
+async def compute_billing_overview(db: AsyncSession) -> dict[str, Any]:
+    """Compute MRR, ARPU, active subscriptions, past-due, and trials.
+
+    MRR normalisation:
+      month    → price_inr × 1
+      year     → price_inr ÷ 12
+      lifetime → excluded (not a recurring charge)
+
+    Joins auth.subscriptions to billing.plans on plan_id (nullable FK).
+    Rows with no plan_id joined (plan_id IS NULL) contribute 0 to MRR.
+    """
+    now = datetime.now(UTC)
+
+    # --- active subscriptions & MRR via ORM join ---
+    # Left-join Subscription → Plan on plan_id so rows without a catalog link are
+    # still counted (they just contribute 0 to MRR).
+    result = await db.execute(
+        select(Subscription, Plan)
+        .outerjoin(Plan, Subscription.plan_id == Plan.id)
+        .where(Subscription.status.in_(_ACTIVE_STATUSES))
+    )
+    rows = result.all()
+
+    active_subscriptions = len(rows)
+    mrr: float = 0.0
+    for sub, plan in rows:
+        if plan is None:
+            continue
+        if plan.interval == "month":
+            mrr += float(plan.price_inr)
+        elif plan.interval == "year":
+            mrr += float(plan.price_inr) / 12.0
+        # lifetime → excluded from MRR (non-recurring)
+
+    arpu_inr: float = mrr / active_subscriptions if active_subscriptions > 0 else 0.0
+
+    # --- past-due count ---
+    past_due = await db.scalar(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.status.in_(_PAST_DUE_STATUSES)
+        )
+    ) or 0
+
+    # --- trials: users with pro_access_until > now (time-window grant, not a sub) ---
+    trials = await db.scalar(
+        select(func.count()).select_from(User).where(User.pro_access_until > now)
+    ) or 0
+
+    return {
+        "mrr_inr": round(mrr, 2),
+        "arpu_inr": round(arpu_inr, 2),
+        "active_subscriptions": active_subscriptions,
+        "past_due": int(past_due),
+        "trials": int(trials),
+    }
+
+
+async def list_subscriptions(
+    db: AsyncSession,
+    *,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return subscriptions with user email and plan price.
+
+    Left-joins auth.subscriptions → auth.users (for email) and billing.plans
+    (for price_inr) on plan_id. Filters by raw Razorpay status string if given.
+    """
+    stmt = (
+        select(Subscription, User, Plan)
+        .join(User, Subscription.user_id == User.id)
+        .outerjoin(Plan, Subscription.plan_id == Plan.id)
+    )
+    if status is not None:
+        stmt = stmt.where(Subscription.status == status)
+    stmt = stmt.order_by(Subscription.created_at.desc()).limit(limit).offset(offset)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    out = []
+    for sub, user, plan in rows:
+        out.append({
+            "email": user.email,
+            "plan": sub.plan,
+            "status": sub.status,
+            "current_period_end": sub.current_period_end,
+            "price_inr": plan.price_inr if plan is not None else None,
+        })
+    return out
+
+
+async def get_user_subscription(db: AsyncSession, user_id: str) -> dict[str, Any] | None:
+    """Return the most recent subscription for a user, or None."""
+    from uuid import UUID
+
+    try:
+        uid = UUID(str(user_id))
+    except (ValueError, TypeError):
+        return None
+
+    result = await db.execute(
+        select(Subscription, Plan)
+        .outerjoin(Plan, Subscription.plan_id == Plan.id)
+        .where(Subscription.user_id == uid)
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return None
+
+    sub, plan = row
+    return {
+        "id": str(sub.id),
+        "plan": sub.plan,
+        "status": sub.status,
+        "current_period_start": sub.current_period_start,
+        "current_period_end": sub.current_period_end,
+        "price_inr": plan.price_inr if plan is not None else None,
+        "created_at": sub.created_at,
+        "updated_at": sub.updated_at,
+    }
+
+
+async def subscription_metrics(db: AsyncSession) -> dict[str, Any]:
+    """Return premium_count, trials, renewals_30d, churn_30d.
+
+    renewals_30d and churn_30d are best-effort (derived from updated_at /
+    current_period_start — no dedicated webhook-event table exists yet).
+    """
+    now = datetime.now(UTC)
+    cutoff_30d = now - timedelta(days=30)
+
+    # premium_count: active-status subs
+    premium_count = await db.scalar(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.status.in_(_ACTIVE_STATUSES)
+        )
+    ) or 0
+
+    # trials: users with pro_access_until > now
+    trials = await db.scalar(
+        select(func.count()).select_from(User).where(User.pro_access_until > now)
+    ) or 0
+
+    # renewals_30d: subs where current_period_start is within last 30 days
+    # (best-effort proxy for renewal — no dedicated billing-cycle table)
+    renewals_30d = await db.scalar(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.current_period_start >= cutoff_30d
+        )
+    ) or 0
+
+    # churn_30d: subs with churn status AND updated_at in last 30 days
+    # (best-effort — updated_at is the closest signal; no webhook-event table)
+    churn_30d = await db.scalar(
+        select(func.count()).select_from(Subscription).where(
+            Subscription.status.in_(_CHURN_STATUSES),
+            Subscription.updated_at >= cutoff_30d,
+        )
+    ) or 0
+
+    return {
+        "premium_count": int(premium_count),
+        "trials": int(trials),
+        "renewals_30d": int(renewals_30d),
+        # churn_30d is best-effort: derived from updated_at on cancelled/expired/completed
+        # subs in the last 30 days. No structured churn-event table exists yet.
+        "churn_30d": int(churn_30d),
+    }
