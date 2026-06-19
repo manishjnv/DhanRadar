@@ -19,9 +19,9 @@ function ScoreBar({ score, state }: ScoreBarProps) {
       ? 'bg-amber'
       : 'bg-royal';
   return (
-    <div className="ladder-bar my-1">
+    <div className="my-1.5 h-2 w-full overflow-hidden rounded-full border border-line bg-surface-3">
       <div
-        className={cn('ladder-bar-fill', fillColor)}
+        className={cn('h-full rounded-full transition-[width] duration-slow ease-out', fillColor)}
         style={{ width: `${pct}%` }}
         role="presentation"
       />
