@@ -503,10 +503,10 @@ export default function ExplorePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <p className="font-mono text-caption uppercase tracking-[0.14em] font-semibold text-royal mb-1">
+        <p className="font-mono text-caption uppercase text-royal mb-1">
           Mutual Funds
         </p>
-        <h1 className="text-h2 font-medium text-ink">Fund Explorer</h1>
+        <h1 className="text-h2 text-ink">Fund Explorer</h1>
         <p className="mt-1 text-small text-ink-secondary">
           Compare funds by rank, assessment, and returns — educational analysis only
         </p>

@@ -273,65 +273,65 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_3m_pct != null ? (
                     <span className={cn(
-                      'font-mono text-[13px] font-semibold',
+                      'font-mono text-small font-semibold',
                       fund.return_3m_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_3m_pct >= 0 ? '+' : ''}{fund.return_3m_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                    <span className="font-mono text-caption text-ink-muted">—</span>
                   )}
                 </td>
                 {/* 6M return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_6m_pct != null ? (
                     <span className={cn(
-                      'font-mono text-[13px] font-semibold',
+                      'font-mono text-small font-semibold',
                       fund.return_6m_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_6m_pct >= 0 ? '+' : ''}{fund.return_6m_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                    <span className="font-mono text-caption text-ink-muted">—</span>
                   )}
                 </td>
                 {/* 1Y return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_1y_pct != null ? (
                     <span className={cn(
-                      'font-mono text-[13px] font-semibold',
+                      'font-mono text-small font-semibold',
                       fund.return_1y_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_1y_pct >= 0 ? '+' : ''}{fund.return_1y_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                    <span className="font-mono text-caption text-ink-muted">—</span>
                   )}
                 </td>
                 {/* 3Y return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_3y_pct != null ? (
                     <span className={cn(
-                      'font-mono text-[13px] font-semibold',
+                      'font-mono text-small font-semibold',
                       fund.return_3y_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_3y_pct >= 0 ? '+' : ''}{fund.return_3y_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                    <span className="font-mono text-caption text-ink-muted">—</span>
                   )}
                 </td>
                 {/* 5Y return */}
                 <td className="py-3 px-3 text-right tabular-nums whitespace-nowrap">
                   {fund.return_5y_pct != null ? (
                     <span className={cn(
-                      'font-mono text-[13px] font-semibold',
+                      'font-mono text-small font-semibold',
                       fund.return_5y_pct >= 0 ? 'text-emerald' : 'text-red',
                     )}>
                       {fund.return_5y_pct >= 0 ? '+' : ''}{fund.return_5y_pct.toFixed(1)}%
                     </span>
                   ) : (
-                    <span className="font-mono text-[11px] text-ink-muted">—</span>
+                    <span className="font-mono text-caption text-ink-muted">—</span>
                   )}
                 </td>
               </tr>
