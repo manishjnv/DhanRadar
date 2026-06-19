@@ -225,12 +225,12 @@ _BEAT_TASKS: list[dict[str, str]] = [
     {"beat_key": "check-achievements", "task_name": "dhanradar.tasks.signal_alerts.check_achievements", "schedule_display": "Daily 22:00 IST"},
     {"beat_key": "mf-constituents-fetch", "task_name": "dhanradar.tasks.mf.mf_constituents_fetch", "schedule_display": "Monthly 10th 04:00 IST"},
     {"beat_key": "mf-kite-enrich", "task_name": "dhanradar.tasks.mf.mf_kite_enrich", "schedule_display": "Weekly Sat 03:00 IST"},
-    # Planned (not yet in beat_schedule — will 404 on trigger until task is registered)
-    {"beat_key": "mf-scheme-master-refresh", "task_name": "dhanradar.tasks.mf.mf_scheme_master_refresh", "schedule_display": "Weekly Sun 03:00 IST (planned)"},
-    {"beat_key": "mf-expense-ratio-fetch", "task_name": "dhanradar.tasks.mf.mf_expense_ratio_fetch", "schedule_display": "Monthly 15th 04:00 IST (planned)"},
-    {"beat_key": "mf-fund-manager-fetch", "task_name": "dhanradar.tasks.mf.mf_fund_manager_fetch", "schedule_display": "Monthly 15th 04:30 IST (planned)"},
-    {"beat_key": "sebi-circulars-fetch", "task_name": "dhanradar.tasks.mf.sebi_circulars_fetch", "schedule_display": "Weekly Wed 05:00 IST (planned)"},
-    {"beat_key": "macro-data-refresh", "task_name": "dhanradar.tasks.mf.macro_data_refresh", "schedule_display": "Weekly Sun 06:00 IST (planned)"},
+    # Phase 6 — now registered in celery_app.beat_schedule (no longer planned).
+    {"beat_key": "mf-scheme-master-refresh", "task_name": "dhanradar.tasks.mf.mf_scheme_master_refresh", "schedule_display": "Weekly Sun 03:00 IST"},
+    {"beat_key": "mf-expense-ratio-fetch", "task_name": "dhanradar.tasks.mf.mf_expense_ratio_fetch", "schedule_display": "Monthly 15th 04:00 IST"},
+    {"beat_key": "mf-fund-manager-fetch", "task_name": "dhanradar.tasks.mf.mf_fund_manager_fetch", "schedule_display": "Monthly 15th 04:30 IST"},
+    {"beat_key": "sebi-circulars-fetch", "task_name": "dhanradar.tasks.mf.sebi_circulars_fetch", "schedule_display": "Weekly Wed 05:00 IST"},
+    {"beat_key": "macro-data-refresh", "task_name": "dhanradar.tasks.mf.macro_data_refresh", "schedule_display": "Weekly Sun 06:00 IST"},
 ]
 
 # Map beat_key → celery task name for pause/resume/trigger

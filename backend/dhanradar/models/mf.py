@@ -550,3 +550,96 @@ class MfDataQualityIssue(Base):
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MfExpenseRatioHistory(Base):
+    """TER (total expense ratio) per scheme over time, with the effective date.
+
+    Slowly-changing: one row per (isin, effective_date). The latest row's ter_pct
+    is also mirrored onto mf_funds.expense_ratio_pct by the fetch task so the report
+    surface reads the current value without a join. Written by
+    `dhanradar.tasks.mf.mf_expense_ratio_fetch` (source = 'amc_expense_ratios').
+    Most AMC factsheet pages are bot-blocked (HDFC/SBI/ICICI_PRU/KOTAK/AXIS) — rows
+    only appear for AMCs that serve a parseable factsheet; no value is ever imputed.
+    """
+
+    __tablename__ = "expense_ratio_history"
+    __table_args__ = (
+        UniqueConstraint("isin", "effective_date", name="uq_expense_ratio_isin_date"),
+        Index("ix_mf_expense_ratio_isin_date", "isin", "effective_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    ter_pct: Mapped[float] = mapped_column(Numeric(6, 3), nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfSebiCircular(Base):
+    """SEBI circular metadata (regulatory updates, scheme mergers, category changes).
+
+    Raw circular METADATA only — number, date, title, url, coarse category. The body
+    text is NOT stored and NEVER summarized into advisory language (non-neg #1). Merger
+    / category-change semantics are not auto-derived from the title into scheme_lineage;
+    that requires structured human review (no fabrication — §8.4). Written by
+    `dhanradar.tasks.mf.sebi_circulars_fetch` (source = 'sebi_circulars').
+    """
+
+    __tablename__ = "sebi_circulars"
+    __table_args__ = (
+        UniqueConstraint("circular_number", name="uq_sebi_circular_number"),
+        Index("ix_mf_sebi_circulars_date", "circular_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    circular_number: Mapped[str] = mapped_column(Text, nullable=False)
+    circular_date: Mapped[date] = mapped_column(Date, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfMacroIndicator(Base):
+    """Point-in-time macro indicators from RBI DBIE (repo rate, CPI, WPI, GDP, M3).
+
+    One row per (indicator_key, as_of_date). Values are stored exactly as published —
+    never interpolated or forecast (this is a market-CONDITION fact store, not a
+    prediction surface). Written by `dhanradar.tasks.mf.macro_data_refresh`
+    (source = 'rbi_dbie').
+    """
+
+    __tablename__ = "macro_indicators"
+    __table_args__ = (
+        UniqueConstraint("indicator_key", "as_of_date", name="uq_macro_indicator_key_date"),
+        Index("ix_mf_macro_indicators_key_date", "indicator_key", "as_of_date"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    indicator_key: Mapped[str] = mapped_column(Text, nullable=False)
+    indicator_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
