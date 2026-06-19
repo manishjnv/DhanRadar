@@ -2,17 +2,21 @@
 
 /**
  * Admin Score Model — /admin/scoring
- * Tier-C read-only page (Admin.md §14 + §16).
+ * Tier-C (Admin.md §14 + §16).
  *
  * Sections:
  *   A — Active model card (version · activated/provisional badge · created_by · methodology link)
  *   B — Axis weights labeled-bar list (numerics allowed, admin-only §16)
  *   C — Coverage (total_funds)
  *   D — Registry versions table (version · created_by · approved_by · two_person_ok · activated · activated_at)
- *   Footer — Disabled "Promote version" affordance (Phase 5, two-person gate)
+ *        Per row: non-activated rows show "Gated (B6)" chip — activation disabled until B6 is resolved.
+ *
+ * Phase 5: Activate Version mutation (POST /admin/scoring/{version}/activate) is NOT wired from the UI.
+ *   The two-person methodology gate (B6) is currently vacuous — re-enable the activation flow only after
+ *   B6 is resolved and a distinct second approver identity is enforced end-to-end.
  *
  * Four-state contract: skeleton / empty / error+retry / data on every region.
- * No advisory verbs. No activation control.
+ * No advisory verbs. No numeric in DOM on public surfaces — admin is exempt (§16).
  */
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +35,6 @@ import {
   useAdminScoringModel,
   type AdminScoringRegistryVersion,
 } from '@/features/admin/api';
-import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
 // Skeletons
@@ -117,7 +120,7 @@ function AxisWeightBars({ weights }: { weights: Record<string, number> }) {
 }
 
 // ---------------------------------------------------------------------------
-// Registry versions table
+// Registry versions table (Activate disabled pending B6)
 // ---------------------------------------------------------------------------
 function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }) {
   if (versions.length === 0) {
@@ -130,7 +133,7 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
     );
   }
 
-  const HEADERS = ['Version', 'Created by', 'Approved by', '2-person OK', 'Active', 'Activated at', 'Created at'];
+  const HEADERS = ['Version', 'Created by', 'Approved by', '2-person OK', 'Active', 'Activated at', 'Created at', 'Activate'];
 
   return (
     <div className="overflow-x-auto">
@@ -173,8 +176,20 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(v.activated_at)}
               </td>
-              <td className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(v.created_at)}
+              </td>
+              <td className="py-2.5">
+                {v.activated ? (
+                  <span className="text-caption text-ink-faint">active</span>
+                ) : (
+                  <span
+                    title="Activation is disabled pending the two-person methodology gate (B6). A second distinct approver identity must be wired before any scoring version can be activated from the console."
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono font-medium bg-amber/10 text-amber border border-amber/30 cursor-not-allowed select-none"
+                  >
+                    Gated (B6)
+                  </span>
+                )}
               </td>
             </tr>
           ))}
@@ -197,26 +212,14 @@ export default function AdminScoringPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Score Model</h1>
           <p className="mt-1 text-small text-ink-muted">
-            Read-only view of the active ranking model, axis weights, coverage, and registry.
-            Tier-C — display only.
+            Active ranking model, axis weights, coverage, and registry.
+            Activation via console is disabled pending B6 (two-person methodology gate).
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Disabled promote affordance — Phase 5, two-person gate */}
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled
-            title="Promote version — Phase 5 (two-person gate B6 + human approval required)"
-            className="opacity-40 cursor-not-allowed"
-          >
-            Promote version — Phase 5 (two-person gate)
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => modelQ.refetch()}>
-            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-            Refresh
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={() => modelQ.refetch()}>
+          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+          Refresh
+        </Button>
       </div>
 
       {/* Section A — Active model card */}
@@ -322,11 +325,11 @@ export default function AdminScoringPage() {
         )}
       </section>
 
-      {/* Section D — Registry versions */}
+      {/* Section D — Registry versions (Activate disabled pending B6) */}
       <Section
         id="section-registry"
         title="Registry Versions"
-        subtitle="All model versions in the ranking_configs registry. Promotion (activate) requires the two-person methodology gate (B6) + separate human approval — Phase 5."
+        subtitle="All model versions in the ranking_configs registry. Activation via console is disabled pending B6 (two-person methodology gate)."
       >
         {modelQ.isLoading && <TableSkeleton rows={4} />}
         {modelQ.isError && (

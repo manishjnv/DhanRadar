@@ -340,3 +340,26 @@ async def list_payment_events(
         }
         for row in rows
     ]
+
+
+async def get_payment_event_user_id(
+    db: Any,  # AsyncSession
+    razorpay_payment_id: str,
+) -> str | None:
+    """Resolve the end-user's user_id for a Razorpay payment id, or None.
+
+    Interface-only read seam so other modules (e.g. billing refunds) can attribute
+    a payment without importing the audit ORM model directly (module isolation #7).
+    Returns the user_id of the most-recent matching payment_event row, or None.
+    """
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.models.audit import PaymentEvent
+
+    row = await db.scalar(
+        sa_select(PaymentEvent)
+        .where(PaymentEvent.razorpay_payment_id == razorpay_payment_id)
+        .order_by(PaymentEvent.ts.desc())
+        .limit(1)
+    )
+    return row.user_id if row is not None else None

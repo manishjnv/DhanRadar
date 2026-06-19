@@ -200,6 +200,11 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
             status_code=status.HTTP_403_FORBIDDEN,
             detail="account_deletion_pending",
         )
+    if user.suspended_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_suspended",
+        )
 
     return user  # type: ignore[return-value]
 
@@ -414,6 +419,10 @@ class _DeletionPendingError(Exception):
     """User exists but has requested account erasure."""
 
 
+class _SuspendedError(Exception):
+    """User account is administratively suspended."""
+
+
 class _SubConflictError(Exception):
     """Email is linked to a different google_sub."""
 
@@ -449,6 +458,8 @@ async def get_or_create_google_user(
     if user is not None:
         if user.deletion_requested_at is not None:
             raise _DeletionPendingError()
+        if user.suspended_at is not None:
+            raise _SuspendedError()
         return user
 
     # --- b) Lookup by email ---
@@ -479,6 +490,8 @@ async def get_or_create_google_user(
         if user is not None:
             if user.deletion_requested_at is not None:
                 raise _DeletionPendingError()
+            if user.suspended_at is not None:
+                raise _SuspendedError()
             return user
         user = await db.scalar(
             select(User).where(User.email == email)
@@ -514,6 +527,8 @@ async def _resolve_existing_email_user(
         raise _SubConflictError()
     if user.deletion_requested_at is not None:
         raise _DeletionPendingError()
+    if user.suspended_at is not None:
+        raise _SuspendedError()
     if user.google_sub == google_sub:
         # Concurrent-creation race: another request already linked this sub.
         return user
@@ -612,6 +627,11 @@ async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="account_deletion_pending",
         )
+    if user.suspended_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_suspended",
+        )
 
     # Success — clear failure counter.
     await redis.delete(attempts_key)
@@ -642,11 +662,13 @@ async def request_email_otp(email: str, db: AsyncSession) -> None:
         select(User).where(User.email == normalised)
     )
 
-    # Unknown email, deletion pending, cooldown active, or daily cap hit →
-    # all return silently. The caller MUST always send 202.
+    # Unknown email, deletion pending, suspended, cooldown active, or daily cap
+    # hit → all return silently. The caller MUST always send 202.
     if user is None:
         return
     if user.deletion_requested_at is not None:
+        return
+    if user.suspended_at is not None:
         return
 
     uid = str(user.id)
@@ -756,6 +778,11 @@ async def authenticate_email_otp(email: str, code: str, db: AsyncSession) -> Use
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="account_deletion_pending",
+        )
+    if user.suspended_at is not None:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_suspended",
         )
 
     # Success: single-use enforcement — delete code key + attempts key.

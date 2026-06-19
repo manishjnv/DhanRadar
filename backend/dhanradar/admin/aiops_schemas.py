@@ -18,7 +18,10 @@ Pydantic models for the 7 GET-only AI Ops endpoints:
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Shared sub-models
@@ -249,3 +252,67 @@ class AiCostResponse(BaseModel):
     latency: InstrumentedFalse = InstrumentedFalse(
         note="per-call latency not stored in ai_recommendation_audit or Redis"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 mutation schemas — prompt template registry
+# ---------------------------------------------------------------------------
+
+
+class PromptTemplateCreateRequest(BaseModel):
+    """Body for POST /admin/ai/prompts — create a new (inactive) template version."""
+
+    template_key: str = Field(..., min_length=1, description="Stable identifier for this prompt")
+    body: str = Field(..., min_length=1, description="Full prompt text")
+    notes: str | None = Field(None, description="Human-readable change notes")
+
+
+class PromptTemplateRow(BaseModel):
+    """One prompt_template row returned by create / activate endpoints."""
+
+    id: UUID
+    template_key: str
+    version: int
+    body: str
+    notes: str | None
+    is_active: bool
+    created_by: str
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 mutation schemas — budget cap override
+# ---------------------------------------------------------------------------
+
+
+class BudgetCapsSetRequest(BaseModel):
+    """Body for POST /admin/ai/cost/caps — set or reset AI budget caps."""
+
+    # Upper bounds are money-safety guards (V5): they prevent a fat-finger from
+    # neutering the AI hard-cap (default ~$9.50/day). Generous ceilings — raise
+    # deliberately in code if a higher legitimate cap is ever needed.
+    free_cap: int = Field(
+        ..., gt=0, le=1_000_000, description="Daily free-tier call count cap"
+    )
+    premium_soft_usd: float = Field(
+        ..., gt=0, le=200.0, description="Premium soft-warn threshold in USD"
+    )
+    premium_hard_usd: float = Field(
+        ..., gt=0, le=200.0, description="Premium hard-stop cap in USD"
+    )
+    reset: bool = Field(
+        False,
+        description=(
+            "When true, delete Redis override keys and revert to hardcoded defaults. "
+            "The cap values in the body are still written to the audit history row."
+        ),
+    )
+
+
+class BudgetCapsResponse(BaseModel):
+    """Response for POST /admin/ai/cost/caps — effective caps after the mutation."""
+
+    free_cap: int
+    premium_soft_usd: float
+    premium_hard_usd: float
+    reset: bool = False

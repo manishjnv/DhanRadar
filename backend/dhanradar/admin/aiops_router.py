@@ -36,11 +36,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.budget import _REDIS_KEYS, compute_budget_state
+from dhanradar.budget import (
+    _CAP_OVERRIDE_KEYS,
+    _REDIS_KEYS,
+    compute_budget_state,
+    get_effective_caps,
+)
 from dhanradar.compliance.service import (
     is_engine_version_activated,
     label_churn_review,
@@ -62,10 +67,14 @@ from .aiops_schemas import (
     AiSafetyResponse,
     AiVersionsResponse,
     AuditRowSummary,
+    BudgetCapsResponse,
+    BudgetCapsSetRequest,
     BudgetSnapshot,
     EngineVersionRow,
     LabelChurnSummary,
     LowConfidenceRowSummary,
+    PromptTemplateCreateRequest,
+    PromptTemplateRow,
     QualityIssueRow,
 )
 
@@ -83,15 +92,25 @@ async def _read_budget_snapshot() -> BudgetSnapshot:
     On a Redis failure, return a degraded snapshot (caps known from constants, spend
     unknown) with ``available=False`` rather than 500-ing a monitoring surface — an
     operator wants this page precisely when infra is unhealthy.
+
+    Passes effective (admin-overridable) caps into compute_budget_state so the read
+    endpoint reflects any live cap overrides set via POST /admin/ai/cost/caps.
     """
     redis = get_redis()
     try:
         free_raw = await redis.get(_REDIS_KEYS["free"])
         premium_raw = await redis.get(_REDIS_KEYS["premium"])
-    except Exception:
+        effective = await get_effective_caps(redis)
+    except Exception:  # noqa: BLE001 — degraded monitoring, not a 500
         # Degraded: do not mislead with "0 spend looks healthy" — flag available=False.
         return BudgetSnapshot(**compute_budget_state(None, None), available=False)
-    state = compute_budget_state(free_raw, premium_raw)
+    state = compute_budget_state(
+        free_raw,
+        premium_raw,
+        free_cap=int(effective["free"]),
+        premium_soft=float(effective["premium_soft"]),
+        premium_hard=float(effective["premium_hard"]),
+    )
     return BudgetSnapshot(**state)
 
 
@@ -348,3 +367,240 @@ async def get_ai_cost(
     """
     budget = await _read_budget_snapshot()
     return AiCostResponse(budget=budget)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 mutations — Prompt Template Registry
+# ---------------------------------------------------------------------------
+#
+# NOTE: the prompt_templates registry is NOT yet consumed by the AI gateway at
+# request time.  The gateway still accepts prompts from callers.  These endpoints
+# are the admin CRUD surface only.  Wiring the gateway to consume active templates
+# is a future Phase 6 step.
+
+
+@router.post("/ai/prompts", response_model=PromptTemplateRow, status_code=201)
+async def create_prompt_template(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: PromptTemplateCreateRequest,
+) -> PromptTemplateRow:
+    """Create a new (INACTIVE) prompt template version.
+
+    Version is auto-incremented per template_key: max(existing) + 1, or 1 if none.
+    The new row is always created as is_active=False — use the activate endpoint to
+    promote a version to active.
+
+    Audit: records action=create_prompt_version to audit.admin_actions.
+    """
+    from dhanradar.audit.service import record_admin_action
+    from dhanradar.models.ai_admin import PromptTemplate
+
+    # Compute next version number for this key (max + 1, or 1 if none exist).
+    existing_max = await db.scalar(
+        select(func.max(PromptTemplate.version)).where(
+            PromptTemplate.template_key == body.template_key
+        )
+    )
+    next_version: int = (existing_max or 0) + 1
+
+    row = PromptTemplate(
+        template_key=body.template_key,
+        version=next_version,
+        body=body.body,
+        notes=body.notes,
+        is_active=False,
+        created_by=admin.user_id,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    target_id = f"{body.template_key}:{next_version}"
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="create_prompt_version",
+        target_type="prompt_template",
+        target_id=target_id,
+        result="created",
+    )
+
+    return PromptTemplateRow(
+        id=row.id,
+        template_key=row.template_key,
+        version=row.version,
+        body=row.body,
+        notes=row.notes,
+        is_active=row.is_active,
+        created_by=row.created_by,
+        created_at=row.created_at,
+    )
+
+
+@router.post(
+    "/ai/prompts/{template_key}/{version}/activate",
+    response_model=PromptTemplateRow,
+)
+async def activate_prompt_template(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    template_key: str,
+    version: int,
+) -> PromptTemplateRow:
+    """Activate a prompt template version (single active per key).
+
+    In one transaction:
+      1. Set is_active=False for ALL existing rows of this template_key.
+      2. Set is_active=True for the target (template_key, version).
+
+    Returns 404 if the target (template_key, version) does not exist.
+    Reversible: activating a different version later deactivates this one.
+
+    Audit: records action=activate_prompt_version to audit.admin_actions.
+    """
+    from sqlalchemy import update
+
+    from dhanradar.audit.service import record_admin_action
+    from dhanradar.models.ai_admin import PromptTemplate
+
+    # 1. Find the target row first so we can 404 before any mutation.
+    target = await db.scalar(
+        select(PromptTemplate).where(
+            PromptTemplate.template_key == template_key,
+            PromptTemplate.version == version,
+        )
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="prompt_template_not_found",
+        )
+
+    # 2. Deactivate all versions of this key, then activate the target.
+    await db.execute(
+        update(PromptTemplate)
+        .where(PromptTemplate.template_key == template_key)
+        .values(is_active=False)
+    )
+    await db.execute(
+        update(PromptTemplate)
+        .where(
+            PromptTemplate.template_key == template_key,
+            PromptTemplate.version == version,
+        )
+        .values(is_active=True)
+    )
+    await db.commit()
+    await db.refresh(target)
+
+    target_id = f"{template_key}:{version}"
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="activate_prompt_version",
+        target_type="prompt_template",
+        target_id=target_id,
+        result="activated",
+    )
+
+    return PromptTemplateRow(
+        id=target.id,
+        template_key=target.template_key,
+        version=target.version,
+        body=target.body,
+        notes=target.notes,
+        is_active=target.is_active,
+        created_by=target.created_by,
+        created_at=target.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 mutations — Budget Cap Override
+# ---------------------------------------------------------------------------
+
+
+@router.post("/ai/cost/caps", response_model=BudgetCapsResponse)
+async def set_budget_caps(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: BudgetCapsSetRequest,
+) -> BudgetCapsResponse:
+    """Set (or reset) the live AI budget caps without a redeploy.
+
+    Normal mode (reset=False):
+      - Validates premium_soft_usd < premium_hard_usd (else 422).
+      - INSERTs an ai_budget_caps history row for audit.
+      - Pushes the three Redis override keys (no expiry — caps persist until
+        explicitly changed or reset).
+      - Returns the now-effective caps.
+
+    Reset mode (reset=True):
+      - DELETEs the three Redis override keys so budget_guard reverts to the
+        hardcoded _CAPS defaults.
+      - Still INSERTs a history row noting the reset (body values are recorded
+        as the administrator's intended caps at the time of reset, for audit trail).
+      - Returns the hardcoded default caps (not the body values).
+
+    Audit: records action=set_budget_caps to audit.admin_actions.
+    """
+    from dhanradar.audit.service import record_admin_action
+    from dhanradar.models.ai_admin import AiBudgetCap
+
+    if not body.reset and body.premium_soft_usd >= body.premium_hard_usd:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="premium_soft_usd_must_be_less_than_premium_hard_usd",
+        )
+
+    # Write audit history row regardless of reset flag.
+    from decimal import Decimal
+
+    cap_row = AiBudgetCap(
+        free_cap=body.free_cap,
+        premium_soft_usd=Decimal(str(body.premium_soft_usd)),
+        premium_hard_usd=Decimal(str(body.premium_hard_usd)),
+        updated_by=admin.user_id,
+    )
+    db.add(cap_row)
+    await db.commit()
+
+    redis = get_redis()
+
+    if body.reset:
+        # Revert to hardcoded defaults by deleting override keys.
+        await redis.delete(
+            _CAP_OVERRIDE_KEYS["free"],
+            _CAP_OVERRIDE_KEYS["premium_soft"],
+            _CAP_OVERRIDE_KEYS["premium_hard"],
+        )
+        from dhanradar.budget import _CAPS
+
+        effective_free = int(_CAPS["free"])
+        effective_soft = float(_CAPS["premium_soft"])
+        effective_hard = float(_CAPS["premium_hard"])
+        result_note = "reset"
+    else:
+        # Push override values; no expiry — caps persist until changed or reset.
+        await redis.set(_CAP_OVERRIDE_KEYS["free"], str(body.free_cap))
+        await redis.set(_CAP_OVERRIDE_KEYS["premium_soft"], str(body.premium_soft_usd))
+        await redis.set(_CAP_OVERRIDE_KEYS["premium_hard"], str(body.premium_hard_usd))
+
+        effective_free = body.free_cap
+        effective_soft = body.premium_soft_usd
+        effective_hard = body.premium_hard_usd
+        result_note = "updated"
+
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="set_budget_caps",
+        target_type="ai_budget",
+        target_id="global",
+        result=result_note,
+    )
+
+    return BudgetCapsResponse(
+        free_cap=effective_free,
+        premium_soft_usd=effective_soft,
+        premium_hard_usd=effective_hard,
+        reset=body.reset,
+    )

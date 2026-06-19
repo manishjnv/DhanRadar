@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import datetime
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Literal
+from typing import Literal
 
 import redis.asyncio as aioredis
 
@@ -37,6 +38,15 @@ _CAPS: dict[str, int | float] = {
 _REDIS_KEYS: dict[str, str] = {
     "free": "ai:budget:free:today",
     "premium": "ai:budget:premium:today",
+}
+
+# Redis keys used by the admin cap-override endpoint (POST /admin/ai/cost/caps).
+# When present, these override the _CAPS hardcoded defaults without a redeploy.
+# When absent / malformed, budget_guard falls back to _CAPS silently.
+_CAP_OVERRIDE_KEYS: dict[str, str] = {
+    "free": "ai:budget:cap:free",
+    "premium_soft": "ai:budget:cap:premium_soft",
+    "premium_hard": "ai:budget:cap:premium_hard",
 }
 
 # Per-call reservation amounts used by the atomic admission (B18).
@@ -97,7 +107,7 @@ class BudgetMeter:
 # ---------------------------------------------------------------------------
 def _next_utc_midnight_ts() -> int:
     """Return the Unix timestamp of the next UTC midnight (as integer seconds)."""
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     next_midnight = (now_utc + datetime.timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -142,6 +152,58 @@ async def _adjust_quietly(
 
 
 # ---------------------------------------------------------------------------
+# Effective cap resolution (Phase 5 admin override support)
+# ---------------------------------------------------------------------------
+
+
+async def get_effective_caps(redis: aioredis.Redis) -> dict[str, int | float]:
+    """Return the effective AI budget caps, honouring any admin Redis overrides.
+
+    Reads the three admin override keys (``ai:budget:cap:{free,premium_soft,
+    premium_hard}``).  On key miss OR any parse / Redis error, falls back to
+    the corresponding ``_CAPS`` hardcoded default.  NEVER raises — any failure
+    degrades silently to the hardcoded default so the hot path is never broken
+    by a bad Redis state or a transient connection error.
+
+    Returns dict with keys: ``free`` (int), ``premium_soft`` (float),
+    ``premium_hard`` (float).
+    """
+    result: dict[str, int | float] = {
+        "free": int(_CAPS["free"]),
+        "premium_soft": float(_CAPS["premium_soft"]),
+        "premium_hard": float(_CAPS["premium_hard"]),
+    }
+    for cap_name, redis_key in _CAP_OVERRIDE_KEYS.items():
+        try:
+            raw = await redis.get(redis_key)
+            if raw is None:
+                continue  # no override set — keep default
+            raw_str = raw.decode() if isinstance(raw, bytes) else str(raw)
+            if cap_name == "free":
+                parsed: int | float = int(float(raw_str))
+            else:
+                parsed = float(raw_str)
+            if parsed <= 0:
+                # Sanity guard: a zero/negative cap would block all AI calls
+                # immediately; treat as a misconfigured override and fall back.
+                logger.warning(
+                    "AI cap override for %r is non-positive (value=%s) — "
+                    "ignoring and using hardcoded default.",
+                    cap_name,
+                    raw_str,
+                )
+                continue
+            result[cap_name] = parsed
+        except Exception:  # noqa: BLE001 — failure → fallback, never raise
+            logger.warning(
+                "AI cap override read failed for key=%r — using hardcoded default.",
+                redis_key,
+                exc_info=True,
+            )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 @asynccontextmanager
@@ -181,7 +243,10 @@ async def budget_guard(
     """
     redis = get_redis()
     key = _REDIS_KEYS[kind]
-    cap: int | float = _CAPS["free"] if kind == "free" else _CAPS["premium_hard"]
+    # Resolve caps from admin Redis override keys; any failure falls back to
+    # _CAPS defaults (get_effective_caps is defensive and never raises).
+    effective = await get_effective_caps(redis)
+    cap: int | float = effective["free"] if kind == "free" else effective["premium_hard"]
     reserve_amt = float(reserve if reserve is not None else _DEFAULT_RESERVE[kind])
 
     # Ensure the key exists with a daily-reset TTL, then reserve atomically.
@@ -199,7 +264,8 @@ async def budget_guard(
 
     if kind == "premium":
         # Soft cap is a WARN threshold (observability), not a stop.
-        soft_cap = float(_CAPS["premium_soft"])
+        # Use the admin-override value if set; effective was resolved above.
+        soft_cap = float(effective["premium_soft"])
         if current >= soft_cap:
             logger.warning(
                 "AI premium budget soft cap crossed: current=$%.4f >= soft=$%.2f "
@@ -273,31 +339,46 @@ def get_budget_state(redis_client) -> dict:  # type: ignore[type-arg]
     )
 
 
-def compute_budget_state(free_raw: bytes | None, premium_raw: bytes | None) -> dict:
+def compute_budget_state(
+    free_raw: bytes | None,
+    premium_raw: bytes | None,
+    *,
+    free_cap: int | None = None,
+    premium_soft: float | None = None,
+    premium_hard: float | None = None,
+) -> dict:
     """Pure computation: derive the budget snapshot from raw Redis byte values.
 
     Separated from I/O so it is trivially unit-testable without a Redis instance.
 
     Args:
-        free_raw:    raw bytes from ``redis.get(_REDIS_KEYS["free"])``; None if key absent.
-        premium_raw: raw bytes from ``redis.get(_REDIS_KEYS["premium"])``;  None if key absent.
+        free_raw:     raw bytes from ``redis.get(_REDIS_KEYS["free"])``; None if key absent.
+        premium_raw:  raw bytes from ``redis.get(_REDIS_KEYS["premium"])``; None if key absent.
+        free_cap:     optional override for the free call-count cap (from admin Redis key).
+                      Defaults to ``_CAPS["free"]``.
+        premium_soft: optional override for the premium soft-cap USD (from admin Redis key).
+                      Defaults to ``_CAPS["premium_soft"]``.
+        premium_hard: optional override for the premium hard-cap USD (from admin Redis key).
+                      Defaults to ``_CAPS["premium_hard"]``.
 
     Returns:
         dict with the same shape as the docstring above (for get_budget_state).
+
+    Backward-compatible: existing callers that pass no kwargs receive the hardcoded defaults.
     """
-    free_cap: int = int(_CAPS["free"])
-    premium_soft_cap: float = float(_CAPS["premium_soft"])
-    premium_hard_cap: float = float(_CAPS["premium_hard"])
+    _free_cap: int = int(free_cap) if free_cap is not None else int(_CAPS["free"])
+    _premium_soft_cap: float = float(premium_soft) if premium_soft is not None else float(_CAPS["premium_soft"])
+    _premium_hard_cap: float = float(premium_hard) if premium_hard is not None else float(_CAPS["premium_hard"])
 
     free_calls_today: int = int(float(free_raw.decode() if free_raw else "0"))
     premium_usd_today: float = round(float(premium_raw.decode() if premium_raw else "0"), 6)
 
     return {
         "free_calls_today": free_calls_today,
-        "free_cap": free_cap,
+        "free_cap": _free_cap,
         "premium_usd_today": premium_usd_today,
-        "premium_soft_cap": premium_soft_cap,
-        "premium_hard_cap": premium_hard_cap,
-        "free_remaining": max(0, free_cap - free_calls_today),
-        "premium_remaining_usd": round(max(0.0, premium_hard_cap - premium_usd_today), 6),
+        "premium_soft_cap": _premium_soft_cap,
+        "premium_hard_cap": _premium_hard_cap,
+        "free_remaining": max(0, _free_cap - free_calls_today),
+        "premium_remaining_usd": round(max(0.0, _premium_hard_cap - premium_usd_today), 6),
     }

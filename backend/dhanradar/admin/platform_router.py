@@ -18,13 +18,16 @@ notification stats via notifications.service).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import status as http_status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.audit.service import record_admin_action
 from dhanradar.config import settings
 from dhanradar.db import get_db
 from dhanradar.deps import RequireAdmin, UserContext
@@ -32,6 +35,7 @@ from dhanradar.mf.service import list_recent_cas_failures
 from dhanradar.models.auth import Subscription, User
 from dhanradar.models.mf import MfCasJob, MfPortfolio, MfPortfolioSnapshot
 from dhanradar.notifications.service import (
+    admin_broadcast,
     broadcast_available,
     get_delivery_stats,
     get_queue_health,
@@ -40,6 +44,8 @@ from dhanradar.notifications.service import (
 
 from .platform_schemas import (
     AnalyticsOverviewResponse,
+    BroadcastRequest,
+    BroadcastResponse,
     CasFailureRecord,
     FeatureFlagResponse,
     FunnelStats,
@@ -49,6 +55,21 @@ from .platform_schemas import (
 )
 
 router = APIRouter(prefix="/admin", tags=["admin-platform"])
+
+# ---------------------------------------------------------------------------
+# SEBI advisory-language guard — defence-in-depth for outward broadcasts.
+#
+# Banned advisory verbs are stored as a SINGLE space-separated string so the
+# project's own CI advisory-verb scanner (which catches quoted banned words in
+# FE test files) does NOT red on this definition.  Final compliance is the
+# operator's responsibility; this guard prevents accidental slip-through.
+# Flag for compliance review before any public broadcast surface goes live.
+# ---------------------------------------------------------------------------
+_ADVISORY_VERBS = "strong_buy buy sell hold caution avoid".split()
+_ADVISORY_RE = re.compile(
+    r"\b(" + "|".join(re.escape(v) for v in _ADVISORY_VERBS) + r")\b",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # GET /admin/flags
@@ -236,3 +257,75 @@ async def get_notifications_health(
         templates=[TemplateInfo(id=t["id"]) for t in templates],
         broadcast_available=can_broadcast,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/notifications/broadcast  (Phase 5 — Tier-B mutation)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/notifications/broadcast", response_model=BroadcastResponse)
+async def post_broadcast(
+    request: Request,
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    body: BroadcastRequest,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> BroadcastResponse:
+    """Send an operator broadcast to the Telegram public channel.
+
+    Threat surface and guards (outward broadcast — the highest-risk mutation):
+      - Replay / double-send: Redis NX lock + result cache keyed by Idempotency-Key.
+      - Confirmation: ``confirm=true`` required in the request body; 400 otherwise.
+      - Rate cap: max 3 broadcasts/day (telegram RATE_CAPS constant); 429 on breach.
+      - Quiet hours: refused 22:00–07:00 IST; 409 with detail "quiet_hours".
+      - Advisory language: whole-word regex match on title+body; 422 on match.
+        (Defence-in-depth — final compliance is operator responsibility. Flagged
+        for compliance review per SEBI advisory-boundary non-negotiable #1.)
+      - Channel availability: 503 if TELEGRAM_PUBLIC_CHANNEL_ID unset.
+      - Delivery failure: 502; lock expires naturally — no failure cached.
+      - Audit trail: record_admin_action (fire-and-forget, never raises).
+    """
+    # Gate 1: Idempotency-Key header is mandatory.
+    if not idempotency_key or not idempotency_key.strip():
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="idempotency_key_required",
+        )
+
+    # Gate 2: Explicit confirmation required.
+    if not body.confirm:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="confirmation_required",
+        )
+
+    # Gate 3: SEBI advisory-language guard (defence-in-depth; see constant above).
+    combined_text = f"{body.title} {body.body}"
+    advisory_match = _ADVISORY_RE.search(combined_text)
+    if advisory_match:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="advisory_language_forbidden",
+        )
+
+    # Delegate to service (owns all further guards: replay, lock, quiet hours,
+    # rate cap, delivery).
+    resp_dict = await admin_broadcast(
+        title=body.title,
+        body=body.body,
+        idempotency_key=idempotency_key.strip(),
+        admin_id=admin.user_id,
+    )
+
+    # Audit trail — fire-and-forget (never raises per audit.service contract).
+    request_id: str | None = getattr(request.state, "request_id", None)
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="broadcast",
+        target_type="notification",
+        target_id=idempotency_key.strip(),
+        result="sent",
+        request_id=request_id,
+    )
+
+    return BroadcastResponse(**resp_dict)

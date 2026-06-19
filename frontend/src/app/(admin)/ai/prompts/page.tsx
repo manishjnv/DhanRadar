@@ -2,13 +2,15 @@
 
 /**
  * AI Prompt & RAG — /admin/ai/prompts
- * Phase 4, Tier-B read-only (Admin.md §15, §18 step 4).
+ * Phase 4 (read) + Phase 5 (mutations) — Tier-B.
  *
- * Backend state: no prompt registry — prompts are caller-supplied.
- * Shows: explanatory empty-state + list of prompt_versions_seen tags.
- * Disabled: "Edit prompt — Phase 5".
+ * Read: prompt registry state + prompt_versions_seen tags.
+ * Mutations (Phase 5 live):
+ *   - Create Prompt Version: form (template_key, body, notes) → POST /admin/ai/prompts
+ *   - Activate Prompt Version: confirm → POST /admin/ai/prompts/{key}/{version}/activate
  *
- * Four-state contract. No advisory verbs.
+ * Four-state contract per mutation: idle / submitting / error+retry / success.
+ * No advisory verbs.
  */
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +22,8 @@ import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
-import { useAdminAIPrompts } from '@/features/admin/api';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { useAdminAIPrompts, useAdminCreatePromptVersion, useAdminActivatePromptVersion } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -40,6 +43,32 @@ function ContentSkeleton() {
 export default function AdminAIPromptsPage() {
   const q = useAdminAIPrompts();
 
+  // Create Prompt Version dialog
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [templateKey, setTemplateKey] = React.useState('');
+  const [promptBody, setPromptBody] = React.useState('');
+  const [promptNotes, setPromptNotes] = React.useState('');
+  const createMutation = useAdminCreatePromptVersion();
+
+  // Activate Prompt Version dialog
+  const [activateTarget, setActivateTarget] = React.useState<{ key: string; version: string } | null>(null);
+  const [activateKey, setActivateKey] = React.useState('');
+  const [activateVersion, setActivateVersion] = React.useState('');
+  const activateMutation = useAdminActivatePromptVersion();
+
+  function openCreate() {
+    setTemplateKey('');
+    setPromptBody('');
+    setPromptNotes('');
+    setCreateOpen(true);
+  }
+
+  function openActivate() {
+    setActivateKey('');
+    setActivateVersion('');
+    setActivateTarget({ key: activateKey, version: activateVersion });
+  }
+
   return (
     <>
       <div className="flex flex-col gap-8">
@@ -53,14 +82,8 @@ export default function AdminAIPromptsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled
-              title="Edit prompt — Phase 5 (gated mutation, full Tier-B review required)"
-              className="opacity-40 cursor-not-allowed"
-            >
-              Edit prompt — Phase 5
+            <Button size="sm" variant="secondary" onClick={openCreate}>
+              Create Prompt Version
             </Button>
             <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
               <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
@@ -103,11 +126,28 @@ export default function AdminAIPromptsPage() {
           <section aria-labelledby="section-prompt-versions">
             <Card>
               <CardHeader>
-                <CardTitle id="section-prompt-versions">Prompt Version Tags Seen</CardTitle>
-                <p className="mt-1 text-small text-ink-muted">
-                  Version tags observed in the gateway audit log.
-                  Not a canonical registry — informational only.
-                </p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle id="section-prompt-versions">Prompt Version Tags Seen</CardTitle>
+                    <p className="mt-1 text-small text-ink-muted">
+                      Version tags observed in the gateway audit log.
+                      Not a canonical registry — informational only.
+                    </p>
+                  </div>
+                  {q.data.prompt_versions_seen.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setActivateKey('');
+                        setActivateVersion('');
+                        setActivateTarget({ key: '', version: '' });
+                      }}
+                    >
+                      Activate Version
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardBody>
                 {q.data.prompt_versions_seen.length === 0 ? (
@@ -133,6 +173,116 @@ export default function AdminAIPromptsPage() {
           </section>
         )}
       </div>
+
+      {/* Create Prompt Version dialog */}
+      <ConfirmDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Create prompt version"
+        description="Register a new prompt version in the AI gateway. The body is the full prompt template."
+        confirmLabel="Create Version"
+        confirmVariant="primary"
+        onConfirm={async () => {
+          if (!templateKey.trim()) throw new Error('Template key is required.');
+          if (!promptBody.trim()) throw new Error('Prompt body is required.');
+          await createMutation.mutateAsync({
+            template_key: templateKey.trim(),
+            body: promptBody.trim(),
+            notes: promptNotes.trim() || undefined,
+          });
+        }}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="prompt-template-key" className="text-small font-medium text-ink">
+              Template key <span className="text-red">*</span>
+            </label>
+            <input
+              id="prompt-template-key"
+              type="text"
+              value={templateKey}
+              onChange={(e) => setTemplateKey(e.target.value)}
+              placeholder="e.g. mf_portfolio_commentary_v2"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="prompt-body" className="text-small font-medium text-ink">
+              Prompt body <span className="text-red">*</span>
+            </label>
+            <textarea
+              id="prompt-body"
+              rows={6}
+              value={promptBody}
+              onChange={(e) => setPromptBody(e.target.value)}
+              placeholder="Enter the full prompt template…"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted resize-y focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="prompt-notes" className="text-small font-medium text-ink">
+              Notes <span className="text-ink-muted font-normal">(optional)</span>
+            </label>
+            <input
+              id="prompt-notes"
+              type="text"
+              value={promptNotes}
+              onChange={(e) => setPromptNotes(e.target.value)}
+              placeholder="e.g. Updated for Q1 2026 risk language"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+        </div>
+      </ConfirmDialog>
+
+      {/* Activate Prompt Version dialog */}
+      {activateTarget !== null && (
+        <ConfirmDialog
+          open={activateTarget !== null}
+          onClose={() => setActivateTarget(null)}
+          title="Activate prompt version"
+          description="Activate a specific prompt version for a template key. This replaces the currently active version."
+          confirmLabel="Activate"
+          confirmVariant="primary"
+          onConfirm={async () => {
+            if (!activateKey.trim()) throw new Error('Template key is required.');
+            if (!activateVersion.trim()) throw new Error('Version is required.');
+            await activateMutation.mutateAsync({
+              key: activateKey.trim(),
+              version: activateVersion.trim(),
+            });
+          }}
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="activate-key" className="text-small font-medium text-ink">
+                Template key <span className="text-red">*</span>
+              </label>
+              <input
+                id="activate-key"
+                type="text"
+                value={activateKey}
+                onChange={(e) => setActivateKey(e.target.value)}
+                placeholder="e.g. mf_portfolio_commentary"
+                className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="activate-version" className="text-small font-medium text-ink">
+                Version <span className="text-red">*</span>
+              </label>
+              <input
+                id="activate-version"
+                type="text"
+                value={activateVersion}
+                onChange={(e) => setActivateVersion(e.target.value)}
+                placeholder="e.g. v2"
+                className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+              />
+            </div>
+          </div>
+        </ConfirmDialog>
+      )}
     </>
   );
 }
