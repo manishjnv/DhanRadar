@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from dhanradar.core.logging import get_logger, hash_user_ref
 
@@ -244,3 +245,98 @@ async def record_security_event(
         )
         await _bump_failure_metric("security_events")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Admin read helpers (Phase 2 — audit log reads)
+# Module isolation: these are the only read fns in this module; all write fns
+# above remain fire-and-forget (never import from auth/billing/admin/compliance).
+# These reads accept an AsyncSession from the caller (passed in from the route).
+# ---------------------------------------------------------------------------
+
+
+async def list_admin_actions(
+    db: Any,  # AsyncSession — imported lazily to avoid circular imports
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    action: str | None = None,
+    admin_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Read audit.admin_actions with optional filters.
+
+    Accepts an AsyncSession from the caller. Uses ORM select — no raw SQL,
+    no f-string interpolation.
+
+    Returns list of dicts: id, ts, admin_id, action, target_type, target_id,
+    result, request_id.
+    """
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.models.audit import AdminAction
+
+    stmt = sa_select(AdminAction)
+    if since is not None:
+        stmt = stmt.where(AdminAction.ts >= since)
+    if until is not None:
+        stmt = stmt.where(AdminAction.ts <= until)
+    if action is not None:
+        stmt = stmt.where(AdminAction.action == action)
+    if admin_id is not None:
+        stmt = stmt.where(AdminAction.admin_id == admin_id)
+    stmt = stmt.order_by(AdminAction.ts.desc()).limit(limit).offset(offset)
+
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    return [
+        {
+            "id": row.id,
+            "ts": row.ts,
+            "admin_id": row.admin_id,
+            "action": row.action,
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "result": row.result,
+            "request_id": row.request_id,
+        }
+        for row in rows
+    ]
+
+
+async def list_payment_events(
+    db: Any,  # AsyncSession
+    *,
+    user_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Read audit.payment_events, optionally filtered by user_id.
+
+    Returns list of dicts: user_id, order_id, razorpay_payment_id, status,
+    request_id, ts.
+    """
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.models.audit import PaymentEvent
+
+    stmt = sa_select(PaymentEvent)
+    if user_id is not None:
+        # user_id in payment_events is stored as TEXT (raw UUID string)
+        stmt = stmt.where(PaymentEvent.user_id == str(user_id))
+    stmt = stmt.order_by(PaymentEvent.ts.desc()).limit(limit).offset(offset)
+
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    return [
+        {
+            "user_id": row.user_id,
+            "order_id": row.order_id,
+            "razorpay_payment_id": row.razorpay_payment_id,
+            "status": row.status,
+            "request_id": row.request_id,
+            "ts": row.ts,
+        }
+        for row in rows
+    ]

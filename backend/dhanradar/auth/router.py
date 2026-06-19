@@ -249,7 +249,19 @@ async def me(
             detail="user_not_found",
         )
 
-    return schemas.MeResponse(user=schemas.UserResponse.model_validate(db_user))
+    # Compute is_admin: str(user.id) in settings.admin_user_ids.
+    # Mirrors RequireAdmin()'s normalisation (str(UUID(user_id))) — canonical UUID string.
+    from dhanradar.config import settings
+
+    try:
+        canonical_uid = str(__import__("uuid").UUID(str(db_user.id)))
+        is_admin = canonical_uid in settings.admin_user_ids
+    except (ValueError, TypeError):
+        is_admin = False
+
+    user_data = schemas.UserResponse.model_validate(db_user)
+    user_data.is_admin = is_admin
+    return schemas.MeResponse(user=user_data)
 
 
 # ---------------------------------------------------------------------------

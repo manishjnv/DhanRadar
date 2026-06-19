@@ -303,6 +303,36 @@ async def rebuild_report_from_db(
 
 
 
+async def list_recent_cas_failures(db: Any, limit: int = 50) -> list[dict]:
+    """Return recently failed CAS jobs for the Admin support view (read-only).
+
+    Queries mf.mf_cas_jobs WHERE status='failed', ordered newest first.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfCasJob
+
+    rows = (
+        await db.scalars(
+            select(MfCasJob)
+            .where(MfCasJob.status == "failed")
+            .order_by(MfCasJob.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "job_id": str(r.job_id),
+            "user_id": str(r.user_id),
+            "status": r.status,
+            "error_message": r.error_message,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        }
+        for r in rows
+    ]
+
+
 async def get_sip_day(db: Any, portfolio_id: Any) -> int | None:
     """Return the most common calendar day-of-month for SIP transactions in this portfolio.
 
