@@ -882,7 +882,19 @@ route (d) decision; `docs/MF_Master_DB_Plan_Final.md` §19.
 
 ## ADR-0034 — Cohort grouping rewire to validated `sebi_category` (model v1.2, B66-f1 pt2)
 
-**Date:** 2026-06-14 · **Status:** Proposed (activation GATED on the B6/B28 two-person gate + founder deploy approval — NOT yet active; v1.1 remains the active prod methodology)
+**Date:** 2026-06-14 · **Status:** ACTIVE (activated 2026-06-19). Model **v1.2** activated in the prod
+`rating_engine_changelog` registry on 2026-06-19 18:04 UTC: `two_person_ok=true`, `approved_by` =
+founder `cda016f5-…` (real, current sole-admin = `manishjnvk@gmail.com`) ≠ `created_by`
+`"claude-builder (B66-f1 pt2)"`; `backtest_passed=true` per the 2026-06-13 read-only prod backtest
+(1.40% churn). **Note:** the v1.2 *methodology* shipped live in PR #138 (`_COHORT_GROUPING_KEY="sebi_category"`
+and config `model_version=v1.2`), so the ~196-fund relabel already occurred at that deploy; this
+activation wrote the formerly-missing two-person registry record (the registry had stopped at v1.1),
+closing the audit gap and making the DB authoritative-state consistent with the live config.
+**Approver-UUID correction:** the v1/v1.1 rows recorded `approved_by=afeea4f5-…`, now a dead orphan
+(no matching user; founder's pre-account-recreation UUID, removed from `ADMIN_USER_IDS` 2026-06-19);
+v1.2 deliberately used the real founder UUID `cda016f5-…`. Original (superseded) status: *Proposed —
+activation gated on the B6/B28 two-person gate + founder deploy approval; v1.1 was the active prod
+methodology.*
 
 **Context:** The category-relative label benchmarks peers grouped by the raw AMFI `mf_funds.category`
 string. B66 showed that string is inconsistent: malformed variants (bare `ELSS`, double-space
