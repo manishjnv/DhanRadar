@@ -21,6 +21,12 @@ export interface AuthUser {
   /** Written only by Onboarding; null until the user completes it. */
   risk_profile: string | null;
   dpdp_consent_version: string | null;
+  /**
+   * True when user.id ∈ settings.admin_user_ids on the backend.
+   * Requires backend change to /auth/me response body (Admin.md §2).
+   * Undefined on older backend builds — treated as false by AdminGuard.
+   */
+  is_admin?: boolean;
 }
 
 /** POST /auth/login and /auth/signup envelope. */

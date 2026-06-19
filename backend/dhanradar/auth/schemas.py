@@ -87,6 +87,10 @@ class UserResponse(BaseModel):
     totp_verified: bool
     risk_profile: str | None
     dpdp_consent_version: str | None
+    # Admin flag — computed at serialisation time from settings.admin_user_ids.
+    # Defaults to False so legacy callers that build UserResponse from ORM rows
+    # without an explicit value stay backward-compatible.
+    is_admin: bool = False
 
 
 class SignupResponse(BaseModel):
