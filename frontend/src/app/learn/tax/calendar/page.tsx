@@ -56,12 +56,12 @@ export default async function TaxCalendarPage() {
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-1">
           <CalendarDays size={20} className="text-royal" aria-hidden="true" />
-          <h1 className="text-h2 font-medium text-ink">Tax Calendar</h1>
+          <h1 className="text-h2 text-ink">Tax Calendar</h1>
         </div>
         <p className="text-small text-ink-secondary">
           Key income-tax dates and deadlines for{' '}
-          <span className="font-medium text-ink">{data.fy_label}</span>
-          {' '}({data.fy_start} – {data.fy_end}).
+          <span className="font-mono tabular-nums text-ink">{data.fy_label}</span>
+          {' '}(<span className="font-mono tabular-nums">{data.fy_start}</span> – <span className="font-mono tabular-nums">{data.fy_end}</span>).
         </p>
       </div>
 
@@ -87,7 +87,7 @@ export default async function TaxCalendarPage() {
                   <div className="flex items-start gap-4">
                     {/* Date badge */}
                     <div
-                      className="shrink-0 text-caption font-medium text-royal bg-royal/10 rounded-md px-2 py-1 tabular-nums min-w-[88px] text-center"
+                      className="shrink-0 font-mono text-caption font-medium text-royal bg-royal/10 rounded-md px-2 py-1 tabular-nums min-w-[88px] text-center"
                       aria-label={`Date: ${entry.date}`}
                     >
                       {entry.date}

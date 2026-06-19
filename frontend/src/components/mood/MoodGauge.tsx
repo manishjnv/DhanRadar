@@ -226,9 +226,10 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
           y={CY + 14}
           textAnchor="middle"
           dominantBaseline="middle"
+          fontFamily="Geist Mono, ui-monospace, monospace"
           fontSize="15"
-          fontWeight="600"
-          letterSpacing="0.03em"
+          fontWeight="500"
+          letterSpacing="0.08em"
           fill={color}
         >
           {displayWord.toUpperCase()}
@@ -240,6 +241,7 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
           y={CY + 30}
           textAnchor="middle"
           dominantBaseline="middle"
+          fontFamily="Geist Mono, ui-monospace, monospace"
           fontSize="10"
           fill="var(--text-muted)"
         >

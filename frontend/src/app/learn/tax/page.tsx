@@ -49,7 +49,7 @@ function ArticleCard({ article }: { article: TaxArticleSummary }) {
         <CardBody>
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <h2 className="text-h3 font-medium text-ink group-hover:text-royal transition-colors leading-snug">
+              <h2 className="text-h3 text-ink group-hover:text-royal transition-colors leading-snug">
                 {article.title}
               </h2>
               <p className="text-small text-ink-secondary mt-1 line-clamp-2">
@@ -58,11 +58,11 @@ function ArticleCard({ article }: { article: TaxArticleSummary }) {
             </div>
           </div>
           <div className="flex items-center gap-2 mt-3">
-            <span className="text-caption text-ink-muted uppercase tracking-wide">
+            <span className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">
               {article.category}
             </span>
             <span className="text-caption text-ink-faint" aria-hidden="true">·</span>
-            <span className="text-caption text-ink-muted">{article.fy_label}</span>
+            <span className="font-mono text-caption text-ink-muted tabular-nums">{article.fy_label}</span>
           </div>
         </CardBody>
       </Card>
@@ -80,7 +80,7 @@ export default async function TaxLearnPage() {
     <MaybeShell>
       {/* Page heading */}
       <div className="mb-6">
-        <h1 className="text-h2 font-medium text-ink">Tax Education</h1>
+        <h1 className="text-h2 text-ink">Tax Education</h1>
         <p className="text-small text-ink-secondary mt-1">
           Plain-language guides on Indian income-tax rules, ELSS, capital gains, and FY deadlines.
         </p>

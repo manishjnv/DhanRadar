@@ -154,7 +154,7 @@ function SetupFlow() {
         </p>
         <div className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2">
           <code
-            className="flex-1 break-all text-caption text-ink select-all"
+            className="flex-1 break-all font-mono text-caption text-ink select-all"
             aria-label="Provisioning URI — select all and copy"
           >
             {provisioning_uri}
@@ -169,7 +169,7 @@ function SetupFlow() {
         </p>
         <div className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2">
           <code
-            className="flex-1 break-all font-mono text-caption text-ink select-all tracking-widest"
+            className="flex-1 break-all font-mono text-caption text-ink select-all tabular-nums tracking-widest"
             aria-label="Base32 TOTP secret"
           >
             {secret}
@@ -259,7 +259,7 @@ export default function SecurityPage() {
     <div className="flex flex-col gap-6 max-w-2xl">
       {/* Page heading */}
       <div className="flex flex-col gap-1">
-        <h1 className="text-h2 font-medium text-ink">Security</h1>
+        <h1 className="text-h2 text-ink">Security</h1>
         <p className="text-small text-ink-secondary">
           Manage how you sign in to your DhanRadar account.
         </p>

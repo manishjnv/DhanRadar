@@ -273,7 +273,7 @@ export default function NotificationPreferencesPage() {
     <div className="flex flex-col gap-6 max-w-2xl">
       {/* Page heading */}
       <div className="flex flex-col gap-1">
-        <h1 className="text-h2 font-medium text-ink">Notification preferences</h1>
+        <h1 className="text-h2 text-ink">Notification preferences</h1>
         <p className="text-small text-ink-secondary">
           Choose how DhanRadar reaches you. All times are IST.
         </p>

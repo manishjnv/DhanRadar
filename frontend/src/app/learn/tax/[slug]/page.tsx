@@ -75,13 +75,13 @@ export default async function TaxArticlePage({
       <article>
         <header className="mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-caption text-ink-muted uppercase tracking-wide">
+            <span className="font-mono text-caption text-ink-muted uppercase tracking-[0.06em]">
               {article.category}
             </span>
             <span className="text-caption text-ink-faint" aria-hidden="true">·</span>
-            <span className="text-caption text-ink-muted">{article.fy_label}</span>
+            <span className="font-mono text-caption text-ink-muted tabular-nums">{article.fy_label}</span>
           </div>
-          <h1 className="text-h2 font-medium text-ink">{article.title}</h1>
+          <h1 className="text-h2 text-ink">{article.title}</h1>
           <p className="text-body text-ink-secondary mt-2">{article.summary}</p>
         </header>
 
@@ -101,13 +101,13 @@ export default async function TaxArticlePage({
           <ReactMarkdown
             components={{
               h1: ({ children }) => (
-                <h2 className="text-h2 font-medium text-ink mt-6 mb-2">{children}</h2>
+                <h2 className="text-h2 text-ink mt-6 mb-2">{children}</h2>
               ),
               h2: ({ children }) => (
-                <h2 className="text-h2 font-medium text-ink mt-6 mb-2">{children}</h2>
+                <h2 className="text-h2 text-ink mt-6 mb-2">{children}</h2>
               ),
               h3: ({ children }) => (
-                <h3 className="text-h3 font-medium text-ink mt-4 mb-1">{children}</h3>
+                <h3 className="text-h3 text-ink mt-4 mb-1">{children}</h3>
               ),
               p: ({ children }) => (
                 <p className="text-body text-ink leading-relaxed">{children}</p>
@@ -163,7 +163,7 @@ export default async function TaxArticlePage({
             <p className="text-caption text-ink-muted">{article.source_note}</p>
           )}
           <p className="text-caption text-ink-muted">
-            Last updated: {article.updated_at}
+            Last updated: <span className="font-mono tabular-nums">{article.updated_at}</span>
           </p>
           {/* Standing <Disclaimer/> is now rendered by MaybeShell. */}
         </footer>

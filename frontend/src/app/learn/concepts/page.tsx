@@ -45,7 +45,7 @@ export default async function ConceptsLearnPage() {
     <MaybeShell>
       {/* Page heading */}
       <div className="mb-6">
-        <h1 className="text-h2 font-medium text-ink">Investing Basics</h1>
+        <h1 className="text-h2 text-ink">Investing Basics</h1>
         <p className="text-small text-ink-secondary mt-1">
           Plain-language explainers of the concepts behind every portfolio — what they
           are and why they matter.

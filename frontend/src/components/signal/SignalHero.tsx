@@ -118,7 +118,7 @@ export function SignalHero({ signalState, isLoading = false }: SignalHeroProps) 
           <ScoreRing fill={cfg.ringFill} color={cfg.ringColor} />
           <span
             className={cn(
-              'absolute inset-0 flex items-center justify-center text-[11px] font-semibold',
+              'absolute inset-0 flex items-center justify-center text-caption font-semibold',
               cfg.textClass,
             )}
             aria-hidden="true"
