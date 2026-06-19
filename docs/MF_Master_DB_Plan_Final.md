@@ -9,7 +9,7 @@ sequencing).
 
 ---
 
-## 0. Live Deployment State (as of 2026-06-16)
+## 0. Live Deployment State (as of 2026-06-19)
 
 | Component | Status | Migration | Notes |
 |---|---|---|---|
@@ -18,12 +18,12 @@ sequencing).
 | `mf.mf_fund_constituents` | LIVE | 0024 | Top-10 AMC SEBI XLSX scraper; UTI+NIPPON working; 5 AMCs bot-blocked; MIRAE format mismatch |
 | `mf.mf_fund_ranks` | LIVE | 0024 | Percentile ranks cached |
 | Phase 3 lineage + audit tables | **LIVE** | 0035 | ingestion_runs, field_lineage, source_health, scheme_lineage, fund_manager_history + source_run_id on mf_fund_metrics |
-| Task 3 scheme-master enrichment | **PENDING** | next = 0025 | plan_type / option_type / fund_manager / scheme_lineage |
+| Task 3 scheme-master enrichment | **LIVE** | 0025 + 0035 | plan_type / option_type columns (0025); scheme_lineage + fund_manager_history tables (0035) |
 | AMC-level AUM (ADR-0035) | **PENDING** | — | AMFI SPA endpoint; needs legal sanction + ADR pre-build gates |
 | Per-scheme AUM via SEBI XLSX piggyback | **PENDING** | — | B67 route (d); rides the constituents scraper extension (ADR-0033 amendment needed) |
 | Benchmark / TRI | **PENDING** | — | Internal compute only; no raw values in DOM |
 | Playwright SPA rendering for blocked AMCs | **PENDING** | — | B63 memory ceiling constraint; needs Tier-B review |
-| Kite MF instruments enrichment | **PENDING** | — | plan_type / option_type / last_price cross-check; ~2,000–3,000 schemes; access token rotation required |
+| Kite MF instruments enrichment | **LIVE** | — | `mf_kite_enrich` task (weekly Sun 02:00 IST); TOTP-automated access-token refresh (pyotp, `KITE_TOTP_SECRET`); plan_type / option_type cross-check for ~2,000–3,000 schemes |
 
 ---
 
@@ -951,20 +951,20 @@ verified.
 - Playwright for HDFC/SBI/ICICI_PRU/KOTAK/AXIS → **PENDING** (Tier-B review required)
 - DSP/FRANKLIN URL discovery → **PENDING** (CDN pattern investigation)
 
-### Phase 3 — Scheme Master Enrichment (Next migration: 0025)
-- Add `plan_type`, `option_type` columns to `mf.scheme` (migration 0025)
-- **Kite `mf_instruments()` enrichment** for ~2k–3k schemes (plan_type/option_type); AMFI name-parse regex fallback for remainder
-- Decide TOTP-automated vs manual token refresh for Kite access token
-- Add `mf.scheme_lineage` table (migration 0025)
-- AMFI scheme master weekly refresh task
-- Scheme closure / merger detection from SEBI circulars
-- `mf.scheme_alias` registration from all existing parsers
+### Phase 3 — Scheme Master Enrichment (migrations 0025 + 0035) ✓ LIVE
+- Add `plan_type`, `option_type` columns to `mf.mf_funds` (migration 0025) ✓
+- **Kite `mf_instruments()` enrichment** for ~2k–3k schemes (plan_type/option_type) via the `mf_kite_enrich` task; AMFI name-parse regex fallback for remainder ✓
+- TOTP-automated token refresh chosen + shipped (pyotp, `KITE_TOTP_SECRET`); manual paste retained as fallback ✓
+- Add `mf.scheme_lineage` table (migration 0035) ✓
+- AMFI scheme master weekly refresh task → **PENDING**
+- Scheme closure / merger detection from SEBI circulars → **PENDING** (manual until automated detection lands)
+- `mf.scheme_alias` registration from all existing parsers → **PENDING**
 
 ### Phase 4 — Expense Ratio + Fund Manager (rides SEBI XLSX piggyback)
 - Requires Phase 2 (SEBI XLSX scraper) substantially complete
 - Extend constituent parser to also extract net_assets per scheme (per-scheme AUM)
 - Extend constituent parser to extract current fund manager per scheme
-- `mf.expense_ratio_history` + `mf.fund_manager_history` tables
+- `mf.fund_manager_history` table landed (migration 0035) ✓; `mf.expense_ratio_history` table → **PENDING**; population of both rides the SEBI XLSX piggyback (still pending)
 - File ADR-0033 amendment before writing these fields (Tier-B gate)
 
 ### Phase 5 — AMC-Level AUM (ADR-0035)
@@ -991,14 +991,14 @@ verified.
 
 | ID | Item | Status | Next action |
 |---|---|---|---|
-| Kite access token | TOTP-automated (pyotp) vs manual daily refresh | **DECIDE** | Choose before implementing `mf_kite_enrich`; TOTP secret stored in `.env` as `KITE_TOTP_SECRET` |
+| Kite access token | TOTP-automated (pyotp) vs manual daily refresh | **DECIDED — TOTP-automated, shipped** | `mf_kite_enrich` live; TOTP secret in `.env` as `KITE_TOTP_SECRET`; token cached in Redis 22h TTL; manual paste retained as fallback |
 | B67 route (d) | ADR-0033 amendment (extend SEBI XLSX parser to AUM + manager + derived credit) | **FILED — ADR-0033-A (2026-06-16)** | Tier-B/ToS/DPDP gate runs at scraper build time; sequenced behind P2a |
 | ADR-0035 | AMFI SPA AMC-level AUM — gates: endpoint RE + legal sanction | PENDING | Reverse-engineer AMFI SPA endpoint; counsel sign-off |
 | Playwright | Bot-protected AMC scraping — B63 memory ceiling constraint | PENDING | Memory profiling; Tier-B + codex:rescue adversarial review before activation |
 | MIRAE | Per-scheme file enumeration logic | PENDING | Implement enumerate-and-iterate pattern (Phase 2) |
 | DSP / FRANKLIN | Disclosure URL discovery returns 0 links | PENDING | CDN pattern investigation; may need direct AMC outreach |
 | TRI / Benchmark | Legal artifact filing | PENDING | Founder files under `docs/legal/` |
-| Scheme lineage | No automated merger detection yet | PENDING | Phase 3; manual from SEBI circulars until Phase 3 lands |
+| Scheme lineage | `mf.scheme_lineage` table landed (0035); no automated merger detection yet | PENDING | Manual from SEBI circulars until automated detection lands |
 | B72 | Audit-trail provenance gap in mf_fund_metrics | **DONE (0035)** | source_run_id added to mf_fund_metrics + mf_metrics_refresh writes UUID per run; deployed 2026-06-17 |
 
 ---
