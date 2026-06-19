@@ -131,7 +131,7 @@ function HowSignalWorks() {
       <ul className="mt-2 flex flex-col gap-1.5 text-caption text-ink-secondary">
         <li>1. You set your personal thresholds for Nifty, VIX, and Market Breadth.</li>
         <li>2. Each day, real market data is checked against your thresholds.</li>
-        <li>3. A weighted score (VIX 40%, Breadth 40%, Nifty 20%) determines the signal state.</li>
+        <li>3. A weighted combination of the VIX, Market Breadth, and Nifty checks determines the signal state.</li>
         <li>4. Your dip fund deployment ladder shows how much to deploy at each signal level.</li>
         <li>5. Your SIPs continue regardless — Signal only governs extra dip deployments.</li>
       </ul>
@@ -251,7 +251,6 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
               niftyValue={nifty50?.value}
               niftyChangePct={nifty50?.change_pct}
               niftyThreshold={rules?.nifty_threshold ?? -8}
-              weight={20}
               isLoading={indicesLoading}
             />
             <MarketSignalCard
@@ -261,7 +260,6 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
               vixValue={vix?.value}
               vixChangePct={vix?.change_pct}
               vixThreshold={rules?.vix_threshold ?? 19}
-              weight={40}
               isLoading={vixLoading}
             />
             <MarketSignalCard
@@ -272,7 +270,6 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
               declines={breadth?.declines}
               adRatio={breadth?.ad_ratio}
               breadthThreshold={rules?.breadth_threshold ?? 0.8}
-              weight={40}
               isLoading={breadthLoading}
             />
           </div>
