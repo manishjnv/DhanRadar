@@ -482,6 +482,36 @@ async def is_engine_version_activated(db: Any, model_version: str) -> bool:
     return result is not None
 
 
+async def list_engine_versions(db: Any, limit: int = 50) -> list[dict]:
+    """Return RatingEngineChangelog rows ordered newest-first (by created_at desc).
+
+    Used by the Admin Phase 3 scoring-read endpoint — read-only, no mutations.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import RatingEngineChangelog
+
+    rows = (
+        await db.scalars(
+            select(RatingEngineChangelog)
+            .order_by(RatingEngineChangelog.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "model_version": r.model_version,
+            "created_by": r.created_by,
+            "approved_by": r.approved_by,
+            "two_person_ok": r.two_person_ok,
+            "activated": r.activated,
+            "activated_at": r.activated_at.isoformat() if r.activated_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
 async def record_engine_changelog(
     db: Any,
     *,

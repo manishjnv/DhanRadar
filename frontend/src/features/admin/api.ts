@@ -439,6 +439,147 @@ export function useAdminBillingWebhookHealth() {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3 extended query keys
+// ---------------------------------------------------------------------------
+export const adminKeysP3 = {
+  scoringModel:          () => ['admin', 'scoring', 'model'] as const,
+  flags:                 () => ['admin', 'flags'] as const,
+  supportCasFailures:    () => ['admin', 'support', 'cas-failures'] as const,
+  analyticsOverview:     () => ['admin', 'analytics', 'overview'] as const,
+  notificationsHealth:   () => ['admin', 'notifications', 'health'] as const,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Types — Score Model (Admin.md §14 Score Model)
+// ---------------------------------------------------------------------------
+
+export interface AdminScoringRegistryVersion {
+  model_version: string;
+  created_by: string;
+  approved_by: string | null;
+  two_person_ok: boolean;
+  activated: boolean;
+  activated_at: string | null;
+  created_at: string;
+}
+
+export interface AdminScoringModel {
+  model_version: string;
+  activated: boolean;
+  provisional: boolean;
+  methodology_url: string;
+  created_by: string;
+  axis_weights: Record<string, number>;
+  coverage: { total_funds: number };
+  registry_versions: AdminScoringRegistryVersion[];
+}
+
+// ---------------------------------------------------------------------------
+// Types — Feature Flags (Admin.md §14 Feature Flags)
+// ---------------------------------------------------------------------------
+
+export interface AdminFlag {
+  key: string;
+  value: boolean;
+  description: string;
+  source: string;
+  mutable: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Types — Support (Admin.md §14 Support)
+// ---------------------------------------------------------------------------
+
+export interface AdminCasFailure {
+  job_id: string;
+  user_id: string;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Types — Analytics (Admin.md §14 Analytics)
+// ---------------------------------------------------------------------------
+
+export interface AdminAnalyticsOverview {
+  signups_total: number;
+  signups_30d: number;
+  cas_uploads_total: number;
+  cas_uploads_30d: number;
+  portfolios_created: number;
+  reports_generated: number;
+  premium_conversions: number;
+  funnel: {
+    cas_uploaded: number;
+    portfolio_created: number;
+    report_generated: number;
+  };
+  conversion_rate_pct: number;
+}
+
+// ---------------------------------------------------------------------------
+// Types — Notifications (Admin.md §14 Notifications)
+// ---------------------------------------------------------------------------
+
+export interface AdminNotificationsHealth {
+  queue_depth: { telegram: number; email: number };
+  sent: number;
+  failed: number;
+  rate_capped: number;
+  deferred: number;
+  last_sent_at: string | null;
+  templates: Array<{ id: string }>;
+  broadcast_available: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 hooks
+// ---------------------------------------------------------------------------
+
+export function useAdminScoringModel() {
+  return useQuery({
+    queryKey: adminKeysP3.scoringModel(),
+    queryFn:  () => api.get<AdminScoringModel>('/admin/scoring/model'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminFlags() {
+  return useQuery({
+    queryKey: adminKeysP3.flags(),
+    queryFn:  () => api.get<AdminFlag[]>('/admin/flags'),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAdminCasFailures(limit = 50) {
+  return useQuery({
+    queryKey: adminKeysP3.supportCasFailures(),
+    queryFn:  () => api.get<AdminCasFailure[]>(`/admin/support/cas-failures?limit=${limit}`),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminAnalyticsOverview() {
+  return useQuery({
+    queryKey: adminKeysP3.analyticsOverview(),
+    queryFn:  () => api.get<AdminAnalyticsOverview>('/admin/analytics/overview'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminNotificationsHealth() {
+  return useQuery({
+    queryKey: adminKeysP3.notificationsHealth(),
+    queryFn:  () => api.get<AdminNotificationsHealth>('/admin/notifications/health'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Audit hook
 // ---------------------------------------------------------------------------
 

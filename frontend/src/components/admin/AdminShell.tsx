@@ -52,11 +52,11 @@ const ADMIN_NAV: AdminNavItem[] = [
   { href: '/admin/operations', label: 'Operations',      icon: Activity,        live: true  },
   { href: '/admin/users',      label: 'Users & Audit',   icon: Users,           live: true  },
   { href: '/admin/billing',    label: 'Billing Ops',     icon: CreditCard,      live: true  },
-  { href: '/admin/scoring',    label: 'Score Model',     icon: BarChart3,       live: false },
-  { href: '/admin/flags',      label: 'Feature Flags',   icon: Flag,            live: false },
-  { href: '/admin/support',    label: 'Support',         icon: HeadphonesIcon,  live: false },
-  { href: '/admin/analytics',  label: 'Analytics',       icon: TrendingUp,      live: false },
-  { href: '/admin/notifications', label: 'Notifications', icon: Bell,           live: false },
+  { href: '/admin/scoring',    label: 'Score Model',     icon: BarChart3,       live: true  },
+  { href: '/admin/flags',      label: 'Feature Flags',   icon: Flag,            live: true  },
+  { href: '/admin/support',    label: 'Support',         icon: HeadphonesIcon,  live: true  },
+  { href: '/admin/analytics',  label: 'Analytics',       icon: TrendingUp,      live: true  },
+  { href: '/admin/notifications', label: 'Notifications', icon: Bell,           live: true  },
 ];
 
 const AIOPS_NAV: AdminNavItem[] = [
