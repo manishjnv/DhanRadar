@@ -12,12 +12,36 @@ Stack: FastAPI (`dhanradar` package) + Next.js (`frontend/`) + TimescaleDB + Red
 
 ## Authority order (binding — resolves every source-of-truth conflict)
 
+For architecture / contracts / behaviour:
 `DhanRadar_Architecture_Final.md` → `DhanRadar_Implementation_Plan.md` → existing code →
-`docs/features/*` → `docs/ui-system/*` → mockups.
+`docs/features/*`.
 
-`docs/ui-system/` is **harvest-not-adopt**: an independently produced kit that conflicts with the
-architecture on framing/stack/auth/tokens and is internally self-contradictory. Apply it only per
-`docs/project-state/MIGRATION_STRATEGY_FINAL.md` (KEEP / MERGE / REPLACE / IGNORE).
+**For UI / visual design (founder rule 2026-06-19, binding):** `docs/ui-system/` is the **master UI
+design and the FIRST source of truth** for every UI change and every new page/screen. The live
+`frontend/` pages are the **older build**; bring them UP TO the ui-system master, don't treat them as
+the design truth. Open ui-system FIRST for design intent:
+
+- **Page mockups** — `docs/ui-system/brand/mockups/*.jsx` (landing, portfolio, screener, stock, app,
+  mobile, charts) + `docs/ui-system/screens/*.md` (dashboard, fund-detail, portfolio, watchlist,
+  settings, …). Use or improve the matching mockup to build a similar page.
+- **Components / typography / color / buttons** — `docs/ui-system/components/*.md` (Button, Card,
+  Input, Table, …) + the brand guide `docs/ui-system/brand/README.md`. Always reference these for
+  type scale, font colour, and button variants.
+
+ui-system is **already Geist/warm** (brand guide = Geist Sans + Geist Mono + Instrument Serif; palette
+Deep Navy / Royal Blue `#1E5EFF` / Emerald / Cyan / Amber / Red) — it matches the stack lock, so there
+is **no font/token conflict** to retokenize. Implement via the live token pipeline as the mechanism
+(`frontend/styles/tokens.json` → `scripts/gen-tokens.mjs` → generated `src/styles/tokens.css` +
+`tailwind.tokens.cjs`; never hand-edit generated files); if the live tokens drift from the brand
+guide, reconcile toward the brand guide. Reuse `frontend/src/components/`.
+
+**What still overrides ui-system (compliance, not design — always win):** the **Non-negotiables**
+below, especially (1) the **SEBI advisory boundary** — the brand palette labels Emerald/Amber/Red as
+"Buy/Hold/Sell"; **translate those to educational labels, never copy the advisory verbs** (RecommendationCard
+likewise) — and (2) **no-numeric-in-DOM** — Chart/ScoreRing show a band, never a raw score.
+Also ignore the ui-system **standalone-package build docs** (`docs/ui-system/docs/01–07`,
+`contracts/`, `nextjs-blueprint/`, `claude-code/*-spec.md`, bootstrap guides) — they describe a
+DIFFERENT stack/auth/API/DB; the real build is `backend/` + `frontend/` per the architecture.
 
 ## Read-first each session (Phase 0)
 
@@ -32,7 +56,8 @@ architecture on framing/stack/auth/tokens and is internally self-contradictory. 
 - Architecture / module contracts → `docs/DhanRadar_Architecture_Final.md`
 - Phase sequence / Allowed-APIs / anti-patterns → `docs/DhanRadar_Implementation_Plan.md`
 - API contract (paths / auth / errors / enums) → `docs/project-state/CANONICAL_OPENAPI_ALIGNMENT.md`
-- Design tokens / components → `docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md` + live `frontend/` token files
+- UI / visual design master — FIRST source of truth → `docs/ui-system/`: page mockups (`brand/mockups/*.jsx`, `screens/*.md`) + component/typography/colour/button specs (`components/*.md`, `brand/README.md`)
+- Design tokens / implementation → `docs/project-state/CANONICAL_DESIGN_SYSTEM_ALIGNMENT.md` + live `frontend/` token files (Geist/warm; the mechanism that implements the ui-system master — already aligned, no Manrope/cool conflict)
 - UI/UX build rules (creating screens/components) → `agent.md`
 - Scoring / rating engine → `docs/project-state/FINAL_SCORING_SPEC.md`
 - ui-system KEEP/MERGE/REPLACE/IGNORE → `docs/project-state/MIGRATION_STRATEGY_FINAL.md`
