@@ -32,7 +32,7 @@ export function AlertList({ alerts }: AlertListProps) {
   }
 
   return (
-    <ul className="flex flex-col gap-2" role="list">
+    <ul className="flex flex-col gap-2">
       {alerts.map((alert, i) => {
         const Icon = SEVERITY_ICON[alert.severity] ?? Info;
         return (

@@ -108,7 +108,7 @@ function RecentSignupsList({
   }
 
   return (
-    <ul className="flex flex-col gap-0" role="list">
+    <ul className="flex flex-col gap-0">
       {signups.map((s, i) => (
         <li
           key={i}
