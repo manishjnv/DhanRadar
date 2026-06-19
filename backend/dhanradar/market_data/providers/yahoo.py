@@ -14,16 +14,26 @@ Signals fetched (raw values; normalisation lives in mood/signals.py):
   - us_bond_10y    : US 10Y yield (^TNX) — level, in percent
   - oil_brent      : Brent crude (BZ=F)  — price level, USD/bbl
   - usd_inr        : USD/INR (INR=X)     — % daily change
+  - market_breadth : NIFTY-50 constituent A/D — advances/(advances+declines) [0,1]
 
 Each symbol is fetched independently — a per-symbol failure yields None for that
 signal (omitted from the payload); the rest proceed. ProviderError is raised only
 on a catastrophic structural failure (httpx unavailable). The Mood Compass
 degrades gracefully to 'data_unavailable' when all signals are None.
+
+market_breadth is derived from the NIFTY-50 constituent advances/declines via the
+shared helper in market_data/breadth.py (``fetch_nifty50_advances_declines_sync``). The
+Redis breadth cache (``signal:breadth:last``, TTL 3600s) is read-first to avoid a
+second slow ~2-5s yfinance download when the Signal-card path already pre-warmed
+it. A breadth fetch failure only omits the key; the six chart signals are still
+returned normally. ProviderError is never raised solely because breadth failed.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime
+import json
 import logging
 from urllib.parse import quote
 
@@ -33,6 +43,11 @@ from dhanradar.market_data.config import DataKind, DataRequest
 from dhanradar.market_data.events import MacroSignalReceived
 from dhanradar.market_data.exceptions import ProviderError
 from dhanradar.market_data.providers.base import MarketDataProvider
+
+# Breadth cache constants — shared with mood/service.py (via market_data.breadth)
+# so the two paths read the same Redis key and the pre-warmed Signal-card fetch is reused here.
+_BREADTH_CACHE_KEY = "signal:breadth:last"
+_TTL_BREADTH_SEC = 3600
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +104,59 @@ def _signal_value(meta: dict, mode: str) -> float | None:
     return (float(price) - float(prev)) / float(prev) * 100.0
 
 
+async def _fetch_breadth_ratio() -> float | None:
+    """Return the market breadth ratio advances/(advances+declines) in [0,1].
+
+    Strategy (cache-first, never imputes):
+      1. Try the Redis breadth cache (``signal:breadth:last``, TTL 3600s) — the
+         Signal-card Celery task pre-warms this every 15 min, so a live yfinance
+         download is usually avoided.
+      2. On cache miss, call ``fetch_nifty50_advances_declines_sync`` in a thread.
+      3. On ANY error (Redis unavailable, yfinance failure, bad data) return None —
+         the key is simply absent from the signals dict (graceful degradation).
+
+    NOTE: the Redis cache stores ``ad_ratio = advances/declines`` (an A/D ratio,
+    not a/(a+d)), so we CANNOT derive a/(a+d) from it without the raw counts.
+    We use ``advances`` and ``declines`` from the cache directly for the correct
+    formula, falling back to a live fetch when the cache is warm but lacks those
+    fields (legacy cache entries).
+    """
+    # --- attempt 1: Redis cache ---
+    try:
+        from dhanradar.redis_client import get_redis
+        raw = await get_redis().get(_BREADTH_CACHE_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            advances = data.get("advances")
+            declines = data.get("declines")
+            if advances is not None and declines is not None:
+                total = int(advances) + int(declines)
+                if total > 0:
+                    return float(int(advances)) / float(total)
+    except Exception:  # noqa: BLE001 — cache unavailable → fall through to live fetch
+        pass
+
+    # --- attempt 2: live yfinance fetch ---
+    try:
+        from dhanradar.market_data.breadth import fetch_nifty50_advances_declines_sync
+        advances, declines = await asyncio.to_thread(fetch_nifty50_advances_declines_sync)
+        total = advances + declines
+        if total <= 0:
+            return None
+        ratio = float(advances) / float(total)
+        # Back-fill the cache so subsequent callers (Signal-card, next run) benefit.
+        try:
+            from dhanradar.redis_client import get_redis
+            cache_payload = json.dumps({"advances": advances, "declines": declines, "ad_ratio": round(advances / max(declines, 1), 3)})
+            await get_redis().set(_BREADTH_CACHE_KEY, cache_payload, ex=_TTL_BREADTH_SEC)
+        except Exception:  # noqa: BLE001 — cache write is best-effort
+            pass
+        return ratio
+    except Exception as exc:  # noqa: BLE001 — breadth is best-effort
+        logger.debug("yahoo_macro: breadth fetch failed — %s", exc)
+        return None
+
+
 class YahooMacroProvider(MarketDataProvider):
     """Best-effort macro signals for the Mood Compass via Yahoo Finance's public
     chart API. Server-reachable (unlike NSE). Per-symbol failures degrade to None;
@@ -121,10 +189,18 @@ class YahooMacroProvider(MarketDataProvider):
         if not signals:
             raise ProviderError(self.name, "no macro signals resolved from Yahoo")
 
+        # market_breadth — derived from NIFTY-50 constituent A/D counts.
+        # Read Redis cache first (pre-warmed by the Signal-card Celery task) to
+        # avoid a second slow ~2-5s yfinance download.  A failure here only omits
+        # the key (NEVER IMPUTE); it does NOT raise ProviderError.
+        breadth_ratio = await _fetch_breadth_ratio()
+        if breadth_ratio is not None:
+            signals["market_breadth"] = breadth_ratio
+
         logger.info(
             "yahoo_macro: fetched %d/%d signals: %s",
             len(signals),
-            len(_SYMBOLS),
+            len(_SYMBOLS) + 1,  # +1 for market_breadth
             list(signals.keys()),
         )
         return MacroSignalReceived(source=self.name, signals=signals, fetched_at=_now_iso())
