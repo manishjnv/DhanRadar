@@ -42,6 +42,14 @@ celery_app = Celery(
         "dhanradar.tasks.compliance",
         "dhanradar.tasks.news",
         "dhanradar.tasks.signal_alerts",
+        # Phase 6 — planned data sources (one module per source; task names are
+        # explicitly "dhanradar.tasks.mf.*" so they match the mf batch route and the
+        # admin source catalog, regardless of the module they live in).
+        "dhanradar.tasks.mf_scheme_master",
+        "dhanradar.tasks.mf_expense_ratio",
+        "dhanradar.tasks.mf_fund_manager",
+        "dhanradar.tasks.sebi_circulars",
+        "dhanradar.tasks.macro_data",
     ],
 )
 
@@ -242,6 +250,35 @@ celery_app.conf.beat_schedule = {
     "mf-kite-enrich": {
         "task": "dhanradar.tasks.mf.mf_kite_enrich",
         "schedule": crontab(day_of_week=6, hour=3, minute=0),
+    },
+    # ----- Phase 6 — planned data sources (Admin.md §18 step 6). Each task writes an
+    # mf.ingestion_runs row + an mf.source_health row via tasks/ingestion_run.py, so
+    # the Ops console flips the source Planned → Healthy on the first successful run.
+    # AMFI scheme master — weekly Sunday 03:00 IST. New/closed/merged schemes.
+    "mf-scheme-master-refresh": {
+        "task": "dhanradar.tasks.mf.mf_scheme_master_refresh",
+        "schedule": crontab(day_of_week=0, hour=3, minute=0),
+    },
+    # AMC expense ratios (TER) — monthly 15th 04:00 IST. Most AMC factsheet pages are
+    # bot-blocked (HDFC/SBI/ICICI_PRU/KOTAK/AXIS) — task degrades gracefully, never crashes.
+    "mf-expense-ratio-fetch": {
+        "task": "dhanradar.tasks.mf.mf_expense_ratio_fetch",
+        "schedule": crontab(day_of_month=15, hour=4, minute=0),
+    },
+    # AMC fund managers — monthly 15th 04:30 IST (after expense-ratio). Same bot-block reality.
+    "mf-fund-manager-fetch": {
+        "task": "dhanradar.tasks.mf.mf_fund_manager_fetch",
+        "schedule": crontab(day_of_month=15, hour=4, minute=30),
+    },
+    # SEBI circulars — weekly Wednesday 05:00 IST. Regulatory/merger/category metadata only.
+    "sebi-circulars-fetch": {
+        "task": "dhanradar.tasks.mf.sebi_circulars_fetch",
+        "schedule": crontab(day_of_week=3, hour=5, minute=0),
+    },
+    # RBI DBIE macro — weekly Sunday 06:00 IST. Repo rate, CPI, WPI, GDP, money supply.
+    "macro-data-refresh": {
+        "task": "dhanradar.tasks.mf.macro_data_refresh",
+        "schedule": crontab(day_of_week=0, hour=6, minute=0),
     },
 }
 
