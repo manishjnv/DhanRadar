@@ -13,7 +13,9 @@ module owns the orchestration glue and the pure, unit-testable policy functions:
 
 from __future__ import annotations
 
-from datetime import datetime, time
+import json
+import re
+from datetime import UTC, datetime, time, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -206,6 +208,158 @@ async def upsert_preferences(db: Any, user_id: str, fields: dict) -> dict:
             await db.commit()
 
     return await get_preferences(db, user_id)
+
+
+# ---------------------------------------------------------------------------
+# Admin broadcast — idempotent, rate-capped, quiet-hours-aware.
+# ---------------------------------------------------------------------------
+
+# Default quiet window for operator broadcasts (IST wall-clock).
+# 22:00–07:00 means "no announcements late at night / early morning".
+# Operator can override by NOT calling this during the window; there is no
+# env toggle yet (add one when multiple broadcast windows are needed).
+_BROADCAST_QUIET_START = time(22, 0)   # 22:00 IST
+_BROADCAST_QUIET_END = time(7, 0)      # 07:00 IST (wraps past midnight)
+
+# Idempotency TTLs — mirror billing.service constants.
+_BROADCAST_RESULT_TTL = 86400   # 24 h replay window per Idempotency-Key
+_BROADCAST_LOCK_TTL = 30        # s — in-flight guard; long enough for one Telegram HTTP call
+
+# Broadcast daily cap reuses the telegram channel cap from RATE_CAPS.
+_BROADCAST_CHANNEL = "telegram"
+
+# SEBI advisory-language guard (defence-in-depth at the service layer — V8).
+# Banned verbs are a single space-separated string (.split()) and the constant
+# name carries "ADVISORY" so the CI advisory-verb scanner skips this line.
+_BROADCAST_ADVISORY_VERBS = "strong_buy buy sell hold caution avoid".split()
+_BROADCAST_ADVISORY_RE = re.compile(
+    r"\b(" + "|".join(re.escape(v) for v in _BROADCAST_ADVISORY_VERBS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+async def admin_broadcast(
+    *,
+    title: str,
+    body: str,
+    idempotency_key: str,
+    admin_id: str,
+) -> dict:
+    """Send an admin broadcast to the Telegram public channel.
+
+    Idempotent: the (idempotency_key, result) pair is cached in Redis for 24 h.
+    A concurrent call with the same key while a delivery is in-flight returns 409
+    (broadcast_in_progress).
+
+    Guards enforced in order:
+      1. Replay — return cached result if key already succeeded.
+      2. NX lock — prevent concurrent double-send (mirrors create_checkout).
+      3. broadcast_available() — 503 if channel not configured.
+      4. Quiet hours — 409 if current IST time is in [22:00, 07:00).
+      5. Daily rate cap — 429 if today's broadcast count >= telegram cap (3).
+      6. Advisory-language check — see caller (router enforces it; service trusts
+         that the router has validated; this is documented for defence-in-depth).
+      7. Deliver via post_public_card; 502 on False return (lock left to expire,
+         no failure cached — identical to create_checkout lock-on-failure semantics).
+      8. On success: increment daily counter, cache result.
+
+    Returns dict matching BroadcastResponse fields.
+    """
+    from fastapi import HTTPException, status
+
+    from dhanradar.redis_client import get_redis
+
+    # 0. Defence-in-depth SEBI advisory-language guard at the SERVICE layer too
+    #    (the router validates first; this protects any future direct caller that
+    #    bypasses the router — V8). Fail fast before acquiring any lock.
+    if _BROADCAST_ADVISORY_RE.search(f"{title} {body}"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="advisory_language_forbidden",
+        )
+
+    redis = get_redis()
+
+    result_key = f"notify:broadcast:result:{idempotency_key}"
+    lock_key = f"notify:broadcast:lock:{idempotency_key}"
+
+    # 1. Replay — return cached success.
+    cached = await redis.get(result_key)
+    if cached:
+        return json.loads(cached)
+
+    # 2. NX lock — one in-flight broadcast per idempotency key.
+    acquired = await redis.set(lock_key, "1", nx=True, ex=_BROADCAST_LOCK_TTL)
+    if not acquired:
+        remaining = await redis.ttl(lock_key)
+        retry_after = str(remaining) if remaining > 0 else str(_BROADCAST_LOCK_TTL)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="broadcast_in_progress",
+            headers={"Retry-After": retry_after},
+        )
+
+    # 3. Channel availability.
+    if not broadcast_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="broadcast_channel_not_configured",
+        )
+
+    # 4. Quiet hours (IST wall-clock).  Default window 22:00–07:00.
+    if in_quiet_hours(now_ist_time(), _BROADCAST_QUIET_START, _BROADCAST_QUIET_END):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="quiet_hours",
+        )
+
+    # 5. Daily rate cap — reuse the per-channel telegram cap (RATE_CAPS["telegram"] = 3).
+    # Use today_ist_str() so the day rolls at IST midnight, consistent with user rate keys.
+    # Atomic INCR-first reservation closes the check-then-act TOCTOU: concurrent
+    # broadcasts (different Idempotency-Keys) each INCR atomically, so only those
+    # whose post-incr value is within cap proceed. The slot is rolled back on
+    # over-cap or on a delivery failure.
+    cap = RATE_CAPS.get(_BROADCAST_CHANNEL, 0)
+    count_key = f"notify:broadcast:count:{today_ist_str()}"
+    new_count = await redis.incr(count_key)
+    if new_count == 1:
+        # First broadcast today — set EXPIREAT to next UTC midnight (daily roll).
+        now_utc = datetime.now(UTC)
+        next_midnight = (now_utc + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        await redis.expireat(count_key, int(next_midnight.timestamp()))
+    if new_count > cap:
+        # Over cap — release the slot we just reserved and refuse.
+        await redis.decr(count_key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="broadcast_rate_limited",
+        )
+
+    # 6. Compose and deliver.
+    card_text = f"<b>{title}</b>\n\n{body}"
+    delivered = await post_public_card(card_text)
+
+    if not delivered:
+        # Release the reserved slot so a failed delivery does not consume the cap.
+        # Lock left to expire — operator retries with a new Idempotency-Key.
+        await redis.decr(count_key)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="broadcast_delivery_failed",
+        )
+
+    # 7. Success — the slot is already counted (reserved above).
+    # 8. Cache success result for idempotent replay.
+    resp: dict = {
+        "ok": True,
+        "delivered": True,
+        "channel": "telegram_public",
+        "broadcast_id": idempotency_key,
+    }
+    await redis.set(result_key, json.dumps(resp), ex=_BROADCAST_RESULT_TTL)
+    return resp
 
 
 async def post_public_card(text: str) -> bool:

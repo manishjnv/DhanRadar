@@ -58,6 +58,25 @@ from dhanradar.redis_client import get_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
+def _user_response(user: object) -> schemas.UserResponse:
+    """Build a UserResponse with is_admin computed from settings.admin_user_ids.
+
+    is_admin MUST be set on EVERY auth response that emits a user (login, signup,
+    TOTP login, email-OTP login, /me) — not just /me. The frontend admin guard reads
+    the login-seeded `me` cache; if login omits is_admin (schema default False), an
+    admin who just logged in is wrongly 404'd at /admin until the cache goes stale.
+    Mirrors RequireAdmin()'s canonical-UUID normalisation.
+    """
+    from uuid import UUID
+
+    data = schemas.UserResponse.model_validate(user)
+    try:
+        data.is_admin = str(UUID(str(user.id))) in settings.admin_user_ids  # type: ignore[attr-defined]
+    except (ValueError, TypeError):
+        data.is_admin = False
+    return data
+
 # Per-IP (CF-Connecting-IP) brute-force / abuse guards. Login and TOTP-verify
 # are the credential-guessing surfaces, so they are tighter than the
 # architecture's generic anon 30 r/m. Realises the architecture's
@@ -105,7 +124,7 @@ async def signup(
 
     return schemas.SignupResponse(
         message="account_created",
-        user=schemas.UserResponse.model_validate(user),
+        user=_user_response(user),
     )
 
 
@@ -135,7 +154,7 @@ async def login(
 
     return schemas.LoginResponse(
         message="login_successful",
-        user=schemas.UserResponse.model_validate(user),
+        user=_user_response(user),
     )
 
 
@@ -187,6 +206,7 @@ async def logout(
 )
 async def refresh(
     response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
     refresh_token: Annotated[str | None, Cookie(alias="__Host-refresh")] = None,
     _rl: Annotated[None, Depends(_rl_refresh)] = None,
 ) -> schemas.RefreshResponse:
@@ -209,9 +229,27 @@ async def refresh(
     old_jti: str = payload["jti"]
 
     # rotate_refresh_token handles reuse detection and Redis rotation.
-    access_token, _, new_refresh_token, _ = await auth_svc.rotate_refresh_token(
+    access_token, _, new_refresh_token, new_refresh_jti = await auth_svc.rotate_refresh_token(
         old_jti, user_id
     )
+
+    # Suspended-account check: load user and refuse if suspended.
+    # Checked after rotation so the old jti is already consumed (reuse detection
+    # still fires) and the new jti is stored (but we revoke it below on refusal).
+    from sqlalchemy import select as _select
+
+    from dhanradar.models.auth import User as _User
+
+    db_user = await db.scalar(_select(_User).where(_User.id == user_id))
+    if db_user is not None and db_user.suspended_at is not None:
+        # Revoke the newly-issued refresh jti so the suspended user cannot
+        # silently keep sessions alive after suspension.
+        await auth_svc.revoke_refresh_jti(new_refresh_jti)
+        clear_auth_cookies(response)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="account_suspended",
+        )
 
     set_auth_cookies(response, access_token, new_refresh_token)
     return schemas.RefreshResponse(message="tokens_rotated")
@@ -249,19 +287,7 @@ async def me(
             detail="user_not_found",
         )
 
-    # Compute is_admin: str(user.id) in settings.admin_user_ids.
-    # Mirrors RequireAdmin()'s normalisation (str(UUID(user_id))) — canonical UUID string.
-    from dhanradar.config import settings
-
-    try:
-        canonical_uid = str(__import__("uuid").UUID(str(db_user.id)))
-        is_admin = canonical_uid in settings.admin_user_ids
-    except (ValueError, TypeError):
-        is_admin = False
-
-    user_data = schemas.UserResponse.model_validate(db_user)
-    user_data.is_admin = is_admin
-    return schemas.MeResponse(user=user_data)
+    return schemas.MeResponse(user=_user_response(db_user))
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +386,7 @@ async def totp_login(
 
     return schemas.LoginResponse(
         message="login_successful",
-        user=schemas.UserResponse.model_validate(user),
+        user=_user_response(user),
     )
 
 
@@ -432,7 +458,7 @@ async def email_otp_login(
 
     return schemas.LoginResponse(
         message="login_successful",
-        user=schemas.UserResponse.model_validate(user),
+        user=_user_response(user),
     )
 
 
@@ -488,6 +514,7 @@ async def google_start(
 
 _ERROR_REDIRECT = "/login?error=google_auth_failed"
 _DELETION_REDIRECT = "/login?error=account_deletion_pending"
+_SUSPENDED_REDIRECT = "/login?error=account_suspended"
 # A password account already exists for this email — auto-link is forbidden
 # (local emails are never verified; see _resolve_existing_email_user).
 _ACCOUNT_EXISTS_REDIRECT = "/login?error=account_exists_use_password"
@@ -569,6 +596,8 @@ async def google_callback(
         user = await auth_svc.get_or_create_google_user(google_sub, email, db)
     except auth_svc._DeletionPendingError:
         return RedirectResponse(url=_DELETION_REDIRECT, status_code=status.HTTP_302_FOUND)
+    except auth_svc._SuspendedError:
+        return RedirectResponse(url=_SUSPENDED_REDIRECT, status_code=status.HTTP_302_FOUND)
     except auth_svc._SubConflictError:
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
     except auth_svc._AccountExistsError:

@@ -9,15 +9,16 @@
 
 import * as React from 'react';
 import { HealthBadge } from './HealthBadge';
+import { Button } from '@/components/ui/Button';
 import { formatDateTime, formatCurrency } from './utils';
 import { cn } from '@/lib/cn';
 import type { AdminSubscriptionRow } from '@/features/admin/api';
 
 interface SubscriptionTableProps {
   subscriptions: AdminSubscriptionRow[];
+  /** When provided, renders a [Change Plan] button per row (Phase 5). */
+  onPlanChange?: (userId: string, currentTier: string) => void;
 }
-
-const HEADERS = ['User ID', 'Email', 'Plan', 'Status', 'Renews', 'Price'];
 
 function subStatusBadge(status: string): React.ReactNode {
   const map: Record<string, Parameters<typeof HealthBadge>[0]['status']> = {
@@ -30,7 +31,9 @@ function subStatusBadge(status: string): React.ReactNode {
   return <HealthBadge status={map[status] ?? 'Planned'} />;
 }
 
-export function SubscriptionTable({ subscriptions }: SubscriptionTableProps) {
+export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionTableProps) {
+  const HEADERS = ['User ID', 'Email', 'Plan', 'Status', 'Renews', 'Price', ...(onPlanChange ? [''] : [])];
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
@@ -38,7 +41,7 @@ export function SubscriptionTable({ subscriptions }: SubscriptionTableProps) {
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
               <th
-                key={h}
+                key={h || 'action'}
                 className={cn(
                   'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
                   h === 'Price' ? 'text-right' : 'text-left',
@@ -70,9 +73,20 @@ export function SubscriptionTable({ subscriptions }: SubscriptionTableProps) {
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
                 {sub.current_period_end ? formatDateTime(sub.current_period_end) : '—'}
               </td>
-              <td className="py-2.5 text-right font-mono tabular-nums text-ink">
+              <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-ink">
                 {formatCurrency(sub.price_inr)}
               </td>
+              {onPlanChange && (
+                <td className="py-2.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onPlanChange(sub.user_id, sub.plan)}
+                  >
+                    Change Plan
+                  </Button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

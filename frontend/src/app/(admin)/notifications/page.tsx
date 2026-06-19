@@ -2,16 +2,19 @@
 
 /**
  * Admin Notifications — /admin/notifications
- * Tier-A read-only page (Admin.md §14 Notifications).
+ * Tier-A (Admin.md §14 Notifications).
  *
  * Sections:
  *   A — Queue health KPIs (telegram depth · email depth · sent · failed · rate_capped · deferred · last_sent_at)
  *   B — Template list (template ids from the in-code list)
- *   C — Broadcast composer affordance (disabled, Phase 5; shows broadcast_available state)
+ *   C — Broadcast composer (Phase 5 live):
+ *         form: title + body; channel fixed to telegram_public;
+ *         explicit confirm checkbox + type-to-confirm "BROADCAST";
+ *         Idempotency-Key = crypto.randomUUID() per submit, regenerated on Retry.
+ *         Server errors advisory-language / quiet-hours / rate-limit surfaced clearly.
  *
  * Four-state contract: skeleton / empty / error+retry / data.
  * No advisory verbs.
- * Broadcast composer is a gated mutation (Phase 5) — shown disabled only.
  */
 
 export const dynamic = 'force-dynamic';
@@ -25,8 +28,17 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative } from '@/components/admin/utils';
-import { useAdminNotificationsHealth } from '@/features/admin/api';
+import { useAdminNotificationsHealth, useAdminBroadcast } from '@/features/admin/api';
+import { ApiError } from '@/lib/apiClient';
+
+// ---------------------------------------------------------------------------
+// Idempotency key helper
+// ---------------------------------------------------------------------------
+function newIdempotencyKey() {
+  return crypto.randomUUID();
+}
 
 // ---------------------------------------------------------------------------
 // Static class maps — Tailwind JIT cannot see interpolated class names
@@ -58,6 +70,161 @@ function ListSkeleton({ rows = 4 }: { rows?: number }) {
 }
 
 // ---------------------------------------------------------------------------
+// Known server error slugs for broadcast — surfaced with clear explanations
+// ---------------------------------------------------------------------------
+function broadcastErrorHint(detail: string): string | null {
+  if (detail.includes('advisory_language') || detail.includes('advisory language')) {
+    return 'The message may contain advisory language (buy/sell/hold). Rephrase to educational language and retry.';
+  }
+  if (detail.includes('quiet_hours') || detail.includes('quiet hours')) {
+    return 'Broadcast blocked by quiet hours policy. Retry during permitted send hours.';
+  }
+  if (detail.includes('rate_limit') || detail.includes('rate limit') || detail.includes('rate_capped')) {
+    return 'Broadcast rate limit reached. Wait before retrying.';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast composer section
+// ---------------------------------------------------------------------------
+function BroadcastComposer({ broadcastAvailable }: { broadcastAvailable: boolean }) {
+  const broadcastMutation = useAdminBroadcast();
+
+  const [open, setOpen] = React.useState(false);
+  const [title, setTitle] = React.useState('');
+  const [body, setBody] = React.useState('');
+  const [acknowledged, setAcknowledged] = React.useState(false);
+  const [idempotencyKey, setIdempotencyKey] = React.useState(newIdempotencyKey);
+
+  function openComposer() {
+    setTitle('');
+    setBody('');
+    setAcknowledged(false);
+    setIdempotencyKey(newIdempotencyKey());
+    setOpen(true);
+  }
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle id="section-broadcast">Broadcast Composer</CardTitle>
+              <p className="mt-1 text-small text-ink-muted">
+                Send an announcement to all users via Telegram public channel.
+                Audit-logged. Rate-limited server-side. No advisory language.
+              </p>
+            </div>
+            <div className="shrink-0 flex flex-col items-end gap-1">
+              <span className="text-caption text-ink-muted">broadcast available</span>
+              <HealthBadge status={broadcastAvailable ? 'Healthy' : 'Paused'} />
+            </div>
+          </div>
+        </CardHeader>
+        <CardBody>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={openComposer}
+            disabled={!broadcastAvailable}
+            title={broadcastAvailable ? undefined : 'Broadcast is not available — check queue health'}
+          >
+            Compose Broadcast
+          </Button>
+          {!broadcastAvailable && (
+            <p className="mt-2 text-caption text-amber">
+              broadcast_available is false — check the notification health before sending.
+            </p>
+          )}
+        </CardBody>
+      </Card>
+
+      <ConfirmDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Send broadcast"
+        description={
+          <>
+            This will send a message to <strong>all users</strong> via Telegram public channel.
+            The action is audit-logged and rate-limited. Advisory language (buy/sell/hold) will
+            be rejected by the server. Type <strong>BROADCAST</strong> to confirm.
+          </>
+        }
+        confirmLabel="Send Broadcast"
+        confirmVariant="danger"
+        confirmPhrase="BROADCAST"
+        onConfirm={async () => {
+          if (!title.trim()) throw new Error('Title is required.');
+          if (!body.trim()) throw new Error('Message body is required.');
+          if (!acknowledged) throw new Error('You must acknowledge the send warning.');
+          try {
+            await broadcastMutation.mutateAsync({
+              payload: { title: title.trim(), body: body.trim(), channel: 'telegram_public' },
+              idempotencyKey,
+            });
+          } catch (err) {
+            // Regenerate idempotency key for retry
+            setIdempotencyKey(newIdempotencyKey());
+            if (err instanceof ApiError) {
+              const detail = err.problem.detail ?? '';
+              const hint = broadcastErrorHint(detail);
+              throw new Error(hint ? `${detail}\n\n${hint}` : detail || err.problem.title);
+            }
+            throw err;
+          }
+        }}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="broadcast-title" className="text-small font-medium text-ink">
+              Title <span className="text-red">*</span>
+            </label>
+            <input
+              id="broadcast-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Platform maintenance scheduled"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="broadcast-body" className="text-small font-medium text-ink">
+              Message body <span className="text-red">*</span>
+            </label>
+            <textarea
+              id="broadcast-body"
+              rows={4}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Educational language only — no buy/sell/hold."
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted resize-y focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-caption text-ink-muted">
+            Channel: <span className="font-mono">telegram_public</span> (fixed)
+          </div>
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              className="mt-0.5 rounded border border-line accent-royal"
+            />
+            <span className="text-small text-ink-secondary">
+              I confirm this message uses educational language only (no advisory verbs), and I understand
+              it will be sent to all users and cannot be recalled.
+            </span>
+          </label>
+        </div>
+      </ConfirmDialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Notifications page
 // ---------------------------------------------------------------------------
 export default function AdminNotificationsPage() {
@@ -70,7 +237,7 @@ export default function AdminNotificationsPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Notifications</h1>
           <p className="mt-1 text-small text-ink-muted">
-            Queue health · templates · broadcast composer (Phase 5).
+            Queue health · templates · broadcast composer (Phase 5 live).
             Sourced from the notify-drain task.
           </p>
         </div>
@@ -180,61 +347,12 @@ export default function AdminNotificationsPage() {
         </Card>
       </section>
 
-      {/* Section C — Broadcast composer (Phase 5 disabled affordance) */}
+      {/* Section C — Broadcast composer (Phase 5 live) */}
       <section aria-labelledby="section-broadcast">
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <CardTitle id="section-broadcast">Broadcast Composer</CardTitle>
-                <p className="mt-1 text-small text-ink-muted">
-                  Send an announcement to all users. Audit-logged. Phase 5 — gated mutation.
-                </p>
-              </div>
-              {/* broadcast_available indicator */}
-              {healthQ.data && (
-                <div className="shrink-0 flex flex-col items-end gap-1">
-                  <span className="text-caption text-ink-muted">broadcast available</span>
-                  <HealthBadge
-                    status={healthQ.data.broadcast_available ? 'Healthy' : 'Paused'}
-                  />
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div className="flex flex-col gap-4">
-              {/* Disabled textarea — affordance only */}
-              <div className="flex flex-col gap-2 opacity-40 pointer-events-none">
-                <label className="text-small font-medium text-ink" htmlFor="broadcast-msg-disabled">
-                  Message
-                </label>
-                <textarea
-                  id="broadcast-msg-disabled"
-                  rows={4}
-                  disabled
-                  placeholder="Broadcast message to all users…"
-                  className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink resize-none placeholder:text-ink-faint focus:outline-none"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled
-                  title="Broadcast composer — Phase 5 (gated mutation, audit-logged)"
-                  className="opacity-40 cursor-not-allowed"
-                >
-                  Send Broadcast — Phase 5
-                </Button>
-                <p className="text-caption text-ink-faint">
-                  Broadcast actions are a gated mutation requiring Phase 5 sign-off and
-                  full Tier-B review + adversarial sign-off in the landing session.
-                </p>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
+        {healthQ.isLoading && <Skeleton className="h-32 rounded-xl" />}
+        {healthQ.data && (
+          <BroadcastComposer broadcastAvailable={healthQ.data.broadcast_available} />
+        )}
       </section>
     </div>
   );

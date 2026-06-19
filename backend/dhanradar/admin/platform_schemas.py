@@ -1,15 +1,16 @@
 """
-DhanRadar — Admin Phase 3: Platform read-only response schemas.
+DhanRadar — Admin Phase 3+5: Platform response schemas.
 
 Covers: feature flags, CAS failure support, analytics overview,
-and notification health. All read-only — no mutation schemas.
+notification health (read-only), and broadcast composer (mutation, Phase 5).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FeatureFlagResponse(BaseModel):
@@ -65,3 +66,32 @@ class NotificationHealthResponse(BaseModel):
     last_sent_at: datetime | None
     templates: list[TemplateInfo]
     broadcast_available: bool
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Admin broadcast composer (mutation schemas)
+# ---------------------------------------------------------------------------
+
+
+class BroadcastRequest(BaseModel):
+    """Body for POST /admin/notifications/broadcast.
+
+    ``confirm`` must be explicitly True — prevents accidental broadcasts from
+    misconfigured clients or copy-paste errors (one extra field = the intent is
+    unambiguous).  ``channel`` is fixed to ``telegram_public`` for the MVP;
+    extend to a Union[Literal] when email/WhatsApp channels are wired.
+    """
+
+    title: str = Field(..., min_length=1, max_length=120)
+    body: str = Field(..., min_length=1, max_length=1000)
+    channel: Literal["telegram_public"] = "telegram_public"
+    confirm: bool = False
+
+
+class BroadcastResponse(BaseModel):
+    """Successful broadcast confirmation returned to the admin caller."""
+
+    ok: bool
+    delivered: bool
+    channel: str
+    broadcast_id: str  # the echoed Idempotency-Key, usable for audit lookups

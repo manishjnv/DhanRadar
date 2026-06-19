@@ -803,6 +803,183 @@ export function useAdminAICost() {
 }
 
 // ---------------------------------------------------------------------------
+// User mutations — Phase 5 first slice
+// ---------------------------------------------------------------------------
+
+export function useSuspendUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post<{ ok: boolean; status: string }>(`/admin/users/${id}/suspend`, reason ? { reason } : {}),
+    onSettled: (_data, _err, { id }) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+    },
+  });
+}
+
+export function useUnsuspendUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ ok: boolean; status: string }>(`/admin/users/${id}/unsuspend`),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Users mutations (reset-access added)
+// ---------------------------------------------------------------------------
+
+export function useResetUserAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ ok: boolean }>(`/admin/users/${id}/reset-access`),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Billing mutations
+// ---------------------------------------------------------------------------
+
+export interface RefundPayload {
+  razorpay_payment_id: string;
+  amount_inr: number;
+  reason: string;
+}
+
+export interface PlanChangePayload {
+  tier: string;
+  grant_until?: string | null;
+  reason: string;
+}
+
+export function useAdminRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ payload, idempotencyKey }: { payload: RefundPayload; idempotencyKey: string }) =>
+      api.postH<{ ok: boolean }>('/admin/billing/refund', payload, { 'Idempotency-Key': idempotencyKey }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.billingPayments() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.billingOverview() });
+    },
+  });
+}
+
+export function useAdminPlanChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, payload }: { userId: string; payload: PlanChangePayload }) =>
+      api.post<{ ok: boolean }>(`/admin/billing/users/${userId}/plan`, payload),
+    onSettled: (_data, _err, { userId }) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(userId) });
+      qc.invalidateQueries({ queryKey: adminKeysExt.billingOverview() });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — AI Ops mutations
+// ---------------------------------------------------------------------------
+
+export interface CreatePromptVersionPayload {
+  template_key: string;
+  body: string;
+  notes?: string;
+}
+
+export interface SetBudgetCapsPayload {
+  free_cap: number;
+  premium_soft_usd: number;
+  premium_hard_usd: number;
+  reset?: boolean;
+}
+
+export function useAdminCreatePromptVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreatePromptVersionPayload) =>
+      api.post<{ ok: boolean; version?: string }>('/admin/ai/prompts', payload),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysAI.prompts() });
+    },
+  });
+}
+
+export function useAdminActivatePromptVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, version }: { key: string; version: string }) =>
+      api.post<{ ok: boolean }>(`/admin/ai/prompts/${key}/${version}/activate`),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysAI.prompts() });
+      qc.invalidateQueries({ queryKey: adminKeysAI.dashboard() });
+    },
+  });
+}
+
+export function useAdminSetBudgetCaps() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SetBudgetCapsPayload) =>
+      api.post<{ ok: boolean }>('/admin/ai/cost/caps', payload),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysAI.cost() });
+      qc.invalidateQueries({ queryKey: adminKeysAI.dashboard() });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Notifications broadcast mutation
+// ---------------------------------------------------------------------------
+
+export interface BroadcastPayload {
+  title: string;
+  body: string;
+  channel: 'telegram_public';
+}
+
+export function useAdminBroadcast() {
+  return useMutation({
+    mutationFn: ({ payload, idempotencyKey }: { payload: BroadcastPayload; idempotencyKey: string }) =>
+      api.postH<{ ok: boolean; queued?: number }>('/admin/notifications/broadcast', payload, {
+        'Idempotency-Key': idempotencyKey,
+      }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Scoring activation mutation
+// ---------------------------------------------------------------------------
+
+export interface ActivateScoringPayload {
+  backtest_passed: boolean;
+}
+
+export function useAdminActivateScoringVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ version, payload }: { version: string; payload: ActivateScoringPayload }) =>
+      api.post<{ ok: boolean; model_version?: string }>(`/admin/scoring/${version}/activate`, payload),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysP3.scoringModel() });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Audit hook
 // ---------------------------------------------------------------------------
 

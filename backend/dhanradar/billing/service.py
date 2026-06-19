@@ -13,6 +13,24 @@ Security properties:
     concurrent identical requests from both creating a subscription
     (double-charge guard).
   - Razorpay key SECRET is never returned (only the public key_id).
+
+admin_refund_payment: operator-initiated refund (Phase 5).
+Security properties:
+  - payment_id and amount come from the authenticated admin request body;
+    the amount is forwarded to Razorpay in PAISE (amount_inr × 100).
+  - Idempotent: same Redis NX-lock + result-cache pattern as create_checkout,
+    keyed by (payment_id, Idempotency-Key).  Amount-mismatch on replay → 409.
+  - Lock is intentionally NOT released on gateway error (same reasoning as
+    create_checkout: a transient timeout must not allow an immediate retry that
+    could produce a duplicate refund).
+  - Razorpay secret NEVER returned in the response.
+
+admin_set_user_plan: operator comp / tier-override (Phase 5).
+Security properties:
+  - tier is validated against UserTierEnum; invalid → 422.
+  - No Razorpay call — this is a DB-only operator grant.
+  - Idempotency-Key is NOT required (naturally idempotent: setting the same
+    tier twice is a no-op at the DB level).
 """
 
 from __future__ import annotations
@@ -364,4 +382,200 @@ async def subscription_metrics(db: AsyncSession) -> dict[str, Any]:
         # churn_30d is best-effort: derived from updated_at on cancelled/expired/completed
         # subs in the last 30 days. No structured churn-event table exists yet.
         "churn_30d": int(churn_30d),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin mutations — Phase 5 (load-bearing payment path)
+# ---------------------------------------------------------------------------
+
+
+def _create_razorpay_refund(payment_id: str, amount_paise: int, admin_id: str) -> dict[str, Any]:
+    """Synchronous Razorpay refund call — run via asyncio.to_thread.
+
+    Amount MUST be in PAISE (INR × 100).  `speed="normal"` is the Razorpay
+    standard-speed refund (T+5 business days); `notes` carry the admin_id for
+    support traceability.  The Razorpay client is constructed inline (same
+    pattern as _create_razorpay_subscription) so the secret is never stored
+    as a module-level attribute.
+    """
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
+    return client.payment.refund(
+        payment_id,
+        {
+            "amount": amount_paise,
+            "speed": "normal",
+            "notes": {"admin_id": admin_id},
+        },
+    )
+
+
+async def admin_refund_payment(
+    *,
+    payment_id: str,
+    amount_inr: int,
+    reason: str | None,
+    idempotency_key: str,
+    admin_id: str,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """Operator-initiated refund via Razorpay.
+
+    Idempotency contract (mirrors create_checkout):
+      - result_key caches the first successful response for _RESULT_TTL.
+      - Cached entry is bound to amount_inr; a replay with a different amount
+        is a client bug → 409 idempotency_key_conflict.
+      - NX lock prevents two concurrent requests from both triggering a refund.
+      - Lock is NOT released on gateway error — the caller must wait _LOCK_TTL
+        before retrying, which prevents duplicate refunds on transient failures.
+
+    user_id resolution:
+      - We resolve the end-user via audit.service.get_payment_event_user_id
+        (interface-only seam — no cross-module ORM import; module isolation #7).
+      - If no row is found, user_id is set to "unknown" for the audit trail.
+      - Razorpay secret is NEVER included in any response.
+    """
+    from dhanradar.audit.service import (
+        get_payment_event_user_id,
+        record_payment_event,
+    )
+
+    redis = get_redis()
+    result_key = f"billing:refund:result:{payment_id}:{idempotency_key}"
+    lock_key = f"billing:refund:lock:{payment_id}:{idempotency_key}"
+
+    # 1. Replay guard — return cached response if available.
+    #    Bound to amount_inr: a replay with a different amount is rejected.
+    cached = await redis.get(result_key)
+    if cached:
+        record = json.loads(cached)
+        if record.get("amount_inr") != amount_inr:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="idempotency_key_conflict",
+            )
+        return record["resp"]
+
+    # 2. Concurrency guard — NX lock, intentionally NOT released on failure.
+    acquired = await redis.set(lock_key, "1", nx=True, ex=_LOCK_TTL)
+    if not acquired:
+        remaining = await redis.ttl(lock_key)
+        retry_after = str(remaining) if remaining > 0 else str(_LOCK_TTL)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="refund_in_progress",
+            headers={"Retry-After": retry_after},
+        )
+
+    # 3. Issue the Razorpay refund in a thread with a hard timeout.
+    #    Lock is intentionally NOT released on TimeoutError/Exception.
+    amount_paise = amount_inr * 100
+    try:
+        refund = await asyncio.wait_for(
+            asyncio.to_thread(_create_razorpay_refund, payment_id, amount_paise, admin_id),
+            timeout=_CALL_TIMEOUT,
+        )
+    except (TimeoutError, Exception) as exc:
+        logger.error(
+            "Razorpay payment.refund failed for payment_ref=%s: %s",
+            hash_user_ref(payment_id),
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="payment_gateway_unavailable",
+        ) from exc
+
+    # 4. Resolve the end-user's user_id from audit.payment_events for the
+    #    payment audit trail.  If not found (payment pre-dates the audit table
+    #    or was created outside this app), fall back to "unknown".
+    resolved_user_id: str = "unknown"
+    try:
+        found = await get_payment_event_user_id(db, payment_id)
+        if found is not None:
+            resolved_user_id = found
+    except Exception:  # noqa: BLE001 — best-effort lookup; must not break the refund path
+        logger.warning(
+            "admin_refund_payment: could not resolve user_id for payment_ref=%s",
+            hash_user_ref(payment_id),
+        )
+
+    # 5. Persist a payment event audit row (fire-and-forget).
+    await record_payment_event(
+        user_id=resolved_user_id,
+        order_id=None,
+        razorpay_payment_id=payment_id,
+        status="refunded",
+        request_id=None,  # caller (router) passes request_id via record_admin_action
+    )
+
+    # 6. Cache the (amount-bound) result so a retry with the same key is idempotent.
+    resp: dict[str, Any] = {
+        "refund_id": refund.get("id"),
+        "amount_inr": amount_inr,
+        "status": "refunded",
+    }
+    await redis.set(
+        result_key,
+        json.dumps({"amount_inr": amount_inr, "resp": resp}),
+        ex=_RESULT_TTL,
+    )
+    return resp
+
+
+async def admin_set_user_plan(
+    *,
+    user_id: str,
+    tier: str,
+    grant_until: datetime | None,
+    reason: str,
+    admin_id: str,  # noqa: ARG001 — reserved for future audit enrichment
+    db: AsyncSession,
+) -> dict[str, Any] | None:
+    """Operator comp / tier-override — DB-only, no Razorpay call.
+
+    Returns None when user_id does not resolve to a User row (router → 404).
+    Returns a dict with the updated tier and pro_access_until on success.
+
+    Tier validation: invalid tier string → HTTP 422 (caught before DB write).
+    Idempotent by nature: setting the same tier + grant_until twice is a no-op.
+    """
+    from uuid import UUID
+
+    from dhanradar.models.auth import User, UserTierEnum
+
+    # Parse user_id as UUID; invalid string → None (router maps to 404).
+    try:
+        uid = UUID(str(user_id))
+    except (ValueError, TypeError):
+        return None
+
+    # Validate tier against the canonical enum.
+    try:
+        tier_enum = UserTierEnum(tier)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="invalid_tier",
+        )
+
+    user_row = await db.scalar(select(User).where(User.id == uid))
+    if user_row is None:
+        return None
+
+    user_row.tier = tier_enum
+    if grant_until is not None:
+        user_row.pro_access_until = grant_until
+        user_row.pro_access_reason = reason
+
+    await db.commit()
+
+    return {
+        "ok": True,
+        "tier": tier,
+        "pro_access_until": (
+            user_row.pro_access_until.isoformat() if user_row.pro_access_until else None
+        ),
     }
