@@ -1,0 +1,251 @@
+"""
+DhanRadar — Admin Phase 4: AI Ops console read-only response schemas.
+
+# LOAD-BEARING: requires Opus + adversarial review
+# Every schema here gates the AI Ops admin surface (scoring, AI gateway,
+# budget governor, compliance audit).  No mutation schemas.  All values are
+# read-only snapshots; instrumented:false fields document absent instrumentation.
+
+Pydantic models for the 7 GET-only AI Ops endpoints:
+    AiDashboardResponse    — /admin/ai (dashboard)
+    AiVersionsResponse     — /admin/ai/versions
+    AiPromptsResponse      — /admin/ai/prompts
+    AiEvalResponse         — /admin/ai/eval
+    AiSafetyResponse       — /admin/ai/safety
+    AiFeedbackResponse     — /admin/ai/feedback
+    AiCostResponse         — /admin/ai/cost
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Shared sub-models
+# ---------------------------------------------------------------------------
+
+
+class InstrumentedFalse(BaseModel):
+    """Placeholder for a metric that is not yet instrumented/stored.
+
+    The ``instrumented`` flag is always False here; ``note`` explains why.
+    """
+
+    instrumented: bool = False
+    note: str = ""
+
+
+class BudgetSnapshot(BaseModel):
+    """Live budget counters from Redis (ai:budget:free:today / ai:budget:premium:today)."""
+
+    free_calls_today: int
+    free_cap: int
+    premium_usd_today: float
+    premium_soft_cap: float
+    premium_hard_cap: float
+    free_remaining: int
+    premium_remaining_usd: float
+    # False when the Redis budget counters could not be read (degraded, not a 500).
+    available: bool = True
+
+
+class LabelChurnSummary(BaseModel):
+    """Lightweight label-churn slice for the dashboard (from label_churn_review)."""
+
+    decision: str
+    churn: float
+    requires_human_review: bool
+    reason: str | None = None
+
+
+class EngineVersionRow(BaseModel):
+    """One row from compliance.rating_engine_changelog (read-only)."""
+
+    model_version: str
+    created_by: str | None
+    approved_by: str | None
+    two_person_ok: bool
+    activated: bool
+    activated_at: str | None  # ISO-8601 or null
+    created_at: str | None    # ISO-8601 or null
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai  — AI Ops Dashboard
+# ---------------------------------------------------------------------------
+
+
+class AiDashboardResponse(BaseModel):
+    """GET /admin/ai — top-level AI ops at-a-glance."""
+
+    model_version: str
+    activated: bool
+    budget: BudgetSnapshot
+    served_7d: int                          # total audit rows in last 7 days
+    low_confidence_7d: int                  # low-confidence log rows in last 7 days
+    label_churn: LabelChurnSummary          # churn review for "educational_label"
+    # Absent / not yet instrumented
+    avg_latency_ms: InstrumentedFalse = InstrumentedFalse(
+        note="latency not tracked in ai_recommendation_audit; absent"
+    )
+    eval_score: InstrumentedFalse = InstrumentedFalse(
+        note="groundedness eval not yet instrumented"
+    )
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/versions  — Score Versioning
+# ---------------------------------------------------------------------------
+
+
+class BacktestPlaceholder(BaseModel):
+    instrumented: bool = False
+    note: str = "backtest results not stored in rating_engine_changelog"
+
+
+class DriftPlaceholder(BaseModel):
+    instrumented: bool = False
+    note: str = "drift values not stored in rating_engine_changelog"
+
+
+class AiVersionsResponse(BaseModel):
+    """GET /admin/ai/versions — scoring model version registry."""
+
+    versions: list[EngineVersionRow]
+    backtest: BacktestPlaceholder = BacktestPlaceholder()
+    drift: DriftPlaceholder = DriftPlaceholder()
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/prompts  — Prompt & RAG
+# ---------------------------------------------------------------------------
+
+
+class AiPromptsResponse(BaseModel):
+    """GET /admin/ai/prompts — prompt version history (no DB registry)."""
+
+    registry: bool = False
+    note: str = (
+        "Prompts are passed in by the gateway caller at request time; "
+        "no server-side prompt DB registry exists. "
+        "prompt_versions_seen are distinct values observed in ai_recommendation_audit."
+    )
+    prompt_versions_seen: list[str]
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/eval  — Quality / Eval
+# ---------------------------------------------------------------------------
+
+
+class QualityIssueRow(BaseModel):
+    """One row from mf.data_quality_issues (same shape as ops_router)."""
+
+    metric_key: str
+    label: str
+    current_value: float | None
+    threshold: float | None
+    unit: str
+    status: str
+    acknowledged_until: str | None
+
+
+class AiEvalResponse(BaseModel):
+    """GET /admin/ai/eval — groundedness eval + data quality issues."""
+
+    quality_issues: list[QualityIssueRow]
+    groundedness: InstrumentedFalse = InstrumentedFalse(
+        note="groundedness eval runs not yet instrumented; no eval table"
+    )
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/safety  — Safety Monitor
+# ---------------------------------------------------------------------------
+
+
+class AuditRowSummary(BaseModel):
+    """Compact view of one ai_recommendation_audit row."""
+
+    id: str
+    served_at: str | None
+    recommendation_type: str
+    label: str | None
+    confidence_band: str | None
+    model: str | None
+    surface: str | None
+    prompt_version: str | None
+    request_id: str | None
+
+
+class LowConfidenceRowSummary(BaseModel):
+    """Compact view of one ai_low_confidence_log row."""
+
+    id: str
+    logged_at: str | None
+    surface: str | None
+    identifier: str | None
+    confidence_score: float | None
+    confidence_band: str | None
+    model: str | None
+    reason: str | None
+    request_id: str | None
+
+
+class AdviceBoundaryBreachesInfo(BaseModel):
+    """Advisory-verb breach counter — NOT instrumented; a 0 here is not a clean pass."""
+
+    value: int = 0
+    instrumented: bool = False
+    note: str = (
+        "NOT a measured metric: no counter of advisory-verb rejections exists, so this "
+        "value is ALWAYS 0 and is NOT confirmation that zero violations occurred. The "
+        "runtime gateway validator rejects advisory output, but rejections are not "
+        "recorded anywhere — this surface cannot observe whether the boundary held."
+    )
+
+
+class AiSafetyResponse(BaseModel):
+    """GET /admin/ai/safety — safety monitor snapshot."""
+
+    days: int
+    served_by_type: dict[str, int]
+    by_confidence_band: dict[str, int]
+    low_confidence_count: int
+    recent_audit_rows: list[AuditRowSummary]
+    recent_low_confidence: list[LowConfidenceRowSummary]
+    label_churn_educational: LabelChurnSummary
+    label_churn_mood: LabelChurnSummary
+    advice_boundary_breaches: AdviceBoundaryBreachesInfo = AdviceBoundaryBreachesInfo()
+    groundedness: InstrumentedFalse = InstrumentedFalse(
+        note="groundedness column absent from ai_recommendation_audit"
+    )
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/feedback  — Feedback Review
+# ---------------------------------------------------------------------------
+
+
+class AiFeedbackResponse(BaseModel):
+    """GET /admin/ai/feedback — user feedback on AI labels/explanations."""
+
+    available: bool = False
+    note: str = "No feedback table exists yet; this endpoint is a placeholder."
+
+
+# ---------------------------------------------------------------------------
+# /admin/ai/cost  — Cost & Usage
+# ---------------------------------------------------------------------------
+
+
+class AiCostResponse(BaseModel):
+    """GET /admin/ai/cost — AI budget governor spend + caps."""
+
+    budget: BudgetSnapshot
+    per_model: InstrumentedFalse = InstrumentedFalse(
+        note="per-model spend breakdown not tracked; Redis keys aggregate free/premium only"
+    )
+    latency: InstrumentedFalse = InstrumentedFalse(
+        note="per-call latency not stored in ai_recommendation_audit or Redis"
+    )

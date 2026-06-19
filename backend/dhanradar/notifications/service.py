@@ -223,6 +223,68 @@ async def post_public_card(text: str) -> bool:
     return result.ok
 
 
+async def get_queue_health() -> dict:
+    """Return Redis queue depths for each notification channel.
+
+    Keys: ``notifications:queue:{channel}``. LLEN = number of pending jobs.
+    Best-effort: returns 0 for each channel on any Redis error.
+    """
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+    result: dict[str, int] = {}
+    for channel in ("telegram", "email"):
+        try:
+            depth = await redis.llen(queue_key(channel))
+            result[channel] = int(depth)
+        except Exception:  # noqa: BLE001 — observability; never break admin reads
+            result[channel] = 0
+    return result
+
+
+async def get_delivery_stats(db: Any) -> dict:
+    """Return per-status delivery counts and the most recent sent timestamp.
+
+    Queries notify.notification_log. Returns:
+      {"sent": int, "failed": int, "rate_capped": int, "deferred": int,
+       "last_sent_at": ISO str or None}
+    """
+    from sqlalchemy import func, select
+
+    from dhanradar.models.notifications import NotificationLog
+
+    counts: dict[str, int] = {"sent": 0, "failed": 0, "rate_capped": 0, "deferred": 0}
+    for status_val in counts:
+        count = await db.scalar(
+            select(func.count()).select_from(NotificationLog).where(
+                NotificationLog.status == status_val
+            )
+        )
+        counts[status_val] = int(count or 0)
+
+    last_sent_row = await db.scalar(
+        select(func.max(NotificationLog.created_at)).where(
+            NotificationLog.status == "sent"
+        )
+    )
+    last_sent_at = last_sent_row.isoformat() if last_sent_row else None
+    return {**counts, "last_sent_at": last_sent_at}
+
+
+def list_templates() -> list[dict]:
+    """Return the in-code template IDs from notifications/templates.py _RENDERERS."""
+    from dhanradar.notifications.templates import _RENDERERS
+
+    return [{"id": tid} for tid in _RENDERERS]
+
+
+def broadcast_available() -> bool:
+    """True iff TELEGRAM_PUBLIC_CHANNEL_ID is set (broadcast is possible)."""
+    from dhanradar.config import settings
+
+    return bool(settings.TELEGRAM_PUBLIC_CHANNEL_ID)
+
+
 async def log_delivery(
     db: Any, user_id: str, channel: str, template_id: str, status: str, error_text: Optional[str] = None
 ) -> None:

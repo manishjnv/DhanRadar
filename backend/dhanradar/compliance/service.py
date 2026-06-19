@@ -482,6 +482,180 @@ async def is_engine_version_activated(db: Any, model_version: str) -> bool:
     return result is not None
 
 
+async def list_engine_versions(db: Any, limit: int = 50) -> list[dict]:
+    """Return RatingEngineChangelog rows ordered newest-first (by created_at desc).
+
+    Used by the Admin Phase 3 scoring-read endpoint — read-only, no mutations.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.compliance import RatingEngineChangelog
+
+    rows = (
+        await db.scalars(
+            select(RatingEngineChangelog)
+            .order_by(RatingEngineChangelog.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "model_version": r.model_version,
+            "created_by": r.created_by,
+            "approved_by": r.approved_by,
+            "two_person_ok": r.two_person_ok,
+            "activated": r.activated,
+            "activated_at": r.activated_at.isoformat() if r.activated_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+async def safety_monitor_summary(db: Any, *, days: int = 7) -> dict:
+    """Read-only safety monitoring summary for the Admin AI Ops console.
+
+    Counts from ``compliance.ai_recommendation_audit`` grouped by
+    recommendation_type + confidence_band over the last ``days`` calendar days.
+
+    Returns:
+        served_by_type    : dict[str, int]  — total rows per recommendation_type
+        by_confidence_band: dict[str, int]  — total rows per confidence_band
+        low_confidence_count: int           — rows in ai_low_confidence_log
+        recent_audit_rows : list[dict]      — last 10 audit rows (subset of columns)
+        recent_low_confidence: list[dict]   — last 10 low-confidence log rows
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from dhanradar.models.compliance import AiLowConfidenceLog, AiRecommendationAudit
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Count by recommendation_type
+    type_rows = (
+        await db.execute(
+            select(
+                AiRecommendationAudit.recommendation_type,
+                func.count().label("cnt"),
+            )
+            .where(AiRecommendationAudit.served_at >= cutoff)
+            .group_by(AiRecommendationAudit.recommendation_type)
+        )
+    ).all()
+    served_by_type: dict[str, int] = {r.recommendation_type: r.cnt for r in type_rows}
+
+    # Count by confidence_band
+    band_rows = (
+        await db.execute(
+            select(
+                AiRecommendationAudit.confidence_band,
+                func.count().label("cnt"),
+            )
+            .where(AiRecommendationAudit.served_at >= cutoff)
+            .group_by(AiRecommendationAudit.confidence_band)
+        )
+    ).all()
+    by_confidence_band: dict[str, int] = {
+        (r.confidence_band or "unknown"): r.cnt for r in band_rows
+    }
+
+    # Count low_confidence_log rows
+    low_conf_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(AiLowConfidenceLog)
+            .where(AiLowConfidenceLog.logged_at >= cutoff)
+        )
+    ) or 0
+
+    # Recent audit rows (last 10)
+    recent_audit = (
+        await db.scalars(
+            select(AiRecommendationAudit)
+            .where(AiRecommendationAudit.served_at >= cutoff)
+            .order_by(AiRecommendationAudit.served_at.desc())
+            .limit(10)
+        )
+    ).all()
+
+    recent_audit_rows = [
+        {
+            "id": str(r.id),
+            "served_at": r.served_at.isoformat() if r.served_at else None,
+            "recommendation_type": r.recommendation_type,
+            "label": r.label,
+            "confidence_band": r.confidence_band,
+            "model": r.model,
+            "surface": r.surface,
+            "prompt_version": r.prompt_version,
+            "request_id": r.request_id,
+        }
+        for r in recent_audit
+    ]
+
+    # Recent low-confidence rows (last 10)
+    recent_lc = (
+        await db.scalars(
+            select(AiLowConfidenceLog)
+            .where(AiLowConfidenceLog.logged_at >= cutoff)
+            .order_by(AiLowConfidenceLog.logged_at.desc())
+            .limit(10)
+        )
+    ).all()
+
+    recent_low_confidence = [
+        {
+            "id": str(r.id),
+            "logged_at": r.logged_at.isoformat() if r.logged_at else None,
+            "surface": r.surface,
+            "identifier": r.identifier,
+            "confidence_score": r.confidence_score,
+            "confidence_band": r.confidence_band,
+            "model": r.model,
+            "reason": r.reason,
+            "request_id": r.request_id,
+        }
+        for r in recent_lc
+    ]
+
+    return {
+        "days": days,
+        "served_by_type": served_by_type,
+        "by_confidence_band": by_confidence_band,
+        "low_confidence_count": low_conf_count,
+        "recent_audit_rows": recent_audit_rows,
+        "recent_low_confidence": recent_low_confidence,
+    }
+
+
+async def list_distinct_prompt_versions(db: Any, *, limit: int = 20) -> list[str]:
+    """Return distinct prompt_version values seen in ``compliance.ai_recommendation_audit``.
+
+    Used by the AI Ops Prompt & RAG page (Phase 4) to surface which prompt_version
+    tags have been used — the registry is the gateway caller's responsibility; this
+    query is a derived view over the audit trail only.
+
+    Returns a list of non-null, non-empty prompt_version strings, ordered by first
+    seen (ascending) so the newest version appears last. Limit defaults to 20.
+    """
+    from sqlalchemy import distinct, select
+
+    from dhanradar.models.compliance import AiRecommendationAudit
+
+    rows = (
+        await db.scalars(
+            select(distinct(AiRecommendationAudit.prompt_version))
+            .where(AiRecommendationAudit.prompt_version.isnot(None))
+            .where(AiRecommendationAudit.prompt_version != "")
+            .order_by(AiRecommendationAudit.prompt_version.asc())
+            .limit(limit)
+        )
+    ).all()
+    return list(rows)
+
+
 async def record_engine_changelog(
     db: Any,
     *,

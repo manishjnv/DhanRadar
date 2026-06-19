@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from uuid import UUID
+from uuid import UUID as StdUUID  # alias used in MfDataQualityIssue.acknowledged_by
 
 from sqlalchemy import (
     BigInteger,
@@ -506,5 +507,46 @@ class MfFundManagerHistory(Base):
         BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
     )
     ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfDataQualityIssue(Base):
+    """Per-metric data quality evaluation row.
+
+    Populated by the quality evaluation job (Phase 5/6). Each run upserts a row per
+    metric_key. The admin GET /quality endpoint reads warning/critical rows.
+
+    acknowledged_until: if set and in the future, the issue is suppressed in the UI
+    (the row remains; suppression is display-layer only — never deletes data).
+    acknowledged_by: FK to auth.users.id (the admin who acknowledged); nullable for
+    auto-evaluated rows.
+    """
+
+    __tablename__ = "data_quality_issues"
+    __table_args__ = (
+        Index("ix_mf_data_quality_issues_metric_evaluated", "metric_key", "evaluated_at"),
+        Index(
+            "ix_mf_data_quality_issues_status",
+            "status",
+            postgresql_where=text("status IN ('warning', 'critical')"),
+        ),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    metric_key: Mapped[str] = mapped_column(Text, nullable=False)
+    current_value: Mapped[float | None] = mapped_column(Numeric(), nullable=True)
+    threshold: Mapped[float | None] = mapped_column(Numeric(), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="ok")
+    acknowledged_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    acknowledged_by: Mapped[StdUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
