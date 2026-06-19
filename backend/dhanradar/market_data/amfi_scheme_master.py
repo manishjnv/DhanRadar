@@ -2,10 +2,14 @@
 DhanRadar — AMFI Scheme Master parser and async fetcher.
 
 Endpoint: https://portal.amfiindia.com/DownloadSchemeData_Po.aspx?mf=0
-Format: semicolon-delimited text with header row:
-  AMC;Code;Scheme Name;Scheme Type;Scheme Category;Scheme NAV Name;
-  Scheme Minimum Amount;Launch Date;Closure Date;
-  ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment
+Format: COMMA-delimited CSV (verified against the live feed 2026-06-19), header row:
+  AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,
+  Scheme Minimum Amount,Launch Date,Closure Date,ISIN Div Payout/ISIN Growth+ISIN Div Reinvestment
+i.e. 10 comma-separated fields per data row. QUIRK: the final field carries BOTH
+ISINs (Div-Payout/Growth and Div-Reinvestment) CONCATENATED with no separator
+(e.g. "INF209K01157INF209K01CE5") — an ISIN is exactly 12 chars (INF + 9), so the two
+are split by a 12-char window / regex findall, not by a delimiter. A single 12-char
+value means growth only (no reinvest plan).
 
 Pure module: no DB, no Redis, no Celery, no auth/billing/scoring imports.
 """
@@ -42,23 +46,26 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 _DATE_FMT = "%d-%b-%Y"
 
-# ISIN regex: must start with INF followed by exactly 9 alphanumeric chars.
-_ISIN_RE = re.compile(r"^INF[A-Z0-9]{9}$")
+# ISIN: INF followed by exactly 9 alphanumeric chars (12 total). The final CSV field
+# concatenates the Growth and Reinvest ISINs with no separator, so findall extracts
+# the 1–2 tokens by their fixed 12-char shape.
+_ISIN_FINDALL = re.compile(r"INF[A-Z0-9]{9}")
 
-# Column indices in the semicolon-delimited master file.
+# Comma-delimited CSV, 10 fields per data row. Scheme Name / NAV Name could in
+# principle contain a comma, so the trailing columns are anchored from the RIGHT
+# (the structured tail is fixed-width) and the name is re-joined from the middle.
+_MIN_FIELDS = 10
 _COL_AMC = 0
 _COL_CODE = 1
 _COL_SCHEME_NAME = 2
-_COL_SCHEME_TYPE = 3
-_COL_SCHEME_CATEGORY = 4
-# _COL_NAV_NAME = 5   (scheme NAV name — not used)
-# _COL_MIN_AMOUNT = 6 (not used)
-_COL_LAUNCH_DATE = 7
-_COL_CLOSURE_DATE = 8
-_COL_ISIN_GROWTH = 9
-_COL_ISIN_REINVEST = 10
-
-_EXPECTED_FIELDS = 11
+# From the right: [-1]=ISIN blob, [-2]=closure, [-3]=launch, [-4]=min amount,
+# [-5]=NAV name, [-6]=category, [-7]=scheme type; scheme name = parts[2:-7].
+_COL_ISIN_BLOB = -1
+_COL_CLOSURE_DATE = -2
+_COL_LAUNCH_DATE = -3
+_COL_SCHEME_CATEGORY = -6
+_COL_SCHEME_TYPE = -7
+_NAME_TAIL = -7  # scheme name = ",".join(parts[2:_NAME_TAIL])
 
 # Header row sentinel — skip when present.
 _HEADER_AMC = "amc"
@@ -100,14 +107,6 @@ def _parse_date(raw: str) -> date | None:
         return None
 
 
-def _isin_valid(raw: str) -> str | None:
-    """Return the ISIN if it matches ^INF[A-Z0-9]{9}$, else None."""
-    s = raw.strip()
-    if _ISIN_RE.match(s):
-        return s
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -115,47 +114,51 @@ def _isin_valid(raw: str) -> str | None:
 
 def parse_scheme_master(text: str) -> list[SchemeMasterRow]:
     """
-    Parse the AMFI Scheme Master text (semicolon-delimited, 11 fields).
+    Parse the AMFI Scheme Master CSV (comma-delimited, ≥10 fields per data row).
 
-    Header row (AMC;Code;…) is skipped.  Blank lines are skipped.  Rows that
-    don't split into exactly 11 fields are skipped.
+    Header row (``AMC,Code,…``) and blank lines are skipped. A data row is
+    identified by a numeric Code in field[1]; rows with fewer than 10 fields or a
+    non-numeric code are skipped (header/garbage). Trailing structured columns are
+    anchored from the right so a stray comma inside a scheme name does not shift the
+    ISIN/date columns; the scheme name is re-joined from the middle.
 
-    Canonical ISIN preference: isin_growth first; else isin_reinvest.
-    Rows where neither ISIN passes ``^INF[A-Z0-9]{9}$`` are SKIPPED — they
-    cannot be keyed and are counted as failed by the task layer.
+    The final field concatenates the Growth and Reinvest ISINs with no separator;
+    both are extracted by ``re.findall`` (each ISIN is exactly 12 chars). Canonical
+    ISIN preference: growth first, else reinvest. Rows where neither ISIN is present
+    are SKIPPED — they cannot be keyed (counted as failed by the task layer).
 
-    Dates are parsed from ``DD-MMM-YYYY``; None on any parse failure (never
-    fabricated).
+    Dates parse from ``DD-MMM-YYYY``; None on failure (never fabricated).
 
     Pure function: no network, no DB, no side effects.
     """
     rows: list[SchemeMasterRow] = []
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
-        parts = line.split(";")
-        if len(parts) != _EXPECTED_FIELDS:
+        parts = line.split(",")
+        if len(parts) < _MIN_FIELDS:
             continue
-        # Skip header row.
-        if parts[_COL_AMC].strip().lower() == _HEADER_AMC:
+        # A data row has a numeric AMFI code in field[1]; this also skips the
+        # header (Code == "Code") and any stray non-data lines.
+        if not parts[_COL_CODE].strip().isdigit():
             continue
 
-        isin_g = _isin_valid(parts[_COL_ISIN_GROWTH])
-        isin_r = _isin_valid(parts[_COL_ISIN_REINVEST])
-
-        # Canonical ISIN: prefer growth, fall back to reinvest.
-        # If neither is valid, skip this row entirely.
+        isins = _ISIN_FINDALL.findall(parts[_COL_ISIN_BLOB].strip())
+        isin_g = isins[0] if isins else None
+        isin_r = isins[1] if len(isins) > 1 else None
+        # If neither ISIN is present, skip — the row cannot be keyed.
         if isin_g is None and isin_r is None:
             continue
 
+        scheme_name = ",".join(parts[_COL_SCHEME_NAME:_NAME_TAIL]).strip()
         scheme_type_raw = parts[_COL_SCHEME_TYPE].strip()
         scheme_cat_raw = parts[_COL_SCHEME_CATEGORY].strip()
 
         rows.append(
             SchemeMasterRow(
                 amfi_code=parts[_COL_CODE].strip(),
-                scheme_name=parts[_COL_SCHEME_NAME].strip(),
+                scheme_name=scheme_name,
                 amc_name=parts[_COL_AMC].strip(),
                 scheme_type=scheme_type_raw if scheme_type_raw else None,
                 scheme_category=scheme_cat_raw if scheme_cat_raw else None,
