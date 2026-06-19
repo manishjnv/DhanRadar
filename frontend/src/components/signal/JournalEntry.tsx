@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { X } from 'lucide-react';
 import type { JournalEntry } from '@/features/signal/types';
 import { useDeleteJournal } from '@/features/signal/api';
 
@@ -58,11 +59,7 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
     <div className={`j-entry ${decisionClass}`}>
       {/* Header row */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span
-          style={{ fontSize: 11, fontFamily: 'var(--dr-font-mono)', color: 'var(--text-muted)' }}
-        >
-          {entry.date}
-        </span>
+        <span className="mono text-caption text-ink-muted">{entry.date}</span>
         <span className={DECISION_BADGE[decisionClass] ?? 'badge badge-neutral'}>
           {DECISION_LABEL[decisionClass] ?? decisionClass}
         </span>
@@ -76,19 +73,19 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
         <div className="ml-auto flex items-center gap-2">
           {confirming ? (
             <>
-              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Delete?</span>
+              <span className="text-caption text-ink-secondary">Delete?</span>
               <button
                 type="button"
                 onClick={handleDelete}
                 disabled={deleteJournal.isPending}
-                style={{ fontSize: 11, color: 'var(--dr-red)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                className="cursor-pointer border-0 bg-transparent p-0 text-caption font-semibold text-red"
               >
                 {deleteJournal.isPending ? '…' : 'Yes'}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
-                style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                className="cursor-pointer border-0 bg-transparent p-0 text-caption text-ink-muted"
               >
                 No
               </button>
@@ -98,9 +95,9 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
               type="button"
               onClick={() => setConfirming(true)}
               aria-label="Delete entry"
-              style={{ fontSize: 13, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+              className="cursor-pointer border-0 bg-transparent p-0 leading-none text-ink-faint hover:text-ink"
             >
-              ✕
+              <X size={14} />
             </button>
           )}
         </div>
@@ -108,16 +105,11 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
 
       {/* Note */}
       {entry.notes && (
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
-          {entry.notes}
-        </p>
+        <p className="mt-1.5 text-small text-ink-secondary">{entry.notes}</p>
       )}
 
       {/* Market snapshot */}
-      <div
-        className="flex items-center gap-3 flex-wrap"
-        style={{ marginTop: 8, fontSize: 11, fontFamily: 'var(--dr-font-mono)', color: 'var(--text-muted)' }}
-      >
+      <div className="mono mt-2 flex items-center gap-3 flex-wrap text-caption text-ink-muted">
         <span>Nifty {fmt(entry.nifty_pct)}%</span>
         <span>VIX {fmt(entry.vix_level)}</span>
         <span>A/D {fmt(entry.breadth_ratio)}</span>

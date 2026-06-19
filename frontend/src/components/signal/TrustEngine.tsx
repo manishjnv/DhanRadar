@@ -43,21 +43,13 @@ export function TrustEngine({ scores, entries }: TrustEngineProps) {
     .slice(0, 10);
 
   const disclaimer = (
-    <div
-      style={{
-        marginTop: 12,
-        padding: '10px 12px',
-        borderRadius: 8,
-        background: 'var(--emerald-soft)',
-        border: '1px solid rgba(0,179,134,0.25)',
-      }}
-    >
+    <div className="mt-3 rounded-md border border-emerald/30 bg-emerald-soft px-3 py-2.5">
       {scores.has_trust_data && (
-        <p style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500, marginBottom: 4 }}>
+        <p className="mb-1 text-small font-medium text-ink">
           {scores.trust_wins} of {scores.trust_total} triggered signals beat waiting
         </p>
       )}
-      <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+      <p className="text-small text-ink-secondary">
         Past accuracy does not predict future outcomes. Educational context only.
       </p>
     </div>
@@ -65,73 +57,42 @@ export function TrustEngine({ scores, entries }: TrustEngineProps) {
 
   return (
     <div className="card card-pad flex flex-col gap-3">
-      <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Trust Engine</p>
+      <p className="text-small font-semibold text-ink">Trust Engine</p>
 
       {!scores.has_trust_data || eligibleRows.length === 0 ? (
-        <div className="empty" style={{ padding: '20px 0', textAlign: 'center' }}>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+        <div className="py-5 text-center">
+          <p className="text-small text-ink-secondary">
             Trust Engine activates after 90 days of signals.
           </p>
-          <p style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 4 }}>
+          <p className="mt-1 text-caption text-ink-faint">
             Keep checking daily — your signal history is building.
           </p>
         </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table className="dt w-full" style={{ minWidth: 380 }}>
+        <div className="overflow-x-auto">
+          <table className="dt w-full min-w-[380px]">
             <thead>
               <tr>
                 {['Signal date', 'Signal state', 'Your action', 'Market outcome'].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      fontSize: 10,
-                      textTransform: 'uppercase',
-                      color: 'var(--text-muted)',
-                      letterSpacing: '0.06em',
-                      paddingBottom: 6,
-                      textAlign: 'left',
-                    }}
-                  >
-                    {h}
-                  </th>
+                  <th key={h}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {eligibleRows.map((row) => (
-                <tr key={row.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td
-                    style={{
-                      fontSize: 11,
-                      fontFamily: 'var(--dr-font-mono)',
-                      color: 'var(--text-muted)',
-                      paddingBlock: 8,
-                    }}
-                  >
-                    {row.date}
-                  </td>
-                  <td style={{ paddingBlock: 8 }}>
+                <tr key={row.id} className="border-t border-line">
+                  <td className="mono text-caption text-ink-muted">{row.date}</td>
+                  <td>
                     <span className={SIGNAL_BADGE[row.signal_state ?? ''] ?? 'badge badge-neutral'}>
                       {SIGNAL_LABEL[row.signal_state ?? ''] ?? row.signal_state}
                     </span>
                   </td>
-                  <td style={{ paddingBlock: 8 }}>
+                  <td>
                     <span className={DECISION_BADGE[row.decision] ?? 'badge badge-neutral'}>
                       {DECISION_LABEL[row.decision] ?? row.decision}
                     </span>
                   </td>
-                  <td
-                    style={{
-                      fontSize: 12,
-                      fontFamily: 'var(--dr-font-mono)',
-                      fontFeatureSettings: "'tnum'",
-                      color: 'var(--text-muted)',
-                      paddingBlock: 8,
-                    }}
-                  >
-                    —
-                  </td>
+                  <td className="mono text-small text-ink-muted">—</td>
                 </tr>
               ))}
             </tbody>
