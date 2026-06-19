@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import type { MarketSignalState, SignalState } from '@/features/signal/types';
+import type { SignalState, SignalStateResponse } from '@/features/signal/types';
 
 // SVG score ring: r=28, cx/cy=32, circumference≈175.93
 const RING_CIRC = 2 * Math.PI * 28;
@@ -84,7 +84,7 @@ const STATE_BADGE_LABEL: Record<SignalState, string> = {
 };
 
 export interface SignalHeroProps {
-  signalState: MarketSignalState | null;
+  signalState: SignalStateResponse | null;
   isLoading?: boolean;
 }
 

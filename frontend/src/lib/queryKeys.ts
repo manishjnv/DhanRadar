@@ -68,6 +68,7 @@ export const queryKeys = {
     state: () => ['consent', 'state'] as const,
   },
   signal: {
+    state:         () => ['signal', 'state'] as const,
     rules:         () => ['signal', 'rules'] as const,
     dipFund:       () => ['signal', 'dip-fund'] as const,
     deployments:   () => ['signal', 'deployments'] as const,
