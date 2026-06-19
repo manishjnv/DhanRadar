@@ -460,6 +460,49 @@ async def get_breadth():  # returns BreadthOut
     return BreadthOut(advances=25, declines=25, ad_ratio=1.0, market_open=False)
 
 
+async def get_breadth_raw() -> dict:
+    """Return the raw breadth dict including ``nifty_change_pct``.
+
+    This is the server-internal counterpart of :func:`get_breadth`.  ``get_breadth``
+    returns a :class:`~dhanradar.signal.schemas.BreadthOut` which intentionally omits
+    ``nifty_change_pct`` from the public schema; callers that need the Nifty change-% for
+    server-side scoring (e.g. ``GET /signal/state``) use this function instead.
+
+    Fallback chain (mirrors ``get_breadth`` exactly):
+      1. Live fetch via ``_fetch_breadth_sync`` — result is also written to the Redis cache.
+      2. Redis cache (``signal:breadth:last``).
+      3. Hard-coded safe defaults: ``advances=25, declines=25, ad_ratio=1.0,
+         nifty_change_pct=0.0``.
+    """
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+
+    try:
+        data = await asyncio.to_thread(_fetch_breadth_sync)
+        try:
+            await redis.set(_BREADTH_CACHE_KEY, json.dumps(data), ex=_TTL_BREADTH_SEC)
+        except Exception:  # noqa: BLE001
+            pass
+        return data
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("signal.breadth_raw_fetch_error: %s", type(exc).__name__)
+
+    try:
+        raw = await redis.get(_BREADTH_CACHE_KEY)
+        if raw:
+            return json.loads(raw if isinstance(raw, str) else raw.decode())
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "advances": 25,
+        "declines": 25,
+        "ad_ratio": 1.0,
+        "nifty_change_pct": 0.0,
+    }
+
+
 async def get_embed_html(db: Any) -> str:
     """Return a self-contained embeddable widget HTML for the Mood Compass (GAP b).
 

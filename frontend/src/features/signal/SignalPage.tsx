@@ -4,7 +4,9 @@
  * Signal page — client tab container.
  * Tab state lives in ?tab= URL param so tabs are bookmarkable.
  * SEBI compliance: no advisory verbs, NOT FINANCIAL ADVICE in SignalHero footer.
- * No numeric DhanRadar score in DOM — MarketSignalState.weighted_score is never rendered.
+ * No numeric DhanRadar score or factor weights reach the client — the signal state is
+ * computed server-side (GET /api/v1/signal/state); the browser only receives the state
+ * + per-axis band indices, never the weights or the weighted aggregate (non-neg #2).
  * Behaviour scores (Reflect tab) are user-behaviour metrics, not fund scores.
  */
 
@@ -14,7 +16,7 @@ import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useMarketIndices } from '@/hooks/useMarketIndices';
 import {
-  useSignalRules, useVIX, useBreadth, useJournal, useSignalDeployments,
+  useSignalRules, useSignalState, useVIX, useBreadth, useJournal, useSignalDeployments,
   useNotifications, useMarkNotificationRead,
 } from './api';
 import { SignalHero } from '@/components/signal/SignalHero';
@@ -30,56 +32,8 @@ import { LogTodayModal } from '@/components/signal/LogTodayModal';
 import { BehaviourSummary } from '@/components/signal/BehaviourSummary';
 import { TrustEngine } from '@/components/signal/TrustEngine';
 import { Achievements } from '@/components/signal/Achievements';
-import type { MarketSignalState, SignalState } from './types';
+import type { SignalState } from './types';
 import { cn } from '@/lib/cn';
-
-// ---------------------------------------------------------------------------
-// Signal state computation — runs client-side only; weighted_score never rendered
-// ---------------------------------------------------------------------------
-
-function niftyScore(changePct: number): number {
-  if (changePct > 0)   return 0; // bullish
-  if (changePct > -2)  return 1; // mild dip
-  if (changePct > -5)  return 2; // pullback
-  if (changePct > -8)  return 3; // bearish
-  return 4;                       // strong correction
-}
-
-function vixScore(vix: number): number {
-  if (vix < 15) return 0;
-  if (vix < 17) return 1;
-  if (vix < 19) return 2;
-  if (vix < 22) return 3;
-  return 4;
-}
-
-function breadthScore(adRatio: number): number {
-  if (adRatio > 1.5) return 0;
-  if (adRatio > 1.2) return 1;
-  if (adRatio > 0.8) return 2;
-  if (adRatio > 0.5) return 3;
-  return 4;
-}
-
-function computeSignalState(
-  niftyChangePct: number,
-  vixValue: number,
-  adRatio: number,
-): MarketSignalState {
-  const ns = niftyScore(niftyChangePct);
-  const vs = vixScore(vixValue);
-  const bs = breadthScore(adRatio);
-  const weighted = ns * 0.20 + vs * 0.40 + bs * 0.40;
-  const state: SignalState =
-    weighted >= 3.0 ? 'triggered' : weighted >= 2.0 ? 'watch' : 'no_signal';
-  return {
-    nifty_score: ns,
-    vix_score: vs,
-    breadth_score: bs,
-    weighted_score: weighted,
-    state,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // CAS prompt banner
@@ -195,14 +149,9 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
   const nifty50 = indices?.find((i) => i.name === 'Nifty 50');
   const marketLoading = indicesLoading || vixLoading || breadthLoading;
 
-  const signalState = React.useMemo<MarketSignalState | null>(() => {
-    if (!nifty50 || !vix || !breadth) return null;
-    return computeSignalState(
-      nifty50.change_pct,
-      vix.value,
-      breadth.ad_ratio,
-    );
-  }, [nifty50, vix, breadth]);
+  // Server-computed signal state — scores and weights never sent to the client
+  // (Non-negotiable #2: no numeric score in DOM / no weights in JS bundle).
+  const { data: signalState } = useSignalState();
 
   const TAB_LABELS: Record<SignalTab, string> = {
     today: 'Today',
@@ -241,7 +190,7 @@ export function SignalPage({ hasCAS }: SignalPageProps) {
         <div className="flex flex-col gap-4">
           {!hasCAS && <CASBanner />}
 
-          <SignalHero signalState={signalState} isLoading={marketLoading} />
+          <SignalHero signalState={signalState ?? null} isLoading={marketLoading} />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <MarketSignalCard
