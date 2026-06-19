@@ -7,8 +7,9 @@ No DB — pure import and attribute inspection.
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import inspect
+import pathlib
 
 import pytest
 
@@ -21,22 +22,35 @@ def _column_names(model_cls) -> set[str]:
     return {c.key for c in model_cls.__table__.columns}
 
 
+def _load_migration(name: str):
+    """Load a migration by file path.
+
+    ``alembic/versions/`` is NOT a Python package (no ``__init__.py``, and the
+    filenames start with a digit), so ``importlib.import_module`` can't reach it.
+    Load the module straight from its file instead.
+    """
+    path = (
+        pathlib.Path(__file__).parent.parent.parent
+        / "alembic" / "versions" / f"{name}.py"
+    )
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 # ---------------------------------------------------------------------------
 # Migration file sanity
 # ---------------------------------------------------------------------------
 
 def test_migration_0035_chain():
-    mod = importlib.import_module(
-        "alembic.versions.0035_phase3_schema_lineage_manager_audit"
-    )
+    mod = _load_migration("0035_phase3_schema_lineage_manager_audit")
     assert mod.revision == "0035"
     assert mod.down_revision == "0034"
 
 
 def test_migration_0035_has_upgrade_and_downgrade():
-    mod = importlib.import_module(
-        "alembic.versions.0035_phase3_schema_lineage_manager_audit"
-    )
+    mod = _load_migration("0035_phase3_schema_lineage_manager_audit")
     assert callable(mod.upgrade)
     assert callable(mod.downgrade)
 
