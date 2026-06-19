@@ -70,7 +70,6 @@ interface MarketSignalCardProps {
   declines?: number;
   adRatio?: number;
   breadthThreshold?: number;
-  weight?: number;
   isLoading?: boolean;
 }
 
@@ -98,7 +97,6 @@ export function MarketSignalCard({
   declines,
   adRatio,
   breadthThreshold = 0.8,
-  weight,
   isLoading = false,
 }: MarketSignalCardProps) {
   if (isLoading) {
@@ -121,14 +119,11 @@ export function MarketSignalCard({
 
   return (
     <div className="card-pad flex flex-col gap-2">
-      {/* Header */}
+      {/* Header — factor weight is NEVER rendered (non-neg #2: weights stay server-side) */}
       <div className="flex items-center justify-between">
-        <span className="text-caption font-medium uppercase tracking-wide text-ink-muted">
+        <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
           {CARD_TITLES[variant]}
         </span>
-        {weight !== undefined && (
-          <span className="badge-neutral">{weight}% weight</span>
-        )}
       </div>
 
       {/* Nifty value block */}
@@ -151,9 +146,9 @@ export function MarketSignalCard({
             )}
           </div>
           <ScoreBar score={score} state={signalState} />
+          {/* Educational band label only — numeric score never reaches the DOM (non-neg #2) */}
           <div className="flex items-center justify-between">
             <span className="text-caption text-ink-muted">{scoreLabel ?? 'Unknown'}</span>
-            <span className="badge-neutral">Score {score}/4</span>
           </div>
           <div className="border-t border-line pt-1">
             <span className="text-caption text-ink-muted">
@@ -191,9 +186,9 @@ export function MarketSignalCard({
             )}
           </div>
           <ScoreBar score={score} state={signalState} />
+          {/* Educational band label only — numeric score never reaches the DOM (non-neg #2) */}
           <div className="flex items-center justify-between">
             <span className="text-caption text-ink-muted">{scoreLabel ?? 'Unknown'}</span>
-            <span className="badge-neutral">Score {score}/4</span>
           </div>
           <div
             className={cn(
@@ -216,13 +211,13 @@ export function MarketSignalCard({
         <>
           <div className="flex items-center gap-4">
             <div>
-              <span className="mono text-[18px] font-semibold text-emerald">
+              <span className="mono text-h3 font-semibold text-emerald tabular-nums">
                 {advances}
               </span>
               <span className="ml-1 text-caption text-ink-muted">▲</span>
             </div>
             <div>
-              <span className="mono text-[18px] font-semibold text-red">
+              <span className="mono text-h3 font-semibold text-red tabular-nums">
                 {declines}
               </span>
               <span className="ml-1 text-caption text-ink-muted">▼</span>
@@ -234,9 +229,9 @@ export function MarketSignalCard({
             )}
           </div>
           <ScoreBar score={score} state={signalState} />
+          {/* Educational band label only — numeric score never reaches the DOM (non-neg #2) */}
           <div className="flex items-center justify-between">
             <span className="text-caption text-ink-muted">{scoreLabel ?? 'Unknown'}</span>
-            <span className="badge-neutral">Score {score}/4</span>
           </div>
           <div className="border-t border-line pt-1">
             <span className="text-caption text-ink-muted">

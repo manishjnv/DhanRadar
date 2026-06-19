@@ -22,7 +22,6 @@ function SliderRow({
   max,
   step,
   format,
-  weight,
   onChange,
 }: {
   label: string;
@@ -32,7 +31,6 @@ function SliderRow({
   max: number;
   step: number;
   format: (v: number) => string;
-  weight: string;
   onChange: (v: number) => void;
 }) {
   return (
@@ -42,9 +40,9 @@ function SliderRow({
           <p className="text-caption font-medium uppercase tracking-wide text-ink-muted">{label}</p>
           <p className="mt-0.5 text-caption text-ink-secondary">{description}</p>
         </div>
+        {/* Factor weight is NEVER rendered (non-neg #2: weights stay server-side) */}
         <div className="flex items-center gap-2">
           <span className="mono text-[22px] font-semibold text-ink">{format(value)}</span>
-          <span className="badge-neutral">{weight}</span>
         </div>
       </div>
       <input
@@ -151,7 +149,6 @@ export function RuleThresholdForm() {
           max={0}
           step={0.5}
           format={(v) => `${v}%`}
-          weight="20% weight"
           onChange={(v) => update({ nifty_threshold: v })}
         />
         <SliderRow
@@ -162,7 +159,6 @@ export function RuleThresholdForm() {
           max={35}
           step={0.5}
           format={(v) => v.toFixed(1)}
-          weight="40% weight"
           onChange={(v) => update({ vix_threshold: v })}
         />
         <SliderRow
@@ -173,7 +169,6 @@ export function RuleThresholdForm() {
           max={1.5}
           step={0.05}
           format={(v) => `A/D ${v.toFixed(2)}`}
-          weight="40% weight"
           onChange={(v) => update({ breadth_threshold: v })}
         />
       </div>
