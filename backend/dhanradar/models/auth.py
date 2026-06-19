@@ -101,6 +101,14 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Admin suspend/unsuspend — set by admin endpoints; blocks login while set.
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    suspended_reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+
     # PHASE 5M tiering — Plus time-window grant + one-time AI-commentary taster.
     pro_access_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

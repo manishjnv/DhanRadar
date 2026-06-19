@@ -48,6 +48,7 @@ import dhanradar.models.consent  # noqa: E402, F401  — registers consent.* tab
 import dhanradar.models.audit  # noqa: E402, F401  — registers audit.* tables (B57)
 import dhanradar.models.education  # noqa: E402, F401  — registers education.* tables (G8)
 import dhanradar.models.news  # noqa: E402, F401  — registers news.* tables (B56)
+import dhanradar.models.ai_admin  # noqa: E402, F401  — registers compliance.prompt_templates + ai_budget_caps (Phase 5)
 import dhanradar.signal.models  # noqa: E402, F401  — registers signal.* tables
 
 target_metadata = Base.metadata

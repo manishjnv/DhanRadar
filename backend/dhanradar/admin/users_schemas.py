@@ -75,13 +75,15 @@ class UserDetailResponse(BaseModel):
     # ABSENT from auth.users — derived as email.split('@')[0]
     display_name: str
     tier: str
-    # 'active' | 'deletion_requested'
+    # 'active' | 'deletion_requested' | 'suspended'
     status: str
     created_at: datetime
     pro_access_until: datetime | None = None
     pro_access_reason: str | None = None
     risk_profile: str | None = None
     dpdp_consent_version: str | None = None
+    # Set when account is administratively suspended; None when active.
+    suspended_at: str | None = None
     # Most recent subscription dict or None (from billing.service.get_user_subscription)
     subscription: dict[str, Any] | None = None
     # Payment events from audit.payment_events (from audit.service.list_payment_events)
@@ -108,3 +110,21 @@ class AuditLogItem(BaseModel):
     target_id: str | None = None
     result: str | None = None
     request_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Suspend / Unsuspend
+# ---------------------------------------------------------------------------
+
+
+class SuspendRequest(BaseModel):
+    """Body for POST /admin/users/{user_id}/suspend."""
+
+    reason: str | None = None
+
+
+class UserActionResponse(BaseModel):
+    """Response for suspend / unsuspend endpoints."""
+
+    ok: bool
+    status: str

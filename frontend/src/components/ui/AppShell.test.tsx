@@ -5,6 +5,7 @@
  * useRouter returns a no-op push function (NavLink uses href, not push, but
  * the hook must be defined to avoid "invariant" errors from next internals).
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppShell } from './AppShell';
@@ -43,10 +44,19 @@ vi.mock('next/link', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 function renderShell() {
+  // AppShell now calls useMe() (react-query) to decide whether to show the admin
+  // nav link, so a QueryClientProvider must wrap it. retry:false keeps the (likely
+  // failing/unmocked) /auth/me query from retrying — useMe resolves to no admin,
+  // and the nav links under test are always present regardless.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <AppShell userSlot={<span data-testid="user-slot">User</span>}>
-      <div data-testid="page-content">Page</div>
-    </AppShell>,
+    <QueryClientProvider client={queryClient}>
+      <AppShell userSlot={<span data-testid="user-slot">User</span>}>
+        <div data-testid="page-content">Page</div>
+      </AppShell>
+    </QueryClientProvider>,
   );
 }
 

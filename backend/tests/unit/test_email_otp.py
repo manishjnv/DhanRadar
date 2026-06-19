@@ -47,12 +47,16 @@ def _make_user(
     uid: str | None = None,
     email: str = "test@example.com",
     deletion_requested_at=None,
+    suspended_at=None,
 ) -> MagicMock:
     """Return a mock User object with the required attributes."""
     user = MagicMock()
     user.id = uuid.UUID(uid) if uid else uuid.uuid4()
     user.email = email
     user.deletion_requested_at = deletion_requested_at
+    # suspended_at must be set explicitly: a bare MagicMock attribute is truthy,
+    # which would trip the auth suspend check (added in admin Phase 5).
+    user.suspended_at = suspended_at
     return user
 
 

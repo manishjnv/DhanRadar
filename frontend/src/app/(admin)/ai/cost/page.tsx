@@ -2,16 +2,12 @@
 
 /**
  * AI Cost & Usage — /admin/ai/cost
- * Phase 4, Tier-B read-only (Admin.md §15, §18 step 4).
+ * Phase 4 (read) + Phase 5 (mutations) — Tier-B.
  *
- * Backend: AiCostResponse (aiops_schemas.py)
- * budget is NESTED under d.budget (BudgetSnapshot).
- * per_model and latency are InstrumentedFalse.
- *
- * Sections:
- *   A — Budget KPI cards (free calls used/cap/remaining · premium USD used/soft/hard/remaining)
- *       with progress bars
- *   B — "Per-model & latency breakdown — not yet instrumented" note
+ * Read: budget KPIs, progress bars, per-model/latency notes.
+ * Mutations (Phase 5 live):
+ *   - Set Budget Caps: form (free_cap, premium_soft_usd, premium_hard_usd, optional reset)
+ *     → confirm → POST /admin/ai/cost/caps
  *
  * Four-state contract. No advisory verbs. Numerics allowed (admin-only, §16).
  */
@@ -28,7 +24,8 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { StatCard } from '@/components/admin/StatCard';
-import { useAdminAICost } from '@/features/admin/api';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { useAdminAICost, useAdminSetBudgetCaps } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
 // Static grid class maps — no dynamic interpolation
@@ -102,6 +99,23 @@ function BudgetBar({
 // ---------------------------------------------------------------------------
 export default function AdminAICostPage() {
   const q = useAdminAICost();
+  const setCapsM = useAdminSetBudgetCaps();
+
+  const [capsOpen, setCapsOpen] = React.useState(false);
+  const [freeCap, setFreeCap] = React.useState('');
+  const [softUsd, setSoftUsd] = React.useState('');
+  const [hardUsd, setHardUsd] = React.useState('');
+  const [resetCaps, setResetCaps] = React.useState(false);
+
+  function openCapsDialog() {
+    // Pre-fill with current values if available
+    const b = q.data?.budget;
+    setFreeCap(b ? String(b.free_cap) : '');
+    setSoftUsd(b ? String(b.premium_soft_cap) : '');
+    setHardUsd(b ? String(b.premium_hard_cap) : '');
+    setResetCaps(false);
+    setCapsOpen(true);
+  }
 
   return (
     <>
@@ -115,10 +129,15 @@ export default function AdminAICostPage() {
               Governed OpenRouter gateway only (Admin.md §15).
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={openCapsDialog}>
+              Set Budget Caps
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
+              <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {q.isLoading && (
@@ -137,7 +156,6 @@ export default function AdminAICostPage() {
         )}
 
         {q.data && (() => {
-          // budget is nested under d.budget
           const b = q.data.budget;
           const allZero = b.free_calls_today === 0 && b.premium_usd_today === 0;
 
@@ -260,6 +278,90 @@ export default function AdminAICostPage() {
           );
         })()}
       </div>
+
+      {/* Set Budget Caps dialog */}
+      <ConfirmDialog
+        open={capsOpen}
+        onClose={() => setCapsOpen(false)}
+        title="Set AI budget caps"
+        description="Update the budget-governor caps for the AI gateway. Hard cap enforcement is immediate. Soft cap triggers a warning but does not block requests."
+        confirmLabel="Update Caps"
+        confirmVariant="primary"
+        onConfirm={async () => {
+          const fc = parseInt(freeCap, 10);
+          const su = parseFloat(softUsd);
+          const hu = parseFloat(hardUsd);
+          if (!fc || fc <= 0) throw new Error('Free cap must be a positive integer.');
+          if (!su || su <= 0) throw new Error('Premium soft cap must be a positive number.');
+          if (!hu || hu <= 0) throw new Error('Premium hard cap must be a positive number.');
+          if (su >= hu) throw new Error('Soft cap must be less than hard cap.');
+          await setCapsM.mutateAsync({
+            free_cap: fc,
+            premium_soft_usd: su,
+            premium_hard_usd: hu,
+            reset: resetCaps || undefined,
+          });
+        }}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="caps-free" className="text-small font-medium text-ink">
+              Free calls cap (daily) <span className="text-red">*</span>
+            </label>
+            <input
+              id="caps-free"
+              type="number"
+              min="1"
+              step="1"
+              value={freeCap}
+              onChange={(e) => setFreeCap(e.target.value)}
+              placeholder="e.g. 500"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="caps-soft" className="text-small font-medium text-ink">
+              Premium soft cap (USD/day) <span className="text-red">*</span>
+            </label>
+            <input
+              id="caps-soft"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={softUsd}
+              onChange={(e) => setSoftUsd(e.target.value)}
+              placeholder="e.g. 0.5"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="caps-hard" className="text-small font-medium text-ink">
+              Premium hard cap (USD/day) <span className="text-red">*</span>
+            </label>
+            <input
+              id="caps-hard"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={hardUsd}
+              onChange={(e) => setHardUsd(e.target.value)}
+              placeholder="e.g. 2.0"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+            />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={resetCaps}
+              onChange={(e) => setResetCaps(e.target.checked)}
+              className="rounded border border-line accent-royal"
+            />
+            <span className="text-small text-ink-secondary">
+              Reset today&apos;s counter (clear accumulated spend/calls)
+            </span>
+          </label>
+        </div>
+      </ConfirmDialog>
     </>
   );
 }

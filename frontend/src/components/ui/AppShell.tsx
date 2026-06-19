@@ -6,10 +6,12 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Upload, Compass, BookOpen, GraduationCap,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Disclaimer } from '@/components/ui/Disclaimer';
+import { useMe } from '@/features/auth/api';
 
 // ---------------------------------------------------------------------------
 // Nav model
@@ -31,6 +33,7 @@ const WORKSPACE: NavItem[] = [
 ];
 
 const SETTINGS: NavItem = { href: '/settings/privacy', label: 'Settings', icon: Settings };
+const ADMIN_NAV: NavItem = { href: '/admin', label: 'Admin', icon: ShieldCheck };
 
 // ---------------------------------------------------------------------------
 // NavLink
@@ -76,10 +79,12 @@ function SidebarContent({
   onNavClick,
   collapsed = false,
   onToggle,
+  isAdmin = false,
 }: {
   onNavClick?: () => void;
   collapsed?: boolean;
   onToggle?: () => void;
+  isAdmin?: boolean;
 }) {
   return (
     <>
@@ -117,6 +122,9 @@ function SidebarContent({
 
       {/* Footer — settings + collapse toggle */}
       <div className="flex flex-col gap-1 border-t border-line p-3">
+        {isAdmin && (
+          <NavLink item={ADMIN_NAV} onClick={onNavClick} collapsed={collapsed} />
+        )}
         <NavLink item={SETTINGS} onClick={onNavClick} collapsed={collapsed} />
 
         {/* Collapse toggle — desktop only (onToggle not passed from mobile drawer) */}
@@ -176,9 +184,9 @@ function Topbar({
 }
 
 // ---------------------------------------------------------------------------
-// MobileDrawer — unchanged: uses same SidebarContent, no collapse in mobile
+// MobileDrawer — uses same SidebarContent, no collapse in mobile
 // ---------------------------------------------------------------------------
-function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+function MobileDrawer({ open, onClose, isAdmin }: { open: boolean; onClose: () => void; isAdmin?: boolean }) {
   const panelRef       = React.useRef<HTMLDivElement>(null);
   const firstFocusRef  = React.useRef<HTMLButtonElement>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
@@ -228,7 +236,7 @@ function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void })
         >
           <X size={16} strokeWidth={2} aria-hidden="true" />
         </button>
-        <SidebarContent onNavClick={onClose} />
+        <SidebarContent onNavClick={onClose} isAdmin={isAdmin} />
       </div>
     </>
   );
@@ -246,6 +254,8 @@ export function AppShell({ children, userSlot }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [collapsed, setCollapsed]   = React.useState(false);
   const pathname = usePathname();
+  const { data: me } = useMe();
+  const isAdmin = me?.is_admin === true;
 
   // Read persisted collapse state after mount (avoids SSR hydration mismatch)
   React.useEffect(() => {
@@ -272,11 +282,11 @@ export function AppShell({ children, userSlot }: AppShellProps) {
           collapsed ? 'w-14' : 'w-56',
         )}
       >
-        <SidebarContent collapsed={collapsed} onToggle={toggleCollapsed} />
+        <SidebarContent collapsed={collapsed} onToggle={toggleCollapsed} isAdmin={isAdmin} />
       </aside>
 
       {/* Mobile drawer */}
-      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} isAdmin={isAdmin} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar userSlot={userSlot} menuOpen={drawerOpen} onMenuOpen={() => setDrawerOpen(true)} />

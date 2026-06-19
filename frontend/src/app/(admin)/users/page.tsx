@@ -5,7 +5,7 @@
  *
  * Section A: User Summary StatCard row (Total · Active · Premium · Trials · Blocked)
  * Section B: UserTable with search + filter chips; [View] opens SideDrawer with user detail.
- *            [Suspend] [Upgrade] [Reset Access] rendered DISABLED (Phase 5 — gated mutations).
+ *            [Suspend] [Unsuspend] [Reset Access] now live via ConfirmDialog (Phase 5).
  * Section C: Subscription Metrics StatCard row (premium_count · trials · renewals_30d · churn_30d)
  * Section D: Audit table (Timestamp · Actor · Action · Entity · Result) with date/action filters.
  *
@@ -27,6 +27,7 @@ import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { SideDrawer } from '@/components/admin/SideDrawer';
 import { UserTable } from '@/components/admin/UserTable';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative, formatDateTime } from '@/components/admin/utils';
 import {
   useAdminUserSummary,
@@ -34,7 +35,11 @@ import {
   useAdminUserDetail,
   useAdminBillingSubMetrics,
   useAdminAudit,
+  useSuspendUser,
+  useUnsuspendUser,
+  useResetUserAccess,
   type AdminAuditRow,
+  type AdminUserDetail,
 } from '@/features/admin/api';
 import { cn } from '@/lib/cn';
 
@@ -102,6 +107,12 @@ function Section({
 // ---------------------------------------------------------------------------
 function UserDetailContent({ userId }: { userId: string }) {
   const { data, isLoading, isError } = useAdminUserDetail(userId);
+  const suspendMutation      = useSuspendUser();
+  const unsuspendMutation    = useUnsuspendUser();
+  const resetAccessMutation  = useResetUserAccess();
+
+  const [dialog, setDialog] = React.useState<'suspend' | 'unsuspend' | 'reset-access' | null>(null);
+  const [suspendReason, setSuspendReason] = React.useState('');
 
   if (isLoading) {
     return (
@@ -115,12 +126,22 @@ function UserDetailContent({ userId }: { userId: string }) {
     return <ErrorCard title="Could not load user detail" />;
   }
 
+  const statusBadge = (
+    data.status === 'active'    ? 'Healthy'  :
+    data.status === 'suspended' ? 'Failed'   :
+    data.status === 'blocked'   ? 'Critical' :
+    'Paused'
+  );
+
   const profileRows: Array<{ label: string; value: React.ReactNode }> = [
     { label: 'ID',           value: <span className="font-mono text-[11px]">{data.id}</span> },
     { label: 'Display Name', value: data.display_name || '—' },
     { label: 'Email',        value: data.email },
     { label: 'Plan (tier)',  value: data.tier },
-    { label: 'Status',       value: <HealthBadge status={data.status === 'active' ? 'Healthy' : 'Failed'} /> },
+    { label: 'Status',       value: <HealthBadge status={statusBadge} /> },
+    ...(data.status === 'suspended' && data.pro_access_reason
+      ? [{ label: 'Suspend Reason', value: <span className="text-red">{data.pro_access_reason}</span> }]
+      : []),
     { label: 'Joined',       value: formatDateTime(data.created_at) },
     { label: 'Pro Until',    value: data.pro_access_until ? formatDateTime(data.pro_access_until) : '—' },
     { label: 'Pro Reason',   value: data.pro_access_reason || '—' },
@@ -206,25 +227,88 @@ function UserDetailContent({ userId }: { userId: string }) {
         </p>
       </div>
 
-      {/* Disabled mutations notice */}
+      {/* Admin actions */}
       <div className="flex flex-col gap-2 pt-2">
         <p className="text-caption text-ink-faint uppercase tracking-wide font-medium">Admin Actions</p>
         <div className="flex flex-wrap gap-2">
-          {['Suspend', 'Unsuspend', 'Reset Access'].map((label) => (
-            <Button
-              key={label}
-              size="sm"
-              variant="ghost"
-              disabled
-              title="Phase 5 — gated mutation"
-              className="opacity-40 cursor-not-allowed"
-            >
-              {label}
+          {data.status === 'suspended' ? (
+            <Button size="sm" variant="ghost" onClick={() => setDialog('unsuspend')}>
+              Unsuspend
             </Button>
-          ))}
+          ) : data.status === 'active' ? (
+            <Button size="sm" variant="ghost" onClick={() => { setSuspendReason(''); setDialog('suspend'); }}>
+              Suspend
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => setDialog('reset-access')}>
+            Reset Access
+          </Button>
         </div>
-        <p className="text-caption text-ink-faint">Mutations require Phase 5 sign-off.</p>
       </div>
+
+      {/* Suspend dialog */}
+      <ConfirmDialog
+        open={dialog === 'suspend'}
+        onClose={() => setDialog(null)}
+        title="Suspend user"
+        description={
+          <>
+            <strong>{data.email}</strong> will lose all access until manually unsuspended.
+            Active sessions remain valid until they expire. Enter a reason then type the email to confirm.
+          </>
+        }
+        confirmLabel="Suspend"
+        confirmVariant="danger"
+        confirmPhrase={data.email}
+        onConfirm={async () => {
+          await suspendMutation.mutateAsync({ id: userId, reason: suspendReason || undefined });
+        }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="drawer-suspend-reason" className="text-small font-medium text-ink">
+            Reason <span className="text-ink-muted font-normal">(optional)</span>
+          </label>
+          <input
+            id="drawer-suspend-reason"
+            type="text"
+            value={suspendReason}
+            onChange={(e) => setSuspendReason(e.target.value)}
+            placeholder="e.g. Terms of service violation"
+            className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
+          />
+        </div>
+      </ConfirmDialog>
+
+      {/* Unsuspend dialog */}
+      <ConfirmDialog
+        open={dialog === 'unsuspend'}
+        onClose={() => setDialog(null)}
+        title="Unsuspend user"
+        description={<><strong>{data.email}</strong> will regain normal access.</>}
+        confirmLabel="Unsuspend"
+        onConfirm={async () => {
+          await unsuspendMutation.mutateAsync(userId);
+        }}
+      />
+
+      {/* Reset Access dialog */}
+      <ConfirmDialog
+        open={dialog === 'reset-access'}
+        onClose={() => setDialog(null)}
+        title="Reset user access"
+        description={
+          <>
+            Resets any manual access grants for <strong>{data.email}</strong>.
+            Does <strong>not</strong> revoke active sessions. Type the email to confirm.
+          </>
+        }
+        confirmLabel="Reset Access"
+        confirmVariant="danger"
+        confirmPhrase={data.email}
+        onConfirm={async () => {
+          await resetAccessMutation.mutateAsync(userId);
+        }}
+      />
     </div>
   );
 }
@@ -388,7 +472,7 @@ export default function AdminUsersPage() {
       {/* Section A — User Summary */}
       <section aria-labelledby="section-user-summary">
         <h2 id="section-user-summary" className="mb-3 text-h3 font-medium text-ink">
-          Section A — User Summary
+          User Summary
         </h2>
         {summaryQ.isLoading && <StatRowSkeleton cols={5} />}
         {summaryQ.isError && (
@@ -416,8 +500,8 @@ export default function AdminUsersPage() {
       {/* Section B — User List */}
       <Section
         id="section-user-list"
-        title="Section B — User List"
-        subtitle="Search and filter users. Mutations (Suspend · Upgrade · Reset Access) require Phase 5."
+        title="User List"
+        subtitle="Search and filter users. Suspend, Unsuspend, and Reset Access are now live (Phase 5)."
         action={
           <div className="flex flex-wrap items-center gap-2">
             {/* Search */}
@@ -495,7 +579,7 @@ export default function AdminUsersPage() {
       {/* Section C — Subscription Metrics */}
       <section aria-labelledby="section-sub-metrics">
         <h2 id="section-sub-metrics" className="mb-3 text-h3 font-medium text-ink">
-          Section C — Subscription Metrics
+          Subscription Metrics
         </h2>
         {subMetricsQ.isLoading && <StatRowSkeleton cols={4} />}
         {subMetricsQ.isError && (
@@ -522,7 +606,7 @@ export default function AdminUsersPage() {
       {/* Section D — Activity & Audit Log */}
       <Section
         id="section-audit"
-        title="Section D — Activity & Audit Log"
+        title="Activity & Audit Log"
         subtitle="Showing admin actions only — user-activity events (logins, uploads) are not yet unified."
         action={
           <AuditFilters

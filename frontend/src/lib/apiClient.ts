@@ -134,12 +134,52 @@ async function request<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Core request with optional extra headers
+// ---------------------------------------------------------------------------
+async function requestWithHeaders<T>(
+  method:       string,
+  path:         string,
+  body?:        unknown,
+  extraHeaders?: Record<string, string>,
+  isRetry = false,
+): Promise<T> {
+  const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+
+  const res = await fetch(url, {
+    method,
+    credentials: 'include',
+    headers: { ...baseHeaders(), ...(extraHeaders ?? {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+
+  if (res.status === 401 && !isRetry) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return requestWithHeaders<T>(method, path, body, extraHeaders, true);
+    }
+    const problem = await parseProblem(res);
+    throw new ApiError(problem);
+  }
+
+  if (!res.ok) {
+    const problem = await parseProblem(res);
+    throw new ApiError(problem);
+  }
+
+  if (res.status === 204) return undefined as unknown as T;
+
+  return res.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 export const api = {
-  get:  <T>(path: string)                     => request<T>('GET',    path),
-  post: <T>(path: string, body?: unknown)     => request<T>('POST',   path, body),
-  put:  <T>(path: string, body?: unknown)     => request<T>('PUT',    path, body),
-  patch:<T>(path: string, body?: unknown)     => request<T>('PATCH',  path, body),
-  del:  <T>(path: string)                     => request<T>('DELETE', path),
+  get:  <T>(path: string)                                                      => request<T>('GET',    path),
+  post: <T>(path: string, body?: unknown)                                      => request<T>('POST',   path, body),
+  put:  <T>(path: string, body?: unknown)                                      => request<T>('PUT',    path, body),
+  patch:<T>(path: string, body?: unknown)                                      => request<T>('PATCH',  path, body),
+  del:  <T>(path: string)                                                      => request<T>('DELETE', path),
+  /** POST with extra headers — used for Idempotency-Key on billing/broadcast mutations. */
+  postH:<T>(path: string, body?: unknown, headers?: Record<string, string>)   => requestWithHeaders<T>('POST', path, body, headers),
 };
