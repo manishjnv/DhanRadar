@@ -44,13 +44,17 @@ export interface BreadthData {
   market_open: boolean;
 }
 
-/** Derived client-side — never rendered as a numeric score in the DOM. */
-export interface MarketSignalState {
+/**
+ * Server-computed signal state — returned by GET /api/v1/signal/state.
+ * No weighted_score or factor weights are present; those stay server-side
+ * (Non-negotiable #2: no numeric score in DOM).
+ */
+export interface SignalStateResponse {
+  state: SignalState;
   nifty_score: number;    // 0–4
   vix_score: number;      // 0–4
   breadth_score: number;  // 0–4
-  weighted_score: number; // float 0–4 — NOT shown in DOM
-  state: SignalState;
+  as_of: string;          // ISO datetime
 }
 
 // ---------------------------------------------------------------------------

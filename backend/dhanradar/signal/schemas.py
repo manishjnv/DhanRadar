@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, field_validator
@@ -73,6 +73,22 @@ class SignalDeploymentOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SignalStateOut(BaseModel):
+    """Server-computed signal state for the authenticated caller.
+
+    NON-NEGOTIABLE #2: ``weighted_score`` and factor weights are intentionally absent
+    from this schema.  They are computed server-side only and never serialised to the
+    client.  The per-axis 0–4 scores feed the existing band-label lookup on the frontend
+    (same as today) without exposing the aggregate or the weights.
+    """
+
+    state: Literal["triggered", "watch", "no_signal"]
+    nifty_score: int
+    vix_score: int
+    breadth_score: int
+    as_of: datetime
 
 
 class VIXOut(BaseModel):

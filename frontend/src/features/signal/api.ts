@@ -15,12 +15,26 @@ import type {
   SignalDeployment,
   SignalDipFund,
   SignalRules,
+  SignalStateResponse,
   VIXData,
 } from './types';
 
 function signalRetry(count: number, error: unknown): boolean {
   if (error instanceof ApiError && error.problem.status === 404) return false;
   return count < 1;
+}
+
+// ---------------------------------------------------------------------------
+// Server-computed signal state (compliance: weights + score never sent to client)
+// ---------------------------------------------------------------------------
+export function useSignalState() {
+  return useQuery({
+    queryKey: queryKeys.signal.state(),
+    queryFn: () => api.get<SignalStateResponse>('/signal/state'),
+    retry: signalRetry,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
 }
 
 // ---------------------------------------------------------------------------

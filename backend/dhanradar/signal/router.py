@@ -2,6 +2,7 @@
 DhanRadar — Signal API router.
 
 Endpoints (all under /api/v1/signal, auth-gated):
+  GET  /signal/state              — server-computed signal state (weights stay server-side)
   GET  /signal/rules              — return (or seed) the caller's signal rules
   PUT  /signal/rules              — update the caller's signal rules
   GET  /signal/dip-fund           — return (or seed) the caller's dip-fund record
@@ -14,6 +15,8 @@ Endpoints (all under /api/v1/signal, auth-gated):
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -38,10 +41,13 @@ from dhanradar.signal.schemas import (
     SignalNotificationOut,
     SignalRulesOut,
     SignalRulesUpdate,
+    SignalStateOut,
     TrustHistoryOut,
 )
 
 router = APIRouter(prefix="/signal", tags=["signal"])
+
+logger = logging.getLogger(__name__)
 
 
 async def _require_auth(
@@ -51,6 +57,47 @@ async def _require_auth(
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return user
+
+
+@router.get("/state", response_model=SignalStateOut)
+async def get_signal_state(
+    _: None = Depends(RequireTier("free")),
+    # Auth-gate only: this dependency enforces login (401 for anonymous). The state
+    # is market-derived, so the user id itself is not needed in the body.
+    _user: UserContext = Depends(_require_auth),
+) -> SignalStateOut:
+    """Return the server-computed signal state for the authenticated caller.
+
+    Fetches live India VIX, market breadth (A/D ratio), and Nifty 50 change-%
+    from the mood-service data layer, then computes the signal state server-side.
+    Factor weights and the weighted aggregate are never returned (non-neg #2).
+
+    Fallback behaviour mirrors the existing mood endpoints: if a market-data
+    source is unavailable the service falls back to Redis cache then hard-coded
+    safe defaults — this endpoint NEVER raises 503.
+    """
+    from dhanradar.mood.service import get_breadth_raw, get_vix
+    from dhanradar.signal import scoring
+
+    vix_out = await get_vix()
+    breadth_raw = await get_breadth_raw()
+
+    nifty_change_pct: float = breadth_raw.get("nifty_change_pct", 0.0)
+    ad_ratio: float = breadth_raw.get("ad_ratio", 1.0)
+
+    ns, vs, bs, state = scoring.compute_signal_state(
+        nifty_change_pct=nifty_change_pct,
+        vix_value=vix_out.value,
+        ad_ratio=ad_ratio,
+    )
+
+    return SignalStateOut(
+        state=state,
+        nifty_score=ns,
+        vix_score=vs,
+        breadth_score=bs,
+        as_of=datetime.now(UTC),
+    )
 
 
 @router.get("/rules", response_model=SignalRulesOut)
