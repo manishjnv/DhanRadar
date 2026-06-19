@@ -98,7 +98,13 @@ async def test_yahoo_provider_omits_failed_symbols(monkeypatch):
         # Only NIFTY resolves; everything else fails → omitted, no crash.
         return {"regularMarketPrice": 100.0, "chartPreviousClose": 100.0} if symbol == "^NSEI" else None
 
+    # market_breadth is fetched independently (NIFTY-50 A/D), not via _quote_meta —
+    # stub it to None here so this test isolates chart-symbol omission behaviour.
+    async def fake_breadth():
+        return None
+
     monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
+    monkeypatch.setattr(yahoo, "_fetch_breadth_ratio", fake_breadth)
     ev = await yahoo.YahooMacroProvider().fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
     assert list(ev.signals.keys()) == ["nifty_trend"]
 
