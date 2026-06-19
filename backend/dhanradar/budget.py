@@ -236,3 +236,68 @@ async def budget_guard(
     delta = actual - reserve_amt
     if delta != 0:
         await _adjust_quietly(redis, key, delta, reason="reservation-reconcile")
+
+
+# ---------------------------------------------------------------------------
+# Read-only budget snapshot for admin monitoring (Phase 4 AI Ops console)
+# ---------------------------------------------------------------------------
+
+
+def get_budget_state(redis_client) -> dict:  # type: ignore[type-arg]
+    """Synchronous read-only budget snapshot for the Admin AI Ops console.
+
+    Reads both Redis daily counters and returns the current spend + cap info.
+    Tolerates a Redis miss (key not yet initialised → returns 0).
+
+    This is intentionally synchronous so it can be called from within an async
+    endpoint via ``await asyncio.to_thread(get_budget_state, redis_client)`` or
+    directly from a regular context. The admin endpoint calls it inside the
+    async path using the async redis client's ``get`` method — see
+    ``aiops_router.py`` for the await pattern.
+
+    Returns a dict with keys:
+        free_calls_today     : int   — calls consumed today
+        free_cap             : int   — daily hard cap (from _CAPS["free"])
+        premium_usd_today    : float — USD spent today
+        premium_soft_cap     : float — soft warning threshold
+        premium_hard_cap     : float — hard stop cap
+        free_remaining       : int   — remaining calls
+        premium_remaining_usd: float — remaining premium budget (vs hard cap)
+    """
+    # NOTE: callers in the async aiops_router use ``await redis.get(key)``
+    # directly for the two reads, then pass the raw values here.  This function
+    # is therefore a pure computation helper, not an I/O function.
+    raise NotImplementedError(
+        "get_budget_state is a helper contract; use get_budget_state_from_values() "
+        "with pre-fetched Redis values, or call the async helper in aiops_router."
+    )
+
+
+def compute_budget_state(free_raw: bytes | None, premium_raw: bytes | None) -> dict:
+    """Pure computation: derive the budget snapshot from raw Redis byte values.
+
+    Separated from I/O so it is trivially unit-testable without a Redis instance.
+
+    Args:
+        free_raw:    raw bytes from ``redis.get(_REDIS_KEYS["free"])``; None if key absent.
+        premium_raw: raw bytes from ``redis.get(_REDIS_KEYS["premium"])``;  None if key absent.
+
+    Returns:
+        dict with the same shape as the docstring above (for get_budget_state).
+    """
+    free_cap: int = int(_CAPS["free"])
+    premium_soft_cap: float = float(_CAPS["premium_soft"])
+    premium_hard_cap: float = float(_CAPS["premium_hard"])
+
+    free_calls_today: int = int(float(free_raw.decode() if free_raw else "0"))
+    premium_usd_today: float = round(float(premium_raw.decode() if premium_raw else "0"), 6)
+
+    return {
+        "free_calls_today": free_calls_today,
+        "free_cap": free_cap,
+        "premium_usd_today": premium_usd_today,
+        "premium_soft_cap": premium_soft_cap,
+        "premium_hard_cap": premium_hard_cap,
+        "free_remaining": max(0, free_cap - free_calls_today),
+        "premium_remaining_usd": round(max(0.0, premium_hard_cap - premium_usd_today), 6),
+    }

@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from dhanradar.admin.aiops_router import router as admin_aiops_router
 from dhanradar.admin.billing_router import router as admin_billing_router
 from dhanradar.admin.ops_router import router as admin_ops_router
 from dhanradar.admin.platform_router import router as admin_platform_router
@@ -134,6 +135,7 @@ app.include_router(admin_users_router, prefix="/api/v1")  # Admin Phase 2 — us
 app.include_router(admin_billing_router, prefix="/api/v1")  # Admin Phase 2 — billing overview/subs/payments; RequireAdmin-gated
 app.include_router(admin_scoring_router, prefix="/api/v1")  # Admin Phase 3 — scoring model read (TIER-C LOAD-BEARING); RequireAdmin-gated
 app.include_router(admin_platform_router, prefix="/api/v1")  # Admin Phase 3 — flags/support/analytics/notifications; RequireAdmin-gated
+app.include_router(admin_aiops_router, prefix="/api/v1")  # Admin Phase 4 — AI Ops console (READ-ONLY, LOAD-BEARING Tier-B); RequireAdmin-gated
 app.include_router(mood_router, prefix="/api/v1")  # Mood Compass — anon market regime
 app.include_router(signal_router, prefix="/api/v1")  # Signal — dip-buy rules + dip-fund + deployments
 app.include_router(consent_router, prefix="/api/v1")  # B44 — DPDP consent grant/revoke writer

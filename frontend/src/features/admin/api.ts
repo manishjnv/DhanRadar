@@ -583,6 +583,229 @@ export function useAdminNotificationsHealth() {
 // Audit hook
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Phase 4 — AI Ops query keys
+// ---------------------------------------------------------------------------
+export const adminKeysAI = {
+  dashboard:  () => ['admin', 'ai', 'dashboard'] as const,
+  versions:   () => ['admin', 'ai', 'versions'] as const,
+  prompts:    () => ['admin', 'ai', 'prompts'] as const,
+  eval:       () => ['admin', 'ai', 'eval'] as const,
+  safety:     () => ['admin', 'ai', 'safety'] as const,
+  feedback:   () => ['admin', 'ai', 'feedback'] as const,
+  cost:       () => ['admin', 'ai', 'cost'] as const,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Types — AI Ops (Admin.md §15)
+// ---------------------------------------------------------------------------
+
+/** Shared budget snapshot — mirrors BudgetSnapshot in aiops_schemas.py */
+export interface AdminAIBudget {
+  free_calls_today: number;
+  free_cap: number;
+  premium_usd_today: number;
+  premium_soft_cap: number;
+  premium_hard_cap: number;
+  free_remaining: number;
+  premium_remaining_usd: number;
+}
+
+/** Mirrors LabelChurnSummary in aiops_schemas.py */
+export interface AdminAILabelChurn {
+  decision: string;
+  churn: number;
+  requires_human_review: boolean;
+  reason: string | null;
+}
+
+/** Mirrors InstrumentedFalse in aiops_schemas.py */
+export interface AdminAIInstrumented {
+  instrumented: boolean;
+  note?: string;
+}
+
+/** Mirrors AiDashboardResponse in aiops_schemas.py */
+export interface AdminAIDashboard {
+  model_version: string;
+  activated: boolean;
+  budget: AdminAIBudget;
+  served_7d: number;
+  low_confidence_7d: number;
+  label_churn: AdminAILabelChurn;
+  avg_latency_ms: AdminAIInstrumented;
+  eval_score: AdminAIInstrumented;
+}
+
+/** Mirrors EngineVersionRow in aiops_schemas.py */
+export interface AdminAIRegistryVersion {
+  model_version: string;
+  created_by: string | null;
+  approved_by: string | null;
+  two_person_ok: boolean;
+  activated: boolean;
+  activated_at: string | null;
+  created_at: string | null;
+}
+
+/** Mirrors AiVersionsResponse in aiops_schemas.py */
+export interface AdminAIVersions {
+  versions: AdminAIRegistryVersion[];
+  backtest: AdminAIInstrumented;
+  drift: AdminAIInstrumented;
+}
+
+/** Mirrors AiPromptsResponse in aiops_schemas.py */
+export interface AdminAIPrompts {
+  registry: boolean;
+  note: string;
+  prompt_versions_seen: string[];
+}
+
+/** Mirrors QualityIssueRow in aiops_schemas.py (same shape as AdminQualityIssue) */
+export interface AdminAIQualityIssueRow {
+  metric_key: string;
+  label: string;
+  current_value: number | null;
+  threshold: number | null;
+  unit: string;
+  status: string;
+  acknowledged_until: string | null;
+}
+
+/** Mirrors AiEvalResponse in aiops_schemas.py */
+export interface AdminAIEval {
+  quality_issues: AdminAIQualityIssueRow[];
+  groundedness: AdminAIInstrumented;
+}
+
+/** Mirrors AuditRowSummary in aiops_schemas.py */
+export interface AdminAIAuditRow {
+  id: string;
+  served_at: string | null;
+  recommendation_type: string;
+  label: string | null;
+  confidence_band: string | null;
+  model: string | null;
+  surface: string | null;
+  prompt_version: string | null;
+  request_id: string | null;
+}
+
+/** Mirrors LowConfidenceRowSummary in aiops_schemas.py */
+export interface AdminAILowConfRow {
+  id: string;
+  logged_at: string | null;
+  surface: string | null;
+  identifier: string | null;
+  confidence_score: number | null;
+  confidence_band: string | null;
+  model: string | null;
+  reason: string | null;
+  request_id: string | null;
+}
+
+/** Mirrors AdviceBoundaryBreachesInfo in aiops_schemas.py */
+export interface AdminAIBreachInfo {
+  value: number;
+  instrumented: boolean;
+  note: string;
+}
+
+/** Mirrors AiSafetyResponse in aiops_schemas.py */
+export interface AdminAISafety {
+  days: number;
+  served_by_type: Record<string, number>;
+  by_confidence_band: Record<string, number>;
+  low_confidence_count: number;
+  recent_audit_rows: AdminAIAuditRow[];
+  recent_low_confidence: AdminAILowConfRow[];
+  label_churn_educational: AdminAILabelChurn;
+  label_churn_mood: AdminAILabelChurn;
+  advice_boundary_breaches: AdminAIBreachInfo;
+  groundedness: AdminAIInstrumented;
+}
+
+/** Mirrors AiFeedbackResponse in aiops_schemas.py */
+export interface AdminAIFeedback {
+  available: boolean;
+  note: string;
+}
+
+/** Mirrors AiCostResponse in aiops_schemas.py (budget nested) */
+export interface AdminAICost {
+  budget: AdminAIBudget;
+  per_model: AdminAIInstrumented;
+  latency: AdminAIInstrumented;
+}
+
+// ---------------------------------------------------------------------------
+// AI Ops hooks
+// ---------------------------------------------------------------------------
+
+export function useAdminAIDashboard() {
+  return useQuery({
+    queryKey: adminKeysAI.dashboard(),
+    queryFn:  () => api.get<AdminAIDashboard>('/admin/ai/dashboard'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useAdminAIVersions() {
+  return useQuery({
+    queryKey: adminKeysAI.versions(),
+    queryFn:  () => api.get<AdminAIVersions>('/admin/ai/versions'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminAIPrompts() {
+  return useQuery({
+    queryKey: adminKeysAI.prompts(),
+    queryFn:  () => api.get<AdminAIPrompts>('/admin/ai/prompts'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminAIEval() {
+  return useQuery({
+    queryKey: adminKeysAI.eval(),
+    queryFn:  () => api.get<AdminAIEval>('/admin/ai/eval'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminAISafety() {
+  return useQuery({
+    queryKey: adminKeysAI.safety(),
+    queryFn:  () => api.get<AdminAISafety>('/admin/ai/safety'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useAdminAIFeedback() {
+  return useQuery({
+    queryKey: adminKeysAI.feedback(),
+    queryFn:  () => api.get<AdminAIFeedback>('/admin/ai/feedback'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAdminAICost() {
+  return useQuery({
+    queryKey: adminKeysAI.cost(),
+    queryFn:  () => api.get<AdminAICost>('/admin/ai/cost'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Audit hook
+// ---------------------------------------------------------------------------
+
 export function useAdminAudit(params?: {
   since?: string;
   until?: string;

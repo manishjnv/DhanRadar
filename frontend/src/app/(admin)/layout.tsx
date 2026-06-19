@@ -7,6 +7,10 @@
  * If is_admin !== true → renders Next.js notFound() (404 — surface-hiding,
  * not a "403 access denied" screen, per Admin.md §2).
  *
+ * Shell variant:
+ *   - /admin/ai and all sub-routes → variant="aiops" (amber accent)
+ *   - all other /admin/* routes    → variant="admin"  (red accent)
+ *
  * Note: this is a CLIENT component guard (UX gate). The real security boundary
  * is RequireAdmin() on every backend endpoint (HTTP 404 to non-admins).
  *
@@ -19,11 +23,13 @@ export const dynamic = 'force-dynamic';
 
 import * as React from 'react';
 import { notFound } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { AdminShell } from '@/components/admin/AdminShell';
 import { useMe } from '@/features/auth/api';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading } = useMe();
+  const pathname = usePathname();
 
   if (isLoading) {
     return (
@@ -43,5 +49,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return null;
   }
 
-  return <AdminShell variant="admin">{children}</AdminShell>;
+  // AI Ops shell (amber) for /admin/ai and all sub-routes.
+  const variant =
+    pathname === '/admin/ai' || pathname.startsWith('/admin/ai/')
+      ? 'aiops'
+      : 'admin';
+
+  return <AdminShell variant={variant}>{children}</AdminShell>;
 }

@@ -60,13 +60,13 @@ const ADMIN_NAV: AdminNavItem[] = [
 ];
 
 const AIOPS_NAV: AdminNavItem[] = [
-  { href: '/admin/ai',           label: 'AI Ops Dashboard',  icon: Bot,         live: false },
-  { href: '/admin/ai/versions',  label: 'Score Versioning',  icon: GitBranch,   live: false },
-  { href: '/admin/ai/prompts',   label: 'Prompt & RAG',      icon: FileText,    live: false },
-  { href: '/admin/ai/eval',      label: 'Quality / Eval',    icon: CheckCircle2, live: false },
-  { href: '/admin/ai/safety',    label: 'Safety Monitor',    icon: ShieldAlert, live: false },
-  { href: '/admin/ai/feedback',  label: 'Feedback Review',   icon: ThumbsUp,    live: false },
-  { href: '/admin/ai/cost',      label: 'Cost & Usage',      icon: DollarSign,  live: false },
+  { href: '/admin/ai',           label: 'AI Ops Dashboard',  icon: Bot,          live: true },
+  { href: '/admin/ai/versions',  label: 'Score Versioning',  icon: GitBranch,    live: true },
+  { href: '/admin/ai/prompts',   label: 'Prompt & RAG',      icon: FileText,     live: true },
+  { href: '/admin/ai/eval',      label: 'Quality / Eval',    icon: CheckCircle2, live: true },
+  { href: '/admin/ai/safety',    label: 'Safety Monitor',    icon: ShieldAlert,  live: true },
+  { href: '/admin/ai/feedback',  label: 'Feedback Review',   icon: ThumbsUp,     live: true },
+  { href: '/admin/ai/cost',      label: 'Cost & Usage',      icon: DollarSign,   live: true },
 ];
 
 // ---------------------------------------------------------------------------
