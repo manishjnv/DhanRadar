@@ -2,7 +2,19 @@
 
 **Stage 1 — Contract Reconciliation. Documentation only; no code, schema, or infra changed.**
 **Date:** 2026-06-05
-**Authority order (binding):** `DhanRadar_Architecture_Final.md` → `DhanRadar_Implementation_Plan.md` → existing implementation → `docs/features` → `docs/ui-system` → mockups.
+**Authority order (binding):** for architecture / contracts / behaviour —
+`DhanRadar_Architecture_Final.md` → `DhanRadar_Implementation_Plan.md` → existing implementation → `docs/features`.
+
+> **UI / visual design (founder rule 2026-06-19, formalizes the D1 revision of 2026-06-10):**
+> `docs/ui-system/` is the **master UI design and FIRST source of truth** for every UI change / new
+> page — consult it first for design intent: page mockups (`brand/mockups/*.jsx`, `screens/*.md`) +
+> component/typography/colour/button specs (`components/*.md`, `brand/README.md`). The
+> "harvest-not-adopt / reference-only" framing below is **superseded**: ui-system now leads on design,
+> implemented via the live `frontend/` token pipeline + `src/components`. ui-system is already
+> **Geist/warm** (brand guide = Geist Sans/Mono + Instrument Serif), so there is no token conflict to
+> retokenize. The KEEP/MERGE/REPLACE/IGNORE table still governs **specific asset adoption relative to
+> the repo**. What still overrides ui-system is **compliance, not stack**: the SEBI advisory boundary
+> (its palette's Buy/Hold/Sell semantics → educational labels) and no-numeric-in-DOM (band, not score).
 
 Classifies every asset across 8 domains as **KEEP** / **MERGE** / **REPLACE** / **IGNORE**, relative to the existing repo.
 
@@ -109,6 +121,7 @@ Classifies every asset across 8 domains as **KEEP** / **MERGE** / **REPLACE** / 
 ---
 
 ## 9. Classification tally
+
 - **KEEP:** all load-bearing backend, auth, DB schema, infra, AI governance, engine contract.
 - **MERGE:** RFC7807, plans catalog, admin/quota/session/audit tables, retokenized components, CI, engine quantitative detail.
 - **REPLACE:** frontend `src/` structure + dependency set + regenerated `openapi.yaml` (skeleton → real).
