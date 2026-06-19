@@ -9,11 +9,10 @@
  *   B — Axis weights labeled-bar list (numerics allowed, admin-only §16)
  *   C — Coverage (total_funds)
  *   D — Registry versions table (version · created_by · approved_by · two_person_ok · activated · activated_at)
- *        Per row: non-activated rows show "Gated (B6)" chip — activation disabled until B6 is resolved.
+ *        Per row: non-activated rows show an Activate button that opens a confirmation dialog.
  *
- * Phase 5: Activate Version mutation (POST /admin/scoring/{version}/activate) is NOT wired from the UI.
- *   The two-person methodology gate (B6) is currently vacuous — re-enable the activation flow only after
- *   B6 is resolved and a distinct second approver identity is enforced end-to-end.
+ * Activate Version mutation (POST /admin/scoring/{version}/activate) is wired per-row.
+ *   Requires a "backtest passed" checkbox + type-to-confirm the version string.
  *
  * Four-state contract: skeleton / empty / error+retry / data on every region.
  * No advisory verbs. No numeric in DOM on public surfaces — admin is exempt (§16).
@@ -30,11 +29,32 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatDateTime } from '@/components/admin/utils';
 import {
   useAdminScoringModel,
+  useAdminActivateScoringVersion,
   type AdminScoringRegistryVersion,
 } from '@/features/admin/api';
+import { ApiError } from '@/lib/apiClient';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function scoringActivateErrorHint(err: unknown): string {
+  if (err instanceof ApiError) {
+    const slug = err.problem.detail ?? '';
+    if (slug === 'two_person_gate_failed') {
+      return 'Two-person gate failed — the approving user must be different from the version creator.';
+    }
+    if (slug === 'backtest_not_passed') {
+      return 'Activation rejected: the backtest must be marked as passed before activating.';
+    }
+    return err.problem.detail ?? err.problem.title ?? 'Activation failed. Please retry.';
+  }
+  if (err instanceof Error) return err.message;
+  return 'Activation failed. Please retry.';
+}
 
 // ---------------------------------------------------------------------------
 // Skeletons
@@ -120,9 +140,13 @@ function AxisWeightBars({ weights }: { weights: Record<string, number> }) {
 }
 
 // ---------------------------------------------------------------------------
-// Registry versions table (Activate disabled pending B6)
+// Registry versions table
 // ---------------------------------------------------------------------------
 function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }) {
+  const [activateTarget, setActivateTarget] = React.useState<string | null>(null);
+  const [backtestPassed, setBacktestPassed] = React.useState(false);
+  const activateMutation = useAdminActivateScoringVersion();
+
   if (versions.length === 0) {
     return (
       <EmptyState
@@ -136,66 +160,114 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
   const HEADERS = ['Version', 'Created by', 'Approved by', '2-person OK', 'Active', 'Activated at', 'Created at', 'Activate'];
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-small">
-        <thead>
-          <tr className="border-b border-line">
-            {HEADERS.map((h) => (
-              <th
-                key={h}
-                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {versions.map((v) => (
-            <tr
-              key={v.model_version}
-              className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-            >
-              <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
-                {v.model_version}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {v.approved_by
-                  ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
-                  : '—'}
-              </td>
-              <td className="py-2.5 pr-4">
-                <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
-              </td>
-              <td className="py-2.5 pr-4">
-                <HealthBadge status={v.activated ? 'Healthy' : 'Paused'} />
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                {formatDateTime(v.activated_at)}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                {formatDateTime(v.created_at)}
-              </td>
-              <td className="py-2.5">
-                {v.activated ? (
-                  <span className="text-caption text-ink-faint">active</span>
-                ) : (
-                  <span
-                    title="Activation is disabled pending the two-person methodology gate (B6). A second distinct approver identity must be wired before any scoring version can be activated from the console."
-                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono font-medium bg-amber/10 text-amber border border-amber/30 cursor-not-allowed select-none"
-                  >
-                    Gated (B6)
-                  </span>
-                )}
-              </td>
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-small">
+          <thead>
+            <tr className="border-b border-line">
+              {HEADERS.map((h) => (
+                <th
+                  key={h}
+                  className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {versions.map((v) => (
+              <tr
+                key={v.model_version}
+                className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
+              >
+                <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
+                  {v.model_version}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+                  {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+                  {v.approved_by
+                    ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
+                    : '—'}
+                </td>
+                <td className="py-2.5 pr-4">
+                  <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
+                </td>
+                <td className="py-2.5 pr-4">
+                  <HealthBadge status={v.activated ? 'Healthy' : 'Paused'} />
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                  {formatDateTime(v.activated_at)}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                  {formatDateTime(v.created_at)}
+                </td>
+                <td className="py-2.5">
+                  {v.activated ? (
+                    <span className="text-caption text-ink-faint">active</span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setBacktestPassed(false);
+                        setActivateTarget(v.model_version);
+                      }}
+                    >
+                      Activate
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmDialog
+        open={activateTarget !== null}
+        onClose={() => setActivateTarget(null)}
+        title="Activate scoring version"
+        description={
+          <>
+            You are about to activate scoring version{' '}
+            <strong className="font-mono">{activateTarget}</strong>. This will replace the
+            currently active model and immediately affect all scored funds.
+          </>
+        }
+        confirmLabel="Activate"
+        confirmVariant="danger"
+        confirmPhrase={activateTarget ?? undefined}
+        onConfirm={async () => {
+          if (!backtestPassed) {
+            throw new Error('You must confirm the backtest has passed before activating.');
+          }
+          try {
+            await activateMutation.mutateAsync({
+              version: activateTarget!,
+              payload: { backtest_passed: backtestPassed },
+            });
+          } catch (err) {
+            throw new Error(scoringActivateErrorHint(err));
+          }
+        }}
+      >
+        {/* Backtest confirmation checkbox */}
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={backtestPassed}
+            onChange={(e) => setBacktestPassed(e.target.checked)}
+            className="h-4 w-4 rounded border-line accent-royal"
+          />
+          <span className="text-small text-ink">
+            I confirm the backtest for this version has passed.
+          </span>
+        </label>
+      </ConfirmDialog>
+    </>
   );
 }
 
@@ -213,7 +285,7 @@ export default function AdminScoringPage() {
           <h1 className="text-h2 font-medium text-ink">Score Model</h1>
           <p className="mt-1 text-small text-ink-muted">
             Active ranking model, axis weights, coverage, and registry.
-            Activation via console is disabled pending B6 (two-person methodology gate).
+            Activate a version per row in the registry table below.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => modelQ.refetch()}>
@@ -325,11 +397,11 @@ export default function AdminScoringPage() {
         )}
       </section>
 
-      {/* Section D — Registry versions (Activate disabled pending B6) */}
+      {/* Section D — Registry versions */}
       <Section
         id="section-registry"
         title="Registry Versions"
-        subtitle="All model versions in the ranking_configs registry. Activation via console is disabled pending B6 (two-person methodology gate)."
+        subtitle="All model versions in the ranking_configs registry. Use the Activate button on a row to promote a version to active."
       >
         {modelQ.isLoading && <TableSkeleton rows={4} />}
         {modelQ.isError && (
