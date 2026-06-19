@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { ClipboardCheck } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { MarketSignalState, SignalState } from '@/features/signal/types';
 
@@ -53,7 +54,7 @@ const STATE_CONFIG: Record<
     textClass: 'text-amber',
   },
   no_signal: {
-    label: 'No action — Conditions not met',
+    label: 'No rules met',
     ringFill: 0.1,
     badgeClass: 'badge-neutral',
     ringColor: 'var(--text-faint)',
@@ -63,7 +64,7 @@ const STATE_CONFIG: Record<
 
 const STATE_BODY: Record<SignalState, string> = {
   triggered:
-    'Your configured thresholds are met. Review each signal below before acting.',
+    'Your configured thresholds are met. Review each signal below.',
   watch:
     'Some conditions are close to your thresholds. Monitor the signals below.',
   no_signal:
@@ -142,7 +143,7 @@ export function SignalHero({ signalState, isLoading = false }: SignalHeroProps) 
 
       {/* SEBI disclosure footer */}
       <div className="rec-foot flex items-center gap-1.5">
-        <span aria-hidden="true">📋</span>
+        <ClipboardCheck size={12} aria-hidden="true" className="shrink-0" />
         <span>NOT FINANCIAL ADVICE — Based on your own configured thresholds</span>
       </div>
     </div>
