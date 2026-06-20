@@ -17,6 +17,10 @@
  * Pages pass ONLY their inner content as children — NOT a page header and NOT
  * the standing <Disclaimer/> (this component / AppShell provide those). The
  * contextual <DisclosureBundle/> next to the content stays in the children.
+ *
+ * `maxWidth` controls the content column: `'default'` (max-w-2xl) suits prose /
+ * single-record pages; `'wide'` (max-w-6xl) suits data tables like the Fund
+ * Explorer that need horizontal room.
  */
 
 import * as React from 'react';
@@ -27,15 +31,23 @@ import { Button } from '@/components/ui/Button';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 import { UserMenu } from '@/features/auth/UserMenu';
 import { useMe } from '@/features/auth/api';
+import { cn } from '@/lib/cn';
 
-export function MaybeShell({ children }: { children: React.ReactNode }) {
+export function MaybeShell({
+  children,
+  maxWidth = 'default',
+}: {
+  children: React.ReactNode;
+  maxWidth?: 'default' | 'wide';
+}) {
   const { data: user } = useMe();
+  const widthClass = maxWidth === 'wide' ? 'max-w-6xl' : 'max-w-2xl';
 
   // Logged in → render within the app shell so the left nav stays consistent.
   if (user) {
     return (
       <AppShell userSlot={<UserMenu />}>
-        <div className="mx-auto max-w-2xl">{children}</div>
+        <div className={cn('mx-auto', widthClass)}>{children}</div>
       </AppShell>
     );
   }
@@ -55,7 +67,7 @@ export function MaybeShell({ children }: { children: React.ReactNode }) {
         </Button>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 py-8">
+      <main className={cn('mx-auto px-4 py-8', widthClass)}>
         {children}
         {/* Standing site-wide line — the standalone page has no AppShell footer. */}
         <footer className="mt-10 border-t border-line pt-4">

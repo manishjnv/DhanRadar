@@ -17,6 +17,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
+import { MaybeShell } from '@/components/ui/MaybeShell';
 import { FundExplorerTable } from '@/components/mf/FundExplorerTable';
 import { useFundCategories, useFundExplorer } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
@@ -501,22 +502,24 @@ export default function ExplorePage() {
   const initialCategory = searchParams.get('category');
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <p className="font-mono text-caption uppercase text-royal mb-1">
-          Mutual Funds
-        </p>
-        <h1 className="text-h2 text-ink">Fund Explorer</h1>
-        <p className="mt-1 text-small text-ink-secondary">
-          Compare funds by rank, assessment, and returns — educational analysis only
-        </p>
-      </div>
+    <MaybeShell maxWidth="wide">
+      <div className="flex flex-col gap-6">
+        <div>
+          <p className="font-mono text-caption uppercase text-royal mb-1">
+            Mutual Funds
+          </p>
+          <h1 className="text-h2 text-ink">Fund Explorer</h1>
+          <p className="mt-1 text-small text-ink-secondary">
+            Compare funds by rank, assessment, and returns — educational analysis only
+          </p>
+        </div>
 
-      <Card>
-        <CardBody>
-          <ExplorerBody initialCategory={initialCategory} />
-        </CardBody>
-      </Card>
-    </div>
+        <Card>
+          <CardBody>
+            <ExplorerBody initialCategory={initialCategory} />
+          </CardBody>
+        </Card>
+      </div>
+    </MaybeShell>
   );
 }

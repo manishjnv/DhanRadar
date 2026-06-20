@@ -17,6 +17,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LabelChip } from '@/components/ui/LabelChip';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
+import { MaybeShell } from '@/components/ui/MaybeShell';
 import { useFundDetail } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
@@ -263,8 +264,10 @@ function FundDetailView() {
 
 export default function FundDetailPage() {
   return (
-    <div className="flex flex-col gap-6">
-      <FundDetailView />
-    </div>
+    <MaybeShell>
+      <div className="flex flex-col gap-6">
+        <FundDetailView />
+      </div>
+    </MaybeShell>
   );
 }
