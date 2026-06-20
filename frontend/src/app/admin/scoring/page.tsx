@@ -30,7 +30,8 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
-import { formatDateTime } from '@/components/admin/utils';
+import { formatDateTime, formatRelative } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminScoringModel,
   useAdminActivateScoringVersion,
@@ -121,7 +122,7 @@ function AxisWeightBars({ weights }: { weights: Record<string, number> }) {
         const pct = maxWeight > 0 ? Math.round((value / maxWeight) * 100) : 0;
         return (
           <div key={key} className="flex items-center gap-3">
-            <span className="w-40 shrink-0 text-small text-ink-muted truncate">{key}</span>
+            <span className="w-40 shrink-0 text-small text-ink-muted truncate">{displayLabel(key)}</span>
             <div className="flex-1 h-2 rounded-full bg-surface-2 overflow-hidden">
               <div
                 className="h-full rounded-full bg-royal/70"
@@ -157,17 +158,19 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
     );
   }
 
-  const HEADERS = ['Version', 'Created by', 'Approved by', '2-person OK', 'Active', 'Activated at', 'Created at', 'Activate'];
+  const HEADERS = ['Version', 'Created by', 'Approved by', 'Approved by Two People', 'Active', 'Activated at', 'Created at', 'Activate'];
 
   return (
     <>
       <div className="overflow-x-auto">
         <table className="w-full text-small">
+          <caption className="sr-only">Score model registry versions</caption>
           <thead>
             <tr className="border-b border-line">
               {HEADERS.map((h) => (
                 <th
                   key={h}
+                  scope="col"
                   className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
                 >
                   {h}
@@ -184,16 +187,18 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
                 <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
                   {v.model_version}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted" title={v.created_by}>
                   {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted" title={v.approved_by ?? undefined}>
                   {v.approved_by
                     ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
                     : '—'}
                 </td>
                 <td className="py-2.5 pr-4">
-                  <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
+                  <span title="Whether a second reviewer approved this scoring version (separate from who created it).">
+                    <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
+                  </span>
                 </td>
                 <td className="py-2.5 pr-4">
                   <HealthBadge status={v.activated ? 'Healthy' : 'Paused'} />
@@ -288,10 +293,17 @@ export default function AdminScoringPage() {
             Activate a version per row in the registry table below.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => modelQ.refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {modelQ.dataUpdatedAt > 0 && (
+            <span className="text-caption text-ink-muted">
+              Last updated {formatRelative(new Date(modelQ.dataUpdatedAt).toISOString())}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => modelQ.refetch()}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Section A — Active model card */}
@@ -321,16 +333,26 @@ export default function AdminScoringPage() {
                 <div className="flex items-center gap-2">
                   <HealthBadge status={modelQ.data.activated ? 'Healthy' : 'Paused'} />
                   {modelQ.data.provisional && (
-                    <HealthBadge status="Warning" />
+                    <span title="Active, but the two-person approval has not been recorded yet.">
+                      <HealthBadge status="Warning" />
+                    </span>
                   )}
                   {modelQ.data.provisional && (
-                    <span className="text-small text-amber">Provisional</span>
+                    <span
+                      className="text-small text-amber"
+                      title="Active, but the two-person approval has not been recorded yet."
+                    >
+                      Provisional
+                    </span>
                   )}
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption uppercase tracking-wide text-ink-muted">Created by</span>
-                <span className="font-mono text-small text-ink">
+                <span
+                  className="font-mono text-small text-ink"
+                  title={modelQ.data.created_by}
+                >
                   {modelQ.data.created_by.length > 12
                     ? modelQ.data.created_by.slice(0, 12) + '…'
                     : modelQ.data.created_by}
@@ -359,7 +381,7 @@ export default function AdminScoringPage() {
       <Section
         id="section-axis-weights"
         title="Axis Weights"
-        subtitle="Internal model weights — numerics visible here (admin-only, Admin.md §16). Not exposed on the public product surface."
+        subtitle="Internal model weights (admin-only view). Not exposed on the public product surface."
       >
         {modelQ.isLoading && <Skeleton className="h-48 rounded-md" />}
         {modelQ.isError && (

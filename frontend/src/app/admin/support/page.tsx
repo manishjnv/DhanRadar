@@ -22,7 +22,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
-import { formatDateTime } from '@/components/admin/utils';
+import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import { useAdminCasFailures, type AdminCasFailure } from '@/features/admin/api';
 import { cn } from '@/lib/cn';
 
@@ -53,7 +53,7 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
     );
   }
 
-  const HEADERS = ['Job ID', 'User ID', 'Status', 'Error', 'Created', 'Completed'];
+  const HEADERS = ['Upload Job', 'User ID', 'Status', 'Error', 'Created', 'Completed'];
 
   // Derive badge status from job status string
   function jobBadgeStatus(status: string): 'Failed' | 'Running' | 'Success' | 'Warning' | 'Paused' {
@@ -68,11 +68,13 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Failed CAS upload jobs — job ID, status, error, and timestamps</caption>
         <thead>
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
               <th
                 key={h}
+                scope="col"
                 className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
               >
                 {h}
@@ -95,14 +97,20 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
               <td className="py-2.5 pr-4">
                 <HealthBadge status={jobBadgeStatus(f.status)} />
               </td>
-              <td className="py-2.5 pr-4 text-small text-ink-secondary max-w-[260px] truncate">
+              <td
+                className="py-2.5 pr-4 text-small text-ink-secondary max-w-[260px] truncate"
+                title={f.error_message ?? undefined}
+              >
                 {f.error_message ?? '—'}
               </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(f.created_at)}
               </td>
-              <td className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                {formatDateTime(f.completed_at)}
+              <td
+                className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap"
+                title={f.completed_at ? undefined : 'Stuck jobs have no completion time — this is expected.'}
+              >
+                {f.completed_at ? formatDateTime(f.completed_at) : '—'}
               </td>
             </tr>
           ))}
@@ -117,6 +125,11 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
 // ---------------------------------------------------------------------------
 export default function AdminSupportPage() {
   const casQ = useAdminCasFailures(50);
+  const [lastRefreshed, setLastRefreshed] = React.useState<Date | null>(null);
+  function handleRefresh() {
+    casQ.refetch();
+    setLastRefreshed(new Date());
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -125,25 +138,38 @@ export default function AdminSupportPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Support</h1>
           <p className="mt-1 text-small text-ink-muted">
-            CAS parse-failure triage · support notes. Triage only — no PII export.
+            CAS upload failure triage · support notes. Triage only — no PII export.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => casQ.refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex flex-col items-end gap-0.5">
+          <Button variant="ghost" size="sm" onClick={handleRefresh}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+          {lastRefreshed && (
+            <span className="text-caption text-ink-faint">
+              Last updated {formatRelative(lastRefreshed.toISOString())}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Section A — CAS parse failures */}
+      {/* Section A — Failed CAS uploads */}
       <section aria-labelledby="section-cas-failures">
         <Card>
           <CardHeader>
-            <CardTitle id="section-cas-failures">CAS Parse Failures</CardTitle>
+            <CardTitle id="section-cas-failures">Failed CAS Uploads</CardTitle>
             <p className="mt-1 text-small text-ink-muted">
-              Last 50 failed or stuck CAS upload jobs. Sourced from the stuck-CAS reaper signal.
+              Mutual-fund statement uploads that failed or got stuck.
             </p>
           </CardHeader>
           <CardBody>
+            <p className="mb-4 text-small text-ink-muted">
+              A CAS upload failure means the system could not parse or process a user&apos;s
+              mutual-fund statement (CAS). To triage: find the matching user via the
+              Users &amp; Audit page using the User ID below.
+              Stuck jobs (no completion time) are held by the reaper until manually cleared.
+            </p>
             {casQ.isLoading && <TableSkeleton rows={6} />}
             {casQ.isError && (
               <ErrorCard

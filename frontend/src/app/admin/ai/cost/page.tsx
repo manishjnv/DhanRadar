@@ -15,7 +15,7 @@
 export const dynamic = 'force-dynamic';
 
 import * as React from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -25,6 +25,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { StatCard } from '@/components/admin/StatCard';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { formatRelative } from '@/components/admin/utils';
 import { useAdminAICost, useAdminSetBudgetCaps } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
@@ -54,19 +55,19 @@ function BudgetBar({
   used,
   cap,
   unit = '',
-  softCap,
+  warnThreshold,
   isFloat = false,
 }: {
   label: string;
   used: number;
   cap: number;
   unit?: string;
-  softCap?: number;
+  warnThreshold?: number;
   isFloat?: boolean;
 }) {
   const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
   const isCritical = cap > 0 && used >= cap;
-  const isWarning = softCap != null && cap > 0 && used >= softCap && !isCritical;
+  const isWarning = warnThreshold != null && cap > 0 && used >= warnThreshold && !isCritical;
   const fmt = (n: number) => (isFloat ? n.toFixed(4) : n.toLocaleString('en-IN'));
 
   return (
@@ -87,9 +88,26 @@ function BudgetBar({
             : undefined
         }
       />
-      {softCap != null && (
-        <p className="text-caption text-ink-muted">Soft cap: {unit}{softCap}</p>
+      {warnThreshold != null && (
+        <p className="text-caption text-ink-muted">Warning threshold: {unit}{warnThreshold}</p>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Save confirmation toast (inline)
+// ---------------------------------------------------------------------------
+function SavedBanner({ onDismiss }: { onDismiss: () => void }) {
+  React.useEffect(() => {
+    const t = setTimeout(onDismiss, 4000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-emerald/30 bg-emerald/5 px-4 py-3 text-small text-emerald">
+      <CheckCircle2 size={16} aria-hidden="true" />
+      <span>Budget caps updated successfully.</span>
     </div>
   );
 }
@@ -106,6 +124,7 @@ export default function AdminAICostPage() {
   const [softUsd, setSoftUsd] = React.useState('');
   const [hardUsd, setHardUsd] = React.useState('');
   const [resetCaps, setResetCaps] = React.useState(false);
+  const [showSaved, setShowSaved] = React.useState(false);
 
   function openCapsDialog() {
     // Pre-fill with current values if available
@@ -123,10 +142,13 @@ export default function AdminAICostPage() {
         {/* Page header */}
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-h2 font-medium text-ink">Cost & Usage</h1>
+            <h1 className="text-h2 font-medium text-ink">Cost &amp; Usage</h1>
             <p className="mt-1 text-small text-ink-muted">
               AI budget-governor spend, free-tier call usage, and cap status.
               Governed OpenRouter gateway only (Admin.md §15).
+              {q.dataUpdatedAt ? (
+                <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
+              ) : null}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -139,6 +161,8 @@ export default function AdminAICostPage() {
             </Button>
           </div>
         </div>
+
+        {showSaved && <SavedBanner onDismiss={() => setShowSaved(false)} />}
 
         {q.isLoading && (
           <div className="flex flex-col gap-6">
@@ -157,10 +181,34 @@ export default function AdminAICostPage() {
 
         {q.data && (() => {
           const b = q.data.budget;
+
+          // If Redis is degraded, budget.available may be false — show a clear message.
+          // (available is an optional field that may be added by the backend when Redis is down)
+          if ((b as { available?: boolean }).available === false) {
+            return (
+              <EmptyState
+                title="Live usage data unavailable"
+                description="The AI usage counters are temporarily unavailable. This usually resolves within a few minutes. Try refreshing."
+                className="py-12"
+              />
+            );
+          }
+
           const allZero = b.free_calls_today === 0 && b.premium_usd_today === 0;
 
           return (
             <div className="flex flex-col gap-6">
+              {/* Help text */}
+              <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
+                <p className="font-medium text-ink mb-1">About free vs premium calls</p>
+                <p>
+                  <strong className="text-ink">Free calls</strong> use AI models with no direct cost but a daily
+                  count limit. Once the daily limit is reached, free-tier AI outputs are unavailable until midnight.
+                  <strong className="text-ink"> Premium calls</strong> draw from a paid budget and stop immediately
+                  when the spending limit is reached.
+                </p>
+              </div>
+
               {/* Section A — Budget KPI cards */}
               <section aria-labelledby="section-budget-kpi">
                 <h2 id="section-budget-kpi" className="mb-3 text-h3 font-medium text-ink">
@@ -168,7 +216,7 @@ export default function AdminAICostPage() {
                 </h2>
                 {allZero ? (
                   <EmptyState
-                    title="No AI spend today"
+                    title="No AI usage today"
                     description="Budget usage will appear here once the AI gateway processes requests."
                     className="py-8"
                   />
@@ -177,7 +225,7 @@ export default function AdminAICostPage() {
                     <StatCard
                       title="Free Calls Used"
                       value={b.free_calls_today.toLocaleString('en-IN')}
-                      sub={`cap: ${b.free_cap.toLocaleString('en-IN')}`}
+                      sub={`limit: ${b.free_cap.toLocaleString('en-IN')}`}
                       status={
                         b.free_remaining === 0
                           ? 'critical'
@@ -200,7 +248,7 @@ export default function AdminAICostPage() {
                     <StatCard
                       title="Premium Spend"
                       value={`$${b.premium_usd_today.toFixed(4)}`}
-                      sub={`soft $${b.premium_soft_cap} · hard $${b.premium_hard_cap}`}
+                      sub={`Warning at $${b.premium_soft_cap} · Stops at $${b.premium_hard_cap}`}
                       status={
                         b.premium_usd_today >= b.premium_hard_cap
                           ? 'critical'
@@ -243,7 +291,7 @@ export default function AdminAICostPage() {
                           used={b.premium_usd_today}
                           cap={b.premium_hard_cap}
                           unit="$"
-                          softCap={b.premium_soft_cap}
+                          warnThreshold={b.premium_soft_cap}
                           isFloat
                         />
                       </div>
@@ -252,25 +300,25 @@ export default function AdminAICostPage() {
                 </section>
               )}
 
-              {/* Section B — Not-yet-instrumented */}
+              {/* Section B — Not-yet-available */}
               <section aria-labelledby="section-cost-gaps">
                 <h2 id="section-cost-gaps" className="mb-3 text-h3 font-medium text-ink">
-                  Planned Instrumentation
+                  Not Yet Available
                 </h2>
                 <div className={`grid grid-cols-1 gap-3 sm:${GRID_COLS_2}`}>
                   <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                     <div className="flex items-center gap-2 mb-2">
-                      <p className="font-medium text-ink">Per-model breakdown</p>
+                      <p className="font-medium text-ink">Cost by AI Model</p>
                       <HealthBadge status={q.data.per_model.instrumented ? 'Healthy' : 'Planned'} />
                     </div>
-                    <p>{q.data.per_model.note ?? 'Per-model cost attribution is not yet instrumented.'}</p>
+                    <p>{q.data.per_model.note ?? 'Cost attribution per AI model is not yet available.'}</p>
                   </div>
                   <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                     <div className="flex items-center gap-2 mb-2">
-                      <p className="font-medium text-ink">Latency breakdown</p>
+                      <p className="font-medium text-ink">Response Time</p>
                       <HealthBadge status={q.data.latency.instrumented ? 'Healthy' : 'Planned'} />
                     </div>
-                    <p>{q.data.latency.note ?? 'Per-call latency histograms are not yet instrumented.'}</p>
+                    <p>{q.data.latency.note ?? 'Per-call response time data is not yet available.'}</p>
                   </div>
                 </div>
               </section>
@@ -284,29 +332,30 @@ export default function AdminAICostPage() {
         open={capsOpen}
         onClose={() => setCapsOpen(false)}
         title="Set AI budget caps"
-        description="Update the budget-governor caps for the AI gateway. Hard cap enforcement is immediate. Soft cap triggers a warning but does not block requests."
+        description="Update the AI gateway budget limits. The spending limit takes effect immediately. The warning threshold triggers an alert but does not stop requests."
         confirmLabel="Update Caps"
         confirmVariant="primary"
         onConfirm={async () => {
           const fc = parseInt(freeCap, 10);
           const su = parseFloat(softUsd);
           const hu = parseFloat(hardUsd);
-          if (!fc || fc <= 0) throw new Error('Free cap must be a positive integer.');
-          if (!su || su <= 0) throw new Error('Premium soft cap must be a positive number.');
-          if (!hu || hu <= 0) throw new Error('Premium hard cap must be a positive number.');
-          if (su >= hu) throw new Error('Soft cap must be less than hard cap.');
+          if (!fc || fc <= 0) throw new Error('Free calls limit must be a positive integer.');
+          if (!su || su <= 0) throw new Error('Warning threshold must be a positive number.');
+          if (!hu || hu <= 0) throw new Error('Spending limit must be a positive number.');
+          if (su >= hu) throw new Error('Warning threshold must be less than the spending limit.');
           await setCapsM.mutateAsync({
             free_cap: fc,
             premium_soft_usd: su,
             premium_hard_usd: hu,
             reset: resetCaps || undefined,
           });
+          setShowSaved(true);
         }}
       >
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="caps-free" className="text-small font-medium text-ink">
-              Free calls cap (daily) <span className="text-red">*</span>
+              Free calls limit (daily) <span className="text-red">*</span>
             </label>
             <input
               id="caps-free"
@@ -321,7 +370,7 @@ export default function AdminAICostPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="caps-soft" className="text-small font-medium text-ink">
-              Premium soft cap (USD/day) <span className="text-red">*</span>
+              Warning threshold (USD/day) <span className="text-red">*</span>
             </label>
             <input
               id="caps-soft"
@@ -336,7 +385,7 @@ export default function AdminAICostPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="caps-hard" className="text-small font-medium text-ink">
-              Premium hard cap (USD/day) <span className="text-red">*</span>
+              Daily spending limit (USD/day) <span className="text-red">*</span>
             </label>
             <input
               id="caps-hard"
@@ -357,7 +406,7 @@ export default function AdminAICostPage() {
               className="rounded border border-line accent-royal"
             />
             <span className="text-small text-ink-secondary">
-              Reset today&apos;s counter (clear accumulated spend/calls)
+              Reset today&apos;s usage counts to zero
             </span>
           </label>
         </div>

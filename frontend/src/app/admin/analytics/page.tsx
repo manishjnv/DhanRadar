@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { StatCard } from '@/components/admin/StatCard';
 import { useAdminAnalyticsOverview } from '@/features/admin/api';
+import { formatRelative } from '@/components/admin/utils';
 
 // ---------------------------------------------------------------------------
 // Static class map for grid — Tailwind JIT cannot see interpolated names
@@ -100,10 +101,17 @@ export default function AdminAnalyticsPage() {
             Infra/host metrics are in Grafana.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => analyticsQ.refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {analyticsQ.dataUpdatedAt > 0 && (
+            <span className="text-caption text-ink-muted">
+              Last updated {formatRelative(new Date(analyticsQ.dataUpdatedAt).toISOString())}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => analyticsQ.refetch()}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Section A — KPI StatCards */}
@@ -133,11 +141,14 @@ export default function AdminAnalyticsPage() {
                 value={analyticsQ.data.signups_30d.toLocaleString('en-IN')}
                 status={analyticsQ.data.signups_30d > 0 ? 'healthy' : 'neutral'}
               />
-              <StatCard
-                title="CAS Uploads (total)"
-                value={analyticsQ.data.cas_uploads_total.toLocaleString('en-IN')}
-                status="neutral"
-              />
+              <div className="flex flex-col gap-1">
+                <StatCard
+                  title="CAS Uploads (total)"
+                  value={analyticsQ.data.cas_uploads_total.toLocaleString('en-IN')}
+                  status="neutral"
+                />
+                <p className="text-caption text-ink-muted">Includes failed uploads.</p>
+              </div>
               <StatCard
                 title="CAS Uploads (30d)"
                 value={analyticsQ.data.cas_uploads_30d.toLocaleString('en-IN')}
@@ -151,11 +162,14 @@ export default function AdminAnalyticsPage() {
                 value={analyticsQ.data.portfolios_created.toLocaleString('en-IN')}
                 status="neutral"
               />
-              <StatCard
-                title="Reports Generated"
-                value={analyticsQ.data.reports_generated.toLocaleString('en-IN')}
-                status="neutral"
-              />
+              <div className="flex flex-col gap-1">
+                <StatCard
+                  title="Reports Generated"
+                  value={analyticsQ.data.reports_generated.toLocaleString('en-IN')}
+                  status="neutral"
+                />
+                <p className="text-caption text-ink-muted">Approximate (one per portfolio refresh).</p>
+              </div>
               <div className="flex flex-col gap-1">
                 <StatCard
                   title="Premium Conversions"
@@ -177,13 +191,19 @@ export default function AdminAnalyticsPage() {
           <CardHeader>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <CardTitle id="section-funnel">Activation Funnel</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle id="section-funnel">Activation Funnel</CardTitle>
+                  <span className="text-caption text-ink-muted font-normal">All time</span>
+                </div>
                 <p className="mt-1 text-small text-ink-muted">
                   CAS uploaded → portfolio created → report generated
                 </p>
               </div>
               {analyticsQ.data && (
-                <div className="shrink-0 text-right">
+                <div
+                  className="shrink-0 text-right"
+                  title="Conversion rate = reports generated ÷ CAS uploads, expressed as a percentage."
+                >
                   <span className="font-mono text-h2 font-medium tabular-nums text-ink">
                     {analyticsQ.data.conversion_rate_pct.toFixed(1)}%
                   </span>

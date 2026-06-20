@@ -8,14 +8,14 @@
  *
  * Sections:
  *   A — Advice-boundary breaches card (always 0 + instrumented:false warning — NOT a clean pass)
- *   B — Served by type dict (rendered as key/value table)
- *   C — By confidence band dict (rendered as key/value table)
- *   D — Recent audit rows table (id · served_at · type · label · band · model · surface)
- *   E — Low-confidence log table (id · logged_at · surface · band · reason)
- *   F — Label churn badges (educational + mood)
+ *   B — AI Outputs by Category dict (rendered as key/value table)
+ *   C — AI Outputs by Certainty Level dict (rendered as key/value table)
+ *   D — Recent audit rows table (id · served_at · category · label · certainty · model · where shown)
+ *   E — Low-confidence log table (id · logged_at · where shown · certainty · score · reason)
+ *   F — Label Stability badges (fund evaluation + market mood)
  *
  * CRITICAL: instrumented:false means "not yet measured", NOT "zero violations".
- * The 0 breach count reflects rejected-at-gateway calls that are NOT recorded.
+ * The 0 breach count reflects blocked AI responses that are NOT yet recorded.
  *
  * Four-state contract. No advisory verbs.
  */
@@ -30,7 +30,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
-import { formatDateTime } from '@/components/admin/utils';
+import { formatDateTime, formatRelative } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminAISafety,
   type AdminAILabelChurn,
@@ -56,9 +57,20 @@ function TableSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Dict table — renders a Record<string, number> as a two-column table
+// Dict table — renders a Record<string, number> as a two-column table,
+// applying displayLabel to the key column.
 // ---------------------------------------------------------------------------
-function DictTable({ data, col1, col2 }: { data: Record<string, number>; col1: string; col2: string }) {
+function DictTable({
+  data,
+  col1,
+  col2,
+  labelDomain,
+}: {
+  data: Record<string, number>;
+  col1: string;
+  col2: string;
+  labelDomain?: Parameters<typeof displayLabel>[1];
+}) {
   const entries = Object.entries(data);
   if (entries.length === 0) {
     return (
@@ -71,7 +83,7 @@ function DictTable({ data, col1, col2 }: { data: Record<string, number>; col1: s
         <thead>
           <tr className="border-b border-line">
             {[col1, col2].map((h) => (
-              <th key={h} className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
+              <th key={h} scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
                 {h}
               </th>
             ))}
@@ -80,7 +92,9 @@ function DictTable({ data, col1, col2 }: { data: Record<string, number>; col1: s
         <tbody>
           {entries.map(([key, count]) => (
             <tr key={key} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">{key}</td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink">
+                {labelDomain ? displayLabel(key, labelDomain) : displayLabel(key)}
+              </td>
               <td className="py-2.5 font-mono text-[11px] tabular-nums text-right text-ink font-medium">
                 {count.toLocaleString('en-IN')}
               </td>
@@ -95,7 +109,7 @@ function DictTable({ data, col1, col2 }: { data: Record<string, number>; col1: s
 // ---------------------------------------------------------------------------
 // Recent audit rows table
 // ---------------------------------------------------------------------------
-const AUDIT_HEADERS = ['Served at', 'Type', 'Label', 'Band', 'Model', 'Surface'];
+const AUDIT_HEADERS = ['Served at', 'Category', 'Label', 'Certainty', 'AI Model', 'Where Shown'];
 
 function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
   if (rows.length === 0) {
@@ -105,11 +119,14 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-small">
+      <table className="w-full text-small" aria-label="Recent AI outputs">
+        <caption className="sr-only">
+          Recent AI outputs served to users, sourced from the AI output log.
+        </caption>
         <thead>
           <tr className="border-b border-line">
             {AUDIT_HEADERS.map((h) => (
-              <th key={h} className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
+              <th key={h} scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
                 {h}
               </th>
             ))}
@@ -121,13 +138,19 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(row.served_at)}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">{row.recommendation_type}</td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.label ?? '—'}</td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.confidence_band ?? '—'}</td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink">
+                {displayLabel(row.recommendation_type, 'recoType')}
+              </td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
+                {row.label ? displayLabel(row.label, 'label') : '—'}
+              </td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
+                {row.confidence_band ? displayLabel(row.confidence_band, 'band') : '—'}
+              </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted truncate max-w-[100px]">
                 {row.model ?? '—'}
               </td>
-              <td className="py-2.5 font-mono text-[11px] text-ink-muted">{row.surface ?? '—'}</td>
+              <td className="py-2.5 text-[11px] text-ink-muted">{row.surface ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -139,7 +162,7 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
 // ---------------------------------------------------------------------------
 // Low-confidence log table
 // ---------------------------------------------------------------------------
-const LOW_CONF_HEADERS = ['Logged at', 'Surface', 'Band', 'Score', 'Reason'];
+const LOW_CONF_HEADERS = ['Logged at', 'Where Shown', 'Certainty', 'Score', 'Reason'];
 
 function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
   if (rows.length === 0) {
@@ -153,7 +176,7 @@ function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
         <thead>
           <tr className="border-b border-line">
             {LOW_CONF_HEADERS.map((h) => (
-              <th key={h} className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
+              <th key={h} scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
                 {h}
               </th>
             ))}
@@ -165,12 +188,14 @@ function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(row.logged_at)}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">{row.surface ?? '—'}</td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.confidence_band ?? '—'}</td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink">{row.surface ?? '—'}</td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
+                {row.confidence_band ? displayLabel(row.confidence_band, 'band') : '—'}
+              </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-ink-muted">
                 {row.confidence_score != null ? row.confidence_score.toFixed(3) : '—'}
               </td>
-              <td className="py-2.5 font-mono text-[11px] text-ink-muted">{row.reason ?? '—'}</td>
+              <td className="py-2.5 text-[11px] text-ink-muted">{row.reason ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -180,16 +205,17 @@ function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Label churn card
+// Label stability card (formerly "churn card")
 // ---------------------------------------------------------------------------
-function ChurnCard({ label, churn }: { label: string; churn: AdminAILabelChurn }) {
+function StabilityCard({ label, churn }: { label: string; churn: AdminAILabelChurn }) {
+  const churnPct = (churn.churn * 100).toFixed(1);
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface p-4 min-w-[220px]">
       <span className="text-caption uppercase tracking-wide text-ink-muted">{label}</span>
-      <span className="font-mono text-small font-medium text-ink">{churn.decision}</span>
+      <span className="text-[11px] text-ink">{displayLabel(churn.decision, 'decision')}</span>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-caption text-ink-muted">
-          churn: {(churn.churn * 100).toFixed(1)}%
+          Changed: {churnPct}% of signals
         </span>
         {churn.requires_human_review && (
           <HealthBadge status="Warning" />
@@ -216,11 +242,11 @@ export default function AdminAISafetyPage() {
           <div>
             <h1 className="text-h2 font-medium text-ink">Safety Monitor</h1>
             <p className="mt-1 text-small text-ink-muted">
-              Primary compliance-ops surface — operationalises the SEBI advisory boundary.
-              Sourced from{' '}
-              <code className="font-mono text-caption">compliance.ai_recommendation_audit</code>{' '}
-              and{' '}
-              <code className="font-mono text-caption">compliance.ai_low_confidence_log</code>.
+              Primary compliance-ops surface — operationalises the SEBI educational, non-advisory boundary.
+              Sourced from the AI output log and the low-confidence refusal log.
+              {q.dataUpdatedAt ? (
+                <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
+              ) : null}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
@@ -262,6 +288,10 @@ export default function AdminAISafetyPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle id="section-breaches">Advice-Boundary Breaches</CardTitle>
+                    <p className="mt-1 text-small text-ink-muted">
+                      Tracks AI outputs that crossed the educational, non-advisory boundary. Blocked AI responses
+                      are filtered before they reach users but may not yet be fully recorded here.
+                    </p>
                   </CardHeader>
                   <CardBody>
                     <div className="flex items-start gap-4">
@@ -289,34 +319,38 @@ export default function AdminAISafetyPage() {
                 </Card>
               </section>
 
-              {/* Section B — Served by type */}
+              {/* Section B — AI Outputs by Category */}
               <section aria-labelledby="section-served-type">
                 <Card>
                   <CardHeader>
                     <CardTitle id="section-served-type">
-                      Served by Recommendation Type ({d.days}d)
+                      AI Outputs by Category ({d.days}d)
                     </CardTitle>
+                    <p className="mt-1 text-small text-ink-muted">
+                      Count of AI-generated outputs delivered to users, grouped by output category.
+                    </p>
                   </CardHeader>
                   <CardBody>
-                    <DictTable data={d.served_by_type} col1="Type" col2="Count" />
+                    <DictTable data={d.served_by_type} col1="Category" col2="Count" labelDomain="recoType" />
                   </CardBody>
                 </Card>
               </section>
 
-              {/* Section C — By confidence band */}
+              {/* Section C — AI Outputs by Certainty Level */}
               <section aria-labelledby="section-served-band">
                 <Card>
                   <CardHeader>
                     <CardTitle id="section-served-band">
-                      Served by Confidence Band ({d.days}d)
+                      AI Outputs by Certainty Level ({d.days}d)
                     </CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
-                      Low-confidence total: {d.low_confidence_count.toLocaleString('en-IN')} outputs returned as{' '}
-                      <code className="font-mono text-caption">insufficient_data</code>
+                      Outputs grouped by certainty level. Low-certainty total:{' '}
+                      {d.low_confidence_count.toLocaleString('en-IN')} outputs returned as "Not Enough Data"
+                      rather than a label.
                     </p>
                   </CardHeader>
                   <CardBody>
-                    <DictTable data={d.by_confidence_band} col1="Band" col2="Count" />
+                    <DictTable data={d.by_confidence_band} col1="Certainty" col2="Count" labelDomain="band" />
                   </CardBody>
                 </Card>
               </section>
@@ -326,6 +360,9 @@ export default function AdminAISafetyPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle id="section-recent">Recent Served Outputs</CardTitle>
+                    <p className="mt-1 text-small text-ink-muted">
+                      The most recent AI outputs logged in the AI output log.
+                    </p>
                   </CardHeader>
                   <CardBody>
                     <AuditTable rows={d.recent_audit_rows} />
@@ -339,8 +376,8 @@ export default function AdminAISafetyPage() {
                   <CardHeader>
                     <CardTitle id="section-low-conf">Low-Confidence Log</CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
-                      Outputs where confidence &lt; 0.30, returned as{' '}
-                      <code className="font-mono text-caption">insufficient_data</code>.
+                      Outputs where certainty was too low to serve a label — returned as "Not Enough Data"
+                      rather than shown to users.
                     </p>
                   </CardHeader>
                   <CardBody>
@@ -349,25 +386,29 @@ export default function AdminAISafetyPage() {
                 </Card>
               </section>
 
-              {/* Section F — Label churn */}
-              <section aria-labelledby="section-churn">
-                <h2 id="section-churn" className="mb-3 text-h3 font-medium text-ink">
-                  Label Churn
+              {/* Section F — Label Stability */}
+              <section aria-labelledby="section-stability">
+                <h2 id="section-stability" className="mb-2 text-h3 font-medium text-ink">
+                  Label Stability
                 </h2>
+                <p className="mb-3 text-small text-ink-muted">
+                  How consistently AI outputs agree across consecutive runs. High change rates may
+                  indicate data volatility or model drift — not necessarily an error.
+                </p>
                 <div className="flex flex-wrap gap-4">
-                  <ChurnCard label="Educational label churn" churn={d.label_churn_educational} />
-                  <ChurnCard label="Mood / regime churn" churn={d.label_churn_mood} />
+                  <StabilityCard label="Fund evaluation consistency" churn={d.label_churn_educational} />
+                  <StabilityCard label="Market mood consistency" churn={d.label_churn_mood} />
                 </div>
               </section>
 
-              {/* Groundedness note */}
+              {/* AI Output Accuracy note */}
               <section aria-labelledby="section-groundedness">
                 <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                   <div className="flex items-center gap-2 mb-2">
-                    <p className="font-medium text-ink">Groundedness</p>
+                    <p className="font-medium text-ink">AI Output Accuracy Check</p>
                     <HealthBadge status={d.groundedness.instrumented ? 'Healthy' : 'Planned'} />
                   </div>
-                  <p>{d.groundedness.note ?? 'Not yet instrumented.'}</p>
+                  <p>{d.groundedness.note ?? 'Not yet available.'}</p>
                 </div>
               </section>
             </div>

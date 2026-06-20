@@ -45,8 +45,13 @@ export function StatCard({
 }: StatCardProps) {
   const TrendIcon = trend ? TREND_ICON[trend] : null;
 
+  // Build a screen-reader label from primitive values; skip for complex React nodes.
+  const valueText =
+    typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
+  const ariaLabel = valueText !== undefined ? `${title}: ${valueText}` : title;
+
   return (
-    <Card className={cn('flex flex-col gap-2 p-5', className)}>
+    <Card className={cn('flex flex-col gap-2 p-5', className)} aria-label={ariaLabel}>
       <p className="text-caption uppercase tracking-wide text-ink-muted">{title}</p>
       <div className="flex items-end justify-between gap-2">
         <span

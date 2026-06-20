@@ -22,7 +22,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
-import { formatDateTime } from '@/components/admin/utils';
+import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import {
   useAdminAIVersions,
   type AdminAIRegistryVersion,
@@ -45,7 +45,7 @@ function TableSkeleton() {
 // Registry versions table
 // ---------------------------------------------------------------------------
 const VERSION_HEADERS = [
-  'Version', 'Created by', 'Approved by', '2-person OK', 'Active', 'Activated at', 'Created at',
+  'Version', 'Created by', 'Approved by', 'Approved by Two People', 'Currently Live', 'Activated at', 'Created at',
 ];
 
 function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
@@ -62,11 +62,13 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Score model version history — one row per registered model version</caption>
         <thead>
           <tr className="border-b border-line">
             {VERSION_HEADERS.map((h) => (
               <th
                 key={h}
+                scope="col"
                 className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
               >
                 {h}
@@ -84,14 +86,18 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
                 {v.model_version}
               </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {v.created_by
-                  ? (v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by)
-                  : '—'}
+                {v.created_by ? (
+                  <span title={v.created_by}>
+                    {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
+                  </span>
+                ) : '—'}
               </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {v.approved_by
-                  ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
-                  : '—'}
+                {v.approved_by ? (
+                  <span title={v.approved_by}>
+                    {v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by}
+                  </span>
+                ) : '—'}
               </td>
               <td className="py-2.5 pr-4">
                 <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
@@ -127,8 +133,9 @@ export default function AdminAIVersionsPage() {
           <div>
             <h1 className="text-h2 font-medium text-ink">Score Versioning</h1>
             <p className="mt-1 text-small text-ink-muted">
-              Read-only view of <code className="font-mono text-caption">ranking_configs</code> registry versions.
-              Promotion requires two-person gate (B6) + separate human approval — Phase 5.
+              Each version is a snapshot of the scoring rules used to label funds.
+              Only one version can be live at a time — "Currently Live" shows which one users see.
+              Switching versions requires sign-off from two people.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -136,15 +143,22 @@ export default function AdminAIVersionsPage() {
               size="sm"
               variant="ghost"
               disabled
-              title="Promote version — Phase 5 (two-person gate B6 + human approval required)"
+              title="Promote (coming soon) — making a version live requires approval from two people and a separate human sign-off"
               className="opacity-40 cursor-not-allowed"
             >
-              Promote version — Phase 5 (two-person gate)
+              Promote (coming soon)
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-              <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-              Refresh
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
+                <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+                Refresh
+              </Button>
+              {q.dataUpdatedAt ? (
+                <span className="text-[10px] text-ink-muted">
+                  Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -152,10 +166,10 @@ export default function AdminAIVersionsPage() {
         <section aria-labelledby="section-ai-versions">
           <Card>
             <CardHeader>
-              <CardTitle id="section-ai-versions">Registry Versions</CardTitle>
+              <CardTitle id="section-ai-versions">Score Model History</CardTitle>
               <p className="mt-1 text-small text-ink-muted">
-                All model versions in the scoring registry.
-                Activation requires the two-person methodology gate.
+                All scoring rule versions, newest first.
+                Only the "Currently Live" version produces labels users see.
               </p>
             </CardHeader>
             <CardBody>
@@ -176,19 +190,19 @@ export default function AdminAIVersionsPage() {
             </h2>
             <div className="flex flex-col gap-2">
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
-                <p className="font-medium text-ink mb-1">Backtest vs benchmark</p>
+                <p className="font-medium text-ink mb-1">Past-performance test</p>
                 <p>
-                  Not yet instrumented —{' '}
+                  Not yet available —{' '}
                   <HealthBadge status={q.data.backtest.instrumented ? 'Healthy' : 'Planned'} />{' '}
-                  Offline backtest tooling is tracked in the Phase 5 build plan.
+                  Shows how well a scoring version would have labelled funds using historical data. Tracked in the Phase 5 build plan.
                 </p>
               </div>
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
-                <p className="font-medium text-ink mb-1">Model drift detection</p>
+                <p className="font-medium text-ink mb-1">Answer-consistency monitor</p>
                 <p>
-                  Not yet instrumented —{' '}
+                  Not yet available —{' '}
                   <HealthBadge status={q.data.drift.instrumented ? 'Healthy' : 'Planned'} />{' '}
-                  Drift alerts will be added alongside the backtest harness.
+                  Alerts when the live scoring version starts producing different results from its baseline. Coming alongside the past-performance test.
                 </p>
               </div>
             </div>

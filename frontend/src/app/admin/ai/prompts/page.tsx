@@ -24,6 +24,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { useAdminAIPrompts, useAdminCreatePromptVersion, useAdminActivatePromptVersion } from '@/features/admin/api';
+import { formatRelative } from '@/components/admin/utils';
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -63,33 +64,38 @@ export default function AdminAIPromptsPage() {
     setCreateOpen(true);
   }
 
-  function openActivate() {
-    setActivateKey('');
-    setActivateVersion('');
-    setActivateTarget({ key: activateKey, version: activateVersion });
-  }
-
   return (
     <>
       <div className="flex flex-col gap-8">
         {/* Page header */}
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-h2 font-medium text-ink">Prompt & RAG</h1>
+            <h1 className="text-h2 font-medium text-ink">AI Prompts</h1>
             <p className="mt-1 text-small text-ink-muted">
-              Prompt template registry and RAG source status.
-              All AI calls go through the governed OpenRouter gateway.
+              Prompt templates used by AI features.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="secondary" onClick={openCreate}>
-              Create Prompt Version
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-              <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-              Refresh
-            </Button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={openCreate}>
+                Create new prompt
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
+                <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+                Refresh
+              </Button>
+            </div>
+            {q.dataUpdatedAt ? (
+              <span className="text-[10px] text-ink-muted">
+                Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}
+              </span>
+            ) : null}
           </div>
+        </div>
+
+        {/* Prep-only banner */}
+        <div className="rounded-lg border border-line bg-surface px-4 py-3 text-small text-ink-muted">
+          Note: prompt templates are not yet used by live AI calls — this is for preparation only.
         </div>
 
         {/* Main content */}
@@ -128,10 +134,9 @@ export default function AdminAIPromptsPage() {
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <CardTitle id="section-prompt-versions">Prompt Version Tags Seen</CardTitle>
+                    <CardTitle id="section-prompt-versions">Prompt versions used so far</CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
-                      Version tags observed in the gateway audit log.
-                      Not a canonical registry — informational only.
+                      Version tags seen in the AI output log. Informational only — not a managed registry.
                     </p>
                   </div>
                   {q.data.prompt_versions_seen.length > 0 && (
@@ -144,7 +149,7 @@ export default function AdminAIPromptsPage() {
                         setActivateTarget({ key: '', version: '' });
                       }}
                     >
-                      Activate Version
+                      Make this prompt active
                     </Button>
                   )}
                 </div>
@@ -161,6 +166,7 @@ export default function AdminAIPromptsPage() {
                     {q.data.prompt_versions_seen.map((tag) => (
                       <span
                         key={tag}
+                        title={tag}
                         className="inline-flex items-center rounded-full bg-surface-2 px-3 py-1 font-mono text-[11px] text-ink-muted border border-line"
                       >
                         {tag}
@@ -178,13 +184,13 @@ export default function AdminAIPromptsPage() {
       <ConfirmDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="Create prompt version"
-        description="Register a new prompt version in the AI gateway. The body is the full prompt template."
-        confirmLabel="Create Version"
+        title="Create new prompt"
+        description="Save a new prompt text to the registry. This does not affect live AI calls yet."
+        confirmLabel="Create"
         confirmVariant="primary"
         onConfirm={async () => {
-          if (!templateKey.trim()) throw new Error('Template key is required.');
-          if (!promptBody.trim()) throw new Error('Prompt body is required.');
+          if (!templateKey.trim()) throw new Error('Prompt name is required.');
+          if (!promptBody.trim()) throw new Error('Prompt text is required.');
           await createMutation.mutateAsync({
             template_key: templateKey.trim(),
             body: promptBody.trim(),
@@ -195,20 +201,20 @@ export default function AdminAIPromptsPage() {
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="prompt-template-key" className="text-small font-medium text-ink">
-              Template key <span className="text-red">*</span>
+              Prompt name <span className="text-red">*</span>
             </label>
             <input
               id="prompt-template-key"
               type="text"
               value={templateKey}
               onChange={(e) => setTemplateKey(e.target.value)}
-              placeholder="e.g. mf_portfolio_commentary_v2"
+              placeholder="e.g. portfolio-commentary"
               className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="prompt-body" className="text-small font-medium text-ink">
-              Prompt body <span className="text-red">*</span>
+              Prompt text <span className="text-red">*</span>
             </label>
             <textarea
               id="prompt-body"
@@ -240,12 +246,12 @@ export default function AdminAIPromptsPage() {
         <ConfirmDialog
           open={activateTarget !== null}
           onClose={() => setActivateTarget(null)}
-          title="Activate prompt version"
-          description="Activate a specific prompt version for a template key. This replaces the currently active version."
-          confirmLabel="Activate"
+          title="Make this prompt active"
+          description="Set a specific prompt version as the one used by AI features. This replaces the currently active version."
+          confirmLabel="Make active"
           confirmVariant="primary"
           onConfirm={async () => {
-            if (!activateKey.trim()) throw new Error('Template key is required.');
+            if (!activateKey.trim()) throw new Error('Prompt name is required.');
             if (!activateVersion.trim()) throw new Error('Version is required.');
             await activateMutation.mutateAsync({
               key: activateKey.trim(),
@@ -256,14 +262,14 @@ export default function AdminAIPromptsPage() {
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="activate-key" className="text-small font-medium text-ink">
-                Template key <span className="text-red">*</span>
+                Prompt name <span className="text-red">*</span>
               </label>
               <input
                 id="activate-key"
                 type="text"
                 value={activateKey}
                 onChange={(e) => setActivateKey(e.target.value)}
-                placeholder="e.g. mf_portfolio_commentary"
+                placeholder="e.g. portfolio-commentary"
                 className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink font-mono placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal/40"
               />
             </div>

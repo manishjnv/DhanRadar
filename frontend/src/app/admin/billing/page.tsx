@@ -141,17 +141,19 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
     );
   }
 
-  const HEADERS = ['User ID', 'Razorpay ID', 'Status', 'Timestamp', 'Request ID', ''];
+  const HEADERS = ['User ID', 'Payment ID', 'Status', 'Timestamp', 'Request ID', ''];
 
   return (
     <>
       <div className="overflow-x-auto">
         <table className="w-full text-small">
+          <caption className="sr-only">Recent payment transactions</caption>
           <thead>
             <tr className="border-b border-line">
               {HEADERS.map((h) => (
                 <th
-                  key={h}
+                  key={h || 'action'}
+                  scope="col"
                   className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
                 >
                   {h}
@@ -355,7 +357,7 @@ function SubscriptionsWithPlanChange({ subscriptions }: { subscriptions: AdminSu
                 className="w-full rounded-md border border-line bg-surface px-3 py-2 text-small text-ink focus:outline-none focus:ring-2 focus:ring-royal/40"
               >
                 {TIER_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>{displayLabel(t, 'tier')}</option>
                 ))}
               </select>
             </div>
@@ -415,32 +417,41 @@ function WebhookHealthCard() {
     : 100;
 
   return (
-    <div className="flex flex-wrap gap-3">
-      <StatCard
-        title="Recent Events"
-        value={data.recent_count.toLocaleString('en-IN')}
-        status="neutral"
-        className="min-w-[140px]"
-      />
-      <StatCard
-        title="Succeeded"
-        value={data.success_count.toLocaleString('en-IN')}
-        status="healthy"
-        className="min-w-[140px]"
-      />
-      <StatCard
-        title="Failed"
-        value={data.failed_count.toLocaleString('en-IN')}
-        status={data.failed_count > 0 ? 'critical' : 'healthy'}
-        className="min-w-[140px]"
-      />
-      <StatCard
-        title="Success Rate"
-        value={`${successRate}%`}
-        status={healthStatus}
-        sub={data.last_event_at ? `Last event ${formatRelative(data.last_event_at)}` : 'No events recorded'}
-        className="min-w-[160px]"
-      />
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap gap-3">
+        <StatCard
+          title="Recent Events"
+          value={data.recent_count.toLocaleString('en-IN')}
+          status="neutral"
+          className="min-w-[140px]"
+        />
+        <StatCard
+          title="Succeeded"
+          value={data.success_count.toLocaleString('en-IN')}
+          status="healthy"
+          className="min-w-[140px]"
+        />
+        <StatCard
+          title="Failed"
+          value={data.failed_count.toLocaleString('en-IN')}
+          status={data.failed_count > 0 ? 'critical' : 'healthy'}
+          className="min-w-[140px]"
+        />
+        <StatCard
+          title="Success Rate"
+          value={`${successRate}%`}
+          status={healthStatus}
+          sub={data.last_event_at ? `Last event ${formatRelative(data.last_event_at)}` : 'No events recorded'}
+          className="min-w-[160px]"
+        />
+      </div>
+      {data.note && (
+        <p className="text-caption text-ink-muted">{data.note}</p>
+      )}
+      <p className="text-caption text-ink-faint">
+        Counts are derived from payment events — not a live webhook delivery log.
+        Renewal and churn figures in KPI Overview are approximate.
+      </p>
     </div>
   );
 }
@@ -452,6 +463,13 @@ export default function AdminBillingPage() {
   const overviewQ       = useAdminBillingOverview();
   const subscriptionsQ  = useAdminSubscriptions({ limit: 50 });
   const paymentsQ       = useAdminBillingPayments({ limit: 50 });
+  const [lastRefreshed, setLastRefreshed] = React.useState<Date | null>(null);
+  function handleRefreshAll() {
+    overviewQ.refetch();
+    subscriptionsQ.refetch();
+    paymentsQ.refetch();
+    setLastRefreshed(new Date());
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -463,18 +481,17 @@ export default function AdminBillingPage() {
             MRR · subscriptions · payments · webhook health · refunds · plan changes (Phase 5 live)
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            overviewQ.refetch();
-            subscriptionsQ.refetch();
-            paymentsQ.refetch();
-          }}
-        >
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh all
-        </Button>
+        <div className="flex flex-col items-end gap-0.5">
+          <Button variant="ghost" size="sm" onClick={handleRefreshAll}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh all
+          </Button>
+          {lastRefreshed && (
+            <span className="text-caption text-ink-faint">
+              Last updated {formatRelative(lastRefreshed.toISOString())}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* KPI row */}
@@ -496,11 +513,13 @@ export default function AdminBillingPage() {
               title="MRR"
               value={formatCurrency(overviewQ.data.mrr_inr)}
               status="neutral"
+              sub="Monthly Recurring Revenue"
             />
             <StatCard
               title="ARPU"
               value={formatCurrency(overviewQ.data.arpu_inr)}
               status="neutral"
+              sub="Average Revenue Per User"
             />
             <StatCard
               title="Active Subscriptions"

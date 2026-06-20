@@ -28,6 +28,8 @@ interface SourceTableProps {
   onViewLogs: (key: string) => void;
 }
 
+const HEADERS = ['Source', 'Tier', 'Method', 'Schedule', 'Cost', 'Last Success', 'Records', 'Status', 'Actions'];
+
 export function SourceTable({ sources, onSync, onPause, onResume, onViewLogs }: SourceTableProps) {
   const [pending, setPending] = React.useState<Record<string, string>>({});
 
@@ -45,11 +47,13 @@ export function SourceTable({ sources, onSync, onPause, onResume, onViewLogs }: 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Data sources — ingestion tier, schedule, last successful run, and controls</caption>
         <thead>
           <tr className="border-b border-line">
-            {['Source', 'Tier', 'Method', 'Schedule', 'Cost', 'Last Success', 'Records', 'Status', 'Actions'].map((h) => (
+            {HEADERS.map((h) => (
               <th
                 key={h}
+                scope="col"
                 className={cn(
                   'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
                   h === 'Records' ? 'text-right' : 'text-left',

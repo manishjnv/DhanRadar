@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * AI Quality / Eval -- /admin/ai/eval
+ * AI Quality & Eval -- /admin/ai/eval
  * Phase 4, Tier-B read-only (Admin.md §15, §18 step 4).
  *
  * Backend: AiEvalResponse (aiops_schemas.py)
@@ -10,7 +10,7 @@
  *
  * Sections:
  *   A -- Quality issues table (typed shape from aiops_schemas)
- *   B -- Groundedness eval: not yet instrumented note
+ *   B -- AI Output Accuracy Check: not yet available note
  *
  * Four-state contract. No advisory verbs.
  */
@@ -18,17 +18,29 @@
 export const dynamic = 'force-dynamic';
 
 import * as React from 'react';
-import { RefreshCw, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, CheckCircle2, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge, type BadgeStatus } from '@/components/admin/HealthBadge';
+import { formatRelative } from '@/components/admin/utils';
 import {
   useAdminAIEval,
   type AdminAIQualityIssueRow,
 } from '@/features/admin/api';
+
+// ---------------------------------------------------------------------------
+// Metric help text — what each threshold means operationally
+// ---------------------------------------------------------------------------
+const METRIC_HELP: Record<string, string> = {
+  missing_nav: 'Funds without a NAV entry for today. Above threshold means reports may show stale prices.',
+  stale_nav: 'Funds whose latest NAV is older than 2 business days. Affects scoring freshness.',
+  missing_metrics: 'Funds with no computed metrics (returns, volatility). These are excluded from rankings.',
+  unscored_funds: 'Active funds that have not been scored in the current cycle. Above threshold blocks the ranking job.',
+  low_corpus: 'Funds with fewer than 12 months of NAV history — too little data for reliable signals.',
+};
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -44,9 +56,9 @@ function ContentSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Quality issues table -- typed QualityIssueRow shape
+// Quality issues table -- raw metric_key moved to tooltip; human label shown
 // ---------------------------------------------------------------------------
-const QI_HEADERS = ['Metric', 'Label', 'Value', 'Threshold', 'Unit', 'Status'];
+const QI_HEADERS = ['Label', 'Value', 'Threshold', 'Unit', 'Status'];
 
 function statusToBadge(s: string): BadgeStatus {
   if (s === 'ok') return 'ok';
@@ -69,12 +81,17 @@ function QualityIssueTable({ issues }: { issues: AdminAIQualityIssueRow[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-small">
+      <table className="w-full text-small" aria-label="Data quality issues" role="table">
+        <caption className="sr-only">
+          Data quality metrics — warning and critical threshold breaches from the MF data pipeline.
+          Values are refreshed each time the quality monitor runs.
+        </caption>
         <thead>
           <tr className="border-b border-line">
             {QI_HEADERS.map((h) => (
               <th
                 key={h}
+                scope="col"
                 className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
               >
                 {h}
@@ -83,25 +100,49 @@ function QualityIssueTable({ issues }: { issues: AdminAIQualityIssueRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {issues.map((row) => (
-            <tr
-              key={row.metric_key}
-              className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-            >
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.metric_key}</td>
-              <td className="py-2.5 pr-4 text-[11px] text-ink">{row.label}</td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-right text-ink">
-                {row.current_value != null ? row.current_value : '--'}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-right text-ink-muted">
-                {row.threshold != null ? row.threshold : '--'}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.unit}</td>
-              <td className="py-2.5">
-                <HealthBadge status={statusToBadge(row.status)} />
-              </td>
-            </tr>
-          ))}
+          {issues.map((row) => {
+            const help = METRIC_HELP[row.metric_key];
+            const snoozeUntil = (row as { acknowledged_until?: string | null }).acknowledged_until;
+            const isSnoozed = snoozeUntil != null && new Date(snoozeUntil) > new Date();
+            return (
+              <tr
+                key={row.metric_key}
+                className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
+              >
+                <td className="py-2.5 pr-4 text-[11px] text-ink">
+                  <span className="flex items-start gap-1.5">
+                    <span>
+                      <span className="font-medium">{row.label}</span>
+                      {isSnoozed && (
+                        <span className="ml-2 text-[10px] text-ink-muted">
+                          Snoozed until {formatRelative(snoozeUntil!)}
+                        </span>
+                      )}
+                    </span>
+                    {help && (
+                      <span
+                        title={help}
+                        className="mt-px shrink-0 cursor-help text-ink-muted"
+                        aria-label={`Help: ${help}`}
+                      >
+                        <Info size={11} />
+                      </span>
+                    )}
+                  </span>
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-right text-ink">
+                  {row.current_value != null ? row.current_value : '--'}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-right text-ink-muted">
+                  {row.threshold != null ? row.threshold : '--'}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">{row.unit}</td>
+                <td className="py-2.5">
+                  <HealthBadge status={statusToBadge(row.status)} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -120,13 +161,13 @@ export default function AdminAIEvalPage() {
         {/* Page header */}
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-h2 font-medium text-ink">Quality / Eval</h1>
+            <h1 className="text-h2 font-medium text-ink">Data Quality &amp; AI Evaluation</h1>
             <p className="mt-1 text-small text-ink-muted">
-              Quality issue tracking and groundedness evaluation results.
-              Sourced from{' '}
-              <code className="font-mono text-caption">mf.data_quality_issues</code>{' '}
-              and{' '}
-              <code className="font-mono text-caption">ai_recommendation_audit</code>.
+              Quality issue tracking and AI output accuracy results.
+              Sourced from the MF data pipeline and the AI output log.
+              {q.dataUpdatedAt ? (
+                <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
+              ) : null}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
@@ -142,6 +183,8 @@ export default function AdminAIEvalPage() {
               <CardTitle id="section-ai-eval-quality">Quality Issues</CardTitle>
               <p className="mt-1 text-small text-ink-muted">
                 Warning and critical threshold breaches from the MF data quality monitor.
+                Each metric has a threshold — values above it indicate a problem that may
+                affect reports or scores shown to users.
               </p>
             </CardHeader>
             <CardBody>
@@ -154,7 +197,7 @@ export default function AdminAIEvalPage() {
           </Card>
         </section>
 
-        {/* Section B -- Groundedness note */}
+        {/* Section B -- AI Output Accuracy Check */}
         {q.data && (
           <section aria-labelledby="section-ai-eval-groundedness">
             <div className="rounded-lg border border-line bg-surface p-5">
@@ -162,7 +205,7 @@ export default function AdminAIEvalPage() {
                 id="section-ai-eval-groundedness"
                 className="text-h3 font-medium text-ink mb-2"
               >
-                Groundedness Evaluation
+                AI Output Accuracy Check
               </h2>
               <div className="flex items-center gap-2 mb-3">
                 <HealthBadge
@@ -170,13 +213,13 @@ export default function AdminAIEvalPage() {
                 />
                 <span className="text-small text-ink-muted">
                   {q.data.groundedness.instrumented
-                    ? 'Groundedness eval instrumented'
-                    : 'Not yet instrumented'}
+                    ? 'AI output accuracy check is active'
+                    : 'Not yet available'}
                 </span>
               </div>
               <p className="text-small text-ink-muted">
                 {q.data.groundedness.note ||
-                  'Groundedness evaluation -- automated scoring of whether AI outputs are supported by source material -- is not yet instrumented. This will be added as part of the Phase 5 eval harness.'}
+                  'Automated checking that AI-generated outputs are supported by underlying fund data is not yet available. This will be added as part of the Phase 5 evaluation framework.'}
               </p>
             </div>
           </section>

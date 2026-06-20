@@ -30,6 +30,7 @@ import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { useAdminNotificationsHealth, useAdminBroadcast } from '@/features/admin/api';
 import { ApiError } from '@/lib/apiClient';
 
@@ -70,11 +71,12 @@ function ListSkeleton({ rows = 4 }: { rows?: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Known server error slugs for broadcast — surfaced with clear explanations
+// Known server error slugs for broadcast — surfaced with clear explanations.
+// Returns a human-readable string; falls back to titleCase for unmapped slugs.
 // ---------------------------------------------------------------------------
-function broadcastErrorHint(detail: string): string | null {
+function broadcastErrorHint(detail: string): string {
   if (detail.includes('advisory_language') || detail.includes('advisory language')) {
-    return 'The message may contain advisory language (buy/sell/hold). Rephrase to educational language and retry.';
+    return 'The message may contain advisory language. Rephrase to educational language and retry.';
   }
   if (detail.includes('quiet_hours') || detail.includes('quiet hours')) {
     return 'Broadcast blocked by quiet hours policy. Retry during permitted send hours.';
@@ -82,7 +84,8 @@ function broadcastErrorHint(detail: string): string | null {
   if (detail.includes('rate_limit') || detail.includes('rate limit') || detail.includes('rate_capped')) {
     return 'Broadcast rate limit reached. Wait before retrying.';
   }
-  return null;
+  // Unknown slug — render human-readable rather than raw.
+  return displayLabel(detail);
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +138,7 @@ function BroadcastComposer({ broadcastAvailable }: { broadcastAvailable: boolean
           </Button>
           {!broadcastAvailable && (
             <p className="mt-2 text-caption text-amber">
-              broadcast_available is false — check the notification health before sending.
+              Broadcast channel is not configured — check the notification health before sending.
             </p>
           )}
         </CardBody>
@@ -170,7 +173,7 @@ function BroadcastComposer({ broadcastAvailable }: { broadcastAvailable: boolean
             if (err instanceof ApiError) {
               const detail = err.problem.detail ?? '';
               const hint = broadcastErrorHint(detail);
-              throw new Error(hint ? `${detail}\n\n${hint}` : detail || err.problem.title);
+              throw new Error(hint || err.problem.title || 'Broadcast failed. Please retry.');
             }
             throw err;
           }
@@ -204,7 +207,7 @@ function BroadcastComposer({ broadcastAvailable }: { broadcastAvailable: boolean
             />
           </div>
           <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-caption text-ink-muted">
-            Channel: <span className="font-mono">telegram_public</span> (fixed)
+            Channel: <span className="font-mono">Public Telegram Channel</span> (fixed)
           </div>
           <label className="flex items-start gap-2 cursor-pointer select-none">
             <input
@@ -237,14 +240,20 @@ export default function AdminNotificationsPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Notifications</h1>
           <p className="mt-1 text-small text-ink-muted">
-            Queue health · templates · broadcast composer (Phase 5 live).
-            Sourced from the notify-drain task.
+            Notification delivery status · templates · broadcast composer.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => healthQ.refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {healthQ.dataUpdatedAt > 0 && (
+            <span className="text-caption text-ink-muted">
+              Last updated {formatRelative(new Date(healthQ.dataUpdatedAt).toISOString())}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => healthQ.refetch()}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Section A — Queue health KPIs */}
@@ -293,16 +302,26 @@ export default function AdminNotificationsPage() {
               </div>
               {/* Rate cap + deferred */}
               <div className={`grid grid-cols-2 gap-3 sm:${GRID_COLS_4}`}>
-                <StatCard
-                  title="Rate Capped"
-                  value={d.rate_capped.toLocaleString('en-IN')}
-                  status={d.rate_capped > 0 ? 'warning' : 'neutral'}
-                />
-                <StatCard
-                  title="Deferred"
-                  value={d.deferred.toLocaleString('en-IN')}
-                  status={d.deferred > 0 ? 'warning' : 'neutral'}
-                />
+                <div className="flex flex-col gap-1">
+                  <StatCard
+                    title="Rate Capped"
+                    value={d.rate_capped.toLocaleString('en-IN')}
+                    status={d.rate_capped > 0 ? 'warning' : 'neutral'}
+                  />
+                  <p className="text-caption text-ink-muted">
+                    Held because the daily broadcast limit was reached.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <StatCard
+                    title="Deferred"
+                    value={d.deferred.toLocaleString('en-IN')}
+                    status={d.deferred > 0 ? 'warning' : 'neutral'}
+                  />
+                  <p className="text-caption text-ink-muted">
+                    Held by quiet-hours policy.
+                  </p>
+                </div>
               </div>
             </>
           );
@@ -347,11 +366,20 @@ export default function AdminNotificationsPage() {
         </Card>
       </section>
 
-      {/* Section C — Broadcast composer (Phase 5 live) */}
+      {/* Section C — Broadcast composer.
+          Shown even when the health query failed so the composer remains
+          accessible; broadcast_available defaults to false in that case. */}
       <section aria-labelledby="section-broadcast">
         {healthQ.isLoading && <Skeleton className="h-32 rounded-xl" />}
-        {healthQ.data && (
-          <BroadcastComposer broadcastAvailable={healthQ.data.broadcast_available} />
+        {!healthQ.isLoading && (
+          <BroadcastComposer
+            broadcastAvailable={healthQ.data?.broadcast_available ?? false}
+          />
+        )}
+        {healthQ.isError && (
+          <p className="mt-2 text-caption text-amber">
+            Queue health could not be loaded — broadcast is disabled until health status is confirmed.
+          </p>
         )}
       </section>
     </div>
