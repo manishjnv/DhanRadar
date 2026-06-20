@@ -243,8 +243,11 @@ services:
     deploy:
       resources:
         limits:
-          # concurrency=1 → ~96 MiB resident; 128M trimmed from 192M to fund beat.
-          memory: 128M
+          # ~101 MiB resident at idle; the 192M→128M trim (to fund beat) was too
+          # aggressive — compute_mood_snapshot OOM-killed every scheduled run, so no
+          # mood snapshot persisted 2026-06-16→06-19 (RCA 2026-06-19). Restored to 192M.
+          # Total dhanradar budget 3072→3136M (+64M), well within ~6 GiB box headroom.
+          memory: 192M
           cpus: "0.25"
 
   dhanradar-celery-misc:
