@@ -17,6 +17,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
+import { MaybeShell } from '@/components/ui/MaybeShell';
 import { FundExplorerTable } from '@/components/mf/FundExplorerTable';
 import { useFundCategories, useFundExplorer } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
@@ -496,7 +497,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function ExplorePage() {
+function ExplorePageContent() {
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get('category');
 
@@ -518,5 +519,18 @@ export default function ExplorePage() {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+export default function ExplorePage() {
+  // useSearchParams must sit under a Suspense boundary now that this page is
+  // public and statically prerendered (outside the (app) group it no longer
+  // inherits the auth-guarded dynamic render).
+  return (
+    <MaybeShell maxWidth="wide">
+      <React.Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+        <ExplorePageContent />
+      </React.Suspense>
+    </MaybeShell>
   );
 }
