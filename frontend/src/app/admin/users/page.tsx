@@ -296,12 +296,7 @@ function UserDetailContent({ userId }: { userId: string }) {
         open={dialog === 'reset-access'}
         onClose={() => setDialog(null)}
         title="Reset user access"
-        description={
-          <>
-            Resets any manual access grants for <strong>{data.email}</strong>.
-            Does <strong>not</strong> revoke active sessions. Type the email to confirm.
-          </>
-        }
+        description="Clears the login lockout counters for this user (the brute-force limits for TOTP and email OTP). It does not change the user's plan, access grants, or account status."
         confirmLabel="Reset Access"
         confirmVariant="danger"
         confirmPhrase={data.email}

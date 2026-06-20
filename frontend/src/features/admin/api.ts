@@ -746,7 +746,7 @@ export interface AdminAICost {
 export function useAdminAIDashboard() {
   return useQuery({
     queryKey: adminKeysAI.dashboard(),
-    queryFn:  () => api.get<AdminAIDashboard>('/admin/ai/dashboard'),
+    queryFn:  () => api.get<AdminAIDashboard>('/admin/ai'),
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
   });
