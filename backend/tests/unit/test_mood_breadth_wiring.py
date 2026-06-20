@@ -4,16 +4,16 @@ macro pipeline.
 
 What is tested:
   1. YahooMacroProvider.fetch() emits ``market_breadth`` when the breadth core
-     returns known advances/declines — verifies correct a/(a+d) formula.
+     returns known advances/declines â€” verifies correct a/(a+d) formula.
   2. fetch_mood_inputs() maps the raw breadth through norm_market_breadth into
      a non-None normalised input in [0, 1].
-  3. Graceful degradation: breadth fetch failure → key absent, no exception,
+  3. Graceful degradation: breadth fetch failure â†’ key absent, no exception,
      other 6 chart signals still returned.
   4. ProviderError NOT raised when breadth fails but chart symbols resolve.
-  5. 6 Yahoo chart signals + market_breadth = 7 present inputs → data_quality
+  5. 6 Yahoo chart signals + market_breadth = 7 present inputs â†’ data_quality
      flips from "degraded" to "ok", crossing the _DEGRADED_BELOW=7 threshold.
 
-All network calls are mocked — deterministic, no yfinance/httpx I/O.
+All network calls are mocked â€” deterministic, no yfinance/httpx I/O.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ async def test_yahoo_provider_emits_market_breadth_from_cache(monkeypatch):
 
     monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
 
-    # Stub Redis: cache contains advances=35, declines=15 → ratio = 35/50 = 0.70
+    # Stub Redis: cache contains advances=35, declines=15 â†’ ratio = 35/50 = 0.70
     advances, declines = 35, 15
     cache_payload = json.dumps({"advances": advances, "declines": declines, "ad_ratio": 2.333})
 
@@ -90,39 +90,15 @@ async def test_yahoo_provider_emits_market_breadth_from_cache(monkeypatch):
         assert key in s, f"Chart signal {key!r} missing from {list(s)}"
 
 
-async def test_yahoo_provider_emits_market_breadth_live_fetch(monkeypatch):
-    """Provider falls through to the live yfinance path when cache is empty and
-    emits the correct a/(a+d) ratio from the shared helper."""
-    from dhanradar.market_data.providers import yahoo
-
-    async def fake_meta(_client, symbol):
-        return _SIX_CHART_METAS.get(symbol)
-
-    monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
-
-    # Cache miss → live fetch returns (30, 20) → ratio = 30/50 = 0.60
-    async def fake_fetch_breadth_ratio():
-        advances, declines = 30, 20
-        total = advances + declines
-        return float(advances) / float(total)
-
-    monkeypatch.setattr(yahoo, "_fetch_breadth_ratio", fake_fetch_breadth_ratio)
-
-    ev = await yahoo.YahooMacroProvider().fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
-    s = ev.signals
-
-    assert "market_breadth" in s
-    assert abs(s["market_breadth"] - 0.60) < 1e-9, f"market_breadth={s['market_breadth']}"
-
 
 # ---------------------------------------------------------------------------
 # 2. fetch_mood_inputs maps raw breadth through norm_market_breadth
 # ---------------------------------------------------------------------------
 
 async def test_fetch_mood_inputs_normalises_market_breadth():
-    """fetch_mood_inputs must pass raw breadth (already a/(a+d) ∈ [0,1]) through
+    """fetch_mood_inputs must pass raw breadth (already a/(a+d) âˆˆ [0,1]) through
     norm_market_breadth and produce a non-None normalised value."""
-    # norm_market_breadth is just _clamp — so the raw value IS the normalised value
+    # norm_market_breadth is just _clamp â€” so the raw value IS the normalised value
     # for inputs already in [0,1].
     raw_breadth = 0.64
     expected_normalised = norm_market_breadth(raw_breadth)  # 0.64
@@ -154,7 +130,7 @@ async def test_fetch_mood_inputs_normalises_market_breadth():
 
 
 # ---------------------------------------------------------------------------
-# 3. Graceful degradation: breadth failure → key absent, no exception raised
+# 3. Graceful degradation: breadth failure â†’ key absent, no exception raised
 # ---------------------------------------------------------------------------
 
 async def test_yahoo_provider_breadth_failure_omits_key_no_exception(monkeypatch):
@@ -186,7 +162,7 @@ async def test_yahoo_provider_breadth_failure_omits_key_no_exception(monkeypatch
 
 async def test_yahoo_provider_no_provider_error_on_breadth_failure(monkeypatch):
     """ProviderError must not be raised when breadth fails but at least one
-    chart symbol succeeds — breadth failure is not a catastrophic failure."""
+    chart symbol succeeds â€” breadth failure is not a catastrophic failure."""
     from dhanradar.market_data.providers import yahoo
 
     async def fake_meta(_client, symbol):
@@ -198,7 +174,7 @@ async def test_yahoo_provider_no_provider_error_on_breadth_failure(monkeypatch):
     async def failing_breadth():
         raise RuntimeError("simulated Redis + yfinance failure")  # noqa: EM101
 
-    # Wrap in the real function's exception handling — but actually _fetch_breadth_ratio
+    # Wrap in the real function's exception handling â€” but actually _fetch_breadth_ratio
     # already eats exceptions internally (returns None). Test both the wrapper behavior
     # and the fact that fetch() does not re-raise.
     async def safe_failing_breadth():
@@ -217,7 +193,7 @@ async def test_yahoo_provider_no_provider_error_on_breadth_failure(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 5. 6 chart signals + market_breadth = 7 → data_quality flips to "ok"
+# 5. 6 chart signals + market_breadth = 7 â†’ data_quality flips to "ok"
 # ---------------------------------------------------------------------------
 
 async def test_seven_signals_flip_data_quality_to_ok():
@@ -231,13 +207,13 @@ async def test_seven_signals_flip_data_quality_to_ok():
             return MacroSignalReceived(
                 source="yahoo_macro",
                 signals={
-                    "nifty_trend":    1.0,   # +3% → greedy
+                    "nifty_trend":    1.0,   # +3% â†’ greedy
                     "india_vix":      15.0,  # level
                     "global_indices": 0.5,   # -0.5%
                     "us_bond_10y":    4.5,   # level
                     "oil_brent":      90.0,  # level
                     "usd_inr":       -0.2,   # -0.2%
-                    "market_breadth": 0.64,  # a/(a+d) — the new 7th signal
+                    "market_breadth": 0.64,  # a/(a+d) â€” the new 7th signal
                 },
                 fetched_at="2026-06-19T00:00:00Z",
             )
@@ -267,7 +243,7 @@ async def test_seven_signals_flip_data_quality_to_ok():
 # ---------------------------------------------------------------------------
 
 async def test_six_signals_without_breadth_still_degraded():
-    """Without market_breadth, 6 signals < 7 → data_quality='degraded'.
+    """Without market_breadth, 6 signals < 7 â†’ data_quality='degraded'.
     This is the current prod state; we should not accidentally mark it ok."""
     class _FakeAdapter:
         async def fetch(self, _request):
@@ -315,14 +291,59 @@ def test_breadth_formula_difference():
 
     The existing _fetch_breadth_sync returns ad_ratio = advances/declines = 2.333.
     The norm_market_breadth expects advances/(advances+declines) = 0.70.
-    If we fed 2.333 directly it would be clamped to 1.0 — wrong.
+    If we fed 2.333 directly it would be clamped to 1.0 â€” wrong.
     """
     advances, declines = 35, 15
-    ad_ratio = advances / max(declines, 1)           # 2.333 — the old ad_ratio
-    breadth_ratio = advances / (advances + declines)  # 0.70 — the correct value
+    ad_ratio = advances / max(declines, 1)           # 2.333 â€” the old ad_ratio
+    breadth_ratio = advances / (advances + declines)  # 0.70 â€” the correct value
 
     assert ad_ratio != breadth_ratio, "Test data must differ (advances != declines)"
     assert abs(breadth_ratio - 0.70) < 1e-9
     # If the wrong formula were used, norm would clamp to 1.0
-    assert norm_market_breadth(ad_ratio) == 1.0   # wrong input → wrong (clamped) output
+    assert norm_market_breadth(ad_ratio) == 1.0   # wrong input â†’ wrong (clamped) output
     assert norm_market_breadth(breadth_ratio) == pytest.approx(0.70)  # correct
+
+
+# ---------------------------------------------------------------------------
+# 9. Real _fetch_breadth_ratio: cache hit -> correct ratio, no live fetch
+# ---------------------------------------------------------------------------
+
+async def test_fetch_breadth_ratio_real_cache_hit(monkeypatch):
+    """_fetch_breadth_ratio with a monkeypatched Redis returning advances=40,
+    declines=10 must return 40/50 = 0.80.  No live yfinance call is made."""
+    import dhanradar.redis_client as rc
+    from dhanradar.market_data.providers import yahoo
+
+    advances, declines = 40, 10
+    payload = json.dumps({"advances": advances, "declines": declines, "ad_ratio": 4.0})
+
+    class _FakeRedis:
+        async def get(self, _key):
+            return payload
+
+    monkeypatch.setattr(rc, "get_redis", lambda: _FakeRedis())
+
+    result = await yahoo._fetch_breadth_ratio()
+    expected = advances / (advances + declines)  # 0.80
+    assert result is not None, "_fetch_breadth_ratio returned None on cache hit"
+    assert abs(result - expected) < 1e-9, f"Expected {expected}, got {result}"
+
+
+# ---------------------------------------------------------------------------
+# 10. Real _fetch_breadth_ratio: cache miss -> None, no exception, no live fetch
+# ---------------------------------------------------------------------------
+
+async def test_fetch_breadth_ratio_real_cache_miss(monkeypatch):
+    """_fetch_breadth_ratio with Redis returning None (cache miss) must return
+    None without raising and without touching yfinance."""
+    import dhanradar.redis_client as rc
+    from dhanradar.market_data.providers import yahoo
+
+    class _FakeRedis:
+        async def get(self, _key):
+            return None  # cache miss
+
+    monkeypatch.setattr(rc, "get_redis", lambda: _FakeRedis())
+
+    result = await yahoo._fetch_breadth_ratio()
+    assert result is None, f"Expected None on cache miss, got {result}"
