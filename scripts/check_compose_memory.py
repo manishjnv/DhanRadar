@@ -21,7 +21,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSE = ROOT / "docker-compose.yml"
-CAP_MB = 3072  # ~3 GB (architecture §A6)
+# ~3 GB band (architecture §A6). Raised 3072 -> 3200 on 2026-06-20 to absorb the
+# celery-mood limit restore 128M -> 192M (#269) — 128M OOM-killed the worker on
+# every mood snapshot, so the +64M is a legitimate, OOM-proven footprint growth,
+# not creep. Current footprint 3136M; 3200M keeps a small headroom and stays well
+# inside the KVM4 box's ~6 GB. Raise again only deliberately, with a note. (RCA 2026-06-20)
+CAP_MB = 3200
 
 
 def _to_mb(value: str, unit: str) -> int:
