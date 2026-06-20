@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-20 — main red: compose memory budget 3136M > 3072M after celery-mood OOM fix
+
+- **Symptom:** every PR + `main` itself failed CI on two jobs — `guards` (`scripts/check_compose_memory.py`) and `backend` (`tests/unit/test_anti_pattern_sweep.py::test_clean_tree_passes_memory_budget`) — both with `COMPOSE MEMORY BUDGET FAILED: 3136M > 3072M (§A6 ~3 GB target)`. The push immediately before was green.
+- **Root cause:** PR #269 restored `dhanradar-celery-mood` `deploy.resources.limits.memory` 128M → 192M because 128M OOM-killed the worker on every mood snapshot. That legitimate +64M pushed the sum of the 9 service limits to exactly 3136M, 64M over the `check_compose_memory.py` `CAP_MB = 3072` discipline gate. The gate was working as designed; the cap simply hadn't been moved to match the OOM-proven footprint, so it red-lined all of CI.
+- **Fix:** raised `CAP_MB` 3072 → 3200 in `scripts/check_compose_memory.py:24` (with an inline note citing #269), keeping celery-mood at the OOM-safe 192M. 3200M (3.125 GB) stays within the §A6 ~3 GB band and far inside the KVM4 box's ~6 GB headroom. Did **not** trim another worker — these limits are tuned close to real usage (celery-mood at 128M *was* OOM-killed), so blind trimming would likely just move the OOM. Script now exits 0 (`3136M < 3200M`).
+- **Prevention:** when a `deploy.resources.limits.memory` change is made for an OOM fix, update `CAP_MB` in the same PR (the gate and the footprint must move together). The cap is a discipline gate, not a hard ceiling — the box has ~6 GB; raise it deliberately with a note + RCA, never silently.
+- **Phase/area:** Infra / docker-compose memory budget (CI deterministic gate).
+
 ### 2026-06-19 — Admin Phase 6: AMFI scheme-master ingested 0 rows (wrong delimiter assumption; test masked it)
 
 - **Symptom:** post-deploy, the `mf_scheme_master_refresh` task ran to `status=success` but wrote **0 rows** (`0 written, 0 failed`) against the live AMFI feed — a false-healthy source. Unit tests were green (27 passed).
