@@ -4,6 +4,7 @@ import * as React from 'react';
 import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatRelative, formatDuration } from './utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 
 export interface AdminTask {
@@ -24,6 +25,8 @@ interface JobTableProps {
   onResume:  (name: string) => Promise<void>;
 }
 
+const HEADERS = ['Job', 'Schedule', 'Last Run', 'Next Run', 'Status', 'Duration', 'Rows', 'Actions'];
+
 export function JobTable({ jobs, onTrigger, onPause, onResume }: JobTableProps) {
   const [pending, setPending] = React.useState<Record<string, string>>({});
 
@@ -41,76 +44,106 @@ export function JobTable({ jobs, onTrigger, onPause, onResume }: JobTableProps) 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Scheduled background jobs — name, schedule, run history, and controls</caption>
         <thead>
           <tr className="border-b border-line">
-            {['Job', 'Schedule', 'Last Run', 'Next Run', 'Status', 'Duration', 'Rows', 'Actions'].map((h) => (
+            {HEADERS.map((h) => (
               <th
                 key={h}
+                scope="col"
                 className={cn(
                   'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
                   h === 'Duration' || h === 'Rows' ? 'text-right' : 'text-left',
                 )}
               >
-                {h}
+                {h === 'Next Run' ? (
+                  <span title="Next-run times are not yet computed by the backend">
+                    Next Run
+                  </span>
+                ) : h}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {jobs.map((job) => (
-            <tr key={job.task_name} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
-              <td className="py-3 pr-4 font-medium text-ink font-mono text-[12px]">{job.task_name}</td>
-              <td className="py-3 pr-4 text-ink-muted font-mono text-[11px]">{job.schedule_display}</td>
-              <td className="py-3 pr-4 text-ink-muted font-mono text-[11px]">{formatRelative(job.last_run_at)}</td>
-              <td className="py-3 pr-4 text-ink-muted font-mono text-[11px]">{formatRelative(job.next_run_at)}</td>
-              <td className="py-3 pr-4">
-                {job.paused
-                  ? <HealthBadge status="Paused" />
-                  : job.last_status
-                    ? <HealthBadge status={job.last_status as Parameters<typeof HealthBadge>[0]['status']} />
-                    : <span className="text-ink-faint text-caption">—</span>
-                }
-              </td>
-              <td className="py-3 pr-4 text-right font-mono tabular-nums text-ink-secondary">
-                {formatDuration(job.last_duration_s)}
-              </td>
-              <td className="py-3 pr-4 text-right font-mono tabular-nums text-ink">
-                {job.last_rows != null ? job.last_rows.toLocaleString('en-IN') : '—'}
-              </td>
-              <td className="py-3">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={() => handle(job.task_name, 'trigger')}
-                    disabled={!!pending[job.task_name]}
-                    aria-busy={pending[job.task_name] === 'trigger'}
+          {jobs.map((job) => {
+            const humanName   = displayLabel(job.task_name, 'task');
+            const humanStatus = job.last_status
+              ? displayLabel(job.last_status, 'runStatus')
+              : null;
+
+            return (
+              <tr key={job.task_name} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
+                <td className="py-3 pr-4">
+                  <p
+                    className="font-medium text-ink"
+                    title={job.task_name}
                   >
-                    {pending[job.task_name] === 'trigger' ? '…' : 'Run Now'}
-                  </Button>
-                  {job.paused ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handle(job.task_name, 'resume')}
-                      disabled={!!pending[job.task_name]}
-                    >
-                      Resume
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handle(job.task_name, 'pause')}
-                      disabled={!!pending[job.task_name]}
-                    >
-                      Pause
-                    </Button>
+                    {humanName}
+                  </p>
+                </td>
+                <td className="py-3 pr-4 text-ink-muted font-mono text-[11px]">{job.schedule_display}</td>
+                <td className="py-3 pr-4 text-ink-muted font-mono text-[11px]">{formatRelative(job.last_run_at)}</td>
+                <td
+                  className="py-3 pr-4 text-ink-muted font-mono text-[11px]"
+                  title="Next-run times are not yet computed by the backend"
+                >
+                  {job.next_run_at ? formatRelative(job.next_run_at) : (
+                    <span className="text-ink-faint italic">Not scheduled yet</span>
                   )}
-                </div>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className="py-3 pr-4">
+                  {job.paused ? (
+                    <HealthBadge status="Paused" />
+                  ) : job.last_status ? (
+                    <HealthBadge
+                      status={job.last_status as Parameters<typeof HealthBadge>[0]['status']}
+                    />
+                  ) : (
+                    <span className="text-ink-faint text-caption">—</span>
+                  )}
+                </td>
+                <td className="py-3 pr-4 text-right font-mono tabular-nums text-ink-secondary">
+                  {formatDuration(job.last_duration_s)}
+                </td>
+                <td className="py-3 pr-4 text-right font-mono tabular-nums text-ink">
+                  {job.last_rows != null ? job.last_rows.toLocaleString('en-IN') : '—'}
+                </td>
+                <td className="py-3">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => handle(job.task_name, 'trigger')}
+                      disabled={!!pending[job.task_name]}
+                      aria-busy={pending[job.task_name] === 'trigger'}
+                    >
+                      {pending[job.task_name] === 'trigger' ? '…' : 'Run Now'}
+                    </Button>
+                    {job.paused ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handle(job.task_name, 'resume')}
+                        disabled={!!pending[job.task_name]}
+                      >
+                        Resume
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handle(job.task_name, 'pause')}
+                        disabled={!!pending[job.task_name]}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

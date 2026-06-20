@@ -38,11 +38,13 @@ export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionT
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Active and recent subscriptions</caption>
         <thead>
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
               <th
                 key={h || 'action'}
+                scope="col"
                 className={cn(
                   'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
                   h === 'Price' ? 'text-right' : 'text-left',

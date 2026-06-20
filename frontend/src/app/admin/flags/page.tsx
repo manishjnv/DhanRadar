@@ -2,9 +2,9 @@
 
 /**
  * Admin Feature Flags — /admin/flags
- * Tier-A read-only page (Admin.md §14 Feature Flags).
+ * Tier-A read-only page.
  *
- * Displays the current flag list (Key · Description · Value · Source).
+ * Displays the current flag list (Name · Description · Value · Source).
  * All toggle controls are DISABLED — flags are env-driven; changes require
  * a config update and container restart (not a UI mutation).
  *
@@ -23,6 +23,15 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { useAdminFlags, type AdminFlag } from '@/features/admin/api';
 import { cn } from '@/lib/cn';
+import { displayLabel } from '@/lib/displayLabel';
+import { formatRelative } from '@/components/admin/utils';
+
+// Per-flag help text: what on/off means in plain words.
+const FLAG_HELP: Record<string, string> = {
+  AUDIT_ARCHIVE_ENABLED: 'On: audit records are archived daily. Off: archiving is paused.',
+  COOKIE_SECURE: 'On: session cookies require HTTPS. Off: cookies are sent over any connection (development only).',
+  DPDP_CONSENT_ENFORCED: 'On: data-processing routes require active user consent. Off: consent checks are skipped.',
+};
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -69,69 +78,80 @@ function FlagsTable({ flags }: { flags: AdminFlag[] }) {
     );
   }
 
-  const HEADERS = ['Key', 'Description', 'Value', 'Source'];
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Feature flags from the running server config</caption>
         <thead>
           <tr className="border-b border-line">
-            {HEADERS.map((h) => (
-              <th
-                key={h}
-                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-              >
-                {h}
-              </th>
-            ))}
-            {/* Disabled toggle column header */}
-            <th className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
-              Toggle
+            <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Name</th>
+            <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Description</th>
+            <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Value</th>
+            <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Source</th>
+            {/* Read-only switch column */}
+            <th scope="col" className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
+              Status
             </th>
           </tr>
         </thead>
         <tbody>
-          {flags.map((flag) => (
-            <tr
-              key={flag.key}
-              className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-            >
-              <td className="py-3 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
-                {flag.key}
-              </td>
-              <td className="py-3 pr-4 text-small text-ink-secondary max-w-xs">
-                {flag.description || '—'}
-              </td>
-              <td className="py-3 pr-4">
-                <ValueBadge value={flag.value} />
-              </td>
-              <td className="py-3 pr-4 text-caption text-ink-muted">
-                {flag.source}
-              </td>
-              <td className="py-3">
-                {/* Always disabled — env-driven */}
-                <button
-                  disabled
-                  title="Env-driven — change via config + restart"
-                  className={cn(
-                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-                    'cursor-not-allowed opacity-40',
-                    flag.value ? 'bg-emerald/40' : 'bg-surface-2 border border-line',
-                  )}
-                  aria-checked={flag.value}
-                  role="switch"
-                  aria-disabled="true"
-                >
+          {flags.map((flag) => {
+            const humanName = displayLabel(flag.key, 'flag');
+            const helpText = FLAG_HELP[flag.key];
+            const sourceLabel = flag.source === 'env'
+              ? 'Set via server config (restart to change)'
+              : flag.source;
+            return (
+              <tr
+                key={flag.key}
+                className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
+              >
+                <td className="py-3 pr-4 whitespace-nowrap">
+                  <span className="text-small font-medium text-ink">{humanName}</span>
                   <span
+                    className="block font-mono text-[10px] text-ink-faint mt-0.5"
+                    title={flag.key}
+                  >
+                    {flag.key}
+                  </span>
+                </td>
+                <td className="py-3 pr-4 text-small text-ink-secondary max-w-xs">
+                  <span>{flag.description || '—'}</span>
+                  {helpText && (
+                    <span className="block mt-0.5 text-caption text-ink-muted">{helpText}</span>
+                  )}
+                </td>
+                <td className="py-3 pr-4">
+                  <ValueBadge value={flag.value} />
+                </td>
+                <td className="py-3 pr-4 text-caption text-ink-muted">
+                  {sourceLabel}
+                </td>
+                <td className="py-3">
+                  {/* Always disabled — env-driven */}
+                  <button
+                    disabled
+                    title="Set via server config — change via config file and restart the container"
                     className={cn(
-                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform',
-                      flag.value ? 'translate-x-4' : 'translate-x-0.5',
+                      'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                      'cursor-not-allowed opacity-40',
+                      flag.value ? 'bg-emerald/40' : 'bg-surface-2 border border-line',
                     )}
-                  />
-                </button>
-              </td>
-            </tr>
-          ))}
+                    aria-checked={flag.value}
+                    role="switch"
+                    aria-disabled="true"
+                  >
+                    <span
+                      className={cn(
+                        'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform',
+                        flag.value ? 'translate-x-4' : 'translate-x-0.5',
+                      )}
+                    />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -152,21 +172,26 @@ export default function AdminFlagsPage() {
           <h1 className="text-h2 font-medium text-ink">Feature Flags</h1>
           <p className="mt-1 text-small text-ink-muted">
             Read-only view of current feature flags from the running config. Toggles are disabled —
-            flags are env-driven; change via config + container restart.
+            flags are set via server config and require a container restart to change.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => flagsQ.refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          {flagsQ.dataUpdatedAt > 0 && (
+            <span className="text-caption text-ink-muted">
+              Last updated {formatRelative(new Date(flagsQ.dataUpdatedAt).toISOString())}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => flagsQ.refetch()}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Info note */}
       <div className="rounded-lg border border-amber/30 bg-amber/5 px-5 py-3">
         <p className="text-small text-amber">
-          Dynamic flag management is future work. These values are read directly from the running
-          config at startup. Compliance-affecting flags (advisory boundary, scoring two-person gate)
-          are read-only here and are only changed via a governed release.
+          These flags are read-only here and change only via server config.
         </p>
       </div>
 
@@ -176,7 +201,7 @@ export default function AdminFlagsPage() {
           <CardHeader>
             <CardTitle id="section-flags-table">Flag List</CardTitle>
             <p className="mt-1 text-small text-ink-muted">
-              Key · Description · Current value · Source. All toggles are disabled.
+              Name · Description · Current value · Source.
             </p>
           </CardHeader>
           <CardBody>

@@ -48,25 +48,25 @@ interface AdminNavItem {
 }
 
 const ADMIN_NAV: AdminNavItem[] = [
-  { href: '/admin',            label: 'Overview',        icon: LayoutDashboard, live: true  },
-  { href: '/admin/operations', label: 'Operations',      icon: Activity,        live: true  },
-  { href: '/admin/users',      label: 'Users & Audit',   icon: Users,           live: true  },
-  { href: '/admin/billing',    label: 'Billing Ops',     icon: CreditCard,      live: true  },
-  { href: '/admin/scoring',    label: 'Score Model',     icon: BarChart3,       live: true  },
-  { href: '/admin/flags',      label: 'Feature Flags',   icon: Flag,            live: true  },
-  { href: '/admin/support',    label: 'Support',         icon: HeadphonesIcon,  live: true  },
-  { href: '/admin/analytics',  label: 'Analytics',       icon: TrendingUp,      live: true  },
-  { href: '/admin/notifications', label: 'Notifications', icon: Bell,           live: true  },
+  { href: '/admin',            label: 'Overview',          icon: LayoutDashboard, live: true  },
+  { href: '/admin/operations', label: 'Data Operations',   icon: Activity,        live: true  },
+  { href: '/admin/users',      label: 'Users',             icon: Users,           live: true  },
+  { href: '/admin/billing',    label: 'Billing',           icon: CreditCard,      live: true  },
+  { href: '/admin/scoring',    label: 'Scoring',           icon: BarChart3,       live: true  },
+  { href: '/admin/flags',      label: 'Feature Flags',     icon: Flag,            live: true  },
+  { href: '/admin/support',    label: 'Support',           icon: HeadphonesIcon,  live: true  },
+  { href: '/admin/analytics',  label: 'Analytics',         icon: TrendingUp,      live: true  },
+  { href: '/admin/notifications', label: 'Notifications',  icon: Bell,            live: true  },
 ];
 
 const AIOPS_NAV: AdminNavItem[] = [
-  { href: '/admin/ai',           label: 'AI Ops Dashboard',  icon: Bot,          live: true },
-  { href: '/admin/ai/versions',  label: 'Score Versioning',  icon: GitBranch,    live: true },
-  { href: '/admin/ai/prompts',   label: 'Prompt & RAG',      icon: FileText,     live: true },
-  { href: '/admin/ai/eval',      label: 'Quality / Eval',    icon: CheckCircle2, live: true },
-  { href: '/admin/ai/safety',    label: 'Safety Monitor',    icon: ShieldAlert,  live: true },
-  { href: '/admin/ai/feedback',  label: 'Feedback Review',   icon: ThumbsUp,     live: true },
-  { href: '/admin/ai/cost',      label: 'Cost & Usage',      icon: DollarSign,   live: true },
+  { href: '/admin/ai',           label: 'AI Overview',            icon: Bot,          live: true },
+  { href: '/admin/ai/versions',  label: 'Score History',          icon: GitBranch,    live: true },
+  { href: '/admin/ai/prompts',   label: 'AI Prompts',             icon: FileText,     live: true },
+  { href: '/admin/ai/eval',      label: 'Data Quality',           icon: CheckCircle2, live: true },
+  { href: '/admin/ai/safety',    label: 'Recommendation Safety',  icon: ShieldAlert,  live: true },
+  { href: '/admin/ai/feedback',  label: 'User Feedback',          icon: ThumbsUp,     live: true },
+  { href: '/admin/ai/cost',      label: 'AI Usage & Cost',        icon: DollarSign,   live: true },
 ];
 
 // ---------------------------------------------------------------------------

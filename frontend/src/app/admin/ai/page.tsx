@@ -24,6 +24,7 @@ import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { useAdminAIDashboard } from '@/features/admin/api';
 import { displayLabel } from '@/lib/displayLabel';
+import { formatRelative } from '@/components/admin/utils';
 
 // ---------------------------------------------------------------------------
 // Skeleton row — 6 StatCards
@@ -58,10 +59,17 @@ export default function AdminAIDashboardPage() {
               Reads from the AI output log.
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-            Refresh
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
+              <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+              Refresh
+            </Button>
+            {q.dataUpdatedAt ? (
+              <span className="text-[10px] text-ink-muted">
+                Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}
+              </span>
+            ) : null}
+          </div>
         </div>
 
         {/* KPI row */}
@@ -111,10 +119,20 @@ export default function AdminAIDashboardPage() {
                 {/* Budget — free calls */}
                 <StatCard
                   title="Free Calls Today"
-                  value={`${d.budget.free_calls_today} / ${d.budget.free_cap}`}
-                  sub={`${d.budget.free_remaining} remaining`}
+                  value={
+                    (d.budget as { available?: boolean }).available === false
+                      ? '—'
+                      : `${d.budget.free_calls_today} / ${d.budget.free_cap}`
+                  }
+                  sub={
+                    (d.budget as { available?: boolean }).available === false
+                      ? 'Live usage data unavailable'
+                      : `${d.budget.free_remaining} remaining · Free-tier AI model calls used today`
+                  }
                   status={
-                    d.budget.free_remaining === 0
+                    (d.budget as { available?: boolean }).available === false
+                      ? 'neutral'
+                      : d.budget.free_remaining === 0
                       ? 'critical'
                       : d.budget.free_remaining < d.budget.free_cap * 0.1
                       ? 'warning'
@@ -124,10 +142,20 @@ export default function AdminAIDashboardPage() {
                 {/* Budget — premium USD */}
                 <StatCard
                   title="Premium Spend Today"
-                  value={`$${d.budget.premium_usd_today.toFixed(4)}`}
-                  sub={`soft cap $${d.budget.premium_soft_cap} · hard $${d.budget.premium_hard_cap}`}
+                  value={
+                    (d.budget as { available?: boolean }).available === false
+                      ? '—'
+                      : `$${d.budget.premium_usd_today.toFixed(4)}`
+                  }
+                  sub={
+                    (d.budget as { available?: boolean }).available === false
+                      ? 'Live usage data unavailable'
+                      : `Warning at $${d.budget.premium_soft_cap} · Stops at $${d.budget.premium_hard_cap} · Paid AI spend today (USD)`
+                  }
                   status={
-                    d.budget.premium_usd_today >= d.budget.premium_hard_cap
+                    (d.budget as { available?: boolean }).available === false
+                      ? 'neutral'
+                      : d.budget.premium_usd_today >= d.budget.premium_hard_cap
                       ? 'critical'
                       : d.budget.premium_usd_today >= d.budget.premium_soft_cap
                       ? 'warning'
@@ -144,14 +172,14 @@ export default function AdminAIDashboardPage() {
                 <StatCard
                   title="Low-Confidence (7d)"
                   value={d.low_confidence_7d.toLocaleString('en-IN')}
-                  sub="Counter not yet wired — currently always 0"
+                  sub="Times the AI declined to answer because it wasn't sure enough · Counter not yet wired — currently always 0"
                   status={d.low_confidence_7d > 0 ? 'warning' : 'neutral'}
                 />
                 {/* Label churn */}
                 <StatCard
                   title="Label Churn"
                   value={displayLabel(d.label_churn.decision, 'decision')}
-                  sub={`churn: ${(d.label_churn.churn * 100).toFixed(1)}%${d.label_churn.requires_human_review ? ' · review needed' : ''}`}
+                  sub={`How often the same fund's label changed — high churn means review needed · ${(d.label_churn.churn * 100).toFixed(1)}%${d.label_churn.requires_human_review ? ' · review needed' : ''}`}
                   status={
                     d.label_churn.requires_human_review
                       ? 'warning'

@@ -332,6 +332,8 @@ export interface AdminBillingWebhookHealth {
   success_count: number;
   failed_count: number;
   last_event_at: string | null;
+  /** Optional note from the backend explaining the data source (e.g. derived from payment events). */
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import { HealthBadge } from './HealthBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 import { formatRelative, formatDateTime } from './utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 import {
   useSuspendUser,
@@ -83,11 +84,13 @@ export function UserTable({ users, onView }: UserTableProps) {
     <>
       <div className="overflow-x-auto">
         <table className="w-full text-small">
+          <caption className="sr-only">User list — name, plan, status, and admin actions</caption>
           <thead>
             <tr className="border-b border-line">
               {HEADERS.map((h) => (
                 <th
-                  key={h}
+                  key={h || 'actions'}
+                  scope="col"
                   className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
                 >
                   {h}
@@ -117,7 +120,7 @@ export function UserTable({ users, onView }: UserTableProps) {
                       tierBadgeClass(user.tier),
                     )}
                   >
-                    {user.tier}
+                    {displayLabel(user.tier, 'tier')}
                   </span>
                 </td>
                 {/* Status */}
@@ -133,7 +136,10 @@ export function UserTable({ users, onView }: UserTableProps) {
                 </td>
                 {/* Last Login */}
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                  {user.last_login_at ? formatRelative(user.last_login_at) : '—'}
+                  {user.last_login_at
+                    ? formatRelative(user.last_login_at)
+                    : <span title="Login history not yet tracked.">—</span>
+                  }
                 </td>
                 {/* Joined */}
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">

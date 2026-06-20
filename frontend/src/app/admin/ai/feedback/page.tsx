@@ -4,8 +4,8 @@
  * AI Feedback Review — /admin/ai/feedback
  * Phase 4, Tier-B read-only (Admin.md §15, §18 step 4).
  *
- * Backend state: feedback pipeline not yet built.
- * Shows: honest empty-state — no feedback pipeline, not a "0 feedbacks" count.
+ * Backend state: feedback collection not yet built.
+ * Shows: honest empty-state — no feedback collection, not a "0 feedbacks" count.
  *
  * Four-state contract. No advisory verbs.
  */
@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
+import { formatRelative } from '@/components/admin/utils';
 import { useAdminAIFeedback } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,9 @@ export default function AdminAIFeedbackPage() {
             <h1 className="text-h2 font-medium text-ink">Feedback Review</h1>
             <p className="mt-1 text-small text-ink-muted">
               Explanation helpfulness feedback — thumbs up/down from users on AI-generated outputs.
+              {q.dataUpdatedAt ? (
+                <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
+              ) : null}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
@@ -62,7 +66,7 @@ export default function AdminAIFeedbackPage() {
                 title="Explanation feedback not yet collected"
                 description={
                   q.data.note ||
-                  'There is no feedback pipeline at this time. Thumbs up/down collection from users and helpful-% metrics will be added in a future phase once the explanation surface is live.'
+                  'There is no feedback collection at this time. Thumbs up/down collection from users and helpfulness metrics will be added in a future phase once the explanation surface is live.'
                 }
                 className="py-16"
               />
@@ -70,7 +74,7 @@ export default function AdminAIFeedbackPage() {
               /* If backend ever flips available:true, show a placeholder */
               <EmptyState
                 icon={<ThumbsUp size={36} />}
-                title="Feedback pipeline live"
+                title="Feedback collection live"
                 description="Feedback data is available — detailed review UI is in progress."
                 className="py-16"
               />
