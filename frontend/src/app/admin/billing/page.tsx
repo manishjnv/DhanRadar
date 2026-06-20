@@ -30,6 +30,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { SubscriptionTable } from '@/components/admin/SubscriptionTable';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative, formatDateTime, formatCurrency } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminBillingOverview,
   useAdminSubscriptions,
@@ -171,14 +172,19 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
                   {p.razorpay_payment_id ?? '—'}
                 </td>
                 <td className="py-2.5 pr-4">
-                  <HealthBadge
-                    status={
-                      p.status === 'captured' ? 'Success' :
-                      p.status === 'failed'   ? 'Failed'  :
-                      p.status === 'pending'  ? 'Running' :
-                      'Paused'
-                    }
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <HealthBadge
+                      status={
+                        p.status === 'captured' ? 'Success' :
+                        p.status === 'failed'   ? 'Failed'  :
+                        p.status === 'pending'  ? 'Running' :
+                        'Paused'
+                      }
+                    />
+                    <span className="text-[11px] text-ink-secondary">
+                      {displayLabel(p.status, 'payment')}
+                    </span>
+                  </div>
                 </td>
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                   {formatDateTime(p.ts)}

@@ -23,6 +23,7 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { useAdminAIDashboard } from '@/features/admin/api';
+import { displayLabel } from '@/lib/displayLabel';
 
 // ---------------------------------------------------------------------------
 // Skeleton row — 6 StatCards
@@ -54,7 +55,7 @@ export default function AdminAIDashboardPage() {
             <h1 className="text-h2 font-medium text-ink">AI Ops Dashboard</h1>
             <p className="mt-1 text-small text-ink-muted">
               Live model status, budget usage, and output quality at a glance.
-              Reads from <code className="text-caption font-mono">ai_recommendation_audit</code>.
+              Reads from the AI output log.
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
@@ -103,7 +104,7 @@ export default function AdminAIDashboardPage() {
                 {/* Model live / version */}
                 <StatCard
                   title="Model Version"
-                  value={d.model_version}
+                  value={`Model: ${d.model_version}`}
                   sub={d.activated ? 'activated' : 'not activated'}
                   status={d.activated ? 'healthy' : 'warning'}
                 />
@@ -143,13 +144,13 @@ export default function AdminAIDashboardPage() {
                 <StatCard
                   title="Low-Confidence (7d)"
                   value={d.low_confidence_7d.toLocaleString('en-IN')}
-                  sub="refused or insufficient_data"
+                  sub="Counter not yet wired — currently always 0"
                   status={d.low_confidence_7d > 0 ? 'warning' : 'neutral'}
                 />
                 {/* Label churn */}
                 <StatCard
                   title="Label Churn"
-                  value={d.label_churn.decision}
+                  value={displayLabel(d.label_churn.decision, 'decision')}
                   sub={`churn: ${(d.label_churn.churn * 100).toFixed(1)}%${d.label_churn.requires_human_review ? ' · review needed' : ''}`}
                   status={
                     d.label_churn.requires_human_review
@@ -169,7 +170,7 @@ export default function AdminAIDashboardPage() {
           <section aria-labelledby="section-ai-status" className="flex items-center gap-3">
             <span className="text-small text-ink-muted">Model status:</span>
             <HealthBadge status={q.data.activated ? 'Healthy' : 'Paused'} />
-            <span className="font-mono text-[11px] text-ink-muted">{q.data.model_version}</span>
+            <span className="font-mono text-[11px] text-ink-muted">Model: {q.data.model_version}</span>
           </section>
         )}
       </div>

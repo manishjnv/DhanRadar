@@ -152,14 +152,14 @@ function ComplianceGlance({
       <StatCard
         title="Advice-boundary breaches today"
         value={breaches}
-        status={breaches > 0 ? 'critical' : 'healthy'}
-        sub="from ai_recommendation_audit"
+        status="neutral"
+        sub="Not yet measured — this 0 is not a clean pass"
       />
       <StatCard
         title="Low-groundedness flags (7d)"
         value={flagsCount}
-        status={flagsCount > 0 ? 'warning' : 'healthy'}
-        sub="from ai_recommendation_audit"
+        status="neutral"
+        sub="Not yet measured — this 0 is not a clean pass"
       />
     </div>
   );
