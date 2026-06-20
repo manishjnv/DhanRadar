@@ -345,7 +345,7 @@ export default function AdminAISafetyPage() {
                     </CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
                       Outputs grouped by certainty level. Low-certainty total:{' '}
-                      {d.low_confidence_count.toLocaleString('en-IN')} outputs returned as "Not Enough Data"
+                      {d.low_confidence_count.toLocaleString('en-IN')} outputs returned as “Not Enough Data”
                       rather than a label.
                     </p>
                   </CardHeader>
@@ -376,7 +376,7 @@ export default function AdminAISafetyPage() {
                   <CardHeader>
                     <CardTitle id="section-low-conf">Low-Confidence Log</CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
-                      Outputs where certainty was too low to serve a label — returned as "Not Enough Data"
+                      Outputs where certainty was too low to serve a label — returned as “Not Enough Data”
                       rather than shown to users.
                     </p>
                   </CardHeader>

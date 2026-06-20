@@ -134,7 +134,7 @@ export default function AdminAIVersionsPage() {
             <h1 className="text-h2 font-medium text-ink">Score Versioning</h1>
             <p className="mt-1 text-small text-ink-muted">
               Each version is a snapshot of the scoring rules used to label funds.
-              Only one version can be live at a time — "Currently Live" shows which one users see.
+              Only one version can be live at a time — “Currently Live” shows which one users see.
               Switching versions requires sign-off from two people.
             </p>
           </div>
@@ -169,7 +169,7 @@ export default function AdminAIVersionsPage() {
               <CardTitle id="section-ai-versions">Score Model History</CardTitle>
               <p className="mt-1 text-small text-ink-muted">
                 All scoring rule versions, newest first.
-                Only the "Currently Live" version produces labels users see.
+                Only the “Currently Live” version produces labels users see.
               </p>
             </CardHeader>
             <CardBody>
