@@ -41,6 +41,7 @@ import {
   type AdminAuditRow,
   type AdminUserDetail,
 } from '@/features/admin/api';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -134,18 +135,29 @@ function UserDetailContent({ userId }: { userId: string }) {
   );
 
   const profileRows: Array<{ label: string; value: React.ReactNode }> = [
-    { label: 'ID',           value: <span className="font-mono text-[11px]">{data.id}</span> },
-    { label: 'Display Name', value: data.display_name || '—' },
-    { label: 'Email',        value: data.email },
-    { label: 'Plan (tier)',  value: data.tier },
-    { label: 'Status',       value: <HealthBadge status={statusBadge} /> },
+    { label: 'ID',                   value: <span className="font-mono text-[11px]">{data.id}</span> },
+    { label: 'Display Name',         value: data.display_name || '—' },
+    { label: 'Email',                value: data.email },
+    { label: 'Plan',                 value: displayLabel(data.tier, 'tier') },
+    { label: 'Status',               value: <HealthBadge status={statusBadge} /> },
     ...(data.status === 'suspended' && data.pro_access_reason
-      ? [{ label: 'Suspend Reason', value: <span className="text-red">{data.pro_access_reason}</span> }]
+      ? [{ label: 'Suspend Reason',  value: <span className="text-red">{data.pro_access_reason}</span> }]
       : []),
-    { label: 'Joined',       value: formatDateTime(data.created_at) },
-    { label: 'Pro Until',    value: data.pro_access_until ? formatDateTime(data.pro_access_until) : '—' },
-    { label: 'Pro Reason',   value: data.pro_access_reason || '—' },
-    { label: 'DPDP Consent', value: data.dpdp_consent_version || '—' },
+    { label: 'Joined',               value: formatDateTime(data.created_at) },
+    { label: 'Paid Access Until',    value: data.pro_access_until ? formatDateTime(data.pro_access_until) : '—' },
+    { label: 'Access Grant Reason',  value: data.pro_access_reason || '—' },
+    { label: 'Consent Version',      value: data.dpdp_consent_version || '—' },
+    {
+      label: 'Last Login',
+      value: (
+        <span
+          className="text-ink-muted"
+          title="Login history is not yet tracked for individual users."
+        >
+          —
+        </span>
+      ),
+    },
   ];
 
   return (
@@ -221,10 +233,13 @@ function UserDetailContent({ userId }: { userId: string }) {
       </div>
 
       {/* Login history & CAS uploads — not yet unified */}
-      <div className="rounded-lg border border-line bg-surface-2 p-4">
-        <p className="text-small text-ink-muted">
-          Login history and CAS upload history are not yet tracked per-user in this view.
-        </p>
+      <div>
+        <h3 className="mb-3 text-h3 font-medium text-ink">Login History</h3>
+        <p className="text-small text-ink-muted">Not yet tracked.</p>
+      </div>
+      <div>
+        <h3 className="mb-3 text-h3 font-medium text-ink">CAS Upload History</h3>
+        <p className="text-small text-ink-muted">Not yet tracked.</p>
       </div>
 
       {/* Admin actions */}
@@ -324,11 +339,13 @@ function AuditTable({ rows }: { rows: AdminAuditRow[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Admin audit log — recent admin actions and their outcomes</caption>
         <thead>
           <tr className="border-b border-line">
             {['Timestamp', 'Actor', 'Action', 'Entity', 'Result'].map((h) => (
               <th
                 key={h}
+                scope="col"
                 className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
               >
                 {h}
@@ -337,34 +354,53 @@ function AuditTable({ rows }: { rows: AdminAuditRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                {formatDateTime(row.ts)}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
-                {row.admin_id.slice(0, 8)}…
-              </td>
-              <td className="py-2.5 pr-4 font-medium text-ink">{row.action}</td>
-              <td className="py-2.5 pr-4 text-ink-secondary text-[11px]">
-                {row.target_type && row.target_id
-                  ? `${row.target_type}:${row.target_id.slice(0, 8)}`
-                  : row.target_type || '—'}
-              </td>
-              <td className="py-2.5">
-                <span
-                  className={cn(
-                    'rounded-full px-2 py-0.5 text-caption font-medium',
-                    row.result === 'ok' || row.result === 'success'
-                      ? 'bg-emerald/10 text-emerald'
-                      : 'bg-red/10 text-red',
-                  )}
-                >
-                  {row.result}
+          {rows.map((row) => {
+            // Normalize ok/success both to "Success"
+            const resultLabel = (row.result === 'ok' || row.result === 'success') ? 'Success' : row.result;
+            const resultOk    = row.result === 'ok' || row.result === 'success';
+
+            // Entity: "user:uuid" → "User {uuid8}…" with full-id tooltip
+            let entityDisplay: React.ReactNode = '—';
+            if (row.target_type && row.target_id) {
+              const short = row.target_id.length > 8 ? row.target_id.slice(0, 8) + '…' : row.target_id;
+              const fullId = `${row.target_type}:${row.target_id}`;
+              const typeLabel = row.target_type.charAt(0).toUpperCase() + row.target_type.slice(1);
+              entityDisplay = (
+                <span title={fullId} className="cursor-default">
+                  {typeLabel} {short}
                 </span>
-              </td>
-            </tr>
-          ))}
+              );
+            } else if (row.target_type) {
+              entityDisplay = row.target_type;
+            }
+
+            return (
+              <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                  {formatDateTime(row.ts)}
+                </td>
+                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
+                  {row.admin_id.slice(0, 8)}…
+                </td>
+                <td className="py-2.5 pr-4 font-medium text-ink">
+                  {displayLabel(row.action, 'audit')}
+                </td>
+                <td className="py-2.5 pr-4 text-ink-secondary text-[11px]">
+                  {entityDisplay}
+                </td>
+                <td className="py-2.5">
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-caption font-medium',
+                      resultOk ? 'bg-emerald/10 text-emerald' : 'bg-red/10 text-red',
+                    )}
+                  >
+                    {resultLabel}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -437,7 +473,22 @@ export default function AdminUsersPage() {
   });
 
   const PLAN_OPTIONS   = ['', 'free', 'trial', 'plus', 'founder_lifetime'];
-  const STATUS_OPTIONS = ['', 'active', 'suspended', 'blocked'];
+  // 'blocked' is not a valid backend status; map to 'deletion_requested' with label "Deletion Requested"
+  const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: '',                   label: 'All status' },
+    { value: 'active',             label: 'Active' },
+    { value: 'suspended',          label: 'Suspended' },
+    { value: 'deletion_requested', label: 'Deletion Requested' },
+  ];
+
+  const [lastRefreshed, setLastRefreshed] = React.useState<Date | null>(null);
+  function handleRefreshAll() {
+    summaryQ.refetch();
+    usersQ.refetch();
+    subMetricsQ.refetch();
+    auditQ.refetch();
+    setLastRefreshed(new Date());
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -449,19 +500,17 @@ export default function AdminUsersPage() {
             User management · subscriptions · audit log
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            summaryQ.refetch();
-            usersQ.refetch();
-            subMetricsQ.refetch();
-            auditQ.refetch();
-          }}
-        >
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh all
-        </Button>
+        <div className="flex flex-col items-end gap-0.5">
+          <Button variant="ghost" size="sm" onClick={handleRefreshAll}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh all
+          </Button>
+          {lastRefreshed && (
+            <span className="text-caption text-ink-faint">
+              Last updated {formatRelative(lastRefreshed.toISOString())}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Section A — User Summary */}
@@ -479,14 +528,25 @@ export default function AdminUsersPage() {
         )}
         {summaryQ.data && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <StatCard title="Total Users"   value={summaryQ.data.total.toLocaleString('en-IN')}   status="neutral" />
-            <StatCard title="Active"        value={summaryQ.data.active.toLocaleString('en-IN')}  status="healthy" />
-            <StatCard title="Premium"       value={summaryQ.data.premium.toLocaleString('en-IN')} status="neutral" />
-            <StatCard title="Trials"        value={summaryQ.data.trials.toLocaleString('en-IN')}  status="neutral" />
+            <StatCard title="Total Users" value={summaryQ.data.total.toLocaleString('en-IN')} status="neutral" />
+            <StatCard title="Active"      value={summaryQ.data.active.toLocaleString('en-IN')} status="healthy" />
+            <StatCard
+              title="Premium"
+              value={summaryQ.data.premium.toLocaleString('en-IN')}
+              status="neutral"
+              sub="Users on paid plans"
+            />
+            <StatCard
+              title="Trials"
+              value={summaryQ.data.trials.toLocaleString('en-IN')}
+              status="neutral"
+              sub="Users with a paid-access trial"
+            />
             <StatCard
               title="Blocked"
               value={summaryQ.data.blocked.toLocaleString('en-IN')}
               status={summaryQ.data.blocked > 0 ? 'warning' : 'neutral'}
+              sub="Users who requested deletion"
             />
           </div>
         )}
@@ -520,24 +580,24 @@ export default function AdminUsersPage() {
                       : 'bg-surface-2 text-ink-muted hover:bg-surface-3',
                   )}
                 >
-                  {opt || 'All plans'}
+                  {opt ? displayLabel(opt, 'tier') : 'All plans'}
                 </button>
               ))}
             </div>
             {/* Status filter chips */}
             <div className="flex items-center gap-1">
-              {STATUS_OPTIONS.map((opt) => (
+              {STATUS_OPTIONS.map(({ value, label }) => (
                 <button
-                  key={opt || 'all-status'}
-                  onClick={() => setStatusFilter(opt)}
+                  key={value || 'all-status'}
+                  onClick={() => setStatusFilter(value)}
                   className={cn(
                     'rounded-full px-2.5 py-0.5 text-caption font-medium transition-colors',
-                    statusFilter === opt
+                    statusFilter === value
                       ? 'bg-royal/10 text-royal'
                       : 'bg-surface-2 text-ink-muted hover:bg-surface-3',
                   )}
                 >
-                  {opt || 'All status'}
+                  {label}
                 </button>
               ))}
             </div>

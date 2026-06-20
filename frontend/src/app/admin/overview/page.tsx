@@ -25,6 +25,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { AlertList } from '@/components/admin/AlertList';
 import { useAdminHealth } from '@/features/admin/api';
 import { formatRelative, formatDateTime } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -61,11 +62,13 @@ function RecentFailuresTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
+        <caption className="sr-only">Recent ingestion failures — source, reason, and time</caption>
         <thead>
           <tr className="border-b border-line">
             {['Source', 'Reason', 'Time'].map((h) => (
               <th
                 key={h}
+                scope="col"
                 className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
               >
                 {h}
@@ -76,7 +79,7 @@ function RecentFailuresTable({
         <tbody>
           {failures.map((f, i) => (
             <tr key={i} className="border-b border-line last:border-0">
-              <td className="py-2.5 pr-4 font-medium text-ink">{f.source}</td>
+              <td className="py-2.5 pr-4 font-medium text-ink">{displayLabel(f.source)}</td>
               <td className="py-2.5 pr-4 text-red">{f.reason}</td>
               <td className="py-2.5 font-mono text-[11px] text-ink-muted">
                 {formatRelative(f.failed_at)}
@@ -118,7 +121,9 @@ function RecentSignupsList({
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-royal/10 text-royal text-caption font-medium shrink-0">
               {s.display_name.charAt(0).toUpperCase()}
             </div>
-            <span className="text-small font-medium text-ink">{s.display_name}</span>
+            <span className="text-small font-medium text-ink">
+              {s.display_name}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             <span className={cn(
@@ -127,7 +132,7 @@ function RecentSignupsList({
                 ? 'bg-emerald/10 text-emerald'
                 : 'bg-surface-2 text-ink-muted',
             )}>
-              {s.plan}
+              {displayLabel(s.plan, 'tier')}
             </span>
             <span className="font-mono text-[11px] text-ink-muted">{formatRelative(s.joined_at)}</span>
           </div>
@@ -149,18 +154,28 @@ function ComplianceGlance({
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <StatCard
-        title="Advice-boundary breaches today"
-        value={breaches}
-        status="neutral"
-        sub="Not yet measured — this 0 is not a clean pass"
-      />
-      <StatCard
-        title="Low-groundedness flags (7d)"
-        value={flagsCount}
-        status="neutral"
-        sub="Not yet measured — this 0 is not a clean pass"
-      />
+      <div>
+        <StatCard
+          title="Advice-boundary breaches today"
+          value={breaches}
+          status="neutral"
+          sub="Not yet measured — this 0 is not a clean pass"
+        />
+        <p className="mt-1.5 text-caption text-ink-faint px-1">
+          Will count AI outputs flagged by the SEBI advisory-boundary classifier — a non-zero value here needs immediate review.
+        </p>
+      </div>
+      <div>
+        <StatCard
+          title="Low-groundedness flags (7d)"
+          value={flagsCount}
+          status="neutral"
+          sub="Not yet measured — this 0 is not a clean pass"
+        />
+        <p className="mt-1.5 text-caption text-ink-faint px-1">
+          Will count AI responses below the groundedness threshold over 7 days — a rising number indicates answer quality issues.
+        </p>
+      </div>
     </div>
   );
 }
@@ -169,7 +184,7 @@ function ComplianceGlance({
 // Overview page
 // ---------------------------------------------------------------------------
 export default function AdminOverviewPage() {
-  const { data, isLoading, isError, refetch } = useAdminHealth();
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useAdminHealth();
 
   // --- Loading state ---
   if (isLoading) {
@@ -225,10 +240,17 @@ export default function AdminOverviewPage() {
           <h1 className="text-h2 font-medium text-ink">Overview</h1>
           <p className="mt-1 text-small text-ink-muted">Platform health at a glance</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => refetch()}>
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button variant="ghost" size="sm" onClick={() => refetch()}>
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+          {dataUpdatedAt > 0 && (
+            <p className="text-caption text-ink-faint">
+              Last updated {formatRelative(new Date(dataUpdatedAt).toISOString())}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* KPI row — 5 cards */}
@@ -237,6 +259,7 @@ export default function AdminOverviewPage() {
           title="Sources Healthy"
           value={`${data!.sources_healthy} / ${data!.sources_total}`}
           status={sourcesStatus}
+          sub="Data sources with a successful recent sync."
         />
         <StatCard
           title="Last NAV Sync"
@@ -268,6 +291,7 @@ export default function AdminOverviewPage() {
             />
           }
           status={systemStatus}
+          sub="Derived from recent ingestion failures across all sources."
         />
       </div>
 

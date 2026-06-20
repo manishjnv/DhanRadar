@@ -3,7 +3,7 @@
 /**
  * Admin Operations — /admin/operations
  *
- * Five sections: A) Sources · B) Scheduled Jobs · C) Recent Runs · D) Data Quality · E) Settings stub
+ * Five sections: A) Data Sources · B) Scheduled Jobs · C) Run History · D) Data Quality · E) Platform Settings
  *
  * Four-state contract per section: Default · Loading (skeleton) · Empty · Error+Retry
  * Numeric values ARE allowed (admin-only, §16).
@@ -38,7 +38,8 @@ import {
   useTaskResume,
   useQualityAcknowledge,
 } from '@/features/admin/api';
-import { formatDateTime, formatDuration } from '@/components/admin/utils';
+import { formatDateTime, formatDuration, formatRelative } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -104,8 +105,8 @@ function RunDetailContent({ runId }: { runId: string }) {
   const rows: Array<{ label: string; value: React.ReactNode }> = [
     { label: 'Run ID',         value: <span className="font-mono text-[11px]">{data.run_id}</span> },
     { label: 'Source',         value: data.source },
-    { label: 'Task',           value: <span className="font-mono">{data.task_name}</span> },
-    { label: 'Status',         value: data.status },
+    { label: 'Task',           value: displayLabel(data.task_name, 'task') },
+    { label: 'Status',         value: displayLabel(data.status, 'runStatus') },
     { label: 'Started',        value: formatDateTime(data.started_at) },
     { label: 'Finished',       value: formatDateTime(data.finished_at) },
     { label: 'Duration',       value: formatDuration(data.duration_s) },
@@ -161,7 +162,7 @@ function SourceLogsContent({ sourceKey }: { sourceKey: string }) {
     return (
       <EmptyState
         title="No runs found"
-        description={`No recent runs recorded for ${sourceKey}.`}
+        description={`No recent runs recorded for ${displayLabel(sourceKey)}.`}
       />
     );
   }
@@ -184,14 +185,18 @@ function SourceLogsContent({ sourceKey }: { sourceKey: string }) {
               run.status === 'failed'  ? 'text-red' :
               run.status === 'success' ? 'text-emerald' : 'text-ink',
             )}>
-              {run.status}
+              {displayLabel(run.status, 'runStatus')}
             </span>
             <span className="font-mono text-[11px] text-ink-muted">{formatDateTime(run.started_at)}</span>
           </div>
           <div className="mt-1 flex items-center gap-3 text-caption text-ink-muted">
             <span>{formatDuration(run.duration_s)}</span>
             <span>{run.records_written?.toLocaleString('en-IN') ?? '—'} written</span>
-            {run.error_class && <span className="text-red">{run.error_class}</span>}
+            {run.error_class && (
+              <span className="text-red" title={run.error_class}>
+                {run.error_class.split('.').pop() ?? run.error_class}
+              </span>
+            )}
           </div>
         </div>
       ))}
@@ -207,7 +212,7 @@ function SettingsStub() {
     <div className="flex flex-col gap-4 text-small text-ink-muted">
       <p>
         Platform settings (support email, notification thresholds, maintenance actions,
-        admin users list) — coming in Phase 4.
+        admin users list) — not yet available.
       </p>
       <div className="rounded-lg border border-line bg-surface-2 p-4">
         <p className="text-caption uppercase tracking-wide font-medium text-ink-faint mb-2">Admin Users</p>
@@ -240,8 +245,15 @@ export default function AdminOperationsPage() {
   const qualityQ = useAdminQuality();
 
   // Drawer state
-  const [runDrawer, setRunDrawer]    = React.useState<string | null>(null);
+  const [runDrawer, setRunDrawer]       = React.useState<string | null>(null);
   const [sourceDrawer, setSourceDrawer] = React.useState<string | null>(null);
+
+  // Resolve source display name for drawer title
+  const sourceDrawerName = React.useMemo(() => {
+    if (!sourceDrawer) return '';
+    const src = sourcesQ.data?.find((s) => s.source_key === sourceDrawer);
+    return src?.name ?? displayLabel(sourceDrawer);
+  }, [sourceDrawer, sourcesQ.data]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -253,26 +265,33 @@ export default function AdminOperationsPage() {
             Data sources · jobs · runs · quality · settings
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            sourcesQ.refetch();
-            tasksQ.refetch();
-            runsQ.refetch();
-            qualityQ.refetch();
-          }}
-        >
-          <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
-          Refresh all
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              sourcesQ.refetch();
+              tasksQ.refetch();
+              runsQ.refetch();
+              qualityQ.refetch();
+            }}
+          >
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            Refresh all
+          </Button>
+          {sourcesQ.dataUpdatedAt > 0 && (
+            <p className="text-caption text-ink-faint">
+              Last updated {formatRelative(new Date(sourcesQ.dataUpdatedAt).toISOString())}
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Section A — Sources */}
+      {/* Section A — Data Sources */}
       <Section
         id="section-sources"
-        title="Section A — Sources"
-        subtitle="All data sources: tier, schedule, last run, and status"
+        title="Data Sources"
+        subtitle="External data feeds powering DhanRadar — each row shows connection tier, schedule, and the last successful sync."
       >
         {sourcesQ.isLoading && <TableSkeleton rows={6} />}
         {sourcesQ.isError && (
@@ -298,8 +317,8 @@ export default function AdminOperationsPage() {
       {/* Section B — Scheduled Jobs */}
       <Section
         id="section-jobs"
-        title="Section B — Scheduled Jobs"
-        subtitle="Celery beat tasks: schedule, last run, next run, status"
+        title="Scheduled Jobs"
+        subtitle="Celery beat background tasks — each job refreshes a dataset or performs a housekeeping action on a fixed schedule."
       >
         {tasksQ.isLoading && <TableSkeleton rows={8} />}
         {tasksQ.isError && (
@@ -312,20 +331,25 @@ export default function AdminOperationsPage() {
           <EmptyState title="No jobs found" />
         )}
         {tasksQ.data && tasksQ.data.length > 0 && (
-          <JobTable
-            jobs={tasksQ.data}
-            onTrigger={async (name) => { await taskTrigger.mutateAsync(name); }}
-            onPause={async (name) => { await taskPause.mutateAsync(name); }}
-            onResume={async (name) => { await taskResume.mutateAsync(name); }}
-          />
+          <>
+            <p className="mb-3 text-caption text-ink-faint">
+              Next-run times are not yet computed — schedules are active; the system runs each job at the configured interval.
+            </p>
+            <JobTable
+              jobs={tasksQ.data}
+              onTrigger={async (name) => { await taskTrigger.mutateAsync(name); }}
+              onPause={async (name) => { await taskPause.mutateAsync(name); }}
+              onResume={async (name) => { await taskResume.mutateAsync(name); }}
+            />
+          </>
         )}
       </Section>
 
-      {/* Section C — Recent Runs */}
+      {/* Section C — Run History */}
       <Section
         id="section-runs"
-        title="Section C — Recent Runs"
-        subtitle="Last 50 ingestion runs across all sources"
+        title="Run History"
+        subtitle="The 50 most recent data ingestion runs across all sources — click a row to see the full run detail."
       >
         {runsQ.isLoading && <TableSkeleton rows={8} />}
         {runsQ.isError && (
@@ -351,8 +375,8 @@ export default function AdminOperationsPage() {
       {/* Section D — Data Quality */}
       <Section
         id="section-quality"
-        title="Section D — Data Quality"
-        subtitle="Active quality checks: current value vs threshold"
+        title="Data Quality"
+        subtitle="Automated checks that compare current pipeline metrics against expected thresholds — alerts appear here when a check fails."
       >
         {qualityQ.isLoading && <TableSkeleton rows={4} />}
         {qualityQ.isError && (
@@ -363,8 +387,8 @@ export default function AdminOperationsPage() {
         )}
         {qualityQ.data && qualityQ.data.length === 0 && (
           <EmptyState
-            title="All quality checks passing"
-            description="No active issues."
+            title="No quality evaluations yet"
+            description="No quality evaluations have run yet — this is not a clean-bill confirmation."
           />
         )}
         {qualityQ.data && qualityQ.data.length > 0 && (
@@ -384,8 +408,8 @@ export default function AdminOperationsPage() {
       {/* Section E — Platform Settings (stub) */}
       <Section
         id="section-settings"
-        title="Section E — Platform Settings"
-        subtitle="Global configuration — Phase 4"
+        title="Platform Settings"
+        subtitle="Global operator configuration — admin access, notification thresholds, and maintenance controls."
       >
         <SettingsStub />
       </Section>
@@ -401,7 +425,7 @@ export default function AdminOperationsPage() {
 
       {/* Source logs drawer */}
       <SideDrawer
-        title={`Source Logs — ${sourceDrawer ?? ''}`}
+        title={sourceDrawerName ? `Logs — ${sourceDrawerName}` : 'Source Logs'}
         open={!!sourceDrawer}
         onClose={() => setSourceDrawer(null)}
       >
