@@ -11,6 +11,7 @@ import * as React from 'react';
 import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatDateTime, formatCurrency } from './utils';
+import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 import type { AdminSubscriptionRow } from '@/features/admin/api';
 
@@ -59,16 +60,19 @@ export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionT
               className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
             >
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {sub.user_id.slice(0, 8)}…
+                {sub.user_id ? sub.user_id.slice(0, 8) + '…' : '—'}
               </td>
               <td className="py-2.5 pr-4 text-ink-secondary text-[11px]">
                 {sub.email}
               </td>
               <td className="py-2.5 pr-4 font-medium text-ink">
-                {sub.plan}
+                {displayLabel(sub.plan, 'tier')}
               </td>
               <td className="py-2.5 pr-4">
                 {subStatusBadge(sub.status)}
+                <span className="ml-1.5 text-[11px] text-ink-secondary">
+                  {displayLabel(sub.status, 'subscription')}
+                </span>
               </td>
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
                 {sub.current_period_end ? formatDateTime(sub.current_period_end) : '—'}

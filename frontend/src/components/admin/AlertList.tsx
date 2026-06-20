@@ -28,7 +28,7 @@ const SEVERITY_ICON: Record<string, React.ElementType> = {
 
 export function AlertList({ alerts }: AlertListProps) {
   if (alerts.length === 0) {
-    return <p className="text-small text-ink-muted py-4 text-center">No recent alerts.</p>;
+    return <p className="text-small text-ink-muted py-4 text-center">Alerting is not yet active — alerts will appear here once wired.</p>;
   }
 
   return (

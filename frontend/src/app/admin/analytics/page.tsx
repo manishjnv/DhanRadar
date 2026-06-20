@@ -156,11 +156,16 @@ export default function AdminAnalyticsPage() {
                 value={analyticsQ.data.reports_generated.toLocaleString('en-IN')}
                 status="neutral"
               />
-              <StatCard
-                title="Premium Conversions"
-                value={analyticsQ.data.premium_conversions.toLocaleString('en-IN')}
-                status={analyticsQ.data.premium_conversions > 0 ? 'healthy' : 'neutral'}
-              />
+              <div className="flex flex-col gap-1">
+                <StatCard
+                  title="Premium Conversions"
+                  value={analyticsQ.data.premium_conversions.toLocaleString('en-IN')}
+                  status={analyticsQ.data.premium_conversions > 0 ? 'healthy' : 'neutral'}
+                />
+                <p className="text-caption text-ink-muted">
+                  Counts all non-free plan records, including past or cancelled — not only active paying users.
+                </p>
+              </div>
             </div>
           </>
         )}
