@@ -23,6 +23,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 - **Prevention:** when a `deploy.resources.limits.memory` change is made for an OOM fix, update `CAP_MB` in the same PR (the gate and the footprint must move together). The cap is a discipline gate, not a hard ceiling — the box has ~6 GB; raise it deliberately with a note + RCA, never silently.
 - **Phase/area:** Infra / docker-compose memory budget (CI deterministic gate).
 
+### 2026-06-20 — celery-mood OOM: macro breadth did a live yfinance fetch on cache miss
+
+- **Symptom:** `compute_mood_snapshot` SIGKILL'd the `dhanradar-celery-mood` worker on off-hours runs even after the 128M→192M bump — `WorkerLostError: Worker exited prematurely: signal 9 (SIGKILL)`, no Python traceback, `yfinance` `TzCache` log lines immediately before the kill. Mood snapshots had not persisted since 2026-06-16. (`docker State.OOMKilled=false` because a worker *child* pid, not the container init, was memcg-killed — inspect the kernel `oom-kill` log, not just the docker flag.)
+- **Root cause:** `YahooMacroProvider._fetch_breadth_ratio` (added PR #247) read the `signal:breadth:last` Redis cache first, but on a miss fell back to a LIVE ~50-ticker NIFTY-50 `yfinance.download` (pandas) inside the 192M mood worker. The cache is pre-warmed only during market hours (`market_data_refresh`, TTL 3600s), so any off-hours / cache-expired run triggered the heavy download → memory spike → OOM. A provider running in the memory-tight mood worker should never do the heavy fetch.
+- **Fix:** PR #272 made `_fetch_breadth_ratio` **cache-only** — reads `signal:breadth:last`, returns `None` on miss/error (breadth omitted → graceful 6/11 degraded), never a live fetch. The heavy NIFTY-50 download stays solely in the `market_data_refresh` pre-warm task. Removed the now-unused `asyncio` import + `_TTL_BREADTH_SEC`. Verified on prod: warm cache → `mood: ... (7/11 inputs, ok)` persisted; empty cache → `6/11, degraded`, worker `restarts=0`, no SIGKILL.
+- **Prevention:** code that runs in a memory-capped worker (celery-mood = 192M) must be a pure cache consumer — never run a pandas/yfinance bulk download there; the heavy fetch belongs to a dedicated pre-warm task sized for it. When wiring "cache-first with live fallback," ask *which worker the fallback executes in* and whether its cgroup limit survives the spike. Verify a data-pipeline fix on BOTH the warm-cache and cache-miss paths (the miss path is the dangerous one).
+- **Phase/area:** Mood Compass / market-data ingestion (celery-mood worker memory).
+
 ### 2026-06-19 — Admin Phase 6: AMFI scheme-master ingested 0 rows (wrong delimiter assumption; test masked it)
 
 - **Symptom:** post-deploy, the `mf_scheme_master_refresh` task ran to `status=success` but wrote **0 rows** (`0 written, 0 failed`) against the live AMFI feed — a false-healthy source. Unit tests were green (27 passed).
