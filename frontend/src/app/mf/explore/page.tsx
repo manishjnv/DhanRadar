@@ -497,29 +497,40 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function ExplorePage() {
+function ExplorePageContent() {
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get('category');
 
   return (
-    <MaybeShell maxWidth="wide">
-      <div className="flex flex-col gap-6">
-        <div>
-          <p className="font-mono text-caption uppercase text-royal mb-1">
-            Mutual Funds
-          </p>
-          <h1 className="text-h2 text-ink">Fund Explorer</h1>
-          <p className="mt-1 text-small text-ink-secondary">
-            Compare funds by rank, assessment, and returns — educational analysis only
-          </p>
-        </div>
-
-        <Card>
-          <CardBody>
-            <ExplorerBody initialCategory={initialCategory} />
-          </CardBody>
-        </Card>
+    <div className="flex flex-col gap-6">
+      <div>
+        <p className="font-mono text-caption uppercase text-royal mb-1">
+          Mutual Funds
+        </p>
+        <h1 className="text-h2 text-ink">Fund Explorer</h1>
+        <p className="mt-1 text-small text-ink-secondary">
+          Compare funds by rank, assessment, and returns — educational analysis only
+        </p>
       </div>
+
+      <Card>
+        <CardBody>
+          <ExplorerBody initialCategory={initialCategory} />
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+export default function ExplorePage() {
+  // useSearchParams must sit under a Suspense boundary now that this page is
+  // public and statically prerendered (outside the (app) group it no longer
+  // inherits the auth-guarded dynamic render).
+  return (
+    <MaybeShell maxWidth="wide">
+      <React.Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+        <ExplorePageContent />
+      </React.Suspense>
     </MaybeShell>
   );
 }

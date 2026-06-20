@@ -266,7 +266,9 @@ export default function FundDetailPage() {
   return (
     <MaybeShell>
       <div className="flex flex-col gap-6">
-        <FundDetailView />
+        <React.Suspense fallback={<FundDetailSkeleton />}>
+          <FundDetailView />
+        </React.Suspense>
       </div>
     </MaybeShell>
   );
