@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from dhanradar.ai_gateway.quality import _ADVISORY_RE
 from dhanradar.market_data.breadth import fetch_nifty50_advances_declines_sync
-from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood
+from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood, factor_tier
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
 from dhanradar.scoring.engine.schemas import (
     DISCLAIMER_VERSION,
@@ -63,6 +63,21 @@ _FACTOR_LABELS: dict[str, str] = {
 def _labelize(keys: list[str]) -> list[str]:
     """Map raw signal keys to human-readable labels; unknown keys pass through unchanged."""
     return [_FACTOR_LABELS.get(k, k) for k in keys]
+
+
+def _factor_objs(keys: list[str], input_vector: dict | None) -> list[dict]:
+    """Build the public {label, tier} factor objects for the driver bars.
+
+    The COARSE 3-way magnitude tier is derived server-side from the persisted
+    normalized value (input_vector) and the factor weight — the numeric strength /
+    value / weight is NEVER emitted, only the tier string (non-neg #2). A factor
+    missing from the input vector falls back to the lowest tier safely.
+    """
+    iv = input_vector if isinstance(input_vector, dict) else {}
+    return [
+        {"label": _FACTOR_LABELS.get(k, k), "tier": factor_tier(iv.get(k), WEIGHTS.get(k, 0.0))}
+        for k in keys
+    ]
 
 # Defense-in-depth advisory screen over the FREE-TEXT commentary before publish — no
 # advisory verb may reach a public surface (non-neg #1). We REUSE the AI gateway's
@@ -147,8 +162,8 @@ def _public_dict(result: MoodResult, snapshot_date: date, commentary: str | None
         "regime": result.regime,
         "confidence_band": result.confidence_band,
         "data_quality": result.data_quality,
-        "contributing_factors": _labelize(list(result.contributing_factors)),
-        "contradicting_factors": _labelize(list(result.contradicting_factors)),
+        "contributing_factors": _factor_objs(list(result.contributing_factors), result.input_vector),
+        "contradicting_factors": _factor_objs(list(result.contradicting_factors), result.input_vector),
         "commentary": commentary,
         "disclosure": DISCLOSURE_BUNDLE,
         "not_advice": NOT_ADVICE,
@@ -210,6 +225,7 @@ def unavailable_public() -> MoodPublic:
     """
     return MoodPublic(
         snapshot_date="",
+        snapshot_at=None,
         regime="data_unavailable",
         confidence_band="insufficient_data",
         data_quality="unavailable",
@@ -282,10 +298,12 @@ async def get_latest(db: Any) -> MoodPublic | None:
         return None
     trend = await _compute_trend(db)
     return MoodPublic(
-        snapshot_date=row.snapshot_date.isoformat(), regime=row.regime,
+        snapshot_date=row.snapshot_date.isoformat(),
+        snapshot_at=row.snapshot_time.isoformat() if row.snapshot_time else None,
+        regime=row.regime,
         confidence_band=row.confidence_band, data_quality=row.data_quality,
-        contributing_factors=_labelize(list(row.contributing_factors or [])),
-        contradicting_factors=_labelize(list(row.contradicting_factors or [])),
+        contributing_factors=_factor_objs(list(row.contributing_factors or []), row.input_vector),
+        contradicting_factors=_factor_objs(list(row.contradicting_factors or []), row.input_vector),
         commentary=row.ai_commentary, disclosure=DISCLOSURE_BUNDLE,
         not_advice=NOT_ADVICE, disclaimer_version=DISCLAIMER_VERSION,
         trend=trend,
@@ -538,12 +556,12 @@ async def get_embed_html(db: Any) -> str:
 
     contrib_html = ""
     if pub.contributing_factors:
-        items = "".join(f"<li>{f}</li>" for f in pub.contributing_factors)
+        items = "".join(f"<li>{f.label}</li>" for f in pub.contributing_factors)
         contrib_html = f"<p style='margin:6px 0 2px;font-weight:600;font-size:12px;'>Supporting signals:</p><ul style='margin:0;padding-left:18px;font-size:12px;'>{items}</ul>"
 
     contra_html = ""
     if pub.contradicting_factors:
-        items = "".join(f"<li>{f}</li>" for f in pub.contradicting_factors)
+        items = "".join(f"<li>{f.label}</li>" for f in pub.contradicting_factors)
         contra_html = f"<p style='margin:6px 0 2px;font-weight:600;font-size:12px;'>Contradicting signals:</p><ul style='margin:0;padding-left:18px;font-size:12px;'>{items}</ul>"
 
     trend_html = (

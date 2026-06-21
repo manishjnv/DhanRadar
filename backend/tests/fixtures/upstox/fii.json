@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "data": {
+    "NSE_EQ|CASH": [
+      {"time_stamp": "2026-06-19", "buy_amount": 18500.5, "sell_amount": 12300.25},
+      {"time_stamp": "2026-06-18", "buy_amount": 12000.0, "sell_amount": 11000.0}
+    ]
+  }
+}

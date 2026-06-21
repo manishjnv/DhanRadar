@@ -1,0 +1,49 @@
+{
+  "articles": [
+    {
+      "url": "https://economictimes.indiatimes.com/mf/mutual-fund-inflows-record-may.cms",
+      "url_mobile": "",
+      "title": "Mutual fund inflows hit a record high in May, AMFI data shows",
+      "seendate": "20260621T123000Z",
+      "socialimage": "https://img.economictimes.com/x.jpg",
+      "domain": "economictimes.indiatimes.com",
+      "language": "English",
+      "sourcecountry": "India",
+      "tone": "-2.5",
+      "V2Tone": "-2.5,1.1,3.6,4.7,0,0,201"
+    },
+    {
+      "url": "https://www.livemint.com/markets/rbi-monetary-policy-repo-rate.html",
+      "url_mobile": "",
+      "title": "RBI monetary policy: repo rate held steady for the sixth time",
+      "seendate": "20260621T090000Z",
+      "socialimage": "",
+      "domain": "livemint.com",
+      "language": "English",
+      "sourcecountry": "India",
+      "tone": "0.4",
+      "V2Tone": "0.4,2.0,1.6,3.6,0,0,150"
+    },
+    {
+      "url": "https://example.com/sports/district-cricket-trophy.html",
+      "url_mobile": "",
+      "title": "Local cricket team wins district trophy in a thrilling final",
+      "seendate": "20260621T060000Z",
+      "socialimage": "",
+      "domain": "example.com",
+      "language": "English",
+      "sourcecountry": "India",
+      "tone": "5.8",
+      "V2Tone": "5.8,6.0,0.2,6.2,0,0,90"
+    },
+    {
+      "url": "https://www.business-standard.com/markets/no-title-item.html",
+      "url_mobile": "",
+      "title": "",
+      "seendate": "20260621T050000Z",
+      "domain": "business-standard.com",
+      "language": "English",
+      "sourcecountry": "India"
+    }
+  ]
+}

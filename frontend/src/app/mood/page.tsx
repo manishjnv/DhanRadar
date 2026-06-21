@@ -23,9 +23,13 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { DriverFactorList } from '@/components/mood/DriverFactorList';
+import { MoodMovement } from '@/components/mood/MoodMovement';
+import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
+import { relativeTime } from '@/features/mood/relative-time';
 
 // ---------------------------------------------------------------------------
 // History strip — 30 small colored squares, one per day
@@ -63,42 +67,23 @@ function HistoryStrip({ days }: { days: number }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Factor lists — contributing / contradicting
-// Uses neutral "+" / "−" markers — NOT green-up/red-down arrows that imply buy/sell
-// ---------------------------------------------------------------------------
-function FactorList({
-  heading,
-  items,
-  marker,
-}: {
-  heading: string;
-  items: string[];
-  marker: '+' | '−';
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div>
-      <p className="text-small font-medium text-ink mb-1">{heading}</p>
-      <ul className="space-y-1">
-        {items.map((item) => (
-          <li key={item} className="flex items-start gap-1.5 text-small text-ink">
-            <span className="text-ink-muted select-none" aria-hidden="true">
-              {marker}
-            </span>
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+// Factor lists are rendered by the shared DriverFactorList (numberless tier bars).
 
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 export default function MoodPage() {
   const { data, isLoading, isError, error, refetch } = useMoodCurrent();
+  // days=2 → today + the prior snapshot, for the "vs yesterday" hero line.
+  const { data: recent } = useMoodHistory(2);
+
+  // "Yesterday" = the most recent snapshot whose date differs from today's.
+  // History is ordered snapshot_date.desc(), so the first non-today row is it.
+  const yesterdayRegime: Regime | null = React.useMemo(() => {
+    if (!data || !recent) return null;
+    const prior = recent.find((h) => h.snapshot_date !== data.snapshot_date);
+    return prior ? prior.regime : null;
+  }, [data, recent]);
 
   const is404 =
     isError && error instanceof ApiError && error.problem.status === 404;
@@ -172,6 +157,25 @@ export default function MoodPage() {
                 />
               </div>
 
+              {/* How sentiment moved vs yesterday — labels + trend word only. */}
+              <div className="mt-2 flex justify-center text-center">
+                <MoodMovement
+                  todayRegime={data.regime as Regime}
+                  yesterdayRegime={yesterdayRegime}
+                  trend={data.trend}
+                />
+              </div>
+
+              {/* Plain-language WHY behind the confidence band — words only, no
+                  counts/percent/score (non-neg #2); data reliability only (#1). */}
+              <div className="mt-2 flex justify-center">
+                <ConfidenceExplanation
+                  dataQuality={data.data_quality}
+                  confidenceBand={data.confidence_band}
+                  className="max-w-prose text-center"
+                />
+              </div>
+
               {/* Commentary — only shown when data_quality ok and present */}
               <div className="mt-4">
                 {data.data_quality === 'ok' && data.commentary ? (
@@ -191,12 +195,12 @@ export default function MoodPage() {
                     What&rsquo;s driving this
                   </p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FactorList
+                    <DriverFactorList
                       heading="Supporting"
                       items={data.contributing_factors}
                       marker="+"
                     />
-                    <FactorList
+                    <DriverFactorList
                       heading="Counterweights"
                       items={data.contradicting_factors}
                       marker="−"
@@ -214,8 +218,13 @@ export default function MoodPage() {
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}
           {/* ------------------------------------------------------------ */}
           <footer className="space-y-2">
-            <p className="font-mono text-caption tabular-nums text-ink-muted">
-              As of {data.snapshot_date}
+            <p
+              className="font-mono text-caption tabular-nums text-ink-muted"
+              title={data.snapshot_at ?? data.snapshot_date}
+            >
+              {data.snapshot_at
+                ? `updated ${relativeTime(data.snapshot_at)}`
+                : `As of ${data.snapshot_date}`}
             </p>
             {/* Contextual #9 disclosure from API (next to the mood read). */}
             <DisclosureBundle

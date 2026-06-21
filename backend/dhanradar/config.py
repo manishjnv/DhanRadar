@@ -131,6 +131,16 @@ class Settings(BaseSettings):
     KITE_TOTP_SECRET: str = ""
 
     # ------------------------------------------------------------------
+    # Upstox Analytics (Mood Compass FII / DII / PCR — Phase 2)
+    # ------------------------------------------------------------------
+    # Read-only 1-year Upstox Analytics Token for the market-data API
+    # (/v2/market/fii, /dii, /pcr). EMPTY ⇒ UpstoxAnalyticsProvider returns no
+    # signals (fail-soft): the Mood engine runs without FII/DII/PCR rather than
+    # crashing or imputing a missing factor. Operator-set; NEVER commit a real
+    # token (kept out of the repo like every other secret).
+    UPSTOX_ANALYTICS_TOKEN: str = ""
+
+    # ------------------------------------------------------------------
     # Razorpay
     # ------------------------------------------------------------------
     RAZORPAY_KEY_ID: str = ""

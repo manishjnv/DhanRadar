@@ -17,6 +17,7 @@ Usage in tasks/mood.py:
 from __future__ import annotations
 
 import logging
+import math
 
 from dhanradar.market_data.config import DataKind, DataRequest
 from dhanradar.market_data.events import MacroSignalReceived
@@ -133,6 +134,74 @@ def norm_usd_inr(pct_change: float) -> float:
     return _clamp((-pct_change + 1.0) / 2.0)
 
 
+# News-sentiment tone → [0, 1] (1 = greed/bullish). The tone is a DESCRIPTIVE
+# 5-point label produced by the governed AI gateway (mood/news_sentiment.py) from
+# recent headlines — never a raw number from the model. This map turns the
+# descriptive label into the engine's 0–1 scale. Unknown labels → None (signal
+# absent; never imputed). news_sentiment is NOT registered in _NORMALIZERS below
+# because it is AI-derived, not adapter-sourced — it is injected into the inputs
+# dict by the mood task after fetch_mood_inputs runs.
+_NEWS_TONE_SCORES: dict[str, float] = {
+    "negative": 0.1,
+    "slightly_negative": 0.3,
+    "neutral": 0.5,
+    "slightly_positive": 0.7,
+    "positive": 0.9,
+}
+
+
+def norm_news_sentiment(tone: str) -> float | None:
+    """Map a descriptive news-sentiment tone label to [0, 1]; 1 = greed/bullish.
+
+    negative → 0.1, slightly_negative → 0.3, neutral → 0.5,
+    slightly_positive → 0.7, positive → 0.9. Returns None for any unrecognised
+    label so the engine drops the signal rather than imputing a value.
+    """
+    return _NEWS_TONE_SCORES.get(tone)
+
+
+# Institutional net-flow saturation thresholds (₹Cr). A daily net flow of this
+# magnitude maps to ≈0.88 (greed) / ≈0.12 (fear) via tanh; larger days asymptote
+# toward 1 / 0 without ever pegging. FII days run larger than DII, so the two have
+# separate constants even though they start equal.
+#
+# PROVISIONAL — normalization curve pending scoring/compliance gate. The dig
+# (docs/research/mood-data-sourcing-2026-06-21.md §2) recommends scaling net flow
+# against a ROLLING WINDOW rather than a fixed constant; that refinement is a
+# Tier-C scoring decision deferred to the gate. This fixed-threshold tanh is a
+# documented first-pass only.
+_FII_FLOW_SATURATION_CR = 10_000.0
+_DII_FLOW_SATURATION_CR = 10_000.0
+
+
+def norm_fii_flows(net_flow_cr: float) -> float:
+    """
+    Map FII daily net cash-market flow (₹Cr) to [0, 1]; 1 = greed/bullish.
+
+    net_flow_cr = buy_amount − sell_amount. Net inflow (buying) → toward 1,
+    net outflow (selling) → toward 0. Formula: clamp(0.5 + 0.5·tanh(flow / S)).
+    - 0 ₹Cr        → 0.50 (neutral)
+    - +10,000 ₹Cr  → ≈0.88 (greed)
+    - −10,000 ₹Cr  → ≈0.12 (fear)
+
+    PROVISIONAL — normalization curve pending scoring/compliance gate.
+    """
+    return _clamp(0.5 + 0.5 * math.tanh(net_flow_cr / _FII_FLOW_SATURATION_CR))
+
+
+def norm_dii_flows(net_flow_cr: float) -> float:
+    """
+    Map DII daily net cash-market flow (₹Cr) to [0, 1]; 1 = greed/bullish.
+
+    Same convention/formula as norm_fii_flows with the DII saturation constant:
+    net inflow → toward 1, net outflow → toward 0,
+    clamp(0.5 + 0.5·tanh(flow / S)); 0 ₹Cr → 0.50.
+
+    PROVISIONAL — normalization curve pending scoring/compliance gate.
+    """
+    return _clamp(0.5 + 0.5 * math.tanh(net_flow_cr / _DII_FLOW_SATURATION_CR))
+
+
 # ---------------------------------------------------------------------------
 # Adapter-based fetch
 # ---------------------------------------------------------------------------
@@ -142,6 +211,8 @@ _NORMALIZERS: dict[str, object] = {
     "india_vix": norm_india_vix,
     "market_breadth": norm_market_breadth,
     "put_call_ratio": norm_put_call_ratio,
+    "fii_flows": norm_fii_flows,
+    "dii_flows": norm_dii_flows,
     "global_indices": norm_global_indices,
     "us_bond_10y": norm_us_bond_10y,
     "oil_brent": norm_oil_brent,

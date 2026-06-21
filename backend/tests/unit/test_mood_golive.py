@@ -30,6 +30,7 @@ def _make_row(mood_score: float, snapshot_date: date | None = None) -> MagicMock
     row = MagicMock()
     row.mood_score = mood_score
     row.snapshot_date = snapshot_date or date.today()
+    row.snapshot_time = datetime(2026, 6, 21, 9, 0, tzinfo=UTC)
     row.regime = "neutral"
     row.confidence_band = "medium"
     row.data_quality = "ok"
