@@ -6,9 +6,10 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Upload, Compass, BookOpen, GraduationCap,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
-  ShieldCheck,
+  ShieldCheck, Search,
   type LucideIcon,
 } from 'lucide-react';
+import { CommandPalette } from '@/components/ui/CommandPalette';
 import { cn } from '@/lib/cn';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 import { useMe } from '@/features/auth/api';
@@ -158,10 +159,12 @@ function SidebarContent({
 function Topbar({
   userSlot,
   onMenuOpen,
+  onSearchOpen,
   menuOpen = false,
 }: {
   userSlot?: React.ReactNode;
   onMenuOpen?: () => void;
+  onSearchOpen?: () => void;
   menuOpen?: boolean;
 }) {
   return (
@@ -178,7 +181,32 @@ function Topbar({
         </button>
         <span className="text-small text-ink-muted">Research Analytics</span>
       </div>
-      {userSlot}
+      <div className="flex items-center gap-3">
+        {/* Search button — opens the ⌘K command palette */}
+        <button
+          type="button"
+          aria-label="Search funds"
+          onClick={onSearchOpen}
+          className={cn(
+            'flex items-center gap-2 rounded-md px-3 py-1.5',
+            'border border-line bg-surface-2 text-small text-ink-secondary',
+            'hover:bg-surface-3 hover:text-ink',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+            'transition-colors',
+          )}
+        >
+          <Search size={14} strokeWidth={2} aria-hidden="true" />
+          <span className="hidden sm:inline">Search funds</span>
+          {/* Keyboard hint chip — hidden on very small screens */}
+          <span
+            className="hidden rounded border border-line bg-surface px-1 font-mono text-caption text-ink-muted sm:inline"
+            aria-hidden="true"
+          >
+            ⌘K
+          </span>
+        </button>
+        {userSlot}
+      </div>
     </header>
   );
 }
@@ -251,8 +279,9 @@ export interface AppShellProps {
 }
 
 export function AppShell({ children, userSlot }: AppShellProps) {
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
-  const [collapsed, setCollapsed]   = React.useState(false);
+  const [drawerOpen,  setDrawerOpen]  = React.useState(false);
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [collapsed,   setCollapsed]   = React.useState(false);
   const pathname = usePathname();
   const { data: me } = useMe();
   const isAdmin = me?.is_admin === true;
@@ -272,6 +301,19 @@ export function AppShell({ children, userSlot }: AppShellProps) {
 
   React.useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
+  // Global ⌘K / Ctrl+K shortcut — opens the command palette
+  React.useEffect(() => {
+    function handleGlobalKey(e: KeyboardEvent) {
+      const isModifier = e.metaKey || e.ctrlKey;
+      if (isModifier && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    }
+    document.addEventListener('keydown', handleGlobalKey);
+    return () => document.removeEventListener('keydown', handleGlobalKey);
+  }, []);
+
   return (
     <div className="flex h-screen overflow-hidden bg-bg">
       {/* Desktop sidebar — animates between w-56 (expanded) and w-14 (collapsed) */}
@@ -288,8 +330,16 @@ export function AppShell({ children, userSlot }: AppShellProps) {
       {/* Mobile drawer */}
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} isAdmin={isAdmin} />
 
+      {/* ⌘K Command palette */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userSlot={userSlot} menuOpen={drawerOpen} onMenuOpen={() => setDrawerOpen(true)} />
+        <Topbar
+          userSlot={userSlot}
+          menuOpen={drawerOpen}
+          onMenuOpen={() => setDrawerOpen(true)}
+          onSearchOpen={() => setPaletteOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex min-h-full flex-col">
             <div className="flex-1">{children}</div>
