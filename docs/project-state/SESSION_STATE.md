@@ -1,5 +1,36 @@
 # DhanRadar — Session State
 
+## 2026-06-21 — Mood Phase 2 + Phase 1 UI + SIP calculator: 8 features shipped & DEPLOYED
+
+**Status:** DONE + DEPLOYED to KVM4 — production at `71dd012` (PR #290 squash-merge); `/api/v1/health`
+200; all 9 dhanradar containers healthy. No new alembic migrations.
+
+**Shipped (8 features, built as parallel branches):**
+
+- Mood **regime-vs-yesterday** trend label on the hero ("Yesterday: X → Today: Y · trend …").
+- Mood **confidence-in-words** — plain-language "why this confidence" from data_quality + band.
+- Mood **relative "updated X ago"** — new `MoodPublic.snapshot_at` from the existing `snapshot_time` col.
+- Mood **numberless driver bars** — coarse 3-way tier per factor (ADR-0036); no numeric in API/DOM.
+- Mood **news-sentiment AI signal** — governed-gateway consumer (Tier-B), the 11th mood factor.
+- **Upstox** FII/DII/PCR provider — **INERT** (no token, not registered in the MACRO_SIGNAL ladder).
+- **GDELT** sanctioned news ingestion source (B56-f5) — headline metadata only, fail-soft.
+- Generic **SIP/compounding educational calculator** at `/learn/calculators/sip`.
+
+**Process:** 8 parallel branches → independent adversarial Tier-B/compliance/sanctioned-source review
+(Sonnet takeover; **all ACCEPT, no blocker**) → conditions applied → one integration branch → full
+gates + CI green (backend/frontend/migrations/guards; lint advisory red only) → deploy. **2 integration
+regressions caught + fixed** (see RCA 2026-06-21: ci_guards outbound-Bearer + snapshot_time mock).
+
+**Deferred / action items:** Upstox token + ladder registration + verify `NIFTY50` key + differentiate
+FII/DII saturation constants; GDELT is KVM4-reachable but currently **429 rate-limited** (fails soft to
+RSS/curated); founder decisions (Upstox account, news tier GDELT-only vs +NewsData, Upstox ToS enquiry).
+
+**Verified live:** `/api/v1/market/mood` 200 with `snapshot_at` + `trend` + factors `{label, tier}`
+(no numeric leak); `/mood` and `/learn/calculators/sip` render. Tier-B news-AI + commentary first
+exercise on the next mood cron (09:00/16:00 IST) — worth a log check.
+
+---
+
 ## 2026-06-21 — MF risk-adjusted analytics shipped + deployed (Wave-1 task 3)
 
 **Status:** DONE + DEPLOYED to KVM4. Production at `090bb93`, box alembic `0042`. `/api/v1/health` 200.
