@@ -25,6 +25,7 @@ import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { DriverFactorList } from '@/components/mood/DriverFactorList';
 import { MoodMovement } from '@/components/mood/MoodMovement';
+import { MoodTimeline } from '@/components/mood/MoodTimeline';
 import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
@@ -237,6 +238,9 @@ export default function MoodPage() {
               )}
             </CardBody>
           </Card>
+
+          {/* How the mood label moved over time — labels only, no scores/returns. */}
+          <MoodTimeline todayRegime={data.regime as Regime} todayDate={data.snapshot_date} />
 
           {/* 30-day history strip */}
           <HistoryStrip days={30} />
