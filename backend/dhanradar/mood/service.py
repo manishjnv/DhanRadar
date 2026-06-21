@@ -225,6 +225,7 @@ def unavailable_public() -> MoodPublic:
     """
     return MoodPublic(
         snapshot_date="",
+        snapshot_at=None,
         regime="data_unavailable",
         confidence_band="insufficient_data",
         data_quality="unavailable",
@@ -297,7 +298,9 @@ async def get_latest(db: Any) -> MoodPublic | None:
         return None
     trend = await _compute_trend(db)
     return MoodPublic(
-        snapshot_date=row.snapshot_date.isoformat(), regime=row.regime,
+        snapshot_date=row.snapshot_date.isoformat(),
+        snapshot_at=row.snapshot_time.isoformat() if row.snapshot_time else None,
+        regime=row.regime,
         confidence_band=row.confidence_band, data_quality=row.data_quality,
         contributing_factors=_factor_objs(list(row.contributing_factors or []), row.input_vector),
         contradicting_factors=_factor_objs(list(row.contradicting_factors or []), row.input_vector),

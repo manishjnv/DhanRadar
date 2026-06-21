@@ -29,6 +29,7 @@ import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
+import { relativeTime } from '@/features/mood/relative-time';
 
 // ---------------------------------------------------------------------------
 // History strip — 30 small colored squares, one per day
@@ -217,8 +218,13 @@ export default function MoodPage() {
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}
           {/* ------------------------------------------------------------ */}
           <footer className="space-y-2">
-            <p className="font-mono text-caption tabular-nums text-ink-muted">
-              As of {data.snapshot_date}
+            <p
+              className="font-mono text-caption tabular-nums text-ink-muted"
+              title={data.snapshot_at ?? data.snapshot_date}
+            >
+              {data.snapshot_at
+                ? `updated ${relativeTime(data.snapshot_at)}`
+                : `As of ${data.snapshot_date}`}
             </p>
             {/* Contextual #9 disclosure from API (next to the mood read). */}
             <DisclosureBundle

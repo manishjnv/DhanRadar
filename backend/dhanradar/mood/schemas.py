@@ -22,6 +22,7 @@ class MoodFactor(BaseModel):
 
 class MoodPublic(BaseModel):
     snapshot_date: str
+    snapshot_at: str | None = None    # ISO 8601 tz-aware datetime of the snapshot (for relative time)
     regime: str                       # extreme_fear|fear|neutral|greed|extreme_greed|data_unavailable
     confidence_band: str              # high|medium|low|insufficient_data
     data_quality: str                 # ok|degraded|unavailable
