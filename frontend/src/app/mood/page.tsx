@@ -23,6 +23,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { MoodMovement } from '@/components/mood/MoodMovement';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
@@ -99,6 +100,16 @@ function FactorList({
 // ---------------------------------------------------------------------------
 export default function MoodPage() {
   const { data, isLoading, isError, error, refetch } = useMoodCurrent();
+  // days=2 → today + the prior snapshot, for the "vs yesterday" hero line.
+  const { data: recent } = useMoodHistory(2);
+
+  // "Yesterday" = the most recent snapshot whose date differs from today's.
+  // History is ordered snapshot_date.desc(), so the first non-today row is it.
+  const yesterdayRegime: Regime | null = React.useMemo(() => {
+    if (!data || !recent) return null;
+    const prior = recent.find((h) => h.snapshot_date !== data.snapshot_date);
+    return prior ? prior.regime : null;
+  }, [data, recent]);
 
   const is404 =
     isError && error instanceof ApiError && error.problem.status === 404;
@@ -169,6 +180,15 @@ export default function MoodPage() {
                 <MoodGauge
                   regime={data.regime as Regime}
                   confidenceBand={data.confidence_band}
+                />
+              </div>
+
+              {/* How sentiment moved vs yesterday — labels + trend word only. */}
+              <div className="mt-2 flex justify-center text-center">
+                <MoodMovement
+                  todayRegime={data.regime as Regime}
+                  yesterdayRegime={yesterdayRegime}
+                  trend={data.trend}
                 />
               </div>
 

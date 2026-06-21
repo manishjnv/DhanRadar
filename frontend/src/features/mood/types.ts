@@ -14,6 +14,11 @@ export type ConfidenceBand = 'high' | 'medium' | 'low' | 'insufficient_data';
 
 export type DataQuality = 'ok' | 'degraded' | 'unavailable';
 
+// Non-numeric trend label derived server-side from the two most recent
+// snapshots (ADR-0023 / _compute_trend). The numeric diff is never exposed —
+// only this descriptive word reaches the client. `null` when < 2 snapshots.
+export type MoodTrend = 'improving' | 'stable' | 'deteriorating';
+
 // ---------------------------------------------------------------------------
 // GET /market/mood
 // ---------------------------------------------------------------------------
@@ -25,6 +30,7 @@ export interface MoodPublic {
   contributing_factors: string[];
   contradicting_factors: string[];
   commentary:           string | null;
+  trend:                MoodTrend | null;
   disclosure:           string;
   not_advice:           string;
   disclaimer_version:   string;
