@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Envs in which the B48 pre-launch consent kill-switch may take effect. This is an
@@ -197,6 +197,19 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     FOUNDING_ACCESS_UNTIL: datetime | None = datetime(
         2026, 12, 31, 23, 59, 59, tzinfo=UTC
+    )
+
+    # ------------------------------------------------------------------
+    # Risk-free rate proxy (Sharpe / Sortino denominators)
+    # ------------------------------------------------------------------
+    # Annual risk-free rate as a FRACTION (e.g. 0.065 = 6.5 %).
+    # Proxy for the RBI 91-day T-bill / 10Y G-sec rate (~6.5% as of 2026).
+    # TODO: replace with an ingested RBI DBIE macro indicator once the macro
+    # feed is live (B75 / macro_data_refresh task).
+    RISK_FREE_RATE_ANNUAL: float = Field(
+        default=0.065,
+        description="Annual risk-free proxy for Sharpe/Sortino (~6.5%). "
+                    "TODO: replace with ingested RBI 91-day T-bill / 10Y G-sec once the macro feed exists.",
     )
 
     # ------------------------------------------------------------------

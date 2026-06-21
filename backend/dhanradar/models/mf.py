@@ -27,6 +27,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -115,6 +116,46 @@ class MfFundMetrics(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Risk-adjusted metrics (migration 0042 — risk.py risk_adjusted_stats output).
+    sharpe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sortino_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volatility_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_1y_avg_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_1y_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_1y_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_1y_pct_positive: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class MfCategoryStats(Base):
+    """Per-category percentile distribution of key fund metrics.
+
+    Refreshed nightly by _metrics_refresh_pipeline after the per-fund upsert.
+    One row per (sebi_category, metric_key, as_of) — composite PK.
+    metric_key is one of 'return_1y_pct', 'return_3y_pct', 'max_drawdown_pct'
+    (other keys may be added later without a schema change).
+    p25/p50/p75/p90 are computed via risk.percentile() on the category cohort.
+    NULL fields mean fewer than _MIN_CATEGORY_FUNDS funds had a value for that
+    metric — rather than writing noisy percentiles on a thin cohort, the row is
+    skipped entirely.
+    """
+
+    __tablename__ = "mf_category_stats"
+    __table_args__ = (
+        PrimaryKeyConstraint("sebi_category", "metric_key", "as_of"),
+        _SCHEMA,
+    )
+
+    sebi_category: Mapped[str] = mapped_column(Text, nullable=False)
+    metric_key: Mapped[str] = mapped_column(Text, nullable=False)
+    p25: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p75: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class MfPortfolio(Base):
