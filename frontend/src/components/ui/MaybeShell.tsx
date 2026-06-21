@@ -44,9 +44,12 @@ export function MaybeShell({
   const widthClass = maxWidth === 'wide' ? 'max-w-6xl' : 'max-w-2xl';
 
   // Logged in → render within the app shell so the left nav stays consistent.
+  // `publicNav` surfaces the public destinations in the top bar (desktop) and
+  // the mobile drawer, so a signed-in user on a public page gets the public nav
+  // AND the workspace sidebar.
   if (user) {
     return (
-      <AppShell userSlot={<UserMenu />}>
+      <AppShell userSlot={<UserMenu />} publicNav>
         <div className={cn('mx-auto', widthClass)}>{children}</div>
       </AppShell>
     );
