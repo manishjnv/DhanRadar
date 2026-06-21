@@ -45,6 +45,19 @@ from dhanradar.mf.signals import _periodic_returns, _sorted_unique
 _PERIODS_PER_YEAR: int = 252          # AMFI NAV is business-daily
 _MIN_NAV_POINTS: int = 252            # < 1 trading year → refuse (all-None)
 
+# Minimum annualised volatility (as a FRACTION) below which Sharpe/Sortino are
+# withheld (NULL).  At ~0.0005 (0.05% annualised) the NAV series is effectively
+# constant — near-flat or stale/placeholder data — so the ratio denominator
+# collapses toward zero and the ratio explodes to ±10⁵–10⁶ (a meaningless
+# "garbage rate").  The MF-analytics governance (§20) is to FAIL TOWARD
+# WITHHOLDING a number, never to emit a guessed/garbage one.  This generalises
+# the exact ``vol == 0`` degenerate case to the near-zero neighbourhood.  The
+# measured volatility_pct is still stored (it is a real, if tiny, quantity);
+# only the unstable ratios are withheld.  Legitimate low-vol debt/liquid funds
+# (annualised vol ≥ ~0.1%) are unaffected — this targets the cause (vol → 0),
+# not the symptom (a large |Sharpe|), so a genuinely high Sharpe survives.
+_MIN_MEANINGFUL_VOL: float = 0.0005
+
 
 # ---------------------------------------------------------------------------
 # Output dataclass
@@ -55,7 +68,8 @@ class RiskStats:
     """Risk-adjusted metrics for a fund's NAV series.
 
     All values are None when the series is too short (< _MIN_NAV_POINTS points)
-    or mathematically undefined (e.g. Sharpe when vol == 0).
+    or mathematically undefined / unstable (e.g. Sharpe when annualised vol is
+    below _MIN_MEANINGFUL_VOL — a near-flat NAV series).
     volatility_pct is annualised stdev in PERCENT (not as a fraction).
     rolling_* stats come from rolling_1y_returns() with 30-day stepping.
     """
@@ -122,8 +136,8 @@ def risk_adjusted_stats(
     # Sharpe ratio (dimensionless).
     # (ann_ret − Rf) / σ_annual   — all in fractions.
     sharpe: float | None
-    if vol == 0.0:
-        # Zero vol → ratio undefined (constant NAV would be degenerate).
+    if vol < _MIN_MEANINGFUL_VOL:
+        # Near-zero vol → constant/near-flat NAV → ratio explodes → withhold.
         sharpe = None
     else:
         sharpe = (ann_ret - risk_free_annual) / vol
@@ -135,8 +149,9 @@ def risk_adjusted_stats(
     dd = math.sqrt(sum_neg_sq / n) * math.sqrt(_PERIODS_PER_YEAR)
 
     sortino: float | None
-    if dd == 0.0:
-        # No negative periods — Sortino is undefined / +∞ (report as None, honest).
+    if dd < _MIN_MEANINGFUL_VOL:
+        # No (or negligible) downside deviation — Sortino undefined / explodes
+        # toward +∞; report as None (honest withholding, same floor as Sharpe).
         sortino = None
     else:
         sortino = (ann_ret - risk_free_annual) / dd
