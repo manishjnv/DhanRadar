@@ -127,6 +127,15 @@ function zoneArc(pa: number, pb: number, r: number): string {
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
+// Filled wedge from the hub out to `r`, spanning a dial range — the soft "lit"
+// highlight behind the active zone (gives the dial a vibrant spotlight).
+function sectorPath(pa: number, pb: number, r: number): string {
+  const s = pointAt(pToA(pa), r);
+  const e = pointAt(pToA(pb), r);
+  const large = (pb - pa) * SWEEP > 180 ? 1 : 0;
+  return `M ${CX} ${CY} L ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)} Z`;
+}
+
 // Decorative animations — all disabled under prefers-reduced-motion.
 const ANIM_CSS = `
   .mg-arc    { animation: mgDraw 1.2s cubic-bezier(.22,.61,.36,1) both; }
@@ -188,8 +197,18 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
       >
         <style>{ANIM_CSS}</style>
 
-        {/* Five colour zones. The active zone is full-opacity + glow + draws in;
-            the rest are muted so the current reading stands out. */}
+        {/* Lit wedge behind the active zone — soft regime-coloured spotlight. */}
+        {ordinal !== null && (
+          <path
+            d={sectorPath(ordinal * 0.2, (ordinal + 1) * 0.2, R + STROKE / 2)}
+            fill={color}
+            opacity={0.16}
+            stroke="none"
+          />
+        )}
+
+        {/* Five colour zones. The active zone is full + glow + draws in; the rest
+            stay vivid-but-subdued so the whole dial reads as a colour scale. */}
         {ZONES.map((z, i) => {
           const zColor = REGIME_COLOR[z.regime];
           const active = ordinal === i;
@@ -201,7 +220,7 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
               style={
                 active
                   ? ({
-                      filter: `drop-shadow(0 0 5px ${zColor})`,
+                      filter: `drop-shadow(0 0 2px ${zColor}) drop-shadow(0 0 8px ${zColor})`,
                       ['--mg-dash' as string]: '100',
                     } as React.CSSProperties)
                   : undefined
@@ -209,9 +228,9 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
               d={d}
               fill="none"
               stroke={zColor}
-              strokeWidth={STROKE}
+              strokeWidth={active ? STROKE + 2 : STROKE}
               strokeLinecap="round"
-              opacity={isInsufficient ? 0.28 : active ? 1 : 0.26}
+              opacity={isInsufficient ? 0.4 : active ? 1 : 0.5}
               pathLength={active ? 100 : undefined}
               strokeDasharray={active ? '100' : undefined}
               strokeDashoffset={active ? 0 : undefined}
