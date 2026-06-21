@@ -19,8 +19,9 @@
  * contextual <DisclosureBundle/> next to the content stays in the children.
  *
  * `maxWidth` controls the content column: `'default'` (max-w-2xl) suits prose /
- * single-record pages; `'wide'` (max-w-6xl) suits data tables like the Fund
- * Explorer that need horizontal room.
+ * single-record pages; `'wide'` (max-w-6xl) suits most data tables; `'full'`
+ * (max-w-none) lets a dense table float edge-to-edge across the viewport (Fund
+ * Explorer).
  */
 
 import * as React from 'react';
@@ -38,10 +39,11 @@ export function MaybeShell({
   maxWidth = 'default',
 }: {
   children: React.ReactNode;
-  maxWidth?: 'default' | 'wide';
+  maxWidth?: 'default' | 'wide' | 'full';
 }) {
   const { data: user } = useMe();
-  const widthClass = maxWidth === 'wide' ? 'max-w-6xl' : 'max-w-2xl';
+  const widthClass =
+    maxWidth === 'full' ? 'max-w-none' : maxWidth === 'wide' ? 'max-w-6xl' : 'max-w-2xl';
 
   // Logged in → render within the app shell so the left nav stays consistent.
   if (user) {
