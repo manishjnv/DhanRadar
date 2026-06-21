@@ -159,6 +159,9 @@ async def fetch_news_sentiment(
             contains_personal_data=False,
             request_id=request_id,
         )
+    # ConsentNotVerifiedError cannot fire here (contains_personal_data=False), but is
+    # caught defensively: if a future change accidentally flips that flag, this fails
+    # SOFT (signal absent) rather than crashing the mood pipeline. Do not remove.
     except (GatewayError, BudgetExhaustedError, ConsentNotVerifiedError):
         logger.info("mood.news_sentiment: gateway withheld output — signal absent")
         return None

@@ -167,7 +167,7 @@ export function SipCalculator() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <p className="text-caption text-ink-muted">Projected value</p>
+              <p className="text-caption text-ink-muted">Illustrated value</p>
               <p
                 className="text-h2 font-mono tabular-nums text-ink"
                 data-testid="result-future-value"
