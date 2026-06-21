@@ -26,6 +26,10 @@ describe('DriverFactorList', () => {
     expect(container.querySelectorAll('[role="presentation"]')).toHaveLength(3);
     expect(container.textContent).toContain('Nifty Trend');
     expect(container.textContent).toContain('Supporting');
+    // each factor shows its qualitative tier WORD so the bar length is self-explanatory
+    expect(container.textContent).toContain('Strong');
+    expect(container.textContent).toContain('Moderate');
+    expect(container.textContent).toContain('Slight');
   });
 
   it('renders distinct discrete fill widths per tier (no inline numeric value)', () => {

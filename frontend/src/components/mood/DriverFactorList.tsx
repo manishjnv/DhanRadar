@@ -23,6 +23,15 @@ const TIER_FILL: Record<string, string> = {
   slight: 'w-1/3',
 };
 
+// Plain-language word for each tier, shown next to the bar so its length is
+// self-explanatory. Qualitative only — NO number (ADR-0036 allows the tier
+// string on the public surface; non-neg #2 only bans numerics).
+const TIER_LABEL: Record<string, string> = {
+  strong: 'Strong',
+  moderate: 'Moderate',
+  slight: 'Slight',
+};
+
 export interface DriverFactorListProps {
   heading: string;
   items: MoodFactor[];
@@ -37,15 +46,21 @@ export function DriverFactorList({ heading, items, marker }: DriverFactorListPro
       <ul className="space-y-2.5">
         {items.map((item) => (
           <li key={item.label} className="text-small text-ink">
-            <div className="flex items-center gap-1.5">
-              <span className="text-ink-muted select-none" aria-hidden="true">
-                {marker}
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="text-ink-muted select-none" aria-hidden="true">
+                  {marker}
+                </span>
+                <span className="truncate">{item.label}</span>
               </span>
-              <span>{item.label}</span>
+              {/* Tier word makes the bar length self-explanatory (qualitative, no number). */}
+              <span className="shrink-0 text-caption font-medium text-ink-muted">
+                {TIER_LABEL[item.tier] ?? TIER_LABEL.slight}
+              </span>
             </div>
             {/* Numberless magnitude bar — discrete tier width, no value shown. */}
             <div
-              className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
+              className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-surface-3"
               role="presentation"
             >
               <div
