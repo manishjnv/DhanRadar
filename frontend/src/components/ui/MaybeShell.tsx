@@ -2,8 +2,9 @@
 
 /**
  * MaybeShell — renders public page content INSIDE the authenticated AppShell
- * (left sidebar) for logged-in users, and as a STANDALONE public page (own
- * header + footer, no sidebar) for anonymous visitors and crawlers.
+ * (left sidebar) for logged-in users, and as a STANDALONE public page (the
+ * shared <SiteHeader/> + <SiteFooter/>, no sidebar) for anonymous visitors and
+ * crawlers.
  *
  * Why: the public, crawlable pages (`/mood`, `/learn/tax/*`, `/learn/concepts/*`)
  * live outside the
@@ -24,11 +25,10 @@
  */
 
 import * as React from 'react';
-import Link from 'next/link';
 
 import { AppShell } from '@/components/ui/AppShell';
-import { Button } from '@/components/ui/Button';
-import { Disclaimer } from '@/components/ui/Disclaimer';
+import { SiteHeader } from '@/components/site/SiteHeader';
+import { SiteFooter } from '@/components/site/SiteFooter';
 import { UserMenu } from '@/features/auth/UserMenu';
 import { useMe } from '@/features/auth/api';
 import { cn } from '@/lib/cn';
@@ -53,27 +53,17 @@ export function MaybeShell({
   }
 
   // Anonymous / crawler / initial render → standalone public chrome.
+  // SiteHeader + SiteFooter are the shared, site-wide public chrome (identical
+  // on the landing page, /pricing, /methodology, and every MaybeShell page) so
+  // the logged-out experience is consistent on web and mobile. SiteFooter
+  // carries the standing <Disclaimer/>.
   return (
-    <div className="min-h-screen bg-bg">
-      <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3">
-        <Link href="/" className="flex items-center gap-2.5">
-          {/* Decorative mark; the wordmark provides the accessible name. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon.svg" alt="" width={26} height={26} className="shrink-0" />
-          <span className="text-h3 font-medium text-navy">DhanRadar</span>
-        </Link>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/dashboard">Open app</Link>
-        </Button>
-      </header>
-
-      <main className={cn('mx-auto px-4 py-8', widthClass)}>
+    <div className="flex min-h-screen flex-col bg-bg">
+      <SiteHeader />
+      <main className={cn('mx-auto w-full flex-1 px-4 py-8 sm:px-6', widthClass)}>
         {children}
-        {/* Standing site-wide line — the standalone page has no AppShell footer. */}
-        <footer className="mt-10 border-t border-line pt-4">
-          <Disclaimer className="text-center" />
-        </footer>
       </main>
+      <SiteFooter />
     </div>
   );
 }
