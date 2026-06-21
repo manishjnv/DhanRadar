@@ -50,6 +50,11 @@ class MfFund(Base):
     amfi_code: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     scheme_name: Mapped[str] = mapped_column(Text, nullable=False)
     amc_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Indexed by migration 0022 (ix_mf_funds_category, B58-f3) for the cohort peer
+    # lookup's `category IN (...)` filter on the rescore/CAS hot path. The index is
+    # defined in the migration (source of truth), not via index=True here — a
+    # model-level index= would auto-name ix_mf_mf_funds_category and diverge from the
+    # migration's clean name (same reason amfi_code's real index is ix_mf_funds_amfi).
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
     aum_crore: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -322,6 +327,11 @@ class UserFundScore(Base):
     unified_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # tier-gated
     confidence_band: Mapped[str] = mapped_column(Text, nullable=False)
     verb_label: Mapped[str] = mapped_column(Text, nullable=False)
+    # Engine diagnostic flags (G10/migration 0041): qualitative string tags only
+    # (partial_coverage/stale/low_liquidity/provisional_model/insufficient_data) —
+    # NO numeric. Persisted so the transparency surface renders honest "why" +
+    # "what would change this" guidance instead of re-deriving it. NULL → read as [].
+    flags: Mapped[list | None] = mapped_column(JSONB, nullable=True, server_default=text("'[]'"))
     model_version: Mapped[str] = mapped_column(Text, nullable=False, server_default="v1")
     scored_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
