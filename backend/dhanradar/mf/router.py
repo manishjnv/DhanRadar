@@ -627,24 +627,48 @@ async def fund_search(
     if len(qn) < 2:
         return []
 
-    rows = (
-        await db.execute(
-            sa_text(
-                "SELECT isin, scheme_name, amc_name, sebi_category"
-                " FROM mf.mf_funds"
-                " WHERE scheme_name ILIKE '%' || :q || '%'"
-                "    OR amc_name ILIKE '%' || :q || '%'"
-                "    OR word_similarity(:q, scheme_name) >= 0.3"
-                "    OR word_similarity(:q, coalesce(amc_name, '')) >= 0.3"
-                " ORDER BY GREATEST("
-                "      word_similarity(:q, scheme_name),"
-                "      word_similarity(:q, coalesce(amc_name, ''))"
-                " ) DESC, scheme_name ASC"
-                " LIMIT :lim"
-            ),
-            {"q": qn, "lim": limit},
+    # Split query into tokens (cap at 6) for token-AND relevance.
+    # Every token must match scheme_name OR amc_name (ILIKE substring OR
+    # word_similarity >= 0.3 for typo tolerance).  Only the param NAME
+    # (t0, t1, …) is f-string-interpolated; the VALUE is always a bind param.
+    tokens = [t for t in qn.split() if t][:6]
+    if not tokens:
+        return []
+
+    params: dict[str, object] = {"q": qn, "qprefix": qn + "%", "lim": limit}
+    clauses: list[str] = []
+    for i, tok in enumerate(tokens):
+        k = f"t{i}"
+        params[k] = tok
+        clauses.append(
+            f"(f.scheme_name ILIKE '%' || :{k} || '%'"
+            f" OR coalesce(f.amc_name, '') ILIKE '%' || :{k} || '%'"
+            f" OR word_similarity(:{k}, f.scheme_name) >= 0.3"
+            f" OR word_similarity(:{k}, coalesce(f.amc_name, '')) >= 0.3)"
         )
-    ).all()
+    where_tokens = " AND ".join(clauses)
+
+    # Source only RANKED + CATEGORIZED funds via the latest rank per ISIN.
+    # The JOIN condition f.sebi_category = r.sebi_category ensures the returned
+    # sebi_category is the one the detail page can resolve via /mf/funds?category=.
+    # Funds present in mf_funds but absent from mf_fund_ranks (unranked) are excluded.
+    sql = (
+        "SELECT f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
+        "       f.plan_type, f.option_type"
+        " FROM mf.mf_funds f"
+        " JOIN ("
+        "   SELECT DISTINCT ON (isin) isin, sebi_category"
+        "   FROM mf.mf_fund_ranks"
+        "   ORDER BY isin, as_of_date DESC"
+        " ) r ON f.isin = r.isin AND f.sebi_category = r.sebi_category"
+        f" WHERE {where_tokens}"
+        " ORDER BY (f.scheme_name ILIKE :qprefix) DESC,"
+        "          similarity(f.scheme_name, :q) DESC,"
+        "          f.scheme_name ASC"
+        " LIMIT :lim"
+    )
+
+    rows = (await db.execute(sa_text(sql), params)).all()
 
     return [
         FundSearchItem(
@@ -652,6 +676,8 @@ async def fund_search(
             scheme_name=r.scheme_name,
             amc_name=r.amc_name,
             sebi_category=r.sebi_category,
+            plan_type=r.plan_type,
+            option_type=r.option_type,
         )
         for r in rows
     ]
