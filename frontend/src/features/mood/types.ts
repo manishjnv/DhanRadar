@@ -19,6 +19,7 @@ export type DataQuality = 'ok' | 'degraded' | 'unavailable';
 // ---------------------------------------------------------------------------
 export interface MoodPublic {
   snapshot_date:        string;
+  snapshot_at:          string | null;
   regime:               Regime;
   confidence_band:      ConfidenceBand;
   data_quality:         DataQuality;
