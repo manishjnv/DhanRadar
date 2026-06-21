@@ -130,6 +130,19 @@ class PortfolioReport(BaseModel):
     disclaimer_version: str | None = None
 
 
+class FundSearchItem(BaseModel):
+    """Search result item for GET /api/v1/mf/search.
+
+    Public — no scores, no numerics, no verb_label (non-neg #2).
+    Fields: isin, scheme_name, amc_name, sebi_category only.
+    """
+
+    isin: str
+    scheme_name: str
+    amc_name: str | None = None
+    sebi_category: str | None = None
+
+
 class FundExplorerItem(BaseModel):
     isin: str
     scheme_name: str
