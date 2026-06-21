@@ -145,25 +145,34 @@ top on scroll, jump-scrolls to anchors. Hidden sections (no data) are omitted, n
   (`in_form…out_of_form` bands) and/or **category rank** over 6M/1Y/2Y. **No numeric scores on the
   axis** — band labels only. Requires label/rank history (see §4).
 
-### 3.4 Risk — **metrics now BUILT (B74, PRs #282/#283); UI = plain-language bands**
+### 3.4 Risk — **metrics now BUILT (B74, PRs #282/#283); UI = band + number + help text + visual**
 
 **Status:** `Sharpe`, `Sortino`, `volatility_pct`, and **rolling-1Y** (avg/min/max/% positive) are
 **computed + stored nightly** in `mf_fund_metrics` (migration 0042), plus a `mf_category_stats`
 table of per-SEBI-category percentiles. `max_drawdown_pct` was already stored. `alpha/beta` still
-need a benchmark series (deferred). **These are INTERNAL numbers** — the build deliberately added
-**no public numeric surface**. This page is the first surface that exposes them, and it must do so
-as **plain-language bands**, never raw ratios (see the decision in §10.6 and the compliance note
-below).
+need a benchmark series (deferred).
+
+**LAUNCH INSTRUCTION (founder decision 2026-06-21 — §10.6 DECIDED):** at launch, show **all three
+together** for each risk metric, so a non-finance user understands it *and* a curious user sees the
+real figure:
+
+1. **Plain-language band** — the **bold headline** (the "vs similar funds" sentence). This is what a
+   beginner reads first.
+2. **The actual number** — shown alongside (e.g. `Sharpe 1.76`, `Volatility 14.3%`), in Geist Mono
+   tabular-nums, with its **as-of date**. Factual risk numbers are **allowed** in the DOM (skill §18
+   — only the proprietary score/weights/fair-value are banned, non-neg #2; **those still never
+   appear**).
+3. **Visual help + help text** — a small **"where this fund sits" scale** plus a one-tap
+   explanation, so the number is easy to grasp without finance knowledge (detail below).
 
 **How the band is chosen (the honest, like-for-like way):** compare the fund to **other funds in
 its own SEBI category** using `mf_category_stats` percentiles — "vs similar funds", which reads as
-education, not advice (skill §15 like-for-like). A raw "Sharpe 1.76" means nothing to a normal
-person; "has handled ups and downs better than most similar funds" does.
+education, not advice (skill §15 like-for-like).
 
-**Plain-language wording (founder rule — must be understandable by a non-finance user).** Every band
+**Plain-language wording (founder rule — must be understandable by a non-finance user).** Every row
 is suffixed with *"(based on past performance — not a recommendation)"*:
 
-| Internal metric (server only) | Where the fund sits in its category | Plain words shown on the page |
+| Metric (number shown) | Where the fund sits in its category | Plain headline shown on the page |
 |---|---|---|
 | Sharpe / Sortino (reward for the bumps it took) | top 25% | **"Has turned its ups-and-downs into returns better than most similar funds"** |
 | | middle half | **"About average for funds like it"** |
@@ -175,25 +184,36 @@ is suffixed with *"(based on past performance — not a recommendation)"*:
 | | mixed | **"Has had some down 1-year stretches in its history"** |
 | Max drawdown (worst drop from a peak) | shallow vs peers | **"Its worst fall was smaller than most similar funds"** (or "larger…") |
 
-- Render each as a **small chip + one-line plain sentence**, with an **info tooltip** that explains
-  the idea in one sentence ("'Steady' means the day-to-day value didn't swing around much"). No
-  number in the chip.
+**The "make the number easy" treatment (build all of this for each metric):**
+
+- **Headline band** (bold sentence from the table) on top.
+- **The number** next to it (mono tabular + unit + "as of <date>"); colour neutral — it is a fact,
+  not a verdict (never red/green "good/bad", never a 0–100 score-looking figure).
+- **A position scale (the key visual):** a short horizontal track showing this fund's **SEBI-category
+  range** (`p25 → p90` from `mf_category_stats`) with a **"this fund" marker** and plain-word ends —
+  e.g. `Steadier ◄———●———► Bumpier`. Seeing *where the dot sits among similar funds* is what makes
+  `14.3%` instantly meaningful to a beginner. (For drawdown/volatility, lower = the "good" end;
+  label the ends in words, not "good/bad".)
+- **One-tap help text** — a `MetricTooltip` / "What does this mean?" expander with **two plain
+  sentences**: what the metric is ("how bumpy the ride was") + how to read the scale ("the dot shows
+  this fund vs similar funds"). No jargon, no formulas.
 - **SEBI Riskometer** (`risk_o_meter`, expose now) rendered as the SEBI gauge — regulatory + trust.
 - **Insufficient data:** funds with `<252` NAV points (or near-flat NAV → metrics withheld as NULL,
-  see RCA 2026-06-21) show **"Not enough history to assess risk yet"** — never a blank or a guess.
+  see RCA 2026-06-21) show **"Not enough history to assess risk yet"** + hide the number/scale —
+  never a blank, a guess, or a misleading explosion value.
 
 > **Backend gap to close first (small):** `mf_category_stats` today percentiles only
 > `return_1y_pct / return_3y_pct / max_drawdown_pct`. To band the **risk ratios** "vs similar
-> funds", the nightly refresh must also percentile `sharpe_ratio`, `sortino_ratio`, and
-> `volatility_pct` (just add those `metric_key`s — no schema change). The **band cut-offs + exact
-> copy are compliance-sensitive** → Compliance (Opus) sign-off before they go live.
+> funds" **and to draw the position scale**, the nightly refresh must also percentile `sharpe_ratio`,
+> `sortino_ratio`, and `volatility_pct` (just add those `metric_key`s — no schema change). The page
+> needs both the fund's number AND its category `p25/p50/p75/p90` to place the marker.
 >
-> **Compliance note (read with §1 + skill §18):** the MF-analytics skill permits *factual* risk
-> numbers (NAV/returns/risk) in the DOM — only the **proprietary score/weights/fair-value** are
-> banned. So showing raw Sharpe is *technically* allowed. But (a) the build chose band-only, and (b)
-> a raw ratio fails the "simple for non-finance users" bar. **Recommendation: bands only at launch.**
-> If raw numbers are ever shown, tier-gate them (Plus) with tooltips and "factual, not a score"
-> framing — founder/Compliance decision in §10.6.
+> **Compliance note (read with §1 + skill §18):** factual risk numbers (NAV/returns/Sharpe/Sortino/
+> volatility/drawdown) **MAY** be displayed — only the **proprietary score, factor weights, and fair
+> value** are forbidden in the DOM (non-neg #2). So "band + number + scale" is compliant. Guardrails:
+> the number is **factual, never framed as a score/verdict or a 0–100 rating**; always carries its
+> **as-of date** + the past-performance / `NOT_ADVICE` disclosure; **band cut-offs + exact copy get
+> Compliance (Opus) sign-off** before they ship (it is a public label surface).
 
 ### 3.5 Portfolio (data partly available)
 
@@ -305,8 +325,13 @@ New components under `frontend/src/components/mf/` (reuse ui-system `Card`, `Cha
 - `TrailingReturnsTable` (fund vs category-avg vs benchmark; mono tabular; `—` for suppressed).
 - `RollingReturnsChart` (Phase 2).
 - `LabelTrendChart` (band trajectory — **no numeric axis**) (Phase 2 / needs B-8).
-- `RiskBands` (plain-language band chips + one-line sentence + `MetricTooltip`, **no raw numbers** —
-  §3.4 wording; consumes server-computed `risk_bands`) + `Riskometer` (SEBI gauge).
+- `RiskMetricCard` (per metric: **plain-language band headline + the number (mono, as-of date) +
+  a `CategoryPositionScale` "this fund vs similar funds" marker + `MetricTooltip` help text**) —
+  §3.4 launch treatment; consumes server-computed `risk_bands` **and** the fund's number + its
+  category `p25/p50/p75/p90`. Plus `Riskometer` (SEBI gauge). The card must **never** render the
+  proprietary score / weights / fair value (non-neg #2).
+- `CategoryPositionScale` (reusable horizontal track: category range + "this fund" marker +
+  plain-word ends) — also reused by §3.6 peers.
 - `HoldingsPanel` (top-10 bars + partial sector tab + "top 10 of N" honesty).
 - `PeerComparisonTable`.
 - `FundInfoGrid` (+ "not yet sourced" states).
@@ -360,9 +385,10 @@ calculator (client-side, can be earlier). Manager drill-down. Tier-gated deep an
 ## 8. Compliance & disclosures checklist (gate before merge)
 
 - [ ] No numeric score / weight / fair value in DOM (grep). Ring = **band arc only**.
-- [ ] **Risk metrics shown as plain-language bands, not raw ratios** (unless §10.6 approves tier-gated
-      raw numbers); bands computed **server-side**; raw Sharpe/Sortino/vol/percentile absent from the
-      client payload when band-only. Band copy reviewed by Compliance (Opus).
+- [ ] **Risk metrics = band headline + factual number + position scale + help text** (§3.4, §10.6
+      DECIDED). Numbers are factual (allowed, skill §18); **never** framed as a score/verdict/0–100
+      rating; each carries its **as-of date**. Bands computed **server-side**; band copy reviewed by
+      Compliance (Opus). The proprietary **score / weights / fair value stay absent** from the DOM.
 - [ ] Only the 5 educational labels; **no advisory verbs** anywhere (grep `strong_buy|buy|sell|hold|caution|avoid` + "Start SIP/Invest/Withdraw").
 - [ ] Confidence band-only; `< 0.30 → insufficient_data`.
 - [ ] Risk profile never feeds the score; scoring inputs unchanged unless two-person gated.
@@ -403,12 +429,13 @@ endpoints; per-change review file under `docs/project-state/reviews/`.
 4. **Sourcing budget** — green-light the ADR-0033 scraper extension for expense ratio / full holdings /
    sector weights, or keep them "not yet sourced" for now?
 5. **PowerUp label collision** — counsel trademark check before a *new* public label-trend surface?
-6. **Risk metrics — bands vs raw numbers (NEW, B74 shipped the data).** Sharpe/Sortino/volatility/
-   rolling are now computed + stored (internal). The MF-analytics skill technically permits showing
-   *factual* risk numbers, but the build chose band-only and raw ratios fail the "simple for
-   non-finance users" bar. **Recommended: plain-language bands only at launch** (per the §3.4 wording
-   table). Decide: (a) bands only, or (b) also show raw numbers tier-gated (Plus) with tooltips? And
-   **approve the band cut-offs + exact copy** (a public label surface → Compliance sign-off).
+6. **Risk metrics — DECIDED (founder 2026-06-21): band + number + visual at launch.** Show, for each
+   risk metric, the **plain-language band headline + the factual number + a "vs similar funds"
+   position scale + one-tap help text** (§3.4). This is compliant (skill §18 — factual risk numbers
+   allowed; only the proprietary score/weights/fair-value stay banned). Remaining sign-offs:
+   **(a)** Compliance (Opus) approves the **band cut-offs + exact copy + help text** before launch;
+   **(b)** confirm the number is shown free for all (not Plus-gated) — current lean: **free**, since
+   it is factual and education is never paywalled (Monetization-Pricing skill).
 
 ---
 
