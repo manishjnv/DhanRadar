@@ -13,6 +13,7 @@ import { CommandPalette } from '@/components/ui/CommandPalette';
 import { cn } from '@/lib/cn';
 import { Disclaimer } from '@/components/ui/Disclaimer';
 import { useMe } from '@/features/auth/api';
+import { PUBLIC_NAV_LINKS } from '@/components/site/SiteHeader';
 
 // ---------------------------------------------------------------------------
 // Nav model
@@ -81,12 +82,18 @@ function SidebarContent({
   collapsed = false,
   onToggle,
   isAdmin = false,
+  publicNav = false,
 }: {
   onNavClick?: () => void;
   collapsed?: boolean;
   onToggle?: () => void;
   isAdmin?: boolean;
+  // When true (mobile drawer on public pages), append the public destinations
+  // as a "Browse" group so the top-bar public nav is reachable on small screens
+  // from the SAME drawer — no second hamburger.
+  publicNav?: boolean;
 }) {
+  const pathname = usePathname();
   return (
     <>
       {/* Brand lockup */}
@@ -119,6 +126,36 @@ function SidebarContent({
         {WORKSPACE.map((item) => (
           <NavLink key={item.href} item={item} onClick={onNavClick} collapsed={collapsed} />
         ))}
+
+        {/* Browse — public destinations, mobile drawer only (publicNav) */}
+        {publicNav && !collapsed && (
+          <>
+            <p className="px-3 pb-1 pt-4 text-caption font-medium uppercase tracking-wide text-ink-faint">
+              Browse
+            </p>
+            {PUBLIC_NAV_LINKS.map((l) => {
+              const active =
+                pathname === l.href || pathname.startsWith(l.href + '/');
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  onClick={onNavClick}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md px-3 py-2 text-small transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                    active
+                      ? 'bg-royal/10 font-medium text-royal'
+                      : 'text-ink-secondary hover:bg-surface-2 hover:text-ink',
+                  )}
+                >
+                  {l.label}
+                </Link>
+              );
+            })}
+          </>
+        )}
       </nav>
 
       {/* Footer — settings + collapse toggle */}
@@ -161,15 +198,21 @@ function Topbar({
   onMenuOpen,
   onSearchOpen,
   menuOpen = false,
+  publicNav = false,
+  pathname = '',
 }: {
   userSlot?: React.ReactNode;
   onMenuOpen?: () => void;
   onSearchOpen?: () => void;
   menuOpen?: boolean;
+  // When true, surface the public destinations inline (desktop) so logged-in
+  // users on public pages get the same public nav as the anonymous SiteHeader.
+  publicNav?: boolean;
+  pathname?: string;
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           className="md:hidden -ml-2 flex items-center justify-center rounded-md p-2 text-ink-secondary hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
@@ -179,7 +222,32 @@ function Topbar({
         >
           <Menu size={20} strokeWidth={2} aria-hidden="true" />
         </button>
-        <span className="text-small text-ink-muted">Research Analytics</span>
+        {publicNav ? (
+          <nav className="hidden items-center gap-1 lg:flex" aria-label="Browse">
+            {PUBLIC_NAV_LINKS.map((l) => {
+              const active =
+                pathname === l.href || pathname.startsWith(l.href + '/');
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center rounded-md px-3 py-2 text-small transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                    active
+                      ? 'font-medium text-royal'
+                      : 'text-ink-secondary hover:text-ink',
+                  )}
+                >
+                  {l.label}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : (
+          <span className="text-small text-ink-muted">Research Analytics</span>
+        )}
       </div>
       <div className="flex items-center gap-3">
         {/* Search button — opens the ⌘K command palette */}
@@ -214,7 +282,7 @@ function Topbar({
 // ---------------------------------------------------------------------------
 // MobileDrawer — uses same SidebarContent, no collapse in mobile
 // ---------------------------------------------------------------------------
-function MobileDrawer({ open, onClose, isAdmin }: { open: boolean; onClose: () => void; isAdmin?: boolean }) {
+function MobileDrawer({ open, onClose, isAdmin, publicNav }: { open: boolean; onClose: () => void; isAdmin?: boolean; publicNav?: boolean }) {
   const panelRef       = React.useRef<HTMLDivElement>(null);
   const firstFocusRef  = React.useRef<HTMLButtonElement>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
@@ -264,7 +332,7 @@ function MobileDrawer({ open, onClose, isAdmin }: { open: boolean; onClose: () =
         >
           <X size={16} strokeWidth={2} aria-hidden="true" />
         </button>
-        <SidebarContent onNavClick={onClose} isAdmin={isAdmin} />
+        <SidebarContent onNavClick={onClose} isAdmin={isAdmin} publicNav={publicNav} />
       </div>
     </>
   );
@@ -276,9 +344,13 @@ function MobileDrawer({ open, onClose, isAdmin }: { open: boolean; onClose: () =
 export interface AppShellProps {
   children: React.ReactNode;
   userSlot?: React.ReactNode;
+  // When true, the top bar surfaces the public destinations (desktop) and the
+  // mobile drawer gains a "Browse" group — used on public pages viewed while
+  // logged in, so a signed-in user gets the public nav AND the workspace sidebar.
+  publicNav?: boolean;
 }
 
-export function AppShell({ children, userSlot }: AppShellProps) {
+export function AppShell({ children, userSlot, publicNav = false }: AppShellProps) {
   const [drawerOpen,  setDrawerOpen]  = React.useState(false);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [collapsed,   setCollapsed]   = React.useState(false);
@@ -328,7 +400,7 @@ export function AppShell({ children, userSlot }: AppShellProps) {
       </aside>
 
       {/* Mobile drawer */}
-      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} isAdmin={isAdmin} />
+      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} isAdmin={isAdmin} publicNav={publicNav} />
 
       {/* ⌘K Command palette */}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
@@ -339,6 +411,8 @@ export function AppShell({ children, userSlot }: AppShellProps) {
           menuOpen={drawerOpen}
           onMenuOpen={() => setDrawerOpen(true)}
           onSearchOpen={() => setPaletteOpen(true)}
+          publicNav={publicNav}
+          pathname={pathname}
         />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex min-h-full flex-col">
