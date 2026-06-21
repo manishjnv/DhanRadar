@@ -17,7 +17,7 @@ honest, fail-safe outcome.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from dhanradar.scoring.engine import FactorInputs, LabelSignals, RatingEngine, SubFactor
 from dhanradar.scoring.engine.schemas import Axis, ScoringResult
@@ -27,11 +27,11 @@ from dhanradar.scoring.engine.schemas import Axis, ScoringResult
 class FundSignals:
     isin: str
     # Pre-normalized axis values 0–100 (None = unavailable → dropped by the engine).
-    quality: Optional[float] = None
-    valuation: Optional[float] = None
-    momentum: Optional[float] = None
-    trend: Optional[float] = None
-    risk: Optional[float] = None
+    quality: float | None = None
+    valuation: float | None = None
+    momentum: float | None = None
+    trend: float | None = None
+    risk: float | None = None
     # Category-relative label rule inputs (drive the label, NOT the score).
     outperform_1y: bool = False
     outperform_3y: bool = False
@@ -107,6 +107,9 @@ async def upsert_user_fund_score(
         unified_score=result.unified_score,
         confidence_band=result.confidence_band.value,
         verb_label=result.verb_label.value,
+        # G10: persist the engine's own diagnostic flags verbatim (qualitative tags,
+        # no numeric) so the transparency surface renders honest data-quality "why".
+        flags=list(result.flags or []),
         model_version=result.model_version,
     )
     stmt = stmt.on_conflict_do_update(
@@ -115,6 +118,7 @@ async def upsert_user_fund_score(
             "unified_score": stmt.excluded.unified_score,
             "confidence_band": stmt.excluded.confidence_band,
             "verb_label": stmt.excluded.verb_label,
+            "flags": stmt.excluded.flags,
             "model_version": stmt.excluded.model_version,
             "scored_at": __import__("sqlalchemy").func.now(),
         },
