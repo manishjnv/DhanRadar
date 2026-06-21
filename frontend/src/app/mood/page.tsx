@@ -23,6 +23,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { DriverFactorList } from '@/components/mood/DriverFactorList';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
@@ -63,36 +64,7 @@ function HistoryStrip({ days }: { days: number }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Factor lists — contributing / contradicting
-// Uses neutral "+" / "−" markers — NOT green-up/red-down arrows that imply buy/sell
-// ---------------------------------------------------------------------------
-function FactorList({
-  heading,
-  items,
-  marker,
-}: {
-  heading: string;
-  items: string[];
-  marker: '+' | '−';
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div>
-      <p className="text-small font-medium text-ink mb-1">{heading}</p>
-      <ul className="space-y-1">
-        {items.map((item) => (
-          <li key={item} className="flex items-start gap-1.5 text-small text-ink">
-            <span className="text-ink-muted select-none" aria-hidden="true">
-              {marker}
-            </span>
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+// Factor lists are rendered by the shared DriverFactorList (numberless tier bars).
 
 // ---------------------------------------------------------------------------
 // Main page
@@ -191,12 +163,12 @@ export default function MoodPage() {
                     What&rsquo;s driving this
                   </p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FactorList
+                    <DriverFactorList
                       heading="Supporting"
                       items={data.contributing_factors}
                       marker="+"
                     />
-                    <FactorList
+                    <DriverFactorList
                       heading="Counterweights"
                       items={data.contradicting_factors}
                       marker="−"

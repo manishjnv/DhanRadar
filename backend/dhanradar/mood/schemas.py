@@ -11,13 +11,22 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class MoodFactor(BaseModel):
+    """A driver factor on the public surface: its human label + a COARSE 3-way
+    magnitude tier ("strong"|"moderate"|"slight"). The numeric contribution /
+    weight / value is NEVER carried here — only the tier string (non-neg #2)."""
+
+    label: str
+    tier: str = "slight"  # strong | moderate | slight
+
+
 class MoodPublic(BaseModel):
     snapshot_date: str
     regime: str                       # extreme_fear|fear|neutral|greed|extreme_greed|data_unavailable
     confidence_band: str              # high|medium|low|insufficient_data
     data_quality: str                 # ok|degraded|unavailable
-    contributing_factors: list[str] = []
-    contradicting_factors: list[str] = []
+    contributing_factors: list[MoodFactor] = []
+    contradicting_factors: list[MoodFactor] = []
     commentary: str | None = None
     disclosure: str
     not_advice: str
