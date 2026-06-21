@@ -133,6 +133,32 @@ def norm_usd_inr(pct_change: float) -> float:
     return _clamp((-pct_change + 1.0) / 2.0)
 
 
+# News-sentiment tone → [0, 1] (1 = greed/bullish). The tone is a DESCRIPTIVE
+# 5-point label produced by the governed AI gateway (mood/news_sentiment.py) from
+# recent headlines — never a raw number from the model. This map turns the
+# descriptive label into the engine's 0–1 scale. Unknown labels → None (signal
+# absent; never imputed). news_sentiment is NOT registered in _NORMALIZERS below
+# because it is AI-derived, not adapter-sourced — it is injected into the inputs
+# dict by the mood task after fetch_mood_inputs runs.
+_NEWS_TONE_SCORES: dict[str, float] = {
+    "negative": 0.1,
+    "slightly_negative": 0.3,
+    "neutral": 0.5,
+    "slightly_positive": 0.7,
+    "positive": 0.9,
+}
+
+
+def norm_news_sentiment(tone: str) -> float | None:
+    """Map a descriptive news-sentiment tone label to [0, 1]; 1 = greed/bullish.
+
+    negative → 0.1, slightly_negative → 0.3, neutral → 0.5,
+    slightly_positive → 0.7, positive → 0.9. Returns None for any unrecognised
+    label so the engine drops the signal rather than imputing a value.
+    """
+    return _NEWS_TONE_SCORES.get(tone)
+
+
 # ---------------------------------------------------------------------------
 # Adapter-based fetch
 # ---------------------------------------------------------------------------

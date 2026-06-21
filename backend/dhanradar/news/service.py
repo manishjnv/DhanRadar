@@ -194,6 +194,29 @@ async def list_news(
     ]
 
 
+async def get_recent_headlines(
+    db: AsyncSession,
+    *,
+    hours: int = 48,
+    limit: int = 30,
+) -> list[str]:
+    """Return active headline TITLES published within the last ``hours`` (newest
+    first). Headline text only — never body/excerpt (the model stores none). Used
+    as the input to the mood news-sentiment signal; returns [] when nothing recent.
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, hours))
+    result = await db.execute(
+        select(NewsItemModel.title)
+        .where(
+            NewsItemModel.is_active.is_(True),
+            NewsItemModel.published_at >= cutoff,
+        )
+        .order_by(NewsItemModel.published_at.desc())
+        .limit(limit)
+    )
+    return [t for t in result.scalars().all() if t]
+
+
 async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
     """Fetch sanctioned RSS feeds and upsert live headline items into news.news_items.
 

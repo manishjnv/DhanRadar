@@ -9,11 +9,13 @@ Routed to the 'mood' queue via celery_app.conf.task_routes.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from dhanradar.celery_app import celery_app
 
+logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
 
 
@@ -32,6 +34,7 @@ def compute_mood_snapshot() -> str:
     from dhanradar.market_data.providers.yahoo import YahooMacroProvider
     from dhanradar.mood import service
     from dhanradar.mood.commentary import generate_mood_commentary
+    from dhanradar.mood.news_sentiment import fetch_news_sentiment
     from dhanradar.mood.signals import fetch_mood_inputs
 
     async def _go() -> str:
@@ -52,6 +55,21 @@ def compute_mood_snapshot() -> str:
             inputs = await fetch_mood_inputs(adapter)
         except Exception:  # noqa: BLE001 — never let signal fetch crash the task
             inputs = service.default_fetch_inputs()
+
+        # 11th factor — news sentiment via the governed gateway (Phase 2). AI-derived,
+        # so it is injected here rather than via the macro adapter. Best-effort: None on
+        # no-headlines / gateway error / low-confidence / advisory rejection leaves the
+        # signal absent and the engine degrades (never imputed). Feeds the server-side
+        # score only — never the DOM.
+        try:
+            from dhanradar.db import TaskSessionLocal
+
+            async with TaskSessionLocal() as news_db:
+                inputs["news_sentiment"] = await fetch_news_sentiment(
+                    OpenRouterGateway(), news_db
+                )
+        except Exception:  # noqa: BLE001 — signal fetch must never crash the task
+            logger.warning("mood: news-sentiment signal fetch failed — signal absent")
 
         # B35-e: AI commentary generator (governed gateway consumer). Awaited by the
         # service ONLY when the snapshot's commentary_allowed gate is set (>= 7 signals,
