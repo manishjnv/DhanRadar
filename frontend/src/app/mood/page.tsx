@@ -44,25 +44,48 @@ const REGIME_BG_CLASS: Record<string, string> = {
   data_unavailable:  'bg-[var(--text-muted)]',
 };
 
+// Legend for the SYMMETRIC attention colour scale — the colour shows how far
+// sentiment sat from neutral (intensity), never its direction, so amber covers
+// both Fear and Greed (non-neg #1: greed is never coloured as a "buy" positive).
+const HISTORY_LEGEND: { cls: string; label: string }[] = [
+  { cls: 'bg-[var(--dr-cyan)]',     label: 'Neutral' },
+  { cls: 'bg-[var(--dr-amber)]',    label: 'Fear / Greed' },
+  { cls: 'bg-[var(--dr-red)]',      label: 'Extreme' },
+  { cls: 'bg-[var(--text-muted)]',  label: 'No reading' },
+];
+
 function HistoryStrip({ days }: { days: number }) {
   const { data, isError } = useMoodHistory(days);
 
   if (isError || !data || data.length === 0) return null;
 
   return (
-    <section aria-label="30-day regime history">
-      <p className="text-caption text-ink-muted mb-2">Last {days} days</p>
-      <div className="flex flex-wrap gap-1" role="list">
+    <section aria-label={`${days}-day market mood history`}>
+      <p className="text-caption text-ink-muted mb-2">Last {days} days · one square per day</p>
+      <div className="flex flex-wrap gap-1.5" role="list">
         {data.map((item) => (
           <div
             key={item.snapshot_date}
             role="listitem"
             title={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
-            className={`h-3 w-3 rounded-sm ${REGIME_BG_CLASS[item.regime] ?? 'bg-[var(--text-muted)]'}`}
+            className={`h-4 w-4 rounded ${REGIME_BG_CLASS[item.regime] ?? 'bg-[var(--text-muted)]'}`}
             aria-label={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
           />
         ))}
       </div>
+
+      {/* Colour legend — makes the attention scale obvious to a first-time reader. */}
+      <ul className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5" aria-label="Colour key">
+        {HISTORY_LEGEND.map((l) => (
+          <li key={l.label} className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
+            <span className={`h-2.5 w-2.5 rounded-sm ${l.cls}`} aria-hidden="true" />
+            {l.label}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-caption text-ink-faint">
+        Colour shows how strong each day&rsquo;s sentiment was, not its direction.
+      </p>
     </section>
   );
 }
@@ -191,8 +214,12 @@ export default function MoodPage() {
               {(data.contributing_factors.length > 0 ||
                 data.contradicting_factors.length > 0) && (
                 <div className="mt-6 border-t border-line pt-4">
-                  <p className="text-small font-medium text-ink mb-3">
+                  <p className="text-small font-medium text-ink mb-1">
                     What&rsquo;s driving this
+                  </p>
+                  <p className="text-caption text-ink-muted mb-3">
+                    A longer bar means the factor is moving the mood more.
+                    Supporting factors pull toward today&rsquo;s reading; counterweights pull the other way.
                   </p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <DriverFactorList
