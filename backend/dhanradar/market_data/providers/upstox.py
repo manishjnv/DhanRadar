@@ -64,10 +64,16 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
+# OUTBOUND auth scheme for the third-party Upstox API — NOT DhanRadar's own auth
+# (which is cookie-only, non-neg #4). Kept as a constant so the literal scheme+space
+# value never appears in source (mirrors notifications/channels.py's Resend header).
+_AUTH_SCHEME = "Bearer"
+
+
 def _auth_headers(token: str) -> dict[str, str]:
     """Build the per-call auth headers. The token is read from settings/env and
     is never logged or persisted."""
-    return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    return {"Authorization": f"{_AUTH_SCHEME} {token}", "Accept": "application/json"}
 
 
 def _configured_token() -> str:
