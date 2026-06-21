@@ -79,7 +79,13 @@ the router (need wiring). `amc_level_aum_crore` is hard-coded null.
 
 - `mf_funds`: `benchmark_index`, `risk_o_meter`, `launch_date`, `sub_category`,
   `expense_ratio_pct` / `exit_load_pct` *(columns exist but are **always NULL** — no ingest path)*.
-- `mf_fund_metrics`: `max_drawdown_pct` (computed, stored, but stripped from the schema), `nav_points`.
+- `mf_fund_metrics`: `max_drawdown_pct`, **`sharpe_ratio`, `sortino_ratio`, `volatility_pct`,
+  `rolling_1y_avg_pct` / `_min_pct` / `_max_pct` / `_pct_positive`** (all computed + stored nightly,
+  B74 / migration 0042), `nav_points` — all currently stripped from the API schema (need surfacing
+  as **bands**, see §3.4).
+- `mf_category_stats` (migration 0042): per-SEBI-category **p25/p50/p75/p90** of `return_1y_pct`,
+  `return_3y_pct`, `max_drawdown_pct`. **No endpoint reads it** — it is the source for the
+  "vs similar funds" bands (§3.4 / §3.6). *(Extend to also percentile the risk ratios — see §3.4.)*
 - `mf_nav_history` (TimescaleDB hypertable): **full daily NAV series** — no per-fund time-series endpoint exists.
 - `mf_fund_constituents` (migration 0033): top-10 holdings — `constituent_name, constituent_isin,
   sector, rating, weight_pct, market_value_cr, as_of_month`. **No endpoint reads it.**
@@ -87,9 +93,11 @@ the router (need wiring). `amc_level_aum_crore` is hard-coded null.
 - Scoring **contributing/contradicting signals** ("why this label") exist on the CAS-report path
   only (`FundReportItem`), not on the explorer/detail path.
 
-**Not computed anywhere** (needs new backend work): rolling returns, Sharpe, Sortino, std-dev,
-alpha, beta. Per-fund **label/rank history** (for a trend chart) — confirm whether nightly
-snapshots are persisted; if not, a small history table is required.
+**Now computed + stored (B74, PRs #282/#283 — was "not computed" in the original plan):**
+rolling-1Y returns, Sharpe, Sortino, volatility (annualised std-dev), plus per-category percentiles
+in `mf_category_stats`. **Still not computed:** rolling-3Y, alpha, beta (need a benchmark TRI
+series). Per-fund **label/rank history** (for a trend chart) — confirm whether nightly snapshots are
+persisted; if not, a small history table is required.
 
 **Source-blocked** (per memory/ADRs — do not fake): **scheme-level AUM** (ADR-0035 settled on
 AMC-level; per-scheme blocked), **expense ratio / exit load** (no ingest source), **full holdings
@@ -129,17 +137,63 @@ top on scroll, jump-scrolls to anchors. Hidden sections (no data) are omitted, n
   trust device per research. Educational framing ("had you tracked ₹10,000…"), not a projection.
 - **Trailing returns table** — periods 3M/6M/1Y/3Y/5Y (have now) vs **category average** and
   **benchmark** (when available); CAGR, mono tabular. `—` for suppressed young-fund periods (honesty).
-- **Rolling returns** (Phase 2 compute) — 1Y/3Y rolling, fund vs category-avg; bar/line.
+- **Rolling returns** — **rolling-1Y is now computed + stored** (`rolling_1y_avg/min/max/pct_positive`,
+  B74); show fund vs category-avg as a bar/line, plus a plain summary line ("Over 1-year stretches in
+  its history, results were positive most of the time" — wording from §3.4). Rolling-3Y still to
+  compute. Keep numbers minimal; lead with the plain sentence.
 - **Label/rank trend** (PowerUp's best idea, made compliant): plot the fund's **label trajectory**
   (`in_form…out_of_form` bands) and/or **category rank** over 6M/1Y/2Y. **No numeric scores on the
   axis** — band labels only. Requires label/rank history (see §4).
 
-### 3.4 Risk (Phase 2 compute)
+### 3.4 Risk — **metrics now BUILT (B74, PRs #282/#283); UI = plain-language bands**
 
-- `max_drawdown_pct` (expose now), **Sharpe, Sortino, std-dev** (compute from NAV), **alpha/beta**
-  (need benchmark series). Each with an **inline plain-language tooltip** ("higher Sharpe = better
-  risk-adjusted return") — research shows tooltips are a top trust pattern.
+**Status:** `Sharpe`, `Sortino`, `volatility_pct`, and **rolling-1Y** (avg/min/max/% positive) are
+**computed + stored nightly** in `mf_fund_metrics` (migration 0042), plus a `mf_category_stats`
+table of per-SEBI-category percentiles. `max_drawdown_pct` was already stored. `alpha/beta` still
+need a benchmark series (deferred). **These are INTERNAL numbers** — the build deliberately added
+**no public numeric surface**. This page is the first surface that exposes them, and it must do so
+as **plain-language bands**, never raw ratios (see the decision in §10.6 and the compliance note
+below).
+
+**How the band is chosen (the honest, like-for-like way):** compare the fund to **other funds in
+its own SEBI category** using `mf_category_stats` percentiles — "vs similar funds", which reads as
+education, not advice (skill §15 like-for-like). A raw "Sharpe 1.76" means nothing to a normal
+person; "has handled ups and downs better than most similar funds" does.
+
+**Plain-language wording (founder rule — must be understandable by a non-finance user).** Every band
+is suffixed with *"(based on past performance — not a recommendation)"*:
+
+| Internal metric (server only) | Where the fund sits in its category | Plain words shown on the page |
+|---|---|---|
+| Sharpe / Sortino (reward for the bumps it took) | top 25% | **"Has turned its ups-and-downs into returns better than most similar funds"** |
+| | middle half | **"About average for funds like it"** |
+| | bottom 25% | **"Has handled its ups-and-downs less well than most similar funds"** |
+| Volatility (how much the value bounces) | least bouncy 25% | **"Steadier than most similar funds"** |
+| | middle half | **"Normal ups and downs for this type of fund"** |
+| | bounciest 25% | **"Bumpier ride than most similar funds"** |
+| Rolling-1Y % positive (how often a 1-year hold was up) | high | **"Was up over almost every 1-year stretch in its history"** |
+| | mixed | **"Has had some down 1-year stretches in its history"** |
+| Max drawdown (worst drop from a peak) | shallow vs peers | **"Its worst fall was smaller than most similar funds"** (or "larger…") |
+
+- Render each as a **small chip + one-line plain sentence**, with an **info tooltip** that explains
+  the idea in one sentence ("'Steady' means the day-to-day value didn't swing around much"). No
+  number in the chip.
 - **SEBI Riskometer** (`risk_o_meter`, expose now) rendered as the SEBI gauge — regulatory + trust.
+- **Insufficient data:** funds with `<252` NAV points (or near-flat NAV → metrics withheld as NULL,
+  see RCA 2026-06-21) show **"Not enough history to assess risk yet"** — never a blank or a guess.
+
+> **Backend gap to close first (small):** `mf_category_stats` today percentiles only
+> `return_1y_pct / return_3y_pct / max_drawdown_pct`. To band the **risk ratios** "vs similar
+> funds", the nightly refresh must also percentile `sharpe_ratio`, `sortino_ratio`, and
+> `volatility_pct` (just add those `metric_key`s — no schema change). The **band cut-offs + exact
+> copy are compliance-sensitive** → Compliance (Opus) sign-off before they go live.
+>
+> **Compliance note (read with §1 + skill §18):** the MF-analytics skill permits *factual* risk
+> numbers (NAV/returns/risk) in the DOM — only the **proprietary score/weights/fair-value** are
+> banned. So showing raw Sharpe is *technically* allowed. But (a) the build chose band-only, and (b)
+> a raw ratio fails the "simple for non-finance users" bar. **Recommendation: bands only at launch.**
+> If raw numbers are ever shown, tier-gate them (Plus) with tooltips and "factual, not a score"
+> framing — founder/Compliance decision in §10.6.
 
 ### 3.5 Portfolio (data partly available)
 
@@ -152,6 +206,11 @@ top on scroll, jump-scrolls to anchors. Hidden sections (no data) are omitted, n
 
 - Peer comparison table: nearest funds in the same `sebi_category` (reuse the explorer query, a
   small slice around this fund's rank): name, label, 1Y/3Y/5Y, rank. **Educational** — no "buy #1".
+- **"Vs similar funds" summary band** (from `mf_category_stats`): one plain line placing this fund in
+  its category — e.g. **"Higher 3-year returns than most similar funds"** / **"Around the middle for
+  funds like it"** / **"Lower than most similar funds"** — *(based on past performance, not a
+  recommendation)*. Same percentile bands as §3.4; this is the single most user-meaningful, most
+  compliance-safe signal because it is explicitly "compared to similar funds".
 
 ### 3.7 Fund info (mix)
 
@@ -210,9 +269,21 @@ returning a downsampled time-series from `mf_nav_history` (TimescaleDB). Powers 
 **B-6 — Peers slice** `GET /api/v1/mf/fund/{isin}/peers` (or include in B-1) — N funds around this
 fund's category rank.
 
-**B-7 — Computed metrics (Phase 2):** rolling returns + Sharpe/Sortino/std-dev from NAV history;
-alpha/beta once a benchmark series exists. Store in `mf_fund_metrics` (extend) via the nightly
-pipeline. **Methodology two-person gate applies to any scoring-input change.**
+**B-7 — Computed metrics — ✅ DONE (B74, PRs #282/#283; box alembic 0042).** Rolling-1Y +
+Sharpe/Sortino/volatility computed from NAV history, stored in `mf_fund_metrics`; per-category
+percentiles in `mf_category_stats`; risk-free = `settings.RISK_FREE_RATE_ANNUAL` (6.5% proxy);
+near-flat-NAV ratios withheld (`_MIN_MEANINGFUL_VOL` floor). **No scoring-input change** (these feed
+no score — the two-person gate was not triggered). **Remaining B-7 work for this page:**
+
+- **B-7a — band the metrics + expose in `FundDetail`:** add `risk_bands` (Sharpe/Sortino/vol/
+  rolling/drawdown → the plain-language bands of §3.4) computed **server-side** from
+  `mf_category_stats`; **the raw ratios must NOT be in the response if band-only is chosen** (§10.6).
+- **B-7b — extend `mf_category_stats`** to also percentile `sharpe_ratio`, `sortino_ratio`,
+  `volatility_pct` (add the `metric_key`s in the nightly refresh — no schema change) so the risk
+  bands are "vs similar funds" like-for-like.
+- **B-7c — alpha/beta** still deferred until a benchmark TRI series is ingested.
+- **Compliance (Opus) sign-off on the band cut-offs + exact copy before they ship** (band wording
+  is a public label surface).
 
 **B-8 — Label/rank history (for §3.3 trend):** confirm whether nightly label/rank snapshots persist;
 if not, add a `mf_fund_label_history` (fund, as_of_month, label, confidence_band, category_rank).
@@ -234,7 +305,8 @@ New components under `frontend/src/components/mf/` (reuse ui-system `Card`, `Cha
 - `TrailingReturnsTable` (fund vs category-avg vs benchmark; mono tabular; `—` for suppressed).
 - `RollingReturnsChart` (Phase 2).
 - `LabelTrendChart` (band trajectory — **no numeric axis**) (Phase 2 / needs B-8).
-- `RiskRatios` (cards + inline tooltips) + `Riskometer` (SEBI gauge).
+- `RiskBands` (plain-language band chips + one-line sentence + `MetricTooltip`, **no raw numbers** —
+  §3.4 wording; consumes server-computed `risk_bands`) + `Riskometer` (SEBI gauge).
 - `HoldingsPanel` (top-10 bars + partial sector tab + "top 10 of N" honesty).
 - `PeerComparisonTable`.
 - `FundInfoGrid` (+ "not yet sourced" states).
@@ -258,8 +330,12 @@ B-1, B-2, B-3 (NAV chart + ₹10k), B-4 (top-10 holdings + partial sectors), B-5
 peers, fund info (with honest gaps), manager, tax explainer, FAQs, why-this-label. **This alone is a
 night-and-day upgrade.**
 
-**Phase 2 — "Computed analytics."** B-7 (rolling returns + Sharpe/Sortino/std-dev), B-8 +
-`LabelTrendChart`, risk section, alpha/beta once benchmark series lands. Two-person methodology gate.
+**Phase 2 — "Computed analytics."** B-7 core **already done** (Sharpe/Sortino/vol/rolling-1Y +
+category percentiles stored). Remaining: **B-7a** (band + expose in `FundDetail`, server-side),
+**B-7b** (extend `mf_category_stats` to the risk ratios), the **Risk section UI** (plain-language
+bands per §3.4), B-8 + `LabelTrendChart`, alpha/beta once a benchmark series lands. The risk-band
+copy is a public label surface → Compliance sign-off (no two-person *scoring* gate needed — these
+feed no score).
 
 **Phase 3 — "Blocked-on-source / premium."** Scheme-level AUM, expense ratio, exit load, full
 holdings + full sector/market-cap weights (need an ingest source — sequence behind the ADR-0033
@@ -284,6 +360,9 @@ calculator (client-side, can be earlier). Manager drill-down. Tier-gated deep an
 ## 8. Compliance & disclosures checklist (gate before merge)
 
 - [ ] No numeric score / weight / fair value in DOM (grep). Ring = **band arc only**.
+- [ ] **Risk metrics shown as plain-language bands, not raw ratios** (unless §10.6 approves tier-gated
+      raw numbers); bands computed **server-side**; raw Sharpe/Sortino/vol/percentile absent from the
+      client payload when band-only. Band copy reviewed by Compliance (Opus).
 - [ ] Only the 5 educational labels; **no advisory verbs** anywhere (grep `strong_buy|buy|sell|hold|caution|avoid` + "Start SIP/Invest/Withdraw").
 - [ ] Confidence band-only; `< 0.30 → insufficient_data`.
 - [ ] Risk profile never feeds the score; scoring inputs unchanged unless two-person gated.
@@ -324,6 +403,12 @@ endpoints; per-change review file under `docs/project-state/reviews/`.
 4. **Sourcing budget** — green-light the ADR-0033 scraper extension for expense ratio / full holdings /
    sector weights, or keep them "not yet sourced" for now?
 5. **PowerUp label collision** — counsel trademark check before a *new* public label-trend surface?
+6. **Risk metrics — bands vs raw numbers (NEW, B74 shipped the data).** Sharpe/Sortino/volatility/
+   rolling are now computed + stored (internal). The MF-analytics skill technically permits showing
+   *factual* risk numbers, but the build chose band-only and raw ratios fail the "simple for
+   non-finance users" bar. **Recommended: plain-language bands only at launch** (per the §3.4 wording
+   table). Decide: (a) bands only, or (b) also show raw numbers tier-gated (Plus) with tooltips? And
+   **approve the band cut-offs + exact copy** (a public label surface → Compliance sign-off).
 
 ---
 
@@ -343,4 +428,9 @@ endpoints; per-change review file under `docs/project-state/reviews/`.
   growth overlay + inline tooltips + rolling returns, minus stars/verdicts/scores).
 - Authority: `docs/DhanRadar_Architecture_Final.md`, `FINAL_SCORING_SPEC.md`, project `CLAUDE.md`
   non-negotiables; memories `powerup-money-label-collision`, `b67-aum-no-clean-per-scheme-source`,
-  `signal-noneg2-numeric-dom`, `ui-system-typography-rollout`.
+  `signal-noneg2-numeric-dom`, `ui-system-typography-rollout`, `mf-risk-analytics-shipped`
+  (the B74 risk metrics + the near-flat-NAV vol-floor learning).
+- Risk-metric build: `backend/dhanradar/mf/risk.py`, migration `0042_mf_risk_adjusted_metrics.py`,
+  `mf_metrics_refresh` in `backend/dhanradar/tasks/mf.py`; governance =
+  `DhanRadar-Mutual-Fund-Analytics` skill (§7 risk metrics, §15 like-for-like category, §18 factual-
+  numbers-vs-score boundary); RCA `docs/rca/README.md` (2026-06-21 Sharpe explosion).
