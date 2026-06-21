@@ -252,6 +252,39 @@ class TestNegativeReturnSeries:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Near-flat NAV — vol below the meaningful floor → Sharpe/Sortino withheld
+# ---------------------------------------------------------------------------
+
+class TestNearFlatNavVolFloor:
+    """A near-constant NAV series (stale / placeholder data) has annualised vol
+    far below _MIN_MEANINGFUL_VOL.  The exact ``vol == 0`` guard would miss it
+    (vol is tiny-but-nonzero), so the ratio would explode to ±10⁵–10⁶.  The
+    floor must withhold Sharpe AND Sortino (→ None) while still storing the
+    (tiny, real) volatility_pct."""
+
+    def test_microscopic_vol_withholds_ratios(self):
+        # 252 points, alternating ±1e-7 fractional return → vol ≈ 1e-7×√252 ≈
+        # 1.6e-6, three orders of magnitude below the 5e-4 floor.
+        returns = [1e-7 if i % 2 == 0 else -1e-7 for i in range(251)]
+        pts = _make_series(252, returns)
+        rs = risk_adjusted_stats(pts, risk_free_annual=_RF)
+        assert rs.sharpe_ratio is None, "near-flat NAV → Sharpe withheld (no explosion)"
+        assert rs.sortino_ratio is None, "near-flat NAV → Sortino withheld"
+        # The measured volatility is still stored (real, if tiny).
+        assert rs.volatility_pct is not None and rs.volatility_pct >= 0.0
+
+    def test_real_low_vol_fund_keeps_sharpe(self):
+        # A genuine low-vol fund: steady +0.03%/day with a real ±0.01% wobble →
+        # annualised vol well above the floor → Sharpe must be a finite number,
+        # NOT withheld (the floor targets vol→0, not merely "low vol").
+        returns = [0.0004 if i % 2 == 0 else 0.0002 for i in range(251)]
+        pts = _make_series(252, returns)
+        rs = risk_adjusted_stats(pts, risk_free_annual=_RF)
+        assert rs.sharpe_ratio is not None, "real low-vol fund keeps its Sharpe"
+        assert abs(rs.sharpe_ratio) < 1000.0, "no explosion for a genuine fund"
+
+
+# ---------------------------------------------------------------------------
 # 4. Short series — fewer than _MIN_NAV_POINTS → all-None
 # ---------------------------------------------------------------------------
 
