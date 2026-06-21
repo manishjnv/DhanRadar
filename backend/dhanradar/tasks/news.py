@@ -35,22 +35,41 @@ def refresh_market_news() -> str:
 
     async def _go() -> str:
         async with TaskSessionLocal() as db:
+            # Each sanctioned source runs in its own try so one failing source
+            # never blocks the other (RSS feeds are IP-blocked from KVM4; GDELT is
+            # VPS-reachable — they fail independently). GDELT is ADDITIVE.
+            rss_count = 0
+            gdelt_count = 0
+
             try:
-                count = await service.fetch_and_upsert_rss_news(db)
-                if count > 0:
-                    return f"news: upserted {count} RSS items"
+                rss_count = await service.fetch_and_upsert_rss_news(db)
+            except Exception:
+                logger.exception("news: RSS ingest failed (isolated) — continuing")
+                await db.rollback()
 
-                # RSS returned 0 — fall back to curated seed so the feed is never empty.
-                logger.warning(
-                    "news: RSS returned 0 items — falling back to curated seed"
-                )
+            try:
+                gdelt_count = await service.fetch_and_upsert_gdelt_news(db)
+            except Exception:
+                logger.exception("news: GDELT ingest failed (isolated) — continuing")
+                await db.rollback()
+
+            total = rss_count + gdelt_count
+            if total > 0:
+                return f"news: upserted {rss_count} RSS + {gdelt_count} GDELT items"
+
+            # Both live sources empty — fall back to curated seed so the feed is
+            # never empty.
+            logger.warning(
+                "news: RSS+GDELT returned 0 items — falling back to curated seed"
+            )
+            try:
                 count = await service.upsert_curated_news(db)
-                return f"news: RSS empty, upserted {count} curated fallback items"
-
+                return f"news: live empty, upserted {count} curated fallback items"
             except Exception:
                 logger.exception(
                     "news: refresh failed; last persisted rows untouched"
                 )
+                await db.rollback()
                 return "news: refresh failed (see logs)"
 
     return asyncio.run(_go())
