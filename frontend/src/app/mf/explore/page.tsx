@@ -20,6 +20,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { FundExplorerTable } from '@/components/mf/FundExplorerTable';
 import { useFundCategories, useFundExplorer } from '@/features/mf/api';
+import { formatCategoryLabel } from '@/features/mf/explorer-format';
 import { cn } from '@/lib/cn';
 import type { SortKey } from '@/components/mf/FundExplorerTable';
 
@@ -46,6 +47,15 @@ function CategoryDropdown({
   activeKey: string;
   onSelect: (key: string) => void;
 }) {
+  // Sort alphabetically by the label the user actually sees (display_name
+  // differs from the raw sebi_category key the backend sorts by).
+  const sorted = React.useMemo(
+    () =>
+      [...categories].sort((a, b) =>
+        formatCategoryLabel(a.display_name).localeCompare(formatCategoryLabel(b.display_name)),
+      ),
+    [categories],
+  );
   return (
     <div className="relative inline-flex items-center gap-2">
       <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
@@ -59,12 +69,12 @@ function CategoryDropdown({
             'h-[34px] rounded-lg border border-line bg-surface-2',
             'pl-3 pr-8 text-small text-ink font-medium cursor-pointer appearance-none',
             'focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40',
-            'transition-colors max-w-[320px]',
+            'transition-colors max-w-[280px]',
           )}
         >
-          {categories.map((cat) => (
+          {sorted.map((cat) => (
             <option key={cat.key} value={cat.key}>
-              {cat.display_name} ({cat.fund_count})
+              {formatCategoryLabel(cat.display_name)} ({cat.fund_count})
             </option>
           ))}
         </select>
