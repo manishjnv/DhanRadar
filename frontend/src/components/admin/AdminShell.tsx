@@ -167,7 +167,15 @@ function AdminSidebar({ variant }: { variant: AdminShellVariant }) {
   return (
     <aside className="hidden md:flex h-full w-56 shrink-0 flex-col border-r border-line bg-surface">
       {/* Brand + accent stripe */}
-      <div className={cn('flex h-14 items-center gap-2.5 border-b border-line px-4', accent.topBorder)}>
+      <Link
+        href="/"
+        aria-label="DhanRadar home"
+        className={cn(
+          'flex h-14 items-center gap-2.5 border-b border-line px-4',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+          accent.topBorder,
+        )}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/icon.svg" alt="" width={24} height={24} className="shrink-0" />
         <span className="flex flex-col leading-tight">
@@ -176,7 +184,7 @@ function AdminSidebar({ variant }: { variant: AdminShellVariant }) {
             {accent.roleLabelText}
           </span>
         </span>
-      </div>
+      </Link>
 
       {/* Nav */}
       <nav className="flex flex-1 flex-col gap-0.5 p-3 overflow-y-auto" aria-label={`${accent.roleLabelText} navigation`}>
