@@ -78,6 +78,42 @@ def _band_for(conf: float) -> str:
     return "insufficient_data"
 
 
+# ---------------------------------------------------------------------------
+# Driver-bar magnitude tier (numberless drivers).
+# ---------------------------------------------------------------------------
+# A factor's "drive strength" = how far its normalized value sits from neutral
+# (0.5), scaled by its weight:  strength = |value − 0.5| × 2 × weight, range
+# [0, weight]. This is SYMMETRIC for supporting AND counterweight factors — a
+# strongly bearish factor in a greedy regime is a STRONG counterweight, not a
+# slight one. The strength is bucketed into exactly 3 COARSE tiers.
+#
+# CRITICAL (non-neg #2): the numeric strength / value / weight is NEVER
+# serialized — only the resulting tier STRING ("strong"|"moderate"|"slight")
+# reaches the client. These thresholds are PROVISIONAL pending compliance review.
+# Max possible strength = max(WEIGHTS) = 0.15 (nifty_trend at value 0/1), so
+# STRONG ≈ 40% of max and MODERATE ≈ 17% of max.
+FACTOR_TIERS: tuple[str, str, str] = ("strong", "moderate", "slight")
+_TIER_STRONG_MIN = 0.060
+_TIER_MODERATE_MIN = 0.025
+
+
+def factor_tier(value: float | None, weight: float) -> str:
+    """Return the coarse 3-bucket magnitude tier for one driver factor.
+
+    NEVER returns a number — only one of FACTOR_TIERS. A missing value (factor
+    absent from the input vector) falls back to the lowest tier ("slight") so the
+    bar always renders safely.
+    """
+    if value is None:
+        return "slight"
+    strength = abs(value - 0.5) * 2.0 * weight
+    if strength >= _TIER_STRONG_MIN:
+        return "strong"
+    if strength >= _TIER_MODERATE_MIN:
+        return "moderate"
+    return "slight"
+
+
 def compute_mood(inputs: dict[str, Optional[float]]) -> Optional[MoodResult]:
     """Compute the regime snapshot. Returns None if ALL inputs are missing (the
     caller skips + retries — architecture all-missing failure mode)."""

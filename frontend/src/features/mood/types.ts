@@ -14,6 +14,16 @@ export type ConfidenceBand = 'high' | 'medium' | 'low' | 'insufficient_data';
 
 export type DataQuality = 'ok' | 'degraded' | 'unavailable';
 
+// Coarse, non-numeric magnitude tier for a driver factor. The raw contribution /
+// weight is proprietary and NEVER sent to the client (non-neg #2) — only this
+// 3-way tier string reaches the UI to size the driver bar.
+export type MoodFactorTier = 'strong' | 'moderate' | 'slight';
+
+export interface MoodFactor {
+  label: string;
+  tier:  MoodFactorTier;
+}
+
 // ---------------------------------------------------------------------------
 // GET /market/mood
 // ---------------------------------------------------------------------------
@@ -22,8 +32,8 @@ export interface MoodPublic {
   regime:               Regime;
   confidence_band:      ConfidenceBand;
   data_quality:         DataQuality;
-  contributing_factors: string[];
-  contradicting_factors: string[];
+  contributing_factors: MoodFactor[];
+  contradicting_factors: MoodFactor[];
   commentary:           string | null;
   disclosure:           string;
   not_advice:           string;
