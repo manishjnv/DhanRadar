@@ -516,6 +516,11 @@ _COHORT_PEER_CHUNK = 200
 # Batch size for the nightly mf_metrics_refresh upsert (ISINs per iteration).
 _METRICS_REFRESH_CHUNK = 500
 
+# Minimum number of funds with a non-None value in a category before we write
+# category-level percentiles (p25/p50/p75/p90) for that (category, metric_key).
+# Fewer than 5 funds is too thin to produce meaningful distribution stats.
+_MIN_CATEGORY_FUNDS = 5
+
 # Peer-cohort GROUPING KEY — VERSIONED METHODOLOGY (B6/B28 two-person gate), B66-f1
 # part 2. Which mf_funds column groups peers into a category cohort:
 #   * "category"      — the RAW AMFI string (v1.1). Malformed variants (bare "ELSS",
@@ -992,12 +997,16 @@ def mf_metrics_refresh() -> str:
 
 
 async def _metrics_refresh_pipeline() -> str:
+    from collections import defaultdict
+
     from sqlalchemy import func, select
     from sqlalchemy.dialects.postgresql import insert
 
+    from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.risk import percentile, risk_adjusted_stats
     from dhanradar.mf.signals import extended_horizon_stats
-    from dhanradar.models.mf import MfFundMetrics, MfNavHistory
+    from dhanradar.models.mf import MfCategoryStats, MfFund, MfFundMetrics, MfNavHistory
 
     today = date.today()
     run_id = str(uuid4())
@@ -1031,6 +1040,13 @@ async def _metrics_refresh_pipeline() -> str:
                 # windows, the refresh must store per-fund as_of and the cohort
                 # builder must filter by it to stay equivalent with the live path.
                 r3m, r6m, r1, r3, r5, dd = extended_horizon_stats(series.get(isin, []))
+
+                # Risk-adjusted metrics (Sharpe, Sortino, vol, rolling 1Y).
+                rs = risk_adjusted_stats(
+                    series.get(isin, []),
+                    risk_free_annual=_s.RISK_FREE_RATE_ANNUAL,
+                )
+
                 upsert_dicts.append({
                     "isin": isin,
                     "return_3m_pct": r3m,
@@ -1042,6 +1058,14 @@ async def _metrics_refresh_pipeline() -> str:
                     "nav_points": len(series.get(isin, [])),
                     "as_of_date": today,
                     "source_run_id": run_id,
+                    # Risk-adjusted metrics (migration 0042).
+                    "sharpe_ratio": rs.sharpe_ratio,
+                    "sortino_ratio": rs.sortino_ratio,
+                    "volatility_pct": rs.volatility_pct,
+                    "rolling_1y_avg_pct": rs.rolling_1y_avg_pct,
+                    "rolling_1y_min_pct": rs.rolling_1y_min_pct,
+                    "rolling_1y_max_pct": rs.rolling_1y_max_pct,
+                    "rolling_1y_pct_positive": rs.rolling_1y_pct_positive,
                 })
 
             # Bulk upsert in sub-chunks to bound statement size.
@@ -1062,13 +1086,92 @@ async def _metrics_refresh_pipeline() -> str:
                         "as_of_date": insert(MfFundMetrics).excluded.as_of_date,
                         "source_run_id": insert(MfFundMetrics).excluded.source_run_id,
                         "computed_at": func.now(),
+                        # Risk-adjusted metrics (migration 0042).
+                        "sharpe_ratio": insert(MfFundMetrics).excluded.sharpe_ratio,
+                        "sortino_ratio": insert(MfFundMetrics).excluded.sortino_ratio,
+                        "volatility_pct": insert(MfFundMetrics).excluded.volatility_pct,
+                        "rolling_1y_avg_pct": insert(MfFundMetrics).excluded.rolling_1y_avg_pct,
+                        "rolling_1y_min_pct": insert(MfFundMetrics).excluded.rolling_1y_min_pct,
+                        "rolling_1y_max_pct": insert(MfFundMetrics).excluded.rolling_1y_max_pct,
+                        "rolling_1y_pct_positive": insert(MfFundMetrics).excluded.rolling_1y_pct_positive,
                     },
                 )
                 await db.execute(stmt)
             await db.commit()
             n_processed += len(chunk)
 
-    summary = f"mf_metrics_refresh: {n_processed} funds"
+    # ------------------------------------------------------------------
+    # Category-stats step: p25/p50/p75/p90 per (sebi_category, metric_key)
+    # for return_1y_pct, return_3y_pct, max_drawdown_pct.
+    # ------------------------------------------------------------------
+    _CATEGORY_METRIC_KEYS = ("return_1y_pct", "return_3y_pct", "max_drawdown_pct")
+
+    async with TaskSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(
+                    MfFund.sebi_category,
+                    MfFundMetrics.return_1y_pct,
+                    MfFundMetrics.return_3y_pct,
+                    MfFundMetrics.max_drawdown_pct,
+                )
+                .join(MfFundMetrics, MfFund.isin == MfFundMetrics.isin)
+                .where(MfFund.sebi_category.isnot(None))
+            )
+        ).all()
+
+    # Group per-metric values by category.
+    # Structure: {category: {metric_key: [values]}}
+    by_cat_metric: dict[str, dict[str, list[float | None]]] = defaultdict(
+        lambda: {k: [] for k in _CATEGORY_METRIC_KEYS}
+    )
+    for row in rows:
+        cat = row.sebi_category
+        by_cat_metric[cat]["return_1y_pct"].append(row.return_1y_pct)
+        by_cat_metric[cat]["return_3y_pct"].append(row.return_3y_pct)
+        by_cat_metric[cat]["max_drawdown_pct"].append(row.max_drawdown_pct)
+
+    cat_stat_upserts: list[dict] = []
+    for cat, metric_map in by_cat_metric.items():
+        for metric_key, values in metric_map.items():
+            valid = sorted(v for v in values if v is not None)
+            if len(valid) < _MIN_CATEGORY_FUNDS:
+                # Too few funds — skip; noisy percentiles are worse than None.
+                continue
+            cat_stat_upserts.append({
+                "sebi_category": cat,
+                "metric_key": metric_key,
+                "p25": percentile(valid, 25.0),
+                "p50": percentile(valid, 50.0),
+                "p75": percentile(valid, 75.0),
+                "p90": percentile(valid, 90.0),
+                "as_of": today,
+            })
+
+    n_cat_stats = 0
+    if cat_stat_upserts:
+        async with TaskSessionLocal() as db:
+            for i in range(0, len(cat_stat_upserts), _UPSERT_CHUNK):
+                chunk_cs = cat_stat_upserts[i : i + _UPSERT_CHUNK]
+                if not chunk_cs:
+                    continue
+                stmt_cs = insert(MfCategoryStats).values(chunk_cs).on_conflict_do_update(
+                    index_elements=["sebi_category", "metric_key", "as_of"],
+                    set_={
+                        "p25": insert(MfCategoryStats).excluded.p25,
+                        "p50": insert(MfCategoryStats).excluded.p50,
+                        "p75": insert(MfCategoryStats).excluded.p75,
+                        "p90": insert(MfCategoryStats).excluded.p90,
+                        "computed_at": func.now(),
+                    },
+                )
+                await db.execute(stmt_cs)
+            await db.commit()
+            n_cat_stats = len(cat_stat_upserts)
+
+    summary = (
+        f"mf_metrics_refresh: {n_processed} funds, {n_cat_stats} category-stat rows"
+    )
     logger.info(summary)
     return summary
 
@@ -2824,9 +2927,9 @@ async def _kite_login_and_get_token() -> str:
     Flow: POST /api/login → POST /api/twofa (TOTP) → follow redirects to
     extract request_token from callback URL → generate_session.
     """
-    import pyotp
     from urllib.parse import parse_qs, urlparse
 
+    import pyotp
     from kiteconnect import KiteConnect
 
     from dhanradar.config import settings as _s
