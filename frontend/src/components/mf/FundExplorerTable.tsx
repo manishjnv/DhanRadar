@@ -25,7 +25,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import { LabelChip } from '@/components/ui/LabelChip';
-import { cleanSchemeName } from '@/features/mf/explorer-format';
+import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
 import type { FundExplorerItem } from '@/features/mf/types';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 
@@ -252,7 +252,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                       </Link>
                       <div className="flex items-center flex-wrap gap-1 mt-0.5">
                         {fund.amc_name && (
-                          <span className="font-mono text-[11px] text-ink-muted truncate max-w-[180px]">{fund.amc_name}</span>
+                          <span className="font-mono text-[11px] text-ink-muted truncate max-w-[180px]">{shortenAmcName(fund.amc_name)}</span>
                         )}
                         {fund.plan_type && (
                           <span className="inline-flex items-center px-1.5 py-px rounded bg-surface-3 border border-line font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">

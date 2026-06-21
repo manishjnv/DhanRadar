@@ -58,7 +58,7 @@ function CategoryDropdown({
   );
   return (
     <div className="relative inline-flex items-center gap-2">
-      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+      <span className="font-mono text-[10px] uppercase tracking-[0.06em] font-medium text-ink-muted shrink-0">
         Category
       </span>
       <div className="relative">
@@ -117,7 +117,7 @@ function FilterChips({
   return (
     <div className="flex items-center gap-4 flex-wrap">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+        <span className="font-mono text-[10px] uppercase tracking-[0.06em] font-medium text-ink-muted shrink-0">
           Plan
         </span>
         <div className="flex gap-1">
@@ -141,7 +141,7 @@ function FilterChips({
         </div>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0">
+        <span className="font-mono text-[10px] uppercase tracking-[0.06em] font-medium text-ink-muted shrink-0">
           Option
         </span>
         <div className="flex gap-1">
@@ -217,7 +217,7 @@ function PerPageSelect({
 }) {
   return (
     <div className="relative inline-flex items-center gap-2">
-      <span className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted shrink-0 whitespace-nowrap">
+      <span className="font-mono text-[10px] uppercase tracking-[0.06em] font-medium text-ink-muted shrink-0 whitespace-nowrap">
         Show
       </span>
       <div className="relative">
@@ -431,12 +431,18 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Row 1: Category selector + search (right-aligned) + fund count */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Controls — Category + Plan + Option on one line; search right-aligned */}
+      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
         <CategoryDropdown
           categories={catData.categories}
           activeKey={activeCategory}
           onSelect={handleCategoryChange}
+        />
+        <FilterChips
+          planFilter={planFilter}
+          optionFilter={optionFilter}
+          onPlanFilter={(k) => { setPlanFilter(k); setPage(1); }}
+          onOptionFilter={(k) => { setOptionFilter(k); setPage(1); }}
         />
         <div className="ml-auto flex items-center gap-3">
           {data && (
@@ -449,14 +455,6 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
           </div>
         </div>
       </div>
-
-      {/* Row 2: Plan / Option type filters */}
-      <FilterChips
-        planFilter={planFilter}
-        optionFilter={optionFilter}
-        onPlanFilter={(k) => { setPlanFilter(k); setPage(1); }}
-        onOptionFilter={(k) => { setOptionFilter(k); setPage(1); }}
-      />
 
       {/* Top pagination — per-page selector on left, page buttons on right */}
       {data && (
@@ -537,7 +535,7 @@ export default function ExplorePage() {
   // public and statically prerendered (outside the (app) group it no longer
   // inherits the auth-guarded dynamic render).
   return (
-    <MaybeShell maxWidth="wide">
+    <MaybeShell maxWidth="full">
       <React.Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
         <ExplorePageContent />
       </React.Suspense>
