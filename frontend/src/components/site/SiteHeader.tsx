@@ -9,7 +9,7 @@
  * the public chrome identical across the whole logged-out surface, on web AND
  * mobile.
  *
- * Add or rename a public nav destination in ONE place — NAV_LINKS below.
+ * Add or rename a public nav destination in ONE place — PUBLIC_NAV_LINKS below.
  *
  * Mobile: the centre links collapse into an accessible hamburger menu (the
  * landing page previously hid them with no fallback, leaving phone visitors with
@@ -30,7 +30,10 @@ const LINK_RING =
   'rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40';
 
 // Canonical public nav links — every entry points to an existing public route.
-const NAV_LINKS = [
+// Exported so the authenticated shell (AppShell) can surface the SAME public
+// destinations in its top bar for logged-in users on public pages, keeping one
+// source of truth for the public nav.
+export const PUBLIC_NAV_LINKS = [
   { href: '/mf/explore', label: 'Explore Funds' },
   { href: '/methodology', label: 'Methodology' },
   { href: '/mood', label: 'Market Mood' },
@@ -80,7 +83,7 @@ export function SiteHeader() {
 
         {/* Centre links — desktop */}
         <div className="hidden items-center gap-1 md:flex">
-          {NAV_LINKS.map((l) => (
+          {PUBLIC_NAV_LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
@@ -143,7 +146,7 @@ export function SiteHeader() {
             className="relative z-30 border-t border-line bg-surface md:hidden"
           >
             <div className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3">
-              {NAV_LINKS.map((l) => (
+              {PUBLIC_NAV_LINKS.map((l) => (
                 <Link
                   key={l.href}
                   href={l.href}
