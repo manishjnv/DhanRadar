@@ -1,5 +1,28 @@
 # DhanRadar — Session State
 
+## 2026-06-21 — MF risk-adjusted analytics shipped + deployed (Wave-1 task 3)
+
+**Status:** DONE + DEPLOYED to KVM4. Production at `090bb93`, box alembic `0042`. `/api/v1/health` 200.
+
+- **PR #282 (migration 0042):** new pure module `backend/dhanradar/mf/risk.py` (Sharpe, Sortino,
+  annualised vol, rolling-1Y windows, percentile) reusing `signals.py` NAV helpers; +7 nullable
+  Float cols on `mf.mf_fund_metrics`; new `mf.mf_category_stats` (sebi_category, metric_key,
+  p25/p50/p75/p90, as_of); `mf_metrics_refresh` extended with per-fund risk stats + post-loop
+  category percentiles (`_MIN_CATEGORY_FUNDS=5`). 252-period annualisation, sample stdev (ddof=1),
+  Sortino MAR=0, Rf=`settings.RISK_FREE_RATE_ANNUAL=0.065` proxy, `<252` NAV points → NULL.
+  **Internal-only — no public DOM numeric (non-neg #2). No scoring/label/ranking_configs change.**
+- **PR #283 (vol-floor fix):** live spot-check found ~32 funds with `|Sharpe|>1000` (min −1.375M) on
+  near-flat NAV; added `_MIN_MEANINGFUL_VOL=0.0005` floor → withhold ratios (keep vol). RCA logged.
+- **Verified live:** triggered `mf_metrics_refresh` on the box; 8061 funds with sane Sharpe
+  (−119…+4.92), 0 explosions, 126 `mf_category_stats` rows, near-flat funds correctly NULL'd.
+- **Gates (both PRs):** ruff ✓ · mypy risk.py clean ✓ · ci_guards ✓ · pytest 36 ✓ · CI
+  backend/frontend/guards/migrations ✓ (lint advisory red only). Single alembic head `0042`.
+- **Next (Wave-1 remaining):** UI-conformance polish pass (MF/portfolio → hi-fi mockups) +
+  reusable components (Sparkline/Stat/FAQ). A future Tier-C task may surface a QUALITATIVE band
+  ("above category median") from these metrics — out of scope here.
+
+---
+
 **Last updated:** 2026-06-16 (**Signal Phase 3 fully deployed + 500→401 hotfix in PR #205.**
 Production at `6f687bd` (PR #202); `signal_notifications` live; 15 concept articles seeded;
 Celery beat registered. PR #205 (`bdf16e0`) pending merge: fixes anonymous-UUID 500 on all
