@@ -23,6 +23,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
@@ -169,6 +170,16 @@ export default function MoodPage() {
                 <MoodGauge
                   regime={data.regime as Regime}
                   confidenceBand={data.confidence_band}
+                />
+              </div>
+
+              {/* Plain-language WHY behind the confidence band — words only, no
+                  counts/percent/score (non-neg #2); data reliability only (#1). */}
+              <div className="mt-2 flex justify-center">
+                <ConfidenceExplanation
+                  dataQuality={data.data_quality}
+                  confidenceBand={data.confidence_band}
+                  className="max-w-prose text-center"
                 />
               </div>
 
