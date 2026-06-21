@@ -35,9 +35,7 @@ const LINK_RING =
 // source of truth for the public nav.
 export const PUBLIC_NAV_LINKS = [
   { href: '/mf/explore', label: 'Explore Funds' },
-  { href: '/methodology', label: 'Methodology' },
   { href: '/mood', label: 'Market Mood' },
-  { href: '/learn/tax', label: 'Tax Education' },
   { href: '/pricing', label: 'Pricing' },
 ] as const;
 
@@ -78,7 +76,13 @@ export function SiteHeader() {
         >
           {/* Decorative icon; the wordmark provides the accessible name */}
           <Image src="/brand/icon.svg" alt="" width={26} height={26} className="shrink-0" />
-          <span className="text-h3 font-semibold text-navy">DhanRadar</span>
+          <span className="flex flex-col leading-none">
+            <span className="text-h3 font-semibold text-navy">DhanRadar</span>
+            {/* Editorial-accent tagline (Instrument Serif), purely decorative chrome */}
+            <span className="mt-0.5 hidden font-serif text-caption italic text-ink-muted sm:block">
+              Educational fund intelligence
+            </span>
+          </span>
         </Link>
 
         {/* Centre links — desktop */}
