@@ -134,13 +134,17 @@ class FundSearchItem(BaseModel):
     """Search result item for GET /api/v1/mf/search.
 
     Public — no scores, no numerics, no verb_label (non-neg #2).
-    Fields: isin, scheme_name, amc_name, sebi_category only.
+    Fields: isin, scheme_name, amc_name, sebi_category, plan_type, option_type only.
+    plan_type / option_type let the frontend disambiguate the direct/regular ·
+    growth/idcw variants of the same scheme in the cmdk search bar.
     """
 
     isin: str
     scheme_name: str
     amc_name: str | None = None
     sebi_category: str | None = None
+    plan_type: str | None = None
+    option_type: str | None = None
 
 
 class FundExplorerItem(BaseModel):

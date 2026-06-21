@@ -30,6 +30,8 @@ interface SearchResult {
   scheme_name: string;
   amc_name: string | null;
   sebi_category: string | null;
+  plan_type: string | null;
+  option_type: string | null;
 }
 
 // Backend returns the list directly: GET /api/v1/mf/search → SearchResult[]
@@ -222,7 +224,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   function handleSelect(result: SearchResult) {
     onClose();
-    router.push(`/mf/fund/${encodeURIComponent(result.isin)}`);
+    router.push(
+      `/mf/fund/${encodeURIComponent(result.isin)}?category=${encodeURIComponent(result.sebi_category ?? '')}`,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -353,6 +357,20 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               {results.map((result, idx) => {
                 const isActive = idx === activeIndex;
                 const optionId = `cmd-option-${idx}`;
+
+                // Plan/option labels — same mapping as FundExplorerTable.tsx lines 219–228.
+                const planLabel = result.plan_type
+                  ? result.plan_type === 'direct' ? 'Direct' : 'Regular'
+                  : null;
+                const optionLabel = result.option_type
+                  ? result.option_type === 'growth'             ? 'Growth'
+                  : result.option_type === 'idcw'               ? 'IDCW'
+                  : result.option_type === 'dividend_reinvest'  ? 'Div Reinvest'
+                  : 'Div Payout'
+                  : null;
+
+                const secondaryParts = [result.amc_name, planLabel, optionLabel].filter(Boolean);
+
                 return (
                   <li
                     key={result.isin}
@@ -386,9 +404,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                           {result.scheme_name}
                         </span>
                         <span className="truncate text-caption text-ink-muted">
-                          {[result.amc_name, result.sebi_category]
-                            .filter(Boolean)
-                            .join(' · ')}
+                          {secondaryParts.join(' · ')}
                         </span>
                       </div>
                     </button>
