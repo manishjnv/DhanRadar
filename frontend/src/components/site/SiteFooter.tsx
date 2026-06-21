@@ -70,7 +70,12 @@ export function SiteFooter() {
               aria-label="DhanRadar home"
             >
               <Image src="/brand/icon.svg" alt="" width={24} height={24} className="shrink-0" />
-              <span className="text-h3 font-semibold text-navy">DhanRadar</span>
+              <span className="flex flex-col leading-none">
+                <span className="text-h3 font-semibold text-navy">DhanRadar</span>
+                <span className="mt-0.5 font-serif text-caption italic text-ink-muted">
+                  Your Investment Radar
+                </span>
+              </span>
             </Link>
             <p className="max-w-xs text-small text-ink-secondary">
               Educational mutual-fund intelligence for India. DhanRadar is a

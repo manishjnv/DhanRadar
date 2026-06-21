@@ -80,7 +80,7 @@ export function SiteHeader() {
             <span className="text-h3 font-semibold text-navy">DhanRadar</span>
             {/* Editorial-accent tagline (Instrument Serif), purely decorative chrome */}
             <span className="mt-0.5 hidden font-serif text-caption italic text-ink-muted sm:block">
-              Educational fund intelligence
+              Your Investment Radar
             </span>
           </span>
         </Link>
