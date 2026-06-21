@@ -40,6 +40,7 @@ flip the old one's status to `Superseded by ADR-NNNN`.
 | ADR-0029 | Two additional login methods: Google SSO (server-side OAuth+PKCE) and TOTP as a standalone first factor | Accepted |
 | ADR-0030 | Cohort label band goes category-class-aware (model v1.1, B58-f4) | Accepted |
 | ADR-0031 | Email OTP as an alternative login factor (amends the OTP-first IGNORE scope) | Accepted |
+| ADR-0036 | Mood driver bars expose a coarse 3-way magnitude tier, never the numeric contribution | Accepted (thresholds provisional) |
 
 ---
 
@@ -998,3 +999,23 @@ Raw AUM point values do not reach the DOM regardless of what is ingested (ADR-00
 **Source:** founder decision 2026-06-14; `docs/project-state/B67_FUNDAMENTALS_SOURCING_MEMO.md`;
 BLOCKERS B67; Data-Ingestion governance §8.4; B56-f5 source-sanction discipline; ADR-0010
 (non-numeric/educational boundary).
+
+## ADR-0036 — Mood driver bars expose a coarse 3-way magnitude tier, never the numeric contribution
+
+**Decision:** the mood Supporting/Counterweights factor list shows relative magnitude as
+numberless bars. The server derives a coarse tier per factor from its internal drive strength
+`abs(value - 0.5) * 2 * weight` (range 0..weight), bucketed into exactly three:
+
+- **strong** — strength ≥ 0.060
+- **moderate** — strength ≥ 0.025
+- **slight** — all others (and any missing value → safe fallback)
+
+Only the tier STRING crosses the API (`MoodPublic` factor = `{label, tier}`) and the DOM (bar width
+`w-full` / `w-2/3` / `w-1/3`). The raw value, weight, and contribution stay server-side (non-neg #2,
+no-numeric-in-DOM). Tiers are computed at read time from the persisted `input_vector` + `WEIGHTS`,
+so there is no DB migration.
+
+**Status:** Accepted; the thresholds are PROVISIONAL pending a scoring/compliance tuning pass.
+
+**Source:** founder build session 2026-06-21; adversarial compliance review (ACCEPT-with-conditions:
+"file this ADR before deploy-eligible"); ADR-0010 (non-numeric/educational boundary).

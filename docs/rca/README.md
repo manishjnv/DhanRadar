@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-21 — Integration of 8 parallel branches surfaced 2 regressions single-branch gates missed
+
+- **Symptom:** each of 8 feature branches passed its own gates, but merging them into one integration branch failed two checks: (1) `ci_guards` flagged `market_data/providers/upstox.py:70` `'Bearer ' auth value (non-neg #4)`; (2) `pytest tests/unit/test_mood_golive.py` raised `ValidationError: snapshot_at Input should be a valid string` (a `MagicMock`).
+- **Root cause:** (1) the Upstox branch's gates ran ruff/mypy/pytest but **not** `ci_guards`, so the outbound third-party `f"Bearer {token}"` header was never scanned against the inbound-cookie-auth guard (non-neg #4). (2) The relative-time branch made `get_latest` call `row.snapshot_time.isoformat()`; `test_mood_golive`'s `_make_row` mock (from a different, older branch) never set `snapshot_time`, so it was an auto-`MagicMock` whose `.isoformat()` returned a non-string. Neither defect is reachable until the two branches coexist — single-branch CI is blind to it.
+- **Fix:** (1) routed the outbound header through an `_AUTH_SCHEME = "Bearer"` constant so no literal `"Bearer "` appears in source (mirrors `notifications/channels.py`'s Resend header) — `market_data/providers/upstox.py:67-70`. (2) `_make_row` now sets `row.snapshot_time` to a real tz-aware datetime — `tests/unit/test_mood_golive.py:32`.
+- **Prevention:** when shipping N parallel branches that touch shared files, **always merge to one integration branch and run the FULL gate suite (incl. `ci_guards` + cross-module pytest) before deploy** — per-branch green is necessary, not sufficient. Run `ci_guards` on every backend branch that adds an HTTP client; outbound third-party `Authorization` headers must use a scheme constant, never a literal `"Bearer "`.
+- **Phase/area:** Mood Phase 2 integration / deploy gating.
+
 ### 2026-06-21 — Sharpe/Sortino exploded to ±10⁶ on near-flat NAV funds
 
 - **Symptom:** post-deploy spot-check of the new `mf_fund_metrics` risk columns (PR #282) found ~32 funds with `|sharpe_ratio| > 1000`, the worst at **−1,375,258**; some `sortino_ratio` near −1300. All 36 unit tests were green.
