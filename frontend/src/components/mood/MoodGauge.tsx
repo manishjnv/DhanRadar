@@ -16,6 +16,11 @@
  * Accessibility (mirrors ScoreRing pattern):
  *   SVG is aria-hidden decorative; single accessible name via
  *   <figcaption className="sr-only"> on the <figure>.
+ *
+ * Visual treatment (decorative only — purely on the aria-hidden SVG):
+ *   a soft regime-coloured glow, an arc that draws in on load, and a gentle
+ *   pulsing marker. ALL animations are disabled under prefers-reduced-motion
+ *   and add no information (the figcaption + words carry the meaning).
  */
 
 import * as React from 'react';
@@ -91,16 +96,36 @@ const BAND_DISPLAY: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// SVG semicircular arc constants
-// Viewbox is 200×120; arc sits in the top 100px, label text below.
+// SVG semicircular arc constants (~30% larger than the original 200×120 and
+// tall enough that the regime + band words sit inside the viewBox with glow room).
 // ---------------------------------------------------------------------------
-const VW      = 200;
-const VH      = 120;
-const CX      = VW / 2;       // 100
-const CY      = 100;          // arc centre Y (at bottom of arc region)
-const R       = 80;           // arc radius
-const STROKE  = 10;
-const NEEDLE_R = 6;           // marker circle radius
+const VW       = 240;        // viewBox width
+const VH       = 152;        // viewBox height
+const RENDER_W = 260;        // rendered px width (≈30% larger than the old 200)
+const RENDER_H = 165;        // rendered px height (keeps the viewBox aspect)
+const CX       = VW / 2;     // 120
+const CY       = 112;        // arc centre Y
+const R        = 94;         // arc radius
+const STROKE   = 15;         // arc thickness
+const NEEDLE_R = 8;          // marker circle radius
+const PULSE_MAX = 24;        // outer radius of the pulsing halo
+
+// Decorative animations — all disabled under prefers-reduced-motion (they carry
+// no information; the words + figcaption are the source of truth).
+const ANIM_CSS = `
+  .mg-arc    { animation: mgDraw 1.15s cubic-bezier(.22,.61,.36,1) both; }
+  .mg-needle { animation: mgPop .5s .95s cubic-bezier(.34,1.56,.64,1) both; }
+  .mg-pulse  { animation: mgPing 2.6s 1.25s ease-out infinite; }
+  .mg-text   { animation: mgFade .6s .85s ease-out both; }
+  @keyframes mgDraw { from { stroke-dashoffset: var(--mg-dash); } to { stroke-dashoffset: 0; } }
+  @keyframes mgPop  { 0% { r: 0; opacity: 0; } 100% { r: ${NEEDLE_R}px; opacity: 1; } }
+  @keyframes mgPing { 0% { r: ${NEEDLE_R}px; opacity: .45; } 70%,100% { r: ${PULSE_MAX}px; opacity: 0; } }
+  @keyframes mgFade { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .mg-arc, .mg-needle, .mg-pulse, .mg-text { animation: none !important; }
+    .mg-pulse { opacity: 0; }
+  }
+`;
 
 // Arc spans from 180° (left) to 0° (right) — a semicircle.
 // Angle for ordinal 0..4 mapped linearly over 180° → 0°.
@@ -161,6 +186,17 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
   }
 
   const arcPath = describeSemiArc(CX, CY, R);
+  // pathLength normalises the arc to 100 units so the dash maths is regime-agnostic.
+  const fillUnits = ordinal !== null ? (ordinal / 4) * 100 : 0;
+
+  // Glow + draw-in are inline so they inherit the regime colour. The custom prop
+  // `--mg-dash` seeds the draw-in start; base strokeDashoffset 0 = full arc when
+  // motion is reduced (no animation).
+  const arcStyle = {
+    filter: `drop-shadow(0 0 4px ${color})`,
+    ['--mg-dash' as string]: String(fillUnits),
+  } as React.CSSProperties;
+  const needleStyle = { filter: `drop-shadow(0 0 5px ${color})` } as React.CSSProperties;
 
   return (
     <figure className={cn('inline-flex flex-col items-center gap-1', className)}>
@@ -169,12 +205,14 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
         Do NOT add aria-label here (would double-announce per ScoreRing B10 note).
       */}
       <svg
-        width={VW}
-        height={VH}
+        width={RENDER_W}
+        height={RENDER_H}
         viewBox={`0 0 ${VW} ${VH}`}
         aria-hidden="true"
         focusable="false"
       >
+        <style>{ANIM_CSS}</style>
+
         {/* Background semicircular track */}
         <path
           d={arcPath}
@@ -182,70 +220,70 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
           stroke={trackColor}
           strokeWidth={STROKE}
           strokeLinecap="round"
-          opacity={isInsufficient ? 0.35 : 1}
+          opacity={isInsufficient ? 0.3 : 0.85}
         />
 
-        {/* Colored active arc — only rendered when we have a valid ordinal position */}
+        {/* Colored active arc — only rendered when we have a valid ordinal position.
+            Draws in from the left (the extreme_fear side) up to the needle. */}
         {ordinal !== null && !isInsufficient && (
           <path
+            className="mg-arc"
+            style={arcStyle}
             d={arcPath}
             fill="none"
             stroke={color}
             strokeWidth={STROKE}
             strokeLinecap="round"
-            // Mask from left end to needle position using dasharray technique
-            strokeDasharray={(() => {
-              // Total arc length = π * R
-              const totalLen = Math.PI * R;
-              // Fraction of arc from left (0°=extreme_greed) to this ordinal
-              // ordinal 0 is far-left (180°), ordinal 4 is far-right (0°)
-              // We fill from the left (ordinal 0 side) up to this position
-              const frac = ordinal / 4;
-              return `${totalLen * frac} ${totalLen * (1 - frac)}`;
-            })()}
-            // Arc starts at left (180°), strokeDasharray fills from there
+            pathLength={100}
+            strokeDasharray={`${fillUnits} 100`}
             strokeDashoffset={0}
           />
         )}
 
-        {/* Needle marker — circle at regime position on the arc */}
+        {/* Pulsing halo behind the needle — gentle "alive" radar ping (decorative).
+            Hidden entirely when motion is reduced. */}
+        {ordinal !== null && !isInsufficient && (
+          <circle
+            className="mg-pulse"
+            cx={needleX}
+            cy={needleY}
+            r={NEEDLE_R}
+            fill={color}
+            opacity={0}
+          />
+        )}
+
+        {/* Needle marker — circle at the regime position on the arc */}
         {ordinal !== null && (
           <circle
+            className="mg-needle"
+            style={isInsufficient ? undefined : needleStyle}
             cx={needleX}
             cy={needleY}
             r={NEEDLE_R}
             fill={isInsufficient ? 'var(--text-muted)' : color}
             stroke="var(--bg)"
-            strokeWidth={2}
+            strokeWidth={2.5}
           />
         )}
 
-        {/* Regime label word — NO numeric value, regime display word only */}
+        {/* Regime label word — NO numeric value, regime display word only.
+            The confidence band is shown in words by ConfidenceExplanation below
+            the gauge, so it is not repeated here (it stays in the figcaption for
+            screen readers). */}
         <text
+          className="mg-text"
           x={CX}
-          y={CY + 14}
+          y={CY + 28}
           textAnchor="middle"
           dominantBaseline="middle"
           fontFamily="Geist Mono, ui-monospace, monospace"
-          fontSize="15"
-          fontWeight="500"
-          letterSpacing="0.08em"
+          fontSize="18"
+          fontWeight="600"
+          letterSpacing="0.1em"
           fill={color}
         >
           {displayWord.toUpperCase()}
-        </text>
-
-        {/* Confidence band word — never a numeric percentage */}
-        <text
-          x={CX}
-          y={CY + 30}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontFamily="Geist Mono, ui-monospace, monospace"
-          fontSize="10"
-          fill="var(--text-muted)"
-        >
-          {bandWord}
         </text>
       </svg>
 
