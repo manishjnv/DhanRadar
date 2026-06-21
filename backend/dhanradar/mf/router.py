@@ -55,6 +55,7 @@ from dhanradar.mf.schemas import (
     FundCategory,
     FundExplorerItem,
     FundExplorerResponse,
+    FundSearchItem,
     MFResearchAskRequest,
     MFResearchAskResponse,
     PortfolioCreateRequest,
@@ -598,6 +599,62 @@ async def fund_categories(
         for r in rows
     ]
     return FundCategoriesResponse(categories=cats)
+
+
+@router.get("/search", response_model=list[FundSearchItem])
+async def fund_search(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query()],
+    limit: Annotated[int, Query(ge=1, le=25)] = 10,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> list[FundSearchItem]:
+    """Trigram-fuzzy fund search for the global cmdk search bar.
+
+    Public — no auth required.  Returns scheme_name, amc_name, isin, and
+    sebi_category only.  Never includes unified_score, factor weights, or any
+    numeric value (non-neg #2).
+
+    SQL is fully parameterised; the user query is bound via ``:q`` — never
+    interpolated into the statement string (SQL-injection safe).
+
+    Uses pg_trgm word_similarity for typo tolerance plus ILIKE for exact
+    substring priority.  The GIN index on scheme_name/amc_name (migration
+    0040) accelerates both predicates.
+    """
+    from sqlalchemy import text as sa_text
+
+    qn = q.strip()
+    if len(qn) < 2:
+        return []
+
+    rows = (
+        await db.execute(
+            sa_text(
+                "SELECT isin, scheme_name, amc_name, sebi_category"
+                " FROM mf.mf_funds"
+                " WHERE scheme_name ILIKE '%' || :q || '%'"
+                "    OR amc_name ILIKE '%' || :q || '%'"
+                "    OR word_similarity(:q, scheme_name) >= 0.3"
+                "    OR word_similarity(:q, coalesce(amc_name, '')) >= 0.3"
+                " ORDER BY GREATEST("
+                "      word_similarity(:q, scheme_name),"
+                "      word_similarity(:q, coalesce(amc_name, ''))"
+                " ) DESC, scheme_name ASC"
+                " LIMIT :lim"
+            ),
+            {"q": qn, "lim": limit},
+        )
+    ).all()
+
+    return [
+        FundSearchItem(
+            isin=r.isin,
+            scheme_name=r.scheme_name,
+            amc_name=r.amc_name,
+            sebi_category=r.sebi_category,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/funds", response_model=FundExplorerResponse)
