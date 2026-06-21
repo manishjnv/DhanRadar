@@ -23,10 +23,8 @@
  */
 
 import type { Metadata } from 'next';
-import Image from 'next/image';
-import Link from 'next/link';
-import { Button } from '@/components/ui/Button';
-import { Disclaimer } from '@/components/ui/Disclaimer';
+import { SiteHeader } from '@/components/site/SiteHeader';
+import { SiteFooter } from '@/components/site/SiteFooter';
 import { PricingPlans } from '@/components/pricing/PricingPlans';
 import { PricingFaq } from '@/components/pricing/PricingFaq';
 
@@ -47,11 +45,6 @@ export const metadata: Metadata = {
 };
 
 // ---------------------------------------------------------------------------
-// Shared focus-ring class for plain <a> links (matches Button's ring)
-// ---------------------------------------------------------------------------
-const LINK_RING =
-  'rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40';
-
 // ---------------------------------------------------------------------------
 // Feature comparison data
 // A semantic table comparing the 3 tiers across key capabilities.
@@ -279,41 +272,7 @@ function ComparisonTable() {
 export default function PricingPage() {
   return (
     <div className="min-h-screen bg-bg">
-      {/* ------------------------------------------------------------------ */}
-      {/* Header                                                              */}
-      {/* ------------------------------------------------------------------ */}
-      <header className="sticky top-0 z-30 bg-surface/95 border-b border-line backdrop-blur-sm">
-        <nav
-          aria-label="Main navigation"
-          className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3"
-        >
-          {/* Brand */}
-          <Link
-            href="/"
-            className={`flex items-center gap-2 ${LINK_RING}`}
-            aria-label="DhanRadar home"
-          >
-            <Image
-              src="/brand/icon.svg"
-              alt=""
-              width={26}
-              height={26}
-              className="shrink-0"
-            />
-            <span className="text-h3 font-semibold text-navy">DhanRadar</span>
-          </Link>
-
-          {/* Right actions */}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/login">Log in</Link>
-            </Button>
-            <Button variant="primary" size="sm" asChild>
-              <Link href="/signup">Get started — free</Link>
-            </Button>
-          </div>
-        </nav>
-      </header>
+      <SiteHeader />
 
       {/* ------------------------------------------------------------------ */}
       {/* Main                                                                */}
@@ -366,65 +325,7 @@ export default function PricingPage() {
         </section>
       </main>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Footer                                                              */}
-      {/* ------------------------------------------------------------------ */}
-      <footer className="bg-surface border-t border-line">
-        <div className="mx-auto max-w-6xl px-6 py-12">
-          <div className="flex flex-col items-center gap-4 text-center">
-            {/* Brand mark */}
-            <Link
-              href="/"
-              className={`flex items-center gap-2 ${LINK_RING}`}
-              aria-label="DhanRadar home"
-            >
-              <Image
-                src="/brand/icon.svg"
-                alt=""
-                width={24}
-                height={24}
-                className="shrink-0"
-              />
-              <span className="text-h3 font-semibold text-navy">DhanRadar</span>
-            </Link>
-
-            <p className="text-caption text-ink-muted">
-              © 2026 DhanRadar.
-            </p>
-
-            {/* Footer nav links */}
-            <nav
-              aria-label="Footer navigation"
-              className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
-            >
-              {[
-                { href: '/dashboard', label: 'Dashboard' },
-                { href: '/mf/upload', label: 'Upload CAS' },
-                { href: '/mood', label: 'Market Mood' },
-                { href: '/learn/tax', label: 'Tax Education' },
-                { href: '/login', label: 'Log in' },
-                { href: '/signup', label: 'Sign up' },
-                { href: '/settings/privacy', label: 'Privacy' },
-              ].map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`
-                    text-small text-ink-secondary hover:text-ink
-                    transition-colors min-h-[44px] flex items-center
-                    ${LINK_RING}
-                  `}
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </nav>
-
-            {/* SEBI disclaimer */}
-            <Disclaimer className="max-w-2xl mx-auto text-center mt-2" />
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

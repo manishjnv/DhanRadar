@@ -20,7 +20,6 @@
  */
 
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
 import {
   FileText,
@@ -33,7 +32,8 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardFooter } from '@/components/ui/Card';
 import { LabelChip } from '@/components/ui/LabelChip';
-import { Disclaimer } from '@/components/ui/Disclaimer';
+import { SiteHeader } from '@/components/site/SiteHeader';
+import { SiteFooter } from '@/components/site/SiteFooter';
 
 // ---------------------------------------------------------------------------
 // SEO metadata
@@ -60,59 +60,8 @@ const LINK_RING =
 // ---------------------------------------------------------------------------
 // Nav
 // ---------------------------------------------------------------------------
-function SiteNav() {
-  return (
-    <header className="sticky top-0 z-30 bg-surface/95 border-b border-line backdrop-blur-sm">
-      <nav
-        aria-label="Main navigation"
-        className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3"
-      >
-        {/* Brand */}
-        <Link
-          href="/"
-          className={`flex items-center gap-2 ${LINK_RING}`}
-          aria-label="DhanRadar home"
-        >
-          {/* Decorative icon; wordmark provides the accessible name */}
-          <Image
-            src="/brand/icon.svg"
-            alt=""
-            width={26}
-            height={26}
-            className="shrink-0"
-          />
-          <span className="text-h3 font-semibold text-navy">DhanRadar</span>
-        </Link>
-
-        {/* Centre links */}
-        <div className="hidden items-center gap-1 sm:flex">
-          <Link
-            href="/learn/tax"
-            className={`px-3 py-2 text-small text-ink-secondary transition-colors hover:text-ink min-h-[44px] flex items-center ${LINK_RING}`}
-          >
-            Tax Education
-          </Link>
-          <Link
-            href="/mood"
-            className={`px-3 py-2 text-small text-ink-secondary transition-colors hover:text-ink min-h-[44px] flex items-center ${LINK_RING}`}
-          >
-            Market Mood
-          </Link>
-        </div>
-
-        {/* Right actions */}
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/login">Log in</Link>
-          </Button>
-          <Button variant="primary" size="sm" asChild>
-            <Link href="/signup">Get started — free</Link>
-          </Button>
-        </div>
-      </nav>
-    </header>
-  );
-}
+// SiteHeader / SiteFooter (shared public chrome) are imported from
+// @/components/site — the single source of truth for the public nav + footer.
 
 // ---------------------------------------------------------------------------
 // Hero
@@ -423,112 +372,12 @@ function Faq() {
 }
 
 // ---------------------------------------------------------------------------
-// Footer
-// ---------------------------------------------------------------------------
-function SiteFooter() {
-  const linkClass = `text-small text-ink-secondary transition-colors hover:text-ink min-h-[44px] flex items-center ${LINK_RING}`;
-
-  return (
-    <footer className="bg-surface border-t border-line">
-      <div className="mx-auto max-w-6xl px-6 py-12">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Brand block */}
-          <div className="flex flex-col gap-3 lg:col-span-1">
-            <Link
-              href="/"
-              className={`flex items-center gap-2 ${LINK_RING}`}
-              aria-label="DhanRadar home"
-            >
-              <Image
-                src="/brand/icon.svg"
-                alt=""
-                width={24}
-                height={24}
-                className="shrink-0"
-              />
-              <span className="text-h3 font-semibold text-navy">DhanRadar</span>
-            </Link>
-            <p className="text-small text-ink-secondary max-w-xs">
-              Educational mutual-fund intelligence for India. DhanRadar is a
-              research-analytics product — not an investment adviser. Investments
-              are subject to market risk.
-            </p>
-            <p className="text-caption text-ink-muted">© 2026 DhanRadar.</p>
-          </div>
-
-          {/* Product */}
-          <nav aria-label="Product links">
-            <p className="text-small font-semibold text-ink mb-2">Product</p>
-            <ul className="flex flex-col gap-0.5">
-              <li>
-                <Link href="/dashboard" className={linkClass}>
-                  Dashboard
-                </Link>
-              </li>
-              <li>
-                <Link href="/mf/upload" className={linkClass}>
-                  Upload CAS
-                </Link>
-              </li>
-              <li>
-                <Link href="/mood" className={linkClass}>
-                  Market Mood
-                </Link>
-              </li>
-            </ul>
-          </nav>
-
-          {/* Learn */}
-          <nav aria-label="Learn links">
-            <p className="text-small font-semibold text-ink mb-2">Learn</p>
-            <ul className="flex flex-col gap-0.5">
-              <li>
-                <Link href="/learn/tax" className={linkClass}>
-                  Tax Education
-                </Link>
-              </li>
-            </ul>
-          </nav>
-
-          {/* Account */}
-          <nav aria-label="Account links">
-            <p className="text-small font-semibold text-ink mb-2">Account</p>
-            <ul className="flex flex-col gap-0.5">
-              <li>
-                <Link href="/login" className={linkClass}>
-                  Log in
-                </Link>
-              </li>
-              <li>
-                <Link href="/signup" className={linkClass}>
-                  Get started
-                </Link>
-              </li>
-              <li>
-                <Link href="/settings/privacy" className={linkClass}>
-                  Privacy
-                </Link>
-              </li>
-            </ul>
-          </nav>
-        </div>
-
-        {/* Bottom disclaimer */}
-        <div className="mt-10 border-t border-line pt-6 flex justify-center">
-          <Disclaimer className="max-w-2xl text-center" />
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Page root
 // ---------------------------------------------------------------------------
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-bg">
-      <SiteNav />
+      <SiteHeader />
       <main>
         <Hero />
         <HowItWorks />
