@@ -194,6 +194,106 @@ async def list_news(
     ]
 
 
+async def get_recent_headlines(
+    db: AsyncSession,
+    *,
+    hours: int = 48,
+    limit: int = 30,
+) -> list[str]:
+    """Return active headline TITLES published within the last ``hours`` (newest
+    first). Headline text only — never body/excerpt (the model stores none). Used
+    as the input to the mood news-sentiment signal; returns [] when nothing recent.
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=max(1, hours))
+    result = await db.execute(
+        select(NewsItemModel.title)
+        .where(
+            NewsItemModel.is_active.is_(True),
+            NewsItemModel.published_at >= cutoff,
+        )
+        .order_by(NewsItemModel.published_at.desc())
+        .limit(limit)
+    )
+    return [t for t in result.scalars().all() if t]
+
+
+async def _upsert_news_items(
+    db: AsyncSession,
+    items: list[dict],
+    *,
+    default_provenance: str = "rss",
+) -> int:
+    """Shared upsert for live ingestion sources (RSS, GDELT, …).
+
+    Upserts headline metadata via INSERT … ON CONFLICT (canonical_url) DO UPDATE
+    so repeated runs are idempotent (dedup is enforced at the DB level). Each
+    item's own ``provenance_source`` is honoured; ``default_provenance`` is used
+    only when an item omits it. Malformed items (empty required fields) are
+    skipped and never crash the batch. Returns the count submitted to the DB.
+
+    B56-f4: ``is_active`` is deliberately NOT in the DO UPDATE set — automated
+    ingestion never flips the publication state of an existing row (only admins
+    change is_active). New rows still insert active.
+    """
+    now = datetime.now(UTC)
+    upserted = 0
+
+    for raw in items:
+        try:
+            title = str(raw["title"]).strip()
+            source = str(raw["source"]).strip()
+            canonical_url = str(raw["canonical_url"]).strip()
+            scope = str(raw.get("scope", "market")).strip()
+            category = str(raw.get("category", "market")).strip()
+            published_at: datetime = raw["published_at"]
+            provenance_source = str(raw.get("provenance_source", default_provenance)).strip()
+
+            if not title or not source or not canonical_url:
+                logger.warning(
+                    "news.service.upsert: skipping malformed item url=%r", canonical_url
+                )
+                continue
+        except (KeyError, TypeError, ValueError):
+            logger.warning("news.service.upsert: skipping malformed item", exc_info=True)
+            continue
+
+        stmt = (
+            pg_insert(NewsItemModel)
+            .values(
+                scope=scope,
+                category=category,
+                title=title,
+                source=source,
+                canonical_url=canonical_url,
+                published_at=published_at,
+                provenance_source=provenance_source,
+                fetched_at=now,
+                is_active=True,
+            )
+            .on_conflict_do_update(
+                index_elements=["canonical_url"],
+                # B56-f4: is_active deliberately NOT in set_ — automated ingestion
+                # never flips the publication state of an existing row (only admins
+                # change is_active). New rows still insert active.
+                set_={
+                    "title": title,
+                    "source": source,
+                    "scope": scope,
+                    "category": category,
+                    "published_at": published_at,
+                    "provenance_source": provenance_source,
+                    "fetched_at": now,
+                    "updated_at": now,
+                },
+            )
+        )
+        await db.execute(stmt)
+        upserted += 1
+
+    await db.commit()
+    return upserted
+
+
 async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
     """Fetch sanctioned RSS feeds and upsert live headline items into news.news_items.
 
@@ -212,63 +312,30 @@ async def fetch_and_upsert_rss_news(db: AsyncSession) -> int:
         logger.warning("news.service: all RSS feeds returned 0 items")
         return 0
 
-    now = datetime.now(UTC)
-    upserted = 0
-
-    for raw in items:
-        try:
-            title = str(raw["title"]).strip()
-            source = str(raw["source"]).strip()
-            canonical_url = str(raw["canonical_url"]).strip()
-            scope = str(raw.get("scope", "market")).strip()
-            category = str(raw.get("category", "market")).strip()
-            published_at: datetime = raw["published_at"]
-            provenance_source = str(raw.get("provenance_source", "rss")).strip()
-
-            if not title or not source or not canonical_url:
-                logger.warning(
-                    "news.service.rss: skipping malformed item url=%r", canonical_url
-                )
-                continue
-        except (KeyError, TypeError, ValueError):
-            logger.warning("news.service.rss: skipping malformed item", exc_info=True)
-            continue
-
-        stmt = (
-            pg_insert(NewsItemModel)
-            .values(
-                scope=scope,
-                category=category,
-                title=title,
-                source=source,
-                canonical_url=canonical_url,
-                published_at=published_at,
-                provenance_source=provenance_source,
-                fetched_at=now,
-                is_active=True,
-            )
-            .on_conflict_do_update(
-                index_elements=["canonical_url"],
-                # B56-f4: is_active deliberately NOT in set_ — ingestion never
-                # flips the publication state of an existing row (reviewer gate:
-                # only admins change is_active). New rows insert active.
-                set_={
-                    "title": title,
-                    "source": source,
-                    "scope": scope,
-                    "category": category,
-                    "published_at": published_at,
-                    "provenance_source": provenance_source,
-                    "fetched_at": now,
-                    "updated_at": now,
-                },
-            )
-        )
-        await db.execute(stmt)
-        upserted += 1
-
-    await db.commit()
+    upserted = await _upsert_news_items(db, items, default_provenance="rss")
     logger.info("news.service.rss: upserted %d items", upserted)
+    return upserted
+
+
+async def fetch_and_upsert_gdelt_news(db: AsyncSession) -> int:
+    """Fetch sanctioned GDELT DOC 2.0 headlines and upsert them into news.news_items.
+
+    ADDITIVE sanctioned source (B56-f5) — runs ALONGSIDE the RSS path, never
+    replacing it or the curated fallback. Headline metadata + canonical link only;
+    GDELT's V2Tone / sentiment is discarded at fetch time (stack-lock). Reuses the
+    shared ``_upsert_news_items`` ON CONFLICT (canonical_url) DO UPDATE path, so a
+    repeated canonical_url updates the existing row rather than duplicating it.
+    Returns 0 (no raise) when GDELT yields nothing — graceful degrade.
+    """
+    from dhanradar.news.gdelt import fetch_gdelt_news
+
+    items = await fetch_gdelt_news()
+    if not items:
+        logger.warning("news.service.gdelt: GDELT returned 0 items")
+        return 0
+
+    upserted = await _upsert_news_items(db, items, default_provenance="gdelt")
+    logger.info("news.service.gdelt: upserted %d items", upserted)
     return upserted
 
 
