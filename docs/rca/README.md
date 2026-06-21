@@ -15,6 +15,14 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-21 — Sharpe/Sortino exploded to ±10⁶ on near-flat NAV funds
+
+- **Symptom:** post-deploy spot-check of the new `mf_fund_metrics` risk columns (PR #282) found ~32 funds with `|sharpe_ratio| > 1000`, the worst at **−1,375,258**; some `sortino_ratio` near −1300. All 36 unit tests were green.
+- **Root cause:** Sharpe = `(ann_ret − Rf)/vol`. For near-constant NAV series (stale/placeholder AMFI data, annualised vol ≈ `5e-6`) the denominator collapses toward zero and the ratio explodes. The implemented `vol == 0` guard only caught the *exact*-zero degenerate case, not the near-zero neighbourhood. The synthetic unit-test NAV series never had near-zero volatility, so the suite missed it — only real production data exercised the path.
+- **Fix:** generalised the zero-vol guard to a minimum-meaningful-volatility floor `_MIN_MEANINGFUL_VOL = 0.0005` (0.05% annualised) in `backend/dhanradar/mf/risk.py:46` — below it, Sharpe **and** Sortino are withheld (NULL) while the measured `volatility_pct` is still stored. Targets the cause (vol → 0), not the symptom (large |Sharpe|), so legitimate low-vol funds keep a real Sharpe. PR #283. Re-ran `mf_metrics_refresh` on KVM4: explosions 32 → 0, Sharpe range now −119…+4.92, ~128 near-flat funds correctly NULL'd.
+- **Prevention:** (1) +2 unit tests in `test_mf_risk.py` (microscopic-vol → ratios None + vol stored; real low-vol fund → Sharpe kept and bounded); (2) standing practice — **range-check computed financial metrics against real prod data**, not just hand-picked unit inputs, before claiming done (the live `celery call mf_metrics_refresh` + min/max SQL is what caught it); (3) MF-analytics §20 codified in code comments — fail toward *withholding* a number, never emit a garbage rate.
+- **Phase/area:** Phase 5 / MF risk-adjusted analytics (B74).
+
 ### 2026-06-20 — main red: compose memory budget 3136M > 3072M after celery-mood OOM fix
 
 - **Symptom:** every PR + `main` itself failed CI on two jobs — `guards` (`scripts/check_compose_memory.py`) and `backend` (`tests/unit/test_anti_pattern_sweep.py::test_clean_tree_passes_memory_budget`) — both with `COMPOSE MEMORY BUDGET FAILED: 3136M > 3072M (§A6 ~3 GB target)`. The push immediately before was green.
