@@ -71,7 +71,7 @@ async def test_authenticate_user_stamps_last_login_at(patch_redis):
     result = await svc.authenticate_user("test@example.com", password, db)
 
     assert result is user
-    # _record_login issues an UPDATE via db.execute, then db.commit
+    # record_login issues an UPDATE via db.execute, then db.commit
     db.execute.assert_called_once()
     db.commit.assert_called_once()
 
@@ -100,7 +100,7 @@ async def test_authenticate_user_wrong_password_does_not_stamp(patch_redis):
 
 
 async def test_rotate_refresh_token_does_not_write_last_login_at(patch_redis):
-    """Token refresh must not call _record_login or write last_login_at.
+    """Token refresh must not call record_login or write last_login_at.
 
     rotate_refresh_token only reads/writes Redis (GETDEL + SET).  It never
     issues a DB UPDATE on auth.users.  We verify no db session is passed to it.
@@ -183,12 +183,12 @@ async def test_authenticate_email_otp_stamps_last_login_at(patch_redis):
 
 
 # ---------------------------------------------------------------------------
-# (5) _record_login helper issues the correct UPDATE statement
+# (5) record_login helper issues the correct UPDATE statement
 # ---------------------------------------------------------------------------
 
 
-async def test_record_login_issues_update_on_correct_user(patch_redis):
-    """_record_login must call db.execute with an UPDATE targeting user.id."""
+async def testrecord_login_issues_update_on_correct_user(patch_redis):
+    """record_login must call db.execute with an UPDATE targeting user.id."""
 
     from dhanradar.auth import service as svc
 
@@ -196,7 +196,7 @@ async def test_record_login_issues_update_on_correct_user(patch_redis):
     db = AsyncMock()
     db.execute = AsyncMock()
 
-    await svc._record_login(user, db)
+    await svc.record_login(user, db)
 
     db.execute.assert_called_once()
     call_args = db.execute.call_args[0][0]

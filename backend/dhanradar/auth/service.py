@@ -25,6 +25,7 @@ Security invariants:
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -207,8 +208,7 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
             detail="account_suspended",
         )
 
-    await _record_login(user, db)  # type: ignore[arg-type]
-    await db.commit()
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -219,23 +219,34 @@ def _raise_invalid_credentials() -> None:
     )
 
 
-async def _record_login(user: User, db: AsyncSession) -> None:
-    """Stamp ``last_login_at`` to the current server time on a genuine login.
+logger = logging.getLogger(__name__)
 
-    Called from every successful authenticate_* path (password, TOTP,
-    email-OTP, Google SSO).  Must NOT be called from the refresh-token path.
 
-    Uses ``sa_func.now()`` (server-side PostgreSQL NOW()) so the timestamp is
-    authoritative and timezone-consistent with all other ``DateTime(timezone=True)``
-    columns.  The UPDATE is issued inside the same transaction that the caller
-    is already holding; the caller is responsible for committing (or the existing
-    commit in each auth function covers it).
+async def record_login(user: User, db: AsyncSession) -> None:
+    """Best-effort stamp of ``last_login_at`` (server NOW()) on a genuine login.
+
+    Called from every successful authenticate_* path (password, TOTP, email-OTP)
+    and the Google SSO path. Must NOT be called from the refresh-token path.
+
+    NEVER raises: ``last_login_at`` is an observational column, so a failure here
+    — a transient DB error, or migration lag where the column does not exist yet
+    during a rolling deploy — must never break the login. On error it logs and
+    rolls back, and the login proceeds. Commits its own UPDATE; it does not assume
+    an open caller transaction (the SSO path has already committed by this point).
     """
-    await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(last_login_at=sa_func.now())
-    )
+    try:
+        await db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(last_login_at=sa_func.now())
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001 — observational; must never break login
+        logger.warning("auth: failed to stamp last_login_at — login continues")
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -657,8 +668,7 @@ async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
 
     # Success — clear failure counter, stamp last_login_at.
     await redis.delete(attempts_key)
-    await _record_login(user, db)  # type: ignore[arg-type]
-    await db.commit()
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -811,8 +821,7 @@ async def authenticate_email_otp(email: str, code: str, db: AsyncSession) -> Use
 
     # Success: single-use enforcement — delete code key + attempts key, stamp last_login_at.
     await _otp.delete_code_and_attempts(uid)
-    await _record_login(user, db)  # type: ignore[arg-type]
-    await db.commit()
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
