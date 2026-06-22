@@ -10,9 +10,11 @@ admin surface). Every change requires Opus line-by-line diff review before merge
 
 ABSENT fields (model gaps — do NOT add columns without a migration):
   - display_name: ABSENT from auth.users → derived as email.split('@')[0]
-  - last_login_at: ABSENT from auth.users → always None (no user_activity_log table)
-  - login_history: no user_activity_log table → always []
-  - cas_uploads: no CAS upload query yet → always []
+  - login_history: no user_activity_log table → always [] (deferred)
+
+Fields wired by migration 0044:
+  - last_login_at: auth.users.last_login_at (NULLABLE; set on genuine logins)
+  - cas_uploads: live query on mf.mf_cas_jobs for the user
 """
 
 from __future__ import annotations
@@ -52,7 +54,8 @@ class UserListItem(BaseModel):
     tier: str
     # 'active' | 'deletion_requested' — derived from deletion_requested_at
     status: str
-    # TODO: last_login_at is ABSENT — no user_activity_log table exists yet.
+    # Populated from auth.users.last_login_at (migration 0044). NULL for users
+    # who have not logged in since the column was added.
     last_login_at: datetime | None = None
     created_at: datetime
 
@@ -88,9 +91,10 @@ class UserDetailResponse(BaseModel):
     subscription: dict[str, Any] | None = None
     # Payment events from audit.payment_events (from audit.service.list_payment_events)
     payments: list[dict[str, Any]]
-    # TODO: no user_activity_log table — always []
+    # Deferred — requires a dedicated auth events table (no user_activity_log yet)
     login_history: list[Any]
-    # TODO: no CAS upload table query yet — always []
+    # Live query on mf.mf_cas_jobs (migration 0044 wiring). Each entry is a
+    # dict with: job_id, status, created_at, completed_at, error_message, portfolio_id.
     cas_uploads: list[Any]
 
 

@@ -254,6 +254,11 @@ _BEAT_KEY_TO_TASK: dict[str, str] = {t["beat_key"]: t["task_name"] for t in _BEA
 _PAUSED_SOURCES_KEY = "paused_sources"
 _PAUSED_TASKS_KEY = "paused_tasks"
 
+# Sort order for the /admin/sources response: Healthy first, then Planned, Paused, Failed.
+# Unknown statuses sort last (99). Python list.sort is stable so catalog order is
+# preserved within each status group.
+_STATUS_ORDER: dict[str, int] = {"Healthy": 0, "Planned": 1, "Paused": 2, "Failed": 3}
+
 
 # ---------------------------------------------------------------------------
 # Helper: ISO 8601 string from datetime or None
@@ -602,6 +607,7 @@ async def list_sources(
                 paused=paused,
             )
         )
+    result.sort(key=lambda r: _STATUS_ORDER.get(r.status, 99))
     return result
 
 
