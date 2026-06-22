@@ -300,7 +300,8 @@ class TestNavrowsToFundUpserts:
         out = _navrows_to_fund_upserts(rows)
         assert set(out[0].keys()) == {
             "isin", "amfi_code", "scheme_name", "category", "sebi_category",
-            "plan_type", "option_type", "launch_date", "is_segregated",
+            "plan_type", "option_type", "fund_name_short", "idcw_frequency",
+            "launch_date", "is_segregated",
         }
 
     def test_plan_type_and_option_type_populated(self):

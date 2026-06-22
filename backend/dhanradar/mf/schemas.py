@@ -56,6 +56,12 @@ class CasJobStatus(BaseModel):
 class FundReportItem(BaseModel):
     isin: str
     scheme_name: str
+    # Display-only clean name (taxonomy.derive_short_name). scheme_name above stays
+    # the immutable official AMFI name shown on Fund Detail / tooltip / export; this
+    # is just the compact label for tables. None on old cached reports.
+    fund_name_short: str | None = None
+    # IDCW payout cadence (daily|weekly|...|annual) or None. Display metadata only.
+    idcw_frequency: str | None = None
     folio_number: str
     # SEBI-canonical category from mf_funds (fills the Category column in the holdings table).
     category: str | None = None
@@ -141,15 +147,20 @@ class FundSearchItem(BaseModel):
 
     isin: str
     scheme_name: str
+    # Display-only clean name; scheme_name remains the official AMFI name.
+    fund_name_short: str | None = None
     amc_name: str | None = None
     sebi_category: str | None = None
     plan_type: str | None = None
     option_type: str | None = None
+    idcw_frequency: str | None = None
 
 
 class FundExplorerItem(BaseModel):
     isin: str
     scheme_name: str
+    # Display-only clean name; scheme_name remains the official AMFI name.
+    fund_name_short: str | None = None
     amc_name: str | None = None
     sebi_category: str
     verb_label: str
@@ -162,8 +173,9 @@ class FundExplorerItem(BaseModel):
     return_1y_pct: float | None = None
     return_3y_pct: float | None = None
     return_5y_pct: float | None = None
-    plan_type: str | None = None        # 'direct' | 'regular' | None
+    plan_type: str | None = None        # 'direct' | 'regular' | 'retail' | 'institutional' | None
     option_type: str | None = None      # 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | None
+    idcw_frequency: str | None = None   # 'daily'|'weekly'|'monthly'|'quarterly'|'half_yearly'|'annual'|None
     amc_level_aum_crore: float | None = None  # AMC-level AUM (ADR-0035); None until endpoint confirmed
 
 

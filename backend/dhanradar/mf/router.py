@@ -653,8 +653,8 @@ async def fund_search(
     # sebi_category is the one the detail page can resolve via /mf/funds?category=.
     # Funds present in mf_funds but absent from mf_fund_ranks (unranked) are excluded.
     sql = (
-        "SELECT f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
-        "       f.plan_type, f.option_type"
+        "SELECT f.isin, f.scheme_name, f.fund_name_short, f.amc_name, f.sebi_category,"
+        "       f.plan_type, f.option_type, f.idcw_frequency"
         " FROM mf.mf_funds f"
         " JOIN ("
         "   SELECT DISTINCT ON (isin) isin, sebi_category"
@@ -674,10 +674,12 @@ async def fund_search(
         FundSearchItem(
             isin=r.isin,
             scheme_name=r.scheme_name,
+            fund_name_short=r.fund_name_short,
             amc_name=r.amc_name,
             sebi_category=r.sebi_category,
             plan_type=r.plan_type,
             option_type=r.option_type,
+            idcw_frequency=r.idcw_frequency,
         )
         for r in rows
     ]
@@ -741,8 +743,8 @@ async def fund_explorer_list(
 
     base_sql = (
         "SELECT"
-        "  f.isin, f.scheme_name, f.amc_name, f.sebi_category,"
-        "  f.plan_type, f.option_type,"
+        "  f.isin, f.scheme_name, f.fund_name_short, f.amc_name, f.sebi_category,"
+        "  f.plan_type, f.option_type, f.idcw_frequency,"
         "  r.rank, r.total_in_cat, r.verb_label,"
         "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct, m.nav_points"
         " FROM mf.mf_funds f"
@@ -781,6 +783,7 @@ async def fund_explorer_list(
         FundExplorerItem(
             isin=r.isin,
             scheme_name=r.scheme_name,
+            fund_name_short=r.fund_name_short,
             amc_name=r.amc_name,
             sebi_category=r.sebi_category,
             verb_label=r.verb_label,
@@ -795,6 +798,7 @@ async def fund_explorer_list(
             return_5y_pct=r.return_5y_pct,
             plan_type=r.plan_type,
             option_type=r.option_type,
+            idcw_frequency=r.idcw_frequency,
             amc_level_aum_crore=None,  # ADR-0035: endpoint unconfirmed; stays None
         )
         for r in rows

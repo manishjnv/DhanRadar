@@ -221,7 +221,10 @@ async def test_search_nav_fields(async_client, db_session, patch_redis):
     data = resp.json()
     assert len(data) >= 1
 
-    expected_keys = {"isin", "scheme_name", "amc_name", "sebi_category", "plan_type", "option_type"}
+    expected_keys = {
+        "isin", "scheme_name", "fund_name_short", "amc_name", "sebi_category",
+        "plan_type", "option_type", "idcw_frequency",
+    }
     for item in data:
         assert set(item.keys()) == expected_keys, (
             f"Unexpected key set: got {set(item.keys())}, want {expected_keys}"
