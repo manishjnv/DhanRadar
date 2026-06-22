@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "data": [
+    {"name": "NIFTY", "segment": "NSE_FO", "expiry": "2099-01-06", "weekly": true, "instrument_key": "NSE_FO|10001", "instrument_type": "CE", "underlying_key": "NSE_INDEX|Nifty 50", "strike_price": 24000.0},
+    {"name": "NIFTY", "segment": "NSE_FO", "expiry": "2099-01-06", "weekly": true, "instrument_key": "NSE_FO|10002", "instrument_type": "PE", "underlying_key": "NSE_INDEX|Nifty 50", "strike_price": 24000.0},
+    {"name": "NIFTY", "segment": "NSE_FO", "expiry": "2099-01-13", "weekly": true, "instrument_key": "NSE_FO|10003", "instrument_type": "CE", "underlying_key": "NSE_INDEX|Nifty 50", "strike_price": 24100.0},
+    {"name": "NIFTY", "segment": "NSE_FO", "expiry": "2099-01-27", "weekly": false, "instrument_key": "NSE_FO|10004", "instrument_type": "PE", "underlying_key": "NSE_INDEX|Nifty 50", "strike_price": 24200.0}
+  ]
+}
