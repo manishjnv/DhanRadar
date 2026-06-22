@@ -163,6 +163,8 @@ export interface PortfolioLatestResponse {
 export interface FundExplorerItem {
   isin: string;
   scheme_name: string;
+  /** Display-only clean name (server-derived); null on old cached rows. */
+  fund_name_short: string | null;
   amc_name: string | null;
   sebi_category: string;
   verb_label: Label;
@@ -181,6 +183,8 @@ export interface FundExplorerItem {
   plan_type: 'direct' | 'regular' | null;
   /** B67 Task 3: parsed from scheme name — null for legacy schemes */
   option_type: 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | null;
+  /** IDCW payout cadence parsed from scheme name — null for non-IDCW/legacy. */
+  idcw_frequency: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'half_yearly' | 'annual' | null;
   /** ADR-0035: AMC-level AUM — null until AMFI SPA endpoint confirmed */
   amc_level_aum_crore: number | null;
 }
