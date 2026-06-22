@@ -718,6 +718,18 @@ class TestDeriveShortName:
                 "HDFC Mid-Cap Opportunities Fund-Direct Plan-Growth",
                 "HDFC Mid-Cap Opportunities Fund",
             ),
+            # Connector word ('of') inside the option long-form must not stop the
+            # scan — real live-feed name that previously left "… Plan - Payout of".
+            (
+                "TATA Resources & Energy Fund Direct Plan - Payout of Income "
+                "Distribution cum capital withdrawal option",
+                "TATA Resources & Energy Fund",
+            ),
+            # 'of' as a genuine brand connector must SURVIVE (scan stops at 'Fund').
+            (
+                "Mirae Asset ETF Fund of Fund - Regular Plan - IDCW",
+                "Mirae Asset ETF Fund of Fund",
+            ),
         ],
     )
     def test_unspaced_hyphen_separators(self, scheme_name: str, expected: str) -> None:
