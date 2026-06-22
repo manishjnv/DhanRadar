@@ -21,8 +21,14 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Compass } from 'lucide-react';
-import { useMoodCurrent, useMoodHistory, useMarketIndices } from '@/features/mood/api';
-import type { MarketIndex } from '@/features/mood/api';
+import {
+  useMoodCurrent,
+  useMoodHistory,
+  useMarketIndices,
+  useMacroQuotes,
+  useMarketBreadth,
+} from '@/features/mood/api';
+import type { MarketIndex, MacroQuote, MarketBreadth } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime, MoodFactor, MoodFactorTier } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
@@ -148,9 +154,51 @@ function Gauge({ regime, size = 240 }: { regime: Regime; size?: number }) {
   const ang = a0 + (a1 - a0) * FRACTION[regime];
   const nx = cx + (r - 22 * scale) * Math.cos(ang);
   const ny = cy + (r - 22 * scale) * Math.sin(ang);
+
+  // Zone labels around the arc (all five zones), at the zone centres.
+  const ZONE_LABELS: [string, number, string][] = [
+    ['Ext. Fear', 0.08, '#10b981'],
+    ['Fear', 0.29, '#65a30d'],
+    ['Neutral', 0.5, '#334155'],
+    ['Greed', 0.71, '#f97316'],
+    ['Ext. Greed', 0.92, '#ef4444'],
+  ];
+  const rLbl = r + sw / 2 + 12 * scale;
+  const labels = ZONE_LABELS.map(([txt, frac, color]) => {
+    const aa = a0 + (a1 - a0) * frac;
+    const c = Math.cos(aa);
+    const lx = cx + rLbl * c;
+    const ly = cy + rLbl * Math.sin(aa);
+    const anchor = c < -0.25 ? 'end' : c > 0.25 ? 'start' : 'middle';
+    return (
+      <text
+        key={txt}
+        x={lx.toFixed(1)}
+        y={ly.toFixed(1)}
+        fill={color}
+        fontSize={11 * scale}
+        fontWeight={700}
+        textAnchor={anchor}
+        dominantBaseline="middle"
+      >
+        {txt}
+      </text>
+    );
+  });
+
+  // Pad the viewBox so the side/top labels are never clipped (the wheel keeps the
+  // requested size; padding only adds label room around it).
+  const padX = 46 * scale;
+  const padTop = 15 * scale;
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+    <svg
+      width={Math.round(W + 2 * padX)}
+      height={Math.round(H + padTop)}
+      viewBox={`${(-padX).toFixed(1)} ${(-padTop).toFixed(1)} ${(W + 2 * padX).toFixed(1)} ${(H + padTop).toFixed(1)}`}
+      aria-hidden="true"
+    >
       {segs}
+      {labels}
       <line
         x1={cx}
         y1={cy}
@@ -333,6 +381,13 @@ export default function MoodPage() {
   const { data, isLoading, isError, error, refetch } = useMoodCurrent();
   const { data: history } = useMoodHistory(40);
   const { data: indices } = useMarketIndices();
+  const { data: macroQuotes } = useMacroQuotes();
+  const { data: breadth } = useMarketBreadth();
+
+  const quoteMap = React.useMemo(
+    () => new Map((macroQuotes ?? []).map((q) => [q.key, q])),
+    [macroQuotes],
+  );
 
   const yesterdayRegime: Regime | null = React.useMemo(() => {
     if (!data || !history) return null;
@@ -421,7 +476,7 @@ export default function MoodPage() {
               {/* HERO */}
               <section className={s.hero}>
                 <div className={s.heroGauge}>
-                  <Gauge regime={data.regime} size={250} />
+                  <Gauge regime={data.regime} size={338} />
                   <div className={s.heroState} style={{ color: HEX[data.regime] }}>
                     {WORD[data.regime]}
                   </div>
@@ -605,7 +660,13 @@ export default function MoodPage() {
                       </div>
                       <div className={s.signalGrid}>
                         {grp.items.map((sig) => (
-                          <SignalCard key={sig.name} sig={sig} role={roles.get(sig.name)} />
+                          <SignalCard
+                            key={sig.name}
+                            sig={sig}
+                            role={roles.get(sig.name)}
+                            quote={quoteMap.get(SIG_QUOTE[sig.name] ?? '')}
+                            breadth={breadth}
+                          />
                         ))}
                       </div>
                     </React.Fragment>
@@ -764,8 +825,58 @@ function DriveRow({ f, cls }: { f: MoodFactor; cls: 'sup' | 'cw' }) {
   );
 }
 
-function SignalCard({ sig, role }: { sig: Sig; role?: Role }) {
+// Signal name → macro-quote key, and per-signal value formatting (public data).
+const SIG_QUOTE: Record<string, string> = {
+  'Nifty Trend': 'nifty_trend',
+  'India VIX': 'india_vix',
+  'Global Indices': 'global_indices',
+  'US 10Y Yield': 'us_bond_10y',
+  'Brent Crude': 'oil_brent',
+  'USD/INR': 'usd_inr',
+};
+const QUOTE_PREFIX: Record<string, string> = { oil_brent: '$', usd_inr: '₹' };
+const QUOTE_SUFFIX: Record<string, string> = { us_bond_10y: '%' };
+function fmtQuoteVal(key: string, value: number): string {
+  return (
+    (QUOTE_PREFIX[key] ?? '') +
+    value.toLocaleString('en-IN', { maximumFractionDigits: 2 }) +
+    (QUOTE_SUFFIX[key] ?? '')
+  );
+}
+
+function SignalCard({
+  sig,
+  role,
+  quote,
+  breadth,
+}: {
+  sig: Sig;
+  role?: Role;
+  quote?: MacroQuote;
+  breadth?: MarketBreadth;
+}) {
   const bias = BIAS[sig.bias];
+  // Real public market value for this signal, when available (Yahoo public data).
+  let liveVal: React.ReactNode = null;
+  if (sig.name === 'Market Breadth' && breadth) {
+    const up = breadth.advances >= breadth.declines;
+    liveVal = (
+      <span className={`${s.exVal} ${s.mono} ${up ? s.up : s.down}`}>
+        {breadth.advances.toLocaleString('en-IN')} adv / {breadth.declines.toLocaleString('en-IN')}{' '}
+        dec
+      </span>
+    );
+  } else if (quote) {
+    const up = quote.change_pct >= 0;
+    liveVal = (
+      <span className={`${s.exVal} ${s.mono} ${up ? s.up : s.down}`}>
+        {fmtQuoteVal(quote.key, quote.value)}{' '}
+        <span style={{ fontSize: 11 }}>
+          {up ? '▲' : '▼'} {fmtPct(quote.change_pct)}
+        </span>
+      </span>
+    );
+  }
   return (
     <div className={s.signal}>
       <span className={s.sigIco} style={{ background: sig.color + '1a', color: sig.color }}>
@@ -780,15 +891,18 @@ function SignalCard({ sig, role }: { sig: Sig; role?: Role }) {
       </div>
       <div className={s.ex}>
         <span className={`${s.exLbl} ${s.mono}`}>Today</span>
-        {role ? (
-          <span className={`${s.exVal} ${role.side === 'supporting' ? s.up : s.down}`}>
-            {role.side === 'supporting' ? '↑ Supporting' : '↓ Counterweight'}
-          </span>
-        ) : (
-          <span className={`${s.exVal} ${s.neu}`}>Awaiting data</span>
-        )}
+        {liveVal ??
+          (role ? (
+            <span className={`${s.exVal} ${role.side === 'supporting' ? s.up : s.down}`}>
+              {role.side === 'supporting' ? '↑ Supporting' : '↓ Counterweight'}
+            </span>
+          ) : (
+            <span className={`${s.exVal} ${s.neu}`}>Awaiting data</span>
+          ))}
         {role && (
-          <span style={{ fontSize: 11, color: '#64748b' }}>{TIER_WORD[role.tier]} today</span>
+          <span style={{ fontSize: 11, color: '#64748b' }}>
+            {role.side === 'supporting' ? 'Supporting' : 'Counterweight'} · {TIER_WORD[role.tier]}
+          </span>
         )}
       </div>
     </div>

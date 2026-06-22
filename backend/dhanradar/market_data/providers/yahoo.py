@@ -103,6 +103,65 @@ def _signal_value(meta: dict, mode: str) -> float | None:
     return (float(price) - float(prev)) / float(prev) * 100.0
 
 
+# Public quotes endpoint metadata. The mood signals are derived from RAW PUBLIC
+# market data (Yahoo) with NO DhanRadar transform — both the level and the % change
+# are public facts, allowed in the DOM (unlike the proprietary mood score).
+_MACRO_QUOTES_CACHE_KEY = "signal:macro_quotes:last"
+_MACRO_QUOTES_TTL = 300  # 5 min — public hits serve from cache, not live Yahoo.
+_MACRO_DISPLAY: dict[str, str] = {
+    "nifty_trend": "Nifty 50",
+    "india_vix": "India VIX",
+    "global_indices": "S&P 500",
+    "us_bond_10y": "US 10Y Yield",
+    "oil_brent": "Brent Crude",
+    "usd_inr": "USD/INR",
+}
+
+
+async def fetch_macro_quotes() -> list[dict]:
+    """Raw public market quotes (level + daily % change) for the macro mood signals.
+
+    Public Yahoo data, no DhanRadar transform — DOM-allowed. Best-effort and
+    Redis-cached (5 min) so the public endpoint never hammers Yahoo. Returns a list
+    of {key, name, value, change_pct}; a per-symbol failure is simply omitted."""
+    from dhanradar.redis_client import get_redis
+
+    redis = get_redis()
+    try:
+        cached = await redis.get(_MACRO_QUOTES_CACHE_KEY)
+        if cached:
+            raw = cached if isinstance(cached, str) else cached.decode()
+            return list(json.loads(raw))
+    except Exception:  # noqa: BLE001 — cache miss/parse error → fetch fresh
+        logger.debug("yahoo_macro.quotes: cache read failed")
+
+    out: list[dict] = []
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        for key, (symbol, _mode) in _SYMBOLS.items():
+            meta = await _quote_meta(client, symbol)
+            if not meta:
+                continue
+            price = meta.get("regularMarketPrice")
+            prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if not price or not prev:
+                continue
+            change_pct = (float(price) - float(prev)) / float(prev) * 100.0
+            out.append(
+                {
+                    "key": key,
+                    "name": _MACRO_DISPLAY.get(key, key),
+                    "value": round(float(price), 2),
+                    "change_pct": round(change_pct, 2),
+                }
+            )
+    if out:
+        try:
+            await redis.set(_MACRO_QUOTES_CACHE_KEY, json.dumps(out), ex=_MACRO_QUOTES_TTL)
+        except Exception:  # noqa: BLE001 — cache write is best-effort
+            logger.debug("yahoo_macro.quotes: cache write failed")
+    return out
+
+
 async def _fetch_breadth_ratio() -> float | None:
     """Return market breadth as advances/(advances+declines) in [0,1], or None.
 
