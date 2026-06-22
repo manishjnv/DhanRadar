@@ -1,0 +1,5 @@
+{
+  "_comment": "Operator-curated short-name overrides for derive_short_name(). When the conservative heuristic produces a wrong/ugly display name for a messy AMFI scheme name, pin a clean one here. 'by_isin' wins over 'by_scheme_name'; scheme-name keys are matched after normalize() (whitespace-collapsed, curly-quote-folded, case-insensitive). Reviewed in PRs like any code; loaded once at import and fails safe to empty on any error. Keep entries rare — the heuristic should cover the vast majority.",
+  "by_isin": {},
+  "by_scheme_name": {}
+}

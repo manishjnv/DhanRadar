@@ -279,13 +279,18 @@ def parse_plan_option(scheme_name: str | None) -> tuple[str | None, str | None]:
 
     Pure function — no DB access, no network calls.
 
-    plan_type : ``'direct'`` | ``'regular'`` | ``None``
+    plan_type : ``'direct'`` | ``'regular'`` | ``'retail'`` | ``'institutional'``
+                | ``None``
     option_type: ``'growth'`` | ``'idcw'`` | ``'dividend_reinvest'`` |
                  ``'dividend_payout'`` | ``None``
 
     Rules are applied case-insensitively. ``None`` is returned when the
     scheme name does not contain a recognisable marker — common for legacy
     schemes whose names predate the Direct/Regular bifurcation (2013).
+
+    Precedence (B72 follow-up): ``direct`` / ``regular`` (the modern post-2013
+    bifurcation) win over the older ``retail`` / ``institutional`` plan classes,
+    which only surface on legacy/closed schemes that carry no Direct/Regular tag.
     Neither raises nor modifies the input.
     """
     if not isinstance(scheme_name, str) or not scheme_name.strip():
@@ -293,12 +298,16 @@ def parse_plan_option(scheme_name: str | None) -> tuple[str | None, str | None]:
 
     lower = scheme_name.lower()
 
-    # plan_type: first match wins
+    # plan_type: first match wins, modern bifurcation (direct/regular) first.
     plan_type: str | None = None
     if "direct" in lower:
         plan_type = "direct"
     elif "regular" in lower:
         plan_type = "regular"
+    elif "institutional" in lower:
+        plan_type = "institutional"
+    elif "retail" in lower:
+        plan_type = "retail"
 
     # option_type: first pattern in _OPTION_PATTERNS wins
     option_type: str | None = None
@@ -308,6 +317,187 @@ def parse_plan_option(scheme_name: str | None) -> tuple[str | None, str | None]:
             break
 
     return plan_type, option_type
+
+
+# ---------------------------------------------------------------------------
+# IDCW frequency parsing + short-name derivation (fund_name_short, B72 follow-up)
+# ---------------------------------------------------------------------------
+
+# IDCW / dividend payout frequencies. Order matters: multi-word tokens
+# ("half yearly") before their substrings; "annual" matches "annually" and
+# "annual" alike. Maps the surface token → the canonical frequency value.
+# These words essentially never appear in a fund's brand name except as the
+# payout cadence of an income-distribution option, so a standalone match is safe.
+_FREQUENCY_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("half yearly",  "half_yearly"),
+    ("half-yearly",  "half_yearly"),
+    ("semi annual",  "half_yearly"),
+    ("semi-annual",  "half_yearly"),
+    ("fortnightly",  "fortnightly"),
+    ("quarterly",    "quarterly"),
+    ("monthly",      "monthly"),
+    ("weekly",       "weekly"),
+    ("daily",        "daily"),
+    ("annually",     "annual"),
+    ("annual",       "annual"),
+    ("yearly",       "annual"),
+)
+
+
+def parse_idcw_frequency(scheme_name: str | None) -> str | None:
+    """Return the IDCW/dividend payout frequency from an AMFI scheme name.
+
+    Pure function. Returns one of ``'daily'`` | ``'weekly'`` | ``'fortnightly'``
+    | ``'monthly'`` | ``'quarterly'`` | ``'half_yearly'`` | ``'annual'`` |
+    ``None``.
+
+    Kept SEPARATE from :func:`parse_plan_option` (rather than widening its stable
+    two-tuple contract, which the nightly upsert + 30 tests depend on). Frequency
+    is only meaningful for an IDCW / dividend option; a pure Growth name yields
+    ``None``. Neither raises nor modifies the input.
+    """
+    if not isinstance(scheme_name, str) or not scheme_name.strip():
+        return None
+    lower = scheme_name.lower()
+    for pattern, value in _FREQUENCY_PATTERNS:
+        if pattern in lower:
+            return value
+    return None
+
+
+# Tokens that are pure plan/option/frequency noise — never part of a brand name.
+# A trailing run of these (after splitting off a " - " segment) is droppable.
+# All lower-case; matched against lower-cased, punctuation-stripped tokens.
+_NOISE_TOKENS: frozenset[str] = frozenset(
+    {
+        # plan
+        "direct", "regular", "retail", "institutional", "plan", "option",
+        # option
+        "growth", "idcw", "dividend", "reinvestment", "reinvest", "re-invest",
+        "payout", "bonus",
+        # income-distribution-cum-capital-withdrawal long form
+        "income", "distribution", "cum", "capital", "withdrawal",
+        # frequency
+        "daily", "weekly", "fortnightly", "monthly", "quarterly",
+        "half", "yearly", "half-yearly", "annual", "annually", "semi", "semi-annual",
+    }
+)
+
+# Strip a leading "(Formerly ...)" / "(Formerly Known As ...)" parenthetical and
+# any other leading/trailing parenthetical the AMFI feed sometimes prepends. We
+# only remove parentheticals that are clearly NOT brand — "(Formerly ...)" — to
+# stay conservative; other parentheticals are left in place.
+_FORMERLY_RE = re.compile(r"\(\s*formerly[^)]*\)", re.IGNORECASE)
+# Punctuation to strip from a token before testing it against _NOISE_TOKENS.
+_TOKEN_STRIP = " \t-–—.,;:"
+
+
+def _segment_is_all_noise(segment: str) -> bool:
+    """True when every word in a " - "-delimited segment is plan/option/frequency
+    noise (so the whole segment can be dropped from the display name)."""
+    words = [w.strip(_TOKEN_STRIP).lower() for w in segment.split()]
+    words = [w for w in words if w]
+    if not words:
+        return True
+    return all(w in _NOISE_TOKENS for w in words)
+
+
+# Module-level cache for the operator override map (loaded lazily, once).
+_OVERRIDES_CACHE: dict[str, dict[str, str]] | None = None
+
+
+def _load_overrides() -> dict[str, dict[str, str]]:
+    """Load the operator-curated short-name overrides from the JSON seed file.
+
+    Shape: ``{"by_isin": {<isin>: <short>}, "by_scheme_name": {<name>: <short>}}``.
+    Loaded once and cached. Fails SAFE to empty maps on any error — a malformed or
+    missing override file must never break the nightly ingestion upsert.
+    """
+    global _OVERRIDES_CACHE
+    if _OVERRIDES_CACHE is not None:
+        return _OVERRIDES_CACHE
+    import json
+    from pathlib import Path
+
+    by_isin: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    try:
+        path = Path(__file__).with_name("fund_name_overrides.json")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        by_isin = {str(k): str(v) for k, v in (raw.get("by_isin") or {}).items()}
+        # Normalize override scheme-name keys so a feed whitespace/curly-quote
+        # variation still hits the pin.
+        by_name = {
+            (normalize(k) or "").lower(): str(v)
+            for k, v in (raw.get("by_scheme_name") or {}).items()
+        }
+    except Exception:  # noqa: BLE001 — override file is best-effort, never fatal
+        by_isin, by_name = {}, {}
+    _OVERRIDES_CACHE = {"by_isin": by_isin, "by_scheme_name": by_name}
+    return _OVERRIDES_CACHE
+
+
+def derive_short_name(scheme_name: str | None, isin: str | None = None) -> str | None:
+    """Return a clean, display-only short name for an AMFI scheme name.
+
+    Pure function (the override map is loaded once from a checked-in JSON file —
+    no DB, no network). This is the SINGLE source of truth for the short name;
+    backend and frontend both read the column it populates, so neither re-derives.
+
+    Resolution order:
+
+    1. **Operator override** — keyed by ``isin`` first, then by the exact
+       (normalized) ``scheme_name``. Lets an operator PIN a clean name when the
+       heuristic is wrong (``fund_name_overrides.json``).
+    2. **Conservative heuristic** — strip a leading ``(Formerly …)`` parenthetical,
+       then drop trailing ``" - "`` segments that are ENTIRELY plan/option/frequency
+       noise (Direct/Regular/Retail · Growth/IDCW/Dividend · Reinvestment/Payout ·
+       Monthly/Quarterly/…), and trim a trailing run of noise words from the last
+       kept segment. Brand words are NEVER stripped, and the first segment is always
+       kept.
+    3. **Fail safe** — if stripping would leave nothing (or the input is empty), the
+       ORIGINAL scheme name is returned unchanged. ``None`` only for a None/blank input.
+
+    ``scheme_name`` itself stays the immutable official AMFI name — this value is
+    display-only and never replaces it on Fund Detail / tooltip / export / reports.
+    """
+    if not isinstance(scheme_name, str) or not scheme_name.strip():
+        return None
+
+    overrides = _load_overrides()
+    if isin and isin in overrides["by_isin"]:
+        return overrides["by_isin"][isin]
+    name_key = (normalize(scheme_name) or "").lower()
+    if name_key in overrides["by_scheme_name"]:
+        return overrides["by_scheme_name"][name_key]
+
+    # 1. Drop a "(Formerly ...)" parenthetical, then normalize whitespace.
+    cleaned = _FORMERLY_RE.sub(" ", scheme_name)
+    cleaned = normalize(cleaned) or ""
+    if not cleaned:
+        return scheme_name.strip()
+
+    # 2. Split on " - " and keep the first segment (brand+fund) plus any later
+    #    segment that carries real (non-noise) words. Drop pure-noise segments.
+    segments = [s.strip() for s in cleaned.split(" - ")]
+    kept: list[str] = [segments[0]] if segments else []
+    for seg in segments[1:]:
+        if not _segment_is_all_noise(seg):
+            kept.append(seg)
+
+    result = " - ".join(s for s in kept if s).strip()
+
+    # 3. Trim a trailing run of noise words from the LAST kept segment (handles
+    #    names with no " - " separators, e.g. "Axis ELSS Tax Saver Fund Direct
+    #    Growth"). Stop at the first non-noise word from the right so brand words
+    #    are never lost.
+    words = result.split()
+    while words and words[-1].strip(_TOKEN_STRIP).lower() in _NOISE_TOKENS:
+        words.pop()
+    result = " ".join(words).strip(_TOKEN_STRIP).strip()
+
+    # Fail safe — never return an empty / over-stripped name.
+    return result if result else scheme_name.strip()
 
 
 # ---------------------------------------------------------------------------
