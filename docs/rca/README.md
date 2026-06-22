@@ -15,6 +15,22 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-22 — Mood worker OOM-killed on the first full (Upstox-enriched) snapshot — silent non-persist
+
+- **Symptom:** after activating the Upstox token in prod (mood worker on KVM4), a triggered `compute_mood_snapshot` fetched everything correctly — log showed `upstox_analytics: fetched 3/3 signals` then `mood signals: normalised 10/10 macro signals` — but **no row appeared** in `mood.market_mood`; the public `/api/v1/market/mood` kept serving the prior 12:25 snapshot (8 inputs, no Upstox). The worker log then carried `Task handler raised error: WorkerLostError('Worker exited prematurely: signal 9 (SIGKILL) Job: 0.')`.
+- **Root cause:** the `dhanradar-celery-mood` container memory limit was `192M` (`docker-compose.yml` `deploy.resources.limits.memory`), idling at ~118 MiB. Activating Upstox added two new memory costs to the snapshot pipeline: (1) the PCR expiry resolver fetches `/v2/option/contract` (~1,800 Nifty contracts, a multi-MB JSON buffered + parsed by `_parse_expiries`, `backend/dhanradar/market_data/providers/upstox.py`); (2) crossing the `commentary_allowed` gate (≥7 signals) for the first time, so `compute_and_store` now also runs the AI commentary generator + news-sentiment gateway calls. The combined peak crossed 192 MiB → the kernel OOM-killer SIGKILLed the worker mid-`compute_and_store`, before the DB write, so the snapshot silently did not persist. Same failure class as the 2026-06-19 128M trim RCA — this worker has a history of living at its memory edge.
+- **Fix:** bumped `dhanradar-celery-mood` memory `192M → 384M` (`docker-compose.yml`, PR #315 → `049ae93`), redeployed. Re-triggered snapshot succeeded: `mood: neutral (11/11 inputs, ok)` in 143 s, worker peaked **203 MiB / 384 MiB** (no OOM), row persisted (`2026-06-22 16:50:21`, 11 inputs), and the public API now serves the FII/DII/PCR drivers. Total dhanradar budget 3136→3328 M, well within the ~8 GiB box headroom.
+- **Prevention:** (1) the compose comment now documents the 192M→384M bump + the two reasons (contract parse + commentary path), so a future memory trim sees the cost. (2) **Lesson — a `WorkerLostError SIGKILL` mid-task means OOM, not a code fault; check the container `mem_limit` vs `docker stats` peak before debugging logic.** (3) **Lesson — adding any signal that triggers a previously-dormant heavy path (here, AI commentary at the ≥7-signal gate) changes the worker's memory envelope even if the new signal's data is tiny.** (4) Follow-up improvement (not done): cache the resolved expiry in Redis (TTL ~12 h) so the large `/option/contract` fetch isn't repeated every run.
+- **Phase/area:** Market Mood / Upstox activation / celery-mood worker sizing (infra).
+
+### 2026-06-22 — Upstox PCR silently absent — provisional Thursday-expiry guess (NSE Nifty weekly moved to Tuesday)
+
+- **Symptom:** the first live Upstox smoke-test returned only **2/3** macro signals — `fii_flows` and `dii_flows` came back, but `put_call_ratio` was always absent, with no error (it failed soft as designed).
+- **Root cause:** `/v2/market/pcr` requires a real, currently-listed option `expiry`; given a non-existent expiry it returns **HTTP 200 with `data: null`** (not a 4xx), which `_parse_pcr` correctly reads as "no signal". The provisional resolver `_nearest_weekly_expiry` (`backend/dhanradar/market_data/providers/upstox.py`) guessed the next **Thursday** — Nifty weekly options' historical expiry day. NSE has since moved the Nifty weekly expiry to **Tuesday**, so the guessed date (`2026-06-25`) was not a live expiry; the real nearest was `2026-06-23` (Tuesday). Confirmed live by querying `/v2/option/contract` and replaying PCR against each real expiry — only the real ones returned data.
+- **Fix:** replaced the weekday guess with a real expiry lookup (PR #296 → merged `7de522c`). New helpers in `backend/dhanradar/market_data/providers/upstox.py`: `_parse_expiries` (distinct sorted expiries from `/v2/option/contract`), `_nearest_expiry` (pure; nearest ISO date on/after today — ISO strings sort chronologically), `_fetch_nearest_expiry` (live lookup, fail-soft None). `fetch()` now resolves the expiry and **skips the `/pcr` call entirely** when none resolves (PCR fails soft; FII/DII unaffected). Live result after fix: **3/3** signals, PCR `0.876`.
+- **Prevention:** (1) the exchange's own contract list is now the source of truth for the expiry — robust to the Thursday→Tuesday shift and to holiday-shifted expiries; no hard-coded weekday remains. (2) Fixture-based unit tests added in `backend/tests/unit/test_mood_upstox.py`: `_parse_expiries`/`_nearest_expiry` edge cases + a "no expiry resolves → `/pcr` not called, FII/DII still returned" case (no live network in committed tests). (3) **Lesson — a vendor endpoint returning `200 + data:null` for a bad parameter is indistinguishable from "no data" at the parse layer; validate such params against the vendor's own list, don't guess.**
+- **Phase/area:** Market Mood / Upstox Analytics provider (PCR).
+
 ### 2026-06-21 — Integration of 8 parallel branches surfaced 2 regressions single-branch gates missed
 
 - **Symptom:** each of 8 feature branches passed its own gates, but merging them into one integration branch failed two checks: (1) `ci_guards` flagged `market_data/providers/upstox.py:70` `'Bearer ' auth value (non-neg #4)`; (2) `pytest tests/unit/test_mood_golive.py` raised `ValidationError: snapshot_at Input should be a valid string` (a `MagicMock`).
@@ -135,6 +151,7 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
   suffix is appended to the interpolated color and that `color-mix` is present. jsdom cannot catch
   this at render time — its CSS parser drops both the broken and the fixed value.
 - **Phase/area:** frontend / What Changed explainability (Plan Group 2, B62).
+
 ### 2026-06-12 — restore.sh lacked TimescaleDB pre/post-restore wrappers (latent restore-failure bug)
 
 - **Symptom:** latent — never bit in production. Found during B37 drill implementation when
