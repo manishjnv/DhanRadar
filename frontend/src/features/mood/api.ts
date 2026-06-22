@@ -62,6 +62,47 @@ export function useMarketIndices() {
 }
 
 // ---------------------------------------------------------------------------
+// GET /market/quotes — raw public quotes (level + % change) for the macro mood
+// signals (S&P 500, US 10Y, Brent, USD/INR, India VIX, Nifty 50). Public Yahoo
+// market data, DOM-allowed — NOT the proprietary mood score. Public, no auth.
+// ---------------------------------------------------------------------------
+export interface MacroQuote {
+  key: string;
+  name: string;
+  value: number;
+  change_pct: number;
+}
+
+export function useMacroQuotes() {
+  return useQuery({
+    queryKey: ['market', 'quotes'],
+    queryFn: () => api.get<MacroQuote[]>('/market/quotes'),
+    retry: moodRetry,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /market/breadth — public advances/declines (Nifty 50 constituents).
+// Public market data, DOM-allowed. Public, no auth.
+// ---------------------------------------------------------------------------
+export interface MarketBreadth {
+  advances: number;
+  declines: number;
+  ad_ratio: number;
+  market_open: boolean;
+}
+
+export function useMarketBreadth() {
+  return useQuery({
+    queryKey: ['market', 'breadth'],
+    queryFn: () => api.get<MarketBreadth>('/market/breadth'),
+    retry: moodRetry,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // GET /market/why-today
 // ---------------------------------------------------------------------------
 export function useWhyToday() {
