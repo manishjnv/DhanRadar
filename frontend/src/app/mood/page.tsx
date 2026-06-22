@@ -28,6 +28,7 @@ import { MoodMovement } from '@/components/mood/MoodMovement';
 import { MoodTimeline } from '@/components/mood/MoodTimeline';
 import { MoodPeriods } from '@/components/mood/MoodPeriods';
 import { MoodFactorGuide } from '@/components/mood/MoodFactorGuide';
+import { MoodMethodology } from '@/components/mood/MoodMethodology';
 import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
@@ -192,11 +193,19 @@ export default function MoodPage() {
             <MoodTimeline todayRegime={data.regime as Regime} todayDate={data.snapshot_date} />
             {/* Monthly / weekly / daily mood markers */}
             <MoodPeriods />
+            {/* Plain-language "how is this calculated?" (collapsed). */}
+            <MoodMethodology />
           </div>
           </div>
 
-          {/* Educational — what each signal means, in plain words (full width). */}
-          <MoodFactorGuide />
+          {/* Educational — what each signal means + which are feeding today's read. */}
+          <MoodFactorGuide
+            liveLabels={
+              new Set(
+                [...data.contributing_factors, ...data.contradicting_factors].map((f) => f.label),
+              )
+            }
+          />
 
           {/* ------------------------------------------------------------ */}
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}
