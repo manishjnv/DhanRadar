@@ -688,6 +688,41 @@ class TestDeriveShortName:
         # 'Growth' as a brand word at the end is kept (no plan/option context).
         assert derive_short_name("Reliance Growth Fund") == "Reliance Growth Fund"
 
+    @pytest.mark.parametrize(
+        ("scheme_name", "expected"),
+        [
+            # Real AMFI names with UN-SPACED hyphen separators (live-feed audit:
+            # these were the ~10% the ' - '-only split previously mangled).
+            (
+                "Aditya Birla Sun Life Banking & PSU Debt Fund - Regular Plan-Growth",
+                "Aditya Birla Sun Life Banking & PSU Debt Fund",
+            ),
+            (
+                "Bajaj Finserv Banking and PSU Fund-Direct Plan- Growth",
+                "Bajaj Finserv Banking and PSU Fund",
+            ),
+            (
+                "LIC MF Banking & PSU Fund-Direct Plan-Daily IDCW",
+                "LIC MF Banking & PSU Fund",
+            ),
+            (
+                "Nippon India Banking and PSU  Fund- Direct Plan-Growth Plan- Growth Option",
+                "Nippon India Banking and PSU Fund",
+            ),
+            (
+                "Motilal Oswal Liquid Fund Direct - IDCW Monthly Payout/Reinvestment",
+                "Motilal Oswal Liquid Fund",
+            ),
+            # Brand-internal hyphen must survive the right-scan (cut is by index).
+            (
+                "HDFC Mid-Cap Opportunities Fund-Direct Plan-Growth",
+                "HDFC Mid-Cap Opportunities Fund",
+            ),
+        ],
+    )
+    def test_unspaced_hyphen_separators(self, scheme_name: str, expected: str) -> None:
+        assert derive_short_name(scheme_name) == expected
+
     def test_legacy_name_unchanged(self) -> None:
         assert derive_short_name("UTI Nifty Index Fund") == "UTI Nifty Index Fund"
 
@@ -777,3 +812,78 @@ def test_navrows_to_fund_upserts_populates_short_name_and_frequency() -> None:
     assert d["idcw_frequency"] == "monthly"
     assert d["plan_type"] == "direct"
     assert d["option_type"] == "dividend_reinvest"
+
+
+# ---------------------------------------------------------------------------
+# Property-based fuzz: derive_short_name must never mangle a brand
+# ---------------------------------------------------------------------------
+# No hypothesis dependency (stack-lock): we enumerate the full
+# brand × plan × option × frequency × separator space deterministically.
+# The invariant: appending ANY combination of plan/option/frequency noise to a
+# brand must derive back to exactly that brand. Brands deliberately include the
+# tricky cases where a NOISE word lives INSIDE the brand ('Regular Savings',
+# 'Growth', 'Income') — those must survive because the brand is the first
+# segment and trailing-trim stops at 'Fund'.
+
+# Real-world brands; each ends in a non-noise head word ('Fund'/'ETF'), as every
+# AMFI scheme name does.
+_FUZZ_BRANDS: tuple[str, ...] = (
+    "Nippon India Large Cap Fund",
+    "ICICI Prudential Regular Savings Fund",   # 'Regular' inside the brand
+    "Reliance Growth Fund",                    # 'Growth' inside the brand
+    "SBI Magnum Income Fund",                  # 'Income' inside the brand
+    "Aditya Birla Sun Life Frontline Equity Fund",
+    "Quant Small Cap Fund",
+    "UTI Nifty 50 Index Fund",
+    "HDFC Mid-Cap Opportunities Fund",
+    "Mirae Asset Aggressive Hybrid Fund",
+    "Axis Banking & PSU Debt Fund",            # '&' in the brand
+    "Kotak Gold ETF",
+)
+_FUZZ_PLANS = ("", "Direct", "Regular", "Retail", "Institutional")
+_FUZZ_OPTIONS = (
+    "", "Growth", "IDCW", "Dividend", "IDCW Reinvestment", "IDCW Payout",
+    "Dividend Reinvestment", "Dividend Payout",
+)
+_FUZZ_FREQS = ("", "Daily", "Weekly", "Monthly", "Quarterly", "Half Yearly", "Annual")
+
+# Advisory verbs must NEVER appear in a derived display name (non-neg #1).
+_ADVISORY_VERBS = ("buy", "sell", "hold", "strong buy", "avoid", "caution")
+
+
+def _fuzz_names():
+    """Yield (brand, constructed_scheme_name) over the full noise space, for
+    both the ' - '-separated and space-separated AMFI naming styles."""
+    for brand in _FUZZ_BRANDS:
+        for plan in _FUZZ_PLANS:
+            for option in _FUZZ_OPTIONS:
+                for freq in _FUZZ_FREQS:
+                    opt_full = f"{freq} {option}".strip() if option else freq
+                    parts = []
+                    if plan:
+                        parts.append(f"{plan} Plan")
+                    if opt_full:
+                        parts.append(opt_full)
+                    if not parts:
+                        yield brand, brand
+                        continue
+                    yield brand, brand + " - " + " - ".join(parts)
+                    yield brand, brand + " " + " ".join(parts)
+
+
+def test_derive_short_name_never_mangles_brand_property() -> None:
+    """For EVERY brand × plan × option × frequency × separator combo, the brand
+    survives exactly, and the result is non-empty, idempotent, and advisory-free."""
+    checked = 0
+    for brand, name in _fuzz_names():
+        short = derive_short_name(name)
+        assert short == brand, f"mangled: {name!r} -> {short!r} (want {brand!r})"
+        # Non-empty + idempotent (feeding a clean name back is a fixed point).
+        assert short
+        assert derive_short_name(short) == short, f"not idempotent: {short!r}"
+        # Compliance: no advisory verb may leak into a display name.
+        low = short.lower()
+        assert not any(v in low.split() for v in _ADVISORY_VERBS), f"advisory leak: {short!r}"
+        checked += 1
+    # Sanity: the space actually got enumerated (guards a silently-empty generator).
+    assert checked > 1500, f"fuzz space too small: {checked}"

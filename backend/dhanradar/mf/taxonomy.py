@@ -390,16 +390,12 @@ _NOISE_TOKENS: frozenset[str] = frozenset(
 _FORMERLY_RE = re.compile(r"\(\s*formerly[^)]*\)", re.IGNORECASE)
 # Punctuation to strip from a token before testing it against _NOISE_TOKENS.
 _TOKEN_STRIP = " \t-–—.,;:"
-
-
-def _segment_is_all_noise(segment: str) -> bool:
-    """True when every word in a " - "-delimited segment is plan/option/frequency
-    noise (so the whole segment can be dropped from the display name)."""
-    words = [w.strip(_TOKEN_STRIP).lower() for w in segment.split()]
-    words = [w for w in words if w]
-    if not words:
-        return True
-    return all(w in _NOISE_TOKENS for w in words)
+# A "word" run for the right-scan trailing strip. Hyphen and slash are NOT in the
+# class, so the live-feed's un-spaced separators ("Fund-Direct", "Plan-Growth",
+# "Payout/Reinvestment") tokenize into distinct words while brand-internal hyphens
+# ("Mid-Cap") survive — the scan only ever cuts by character index, never rejoins,
+# so interior punctuation in the kept prefix is preserved.
+_WORD_RE = re.compile(r"[A-Za-z0-9&'.()]+")
 
 
 # Module-level cache for the operator override map (loaded lazily, once).
@@ -450,11 +446,13 @@ def derive_short_name(scheme_name: str | None, isin: str | None = None) -> str |
        (normalized) ``scheme_name``. Lets an operator PIN a clean name when the
        heuristic is wrong (``fund_name_overrides.json``).
     2. **Conservative heuristic** — strip a leading ``(Formerly …)`` parenthetical,
-       then drop trailing ``" - "`` segments that are ENTIRELY plan/option/frequency
-       noise (Direct/Regular/Retail · Growth/IDCW/Dividend · Reinvestment/Payout ·
-       Monthly/Quarterly/…), and trim a trailing run of noise words from the last
-       kept segment. Brand words are NEVER stripped, and the first segment is always
-       kept.
+       then scan from the RIGHT dropping a trailing run of plan/option/frequency
+       noise tokens (Direct/Regular/Retail/Institutional · Growth/IDCW/Dividend ·
+       Reinvestment/Payout/Bonus · the Income-Distribution-cum-Capital-Withdrawal
+       long form · Daily/Monthly/…), stopping at the first BRAND word. Tokens split
+       on whitespace AND hyphens so the feed's un-spaced separators
+       ("Fund-Direct Plan-Growth") are handled, while brand-internal hyphens
+       ("Mid-Cap") survive because the cut is by character index, never a rejoin.
     3. **Fail safe** — if stripping would leave nothing (or the input is empty), the
        ORIGINAL scheme name is returned unchanged. ``None`` only for a None/blank input.
 
@@ -477,24 +475,18 @@ def derive_short_name(scheme_name: str | None, isin: str | None = None) -> str |
     if not cleaned:
         return scheme_name.strip()
 
-    # 2. Split on " - " and keep the first segment (brand+fund) plus any later
-    #    segment that carries real (non-noise) words. Drop pure-noise segments.
-    segments = [s.strip() for s in cleaned.split(" - ")]
-    kept: list[str] = [segments[0]] if segments else []
-    for seg in segments[1:]:
-        if not _segment_is_all_noise(seg):
-            kept.append(seg)
-
-    result = " - ".join(s for s in kept if s).strip()
-
-    # 3. Trim a trailing run of noise words from the LAST kept segment (handles
-    #    names with no " - " separators, e.g. "Axis ELSS Tax Saver Fund Direct
-    #    Growth"). Stop at the first non-noise word from the right so brand words
-    #    are never lost.
-    words = result.split()
-    while words and words[-1].strip(_TOKEN_STRIP).lower() in _NOISE_TOKENS:
-        words.pop()
-    result = " ".join(words).strip(_TOKEN_STRIP).strip()
+    # 2. Right-scan: drop the trailing run of plan/option/frequency noise tokens,
+    #    cutting at the character offset just before the last surviving noise word.
+    #    Stops at the first non-noise (brand) word, e.g. "Fund"/"ETF"/"Index".
+    matches = list(_WORD_RE.finditer(cleaned))
+    cut = len(cleaned)
+    for m in reversed(matches):
+        key = m.group(0).strip(_TOKEN_STRIP + "()").lower()
+        if key == "" or key in _NOISE_TOKENS:
+            cut = m.start()
+            continue
+        break
+    result = cleaned[:cut].strip(_TOKEN_STRIP).strip()
 
     # Fail safe — never return an empty / over-stripped name.
     return result if result else scheme_name.strip()
