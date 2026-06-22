@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.dashboard.indices import get_indices
+from dhanradar.dashboard.schemas import MarketIndex
 from dhanradar.db import get_db
 from dhanradar.mood import service
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
@@ -69,3 +71,12 @@ async def market_vix() -> VIXOut:
 @router.get("/breadth", response_model=BreadthOut)
 async def market_breadth() -> BreadthOut:
     return await service.get_breadth()
+
+
+@router.get("/indices", response_model=list[MarketIndex])
+async def market_indices() -> list[MarketIndex]:
+    """Public index levels (Nifty 50, Sensex, …). `value`/`change_pct` are PUBLIC
+    market data — explicitly DOM-allowed (see MarketIndex), NOT a DhanRadar score —
+    so this mirrors the public /market/vix and /market/breadth: no auth, the mood
+    page is public. Interface-only reuse of the shared index fetcher."""
+    return await get_indices()
