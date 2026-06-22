@@ -25,7 +25,9 @@ from dhanradar.mf.taxonomy import (
     _LEGACY_UNMAPPABLE,
     canonical_for,
     classify,
+    derive_short_name,
     normalize,
+    parse_idcw_frequency,
     parse_plan_option,
     summarize,
 )
@@ -546,3 +548,342 @@ def test_navrows_to_fund_upserts_cohort_key_invariant() -> None:
         "Raw category cohort key must not be mutated"
     )
     assert d_legacy["sebi_category"] is None
+
+
+# ---------------------------------------------------------------------------
+# parse_plan_option — retail / institutional (B72 follow-up) — pure function
+# ---------------------------------------------------------------------------
+
+
+class TestParsePlanOptionRetailInstitutional:
+    def test_retail_plan(self) -> None:
+        pt, _ = parse_plan_option("Franklin India Bluechip Fund - Retail Plan - Growth")
+        assert pt == "retail"
+
+    def test_institutional_plan(self) -> None:
+        pt, _ = parse_plan_option("ICICI Prudential Liquid Fund - Institutional Plan - Growth")
+        assert pt == "institutional"
+
+    def test_direct_wins_over_retail(self) -> None:
+        """Modern direct/regular tag wins over the older retail class."""
+        pt, _ = parse_plan_option("Some Retail Series Fund - Direct Plan - Growth")
+        assert pt == "direct"
+
+    def test_regular_wins_over_institutional(self) -> None:
+        pt, _ = parse_plan_option(
+            "Some Institutional Series Fund - Regular Plan - Growth"
+        )
+        assert pt == "regular"
+
+    def test_institutional_fits_widened_column(self) -> None:
+        """'institutional' is 13 chars — must fit mf_funds.plan_type String(20)."""
+        assert len("institutional") <= 20
+
+
+# ---------------------------------------------------------------------------
+# parse_idcw_frequency — pure function, no DB / no network
+# ---------------------------------------------------------------------------
+
+
+class TestParseIdcwFrequency:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("HDFC Liquid Fund - Direct Plan - Daily IDCW", "daily"),
+            ("SBI Magnum Fund - Regular Plan - Weekly IDCW Reinvestment", "weekly"),
+            ("Some Debt Fund - Direct - Fortnightly IDCW", "fortnightly"),
+            ("Axis Fund - Regular Plan - Monthly IDCW Payout", "monthly"),
+            ("Kotak Bond Fund - Direct Plan - Quarterly Dividend", "quarterly"),
+            ("Nippon Fund - Regular Plan - Half Yearly IDCW", "half_yearly"),
+            ("Nippon Fund - Regular Plan - Half-Yearly IDCW", "half_yearly"),
+            ("UTI Fund - Direct Plan - Annual IDCW", "annual"),
+            ("UTI Fund - Direct Plan - Annually IDCW", "annual"),
+            ("ABC Fund - Regular Plan - Yearly IDCW", "annual"),
+        ],
+    )
+    def test_known_frequencies(self, name: str, expected: str) -> None:
+        assert parse_idcw_frequency(name) == expected
+
+    def test_growth_name_has_no_frequency(self) -> None:
+        assert parse_idcw_frequency("SBI Bluechip Fund - Direct Plan - Growth") is None
+
+    def test_bare_name_none(self) -> None:
+        assert parse_idcw_frequency("UTI Nifty Index Fund") is None
+
+    def test_none_and_blank(self) -> None:
+        assert parse_idcw_frequency(None) is None  # type: ignore[arg-type]
+        assert parse_idcw_frequency("") is None
+        assert parse_idcw_frequency("   ") is None
+        assert parse_idcw_frequency(123) is None  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# derive_short_name — pure function (override map loaded once from JSON)
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveShortName:
+    """Conservative short-name derivation. The frontend reads the populated
+    column instead of re-deriving, so these cases are the cross-surface contract."""
+
+    @pytest.mark.parametrize(
+        ("scheme_name", "expected"),
+        [
+            # Modern Direct/Regular + Growth/IDCW → brand survives, plan/option drop.
+            (
+                "Nippon India Large Cap Fund - Direct Plan - Growth",
+                "Nippon India Large Cap Fund",
+            ),
+            (
+                "HDFC Mid-Cap Opportunities Fund - Regular Plan - IDCW",
+                "HDFC Mid-Cap Opportunities Fund",
+            ),
+            (
+                "SBI Bluechip Fund - Direct Plan - Growth",
+                "SBI Bluechip Fund",
+            ),
+            # No " - " separators: trailing plan/option tokens are trimmed.
+            (
+                "Axis ELSS Tax Saver Fund Direct Growth",
+                "Axis ELSS Tax Saver Fund",
+            ),
+            # Reinvestment / Payout / Dividend variants stripped.
+            (
+                "ICICI Prudential Value Discovery Fund - Regular Plan - Dividend Reinvestment",
+                "ICICI Prudential Value Discovery Fund",
+            ),
+            (
+                "Franklin India Prima Fund - Direct Plan - IDCW Payout",
+                "Franklin India Prima Fund",
+            ),
+            # Frequency word + option stripped together.
+            (
+                "HDFC Liquid Fund - Direct Plan - Daily IDCW Reinvestment",
+                "HDFC Liquid Fund",
+            ),
+            # Retail plan stripped.
+            (
+                "Franklin India Bluechip Fund - Retail Plan - Growth",
+                "Franklin India Bluechip Fund",
+            ),
+            # "(Formerly ...)" parenthetical removed; brand kept.
+            (
+                "Aditya Birla Sun Life Frontline Equity Fund (Formerly Birla SL Frontline) - Direct - Growth",
+                "Aditya Birla Sun Life Frontline Equity Fund",
+            ),
+        ],
+    )
+    def test_derives_clean_name(self, scheme_name: str, expected: str) -> None:
+        assert derive_short_name(scheme_name) == expected
+
+    def test_brand_words_never_stripped(self) -> None:
+        """'Regular Savings' / 'Growth' inside the brand must survive (first
+        segment is always kept; trailing-trim stops at the first brand word)."""
+        assert (
+            derive_short_name(
+                "ICICI Prudential Regular Savings Fund - Direct Plan - Growth"
+            )
+            == "ICICI Prudential Regular Savings Fund"
+        )
+        # 'Growth' as a brand word at the end is kept (no plan/option context).
+        assert derive_short_name("Reliance Growth Fund") == "Reliance Growth Fund"
+
+    @pytest.mark.parametrize(
+        ("scheme_name", "expected"),
+        [
+            # Real AMFI names with UN-SPACED hyphen separators (live-feed audit:
+            # these were the ~10% the ' - '-only split previously mangled).
+            (
+                "Aditya Birla Sun Life Banking & PSU Debt Fund - Regular Plan-Growth",
+                "Aditya Birla Sun Life Banking & PSU Debt Fund",
+            ),
+            (
+                "Bajaj Finserv Banking and PSU Fund-Direct Plan- Growth",
+                "Bajaj Finserv Banking and PSU Fund",
+            ),
+            (
+                "LIC MF Banking & PSU Fund-Direct Plan-Daily IDCW",
+                "LIC MF Banking & PSU Fund",
+            ),
+            (
+                "Nippon India Banking and PSU  Fund- Direct Plan-Growth Plan- Growth Option",
+                "Nippon India Banking and PSU Fund",
+            ),
+            (
+                "Motilal Oswal Liquid Fund Direct - IDCW Monthly Payout/Reinvestment",
+                "Motilal Oswal Liquid Fund",
+            ),
+            # Brand-internal hyphen must survive the right-scan (cut is by index).
+            (
+                "HDFC Mid-Cap Opportunities Fund-Direct Plan-Growth",
+                "HDFC Mid-Cap Opportunities Fund",
+            ),
+        ],
+    )
+    def test_unspaced_hyphen_separators(self, scheme_name: str, expected: str) -> None:
+        assert derive_short_name(scheme_name) == expected
+
+    def test_legacy_name_unchanged(self) -> None:
+        assert derive_short_name("UTI Nifty Index Fund") == "UTI Nifty Index Fund"
+
+    def test_none_and_blank(self) -> None:
+        assert derive_short_name(None) is None  # type: ignore[arg-type]
+        assert derive_short_name("") is None
+        assert derive_short_name("   ") is None
+        assert derive_short_name(123) is None  # type: ignore[arg-type]
+
+    def test_never_over_strips_to_empty(self) -> None:
+        """A name that is ALL plan/option noise falls back to the original."""
+        original = "Direct Plan - Growth"
+        # First segment ("Direct Plan") is always kept, so we never get "".
+        assert derive_short_name(original)
+
+    def test_override_by_isin_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Operator ISIN override pins the clean name over the heuristic."""
+        import dhanradar.mf.taxonomy as tax
+
+        monkeypatch.setattr(
+            tax,
+            "_OVERRIDES_CACHE",
+            {"by_isin": {"INF000TEST01": "Pinned Clean Name"}, "by_scheme_name": {}},
+        )
+        assert (
+            derive_short_name("Messy Raw Scheme Name - Direct - Growth", "INF000TEST01")
+            == "Pinned Clean Name"
+        )
+        # Without the matching ISIN, the heuristic runs.
+        assert (
+            derive_short_name("Messy Raw Scheme Name - Direct - Growth", "INF000OTHER")
+            == "Messy Raw Scheme Name"
+        )
+
+    def test_override_by_scheme_name_normalized(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scheme-name override matches after normalize() (case/whitespace-folded)."""
+        import dhanradar.mf.taxonomy as tax
+
+        monkeypatch.setattr(
+            tax,
+            "_OVERRIDES_CACHE",
+            {
+                "by_isin": {},
+                "by_scheme_name": {"weird fund - direct - growth": "Weird Fund (Pinned)"},
+            },
+        )
+        # Different spacing + case still hits the normalized key.
+        assert (
+            derive_short_name("Weird  Fund - Direct - Growth")
+            == "Weird Fund (Pinned)"
+        )
+
+    def test_override_file_loads_without_error(self) -> None:
+        """The shipped JSON override file parses and yields the expected shape."""
+        import dhanradar.mf.taxonomy as tax
+
+        tax._OVERRIDES_CACHE = None  # force a real load from disk
+        loaded = tax._load_overrides()
+        assert set(loaded) == {"by_isin", "by_scheme_name"}
+        assert isinstance(loaded["by_isin"], dict)
+        assert isinstance(loaded["by_scheme_name"], dict)
+
+
+def test_navrows_to_fund_upserts_populates_short_name_and_frequency() -> None:
+    """The nightly upsert mapping carries fund_name_short + idcw_frequency, and
+    leaves the official scheme_name intact (display-only contract)."""
+    import datetime
+
+    from dhanradar.market_data.amfi import NavRow
+    from dhanradar.tasks.mf import _navrows_to_fund_upserts
+
+    row = NavRow(
+        amfi_code="119551",
+        isin_growth="INF179KB1HA2",
+        isin_reinvest=None,
+        scheme_name="HDFC Liquid Fund - Direct Plan - Monthly IDCW Reinvestment",
+        nav=78.4321,
+        nav_date=datetime.date(2026, 6, 22),
+        category="Debt Scheme - Liquid Fund",
+    )
+    out = {d["isin"]: d for d in _navrows_to_fund_upserts([row])}
+    d = out["INF179KB1HA2"]
+    assert d["scheme_name"] == "HDFC Liquid Fund - Direct Plan - Monthly IDCW Reinvestment"
+    assert d["fund_name_short"] == "HDFC Liquid Fund"
+    assert d["idcw_frequency"] == "monthly"
+    assert d["plan_type"] == "direct"
+    assert d["option_type"] == "dividend_reinvest"
+
+
+# ---------------------------------------------------------------------------
+# Property-based fuzz: derive_short_name must never mangle a brand
+# ---------------------------------------------------------------------------
+# No hypothesis dependency (stack-lock): we enumerate the full
+# brand × plan × option × frequency × separator space deterministically.
+# The invariant: appending ANY combination of plan/option/frequency noise to a
+# brand must derive back to exactly that brand. Brands deliberately include the
+# tricky cases where a NOISE word lives INSIDE the brand ('Regular Savings',
+# 'Growth', 'Income') — those must survive because the brand is the first
+# segment and trailing-trim stops at 'Fund'.
+
+# Real-world brands; each ends in a non-noise head word ('Fund'/'ETF'), as every
+# AMFI scheme name does.
+_FUZZ_BRANDS: tuple[str, ...] = (
+    "Nippon India Large Cap Fund",
+    "ICICI Prudential Regular Savings Fund",   # 'Regular' inside the brand
+    "Reliance Growth Fund",                    # 'Growth' inside the brand
+    "SBI Magnum Income Fund",                  # 'Income' inside the brand
+    "Aditya Birla Sun Life Frontline Equity Fund",
+    "Quant Small Cap Fund",
+    "UTI Nifty 50 Index Fund",
+    "HDFC Mid-Cap Opportunities Fund",
+    "Mirae Asset Aggressive Hybrid Fund",
+    "Axis Banking & PSU Debt Fund",            # '&' in the brand
+    "Kotak Gold ETF",
+)
+_FUZZ_PLANS = ("", "Direct", "Regular", "Retail", "Institutional")
+_FUZZ_OPTIONS = (
+    "", "Growth", "IDCW", "Dividend", "IDCW Reinvestment", "IDCW Payout",
+    "Dividend Reinvestment", "Dividend Payout",
+)
+_FUZZ_FREQS = ("", "Daily", "Weekly", "Monthly", "Quarterly", "Half Yearly", "Annual")
+
+# Advisory verbs must NEVER appear in a derived display name (non-neg #1).
+_ADVISORY_VERBS = ("buy", "sell", "hold", "strong buy", "avoid", "caution")
+
+
+def _fuzz_names():
+    """Yield (brand, constructed_scheme_name) over the full noise space, for
+    both the ' - '-separated and space-separated AMFI naming styles."""
+    for brand in _FUZZ_BRANDS:
+        for plan in _FUZZ_PLANS:
+            for option in _FUZZ_OPTIONS:
+                for freq in _FUZZ_FREQS:
+                    opt_full = f"{freq} {option}".strip() if option else freq
+                    parts = []
+                    if plan:
+                        parts.append(f"{plan} Plan")
+                    if opt_full:
+                        parts.append(opt_full)
+                    if not parts:
+                        yield brand, brand
+                        continue
+                    yield brand, brand + " - " + " - ".join(parts)
+                    yield brand, brand + " " + " ".join(parts)
+
+
+def test_derive_short_name_never_mangles_brand_property() -> None:
+    """For EVERY brand × plan × option × frequency × separator combo, the brand
+    survives exactly, and the result is non-empty, idempotent, and advisory-free."""
+    checked = 0
+    for brand, name in _fuzz_names():
+        short = derive_short_name(name)
+        assert short == brand, f"mangled: {name!r} -> {short!r} (want {brand!r})"
+        # Non-empty + idempotent (feeding a clean name back is a fixed point).
+        assert short
+        assert derive_short_name(short) == short, f"not idempotent: {short!r}"
+        # Compliance: no advisory verb may leak into a display name.
+        low = short.lower()
+        assert not any(v in low.split() for v in _ADVISORY_VERBS), f"advisory leak: {short!r}"
+        checked += 1
+    # Sanity: the space actually got enumerated (guards a silently-empty generator).
+    assert checked > 1500, f"fuzz space too small: {checked}"

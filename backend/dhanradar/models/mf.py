@@ -65,8 +65,16 @@ class MfFund(Base):
     benchmark_index: Mapped[str | None] = mapped_column(Text, nullable=True)
     sebi_category: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_o_meter: Mapped[str | None] = mapped_column(Text, nullable=True)
-    plan_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # String(20): widened from String(10) by migration 0043 to fit 'institutional'.
+    plan_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     option_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Display-only clean name derived from scheme_name (taxonomy.derive_short_name).
+    # scheme_name stays the immutable official AMFI name; this NEVER replaces it on
+    # Fund Detail / tooltip / export / reports (non-neg compliance: full name shown).
+    fund_name_short: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # IDCW/dividend payout cadence parsed from scheme_name (taxonomy.parse_idcw_frequency):
+    # daily|weekly|fortnightly|monthly|quarterly|half_yearly|annual|None.
+    idcw_frequency: Mapped[str | None] = mapped_column(Text, nullable=True)
     launch_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_segregated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

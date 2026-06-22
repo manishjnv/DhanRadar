@@ -44,7 +44,12 @@ from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
-from dhanradar.mf.taxonomy import canonical_for, parse_plan_option
+from dhanradar.mf.taxonomy import (
+    canonical_for,
+    derive_short_name,
+    parse_idcw_frequency,
+    parse_plan_option,
+)
 from dhanradar.mf.taxonomy import summarize as taxonomy_summarize
 
 logger = logging.getLogger(__name__)
@@ -158,8 +163,9 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
     Map a list of NavRow → list of dicts ready for mf_funds upsert.
 
     Columns this feed owns: amfi_code, scheme_name, category, sebi_category,
-    plan_type, option_type.  isin is the PK (isin_growth preferred, else
-    isin_reinvest).  Rows without a keyable ISIN are skipped.
+    plan_type, option_type, fund_name_short, idcw_frequency.  isin is the PK
+    (isin_growth preferred, else isin_reinvest).  Rows without a keyable ISIN are
+    skipped.
 
     Deduplication: last-seen row wins for duplicate ISINs in one batch (dict keyed
     by isin), preventing ON CONFLICT DO UPDATE cardinality errors.
@@ -179,6 +185,10 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             "sebi_category": canonical_for(row.category),
             "plan_type": plan_type,
             "option_type": option_type,
+            # Display-only clean name + IDCW cadence, derived from the same scheme
+            # name (single source of truth: taxonomy). scheme_name stays official.
+            "fund_name_short": derive_short_name(row.scheme_name, isin),
+            "idcw_frequency": parse_idcw_frequency(row.scheme_name),
             "is_segregated": is_segregated,
             "launch_date": row.nav_date,
         }
@@ -377,6 +387,10 @@ async def _run_pipeline(
             )
             funds_payload.append({
                 "isin": p.isin, "scheme_name": p.scheme_name, "folio_number": p.folio_number,
+                # Display-only clean name from the CAS scheme name (same derivation
+                # as the master). scheme_name (official) is still carried + shown.
+                "fund_name_short": derive_short_name(p.scheme_name, p.isin),
+                "idcw_frequency": parse_idcw_frequency(p.scheme_name),
                 "category": category_map.get(p.isin),
                 "units": p.units, "invested_amount": p.cost, "current_value": p.value,
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
@@ -871,6 +885,8 @@ async def _nav_daily_pipeline() -> str:
                     "sebi_category": insert(MfFund).excluded.sebi_category,
                     "plan_type": insert(MfFund).excluded.plan_type,
                     "option_type": insert(MfFund).excluded.option_type,
+                    "fund_name_short": insert(MfFund).excluded.fund_name_short,
+                    "idcw_frequency": insert(MfFund).excluded.idcw_frequency,
                     "is_segregated": insert(MfFund).excluded.is_segregated,
                     # Keep the earliest date seen — LEAST ignores NULL so a NULL
                     # existing launch_date gets replaced by the incoming nav_date.
@@ -1685,6 +1701,7 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
     update_stmt = text(
         "UPDATE mf.mf_funds"
         " SET plan_type = :b_plan_type, option_type = :b_option_type,"
+        " fund_name_short = :b_fund_name_short, idcw_frequency = :b_idcw_frequency,"
         " is_segregated = :b_is_segregated, launch_date = :b_launch_date"
         " WHERE isin = :b_isin"
     )
@@ -1713,6 +1730,8 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
                     "b_isin": fund.isin,
                     "b_plan_type": plan_type,
                     "b_option_type": option_type,
+                    "b_fund_name_short": derive_short_name(fund.scheme_name, fund.isin),
+                    "b_idcw_frequency": parse_idcw_frequency(fund.scheme_name),
                     "b_is_segregated": "segregated portfolio" in name,
                     "b_launch_date": min_date_map.get(fund.isin),
                 })

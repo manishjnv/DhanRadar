@@ -28,11 +28,26 @@ import { Skeleton } from '@/components/ui/Skeleton';
 interface SearchResult {
   isin: string;
   scheme_name: string;
+  // Display-only clean name from the backend (taxonomy.derive_short_name).
+  // scheme_name stays the official AMFI name (shown as the hover title).
+  fund_name_short: string | null;
   amc_name: string | null;
   sebi_category: string | null;
   plan_type: string | null;
   option_type: string | null;
+  idcw_frequency: string | null;
 }
+
+// Humanise an idcw_frequency token for the secondary line.
+const FREQ_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  fortnightly: 'Fortnightly',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  half_yearly: 'Half-Yearly',
+  annual: 'Annual',
+};
 
 // Backend returns the list directly: GET /api/v1/mf/search → SearchResult[]
 type SearchResponse = SearchResult[];
@@ -362,12 +377,25 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                 const planLabel = result.plan_type
                   ? result.plan_type === 'direct' ? 'Direct' : 'Regular'
                   : null;
-                const optionLabel = result.option_type
+                const baseOptionLabel = result.option_type
                   ? result.option_type === 'growth'             ? 'Growth'
                   : result.option_type === 'idcw'               ? 'IDCW'
                   : result.option_type === 'dividend_reinvest'  ? 'Div Reinvest'
                   : 'Div Payout'
                   : null;
+                // Prefix the payout cadence for income-distribution options
+                // (e.g. "Monthly IDCW"); Growth has no frequency.
+                const freqLabel =
+                  result.idcw_frequency && result.option_type !== 'growth'
+                    ? FREQ_LABELS[result.idcw_frequency] ?? null
+                    : null;
+                const optionLabel = baseOptionLabel
+                  ? [freqLabel, baseOptionLabel].filter(Boolean).join(' ')
+                  : null;
+
+                // Prominent label = clean short name; fall back to the official
+                // name when the backend has not derived one (old cached rows).
+                const primaryLabel = result.fund_name_short || result.scheme_name;
 
                 const secondaryParts = [result.amc_name, planLabel, optionLabel].filter(Boolean);
 
@@ -400,8 +428,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                       )}
                     >
                       <div className="flex flex-1 flex-col gap-0.5 min-w-0">
-                        <span className="truncate text-small font-medium text-ink">
-                          {result.scheme_name}
+                        {/* Clean short name; the official AMFI name stays available
+                            on hover (title) so the full legal name is never lost. */}
+                        <span
+                          className="truncate text-small font-medium text-ink"
+                          title={result.scheme_name}
+                        >
+                          {primaryLabel}
                         </span>
                         <span className="truncate text-caption text-ink-muted">
                           {secondaryParts.join(' · ')}
