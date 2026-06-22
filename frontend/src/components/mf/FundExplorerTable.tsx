@@ -248,7 +248,10 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                         title={fund.scheme_name}
                         className="font-medium text-ink leading-tight group-hover:text-royal transition-colors line-clamp-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
                       >
-                        {cleanSchemeName(fund.scheme_name)}
+                        {/* Prefer the server-derived clean name (strips
+                            "(Formerly …)", plan/option, etc.); fall back to the
+                            local helper only for old cached rows with no column. */}
+                        {fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)}
                       </Link>
                       <div className="flex items-center flex-wrap gap-1 mt-0.5">
                         {fund.amc_name && (
