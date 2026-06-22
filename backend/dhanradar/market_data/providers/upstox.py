@@ -47,21 +47,48 @@ _FII_URL = f"{_BASE}/fii"
 _DII_URL = f"{_BASE}/dii"
 _PCR_URL = f"{_BASE}/pcr"
 
-# FII/DII daily cash-market flow query (dig §2).
+# FII/DII daily cash-market flow query (dig §2). These params are correct as-is
+# (verified against the Upstox get-fii / get-dii docs: data_type + interval).
 _FLOW_PARAMS = {"data_type": "NSE_EQ|CASH", "interval": "1D"}
 # The flow records are keyed under this exact string in the response `data` map.
 _FLOW_DATA_KEY = "NSE_EQ|CASH"
 
-# Nifty-50 instrument key for the PCR endpoint.
-# TODO verify against Upstox instrument master — best guess from the dig; the
-# exact key string must be confirmed against the live instrument dump before deploy.
+# Nifty-50 instrument key for the PCR endpoint. VERIFIED 2026-06-22 against the
+# Upstox instruments docs + community (the canonical NSE index key is exactly this).
 _NIFTY50_INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"
+
+# PCR intraday bucket granularity (minutes). The twice-daily snapshot only needs a
+# single read, so the bucket size is immaterial to the final data.pcr; 60 is a safe
+# coarse value.
+_PCR_BUCKET_INTERVAL = "60"
+
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+def _ist_today() -> datetime.date:
+    """Today's date in IST — the trading date used for the PCR `date` param."""
+    return datetime.datetime.now(_IST).date()
+
+
+def _nearest_weekly_expiry(today: datetime.date) -> datetime.date:
+    """Nearest upcoming weekly Nifty option expiry (today if today is the expiry
+    weekday).
+
+    PROVISIONAL — Nifty weekly options have historically expired on Thursday
+    (weekday 3); this returns the next Thursday on/after ``today``. Exchange
+    holidays (and any future NSE expiry-day change) can shift the real expiry, so
+    this MUST be confirmed against Upstox's live expiry/contracts list at
+    activation. If the resolved expiry is wrong, the PCR call simply fails soft
+    (the signal is omitted) — FII/DII are unaffected and still exit degraded mode.
+    """
+    days_ahead = (3 - today.weekday()) % 7
+    return today + datetime.timedelta(days=days_ahead)
 
 
 # OUTBOUND auth scheme for the third-party Upstox API — NOT DhanRadar's own auth
@@ -201,9 +228,17 @@ class UpstoxAnalyticsProvider(MarketDataProvider):
             async with client:
                 fii_payload = await _get_json(client, _FII_URL, headers, _FLOW_PARAMS)
                 dii_payload = await _get_json(client, _DII_URL, headers, _FLOW_PARAMS)
-                pcr_payload = await _get_json(
-                    client, _PCR_URL, headers, {"instrument_key": _NIFTY50_INSTRUMENT_KEY}
-                )
+                # PCR requires ALL FOUR params (verified against the get-pcr docs
+                # 2026-06-22): instrument_key + expiry + date + bucket_interval. The
+                # earlier single-param call would have 400'd → PCR silently absent.
+                today = _ist_today()
+                pcr_params = {
+                    "instrument_key": _NIFTY50_INSTRUMENT_KEY,
+                    "expiry": _nearest_weekly_expiry(today).isoformat(),
+                    "date": today.isoformat(),
+                    "bucket_interval": _PCR_BUCKET_INTERVAL,
+                }
+                pcr_payload = await _get_json(client, _PCR_URL, headers, pcr_params)
         except Exception as exc:  # noqa: BLE001 — client construction/teardown is best-effort
             logger.warning("upstox_analytics: client error — %s", exc)
             return MacroSignalReceived(source=self.name, signals={}, fetched_at=_now_iso())

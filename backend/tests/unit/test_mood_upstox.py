@@ -274,3 +274,94 @@ async def test_fetch_mood_inputs_normalises_upstox_signals():
     # and the normalised vector still computes a real regime
     result = compute_mood(inputs)
     assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Additive supplemental wiring (#2): Upstox merges ALONGSIDE the Yahoo set,
+# it is NOT a ladder fallback that competes with it.
+# ---------------------------------------------------------------------------
+async def test_supplemental_adapter_merges_additively():
+    class _Primary:  # Yahoo-like macro set, WITHOUT fii/dii/pcr
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="yahoo_macro",
+                signals={"nifty_trend": 1.5, "india_vix": 14.0},
+                fetched_at="2026-06-22T00:00:00Z",
+            )
+
+    class _Supplemental:  # Upstox: the three extra signals
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="upstox_analytics",
+                signals={"fii_flows": 6200.25, "dii_flows": -7500.0, "put_call_ratio": 0.6162},
+                fetched_at="2026-06-22T00:00:00Z",
+            )
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Supplemental()])
+    # primary signals present
+    assert inputs["nifty_trend"] is not None
+    assert inputs["india_vix"] is not None
+    # supplemental signals merged additively (not lost to a fallback)
+    assert inputs["fii_flows"] is not None and inputs["fii_flows"] > 0.5
+    assert inputs["dii_flows"] is not None and inputs["dii_flows"] < 0.5
+    assert inputs["put_call_ratio"] is not None
+
+
+async def test_primary_wins_on_signal_overlap():
+    # If both adapters supply the same key, the PRIMARY value is kept (setdefault).
+    class _Primary:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="p", signals={"put_call_ratio": 0.7}, fetched_at="t"
+            )
+
+    class _Supplemental:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="s", signals={"put_call_ratio": 1.3}, fetched_at="t"
+            )
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Supplemental()])
+    # primary PCR 0.7 → norm > 0.5; had the supplemental 1.3 won it would be < 0.5
+    assert inputs["put_call_ratio"] > 0.5
+
+
+async def test_supplemental_failure_does_not_break_primary():
+    class _Primary:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="p", signals={"nifty_trend": 1.0}, fetched_at="t"
+            )
+
+    class _Boom:
+        async def fetch(self, _request):
+            raise RuntimeError("upstox down")
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Boom()])
+    assert inputs["nifty_trend"] is not None      # primary survived
+    assert inputs["fii_flows"] is None            # supplemental absent, no crash
+
+
+# ---------------------------------------------------------------------------
+# Differentiated FII/DII saturation (#4)
+# ---------------------------------------------------------------------------
+def test_fii_dii_saturation_differentiated():
+    flow = 10_000.0
+    # FII (S=15k) reacts LESS to the same flow than DII (S=10k) — no longer equal.
+    assert norm_fii_flows(flow) != norm_dii_flows(flow)
+    assert norm_fii_flows(flow) < norm_dii_flows(flow)
+
+
+# ---------------------------------------------------------------------------
+# PCR contract fix (#3): all four required params are sent
+# ---------------------------------------------------------------------------
+async def test_pcr_call_sends_all_four_required_params():
+    prov, captured = _provider(_ok_routes())
+    await prov.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
+
+    pcr_call = next(c for c in captured["client"].calls if "/pcr" in c["url"])
+    params = pcr_call["params"]
+    assert params.get("instrument_key") == "NSE_INDEX|Nifty 50"
+    assert params.get("expiry")           # YYYY-MM-DD, resolved expiry
+    assert params.get("date")             # YYYY-MM-DD, trading date
+    assert params.get("bucket_interval")  # minutes
