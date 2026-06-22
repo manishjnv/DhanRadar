@@ -12,6 +12,7 @@ import {
 import { CommandPalette } from '@/components/ui/CommandPalette';
 import { cn } from '@/lib/cn';
 import { SiteFooter } from '@/components/site/SiteFooter';
+import { AdminAlertsBell } from '@/components/admin/AdminAlertsBell';
 import { useMe } from '@/features/auth/api';
 import { PUBLIC_NAV_LINKS } from '@/components/site/SiteHeader';
 
@@ -273,6 +274,7 @@ function Topbar({
             ⌘K
           </span>
         </button>
+        <AdminAlertsBell />
         {userSlot}
       </div>
     </header>

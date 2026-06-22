@@ -52,6 +52,7 @@ async def test_ops_endpoints_404_for_anonymous(async_client):
     """No cookie → 404 for every new admin ops endpoint."""
     for path in [
         "/api/v1/admin/health",
+        "/api/v1/admin/alerts",
         "/api/v1/admin/sources",
         "/api/v1/admin/tasks",
         "/api/v1/admin/runs",
@@ -78,6 +79,7 @@ async def test_ops_endpoints_404_for_non_admin(async_client, monkeypatch):
 
     for path in [
         "/api/v1/admin/health",
+        "/api/v1/admin/alerts",
         "/api/v1/admin/sources",
         "/api/v1/admin/tasks",
         "/api/v1/admin/runs",
@@ -120,6 +122,32 @@ async def test_health_200_for_admin(async_client, monkeypatch):
     # Deferred signals must be 0 (TODO in ops_router.py)
     assert body["advice_boundary_breaches_today"] == 0
     assert body["low_groundedness_flags_7d"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 3b. GET /admin/alerts — admin gets 200 with a derived-alerts envelope
+# ---------------------------------------------------------------------------
+
+
+async def test_alerts_200_for_admin(async_client, monkeypatch):
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_alerts@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.get("/api/v1/admin/alerts", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert isinstance(body["alerts"], list)
+    assert body["count"] == len(body["alerts"])
+    # With no mood snapshot computed in the test DB, the 'mood_missing' alert fires.
+    keys = {a["key"] for a in body["alerts"]}
+    assert "mood_missing" in keys
+    for a in body["alerts"]:
+        assert a["severity"] in {"critical", "warning", "info"}
+        assert a["title"] and a["detail"]
 
 
 # ---------------------------------------------------------------------------
