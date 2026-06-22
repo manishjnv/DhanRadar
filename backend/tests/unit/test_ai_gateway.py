@@ -286,3 +286,117 @@ async def test_default_is_fail_closed_for_personal_data(patch_redis):
     with pytest.raises(ConsentNotVerifiedError):
         await gw.complete(task_type="mf_pick", messages=_MSGS, schema=_StockOut)
 
+
+# ---------------------------------------------------------------------------
+# Cheap NON-premium paid fallback (non-Claude) for configured low-volume tasks
+# ---------------------------------------------------------------------------
+
+
+async def test_eligible_task_falls_back_to_cheap_paid_model_when_free_all_429(patch_redis):
+    """All free models 429 + an eligible task → retry a cheap paid model and win."""
+    client = _Client({"free_a": _rate_limit(), "free_b": _rate_limit(), "paid_x": _Resp(_valid())})
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a", "free_b"],
+        paid_fallback_models=["paid_x"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    res = await gw.complete(
+        task_type="news_sentiment", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert res.model_used == "paid_x"
+    assert client.chat.completions.calls == ["free_a", "free_b", "paid_x"]
+
+
+async def test_non_eligible_task_does_not_use_cheap_fallback(patch_redis):
+    """A task NOT in the fallback set keeps the old behaviour (AllFreeModelsFailed)."""
+    from dhanradar.ai_gateway.errors import AllFreeModelsFailedError
+
+    client = _Client({"free_a": _rate_limit(), "paid_x": _Resp(_valid())})
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        paid_fallback_models=["paid_x"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    with pytest.raises(AllFreeModelsFailedError):
+        await gw.complete(
+            task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+        )
+    assert "paid_x" not in client.chat.completions.calls
+
+
+async def test_eligible_high_stakes_task_uses_cheap_fallback_not_sonnet(patch_redis):
+    """A high-stakes task that is ALSO a paid-fallback task must skip Sonnet (no Claude)."""
+    client = _Client(
+        {
+            "free_a": _Resp(_schema_invalid()),  # responded-but-failed-quality
+            "paid_x": _Resp(_valid()),
+            "sonnet": _Resp(_valid(), total=500),
+        }
+    )
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        sonnet_model="sonnet",
+        paid_fallback_models=["paid_x"],
+        paid_fallback_tasks=["mood_commentary"],  # mood_commentary is in HIGH_STAKES_TASKS
+    )
+    res = await gw.complete(
+        task_type="mood_commentary", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert res.model_used == "paid_x"
+    assert "sonnet" not in client.chat.completions.calls  # NOT Claude
+
+
+async def test_cheap_fallback_rotates_on_429_then_returns_next(patch_redis):
+    """The cheap fallback round-robins on 429 just like the free pool."""
+    client = _Client(
+        {"free_a": _rate_limit(), "paid_x": _rate_limit(), "paid_y": _Resp(_valid())}
+    )
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        paid_fallback_models=["paid_x", "paid_y"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    res = await gw.complete(
+        task_type="news_sentiment", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert res.model_used == "paid_y"
+
+
+async def test_cheap_fallback_all_fail_falls_through_to_all_free_failed(patch_redis):
+    """If every cheap fallback model also 429s, the original error path still fires."""
+    from dhanradar.ai_gateway.errors import AllFreeModelsFailedError
+
+    client = _Client({"free_a": _rate_limit(), "paid_x": _rate_limit()})
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        paid_fallback_models=["paid_x"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    with pytest.raises(AllFreeModelsFailedError):
+        await gw.complete(
+            task_type="news_sentiment", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+        )
+
+
+async def test_cheap_fallback_402_raises_credit_exhausted_and_does_not_rotate(patch_redis):
+    """A 402 from a paid fallback model raises CreditExhaustedError, NOT silent rotation."""
+    client = _Client(
+        {"free_a": _rate_limit(), "paid_x": _status(402), "paid_y": _Resp(_valid())}
+    )
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        paid_fallback_models=["paid_x", "paid_y"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    with pytest.raises(CreditExhaustedError):
+        await gw.complete(
+            task_type="news_sentiment", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+        )
+    assert "paid_y" not in client.chat.completions.calls  # 402 must not fall through
+

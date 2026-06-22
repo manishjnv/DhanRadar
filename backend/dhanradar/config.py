@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     AI_FREE_MODELS: str = ""
     # High-stakes schema-failure spillover (premium budget). A real, paid id.
     AI_SONNET_MODEL: str = "anthropic/claude-sonnet-4.6"
+    # Cheap NON-premium paid-model fallback (operator-set, verified ids), tried when
+    # the free pool yields nothing usable for AI_PAID_FALLBACK_TASKS. Keeps low-volume
+    # signals (mood news-sentiment / commentary) alive through free-tier 429 weather
+    # WITHOUT premium-Sonnet spend. Policy: non-Claude/OpenAI/Google ids only. For the
+    # listed tasks this fallback OWNS the retry (those tasks skip the Sonnet spillover).
+    AI_PAID_FALLBACK_MODELS: str = ""
+    AI_PAID_FALLBACK_TASKS: str = ""
+    # Rough blended $/1M tokens for the cheap fallback — debits the premium budget
+    # counter only (not a billing source of truth); conservative over-estimate.
+    AI_PAID_FALLBACK_USD_PER_1M: float = 0.5
 
     # ------------------------------------------------------------------
     # Observability
