@@ -96,18 +96,30 @@ def compute_mood_snapshot() -> str:
                 async with ingestion_run(
                     "dhanradar.tasks.mood.compute_mood_snapshot", "upstox_analytics"
                 ) as (run_id, stats):  # noqa: F841 — run_id unused here; stats mutated
-                    upstox_event = await UpstoxAnalyticsProvider(token=token).fetch(
-                        DataRequest(DataKind.MACRO_SIGNAL, {})
-                    )
-                    n = len(upstox_event.signals)
-                    stats.fetched = 3  # three signals attempted: fii, dii, pcr
-                    stats.written = n
-                    if n == 0:
+                    # Catch INSIDE the run block so no raw exception propagates to
+                    # ingestion_run's error_detail writer (which stores str(exc)). The
+                    # token is a local here; even though the provider never raises and
+                    # no path embeds the token in an exception string, this guarantees
+                    # only a static, token-free reason is ever persisted (Tier-B 2026-06-22).
+                    try:
+                        upstox_event = await UpstoxAnalyticsProvider(token=token).fetch(
+                            DataRequest(DataKind.MACRO_SIGNAL, {})
+                        )
+                        n = len(upstox_event.signals)
+                        stats.fetched = 3  # three signals attempted: fii, dii, pcr
+                        stats.written = n
+                        if n == 0:
+                            stats.reachable = False
+                            stats.status_override = "failed"
+                            stats.last_error = (
+                                "upstox returned no signals (token invalid or API unreachable)"
+                            )
+                    except Exception:  # noqa: BLE001 — never surface a raw exception (not token-safe) to error_detail
+                        logger.warning("mood: upstox fetch raised unexpectedly — recording soft failure")
+                        upstox_event = None
                         stats.reachable = False
                         stats.status_override = "failed"
-                        stats.last_error = (
-                            "upstox returned no signals (token invalid or API unreachable)"
-                        )
+                        stats.last_error = "upstox fetch error (see task logs)"
                 # OUTSIDE the run block: a cache hiccup must never mark the run failed.
                 if upstox_event is not None and upstox_event.signals:
                     await service.cache_market_flows(upstox_event.signals)

@@ -938,7 +938,7 @@ function InstitutionalFlowsCard({ flows }: { flows: Flows }) {
         <h3>Institutional flows</h3>
         <p className={s.pSub}>
           How much money large institutions moved in or out today — a public market fact, not a
-          prediction.
+          prediction. Flow direction does not predict market moves.
         </p>
       </div>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
