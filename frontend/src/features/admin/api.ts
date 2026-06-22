@@ -14,6 +14,7 @@ import { api } from '@/lib/apiClient';
 export const adminKeys = {
   all:     () => ['admin'] as const,
   health:  () => ['admin', 'health'] as const,
+  alerts:  () => ['admin', 'alerts'] as const,
   sources: () => ['admin', 'sources'] as const,
   tasks:   () => ['admin', 'tasks'] as const,
   runs:    (params?: Record<string, unknown>) => ['admin', 'runs', params] as const,
@@ -101,6 +102,31 @@ export function useAdminHealth() {
   return useQuery({
     queryKey: adminKeys.health(),
     queryFn: () => api.get<AdminHealthResponse>('/admin/health'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+// Derived attention alerts for the admin bell. Only enabled for admins so a
+// non-admin never fires the (404-on-non-admin) request.
+export interface AdminAlert {
+  key: string;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  detail: string;
+  since: string | null;
+  href: string | null;
+}
+export interface AdminAlertsResponse {
+  count: number;
+  alerts: AdminAlert[];
+}
+
+export function useAdminAlerts(enabled: boolean) {
+  return useQuery({
+    queryKey: adminKeys.alerts(),
+    queryFn: () => api.get<AdminAlertsResponse>('/admin/alerts'),
+    enabled,
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
   });
