@@ -19,6 +19,22 @@ logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
 
 
+class _PrefetchedAdapter:
+    """Wraps a single pre-fetched MacroSignalReceived event so fetch_mood_inputs
+    can consume it via the normal .fetch() interface without re-hitting the network.
+
+    This is the mechanism that ensures the Upstox API is called AT MOST ONCE per
+    snapshot run, regardless of how many times fetch_mood_inputs would otherwise
+    invoke the provider internally.
+    """
+
+    def __init__(self, event: object) -> None:
+        self._event = event
+
+    async def fetch(self, _request: object) -> object:  # noqa: ANN001
+        return self._event
+
+
 @celery_app.task(name="dhanradar.tasks.mood.compute_mood_snapshot")
 def compute_mood_snapshot() -> str:
     """Compute + publish the current twice-daily market-mood snapshot.
@@ -26,10 +42,19 @@ def compute_mood_snapshot() -> str:
     Builds a minimal macro adapter (NseMacroProvider), fetches the best-effort
     signal subset, then calls compute_and_store.  Signal fetch failure is caught
     and degrades gracefully to the all-None (data_unavailable) path.
+
+    Upstox Analytics (FII/DII/PCR) is token-gated:
+      - When UPSTOX_ANALYTICS_TOKEN is set, the API is fetched EXACTLY ONCE inside
+        an ingestion_run context (for health/ops tracking), then cached via
+        service.cache_market_flows, and the resulting event is replayed into
+        fetch_mood_inputs via _PrefetchedAdapter — no second network call.
+      - When the token is absent, the existing no-token upstox_adapter path is used
+        (provider returns no signals, INERT, no change in behaviour).
     """
     from dhanradar.ai_gateway.gateway import OpenRouterGateway
+    from dhanradar.config import settings
     from dhanradar.market_data.adapter import MarketDataAdapter
-    from dhanradar.market_data.config import DataKind, load_ladders
+    from dhanradar.market_data.config import DataKind, DataRequest, load_ladders
     from dhanradar.market_data.providers.macro import NseMacroProvider
     from dhanradar.market_data.providers.upstox import UpstoxAnalyticsProvider
     from dhanradar.market_data.providers.yahoo import YahooMacroProvider
@@ -37,9 +62,11 @@ def compute_mood_snapshot() -> str:
     from dhanradar.mood.commentary import generate_mood_commentary
     from dhanradar.mood.news_sentiment import fetch_news_sentiment
     from dhanradar.mood.signals import fetch_mood_inputs
+    from dhanradar.tasks.ingestion_run import ingestion_run
 
     async def _go() -> str:
         now_ist = datetime.now(_IST)
+        token = settings.UPSTOX_ANALYTICS_TOKEN
 
         # Build the macro adapter: Yahoo primary (server-reachable), NSE fallback.
         # Ladder order lives in market_data config (MACRO_SIGNAL).
@@ -52,21 +79,51 @@ def compute_mood_snapshot() -> str:
         )
 
         # Upstox Analytics is ADDITIVE, not a ladder fallback: it supplies
-        # fii_flows / dii_flows / put_call_ratio that Yahoo/NSE do not. It is a
-        # separate supplemental adapter (its own single-provider ladder) merged in
-        # by fetch_mood_inputs. INERT until UPSTOX_ANALYTICS_TOKEN is set — with no
-        # token the provider returns no signals, so this changes nothing in prod
-        # until the token lands.
+        # fii_flows / dii_flows / put_call_ratio that Yahoo/NSE do not.
+        # INERT until UPSTOX_ANALYTICS_TOKEN is set.
         upstox_adapter = MarketDataAdapter(
             providers={"upstox_analytics": UpstoxAnalyticsProvider()},
             ladders={DataKind.MACRO_SIGNAL: ["upstox_analytics"]},
         )
 
+        # Token-gated: fetch Upstox ONCE, record the run in ingestion_runs, cache
+        # raw flows, then replay the event via _PrefetchedAdapter so fetch_mood_inputs
+        # never makes a second network call.  Any failure here falls back to the
+        # no-token path (upstox_adapter, which returns no signals).
+        upstox_event = None
+        if token:
+            try:
+                async with ingestion_run(
+                    "dhanradar.tasks.mood.compute_mood_snapshot", "upstox_analytics"
+                ) as (run_id, stats):  # noqa: F841 — run_id unused here; stats mutated
+                    upstox_event = await UpstoxAnalyticsProvider(token=token).fetch(
+                        DataRequest(DataKind.MACRO_SIGNAL, {})
+                    )
+                    n = len(upstox_event.signals)
+                    stats.fetched = 3  # three signals attempted: fii, dii, pcr
+                    stats.written = n
+                    if n == 0:
+                        stats.reachable = False
+                        stats.status_override = "failed"
+                        stats.last_error = (
+                            "upstox returned no signals (token invalid or API unreachable)"
+                        )
+                # OUTSIDE the run block: a cache hiccup must never mark the run failed.
+                if upstox_event is not None and upstox_event.signals:
+                    await service.cache_market_flows(upstox_event.signals)
+            except Exception:  # noqa: BLE001 — health/flows recording must never crash the snapshot
+                logger.warning("mood: upstox health/flows recording failed — continuing")
+                upstox_event = None
+
+        supplementals = (
+            [_PrefetchedAdapter(upstox_event)]
+            if upstox_event is not None
+            else [upstox_adapter]
+        )
+
         # Fetch signals best-effort; any failure returns the all-None dict.
         try:
-            inputs = await fetch_mood_inputs(
-                adapter, supplemental_adapters=[upstox_adapter]
-            )
+            inputs = await fetch_mood_inputs(adapter, supplemental_adapters=supplementals)
         except Exception:  # noqa: BLE001 — never let signal fetch crash the task
             inputs = service.default_fetch_inputs()
 

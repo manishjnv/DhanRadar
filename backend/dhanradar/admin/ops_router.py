@@ -47,6 +47,7 @@ from .ops_schemas import (
     AdminAlert,
     AdminAlertsResponse,
     HealthResponse,
+    MoodStatus,
     OkResponse,
     QualityRow,
     RecentAlert,
@@ -187,6 +188,17 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
         "cost": "Free",
         "celery_task": "dhanradar.tasks.news.refresh_market_news",
         "beat_key": "news-refresh-market",
+    },
+    {
+        "source_key": "upstox_analytics",
+        "name": "Upstox Analytics",
+        "tier": "Market",
+        "description": "FII/DII net flows + Nifty put-call ratio (Mood Compass signals)",
+        "method": "REST API (Bearer token)",
+        "schedule_display": "Twice daily (09:00 & 16:00 IST mood snapshot)",
+        "cost": "Free (Analytics token)",
+        "celery_task": "dhanradar.tasks.mood.compute_mood_snapshot",
+        "beat_key": "mood-compute-snapshot",
     },
 ]
 
@@ -1032,3 +1044,69 @@ async def acknowledge_quality(
         request_id=getattr(request.state, "request_id", None),
     )
     return OkResponse()
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/mood-status
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mood-status", response_model=MoodStatus)
+async def get_mood_status(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MoodStatus:
+    """Latest Market-Mood snapshot coverage for the admin Operations page.
+
+    Returns how many of the 11 signals fed the latest read, data_quality, and
+    which signals were present in the input_vector — highlighting the 3
+    Upstox-sourced ones (fii_flows, dii_flows, put_call_ratio).
+
+    Read-only; RequireAdmin. Returns a zero/None shape when no snapshot exists.
+    """
+    from dhanradar.models.mood import MarketMood
+
+    _EMPTY = MoodStatus(
+        snapshot_at=None,
+        regime=None,
+        inputs_available=0,
+        data_quality=None,
+        signals_present=[],
+        upstox_fii_flows=False,
+        upstox_dii_flows=False,
+        upstox_put_call_ratio=False,
+    )
+
+    row = (
+        await db.execute(
+            select(
+                MarketMood.snapshot_time,
+                MarketMood.regime,
+                MarketMood.inputs_available,
+                MarketMood.data_quality,
+                MarketMood.input_vector,
+            )
+            .order_by(MarketMood.snapshot_date.desc(), MarketMood.snapshot_time.desc())
+            .limit(1)
+        )
+    ).first()
+
+    if row is None:
+        return _EMPTY
+
+    snap_time, regime, inputs_available, data_quality, input_vector = row
+
+    # input_vector is JSONB dict of signal_key -> value (None means not fed).
+    vec: dict = input_vector or {}
+    signals_present = sorted(k for k, v in vec.items() if v is not None)
+
+    return MoodStatus(
+        snapshot_at=_iso(snap_time),
+        regime=regime,
+        inputs_available=inputs_available,
+        data_quality=data_quality,
+        signals_present=signals_present,
+        upstox_fii_flows="fii_flows" in signals_present,
+        upstox_dii_flows="dii_flows" in signals_present,
+        upstox_put_call_ratio="put_call_ratio" in signals_present,
+    )

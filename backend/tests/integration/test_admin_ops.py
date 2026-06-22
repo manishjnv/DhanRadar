@@ -57,6 +57,7 @@ async def test_ops_endpoints_404_for_anonymous(async_client):
         "/api/v1/admin/tasks",
         "/api/v1/admin/runs",
         "/api/v1/admin/quality",
+        "/api/v1/admin/mood-status",
     ]:
         r = await async_client.get(path)
         assert r.status_code == 404, f"Expected 404 on {path}, got {r.status_code}: {r.text}"
@@ -84,6 +85,7 @@ async def test_ops_endpoints_404_for_non_admin(async_client, monkeypatch):
         "/api/v1/admin/tasks",
         "/api/v1/admin/runs",
         "/api/v1/admin/quality",
+        "/api/v1/admin/mood-status",
     ]:
         r = await async_client.get(path, headers=headers)
         assert r.status_code == 404, f"Expected 404 on {path}, got {r.status_code}: {r.text}"
@@ -322,3 +324,109 @@ async def test_me_is_admin_false_for_non_admin(async_client, monkeypatch):
     r = await async_client.get("/api/v1/auth/me", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["user"]["is_admin"] is False
+
+
+# ---------------------------------------------------------------------------
+# 11. GET /admin/mood-status — coverage shape + empty shape
+# ---------------------------------------------------------------------------
+
+
+async def test_mood_status_empty_when_no_snapshot(async_client, monkeypatch, db_session):
+    """No MarketMood row → returns the zero/None shape."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_mood_empty@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.get("/api/v1/admin/mood-status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["snapshot_at"] is None
+    assert body["regime"] is None
+    assert body["inputs_available"] == 0
+    assert body["total_signals"] == 11
+    assert body["data_quality"] is None
+    assert body["signals_present"] == []
+    assert body["upstox_fii_flows"] is False
+    assert body["upstox_dii_flows"] is False
+    assert body["upstox_put_call_ratio"] is False
+
+
+async def test_mood_status_with_seeded_snapshot(async_client, monkeypatch, db_session):
+    """Seeded MarketMood row → correct coverage, signals_present, and upstox booleans."""
+    import datetime as _dt
+
+    from dhanradar.config import settings
+    from dhanradar.models.mood import MarketMood
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_mood_seed@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    today = _dt.date.today()
+    snap_time = _dt.datetime(today.year, today.month, today.day, 9, 0, 0,
+                             tzinfo=_dt.UTC)
+    # Seed a MarketMood row with 5 signals including all 3 Upstox signals.
+    seed_vector = {
+        "fii_flows": 0.6,
+        "dii_flows": 0.4,
+        "put_call_ratio": 0.7,
+        "nifty_momentum": 0.5,
+        "vix_level": None,       # absent — not counted
+    }
+    mood_row = MarketMood(
+        snapshot_date=today,
+        snapshot_time=snap_time,
+        regime="Cautiously Optimistic",
+        confidence_band="medium",
+        inputs_available=4,      # 4 non-None values in seed_vector
+        input_vector=seed_vector,
+        data_quality="ok",
+        contributing_factors=[],
+        contradicting_factors=[],
+    )
+    db_session.add(mood_row)
+    await db_session.commit()
+
+    r = await async_client.get("/api/v1/admin/mood-status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["snapshot_at"] is not None
+    assert body["regime"] == "Cautiously Optimistic"
+    assert body["inputs_available"] == 4
+    assert body["total_signals"] == 11
+    assert body["data_quality"] == "ok"
+    # Sorted non-None keys
+    assert sorted(body["signals_present"]) == sorted(
+        ["fii_flows", "dii_flows", "put_call_ratio", "nifty_momentum"]
+    )
+    assert body["upstox_fii_flows"] is True
+    assert body["upstox_dii_flows"] is True
+    assert body["upstox_put_call_ratio"] is True
+
+
+# ---------------------------------------------------------------------------
+# 12. GET /admin/sources — upstox_analytics appears in the catalog
+# ---------------------------------------------------------------------------
+
+
+async def test_sources_includes_upstox_analytics(async_client, monkeypatch):
+    """upstox_analytics must appear in GET /admin/sources (catalog completeness)."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_src_upstox@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.get("/api/v1/admin/sources", headers=headers)
+    assert r.status_code == 200, r.text
+    source_keys = [e["source_key"] for e in r.json()]
+    assert "upstox_analytics" in source_keys, (
+        f"upstox_analytics missing from /admin/sources; got: {source_keys}"
+    )

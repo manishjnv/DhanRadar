@@ -7,7 +7,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
-import type { MoodPublic, MoodHistoryItem, WhyToday } from './types';
+import type { MoodPublic, MoodHistoryItem, WhyToday, Flows } from './types';
 
 // ---------------------------------------------------------------------------
 // Retry helper — 404 means "no snapshot yet", not a transient error; don't retry.
@@ -98,6 +98,24 @@ export function useMarketBreadth() {
     queryKey: ['market', 'breadth'],
     queryFn: () => api.get<MarketBreadth>('/market/breadth'),
     retry: moodRetry,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /market/flows — FII / DII net flows + Put-Call Ratio.
+// Raw public market facts, DOM-allowed (not a DhanRadar-computed value).
+// Returns null fields when cache is cold; callers should hide/suppress zeros.
+// ---------------------------------------------------------------------------
+export async function getFlows(): Promise<Flows> {
+  return api.get<Flows>('/market/flows');
+}
+
+export function useMarketFlows() {
+  return useQuery({
+    queryKey: ['market', 'flows'],
+    queryFn:  getFlows,
+    retry:    moodRetry,
     staleTime: 5 * 60 * 1000,
   });
 }

@@ -56,6 +56,17 @@ export interface MoodHistoryItem {
 }
 
 // ---------------------------------------------------------------------------
+// GET /market/flows — FII/DII/PCR public market facts (not computed by DhanRadar)
+// DOM-allowed: raw public data, not a proprietary score.
+// ---------------------------------------------------------------------------
+export interface Flows {
+  fii_cr:  number | null;
+  dii_cr:  number | null;
+  pcr:     number | null;
+  as_of:   string | null;
+}
+
+// ---------------------------------------------------------------------------
 // GET /market/why-today
 // ---------------------------------------------------------------------------
 export interface WhyToday {

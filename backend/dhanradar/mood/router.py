@@ -19,7 +19,7 @@ from dhanradar.dashboard.schemas import MarketIndex
 from dhanradar.db import get_db
 from dhanradar.market_data.providers.yahoo import fetch_macro_quotes
 from dhanradar.mood import service
-from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
+from dhanradar.mood.schemas import FlowsOut, MoodHistoryItem, MoodPublic, WhyToday
 from dhanradar.signal.schemas import BreadthOut, MacroQuote, VIXOut
 
 router = APIRouter(prefix="/market", tags=["mood-compass"])
@@ -72,6 +72,14 @@ async def market_vix() -> VIXOut:
 @router.get("/breadth", response_model=BreadthOut)
 async def market_breadth() -> BreadthOut:
     return await service.get_breadth()
+
+
+@router.get("/flows", response_model=FlowsOut)
+async def market_flows() -> FlowsOut:
+    """Public FII/DII net flows + Nifty PCR — RAW public market data, DOM-allowed
+    (like /vix, /breadth). NOT the proprietary mood score. Cached from the twice-daily
+    snapshot; null when cold."""
+    return await service.get_flows()
 
 
 @router.get("/indices", response_model=list[MarketIndex])

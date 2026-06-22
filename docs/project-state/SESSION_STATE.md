@@ -1,5 +1,34 @@
 # DhanRadar — Session State
 
+## 2026-06-22 — Upstox Analytics live + ops-surfacing branch
+
+**Status:** Upstox integration DEPLOYED (PRs #296/#315/#316 on main). Ops-surfacing additions
+on `feat/upstox-ops-surfacing` — built, pending review, NOT yet deployed.
+
+**Shipped to production:**
+
+- **PR #296** — Upstox PCR Tuesday-expiry fix + additive wiring: `UpstoxAnalyticsProvider`
+  supplemental adapter registered in the MACRO\_SIGNAL ladder; PCR expiry resolved from live
+  Upstox `/option/contract` list (NSE Nifty weekly = Tuesday, not Thursday); FII/DII/PCR
+  all feeding the mood engine.
+- **PR #315** — Mood worker memory 192 MB → 384 MB; fixes full-snapshot OOM that killed the
+  worker on the first 11-input run.
+- **PR #316** — RCAs for the above.
+
+**Live smoke-test (2026-06-22):** 3/3 Upstox signals present; engine at 11/11 inputs,
+`data_quality=ok`; out of degraded mode. B69 resolved.
+
+**On `feat/upstox-ops-surfacing` (pending review):**
+
+- Upstox as a monitored source on the Admin Operations page (`source_key=upstox_analytics`,
+  `mf.ingestion_runs` + `mf.source_health`).
+- `GET /admin/mood-status` signal-coverage panel (RequireAdmin).
+- `GET /market/flows` public FII/DII/PCR facts card (DOM-allowed public market data).
+
+**Next action:** review + merge `feat/upstox-ops-surfacing`; deploy.
+
+---
+
 ## 2026-06-21 — Mood Phase 2 + Phase 1 UI + SIP calculator: 8 features shipped & DEPLOYED
 
 **Status:** DONE + DEPLOYED to KVM4 — production at `71dd012` (PR #290 squash-merge); `/api/v1/health`

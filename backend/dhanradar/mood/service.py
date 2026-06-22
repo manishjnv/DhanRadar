@@ -345,12 +345,15 @@ async def get_why_today(db: Any) -> WhyToday | None:
 
 # ---------------------------------------------------------------------------
 # Part A — Live VIX  |  Part B — Market Breadth  (Phase 4)
+# Part C — FII/DII Flows + PCR cache (Upstox Analytics, Phase 5)
 # ---------------------------------------------------------------------------
 
 _VIX_CACHE_KEY = "signal:vix:last"
 _BREADTH_CACHE_KEY = "signal:breadth:last"
+_FLOWS_CACHE_KEY = "signal:flows:last"
 _TTL_VIX_SEC = 24 * 3600
 _TTL_BREADTH_SEC = 3600
+_TTL_FLOWS_SEC = _TTL_12H  # 12 h — matches the twice-daily snapshot cadence
 
 _IST = ZoneInfo("Asia/Kolkata")
 
@@ -526,6 +529,50 @@ async def get_breadth_raw() -> dict:
         "ad_ratio": 1.0,
         "nifty_change_pct": 0.0,
     }
+
+
+async def cache_market_flows(raw_signals: dict) -> None:
+    """Write FII/DII flows + PCR from the Upstox snapshot into Redis.
+
+    Best-effort: a Redis failure logs a warning and is swallowed — it must never
+    crash the mood pipeline.  Called from tasks/mood.py OUTSIDE the ingestion_run
+    context so a cache hiccup does not mark the ingestion run as failed.
+    """
+    from dhanradar.redis_client import get_redis
+
+    payload = json.dumps({
+        "fii_cr": raw_signals.get("fii_flows"),
+        "dii_cr": raw_signals.get("dii_flows"),
+        "pcr": raw_signals.get("put_call_ratio"),
+        "as_of": datetime.now(UTC).isoformat(),
+    })
+    try:
+        await get_redis().set(_FLOWS_CACHE_KEY, payload, ex=_TTL_FLOWS_SEC)
+    except Exception:  # noqa: BLE001
+        logger.warning("mood: cache_market_flows failed — flows cache not updated")
+
+
+async def get_flows():  # returns FlowsOut
+    """Return the latest cached FII/DII flows + PCR from the Upstox snapshot.
+
+    Populated by the twice-daily compute_mood_snapshot task when
+    UPSTOX_ANALYTICS_TOKEN is set.  Returns all-None when the cache is cold
+    (token not set, or snapshot not yet run since restart).
+
+    Raw public market data — DOM-allowed (same rule as /vix, /breadth).
+    """
+    from dhanradar.mood.schemas import FlowsOut
+    from dhanradar.redis_client import get_redis
+
+    try:
+        raw = await get_redis().get(_FLOWS_CACHE_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            return FlowsOut(**data)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return FlowsOut(fii_cr=None, dii_cr=None, pcr=None, as_of=None)
 
 
 async def get_embed_html(db: Any) -> str:

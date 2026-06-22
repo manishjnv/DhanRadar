@@ -26,8 +26,10 @@ import {
   useMoodHistory,
   useMacroQuotes,
   useMarketBreadth,
+  useMarketFlows,
 } from '@/features/mood/api';
 import type { MacroQuote, MarketBreadth } from '@/features/mood/api';
+import type { Flows } from '@/features/mood/types';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime, MoodFactor, MoodFactorTier } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
@@ -381,6 +383,7 @@ export default function MoodPage() {
   const { data: history } = useMoodHistory(180);
   const { data: macroQuotes } = useMacroQuotes();
   const { data: breadth } = useMarketBreadth();
+  const { data: flows } = useMarketFlows();
 
   const quoteMap = React.useMemo(
     () => new Map((macroQuotes ?? []).map((q) => [q.key, q])),
@@ -562,6 +565,11 @@ export default function MoodPage() {
                   </div>
                 </div>
               </section>
+
+              {/* INSTITUTIONAL FLOWS — public market facts, DOM-allowed (not computed by DhanRadar) */}
+              {flows && (flows.fii_cr !== null || flows.dii_cr !== null || flows.pcr !== null) && (
+                <InstitutionalFlowsCard flows={flows} />
+              )}
 
               {/* WHAT'S DRIVING THIS */}
               <div className={s.sectionTitle}>
@@ -895,6 +903,87 @@ function SignalCard({
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Institutional Flows card — FII / DII / PCR public market facts.
+// These are raw data DhanRadar does NOT compute, so showing the numbers is
+// DOM-allowed (founder rule 2026-06-22). Language is descriptive only —
+// no advisory verbs, no market call.
+// ---------------------------------------------------------------------------
+
+/** Format a crore value with sign and plain direction word. */
+function fmtCrore(v: number): { display: string; direction: string; positive: boolean } {
+  const positive = v >= 0;
+  const abs = Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  return {
+    display: `${positive ? '+' : '−'}₹${abs} Cr`,
+    direction: positive ? 'net buying' : 'net selling',
+    positive,
+  };
+}
+
+function InstitutionalFlowsCard({ flows }: { flows: Flows }) {
+  const hasFii  = flows.fii_cr !== null;
+  const hasDii  = flows.dii_cr !== null;
+  const hasPcr  = flows.pcr    !== null;
+  const fii  = hasFii ? fmtCrore(flows.fii_cr as number) : null;
+  const dii  = hasDii ? fmtCrore(flows.dii_cr as number) : null;
+  const asOf = flows.as_of ? relativeTime(flows.as_of) : null;
+
+  return (
+    <section className={s.panel} aria-label="Institutional flows">
+      <div style={{ marginBottom: 10 }}>
+        <h3>Institutional flows</h3>
+        <p className={s.pSub}>
+          How much money large institutions moved in or out today — a public market fact, not a
+          prediction.
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        {fii && (
+          <div className={s.cchip} style={{ minWidth: 140 }}>
+            <div className={s.ccName}>FII (Foreign)</div>
+            <div
+              className={`${s.ccVal} ${s.mono}`}
+              style={{ color: fii.positive ? '#10b981' : '#ef4444' }}
+            >
+              {fii.display}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{fii.direction}</div>
+          </div>
+        )}
+        {dii && (
+          <div className={s.cchip} style={{ minWidth: 140 }}>
+            <div className={s.ccName}>DII (Domestic)</div>
+            <div
+              className={`${s.ccVal} ${s.mono}`}
+              style={{ color: dii.positive ? '#10b981' : '#ef4444' }}
+            >
+              {dii.display}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{dii.direction}</div>
+          </div>
+        )}
+        {hasPcr && (
+          <div className={s.cchip} style={{ minWidth: 140 }}>
+            <div className={s.ccName}>Nifty Put-Call Ratio</div>
+            <div className={`${s.ccVal} ${s.mono}`} style={{ color: '#2563eb' }}>
+              {(flows.pcr as number).toFixed(2)}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>
+              options positioning gauge
+            </div>
+          </div>
+        )}
+      </div>
+      {asOf && (
+        <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8' }}>
+          As of {asOf} · Public exchange data
+        </div>
+      )}
+    </section>
   );
 }
 
