@@ -51,6 +51,19 @@ const AVATAR_VAR_COLORS = [
   '#374151',
 ] as const;
 
+// IDCW payout cadence → short display keyword. Disambiguates funds that share a
+// brand + plan + IDCW option but differ only by frequency (e.g. the Sundaram
+// Banking & PSU Direct IDCW variants: Daily/Weekly/Monthly/Quarterly/base).
+const FREQ_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  fortnightly: 'Fortnightly',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  half_yearly: 'Half-Yearly',
+  annual: 'Annual',
+};
+
 function FundAvatar({ name }: { name: string }) {
   const idx = ((name.charCodeAt(0) || 0) + (name.charCodeAt(1) || 0)) % AVATAR_VAR_COLORS.length;
   return (
@@ -268,6 +281,13 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                               : fund.option_type === 'idcw' ? 'IDCW'
                               : fund.option_type === 'dividend_reinvest' ? 'Div Reinvest'
                               : 'Div Payout'}
+                          </span>
+                        )}
+                        {/* Frequency keyword — the distinguishing chip for IDCW
+                            variants that share the same brand/plan/option. */}
+                        {fund.idcw_frequency && fund.option_type !== 'growth' && FREQ_LABELS[fund.idcw_frequency] && (
+                          <span className="inline-flex items-center px-1.5 py-px rounded bg-surface-3 border border-line font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+                            {FREQ_LABELS[fund.idcw_frequency]}
                           </span>
                         )}
                       </div>
