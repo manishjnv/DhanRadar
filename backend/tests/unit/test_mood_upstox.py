@@ -83,6 +83,8 @@ def _ok_routes() -> dict[str, _FakeResponse]:
     return {
         "/fii": _FakeResponse(200, _fixture("fii")),
         "/dii": _FakeResponse(200, _fixture("dii")),
+        # option/contract is queried before /pcr to resolve the real nearest expiry.
+        "/option/contract": _FakeResponse(200, _fixture("option_contract")),
         "/pcr": _FakeResponse(200, _fixture("pcr")),
     }
 
@@ -180,7 +182,8 @@ async def test_provider_sends_bearer_token_not_in_url():
     await prov.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
 
     calls = captured["client"].calls
-    assert len(calls) == 3
+    # fii + dii + option/contract (expiry lookup) + pcr = 4 calls
+    assert len(calls) == 4
     for call in calls:
         assert call["headers"].get("Authorization") == "Bearer secret-xyz"
         assert call["headers"].get("Accept") == "application/json"
@@ -204,6 +207,7 @@ async def test_non_200_omits_that_signal():
     routes = {
         "/fii": _FakeResponse(500, {}),              # server error → fii absent
         "/dii": _FakeResponse(200, _fixture("dii")),
+        "/option/contract": _FakeResponse(200, _fixture("option_contract")),
         "/pcr": _FakeResponse(200, _fixture("pcr")),
     }
     prov, _ = _provider(routes)
@@ -217,6 +221,7 @@ async def test_malformed_json_omits_that_signal():
     routes = {
         "/fii": _FakeResponse(200, _fixture("fii")),
         "/dii": _FakeResponse(200, None, raise_on_json=True),   # malformed → dii absent
+        "/option/contract": _FakeResponse(200, _fixture("option_contract")),
         "/pcr": _FakeResponse(200, _fixture("pcr")),
     }
     prov, _ = _provider(routes)
@@ -230,6 +235,7 @@ async def test_empty_data_list_yields_no_flow_signal():
     routes = {
         "/fii": _FakeResponse(200, {"status": "success", "data": {"NSE_EQ|CASH": []}}),
         "/dii": _FakeResponse(200, {"status": "success", "data": {"NSE_EQ|CASH": []}}),
+        "/option/contract": _FakeResponse(200, _fixture("option_contract")),
         "/pcr": _FakeResponse(200, _fixture("pcr")),
     }
     prov, _ = _provider(routes)
@@ -274,3 +280,169 @@ async def test_fetch_mood_inputs_normalises_upstox_signals():
     # and the normalised vector still computes a real regime
     result = compute_mood(inputs)
     assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Additive supplemental wiring (#2): Upstox merges ALONGSIDE the Yahoo set,
+# it is NOT a ladder fallback that competes with it.
+# ---------------------------------------------------------------------------
+async def test_supplemental_adapter_merges_additively():
+    class _Primary:  # Yahoo-like macro set, WITHOUT fii/dii/pcr
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="yahoo_macro",
+                signals={"nifty_trend": 1.5, "india_vix": 14.0},
+                fetched_at="2026-06-22T00:00:00Z",
+            )
+
+    class _Supplemental:  # Upstox: the three extra signals
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="upstox_analytics",
+                signals={"fii_flows": 6200.25, "dii_flows": -7500.0, "put_call_ratio": 0.6162},
+                fetched_at="2026-06-22T00:00:00Z",
+            )
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Supplemental()])
+    # primary signals present
+    assert inputs["nifty_trend"] is not None
+    assert inputs["india_vix"] is not None
+    # supplemental signals merged additively (not lost to a fallback)
+    assert inputs["fii_flows"] is not None and inputs["fii_flows"] > 0.5
+    assert inputs["dii_flows"] is not None and inputs["dii_flows"] < 0.5
+    assert inputs["put_call_ratio"] is not None
+
+
+async def test_primary_wins_on_signal_overlap():
+    # If both adapters supply the same key, the PRIMARY value is kept (setdefault).
+    class _Primary:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="p", signals={"put_call_ratio": 0.7}, fetched_at="t"
+            )
+
+    class _Supplemental:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="s", signals={"put_call_ratio": 1.3}, fetched_at="t"
+            )
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Supplemental()])
+    # primary PCR 0.7 → norm > 0.5; had the supplemental 1.3 won it would be < 0.5
+    assert inputs["put_call_ratio"] > 0.5
+
+
+async def test_supplemental_failure_does_not_break_primary():
+    class _Primary:
+        async def fetch(self, _request):
+            return MacroSignalReceived(
+                source="p", signals={"nifty_trend": 1.0}, fetched_at="t"
+            )
+
+    class _Boom:
+        async def fetch(self, _request):
+            raise RuntimeError("upstox down")
+
+    inputs = await fetch_mood_inputs(_Primary(), supplemental_adapters=[_Boom()])
+    assert inputs["nifty_trend"] is not None      # primary survived
+    assert inputs["fii_flows"] is None            # supplemental absent, no crash
+
+
+# ---------------------------------------------------------------------------
+# Differentiated FII/DII saturation (#4)
+# ---------------------------------------------------------------------------
+def test_fii_dii_saturation_differentiated():
+    flow = 10_000.0
+    # FII (S=15k) reacts LESS to the same flow than DII (S=10k) — no longer equal.
+    assert norm_fii_flows(flow) != norm_dii_flows(flow)
+    assert norm_fii_flows(flow) < norm_dii_flows(flow)
+
+
+# ---------------------------------------------------------------------------
+# PCR contract fix (#3): all four required params are sent
+# ---------------------------------------------------------------------------
+async def test_pcr_call_sends_all_four_required_params():
+    prov, captured = _provider(_ok_routes())
+    await prov.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
+
+    pcr_call = next(c for c in captured["client"].calls if "/pcr" in c["url"])
+    params = pcr_call["params"]
+    assert params.get("instrument_key") == "NSE_INDEX|Nifty 50"
+    # expiry is the REAL nearest upcoming contract expiry resolved from the
+    # option/contract fixture (2099-01-06), not a guessed weekday.
+    assert params.get("expiry") == "2099-01-06"
+    assert params.get("date")             # YYYY-MM-DD, trading date
+    assert params.get("bucket_interval")  # minutes
+
+
+# ---------------------------------------------------------------------------
+# Expiry resolver (#3 follow-up): real contract lookup, not a Thursday guess.
+# The live PCR endpoint returns HTTP 200 + data=null for a non-existent expiry
+# (NSE weekly expiry moved off Thursday), so the expiry MUST be a real listed one.
+# ---------------------------------------------------------------------------
+def test_parse_expiries_extracts_distinct_sorted_dates():
+    from dhanradar.market_data.providers.upstox import _parse_expiries
+
+    expiries = _parse_expiries(_fixture("option_contract"))
+    # distinct + sorted ascending (the fixture repeats 2099-01-06 across CE/PE)
+    assert expiries == ["2099-01-06", "2099-01-13", "2099-01-27"]
+
+
+def test_parse_expiries_handles_malformed_payload():
+    from dhanradar.market_data.providers.upstox import _parse_expiries
+
+    assert _parse_expiries(None) == []
+    assert _parse_expiries({}) == []
+    assert _parse_expiries({"data": None}) == []
+    assert _parse_expiries({"data": [{"no_expiry": 1}, "junk"]}) == []
+
+
+def test_nearest_expiry_picks_first_on_or_after_today():
+    import datetime
+
+    from dhanradar.market_data.providers.upstox import _nearest_expiry
+
+    expiries = ["2026-06-16", "2026-06-23", "2026-06-30"]
+    # today before all → first upcoming
+    assert _nearest_expiry(expiries, datetime.date(2026, 6, 22)) == "2026-06-23"
+    # today == an expiry → that expiry (on-or-after, inclusive)
+    assert _nearest_expiry(expiries, datetime.date(2026, 6, 23)) == "2026-06-23"
+    # past expiries skipped
+    assert _nearest_expiry(expiries, datetime.date(2026, 6, 17)) == "2026-06-23"
+    # all in the past → None (PCR fails soft)
+    assert _nearest_expiry(expiries, datetime.date(2026, 7, 1)) is None
+    # empty list → None
+    assert _nearest_expiry([], datetime.date(2026, 6, 22)) is None
+
+
+async def test_pcr_skipped_when_no_expiry_resolves():
+    # option/contract returns no usable expiry → PCR call is NOT made, signal
+    # absent, FII/DII still returned (fail-soft, never raises).
+    routes = {
+        "/fii": _FakeResponse(200, _fixture("fii")),
+        "/dii": _FakeResponse(200, _fixture("dii")),
+        "/option/contract": _FakeResponse(200, {"status": "success", "data": []}),
+        "/pcr": _FakeResponse(200, _fixture("pcr")),
+    }
+    prov, captured = _provider(routes)
+    ev = await prov.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
+    assert ev.signals.get("fii_flows") == 6200.25
+    assert ev.signals.get("dii_flows") == -7500.0
+    assert "put_call_ratio" not in ev.signals
+    # no /pcr request was issued because the expiry could not be resolved
+    assert not any("/pcr" in c["url"] for c in captured["client"].calls)
+
+
+async def test_pcr_skipped_when_contract_lookup_errors():
+    # option/contract non-200 → expiry None → PCR skipped, FII/DII unaffected.
+    routes = {
+        "/fii": _FakeResponse(200, _fixture("fii")),
+        "/dii": _FakeResponse(200, _fixture("dii")),
+        "/option/contract": _FakeResponse(503, {}),
+        "/pcr": _FakeResponse(200, _fixture("pcr")),
+    }
+    prov, captured = _provider(routes)
+    ev = await prov.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
+    assert ev.signals.get("fii_flows") == 6200.25
+    assert "put_call_ratio" not in ev.signals
+    assert not any("/pcr" in c["url"] for c in captured["client"].calls)

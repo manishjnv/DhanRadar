@@ -29,8 +29,9 @@ def compute_mood_snapshot() -> str:
     """
     from dhanradar.ai_gateway.gateway import OpenRouterGateway
     from dhanradar.market_data.adapter import MarketDataAdapter
-    from dhanradar.market_data.config import load_ladders
+    from dhanradar.market_data.config import DataKind, load_ladders
     from dhanradar.market_data.providers.macro import NseMacroProvider
+    from dhanradar.market_data.providers.upstox import UpstoxAnalyticsProvider
     from dhanradar.market_data.providers.yahoo import YahooMacroProvider
     from dhanradar.mood import service
     from dhanradar.mood.commentary import generate_mood_commentary
@@ -50,9 +51,22 @@ def compute_mood_snapshot() -> str:
             ladders=load_ladders(),
         )
 
+        # Upstox Analytics is ADDITIVE, not a ladder fallback: it supplies
+        # fii_flows / dii_flows / put_call_ratio that Yahoo/NSE do not. It is a
+        # separate supplemental adapter (its own single-provider ladder) merged in
+        # by fetch_mood_inputs. INERT until UPSTOX_ANALYTICS_TOKEN is set — with no
+        # token the provider returns no signals, so this changes nothing in prod
+        # until the token lands.
+        upstox_adapter = MarketDataAdapter(
+            providers={"upstox_analytics": UpstoxAnalyticsProvider()},
+            ladders={DataKind.MACRO_SIGNAL: ["upstox_analytics"]},
+        )
+
         # Fetch signals best-effort; any failure returns the all-None dict.
         try:
-            inputs = await fetch_mood_inputs(adapter)
+            inputs = await fetch_mood_inputs(
+                adapter, supplemental_adapters=[upstox_adapter]
+            )
         except Exception:  # noqa: BLE001 — never let signal fetch crash the task
             inputs = service.default_fetch_inputs()
 
