@@ -380,6 +380,53 @@ def test_is_mf_relevant_macro_keyword():
 
 
 # ---------------------------------------------------------------------------
+# 10b. _is_mf_relevant: broad equity-market keyword → True + "market" override
+# ---------------------------------------------------------------------------
+
+
+def test_is_mf_relevant_market_keyword():
+    """Broad equity-market headlines → relevant=True, category='market' (2026-06-22).
+
+    These are exactly the headlines the mood news-sentiment signal was being starved
+    of (the GDELT India-market query fetched them; the old MF-only gate dropped them).
+    """
+    from dhanradar.news.rss import _is_mf_relevant
+
+    relevant, cat = _is_mf_relevant("Sensex up 400 pts, Nifty above 24,100 on global cues")
+    assert relevant is True
+    assert cat == "market"
+
+    for headline in [
+        "Indian equities extend rally for a third session",
+        "Midcap and smallcap stocks outperform the broader market",
+        "Dalal Street ends higher; bluechip names lead gains",
+        "Foreign institutional investor flows turn positive",
+    ]:
+        r, c = _is_mf_relevant(headline)
+        assert r is True, headline
+        assert c == "market", headline
+
+
+def test_market_keywords_have_no_short_token_false_positives():
+    """Short ambiguous tokens ('nse'/'bse'/'ipo'/'fii') are NOT keywords — titles that
+    merely contain them as substrings must still be dropped."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    assert _is_mf_relevant("Consensus builds on new banking licence norms")[0] is False
+    assert _is_mf_relevant("RBI releases information on reserve money for the week")[0] is False
+    assert _is_mf_relevant("Auction of 91-Day Treasury Bills")[0] is False
+
+
+def test_mf_keyword_takes_precedence_over_market():
+    """A headline matching both MF and market terms is categorised MF (MF loop first)."""
+    from dhanradar.news.rss import _is_mf_relevant
+
+    relevant, cat = _is_mf_relevant("Equity mutual fund SIP inflows hit record as Nifty rallies")
+    assert relevant is True
+    assert cat == "mutual_funds"
+
+
+# ---------------------------------------------------------------------------
 # 11. _is_mf_relevant: unrelated banking title → False
 # ---------------------------------------------------------------------------
 

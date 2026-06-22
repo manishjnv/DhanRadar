@@ -131,14 +131,50 @@ _MACRO_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+# Broad EQUITY-MARKET terms (category "market"). DhanRadar started MF-first, but the
+# market-mood news-sentiment signal needs general equity-market headlines (index moves,
+# market direction), and the founder elected to surface them on the public news feed too
+# (2026-06-22). GDELT's query is already India-market-scoped, so these widen what its
+# results keep rather than pulling new sources. Every term is DISTINCTIVE and matched as
+# a substring — short ambiguous tokens (bare nse / bse / ipo / fii) are deliberately
+# excluded to avoid false positives, and directional trade-action words are excluded so
+# the advisory boundary and the ci_guards scan stay clean.
+_MARKET_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "nifty",
+        "sensex",
+        "stock market",
+        "share market",
+        "equity market",
+        "equities",
+        "dalal street",
+        "stock exchange",
+        "market rally",
+        "market correction",
+        "market crash",
+        "market plunge",
+        "bull market",
+        "bear market",
+        "foreign institutional investor",
+        "domestic institutional investor",
+        "midcap",
+        "smallcap",
+        "largecap",
+        "bluechip",
+        "broader market",
+    }
+)
+
 
 def _is_mf_relevant(title: str) -> tuple[bool, str | None]:
-    """Return (True, override_category) when the title passes the MF relevance gate.
+    """Return (True, override_category) when the title passes the market relevance gate.
 
     Returns (False, None) for items that should be dropped.
 
-    override_category is "mutual_funds" when direct MF keywords match, else None
-    (caller keeps the registry-configured category, e.g. "macro").
+    override_category is "mutual_funds" for direct MF keywords, "market" for broad
+    equity-market keywords, else None (caller keeps the registry-configured category,
+    e.g. "macro"). The name is kept for import stability — the gate is now market-wide,
+    not MF-only (see _MARKET_KEYWORDS, 2026-06-22).
 
     Exclusion guard: titles that contain SGB (Sovereign Gold Bond) are excluded
     even if they also contain "redemption" — SGB is not a mutual fund product.
@@ -157,6 +193,10 @@ def _is_mf_relevant(title: str) -> tuple[bool, str | None]:
     for kw in _MACRO_KEYWORDS:
         if kw in lower:
             return True, None  # keep registry category ("macro")
+
+    for kw in _MARKET_KEYWORDS:
+        if kw in lower:
+            return True, "market"  # broad equity-market headline
 
     return False, None
 
