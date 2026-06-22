@@ -21,7 +21,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Compass } from 'lucide-react';
-import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
+import { useMoodCurrent, useMoodHistory, useMarketIndices } from '@/features/mood/api';
+import type { MarketIndex } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime, MoodFactor, MoodFactorTier } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
@@ -331,6 +332,7 @@ interface Role {
 export default function MoodPage() {
   const { data, isLoading, isError, error, refetch } = useMoodCurrent();
   const { data: history } = useMoodHistory(40);
+  const { data: indices } = useMarketIndices();
 
   const yesterdayRegime: Regime | null = React.useMemo(() => {
     if (!data || !history) return null;
@@ -456,19 +458,40 @@ export default function MoodPage() {
                       </span>
                     )}
                   </div>
-                  <p className={s.heroSummary}>
-                    {data.data_quality === 'ok' && data.commentary
-                      ? data.commentary
-                      : `Market signals reported today, so this is a ${
-                          data.confidence_band === 'insufficient_data'
-                            ? 'low'
-                            : data.confidence_band
-                        }-confidence read. ${
-                          data.data_quality === 'degraded'
-                            ? 'Some signals are still warming up, so read it as a broad guide.'
-                            : 'This is a plain read of the overall tone — not a prediction or a tip to act on.'
-                        }`}
-                  </p>
+                  {/* Short plain-language pointers (replaces the long commentary). */}
+                  <ul className={s.heroBullets}>
+                    <li>
+                      Mood is{' '}
+                      <b style={{ color: HEX[data.regime] }}>{WORD[data.regime]}</b> today, with{' '}
+                      {data.confidence_band === 'insufficient_data' ? 'low' : data.confidence_band}{' '}
+                      confidence.
+                    </li>
+                    {data.contributing_factors.length > 0 && (
+                      <li>
+                        Lifting the mood:{' '}
+                        <b>
+                          {data.contributing_factors
+                            .slice(0, 3)
+                            .map((f) => f.label)
+                            .join(', ')}
+                        </b>
+                        .
+                      </li>
+                    )}
+                    {data.contradicting_factors.length > 0 && (
+                      <li>
+                        Holding it back:{' '}
+                        <b>
+                          {data.contradicting_factors
+                            .slice(0, 2)
+                            .map((f) => f.label)
+                            .join(', ')}
+                        </b>
+                        .
+                      </li>
+                    )}
+                    <li>A plain read of the overall tone — not a prediction or a tip to act on.</li>
+                  </ul>
                   <div className={`${s.conf} ${s.mono}`}>
                     <span>Confidence</span>
                     <span className={s.confDots}>
@@ -524,9 +547,6 @@ export default function MoodPage() {
               {/* HOW THE MOOD HAS MOVED */}
               <div className={s.sectionTitle}>
                 <h2>How the mood has moved</h2>
-                <span className={s.stSub}>
-                  Plain history of the label — no scores, not a forecast
-                </span>
               </div>
               <MovedTable
                 today={data.regime}
@@ -559,18 +579,38 @@ export default function MoodPage() {
                 );
               })()}
 
-              {/* WHAT MOVES THE MOOD — signal grid */}
+              {/* WHAT MOVES THE MOOD — signals grouped by today's role */}
               <div className={s.sectionTitle}>
                 <h2>What moves the mood</h2>
                 <span className={s.stSub}>
-                  The mood is a blend of these signals — in plain words
+                  The mood is a blend of these signals — grouped by what they&rsquo;re doing today
                 </span>
               </div>
-              <div className={s.signalGrid}>
-                {SIGNALS.map((sig) => (
-                  <SignalCard key={sig.name} sig={sig} role={roles.get(sig.name)} />
-                ))}
-              </div>
+              {(() => {
+                const supporting = SIGNALS.filter((g) => roles.get(g.name)?.side === 'supporting');
+                const counter = SIGNALS.filter((g) => roles.get(g.name)?.side === 'counterweight');
+                const awaiting = SIGNALS.filter((g) => !roles.get(g.name));
+                const groups: { key: string; label: string; dot: string; items: Sig[] }[] = [
+                  { key: 'sup', label: 'Supporting the mood', dot: '#10b981', items: supporting },
+                  { key: 'cw', label: 'Counterweights', dot: '#ef4444', items: counter },
+                  { key: 'aw', label: 'Awaiting data', dot: '#94a3b8', items: awaiting },
+                ];
+                return groups
+                  .filter((grp) => grp.items.length > 0)
+                  .map((grp) => (
+                    <React.Fragment key={grp.key}>
+                      <div className={`${s.groupHead} ${s.mono}`}>
+                        <span className={s.ghDot} style={{ background: grp.dot }} />
+                        {grp.label}
+                      </div>
+                      <div className={s.signalGrid}>
+                        {grp.items.map((sig) => (
+                          <SignalCard key={sig.name} sig={sig} role={roles.get(sig.name)} />
+                        ))}
+                      </div>
+                    </React.Fragment>
+                  ));
+              })()}
 
               {/* HOW TO READ + COMES TOGETHER */}
               <div className={s.sectionTitle}>
@@ -641,27 +681,18 @@ export default function MoodPage() {
                 <div className={s.panel}>
                   <h3>How it comes together</h3>
                   <p className={s.pSub}>
-                    More signals leaning toward greed push the read up; more toward fear push it down.
+                    Today&rsquo;s index moves feed the read — these are live market levels (public
+                    market data), not the mood score.
                   </p>
                   <div className={s.combine}>
-                    <div className={s.chips}>
-                      {SIGNALS.slice(0, 8).map((sig) => {
-                        const role = roles.get(sig.name);
-                        const glyph = role ? (role.side === 'supporting' ? '↑' : '↓') : '·';
-                        const col = role
-                          ? role.side === 'supporting'
-                            ? '#10b981'
-                            : '#ef4444'
-                          : '#94a3b8';
-                        return (
-                          <div key={sig.name} className={s.cchip}>
-                            <div className={s.ccName}>{sig.name}</div>
-                            <div className={s.ccSig} style={{ color: col }}>
-                              {glyph}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className={s.idxList}>
+                      {indices && indices.length > 0 ? (
+                        indices.map((idx) => <IndexRow key={idx.name} idx={idx} />)
+                      ) : (
+                        <div className={s.idxRow}>
+                          <span className={s.idxName}>Index levels updating…</span>
+                        </div>
+                      )}
                     </div>
                     <div className={s.combineArrow}>→</div>
                     <div className={s.result}>
@@ -673,12 +704,12 @@ export default function MoodPage() {
                   </div>
                   <div className={s.combineKey}>
                     <span>
-                      <span className={s.keyDot} style={{ background: '#10b981' }} /> Up = leaning
-                      greed
+                      <span className={s.keyDot} style={{ background: '#10b981' }} /> Green = up vs
+                      yesterday
                     </span>
                     <span>
-                      <span className={s.keyDot} style={{ background: '#ef4444' }} /> Down = leaning
-                      fear
+                      <span className={s.keyDot} style={{ background: '#ef4444' }} /> Red = down vs
+                      yesterday
                     </span>
                   </div>
                 </div>
@@ -760,6 +791,30 @@ function SignalCard({ sig, role }: { sig: Sig; role?: Role }) {
           <span style={{ fontSize: 11, color: '#64748b' }}>{TIER_WORD[role.tier]} today</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// Public index quote row — value + points + % change vs yesterday. `value`/`change_pct`
+// are public market data, explicitly DOM-allowed (NOT the proprietary mood score).
+const fmtVal = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const fmtPts = (v: number) =>
+  Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: Math.abs(v) >= 100 ? 0 : 1 });
+const fmtPct = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}%`;
+
+function IndexRow({ idx }: { idx: MarketIndex }) {
+  const up = idx.change_pct >= 0;
+  const prev = idx.value / (1 + idx.change_pct / 100);
+  const pts = idx.value - prev;
+  return (
+    <div className={s.idxRow}>
+      <span className={s.idxName}>{idx.name}</span>
+      <span className={s.idxRight}>
+        <span className={`${s.idxVal} ${s.mono}`}>{fmtVal(idx.value)}</span>
+        <span className={`${s.idxChg} ${s.mono} ${up ? s.up : s.down}`}>
+          {up ? '▲' : '▼'} {fmtPts(pts)} ({fmtPct(idx.change_pct)})
+        </span>
+      </span>
     </div>
   );
 }
