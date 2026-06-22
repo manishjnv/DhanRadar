@@ -22,75 +22,18 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Compass } from 'lucide-react';
-import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { MoodGauge } from '@/components/mood/MoodGauge';
 import { DriverFactorList } from '@/components/mood/DriverFactorList';
 import { MoodMovement } from '@/components/mood/MoodMovement';
 import { MoodTimeline } from '@/components/mood/MoodTimeline';
+import { MoodPeriods } from '@/components/mood/MoodPeriods';
 import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
 
-// ---------------------------------------------------------------------------
-// History strip — 30 small colored squares, one per day
-// ---------------------------------------------------------------------------
-const REGIME_BG_CLASS: Record<string, string> = {
-  extreme_fear:      'bg-[var(--dr-red)]',
-  fear:              'bg-[var(--dr-amber)]',
-  neutral:           'bg-[var(--dr-cyan)]',
-  greed:             'bg-[var(--dr-amber)]',
-  extreme_greed:     'bg-[var(--dr-red)]',
-  insufficient_data: 'bg-[var(--text-muted)]',
-  data_unavailable:  'bg-[var(--text-muted)]',
-};
-
-// Legend for the SYMMETRIC attention colour scale — the colour shows how far
-// sentiment sat from neutral (intensity), never its direction, so amber covers
-// both Fear and Greed (non-neg #1: greed is never coloured as a "buy" positive).
-const HISTORY_LEGEND: { cls: string; label: string }[] = [
-  { cls: 'bg-[var(--dr-cyan)]',     label: 'Neutral' },
-  { cls: 'bg-[var(--dr-amber)]',    label: 'Fear / Greed' },
-  { cls: 'bg-[var(--dr-red)]',      label: 'Extreme' },
-  { cls: 'bg-[var(--text-muted)]',  label: 'No reading' },
-];
-
-function HistoryStrip({ days }: { days: number }) {
-  const { data, isError } = useMoodHistory(days);
-
-  if (isError || !data || data.length === 0) return null;
-
-  return (
-    <section aria-label={`${days}-day market mood history`}>
-      <p className="text-caption text-ink-muted mb-2">Last {days} days · one square per day</p>
-      <div className="flex flex-wrap gap-1.5" role="list">
-        {data.map((item) => (
-          <div
-            key={item.snapshot_date}
-            role="listitem"
-            title={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
-            className={`h-4 w-4 rounded ${REGIME_BG_CLASS[item.regime] ?? 'bg-[var(--text-muted)]'}`}
-            aria-label={`${item.snapshot_date}: ${REGIME_DISPLAY[item.regime as Regime]}`}
-          />
-        ))}
-      </div>
-
-      {/* Colour legend — makes the attention scale obvious to a first-time reader. */}
-      <ul className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5" aria-label="Colour key">
-        {HISTORY_LEGEND.map((l) => (
-          <li key={l.label} className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
-            <span className={`h-2.5 w-2.5 rounded-sm ${l.cls}`} aria-hidden="true" />
-            {l.label}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-1.5 text-caption text-ink-faint">
-        Colour shows how strong each day&rsquo;s sentiment was, not its direction.
-      </p>
-    </section>
-  );
-}
-
+// The 30-day history is now shown by the MoodPeriods (monthly/weekly/daily) strip.
 // Factor lists are rendered by the shared DriverFactorList (numberless tier bars).
 
 // ---------------------------------------------------------------------------
@@ -242,8 +185,8 @@ export default function MoodPage() {
           {/* How the mood label moved over time — labels only, no scores/returns. */}
           <MoodTimeline todayRegime={data.regime as Regime} todayDate={data.snapshot_date} />
 
-          {/* 30-day history strip */}
-          <HistoryStrip days={30} />
+          {/* Monthly / weekly / daily mood markers */}
+          <MoodPeriods />
 
           {/* ------------------------------------------------------------ */}
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}

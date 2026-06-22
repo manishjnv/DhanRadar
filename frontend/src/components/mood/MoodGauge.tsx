@@ -7,11 +7,14 @@
  *   centre of the dial shows the regime WORD, never a score.
  *
  * Advisory verb ban (non-negotiable #1):
- *   Colour mapping is a NON-ADVISORY SYMMETRIC "attention" scale:
- *   both extremes (extreme_fear, extreme_greed) = red (caution).
- *   center (neutral) = cyan (calm).
- *   The fear→greed ORDER along the dial is descriptive position, not direction:
- *   greed is never coloured green/positive (which would imply a buy directive).
+ *   Colour follows the STANDARD fear–greed-index convention (CNN Fear & Greed /
+ *   Tickertape MMI): a green→red diverging scale, Extreme Fear = green … Extreme
+ *   Greed = red. This is DESCRIPTIVE sentiment visualisation for clarity, NOT an
+ *   advisory signal — every zone carries its NAME on the dial, and there is no
+ *   buy/sell/hold wording anywhere on the surface. (Founder decision 2026-06-22,
+ *   superseding the earlier symmetric-attention scale; logged for the compliance
+ *   record. The hard SEBI lines — no numeric score, no return-correlation — are
+ *   unchanged.)
  *
  * Accessibility (mirrors ScoreRing pattern):
  *   SVG is aria-hidden decorative; single accessible name via
@@ -42,14 +45,18 @@ export type Regime =
   | 'data_unavailable';
 
 // ---------------------------------------------------------------------------
-// Symmetric attention colour scale (see compliance note above).
+// Fear–greed diverging colour scale (CNN / Tickertape convention, see compliance
+// note above). Five DISTINCT colours so each level is identifiable at a glance —
+// green (Extreme Fear) → lime → yellow → orange → red (Extreme Greed). These are
+// the mood data-viz palette (a semantic scale, like a heatmap), kept separate
+// from the brand action tokens so a sentiment colour is never read as a CTA.
 // ---------------------------------------------------------------------------
 export const REGIME_COLOR: Record<Regime, string> = {
-  extreme_fear:      'var(--dr-red)',
-  fear:              'var(--dr-amber)',
-  neutral:           'var(--dr-cyan)',
-  greed:             'var(--dr-amber)',
-  extreme_greed:     'var(--dr-red)',
+  extreme_fear:      '#16A34A',  // green
+  fear:              '#A3E635',  // lime
+  neutral:           '#FACC15',  // yellow
+  greed:             '#F97316',  // orange
+  extreme_greed:     'var(--dr-red)', // red (#E5484D, brand)
   insufficient_data: 'var(--text-muted)',
   data_unavailable:  'var(--text-muted)',
 };
@@ -96,16 +103,17 @@ const ZONES: { regime: Regime; label: string }[] = [
 // Dial geometry — a 270° arc with a 90° gap at the bottom.
 // Angles are compass bearings: 0 = top, 90 = right, 180 = bottom, 270 = left.
 // ---------------------------------------------------------------------------
-const VW       = 240;
-const VH       = 184;
-const RENDER_W = 264;
-const RENDER_H = 202;
-const CX       = 120;
-const CY       = 116;
+const VW       = 300;
+const VH       = 190;
+const RENDER_W = 300;
+const RENDER_H = 190;
+const CX       = 150;
+const CY       = 114;
 const R        = 92;       // colour-ring centreline radius
 const STROKE   = 18;       // ring thickness
 const NEEDLE_R = 7;        // hub radius
 const NEEDLE_LEN = R - STROKE / 2 - 8;
+const LABEL_R  = R + STROKE / 2 + 7;  // zone-label radius (outside the ring)
 const START_A  = 225;      // bottom-left
 const SWEEP    = 270;      // total dial degrees
 const ZPAD     = 0.012;    // gap between zones, in [0,1] dial-fraction units
@@ -251,6 +259,43 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
           </g>
         )}
 
+        {/* Zone NAMES placed on the dial at each zone — this is what tells the two
+            reds (Extreme Fear vs Extreme Greed) and two ambers (Fear vs Greed)
+            apart, since the symmetric colour scale deliberately can't. The active
+            zone's name is bold/bright. */}
+        {ZONES.map((z, i) => {
+          const midA = pToA((i + 0.5) / 5);
+          const p = pointAt(midA, LABEL_R);
+          const s = Math.sin((midA * Math.PI) / 180);
+          const anchor = s > 0.25 ? 'start' : s < -0.25 ? 'end' : 'middle';
+          const two = z.label.startsWith('Extreme');
+          const active = ordinal === i;
+          return (
+            <text
+              key={z.regime}
+              x={p.x.toFixed(1)}
+              y={p.y.toFixed(1)}
+              textAnchor={anchor}
+              dominantBaseline="middle"
+              fontFamily="Geist Mono, ui-monospace, monospace"
+              fontSize="9"
+              letterSpacing="0.04em"
+              fontWeight={active ? 700 : 500}
+              fill={active ? REGIME_COLOR[z.regime] : 'var(--text-muted)'}
+              opacity={active ? 1 : 0.85}
+            >
+              {two ? (
+                <>
+                  <tspan x={p.x.toFixed(1)} dy="-0.45em">Extreme</tspan>
+                  <tspan x={p.x.toFixed(1)} dy="1.05em">{z.label.replace('Extreme ', '')}</tspan>
+                </>
+              ) : (
+                z.label
+              )}
+            </text>
+          );
+        })}
+
         {/* Centre regime word — NO numeric value, ever. */}
         <text
           className="mg-text"
@@ -267,20 +312,6 @@ export function MoodGauge({ regime, confidenceBand, className }: MoodGaugeProps)
           {displayWord.toUpperCase()}
         </text>
       </svg>
-
-      {/* Zone legend — names the five zones + their colours so the dial is
-          self-explanatory (left = fear, right = greed; symmetric attention scale). */}
-      <ul className="flex flex-wrap justify-center gap-x-3 gap-y-1" aria-hidden="true">
-        {ZONES.map((z) => (
-          <li key={z.regime} className="inline-flex items-center gap-1 text-caption text-ink-muted">
-            <span
-              className="h-2 w-2 rounded-sm"
-              style={{ backgroundColor: REGIME_COLOR[z.regime] }}
-            />
-            {z.label}
-          </li>
-        ))}
-      </ul>
 
       {/* Single accessible name for the figure (mirrors ScoreRing pattern). */}
       <figcaption className="sr-only">{accessibleLabel}</figcaption>
