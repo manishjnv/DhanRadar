@@ -27,7 +27,8 @@ import { DriverFactorList } from '@/components/mood/DriverFactorList';
 import { MoodMovement } from '@/components/mood/MoodMovement';
 import { MoodTimeline } from '@/components/mood/MoodTimeline';
 import { MoodPeriods } from '@/components/mood/MoodPeriods';
-import { MoodFactorGuide } from '@/components/mood/MoodFactorGuide';
+import { MoodFactorGuide, type SignalRole } from '@/components/mood/MoodFactorGuide';
+import { MoodScale } from '@/components/mood/MoodScale';
 import { MoodMethodology } from '@/components/mood/MoodMethodology';
 import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
@@ -198,12 +199,20 @@ export default function MoodPage() {
           </div>
           </div>
 
-          {/* Educational — what each signal means + which are feeding today's read. */}
+          {/* How to read the scale — labelled gradient + today's marker (no numbers). */}
+          <MoodScale regime={data.regime as Regime} />
+
+          {/* Signal cards — what each signal is + how it's pulling the mood today. */}
           <MoodFactorGuide
-            liveLabels={
-              new Set(
-                [...data.contributing_factors, ...data.contradicting_factors].map((f) => f.label),
-              )
+            signalState={
+              new Map<string, SignalRole>([
+                ...data.contributing_factors.map(
+                  (f) => [f.label, { side: 'supporting', tier: f.tier }] as const,
+                ),
+                ...data.contradicting_factors.map(
+                  (f) => [f.label, { side: 'counterweight', tier: f.tier }] as const,
+                ),
+              ])
             }
           />
 
