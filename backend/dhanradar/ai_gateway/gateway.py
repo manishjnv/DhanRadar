@@ -85,6 +85,8 @@ class OpenRouterGateway:
         sonnet_model: str | None = None,
         high_stakes_tasks: Iterable[str] | None = None,
         task_model_preferences: dict[str, list[str]] | None = None,
+        paid_fallback_models: Sequence[str] | None = None,
+        paid_fallback_tasks: Iterable[str] | None = None,
         redis: Any = None,
     ) -> None:
         self._client = client  # injected (tests) or lazily built
@@ -93,6 +95,18 @@ class OpenRouterGateway:
         )
         self._sonnet_model = sonnet_model or settings.AI_SONNET_MODEL
         self._high_stakes = frozenset(high_stakes_tasks) if high_stakes_tasks else HIGH_STAKES_TASKS
+        # Cheap NON-premium paid fallback (non-Claude) for the listed low-volume tasks.
+        self._paid_fallback_models = (
+            list(paid_fallback_models)
+            if paid_fallback_models is not None
+            else _parse_csv(settings.AI_PAID_FALLBACK_MODELS)
+        )
+        self._paid_fallback_tasks = (
+            frozenset(paid_fallback_tasks)
+            if paid_fallback_tasks is not None
+            else frozenset(_parse_csv(settings.AI_PAID_FALLBACK_TASKS))
+        )
+        self._paid_fallback_usd_per_1m = settings.AI_PAID_FALLBACK_USD_PER_1M
         # Task→model ordering (subset of the free pool), sourced from the Admin
         # module's prompt templates in production. Empty → use the full pool.
         self._task_prefs = task_model_preferences or {}
@@ -197,8 +211,24 @@ class OpenRouterGateway:
                     continue  # quality fail → try the next free model
                 return CompletionResult(output=result, model_used=model)
 
+        # --- Cheap paid fallback for configured low-volume tasks ----------
+        # (e.g. mood news-sentiment / commentary). Runs when the free pool yields
+        # nothing usable — all rate-limited OR responded-but-failed-quality — and
+        # retries on a cheap NON-premium, non-Claude paid model under the premium
+        # USD cap, so the signal survives free-tier 429 weather without premium
+        # spend. These tasks are OWNED by this fallback: they skip the Sonnet
+        # spillover below. On no usable output it returns None and we fall through.
+        if task_type in self._paid_fallback_tasks and self._paid_fallback_models:
+            fb = await self._paid_fallback(messages, validator)
+            if fb is not None:
+                return fb
+
         # --- Escalation: free pool produced no valid output ---------------
-        if last_quality_error is not None and task_type in self._high_stakes:
+        if (
+            last_quality_error is not None
+            and task_type in self._high_stakes
+            and task_type not in self._paid_fallback_tasks
+        ):
             # Premium Sonnet spillover — but bound it with the SAME 3-strike skip
             # so a persistently-bad high-stakes ticker cannot loop premium spend.
             try:
@@ -279,6 +309,40 @@ class OpenRouterGateway:
         # Audit the model that actually served (res.model == self._sonnet_model here,
         # but use the threaded field so provenance stays symmetric with the free pool).
         return CompletionResult(output=output, model_used=res.model)
+
+    async def _paid_fallback(
+        self, messages: list[dict[str, str]], validator: QualityValidator
+    ) -> CompletionResult | None:
+        """Cheap NON-premium, non-Claude paid-model fallback for low-volume tasks.
+
+        Tries each configured model in order under the PREMIUM USD budget cap and
+        returns the first schema-valid, advisory-clean result. Returns None when no
+        model produced usable output (429 / upstream error / non-JSON / quality
+        fail) — the caller then falls through to the standard error handling. 402
+        (credit exhausted) propagates as CreditExhaustedError; the premium hard cap
+        raises BudgetExhaustedError before any call. Cost is debited even for a
+        response that then fails validation (the model billed on response)."""
+        async with budget_guard("premium") as meter:
+            for model in self._paid_fallback_models:
+                try:
+                    res = await self._call(model, messages)
+                except RateLimitError:
+                    continue  # 429 → try the next fallback model
+                except APIStatusError as exc:
+                    if getattr(exc, "status_code", None) == 402:
+                        raise CreditExhaustedError(
+                            "OpenRouter returned 402 on paid fallback — credit exhausted; top up."
+                        ) from exc
+                    continue  # other upstream error → try next model
+                except json.JSONDecodeError:
+                    continue  # billed but unusable → try next model
+                meter.cost_usd += (res.total_tokens / 1_000_000) * self._paid_fallback_usd_per_1m
+                try:
+                    output = validator.validate(res.data)
+                except QualityValidationError:
+                    continue  # quality fail → try the next fallback model
+                return CompletionResult(output=output, model_used=res.model)
+        return None
 
     async def _record_strike(self, task_type: str, ticker: str | None) -> int:
         """Increment and return the 3-strike-per-(ticker, day) counter."""
