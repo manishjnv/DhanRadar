@@ -163,3 +163,101 @@ def test_paused_sources_key_constant():
     from dhanradar.admin.ops_router import _PAUSED_SOURCES_KEY
 
     assert _PAUSED_SOURCES_KEY == "paused_sources"
+
+
+def test_source_catalog_contains_upstox_analytics():
+    from dhanradar.admin.ops_router import _SOURCE_CATALOG
+
+    keys = [s["source_key"] for s in _SOURCE_CATALOG]
+    assert "upstox_analytics" in keys, (
+        f"upstox_analytics missing from _SOURCE_CATALOG; got: {keys}"
+    )
+
+
+def test_upstox_analytics_catalog_shape():
+    """Verify the upstox_analytics entry has the required keys and exact source_key string."""
+    from dhanradar.admin.ops_router import _SOURCE_CATALOG
+
+    entry = next(
+        (s for s in _SOURCE_CATALOG if s["source_key"] == "upstox_analytics"), None
+    )
+    assert entry is not None, "upstox_analytics not in _SOURCE_CATALOG"
+    # Exact source_key string — the integration contract with the mood task.
+    assert entry["source_key"] == "upstox_analytics"
+    assert entry["tier"] == "Market"
+    assert entry["celery_task"] == "dhanradar.tasks.mood.compute_mood_snapshot"
+    assert entry["beat_key"] == "mood-compute-snapshot"
+    # Required catalog keys must all be present
+    for key in ("name", "description", "method", "schedule_display", "cost"):
+        assert key in entry, f"Missing key {key!r} in upstox_analytics catalog entry"
+
+
+# ---------------------------------------------------------------------------
+# MoodStatus schema
+# ---------------------------------------------------------------------------
+
+
+def test_mood_status_defaults():
+    """MoodStatus round-trips with its zero/None shape (empty-DB scenario)."""
+    from dhanradar.admin.ops_schemas import MoodStatus
+
+    m = MoodStatus(
+        snapshot_at=None,
+        regime=None,
+        inputs_available=0,
+        data_quality=None,
+        signals_present=[],
+        upstox_fii_flows=False,
+        upstox_dii_flows=False,
+        upstox_put_call_ratio=False,
+    )
+    assert m.snapshot_at is None
+    assert m.regime is None
+    assert m.inputs_available == 0
+    assert m.total_signals == 11   # class-level default
+    assert m.data_quality is None
+    assert m.signals_present == []
+    assert m.upstox_fii_flows is False
+    assert m.upstox_dii_flows is False
+    assert m.upstox_put_call_ratio is False
+
+
+def test_mood_status_with_signals():
+    """MoodStatus correctly stores signals_present and upstox booleans."""
+    from dhanradar.admin.ops_schemas import MoodStatus
+
+    m = MoodStatus(
+        snapshot_at="2026-06-22T09:00:00+00:00",
+        regime="Cautiously Optimistic",
+        inputs_available=4,
+        data_quality="ok",
+        signals_present=["dii_flows", "fii_flows", "nifty_momentum", "put_call_ratio"],
+        upstox_fii_flows=True,
+        upstox_dii_flows=True,
+        upstox_put_call_ratio=True,
+    )
+    assert m.total_signals == 11
+    assert m.inputs_available == 4
+    assert "fii_flows" in m.signals_present
+    assert m.upstox_fii_flows is True
+    assert m.upstox_dii_flows is True
+    assert m.upstox_put_call_ratio is True
+
+
+def test_mood_status_partial_upstox():
+    """When only some Upstox signals are present, booleans are independent."""
+    from dhanradar.admin.ops_schemas import MoodStatus
+
+    m = MoodStatus(
+        snapshot_at="2026-06-22T09:00:00+00:00",
+        regime="Neutral",
+        inputs_available=2,
+        data_quality="degraded",
+        signals_present=["fii_flows", "nifty_momentum"],
+        upstox_fii_flows=True,
+        upstox_dii_flows=False,
+        upstox_put_call_ratio=False,
+    )
+    assert m.upstox_fii_flows is True
+    assert m.upstox_dii_flows is False
+    assert m.upstox_put_call_ratio is False

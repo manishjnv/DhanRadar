@@ -12,14 +12,15 @@ import { api } from '@/lib/apiClient';
 // Query key factory
 // ---------------------------------------------------------------------------
 export const adminKeys = {
-  all:     () => ['admin'] as const,
-  health:  () => ['admin', 'health'] as const,
-  alerts:  () => ['admin', 'alerts'] as const,
-  sources: () => ['admin', 'sources'] as const,
-  tasks:   () => ['admin', 'tasks'] as const,
-  runs:    (params?: Record<string, unknown>) => ['admin', 'runs', params] as const,
-  run:     (id: string) => ['admin', 'run', id] as const,
-  quality: () => ['admin', 'quality'] as const,
+  all:        () => ['admin'] as const,
+  health:     () => ['admin', 'health'] as const,
+  alerts:     () => ['admin', 'alerts'] as const,
+  sources:    () => ['admin', 'sources'] as const,
+  tasks:      () => ['admin', 'tasks'] as const,
+  runs:       (params?: Record<string, unknown>) => ['admin', 'runs', params] as const,
+  run:        (id: string) => ['admin', 'run', id] as const,
+  quality:    () => ['admin', 'quality'] as const,
+  moodStatus: () => ['admin', 'mood-status'] as const,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -176,6 +177,31 @@ export function useAdminQuality() {
     queryKey: adminKeys.quality(),
     queryFn: () => api.get<AdminQualityIssue[]>('/admin/quality'),
     staleTime: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Market Mood signal coverage (admin-only)
+// ---------------------------------------------------------------------------
+
+export interface AdminMoodStatus {
+  snapshot_at:         string | null;
+  regime:              string | null;
+  inputs_available:    number;
+  total_signals:       number;
+  data_quality:        string | null;
+  signals_present:     string[];
+  upstox_fii_flows:    boolean;
+  upstox_dii_flows:    boolean;
+  upstox_put_call_ratio: boolean;
+}
+
+export function useAdminMoodStatus() {
+  return useQuery({
+    queryKey: adminKeys.moodStatus(),
+    queryFn: () => api.get<AdminMoodStatus>('/admin/mood-status'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 

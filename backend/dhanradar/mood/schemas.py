@@ -49,3 +49,13 @@ class WhyToday(BaseModel):
     disclosure: str
     not_advice: str
     disclaimer_version: str
+
+
+class FlowsOut(BaseModel):
+    """Public FII/DII net flows (₹Cr) + Nifty put-call ratio. RAW public market facts
+    (DOM-allowed, NOT a DhanRadar computed score). Null when the cache is cold."""
+
+    fii_cr: float | None
+    dii_cr: float | None
+    pcr: float | None
+    as_of: str | None
