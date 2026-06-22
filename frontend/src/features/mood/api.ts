@@ -42,6 +42,26 @@ export function useMoodHistory(days: number = 30) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /market/indices — public index levels (Nifty 50, Sensex, …).
+// `value`/`change_pct` are PUBLIC market data, explicitly allowed in the DOM
+// (NOT the proprietary mood score). Public endpoint, no auth.
+// ---------------------------------------------------------------------------
+export interface MarketIndex {
+  name: string;
+  value: number;
+  change_pct: number;
+}
+
+export function useMarketIndices() {
+  return useQuery({
+    queryKey: ['market', 'indices'],
+    queryFn: () => api.get<MarketIndex[]>('/market/indices'),
+    retry: moodRetry,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // GET /market/why-today
 // ---------------------------------------------------------------------------
 export function useWhyToday() {

@@ -179,6 +179,102 @@
   margin: 14px 0 0;
   max-width: 560px;
 }
+/* short, plain-language pointers (replaces the long commentary paragraph) */
+.heroBullets {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-width: 580px;
+}
+.heroBullets li {
+  font-size: 14px;
+  color: var(--text-2);
+  line-height: 1.5;
+  padding-left: 18px;
+  position: relative;
+}
+.heroBullets li::before {
+  content: '•';
+  position: absolute;
+  left: 4px;
+  color: var(--blue);
+  font-weight: 700;
+}
+.heroBullets li b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* signal group heading (Supporting / Counterweight / Awaiting) */
+.groupHead {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 24px 2px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.groupHead:first-of-type {
+  margin-top: 0;
+}
+.ghDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* index-quote rows (How it comes together) — public market data, DOM-allowed */
+.idxList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.idxRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.idxName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.idxRight {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.idxVal {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.idxChg {
+  font-size: 12px;
+  font-weight: 600;
+}
+.idxChg.up {
+  color: var(--emerald);
+}
+.idxChg.down {
+  color: var(--red);
+}
 .conf {
   display: inline-flex;
   align-items: center;
