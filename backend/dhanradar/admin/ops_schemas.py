@@ -9,7 +9,7 @@ auth extension.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -35,6 +35,23 @@ class RecentAlert(BaseModel):
     message: str
     severity: str
     created_at: str
+
+
+class AdminAlert(BaseModel):
+    """One attention item for the admin alert bell. DERIVED from current state, not a
+    failure-event log — so a job that NEVER RAN (dead scheduler) is still surfaced."""
+
+    key: str
+    severity: Literal["critical", "warning", "info"]
+    title: str
+    detail: str
+    since: str | None = None  # ISO timestamp the condition has held from, if known
+    href: str | None = None  # admin/app path to act on it
+
+
+class AdminAlertsResponse(BaseModel):
+    count: int
+    alerts: list[AdminAlert]
 
 
 class HealthResponse(BaseModel):

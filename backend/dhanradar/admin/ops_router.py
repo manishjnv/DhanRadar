@@ -44,6 +44,8 @@ from dhanradar.redis_client import get_redis
 
 from .ops_schemas import (
     AcknowledgeRequest,
+    AdminAlert,
+    AdminAlertsResponse,
     HealthResponse,
     OkResponse,
     QualityRow,
@@ -393,6 +395,129 @@ async def get_health(
         recent_signups=recent_signups,
         recent_alerts=recent_alerts,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/alerts — derived "attention bell" for the admin top bar
+# ---------------------------------------------------------------------------
+
+
+@router.get("/alerts", response_model=AdminAlertsResponse)
+async def get_alerts(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AdminAlertsResponse:
+    """Attention items for the admin bell, DERIVED from current state (not a
+    failure-event log) so a job that NEVER RAN — a dead scheduler — is still caught.
+    Read-only; self-clears when the underlying condition resolves. RequireAdmin."""
+    from dhanradar.models.mood import MarketMood
+
+    alerts: list[AdminAlert] = []
+    now = datetime.now(UTC)
+
+    # 1) Market-Mood freshness — the silent-failure case (scheduler never ran).
+    latest = (
+        await db.execute(
+            select(
+                MarketMood.snapshot_time,
+                MarketMood.data_quality,
+                MarketMood.inputs_available,
+            )
+            .order_by(MarketMood.snapshot_date.desc())
+            .limit(1)
+        )
+    ).first()
+    if latest is None:
+        alerts.append(
+            AdminAlert(
+                key="mood_missing",
+                severity="critical",
+                title="Market Mood has never been computed",
+                detail="No DMMI snapshot exists yet — the scheduled mood job may not be running.",
+                href="/admin",
+            )
+        )
+    else:
+        snap_time, dq, inputs = latest
+        age_h = (now - snap_time).total_seconds() / 3600 if snap_time else 999.0
+        # 9 AM / 4 PM IST runs leave a ~17h overnight gap, so >20h means a run was missed.
+        if age_h > 20:
+            alerts.append(
+                AdminAlert(
+                    key="mood_stale",
+                    severity="critical",
+                    title="Market Mood snapshot is stale",
+                    detail=(
+                        f"The last DMMI read is ~{int(age_h)}h old; a scheduled run "
+                        "(≈9 AM / 4 PM IST) was likely missed."
+                    ),
+                    since=_iso(snap_time),
+                    href="/admin",
+                )
+            )
+        elif dq == "degraded" or inputs < 7:
+            alerts.append(
+                AdminAlert(
+                    key="mood_degraded",
+                    severity="warning",
+                    title="Market Mood is running degraded",
+                    detail=f"Only {inputs} of 11 signals are feeding the read; confidence is capped.",
+                    since=_iso(snap_time),
+                    href="/mood",
+                )
+            )
+
+    # 2) Recent data-ingestion failures (last 24h) — same source as the health page.
+    fail_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(MfIngestionRun)
+            .where(MfIngestionRun.status.in_(["failed", "partial"]))
+            .where(MfIngestionRun.started_at >= now - timedelta(hours=24))
+        )
+    ) or 0
+    if fail_count:
+        alerts.append(
+            AdminAlert(
+                key="ingestion_failures",
+                severity="warning",
+                title=f"{fail_count} data-ingestion failure(s) in 24h",
+                detail="One or more source ingestion runs failed or completed partially.",
+                href="/admin",
+            )
+        )
+
+    # 3) Unreachable data sources (latest health row per source).
+    subq = (
+        select(
+            MfSourceHealth.source,
+            func.max(MfSourceHealth.check_time).label("max_ct"),
+        )
+        .group_by(MfSourceHealth.source)
+        .subquery()
+    )
+    health_rows = (
+        await db.scalars(
+            select(MfSourceHealth).join(
+                subq,
+                (MfSourceHealth.source == subq.c.source)
+                & (MfSourceHealth.check_time == subq.c.max_ct),
+            )
+        )
+    ).all()
+    unhealthy = [r.source for r in health_rows if not r.reachable]
+    if unhealthy:
+        alerts.append(
+            AdminAlert(
+                key="sources_unhealthy",
+                severity="warning",
+                title=f"{len(unhealthy)} data source(s) unreachable",
+                detail="Latest health check failed for: " + ", ".join(sorted(unhealthy)[:6]),
+                href="/admin",
+            )
+        )
+
+    return AdminAlertsResponse(count=len(alerts), alerts=alerts)
 
 
 # ---------------------------------------------------------------------------
