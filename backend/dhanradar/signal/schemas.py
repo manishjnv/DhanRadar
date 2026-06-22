@@ -104,6 +104,16 @@ class BreadthOut(BaseModel):
     market_open: bool
 
 
+class MacroQuote(BaseModel):
+    """A raw public market quote for a macro mood signal. `value` (level) and
+    `change_pct` are PUBLIC market data (Yahoo), DOM-allowed — NOT a DhanRadar score."""
+
+    key: str
+    name: str
+    value: float
+    change_pct: float
+
+
 # ---------------------------------------------------------------------------
 # Journal (Phase 2 — Reflect tab)
 # ---------------------------------------------------------------------------

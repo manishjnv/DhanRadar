@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.dashboard.indices import get_indices
 from dhanradar.dashboard.schemas import MarketIndex
 from dhanradar.db import get_db
+from dhanradar.market_data.providers.yahoo import fetch_macro_quotes
 from dhanradar.mood import service
 from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
-from dhanradar.signal.schemas import BreadthOut, VIXOut
+from dhanradar.signal.schemas import BreadthOut, MacroQuote, VIXOut
 
 router = APIRouter(prefix="/market", tags=["mood-compass"])
 
@@ -80,3 +81,11 @@ async def market_indices() -> list[MarketIndex]:
     so this mirrors the public /market/vix and /market/breadth: no auth, the mood
     page is public. Interface-only reuse of the shared index fetcher."""
     return await get_indices()
+
+
+@router.get("/quotes", response_model=list[MacroQuote])
+async def market_quotes() -> list[MacroQuote]:
+    """Raw public quotes (level + % change) for the macro mood signals — S&P 500,
+    US 10Y, Brent, USD/INR, India VIX, Nifty 50. Public Yahoo market data, DOM-allowed
+    (NOT the proprietary mood score). Cached 5 min; public like /vix and /breadth."""
+    return [MacroQuote(**q) for q in await fetch_macro_quotes()]
