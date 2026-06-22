@@ -24,11 +24,10 @@ import { Compass } from 'lucide-react';
 import {
   useMoodCurrent,
   useMoodHistory,
-  useMarketIndices,
   useMacroQuotes,
   useMarketBreadth,
 } from '@/features/mood/api';
-import type { MarketIndex, MacroQuote, MarketBreadth } from '@/features/mood/api';
+import type { MacroQuote, MarketBreadth } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime, MoodFactor, MoodFactorTier } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
@@ -379,8 +378,7 @@ interface Role {
 // ---------------------------------------------------------------------------
 export default function MoodPage() {
   const { data, isLoading, isError, error, refetch } = useMoodCurrent();
-  const { data: history } = useMoodHistory(40);
-  const { data: indices } = useMarketIndices();
+  const { data: history } = useMoodHistory(180);
   const { data: macroQuotes } = useMacroQuotes();
   const { data: breadth } = useMarketBreadth();
 
@@ -609,30 +607,12 @@ export default function MoodPage() {
                 history={history ?? []}
               />
 
-              {/* RECENT MONTHS */}
-              {(() => {
-                const months = monthBuckets(history ?? [], data.regime, data.snapshot_date);
-                if (months.length < 2) return null;
-                return (
-                  <>
-                    <div className={s.sectionTitle}>
-                      <h2>Recent months</h2>
-                      <span className={s.stSub}>Where the mood mostly sat each month</span>
-                    </div>
-                    <div className={s.monthStrip}>
-                      {months.map((m) => (
-                        <div key={m.key} className={`${s.mcell}${m.today ? ' ' + s.today : ''}`}>
-                          <div className={`${s.mName} ${s.mono}`}>{m.label}</div>
-                          <div className={s.mDisc} style={{ background: HEX[m.regime] }} />
-                          <div className={s.mState} style={{ color: HEX[m.regime] }}>
-                            {WORD[m.regime]}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
+              {/* MOOD OVER TIME — daily / weekly / monthly toggle (DMMI styling) */}
+              <PeriodsStrip
+                history={history ?? []}
+                todayRegime={data.regime}
+                todayDate={data.snapshot_date}
+              />
 
               {/* WHAT MOVES THE MOOD — signals grouped by today's role */}
               <div className={s.sectionTitle}>
@@ -738,22 +718,39 @@ export default function MoodPage() {
                   </div>
                 </div>
 
-                {/* Comes together */}
+                {/* Comes together — every contributing signal, compact */}
                 <div className={s.panel}>
                   <h3>How it comes together</h3>
                   <p className={s.pSub}>
-                    Today&rsquo;s index moves feed the read — these are live market levels (public
-                    market data), not the mood score.
+                    Every signal pulling the mood today — green leans greed, red leans fear. Together
+                    they make the zone on the right.
                   </p>
                   <div className={s.combine}>
-                    <div className={s.idxList}>
-                      {indices && indices.length > 0 ? (
-                        indices.map((idx) => <IndexRow key={idx.name} idx={idx} />)
-                      ) : (
-                        <div className={s.idxRow}>
-                          <span className={s.idxName}>Index levels updating…</span>
-                        </div>
-                      )}
+                    <div className={s.chips}>
+                      {[
+                        ...data.contributing_factors.map((f) => ({ f, support: true })),
+                        ...data.contradicting_factors.map((f) => ({ f, support: false })),
+                      ].map(({ f, support }) => {
+                        const q = quoteMap.get(SIG_QUOTE[f.label] ?? '');
+                        const valStr =
+                          f.label === 'Market Breadth' && breadth
+                            ? `${breadth.advances}/${breadth.declines}`
+                            : q
+                              ? fmtQuoteCompact(q.key, q.value)
+                              : '';
+                        const col = support ? '#10b981' : '#ef4444';
+                        return (
+                          <div key={f.label} className={s.cchip}>
+                            <div className={s.ccName}>{f.label}</div>
+                            <div className={s.ccVal} style={{ color: col }}>
+                              {valStr && <span className={s.mono}>{valStr} </span>}
+                              {support ? '▲' : '▼'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {data.contributing_factors.length + data.contradicting_factors.length ===
+                        0 && <div className={s.driveEmpty}>Signals updating…</div>}
                     </div>
                     <div className={s.combineArrow}>→</div>
                     <div className={s.result}>
@@ -765,37 +762,21 @@ export default function MoodPage() {
                   </div>
                   <div className={s.combineKey}>
                     <span>
-                      <span className={s.keyDot} style={{ background: '#10b981' }} /> Green = up vs
-                      yesterday
+                      <span className={s.keyDot} style={{ background: '#10b981' }} /> Green = leaning
+                      greed
                     </span>
                     <span>
-                      <span className={s.keyDot} style={{ background: '#ef4444' }} /> Red = down vs
-                      yesterday
+                      <span className={s.keyDot} style={{ background: '#ef4444' }} /> Red = leaning
+                      fear
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* DISCLAIMER + FOOTER */}
-              <div className={s.disclaimer}>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 8 v.01 M12 11 v5" />
-                </svg>
-                Informational only. The Market Mood Index is an educational gauge, not investment
-                advice. Markets carry risk.
-              </div>
-              <div style={{ marginTop: 16 }}>
+              {/* DISCLOSURE — the single SEBI-required bundle (non-neg #9), tied to the in-force
+                  disclaimer version. The standing site footer (MaybeShell/AppShell) is the common
+                  footer for all users; no extra page-level disclaimer here. */}
+              <div style={{ marginTop: 20 }}>
                 <DisclosureBundle disclosure={data.disclosure} notAdvice={data.not_advice} />
               </div>
             </>
@@ -840,6 +821,14 @@ function fmtQuoteVal(key: string, value: number): string {
   return (
     (QUOTE_PREFIX[key] ?? '') +
     value.toLocaleString('en-IN', { maximumFractionDigits: 2 }) +
+    (QUOTE_SUFFIX[key] ?? '')
+  );
+}
+// Compact form (no decimals) for the dense "how it comes together" chips.
+function fmtQuoteCompact(key: string, value: number): string {
+  return (
+    (QUOTE_PREFIX[key] ?? '') +
+    Math.round(value).toLocaleString('en-IN') +
     (QUOTE_SUFFIX[key] ?? '')
   );
 }
@@ -909,29 +898,8 @@ function SignalCard({
   );
 }
 
-// Public index quote row — value + points + % change vs yesterday. `value`/`change_pct`
-// are public market data, explicitly DOM-allowed (NOT the proprietary mood score).
-const fmtVal = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const fmtPts = (v: number) =>
-  Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: Math.abs(v) >= 100 ? 0 : 1 });
+// Signed % change, e.g. "+0.46%" — public market data (NOT the mood score).
 const fmtPct = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}%`;
-
-function IndexRow({ idx }: { idx: MarketIndex }) {
-  const up = idx.change_pct >= 0;
-  const prev = idx.value / (1 + idx.change_pct / 100);
-  const pts = idx.value - prev;
-  return (
-    <div className={s.idxRow}>
-      <span className={s.idxName}>{idx.name}</span>
-      <span className={s.idxRight}>
-        <span className={`${s.idxVal} ${s.mono}`}>{fmtVal(idx.value)}</span>
-        <span className={`${s.idxChg} ${s.mono} ${up ? s.up : s.down}`}>
-          {up ? '▲' : '▼'} {fmtPts(pts)} ({fmtPct(idx.change_pct)})
-        </span>
-      </span>
-    </div>
-  );
-}
 
 function MovedTable({
   today,
@@ -986,50 +954,108 @@ function MovedTable({
   );
 }
 
-// Most-common regime per calendar month from history (+ today), most recent last.
-function monthBuckets(
-  history: { snapshot_date: string; regime: Regime }[],
-  todayRegime: Regime,
-  todayDate: string,
-): { key: string; label: string; regime: Regime; today: boolean }[] {
-  const MONTHS = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  const byMonth = new Map<string, Map<Regime, number>>();
-  for (const h of history) {
-    const key = h.snapshot_date.slice(0, 7); // YYYY-MM
-    if (!byMonth.has(key)) byMonth.set(key, new Map());
-    const c = byMonth.get(key)!;
-    c.set(h.regime, (c.get(h.regime) ?? 0) + 1);
+// --- Mood-over-time: daily / weekly / monthly buckets (DMMI-styled toggle) ---
+type View = 'monthly' | 'weekly' | 'daily';
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const VIEW_COUNT: Record<View, number> = { monthly: 6, weekly: 8, daily: 12 };
+
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7; // Monday = 0
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function bucketKey(d: Date, v: View): string {
+  if (v === 'monthly') return `${d.getFullYear()}-${d.getMonth()}`;
+  if (v === 'weekly') return startOfWeek(d).toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
+}
+function bucketLabel(d: Date, v: View): string {
+  if (v === 'monthly') return MONTHS[d.getMonth()];
+  const ref = v === 'weekly' ? startOfWeek(d) : d;
+  return `${ref.getDate()} ${MONTHS[ref.getMonth()]}`;
+}
+function modeRegime(rs: Regime[]): Regime {
+  const counts = new Map<Regime, number>();
+  for (const r of rs) counts.set(r, (counts.get(r) ?? 0) + 1);
+  let best = rs[0];
+  let bestN = 0;
+  for (const [r, n] of counts) {
+    if (n > bestN) {
+      best = r;
+      bestN = n;
+    }
   }
-  const todayKey = todayDate.slice(0, 7);
-  const out = [...byMonth.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, counts]) => {
-      let regime: Regime = 'neutral';
-      let max = -1;
-      for (const [rg, n] of counts) {
-        if (n > max) {
-          max = n;
-          regime = rg;
-        }
-      }
-      const mi = parseInt(key.slice(5, 7), 10) - 1;
-      return { key, label: MONTHS[mi] ?? key, regime, today: false };
-    })
-    .filter((m) => m.key !== todayKey)
-    .slice(-4);
-  out.push({ key: todayKey, label: 'Now', regime: todayRegime, today: true });
-  return out;
+  return best;
+}
+
+function PeriodsStrip({
+  history,
+  todayRegime,
+  todayDate,
+}: {
+  history: { snapshot_date: string; regime: Regime }[];
+  todayRegime: Regime;
+  todayDate: string;
+}) {
+  const [view, setView] = React.useState<View>('monthly');
+  const cells = React.useMemo(() => {
+    if (!history.length) return [];
+    const groups = new Map<string, { date: Date; regimes: Regime[] }>();
+    for (const h of history) {
+      const d = new Date(h.snapshot_date);
+      if (Number.isNaN(d.getTime())) continue;
+      const k = bucketKey(d, view);
+      const g = groups.get(k);
+      if (g) g.regimes.push(h.regime);
+      else groups.set(k, { date: d, regimes: [h.regime] });
+    }
+    const todayKey = bucketKey(new Date(todayDate), view);
+    return [...groups.entries()]
+      .map(([key, g]) => ({
+        key,
+        date: g.date,
+        regime: key === todayKey ? todayRegime : modeRegime(g.regimes),
+        label: key === todayKey ? 'Now' : bucketLabel(g.date, view),
+        today: key === todayKey,
+      }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .slice(-VIEW_COUNT[view]);
+  }, [history, view, todayRegime, todayDate]);
+
+  if (!cells.length) return null;
+  return (
+    <>
+      <div className={s.sectionTitle}>
+        <h2>Mood over time</h2>
+        <span className={s.stSub}>Where the mood sat — switch the window</span>
+      </div>
+      <div className={s.periodsPanel}>
+        <div className={s.periodToggle}>
+          {(['monthly', 'weekly', 'daily'] as View[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`${s.periodBtn}${view === v ? ' ' + s.periodBtnOn : ''}`}
+            >
+              {v.charAt(0).toUpperCase() + v.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className={s.monthStrip}>
+          {cells.map((m) => (
+            <div key={m.key} className={`${s.mcell}${m.today ? ' ' + s.today : ''}`}>
+              <div className={`${s.mName} ${s.mono}`}>{m.label}</div>
+              <div className={s.mDisc} style={{ background: HEX[m.regime] }} />
+              <div className={s.mState} style={{ color: HEX[m.regime] }}>
+                {WORD[m.regime]}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
 }
