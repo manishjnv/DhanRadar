@@ -15,9 +15,11 @@ RAW values are returned (net flow in ₹Cr, raw PCR); normalization to the
 engine's 0–1 scale happens in ``mood/signals.py`` (norm_fii_flows /
 norm_dii_flows / norm_put_call_ratio — PCR is contrarian-inverted there).
 
-NOT yet smoke-tested against the live API — no token in hand at build time
-(tested against captured fixtures only). Pending scoring + compliance sign-off
-and a live-token smoke test before it lands.
+LIVE smoke-tested 2026-06-22 with the real Analytics Token: FII + DII returned
+plausible daily net flows; PCR now returns data after the expiry resolver was
+switched from a Thursday guess to a real expiry lookup (NSE Nifty weekly options
+expire on TUESDAY, not Thursday — see _fetch_nearest_expiry). Pending scoring +
+compliance sign-off before it lands.
 
 Integration note (flagged for review): the shared MACRO_SIGNAL ladder returns a
 SINGLE provider's event (it does not merge providers), so combining these three
@@ -47,21 +49,86 @@ _FII_URL = f"{_BASE}/fii"
 _DII_URL = f"{_BASE}/dii"
 _PCR_URL = f"{_BASE}/pcr"
 
-# FII/DII daily cash-market flow query (dig §2).
+# FII/DII daily cash-market flow query (dig §2). These params are correct as-is
+# (verified against the Upstox get-fii / get-dii docs: data_type + interval).
 _FLOW_PARAMS = {"data_type": "NSE_EQ|CASH", "interval": "1D"}
 # The flow records are keyed under this exact string in the response `data` map.
 _FLOW_DATA_KEY = "NSE_EQ|CASH"
 
-# Nifty-50 instrument key for the PCR endpoint.
-# TODO verify against Upstox instrument master — best guess from the dig; the
-# exact key string must be confirmed against the live instrument dump before deploy.
+# Nifty-50 instrument key for the PCR endpoint. VERIFIED 2026-06-22 against the
+# Upstox instruments docs + community (the canonical NSE index key is exactly this).
 _NIFTY50_INSTRUMENT_KEY = "NSE_INDEX|Nifty 50"
+
+# Option-contract endpoint — lists every live Nifty option contract with its
+# `expiry` (ISO YYYY-MM-DD). Used to resolve the REAL nearest expiry for the PCR
+# call instead of guessing a weekday (the weekly expiry day has changed over time;
+# verified live 2026-06-22 — Nifty weekly now expires on Tuesday, not Thursday).
+_CONTRACT_URL = "https://api.upstox.com/v2/option/contract"
+
+# PCR intraday bucket granularity (minutes). The twice-daily snapshot only needs a
+# single read, so the bucket size is immaterial to the final data.pcr; 60 is a safe
+# coarse value.
+_PCR_BUCKET_INTERVAL = "60"
+
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+def _ist_today() -> datetime.date:
+    """Today's date in IST — the trading date used for the PCR `date` param."""
+    return datetime.datetime.now(_IST).date()
+
+
+def _parse_expiries(payload: dict | None) -> list[str]:
+    """Distinct ISO ``YYYY-MM-DD`` expiry dates from an option/contract response
+    (``data[].expiry``), sorted ascending. [] on any structural gap."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+    found = {
+        rec["expiry"]
+        for rec in data
+        if isinstance(rec, dict) and isinstance(rec.get("expiry"), str)
+    }
+    return sorted(found)
+
+
+def _nearest_expiry(expiries: list[str], today: datetime.date) -> str | None:
+    """Nearest option expiry on/after ``today`` from a list of ISO date strings.
+
+    ISO ``YYYY-MM-DD`` sorts lexicographically == chronologically, so a plain
+    string comparison is correct. Returns None if the list is empty or every
+    expiry is in the past (→ PCR omitted, fails soft; FII/DII unaffected).
+    """
+    iso_today = today.isoformat()
+    upcoming = sorted(e for e in expiries if e >= iso_today)
+    return upcoming[0] if upcoming else None
+
+
+async def _fetch_nearest_expiry(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    today: datetime.date,
+) -> str | None:
+    """Resolve the real nearest Nifty option expiry by querying the live
+    option/contract list. None on any error (→ PCR omitted, never raises).
+
+    Replaces the old Thursday-guess heuristic: the NSE weekly expiry weekday has
+    changed (it is Tuesday as of 2026-06, confirmed live), and exchange holidays
+    shift it further, so a fixed weekday is unreliable. The exchange's own
+    contract list is the source of truth.
+    """
+    payload = await _get_json(
+        client, _CONTRACT_URL, headers, {"instrument_key": _NIFTY50_INSTRUMENT_KEY}
+    )
+    return _nearest_expiry(_parse_expiries(payload), today)
 
 
 # OUTBOUND auth scheme for the third-party Upstox API — NOT DhanRadar's own auth
@@ -201,9 +268,28 @@ class UpstoxAnalyticsProvider(MarketDataProvider):
             async with client:
                 fii_payload = await _get_json(client, _FII_URL, headers, _FLOW_PARAMS)
                 dii_payload = await _get_json(client, _DII_URL, headers, _FLOW_PARAMS)
-                pcr_payload = await _get_json(
-                    client, _PCR_URL, headers, {"instrument_key": _NIFTY50_INSTRUMENT_KEY}
-                )
+                # PCR requires ALL FOUR params (verified live against the get-pcr
+                # endpoint 2026-06-22): instrument_key + expiry + date +
+                # bucket_interval. The `expiry` MUST be a real, currently-listed
+                # option expiry — a wrong date returns HTTP 200 with data=null. We
+                # resolve it from the live contract list rather than guessing a
+                # weekday; if it cannot be resolved, PCR is skipped (fails soft,
+                # FII/DII unaffected).
+                today = _ist_today()
+                pcr_payload = None
+                expiry = await _fetch_nearest_expiry(client, headers, today)
+                if expiry is not None:
+                    pcr_payload = await _get_json(
+                        client,
+                        _PCR_URL,
+                        headers,
+                        {
+                            "instrument_key": _NIFTY50_INSTRUMENT_KEY,
+                            "expiry": expiry,
+                            "date": today.isoformat(),
+                            "bucket_interval": _PCR_BUCKET_INTERVAL,
+                        },
+                    )
         except Exception as exc:  # noqa: BLE001 — client construction/teardown is best-effort
             logger.warning("upstox_analytics: client error — %s", exc)
             return MacroSignalReceived(source=self.name, signals={}, fetched_at=_now_iso())

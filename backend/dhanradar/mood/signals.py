@@ -162,15 +162,20 @@ def norm_news_sentiment(tone: str) -> float | None:
 
 # Institutional net-flow saturation thresholds (₹Cr). A daily net flow of this
 # magnitude maps to ≈0.88 (greed) / ≈0.12 (fear) via tanh; larger days asymptote
-# toward 1 / 0 without ever pegging. FII days run larger than DII, so the two have
-# separate constants even though they start equal.
+# toward 1 / 0 without ever pegging.
+#
+# FII vs DII are differentiated: FII cash-market days run LARGER and more volatile
+# (single-day swings routinely ±10–20k ₹Cr), so FII needs a higher saturation so a
+# big-but-ordinary FII day does not peg the signal; DII flows (SIP-driven, steadier)
+# saturate sooner. Equal constants over-weighted ordinary DII days and under-reacted
+# to large FII days.
 #
 # PROVISIONAL — normalization curve pending scoring/compliance gate. The dig
 # (docs/research/mood-data-sourcing-2026-06-21.md §2) recommends scaling net flow
 # against a ROLLING WINDOW rather than a fixed constant; that refinement is a
-# Tier-C scoring decision deferred to the gate. This fixed-threshold tanh is a
-# documented first-pass only.
-_FII_FLOW_SATURATION_CR = 10_000.0
+# Tier-C scoring decision deferred to the gate. These fixed-threshold tanh values
+# are a documented first-pass only.
+_FII_FLOW_SATURATION_CR = 15_000.0
 _DII_FLOW_SATURATION_CR = 10_000.0
 
 
@@ -179,10 +184,11 @@ def norm_fii_flows(net_flow_cr: float) -> float:
     Map FII daily net cash-market flow (₹Cr) to [0, 1]; 1 = greed/bullish.
 
     net_flow_cr = buy_amount − sell_amount. Net inflow (buying) → toward 1,
-    net outflow (selling) → toward 0. Formula: clamp(0.5 + 0.5·tanh(flow / S)).
+    net outflow (selling) → toward 0. Formula: clamp(0.5 + 0.5·tanh(flow / S))
+    with S = 15,000 ₹Cr (FII days run larger than DII; see saturation note above).
     - 0 ₹Cr        → 0.50 (neutral)
-    - +10,000 ₹Cr  → ≈0.88 (greed)
-    - −10,000 ₹Cr  → ≈0.12 (fear)
+    - +15,000 ₹Cr  → ≈0.88 (greed)
+    - −15,000 ₹Cr  → ≈0.12 (fear)
 
     PROVISIONAL — normalization curve pending scoring/compliance gate.
     """
@@ -220,41 +226,65 @@ _NORMALIZERS: dict[str, object] = {
 }
 
 
-async def fetch_mood_inputs(adapter: object) -> dict[str, float | None]:
-    """
-    Fetch macro signals via the adapter and normalise them into the 11-key
-    dict expected by ``compute_mood``.
+def _extract_raw_signals(event: object) -> dict:
+    """Return the raw signals dict from a MacroSignalReceived, or {} for any
+    other / unexpected event type."""
+    if not isinstance(event, MacroSignalReceived):
+        logger.warning("mood signals: unexpected event type %s", type(event))
+        return {}
+    return dict(event.signals or {})
 
-    Whichever of the normalisable signals the active provider returns are mapped
-    to [0, 1] (Yahoo primary supplies nifty_trend, india_vix, global_indices,
-    us_bond_10y, oil_brent, usd_inr; the NSE fallback supplies nifty_trend,
-    india_vix, market_breadth, put_call_ratio). Any signal the provider omits
-    stays None and is dropped by compute_mood (never imputed).
 
-    On AllProvidersFailedError or any unexpected error the all-None dict is
-    returned — compute_and_store handles this as the data_unavailable path
-    (graceful degradation, no exception propagates).
-
-    ``adapter`` is typed as ``object`` to avoid a hard import of
-    MarketDataAdapter here; duck-typing is fine since tests can pass any
-    object with an async ``.fetch(request)`` method.
-    """
-    inputs: dict[str, float | None] = {k: None for k in WEIGHTS}
-
+async def _fetch_raw_from_adapter(adapter: object) -> dict:
+    """Fetch MACRO_SIGNAL from one adapter and return its raw signals dict, or
+    {} on AllProvidersFailedError / any unexpected error (best-effort, never
+    raises). ``adapter`` is duck-typed: any object with an async ``.fetch``."""
     try:
         event = await adapter.fetch(DataRequest(DataKind.MACRO_SIGNAL, {}))
     except AllProvidersFailedError as exc:
         logger.warning("mood signals: all macro providers failed — %s", exc)
-        return inputs
+        return {}
     except Exception as exc:  # noqa: BLE001 — best-effort, never crashes the task
         logger.warning("mood signals: unexpected error fetching macro signals — %s", exc)
-        return inputs
+        return {}
+    return _extract_raw_signals(event)
 
-    if not isinstance(event, MacroSignalReceived):
-        logger.warning("mood signals: unexpected event type %s", type(event))
-        return inputs
 
-    raw_signals: dict = event.signals
+async def fetch_mood_inputs(
+    adapter: object,
+    *,
+    supplemental_adapters: list | None = None,
+) -> dict[str, float | None]:
+    """
+    Fetch macro signals via the adapter(s) and normalise them into the 11-key
+    dict expected by ``compute_mood``.
+
+    The PRIMARY adapter runs the MACRO_SIGNAL ladder (Yahoo primary supplies
+    nifty_trend, india_vix, global_indices, us_bond_10y, oil_brent, usd_inr; the
+    NSE fallback supplies nifty_trend, india_vix, market_breadth, put_call_ratio).
+
+    Each SUPPLEMENTAL adapter is fetched ADDITIVELY and merged in — used for the
+    Upstox Analytics provider, which contributes fii_flows / dii_flows /
+    put_call_ratio that no Yahoo/NSE provider supplies. This is deliberately NOT
+    a ladder entry: the ladder is a fallback chain (first success wins), so an
+    Upstox ladder entry would COMPETE with Yahoo instead of adding to it. A
+    supplemental only fills a signal the primary did not already set (the primary
+    wins the rare overlap, e.g. PCR from the NSE fallback). All access stays via
+    adapters, so module isolation is preserved.
+
+    Whichever signals are present are mapped to [0, 1]; any signal omitted by every
+    adapter stays None and is dropped by compute_mood (never imputed). If every
+    adapter yields nothing, the all-None dict is returned — compute_and_store
+    handles that as the data_unavailable path (graceful, no exception propagates).
+    """
+    inputs: dict[str, float | None] = {k: None for k in WEIGHTS}
+
+    raw_signals: dict = await _fetch_raw_from_adapter(adapter)
+    for supplemental in supplemental_adapters or []:
+        extra = await _fetch_raw_from_adapter(supplemental)
+        for key, value in extra.items():
+            raw_signals.setdefault(key, value)  # primary wins on overlap
+
     for key, normalizer in _NORMALIZERS.items():
         raw = raw_signals.get(key)
         if raw is not None:
