@@ -390,6 +390,17 @@ _NOISE_TOKENS: frozenset[str] = frozenset(
 _FORMERLY_RE = re.compile(r"\(\s*formerly[^)]*\)", re.IGNORECASE)
 # Punctuation to strip from a token before testing it against _NOISE_TOKENS.
 _TOKEN_STRIP = " \t-–—.,;:"
+# Connector/filler words that join option long-forms ("Payout OF Income
+# Distribution …", "… cum Capital Withdrawal"). They never legitimately END a
+# clean brand (brands end in Fund/ETF/Scheme/Series/Plan-N), so inside the
+# trailing noise run they are consumed like noise — without them a single 'of'
+# stops the scan and leaves "… Plan - Payout of". A connector is only ever reached
+# when everything to its RIGHT is already noise, so "State Bank of India Fund" and
+# "Fund of Fund" are safe (the scan stops at the brand's 'Fund' first).
+_CONNECTOR_TOKENS: frozenset[str] = frozenset(
+    {"of", "the", "and", "a", "an", "for", "to", "with", "cum", "from"}
+)
+
 # A "word" run for the right-scan trailing strip. Hyphen and slash are NOT in the
 # class, so the live-feed's un-spaced separators ("Fund-Direct", "Plan-Growth",
 # "Payout/Reinvestment") tokenize into distinct words while brand-internal hyphens
@@ -482,7 +493,7 @@ def derive_short_name(scheme_name: str | None, isin: str | None = None) -> str |
     cut = len(cleaned)
     for m in reversed(matches):
         key = m.group(0).strip(_TOKEN_STRIP + "()").lower()
-        if key == "" or key in _NOISE_TOKENS:
+        if key == "" or key in _NOISE_TOKENS or key in _CONNECTOR_TOKENS:
             cut = m.start()
             continue
         break
