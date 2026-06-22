@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { CommandPalette } from '@/components/ui/CommandPalette';
 import { cn } from '@/lib/cn';
-import { Disclaimer } from '@/components/ui/Disclaimer';
+import { SiteFooter } from '@/components/site/SiteFooter';
 import { useMe } from '@/features/auth/api';
 import { PUBLIC_NAV_LINKS } from '@/components/site/SiteHeader';
 
@@ -417,9 +417,13 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex min-h-full flex-col">
             <div className="flex-1">{children}</div>
-            <footer className="mt-8 border-t border-line pt-4">
-              <Disclaimer className="text-center" />
-            </footer>
+            {/* The shared global SiteFooter — universal for ALL users (anonymous get it
+                via MaybeShell; logged-in get the SAME footer here). Full-bleed: the
+                negative margins cancel the <main> p-6 so it sits flush at the bottom.
+                SiteFooter carries the standing SEBI Disclaimer. */}
+            <div className="-mx-6 -mb-6 mt-8">
+              <SiteFooter />
+            </div>
           </div>
         </main>
       </div>

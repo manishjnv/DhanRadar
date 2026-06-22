@@ -50,7 +50,7 @@ const WORD: Record<Regime, string> = {
 const HEX: Record<Regime, string> = {
   extreme_fear: '#10b981',
   fear: '#65a30d',
-  neutral: '#334155',
+  neutral: '#d97706', // amber — matches the gauge's neutral (centre) zone, not black
   greed: '#f97316',
   extreme_greed: '#ef4444',
   insufficient_data: '#94a3b8',
@@ -158,11 +158,11 @@ function Gauge({ regime, size = 240 }: { regime: Regime; size?: number }) {
   const ZONE_LABELS: [string, number, string][] = [
     ['Ext. Fear', 0.08, '#10b981'],
     ['Fear', 0.29, '#65a30d'],
-    ['Neutral', 0.5, '#334155'],
+    ['Neutral', 0.5, '#d97706'],
     ['Greed', 0.71, '#f97316'],
     ['Ext. Greed', 0.92, '#ef4444'],
   ];
-  const rLbl = r + sw / 2 + 12 * scale;
+  const rLbl = r + sw / 2 + 11 * scale;
   const labels = ZONE_LABELS.map(([txt, frac, color]) => {
     const aa = a0 + (a1 - a0) * frac;
     const c = Math.cos(aa);
@@ -175,7 +175,7 @@ function Gauge({ regime, size = 240 }: { regime: Regime; size?: number }) {
         x={lx.toFixed(1)}
         y={ly.toFixed(1)}
         fill={color}
-        fontSize={11 * scale}
+        fontSize={7.6 * scale}
         fontWeight={700}
         textAnchor={anchor}
         dominantBaseline="middle"
@@ -187,8 +187,8 @@ function Gauge({ regime, size = 240 }: { regime: Regime; size?: number }) {
 
   // Pad the viewBox so the side/top labels are never clipped (the wheel keeps the
   // requested size; padding only adds label room around it).
-  const padX = 46 * scale;
-  const padTop = 15 * scale;
+  const padX = 52 * scale;
+  const padTop = 16 * scale;
   return (
     <svg
       width={Math.round(W + 2 * padX)}
@@ -478,7 +478,7 @@ export default function MoodPage() {
                   <div className={s.heroState} style={{ color: HEX[data.regime] }}>
                     {WORD[data.regime]}
                   </div>
-                  <div className={`${s.heroSub} ${s.mono}`}>Educational gauge — no score</div>
+                  <div className={`${s.heroSub} ${s.mono}`}>Educational DMMI index</div>
                 </div>
                 <div className={s.heroRight}>
                   <div className={s.trendLine}>
