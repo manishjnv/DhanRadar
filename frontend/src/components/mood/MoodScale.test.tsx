@@ -23,8 +23,7 @@ describe('MoodScale', () => {
     expect(container.textContent ?? '').not.toMatch(/[0-9%]/);
   });
 
-  it('renders safely (no marker) for an unknown / insufficient regime', () => {
-    // @ts-expect-error — defense-in-depth
+  it('renders safely (no marker) for an insufficient-data regime', () => {
     expect(() => render(<MoodScale regime="insufficient_data" />)).not.toThrow();
   });
 });
