@@ -243,11 +243,13 @@ services:
     deploy:
       resources:
         limits:
-          # ~101 MiB resident at idle; the 192M→128M trim (to fund beat) was too
-          # aggressive — compute_mood_snapshot OOM-killed every scheduled run, so no
-          # mood snapshot persisted 2026-06-16→06-19 (RCA 2026-06-19). Restored to 192M.
-          # Total dhanradar budget 3072→3136M (+64M), well within ~6 GiB box headroom.
-          memory: 192M
+          # ~118 MiB resident at idle. History: a 192M→128M trim OOM-killed every
+          # scheduled run (no snapshot 2026-06-16→06-19, RCA 2026-06-19) → restored to
+          # 192M. Activating Upstox (2026-06-22) added the ~1800-row /option/contract
+          # parse AND tripped the AI-commentary path (now ≥7 signals), so a full
+          # 10/11-signal snapshot peaked past 192M and OOM-killed again (RCA 2026-06-22).
+          # Bumped to 384M. Total dhanradar budget 3136→3328M, well within ~6 GiB headroom.
+          memory: 384M
           cpus: "0.25"
 
   dhanradar-celery-misc:
