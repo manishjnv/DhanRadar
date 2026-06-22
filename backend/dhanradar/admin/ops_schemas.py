@@ -152,3 +152,20 @@ class QualityRow(BaseModel):
 
 class AcknowledgeRequest(BaseModel):
     duration_days: int
+
+
+# ---------------------------------------------------------------------------
+# Mood-status endpoint
+# ---------------------------------------------------------------------------
+
+
+class MoodStatus(BaseModel):
+    snapshot_at: str | None          # ISO of latest snapshot_time
+    regime: str | None
+    inputs_available: int             # of 11
+    total_signals: int = 11
+    data_quality: str | None          # 'ok' | 'degraded'
+    signals_present: list[str]        # keys present in the latest input_vector
+    upstox_fii_flows: bool            # whether fii_flows fed the latest snapshot
+    upstox_dii_flows: bool
+    upstox_put_call_ratio: bool

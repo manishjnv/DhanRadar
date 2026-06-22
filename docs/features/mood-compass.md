@@ -26,6 +26,8 @@ card via the Notification interface.
   404 `mood_unavailable` when no snapshot yet.
 - `GET /api/v1/market/mood/history?days=N` (1..365) → `[{snapshot_date, regime}]`.
 - `GET /api/v1/market/why-today` → `WhyToday` (commentary + evidence + disclosure).
+- `GET /api/v1/market/flows` — **public** — raw FII/DII/PCR facts derived from the twice-daily
+  mood snapshot (DOM-allowed public market data; no DhanRadar-computed output).
 - Emits `mood.snapshot.published` (via `emit_published`: B26 audit + public card).
 - Deferred: `GET /market/mood/embed` (creator widget).
 
@@ -52,12 +54,27 @@ Schema `mood` (Alembic 0007): `market_mood` (snapshot_date PK, snapshot_time,
 JSONB, `ai_commentary`, `model_used`, `data_quality`). Redis `mood:latest` 12h.
 `mood_history` (pgvector, AI-Enrichment analogues) deferred.
 
+## Signal providers (as-built)
+
+- **YahooMacroProvider** (primary) — 6 signals: `nifty_trend`, `global_indices`,
+  `india_vix`, `us_bond_10y`, `oil_brent`, `usd_inr`.
+- **UpstoxAnalyticsProvider** (supplemental, live 2026-06-22) — 3 signals: `fii_flows`,
+  `dii_flows`, `put_call_ratio`. PCR expiry is resolved from the live Upstox
+  `/option/contract` list — NSE Nifty weekly expiry is **Tuesday** (not Thursday).
+- **News-sentiment AI signal** (governed gateway consumer) — 1 signal: `news_sentiment`
+  (GDELT-sourced, sanctioned B56-f5).
+- **market_breadth** — wired (Yahoo sector/constituent adapter reads Redis `signal:breadth:last`);
+  live value depends on the Redis cache being warm (cold outside market hours → absent, not an error).
+
+All 11 inputs live as of 2026-06-22: engine runs at `inputs_available=11`, `data_quality=ok`
+(out of degraded mode; B69 resolved). Celery mood worker memory limit: 384 MB (bumped from
+192 MB, PR #315, to clear a full-snapshot OOM).
+
 ## Pipeline / behaviour
 
 1. `compute_mood_snapshot` (Celery `mood` queue, beat **09:00 & 16:00 IST**) →
    `service.compute_and_store`.
-2. Ingest 11 signals (`fetch`, INJECTABLE — the Market Data Adapter providers are stubbed,
-   so launch inputs are all-missing → snapshot skipped). Normalize 0–1, missing dropped
+2. Ingest 11 signals via registered providers (above). Normalize 0–1, missing dropped
    (never imputed), decrement `inputs_available`.
 3. Weighted score = Σ(value·weight present)/Σ(weight present)·100 → bucket. Weights:
    nifty_trend .15 · market_breadth .12 · india_vix .10 · fii_flows .10 · global_indices .10 ·
@@ -81,11 +98,18 @@ JSONB, `ai_commentary`, `model_used`, `data_quality`). Redis `mood:latest` 12h.
 - Commentary with an advisory verb → withheld (publish regime alone).
 - Persist/cache/emit are best-effort and isolated — a failure never breaks the snapshot.
 
+## Admin surfaces (as-built 2026-06-22)
+
+- `GET /admin/mood-status` — signal-coverage panel endpoint (RequireAdmin); returns
+  per-signal live/absent status and current `inputs_available` / `data_quality`.
+- **Admin Operations page** — Upstox is a monitored ingestion source (`source_key=upstox_analytics`)
+  visible under `mf.ingestion_runs` + `mf.source_health`, alongside existing sources.
+
 ## Dependencies
 
-Consumes: the Market Data Adapter (signals, stubbed), the AI gateway (commentary, deferred),
-Compliance (`record_served_label`), Notification (`post_public_card`), the scoring engine's
-disclosure constants. Build entirely in-house.
+Consumes: YahooMacroProvider + UpstoxAnalyticsProvider (signals), the AI gateway (commentary,
+governed gateway), Compliance (`record_served_label`), Notification (`post_public_card`), the
+scoring engine's disclosure constants. Build entirely in-house.
 
 ## Compliance posture
 
@@ -105,6 +129,13 @@ disclosure constants. Build entirely in-house.
 
 ## Changelog
 
+- 2026-06-22 — Upstox Analytics live (PRs #296/#315/#316): `UpstoxAnalyticsProvider`
+  supplemental adapter feeds FII flows, DII flows, and PCR; PCR Tuesday-expiry fix (NSE
+  Nifty weekly expiry resolved from live `/option/contract` list); mood worker OOM resolved
+  (192 MB → 384 MB, PR #315); engine now at 11/11 inputs, `data_quality=ok` (B69 resolved).
+  New surfaces on `feat/upstox-ops-surfacing` (pending review): `GET /market/flows` (public
+  FII/DII/PCR facts card), `GET /admin/mood-status` signal-coverage panel, Upstox as a
+  monitored source on the Admin Operations page.
 - 2026-06-06 — FE public page built (`/mood`, Tier-A UI): band-only `MoodGauge`
   (symmetric non-advisory colour scale), factor lists, 30-day history strip, disclosure +
   NOT_ADVICE rendered, 404/empty/error states. MSW mocks for `/market/mood`,

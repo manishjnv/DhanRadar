@@ -13,7 +13,7 @@
 export const dynamic = 'force-dynamic';
 
 import * as React from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, CheckCircle2, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -30,6 +30,7 @@ import {
   useAdminRuns,
   useAdminQuality,
   useAdminRunDetail,
+  useAdminMoodStatus,
   useSourceSync,
   useSourcePause,
   useSourceResume,
@@ -205,7 +206,103 @@ function SourceLogsContent({ sourceKey }: { sourceKey: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings stub (Section E)
+// Market Mood — signal coverage panel (Section E-pre)
+// Numeric values allowed — admin-only surface (Admin.md §16).
+// ---------------------------------------------------------------------------
+function MoodCoveragePanel() {
+  const { data, isLoading, isError, refetch } = useAdminMoodStatus();
+
+  if (isLoading) return <TableSkeleton rows={3} />;
+  if (isError)   return <ErrorCard title="Could not load mood status" onRetry={() => void refetch()} />;
+  if (!data)     return null;
+
+  const degraded = data.data_quality !== 'ok';
+  const upstoxSignals: { label: string; present: boolean }[] = [
+    { label: 'FII Flows',       present: data.upstox_fii_flows },
+    { label: 'DII Flows',       present: data.upstox_dii_flows },
+    { label: 'Put-Call Ratio',  present: data.upstox_put_call_ratio },
+  ];
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Signal count + quality badge */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-h3 font-medium text-ink tabular-nums font-mono">
+          {data.inputs_available} / {data.total_signals}
+        </span>
+        <span className="text-small text-ink-muted">signals available</span>
+        {degraded ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber/10 px-2 py-0.5 text-caption font-medium text-amber">
+            Degraded — {data.data_quality ?? 'check data quality'}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald/10 px-2 py-0.5 text-caption font-medium text-emerald">
+            OK
+          </span>
+        )}
+      </div>
+
+      {/* Last snapshot + regime */}
+      <div className="flex flex-col gap-1 text-small text-ink-muted">
+        {data.snapshot_at ? (
+          <span>Last snapshot: {formatRelative(data.snapshot_at)} ({new Date(data.snapshot_at).toLocaleString('en-IN')})</span>
+        ) : (
+          <span>Last snapshot: not yet computed</span>
+        )}
+        {data.regime && (
+          <span>Regime: <span className="font-medium text-ink capitalize">{data.regime.replace(/_/g, ' ')}</span></span>
+        )}
+      </div>
+
+      {/* Upstox signals */}
+      <div>
+        <p className="text-caption uppercase tracking-wide font-medium text-ink-faint mb-2">
+          Upstox signals
+        </p>
+        <div className="flex flex-col gap-2">
+          {upstoxSignals.map(({ label, present }) => (
+            <div key={label} className="flex items-center gap-2 text-small">
+              {present ? (
+                <CheckCircle2 size={15} strokeWidth={2} className="text-emerald shrink-0" aria-label="present" />
+              ) : (
+                <Minus size={15} strokeWidth={2} className="text-ink-faint shrink-0" aria-label="absent" />
+              )}
+              <span className={present ? 'text-ink' : 'text-ink-muted'}>{label}</span>
+              <span className={cn(
+                'ml-auto text-caption font-mono',
+                present ? 'text-emerald' : 'text-ink-faint',
+              )}>
+                {present ? 'present' : 'absent'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Signals present list (collapsed display) */}
+      {data.signals_present.length > 0 && (
+        <div>
+          <p className="text-caption uppercase tracking-wide font-medium text-ink-faint mb-2">
+            Signals present ({data.signals_present.length})
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.signals_present.map((sig) => (
+              <span
+                key={sig}
+                className="inline-block rounded bg-surface-2 border border-line px-2 py-0.5 text-caption text-ink-muted font-mono"
+              >
+                {sig}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings stub (Section F)
 // ---------------------------------------------------------------------------
 function SettingsStub() {
   return (
@@ -239,10 +336,11 @@ export default function AdminOperationsPage() {
   const qualityAck   = useQualityAcknowledge();
 
   // Queries
-  const sourcesQ = useAdminSources();
-  const tasksQ   = useAdminTasks();
-  const runsQ    = useAdminRuns({ limit: 50 });
-  const qualityQ = useAdminQuality();
+  const sourcesQ    = useAdminSources();
+  const tasksQ      = useAdminTasks();
+  const runsQ       = useAdminRuns({ limit: 50 });
+  const qualityQ    = useAdminQuality();
+  const moodStatusQ = useAdminMoodStatus();
 
   // Drawer state
   const [runDrawer, setRunDrawer]       = React.useState<string | null>(null);
@@ -262,7 +360,7 @@ export default function AdminOperationsPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Operations</h1>
           <p className="mt-1 text-small text-ink-muted">
-            Data sources · jobs · runs · quality · settings
+            Data sources · jobs · runs · quality · mood coverage · settings
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -274,6 +372,7 @@ export default function AdminOperationsPage() {
               tasksQ.refetch();
               runsQ.refetch();
               qualityQ.refetch();
+              moodStatusQ.refetch();
             }}
           >
             <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
@@ -405,7 +504,16 @@ export default function AdminOperationsPage() {
         )}
       </Section>
 
-      {/* Section E — Platform Settings (stub) */}
+      {/* Section E — Market Mood signal coverage */}
+      <Section
+        id="section-mood-coverage"
+        title="Market Mood — Signal Coverage"
+        subtitle="How many of the mood signals are available right now, and whether the three Upstox signals have arrived."
+      >
+        <MoodCoveragePanel />
+      </Section>
+
+      {/* Section F — Platform Settings (stub) */}
       <Section
         id="section-settings"
         title="Platform Settings"
