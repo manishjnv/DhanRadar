@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, Upload, Compass, BookOpen, GraduationCap,
+  LayoutDashboard, Upload, Compass,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
   ShieldCheck, Search,
   type LucideIcon,
@@ -31,8 +31,8 @@ const WORKSPACE: NavItem[] = [
   { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
   { href: '/mood',           label: 'Market Mood',     icon: Compass          },
   { href: '/signal',         label: 'Signal',          icon: Signal           },
-  { href: '/learn/tax',      label: 'Tax Guides',      icon: BookOpen         },
-  { href: '/learn/concepts', label: 'Investing Basics', icon: GraduationCap   },
+  // Tax Guides + Investing Basics intentionally NOT in the sidebar — they live in
+  // the footer "Learn" column only (founder 2026-06-22).
 ];
 
 const SETTINGS: NavItem = { href: '/settings/privacy', label: 'Settings', icon: Settings };
