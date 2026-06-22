@@ -33,7 +33,7 @@ export function MarketNewsWidget({ items }: MarketNewsWidgetProps) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-small text-ink-muted">No news available right now.</p>
-        <p className="text-caption text-ink-muted">
+        <p className="text-small text-ink-secondary">
           Informational headlines only, not investment advice.
         </p>
       </div>
@@ -64,9 +64,15 @@ export function MarketNewsWidget({ items }: MarketNewsWidgetProps) {
           </li>
         ))}
       </ul>
-      <p className="text-caption text-ink-muted">
-        Informational headlines only, not investment advice.
-      </p>
+      <div className="flex flex-col gap-0.5">
+        <p className="text-small text-ink-secondary">
+          Informational headlines only, not investment advice.
+        </p>
+        <p className="text-caption text-ink-muted">
+          Headlines via the GDELT Project and sanctioned RSS feeds. Links open the
+          original publisher.
+        </p>
+      </div>
     </div>
   );
 }
