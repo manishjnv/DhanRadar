@@ -27,6 +27,7 @@ import { DriverFactorList } from '@/components/mood/DriverFactorList';
 import { MoodMovement } from '@/components/mood/MoodMovement';
 import { MoodTimeline } from '@/components/mood/MoodTimeline';
 import { MoodPeriods } from '@/components/mood/MoodPeriods';
+import { MoodFactorGuide } from '@/components/mood/MoodFactorGuide';
 import { ConfidenceExplanation } from '@/components/mood/ConfidenceExplanation';
 import { useMoodCurrent, useMoodHistory } from '@/features/mood/api';
 import { ApiError } from '@/lib/apiClient';
@@ -63,7 +64,7 @@ export default function MoodPage() {
     (data.data_quality === 'unavailable' || data.regime === 'data_unavailable');
 
   return (
-    <MaybeShell>
+    <MaybeShell maxWidth="wide">
       {/* Page heading */}
       <div className="mb-6">
         <h1 className="text-h2 text-ink">Market Mood</h1>
@@ -113,8 +114,11 @@ export default function MoodPage() {
       {/* ---------------------------------------------------------------- */}
       {data && !unavailable && (
         <div className="space-y-6">
-          {/* Primary mood card */}
-          <Card>
+          {/* Responsive layout: 1 column on mobile, gauge card + side rail on
+              large screens (the grid stacks below max-w on small viewports). */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+          {/* Primary mood card — wide left column on large screens */}
+          <Card className="lg:col-span-2">
             <CardBody>
               {/* Gauge — centered, regime label + band only, no numeric */}
               <div className="flex justify-center py-2">
@@ -182,11 +186,17 @@ export default function MoodPage() {
             </CardBody>
           </Card>
 
-          {/* How the mood label moved over time — labels only, no scores/returns. */}
-          <MoodTimeline todayRegime={data.regime as Regime} todayDate={data.snapshot_date} />
+          {/* Side rail — mood-over-time widgets (right column on large screens). */}
+          <div className="space-y-6">
+            {/* How the mood label moved over time — labels only, no scores/returns. */}
+            <MoodTimeline todayRegime={data.regime as Regime} todayDate={data.snapshot_date} />
+            {/* Monthly / weekly / daily mood markers */}
+            <MoodPeriods />
+          </div>
+          </div>
 
-          {/* Monthly / weekly / daily mood markers */}
-          <MoodPeriods />
+          {/* Educational — what each signal means, in plain words (full width). */}
+          <MoodFactorGuide />
 
           {/* ------------------------------------------------------------ */}
           {/* Footer — snapshot date, disclosure (non-negotiable #9)        */}
