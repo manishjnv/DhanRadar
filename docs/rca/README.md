@@ -1090,3 +1090,11 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 - **Fix:** re-verified state with a self-safe method.
 - **Prevention:** standing rule in plan/infra-notes — never `pkill -f <pattern>` where the pattern can appear in your own command line; enumerate with `pgrep -x cloudflared` and check `/proc/<pid>/cmdline` per pid.
 - **Phase/area:** Phase 1 / process cleanup over SSH.
+
+### 2026-06-22 — Mood news-sentiment signal chronically absent (starved by MF-only filter)
+
+- **Symptom:** the 11th mood signal `news_sentiment` was almost never present; the mood engine ran at ≤7/11, and the signal showed "Awaiting data" on the /mood page despite GDELT working.
+- **Root cause:** GDELT's query is already India-market-scoped (returns Moneycontrol "Sensex up 400 pts, Nifty above 24,100" etc.), but every article was then re-filtered through `news.rss._is_mf_relevant`, an **MF-only gate** (MF + monetary-policy keywords). Broad equity-market headlines matched neither and were dropped. Only ~3 thin, mostly-US headlines survived per 48h → the AI tone read landed below the 0.30 confidence floor → signal withheld (`mood/news_sentiment.py`).
+- **Fix:** added `_MARKET_KEYWORDS` (distinctive equity-market terms; short ambiguous tokens + trade-action words excluded) → category `market`; the gate now keeps broad market headlines. Surfaced on the public news feed too (founder decision). `backend/dhanradar/news/rss.py` (PR #301, main `bf4d020`). Headline-metadata-only; gateway advisory screen + confidence floor still gate the score (no-impute intact). Tier-B compliance review ACCEPT — both hard gates clean.
+- **Prevention:** a source-relevance filter NARROWER than the fetch query silently discards intended data — when a query is already scoped, don't re-filter on a different (stricter) axis. Verified the deployed gate keeps real Sensex/Nifty/FII headlines and still drops banking noise. Residual: GDELT 429s intermittently under manual hammering (rare under normal cadence); ingested headlines persist 48h so a single good call seeds the pool.
+- **Phase/area:** Market Mood / news-sentiment signal.
