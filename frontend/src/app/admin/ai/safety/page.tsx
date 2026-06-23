@@ -417,7 +417,22 @@ export default function AdminAISafetyPage() {
                     <p className="font-medium text-ink">AI Output Accuracy Check</p>
                     <HealthBadge status={d.groundedness.instrumented ? 'Healthy' : 'Planned'} />
                   </div>
-                  <p>{d.groundedness.note ?? 'Not yet available.'}</p>
+                  {d.groundedness.instrumented && d.groundedness.value !== null ? (
+                    <p>
+                      Average groundedness{' '}
+                      <span className="font-mono text-ink">
+                        {(d.groundedness.value * 100).toFixed(0)}%
+                      </span>{' '}
+                      across {d.groundedness.sample_count.toLocaleString('en-IN')} sampled
+                      outputs ({d.groundedness.window_days}d)
+                      {d.groundedness.low_flags > 0
+                        ? ` · ${d.groundedness.low_flags.toLocaleString('en-IN')} flagged low`
+                        : ''}
+                      .
+                    </p>
+                  ) : (
+                    <p>{d.groundedness.note ?? 'Not yet available.'}</p>
+                  )}
                 </div>
               </section>
             </div>

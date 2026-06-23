@@ -81,6 +81,25 @@ class LatencyInfo(BaseModel):
     note: str = ""
 
 
+class GroundednessInfo(BaseModel):
+    """Sampled LLM-judge groundedness over a rolling window (Redis daily counters; PR-4).
+
+    A sampled fraction of served AI outputs is scored 0..1 for how well its claims
+    are supported by its input context. ``value`` is the mean score (None until a
+    sample exists), ``sample_count`` how many outputs were judged, ``low_flags`` how
+    many scored below the low threshold. ``instrumented`` requires ≥1 sample (a 0
+    mean is not meaningful without a denominator). Only scores are stored — never
+    the judged context or output (DPDP-safe).
+    """
+
+    instrumented: bool = False
+    value: float | None = None
+    sample_count: int = 0
+    low_flags: int = 0
+    window_days: int = 7
+    note: str = ""
+
+
 class BudgetSnapshot(BaseModel):
     """Live budget counters from Redis (ai:budget:free:today / ai:budget:premium:today)."""
 
@@ -135,8 +154,8 @@ class AiDashboardResponse(BaseModel):
     avg_latency_ms: LatencyInfo = LatencyInfo(
         note="no latency samples recorded yet"
     )
-    eval_score: InstrumentedFalse = InstrumentedFalse(
-        note="groundedness eval not yet instrumented"
+    eval_score: GroundednessInfo = GroundednessInfo(
+        note="no groundedness samples recorded yet"
     )
 
 
@@ -201,8 +220,8 @@ class AiEvalResponse(BaseModel):
     """GET /admin/ai/eval — groundedness eval + data quality issues."""
 
     quality_issues: list[QualityIssueRow]
-    groundedness: InstrumentedFalse = InstrumentedFalse(
-        note="groundedness eval runs not yet instrumented; no eval table"
+    groundedness: GroundednessInfo = GroundednessInfo(
+        note="no groundedness samples recorded yet"
     )
 
 
@@ -271,8 +290,8 @@ class AiSafetyResponse(BaseModel):
     label_churn_educational: LabelChurnSummary
     label_churn_mood: LabelChurnSummary
     advice_boundary_breaches: AdviceBoundaryBreachesInfo = AdviceBoundaryBreachesInfo()
-    groundedness: InstrumentedFalse = InstrumentedFalse(
-        note="groundedness column absent from ai_recommendation_audit"
+    groundedness: GroundednessInfo = GroundednessInfo(
+        note="no groundedness samples recorded yet"
     )
 
 

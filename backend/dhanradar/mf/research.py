@@ -293,6 +293,9 @@ async def generate_research_answer(
             contains_personal_data=True,
             cross_border_consent_verified=True,
             request_id=request_id,
+            # Synchronous user-facing ask route — opt OUT of inline groundedness
+            # sampling so a user request never waits on an extra judge call.
+            judge_eligible=False,
         )
     except (GatewayError, BudgetExhaustedError, ConsentNotVerifiedError) as exc:
         return {

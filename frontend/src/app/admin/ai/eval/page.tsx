@@ -217,10 +217,26 @@ export default function AdminAIEvalPage() {
                     : 'Not yet available'}
                 </span>
               </div>
-              <p className="text-small text-ink-muted">
-                {q.data.groundedness.note ||
-                  'Automated checking that AI-generated outputs are supported by underlying fund data is not yet available. This will be added as part of the Phase 5 evaluation framework.'}
-              </p>
+              {q.data.groundedness.instrumented && q.data.groundedness.value !== null ? (
+                <p className="text-small text-ink-muted">
+                  Average groundedness{' '}
+                  <span className="font-mono text-ink">
+                    {(q.data.groundedness.value * 100).toFixed(0)}%
+                  </span>{' '}
+                  across {q.data.groundedness.sample_count.toLocaleString('en-IN')} sampled
+                  AI outputs over the last {q.data.groundedness.window_days} days
+                  {q.data.groundedness.low_flags > 0
+                    ? ` · ${q.data.groundedness.low_flags.toLocaleString('en-IN')} flagged low`
+                    : ''}
+                  . A sampled grader scores how well each AI output is supported by its
+                  source data.
+                </p>
+              ) : (
+                <p className="text-small text-ink-muted">
+                  {q.data.groundedness.note ||
+                    'Automated checking that AI-generated outputs are supported by underlying fund data is not yet available.'}
+                </p>
+              )}
             </div>
           </section>
         )}

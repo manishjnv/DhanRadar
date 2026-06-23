@@ -27,14 +27,14 @@ import { displayLabel } from '@/lib/displayLabel';
 import { formatRelative } from '@/components/admin/utils';
 
 // ---------------------------------------------------------------------------
-// Skeleton row — 7 StatCards
+// Skeleton row — 8 StatCards
 // ---------------------------------------------------------------------------
 const GRID_COLS_3 = 'grid-cols-3';
 
 function KpiSkeleton() {
   return (
     <div className={`grid grid-cols-2 gap-3 sm:${GRID_COLS_3}`}>
-      {[...Array(7)].map((_, i) => (
+      {[...Array(8)].map((_, i) => (
         <Skeleton key={i} className="h-24 rounded-xl" />
       ))}
     </div>
@@ -202,6 +202,25 @@ export default function AdminAIDashboardPage() {
                       : 'No AI calls timed yet — appears once the AI starts serving'
                   }
                   status="neutral"
+                />
+                {/* Groundedness eval score (7d) */}
+                <StatCard
+                  title="Groundedness (7d)"
+                  value={
+                    d.eval_score.instrumented && d.eval_score.value !== null
+                      ? `${(d.eval_score.value * 100).toFixed(0)}%`
+                      : '—'
+                  }
+                  sub={
+                    d.eval_score.instrumented && d.eval_score.value !== null
+                      ? `How well AI outputs match their source data · ${d.eval_score.sample_count.toLocaleString('en-IN')} sampled${d.eval_score.low_flags > 0 ? ` · ${d.eval_score.low_flags} flagged low` : ''}`
+                      : 'No AI outputs sampled yet — appears once the AI starts serving'
+                  }
+                  status={
+                    d.eval_score.instrumented && d.eval_score.low_flags > 0
+                      ? 'warning'
+                      : 'neutral'
+                  }
                 />
               </div>
             );
