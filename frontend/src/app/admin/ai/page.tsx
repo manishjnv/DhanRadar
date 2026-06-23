@@ -27,14 +27,14 @@ import { displayLabel } from '@/lib/displayLabel';
 import { formatRelative } from '@/components/admin/utils';
 
 // ---------------------------------------------------------------------------
-// Skeleton row — 6 StatCards
+// Skeleton row — 7 StatCards
 // ---------------------------------------------------------------------------
 const GRID_COLS_3 = 'grid-cols-3';
 
 function KpiSkeleton() {
   return (
     <div className={`grid grid-cols-2 gap-3 sm:${GRID_COLS_3}`}>
-      {[...Array(6)].map((_, i) => (
+      {[...Array(7)].map((_, i) => (
         <Skeleton key={i} className="h-24 rounded-xl" />
       ))}
     </div>
@@ -187,6 +187,21 @@ export default function AdminAIDashboardPage() {
                       ? 'warning'
                       : 'healthy'
                   }
+                />
+                {/* Avg AI response time (7d) */}
+                <StatCard
+                  title="Avg Response Time (7d)"
+                  value={
+                    d.avg_latency_ms.instrumented && d.avg_latency_ms.value_ms !== null
+                      ? `${Math.round(d.avg_latency_ms.value_ms).toLocaleString('en-IN')} ms`
+                      : '—'
+                  }
+                  sub={
+                    d.avg_latency_ms.instrumented && d.avg_latency_ms.value_ms !== null
+                      ? `Average AI model reply time across ${d.avg_latency_ms.sample_count.toLocaleString('en-IN')} calls`
+                      : 'No AI calls timed yet — appears once the AI starts serving'
+                  }
+                  status="neutral"
                 />
               </div>
             );

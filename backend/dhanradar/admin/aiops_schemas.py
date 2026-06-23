@@ -38,6 +38,22 @@ class InstrumentedFalse(BaseModel):
     note: str = ""
 
 
+class LatencyInfo(BaseModel):
+    """Average LLM response latency over a rolling window (Redis daily counters).
+
+    ``instrumented`` is the discriminator the frontend reads: True once the
+    gateway has recorded at least one sample in the window, otherwise False (no
+    samples yet, or the Redis read degraded). ``value_ms`` is the rolling mean in
+    milliseconds, ``sample_count`` the number of timed responses behind it.
+    """
+
+    instrumented: bool = False
+    value_ms: float | None = None
+    sample_count: int = 0
+    window_days: int = 7
+    note: str = ""
+
+
 class BudgetSnapshot(BaseModel):
     """Live budget counters from Redis (ai:budget:free:today / ai:budget:premium:today)."""
 
@@ -87,9 +103,10 @@ class AiDashboardResponse(BaseModel):
     served_7d: int                          # total audit rows in last 7 days
     low_confidence_7d: int                  # low-confidence log rows in last 7 days
     label_churn: LabelChurnSummary          # churn review for "educational_label"
-    # Absent / not yet instrumented
-    avg_latency_ms: InstrumentedFalse = InstrumentedFalse(
-        note="latency not tracked in ai_recommendation_audit; absent"
+    # Rolling avg LLM response latency (Redis daily counters; instrumented once
+    # the gateway records samples). eval_score remains not-yet-instrumented.
+    avg_latency_ms: LatencyInfo = LatencyInfo(
+        note="no latency samples recorded yet"
     )
     eval_score: InstrumentedFalse = InstrumentedFalse(
         note="groundedness eval not yet instrumented"
@@ -249,8 +266,8 @@ class AiCostResponse(BaseModel):
     per_model: InstrumentedFalse = InstrumentedFalse(
         note="per-model spend breakdown not tracked; Redis keys aggregate free/premium only"
     )
-    latency: InstrumentedFalse = InstrumentedFalse(
-        note="per-call latency not stored in ai_recommendation_audit or Redis"
+    latency: LatencyInfo = LatencyInfo(
+        note="no latency samples recorded yet"
     )
 
 

@@ -40,6 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.ai_gateway.metrics import read_latency_window
 from dhanradar.budget import (
     _CAP_OVERRIDE_KEYS,
     _REDIS_KEYS,
@@ -72,6 +73,7 @@ from .aiops_schemas import (
     BudgetSnapshot,
     EngineVersionRow,
     LabelChurnSummary,
+    LatencyInfo,
     LowConfidenceRowSummary,
     PromptTemplateCreateRequest,
     PromptTemplateRow,
@@ -142,8 +144,9 @@ async def get_ai_dashboard(
     - Served audit count for last 7 days
     - Low-confidence log count for last 7 days
     - Label churn review for 'educational_label'
+    - Rolling avg LLM response latency (gateway Redis counters)
 
-    All absent metrics (avg_latency_ms, eval_score) return instrumented:false.
+    eval_score remains not-yet-instrumented (instrumented:false).
     """
     from dhanradar.models.compliance import AiLowConfidenceLog, AiRecommendationAudit
 
@@ -174,6 +177,10 @@ async def get_ai_dashboard(
     # Activation state via the registry (compliance service owns this)
     activated = await is_engine_version_activated(db, cfg.model_version)
 
+    # Rolling avg LLM response latency from the gateway's Redis counters. Read is
+    # non-fatal: a Redis failure returns instrumented=False, never 500s the page.
+    latency = LatencyInfo(**await read_latency_window(7))
+
     return AiDashboardResponse(
         model_version=cfg.model_version,
         activated=activated,
@@ -181,6 +188,7 @@ async def get_ai_dashboard(
         served_7d=served_7d,
         low_confidence_7d=low_confidence_7d,
         label_churn=churn,
+        avg_latency_ms=latency,
     )
 
 
@@ -362,11 +370,13 @@ async def get_ai_cost(
     """Return the AI budget governor spend snapshot.
 
     Budget counters are read from Redis (``ai:budget:free:today`` /
-    ``ai:budget:premium:today``).  Per-model breakdown and latency are not tracked
-    in the current Redis-counter implementation (instrumented:false).
+    ``ai:budget:premium:today``).  Per-model spend breakdown is still not tracked
+    (instrumented:false).  Latency is now sourced from the gateway's rolling Redis
+    latency counters (instrumented once samples exist).
     """
     budget = await _read_budget_snapshot()
-    return AiCostResponse(budget=budget)
+    latency = LatencyInfo(**await read_latency_window(7))
+    return AiCostResponse(budget=budget, latency=latency)
 
 
 # ---------------------------------------------------------------------------
