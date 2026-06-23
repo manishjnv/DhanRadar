@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -37,6 +38,7 @@ from dhanradar.ai_gateway.errors import (
     QualityValidationError,
     ThreeStrikeSkipError,
 )
+from dhanradar.ai_gateway.metrics import record_latency
 from dhanradar.ai_gateway.quality import QualityValidator
 from dhanradar.ai_gateway.schemas import AIOutputBase
 from dhanradar.budget import budget_guard
@@ -273,11 +275,17 @@ class OpenRouterGateway:
         """One LLM call. Raises RateLimitError/APIStatusError (handled upstream)
         or json.JSONDecodeError if the content is not JSON."""
         client = self._get_client()
+        started = time.monotonic()
         resp = await client.chat.completions.create(
             model=model,
             messages=messages,
             response_format={"type": "json_object"},
         )
+        # Record the wall-clock latency of this served response (non-fatal). A
+        # rate-limited / 402 call raises inside create() above and never reaches
+        # here, so only genuine model responses are timed. record_latency NEVER
+        # raises — an observational metric must not break an AI call.
+        await record_latency((time.monotonic() - started) * 1000.0, redis=self._redis)
         # Empty choices (e.g. content-filtered) → treat as a malformed response,
         # not an unhandled IndexError that would bypass the gateway taxonomy.
         if not getattr(resp, "choices", None):

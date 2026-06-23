@@ -318,7 +318,17 @@ export default function AdminAICostPage() {
                       <p className="font-medium text-ink">Response Time</p>
                       <HealthBadge status={q.data.latency.instrumented ? 'Healthy' : 'Planned'} />
                     </div>
-                    <p>{q.data.latency.note ?? 'Per-call response time data is not yet available.'}</p>
+                    {q.data.latency.instrumented && q.data.latency.value_ms !== null ? (
+                      <p>
+                        <span className="font-mono text-ink">
+                          {Math.round(q.data.latency.value_ms).toLocaleString('en-IN')} ms
+                        </span>{' '}
+                        average AI reply time over the last {q.data.latency.window_days} days
+                        {' '}({q.data.latency.sample_count.toLocaleString('en-IN')} calls).
+                      </p>
+                    ) : (
+                      <p>{q.data.latency.note ?? 'Per-call response time data is not yet available.'}</p>
+                    )}
                   </div>
                 </div>
               </section>

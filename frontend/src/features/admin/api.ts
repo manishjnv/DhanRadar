@@ -733,6 +733,15 @@ export interface AdminAIInstrumented {
   note?: string;
 }
 
+/** Mirrors LatencyInfo in aiops_schemas.py — rolling avg LLM response latency. */
+export interface AdminAILatency {
+  instrumented: boolean;
+  value_ms: number | null;
+  sample_count: number;
+  window_days: number;
+  note?: string;
+}
+
 /** Mirrors AiDashboardResponse in aiops_schemas.py */
 export interface AdminAIDashboard {
   model_version: string;
@@ -741,7 +750,7 @@ export interface AdminAIDashboard {
   served_7d: number;
   low_confidence_7d: number;
   label_churn: AdminAILabelChurn;
-  avg_latency_ms: AdminAIInstrumented;
+  avg_latency_ms: AdminAILatency;
   eval_score: AdminAIInstrumented;
 }
 
@@ -844,7 +853,7 @@ export interface AdminAIFeedback {
 export interface AdminAICost {
   budget: AdminAIBudget;
   per_model: AdminAIInstrumented;
-  latency: AdminAIInstrumented;
+  latency: AdminAILatency;
 }
 
 // ---------------------------------------------------------------------------
