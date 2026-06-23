@@ -419,3 +419,118 @@ async def test_admin_notifications_health_without_mocks(async_client, monkeypatc
     # Empty notification_log → all counts zero
     assert data["sent"] == 0
     assert data["failed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. POST /admin/support/cas-failures/{job_id}/notes — set + read-back
+# ---------------------------------------------------------------------------
+
+
+async def _seed_failed_cas_job(db_session, user_id: str) -> str:
+    """Insert one failed mf.mf_cas_jobs row and return its job_id (str)."""
+    from dhanradar.models.mf import MfCasJob
+
+    job = MfCasJob(
+        user_id=user_id,
+        status="failed",
+        source_hash="seed-hash-cas-notes",
+        error_message="parser failed",
+    )
+    db_session.add(job)
+    await db_session.commit()
+    await db_session.refresh(job)
+    return str(job.job_id)
+
+
+async def test_admin_set_cas_support_notes_and_read_back(
+    async_client, db_session, monkeypatch
+):
+    """Admin sets a support note, then reads it back via get_cas_failures."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_casnotes@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    job_id = await _seed_failed_cas_job(db_session, user_id)
+
+    # Set the note.
+    r = await async_client.post(
+        f"/api/v1/admin/support/cas-failures/{job_id}/notes",
+        json={"notes": "investigated — bad folio header"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+    # Read it back through the support-failures list.
+    r2 = await async_client.get(
+        "/api/v1/admin/support/cas-failures", headers=headers
+    )
+    assert r2.status_code == 200, r2.text
+    rows = r2.json()
+    match = next((row for row in rows if row["job_id"] == job_id), None)
+    assert match is not None, "seeded failed CAS job not returned by the read"
+    assert match["support_notes"] == "investigated — bad folio header"
+
+
+async def test_admin_set_cas_support_notes_empty_clears(
+    async_client, db_session, monkeypatch
+):
+    """An empty notes string is accepted and clears the note (→ '')."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_casnotes_clear@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    job_id = await _seed_failed_cas_job(db_session, user_id)
+
+    r = await async_client.post(
+        f"/api/v1/admin/support/cas-failures/{job_id}/notes",
+        json={"notes": ""},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_admin_set_cas_support_notes_unknown_job_404(
+    async_client, monkeypatch
+):
+    """Unknown job_id → 404 cas_job_not_found."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "admin_casnotes_404@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    missing = "00000000-0000-0000-0000-0000000000ff"
+    r = await async_client.post(
+        f"/api/v1/admin/support/cas-failures/{missing}/notes",
+        json={"notes": "x"},
+        headers=headers,
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_admin_set_cas_support_notes_404_for_non_admin(
+    async_client, monkeypatch
+):
+    """Non-admin → 404 (surface-hiding) on the notes mutation."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", "")
+    user_id, access = await _signup(async_client, "nonadmin_casnotes@example.com")
+    headers = make_auth_headers(access_token=access)
+
+    fake = "00000000-0000-0000-0000-000000000001"
+    r = await async_client.post(
+        f"/api/v1/admin/support/cas-failures/{fake}/notes",
+        json={"notes": "x"},
+        headers=headers,
+    )
+    assert r.status_code == 404, r.text

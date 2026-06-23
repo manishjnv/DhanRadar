@@ -274,6 +274,7 @@ class MfCasJob(Base):
     progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     source_hash: Mapped[str] = mapped_column(Text, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    support_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
