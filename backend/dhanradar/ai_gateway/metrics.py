@@ -65,6 +65,11 @@ _GROUNDED_SUM_KEY = "ai:grounded:sum:{day}"
 _GROUNDED_COUNT_KEY = "ai:grounded:count:{day}"
 _GROUNDED_LOWFLAG_KEY = "ai:grounded:lowflags:{day}"
 
+# Groundedness judge paid-model usage (PR-4b). Separate namespace from serve-path
+# ai:spend:* so paid judge calls never appear in the per-model-spend admin chart.
+_JUDGE_CALLS_KEY = "ai:judge:calls:{model}:{day}"
+_JUDGE_SPEND_MODELS_KEY = "ai:judge:models:{day}"
+
 
 def _day(dt: datetime.datetime) -> str:
     return dt.strftime("%Y%m%d")
@@ -350,3 +355,26 @@ async def read_groundedness_window(days: int = 7, *, redis: Any = None) -> dict:
     except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
         logger.debug("ai groundedness read failed", exc_info=True)
         return absent
+
+
+async def record_judge_spend(model: str, *, redis: Any = None) -> None:
+    """Record one paid groundedness judge call (PR-4b). Never raises.
+
+    Tracks call count per model in separate Redis keys (ai:judge:spend:*) so judge
+    calls never appear in the serve-path per-model-spend admin chart. USD estimation
+    is left to the operator (calls × ~1-4K tokens × model rate). TTL set
+    UNCONDITIONALLY on every write.
+    """
+    try:
+        if not model:
+            return
+        r: Any = redis or get_redis()
+        day = _day(datetime.datetime.now(datetime.UTC))
+        models_key = _JUDGE_SPEND_MODELS_KEY.format(day=day)
+        calls_key = _JUDGE_CALLS_KEY.format(model=model, day=day)
+        await r.sadd(models_key, model)
+        await r.expire(models_key, _RETENTION_SECONDS)
+        await r.incr(calls_key)
+        await r.expire(calls_key, _RETENTION_SECONDS)
+    except Exception:  # noqa: BLE001 — observational metric must never break an AI call
+        logger.debug("ai judge-spend record failed", exc_info=True)
