@@ -265,6 +265,7 @@ async def get_user_detail(
         tier=user.tier.value,
         status=_derive_status(user),
         created_at=user.created_at,
+        last_login_at=user.last_login_at,
         pro_access_until=user.pro_access_until,
         pro_access_reason=user.pro_access_reason,
         risk_profile=user.risk_profile,
