@@ -23,7 +23,8 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
-import { useAdminCasFailures, type AdminCasFailure } from '@/features/admin/api';
+import { Input } from '@/components/ui/Input';
+import { useAdminCasFailures, useSetCasNotes, type AdminCasFailure } from '@/features/admin/api';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,125 @@ function TableSkeleton({ rows = 6 }: { rows?: number }) {
         <Skeleton key={i} className="h-11 rounded-md" />
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CAS failure row — with inline support-note editor
+// ---------------------------------------------------------------------------
+type BadgeStatus = 'Failed' | 'Running' | 'Success' | 'Warning' | 'Paused';
+
+function CasFailureRow({ f, badgeStatus }: { f: AdminCasFailure; badgeStatus: BadgeStatus }) {
+  const setNotes = useSetCasNotes();
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(f.support_notes ?? '');
+  const [justSaved, setJustSaved] = React.useState(false);
+
+  // Re-sync the draft if the underlying note changes (e.g. after a refetch)
+  // and we are not actively editing.
+  React.useEffect(() => {
+    if (!editing) setDraft(f.support_notes ?? '');
+  }, [f.support_notes, editing]);
+
+  function handleSave() {
+    setNotes.mutate(
+      { jobId: f.job_id, notes: draft.trim() },
+      {
+        onSuccess: () => {
+          setEditing(false);
+          setJustSaved(true);
+          window.setTimeout(() => setJustSaved(false), 2000);
+        },
+      },
+    );
+  }
+
+  return (
+    <tr className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
+      <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
+        {f.job_id.length > 12 ? f.job_id.slice(0, 12) + '…' : f.job_id}
+      </td>
+      <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+        {f.user_id.length > 8 ? f.user_id.slice(0, 8) + '…' : f.user_id}
+      </td>
+      <td className="py-2.5 pr-4">
+        <HealthBadge status={badgeStatus} />
+      </td>
+      <td
+        className="py-2.5 pr-4 text-small text-ink-secondary max-w-[260px] truncate"
+        title={f.error_message ?? undefined}
+      >
+        {f.error_message ?? '—'}
+      </td>
+      <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+        {formatDateTime(f.created_at)}
+      </td>
+      <td
+        className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap"
+        title={f.completed_at ? undefined : 'Stuck jobs have no completion time — this is expected.'}
+      >
+        {f.completed_at ? formatDateTime(f.completed_at) : '—'}
+      </td>
+      <td className="py-2.5 align-top min-w-[220px]">
+        {editing ? (
+          <div className="flex flex-col gap-1.5">
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Add a support note…"
+              aria-label={`Support note for job ${f.job_id}`}
+              maxLength={2000}
+              disabled={setNotes.isPending}
+              className="h-8 text-small"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleSave}
+                disabled={setNotes.isPending}
+              >
+                {setNotes.isPending ? 'Saving…' : 'Save'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditing(false);
+                  setDraft(f.support_notes ?? '');
+                }}
+                disabled={setNotes.isPending}
+              >
+                Cancel
+              </Button>
+              {setNotes.isError && (
+                <span className="text-caption text-danger">Could not save</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2">
+            <span
+              className={cn(
+                'text-small max-w-[200px] break-words',
+                f.support_notes ? 'text-ink-secondary' : 'text-ink-faint',
+              )}
+            >
+              {f.support_notes || '—'}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditing(true)}
+              aria-label={`Edit support note for job ${f.job_id}`}
+            >
+              {f.support_notes ? 'Edit' : 'Add'}
+            </Button>
+            {justSaved && <span className="text-caption text-success">Saved</span>}
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -53,7 +173,7 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
     );
   }
 
-  const HEADERS = ['Upload Job', 'User ID', 'Status', 'Error', 'Created', 'Completed'];
+  const HEADERS = ['Upload Job', 'User ID', 'Status', 'Error', 'Created', 'Completed', 'Support Note'];
 
   // Derive badge status from job status string
   function jobBadgeStatus(status: string): 'Failed' | 'Running' | 'Success' | 'Warning' | 'Paused' {
@@ -84,35 +204,7 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
         </thead>
         <tbody>
           {failures.map((f) => (
-            <tr
-              key={f.job_id}
-              className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-            >
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
-                {f.job_id.length > 12 ? f.job_id.slice(0, 12) + '…' : f.job_id}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {f.user_id.length > 8 ? f.user_id.slice(0, 8) + '…' : f.user_id}
-              </td>
-              <td className="py-2.5 pr-4">
-                <HealthBadge status={jobBadgeStatus(f.status)} />
-              </td>
-              <td
-                className="py-2.5 pr-4 text-small text-ink-secondary max-w-[260px] truncate"
-                title={f.error_message ?? undefined}
-              >
-                {f.error_message ?? '—'}
-              </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                {formatDateTime(f.created_at)}
-              </td>
-              <td
-                className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap"
-                title={f.completed_at ? undefined : 'Stuck jobs have no completion time — this is expected.'}
-              >
-                {f.completed_at ? formatDateTime(f.completed_at) : '—'}
-              </td>
-            </tr>
+            <CasFailureRow key={f.job_id} f={f} badgeStatus={jobBadgeStatus(f.status)} />
           ))}
         </tbody>
       </table>

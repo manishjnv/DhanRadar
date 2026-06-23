@@ -328,6 +328,7 @@ async def list_recent_cas_failures(db: Any, limit: int = 50) -> list[dict]:
             "error_message": r.error_message,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            "support_notes": r.support_notes,
         }
         for r in rows
     ]
