@@ -158,6 +158,37 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
     # ------------------------------------------------------------------
+    # BSE Star MF 2.0 (mutual-fund execution integration)
+    # ------------------------------------------------------------------
+    # Webhook transport is JOSE (API doc §6.1.7): BSE sends a JWS (signed with
+    # BSE's private key) wrapping a JWE (encrypted to OUR public key). The receiver
+    # VERIFIES the JWS with BSE's public key, then DECRYPTS the JWE with our private
+    # key — fail-closed: if either key is unset the webhook is refused (503), never
+    # parsed unverified.
+    #   * BSE_WEBHOOK_PUBLIC_KEY(_FILE)  — BSE's public key (verify their signature).
+    #   * BSE_PRIVATE_KEY(_FILE)         — OUR private key (decrypt the JWE; also signs
+    #                                      our outbound API requests). Mounted file is
+    #                                      the production form (key never transits env).
+    # Resolve via the bse_webhook_public_key / bse_private_key computed properties.
+    BSE_WEBHOOK_PUBLIC_KEY: str = ""
+    BSE_WEBHOOK_PUBLIC_KEY_FILE: str = ""
+    BSE_PRIVATE_KEY: str = ""
+    BSE_PRIVATE_KEY_FILE: str = ""
+    # uat | production — selects which BSE base URL the outbound client targets.
+    BSE_ENV: str = "uat"
+    BSE_API_BASE_URL_UAT: str = "https://starmfv2demo.bseindia.com/api/"
+    BSE_API_BASE_URL_PROD: str = "https://v2.bsestarmf.in/api/"
+    # Our BSE member code + the X-API-Org-ID header value BSE assigns at onboarding
+    # (member/<org-code>:<fingerprint>). Empty until BSE provisions us.
+    BSE_MEMBER_CODE: str = ""
+    BSE_API_ORG_ID: str = ""
+    BSE_LOGIN_USERNAME: str = ""
+    BSE_LOGIN_PASSWORD: str = ""
+    # Optional comma-separated allowlist of BSE webhook SOURCE IPs (defence in depth
+    # on top of the JOSE signature). EMPTY ⇒ IP check skipped (signature is the gate).
+    BSE_WEBHOOK_SOURCE_IPS: str = ""
+
+    # ------------------------------------------------------------------
     # Google SSO (OAuth 2.0 authorization-code + PKCE)
     # All three must be set for SSO to be active; any absent → 503.
     # ------------------------------------------------------------------
@@ -278,6 +309,39 @@ class Settings(BaseSettings):
     @property
     def jwt_public_key(self) -> str:
         return self._resolve_pem(self.JWT_PUBLIC_KEY_FILE, self.JWT_PUBLIC_KEY)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def bse_webhook_public_key(self) -> str:
+        """BSE's public key (PEM) used to VERIFY the JWS on inbound webhooks.
+        Empty ⇒ webhook verification fails closed (receiver returns 503)."""
+        return self._resolve_pem(self.BSE_WEBHOOK_PUBLIC_KEY_FILE, self.BSE_WEBHOOK_PUBLIC_KEY)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def bse_private_key(self) -> str:
+        """OUR private key (PEM) used to DECRYPT the JWE on inbound webhooks (and
+        to sign outbound API requests). Empty ⇒ fails closed (receiver 503)."""
+        return self._resolve_pem(self.BSE_PRIVATE_KEY_FILE, self.BSE_PRIVATE_KEY)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def bse_api_base_url(self) -> str:
+        """Active BSE base URL, selected by BSE_ENV (uat | production)."""
+        return (
+            self.BSE_API_BASE_URL_PROD
+            if self.BSE_ENV.strip().lower() == "production"
+            else self.BSE_API_BASE_URL_UAT
+        )
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def bse_webhook_source_ips(self) -> frozenset[str]:
+        """Optional allowlist of BSE webhook source IPs (defence in depth). Empty
+        set ⇒ no IP gate (the JOSE signature is the real authentication)."""
+        return frozenset(
+            ip.strip() for ip in self.BSE_WEBHOOK_SOURCE_IPS.split(",") if ip.strip()
+        )
 
     @computed_field  # type: ignore[misc]
     @property
