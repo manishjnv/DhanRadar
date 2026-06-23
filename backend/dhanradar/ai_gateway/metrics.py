@@ -48,6 +48,13 @@ _SPEND_CALLS_KEY = "ai:spend:calls:{model}:{day}"
 _SPEND_USD_KEY = "ai:spend:usd:{model}:{day}"
 _SPEND_MODELS_KEY = "ai:spend:models:{day}"
 
+# Advice-boundary breaches (PR-3): per-UTC-day count of LLM responses REJECTED by
+# the quality validator's SEBI advisory screen (a banned verb reached output).
+# This is a compliance-observability counter for non-neg #1 — it does NOT mean
+# advisory text reached a user (rejected output is never served), it means the
+# model TRIED and the gate held.
+_ADVISORY_BREACH_KEY = "ai:advisory_breach:{day}"
+
 
 def _day(dt: datetime.datetime) -> str:
     return dt.strftime("%Y%m%d")
@@ -213,3 +220,45 @@ async def read_spend_window(days: int = 7, *, redis: Any = None) -> dict:
     except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
         logger.debug("ai model-spend read failed", exc_info=True)
         return absent
+
+
+async def record_advisory_breach(*, redis: Any = None) -> None:
+    """Increment today's advice-boundary breach counter. Never raises.
+
+    Called when the quality validator rejects an LLM response for advisory
+    language (the SEBI educational boundary held). Non-fatal: a Redis failure
+    must not break the gateway's reject/spillover/skip path.
+    """
+    try:
+        r: Any = redis or get_redis()
+        day = _day(datetime.datetime.now(datetime.UTC))
+        key = _ADVISORY_BREACH_KEY.format(day=day)
+        await r.incr(key)
+        await r.expire(key, _RETENTION_SECONDS)
+    except Exception:  # noqa: BLE001 — observational metric must never break the gateway
+        logger.debug("ai advisory-breach record failed", exc_info=True)
+
+
+async def read_advisory_breaches(days: int = 7, *, redis: Any = None) -> dict:
+    """Sum the advice-boundary breach counter over the last ``days`` UTC days.
+
+    Returns {"instrumented", "value", "window_days"}. ``instrumented`` is True
+    whenever the Redis read succeeds (even at 0) — unlike latency/spend, a 0 here
+    is a MEANINGFUL clean reading (the boundary held with no breaches), so the
+    surface must not present it as "not measured". Degrades to instrumented=False
+    only on a Redis failure.
+    """
+    days = max(1, min(days, _RETENTION_DAYS))
+    try:
+        r: Any = redis or get_redis()
+        now = datetime.datetime.now(datetime.UTC)
+        total = 0
+        for i in range(days):
+            day = _day(now - datetime.timedelta(days=i))
+            raw = await r.get(_ADVISORY_BREACH_KEY.format(day=day))
+            if raw:
+                total += int(raw)
+        return {"instrumented": True, "value": total, "window_days": days}
+    except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
+        logger.debug("ai advisory-breach read failed", exc_info=True)
+        return {"instrumented": False, "value": 0, "window_days": days}

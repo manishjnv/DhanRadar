@@ -24,7 +24,7 @@ exhaustive coverage.
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from pydantic import ValidationError
 
@@ -111,6 +111,7 @@ class QualityValidator:
             raise QualityValidationError(
                 "advisory language in AI output (SEBI educational boundary)",
                 reasons=sorted(set(hits)),
+                advisory_breach=True,
             )
 
         return model

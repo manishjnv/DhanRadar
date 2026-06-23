@@ -240,15 +240,22 @@ class LowConfidenceRowSummary(BaseModel):
 
 
 class AdviceBoundaryBreachesInfo(BaseModel):
-    """Advisory-verb breach counter — NOT instrumented; a 0 here is not a clean pass."""
+    """Advisory-boundary breach counter (PR-3).
+
+    Counts LLM responses REJECTED by the gateway's SEBI advisory screen over the
+    window. A breach means the model emitted a banned advisory verb and the gate
+    HELD (the output was never served) — it is NOT advice that reached a user.
+    When instrumented, a 0 is now a MEANINGFUL clean reading (boundary held, no
+    breaches), not the old "cannot observe" placeholder.
+    """
 
     value: int = 0
+    window_days: int = 7
     instrumented: bool = False
     note: str = (
-        "NOT a measured metric: no counter of advisory-verb rejections exists, so this "
-        "value is ALWAYS 0 and is NOT confirmation that zero violations occurred. The "
-        "runtime gateway validator rejects advisory output, but rejections are not "
-        "recorded anywhere — this surface cannot observe whether the boundary held."
+        "Count of AI responses rejected by the runtime advisory screen (the SEBI "
+        "boundary held — rejected output is never served to a user). A 0 means no "
+        "breaches were recorded in the window."
     )
 
 

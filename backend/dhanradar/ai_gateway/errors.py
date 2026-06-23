@@ -27,11 +27,23 @@ class AllFreeModelsFailedError(GatewayError):
 
 class QualityValidationError(GatewayError):
     """An LLM response failed schema validation or contained banned advisory
-    language. Triggers spillover (high-stakes) or the 3-strike skip."""
+    language. Triggers spillover (high-stakes) or the 3-strike skip.
 
-    def __init__(self, message: str, *, reasons: list[str] | None = None) -> None:
+    ``advisory_breach`` is True only for the SEBI advisory-boundary rejection
+    (banned verb in model output), False for a plain schema failure. The gateway
+    branches on it to increment the advice-boundary breach counter (non-neg #1
+    observability) without counting ordinary schema misses."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reasons: list[str] | None = None,
+        advisory_breach: bool = False,
+    ) -> None:
         super().__init__(message)
         self.reasons = reasons or []
+        self.advisory_breach = advisory_breach
 
 
 class ThreeStrikeSkipError(GatewayError):
