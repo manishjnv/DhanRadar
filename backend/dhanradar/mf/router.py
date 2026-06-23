@@ -66,6 +66,7 @@ from dhanradar.mf.schemas import (
     PortfolioSummary,
     SnapshotHistoryItem,
 )
+from dhanradar.models.auth import UserActivityLog
 from dhanradar.models.mf import MfCasJob, MfPortfolio
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
@@ -330,6 +331,17 @@ async def upload_cas(
 
     request_id: str | None = getattr(request.state, "request_id", None)
     parse_cas_job.delay(job_id, path, user.user_id, resolved_portfolio_id, request_id=request_id)
+
+    # Best-effort: record the upload in auth.user_activity_log so it shows in the
+    # admin activity feed. The job is already committed above — this must NEVER fail
+    # the upload (mirrors auth.record_login's non-fatal pattern).
+    try:
+        db.add(UserActivityLog(user_id=uid, event_type="cas_upload", request_id=request_id))
+        await db.commit()
+    except Exception:  # noqa: BLE001 — observational; must never break the upload
+        logger.warning("mf: failed to record cas_upload activity — continuing")
+        await db.rollback()
+
     return CasUploadResponse(job_id=job_id, estimated_seconds=60)
 
 
