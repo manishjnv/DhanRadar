@@ -2,6 +2,26 @@ tunnel: <DHANRADAR-TUNNEL-ID>
 credentials-file: /etc/cloudflared/dhanradar.json
 no-autoupdate: true
 ingress:
+  # ── api.dhanradar.com — isolated partner/integration webhook subdomain ──
+  # Exposes ONLY explicitly-allowlisted integration paths to the backend; every
+  # other path on this host is 404. This keeps third-party webhook surfaces off
+  # the public site and lets edge WAF / source-IP allowlists be scoped to this
+  # hostname alone. Add one rule per integration here (e.g. MF Utility:
+  #   - hostname: api.dhanradar.com
+  #     path: ^/api/v1/mfu/.*
+  #     service: http://dhanradar-fastapi:8000
+  # ) and mirror a matching 404 block on dhanradar.com below.
+  - hostname: api.dhanradar.com
+    path: ^/api/v1/bse/.*
+    service: http://dhanradar-fastapi:8000
+  - hostname: api.dhanradar.com
+    service: http_status:404
+  # ── dhanradar.com — public site + customer API ──
+  # Integration webhook paths live ONLY on api.dhanradar.com; 404 them on the
+  # public host so the webhook is reachable on exactly one surface.
+  - hostname: dhanradar.com
+    path: ^/api/v1/bse/.*
+    service: http_status:404
   - hostname: dhanradar.com
     path: ^/api/.*
     service: http://dhanradar-fastapi:8000
