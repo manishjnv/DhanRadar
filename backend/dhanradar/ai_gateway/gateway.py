@@ -38,7 +38,7 @@ from dhanradar.ai_gateway.errors import (
     QualityValidationError,
     ThreeStrikeSkipError,
 )
-from dhanradar.ai_gateway.metrics import record_latency
+from dhanradar.ai_gateway.metrics import record_latency, record_model_spend
 from dhanradar.ai_gateway.quality import QualityValidator
 from dhanradar.ai_gateway.schemas import AIOutputBase
 from dhanradar.budget import budget_guard
@@ -286,6 +286,10 @@ class OpenRouterGateway:
         # here, so only genuine model responses are timed. record_latency NEVER
         # raises — an observational metric must not break an AI call.
         await record_latency((time.monotonic() - started) * 1000.0, redis=self._redis)
+        # Record one billed call against this model (non-fatal). USD is recorded
+        # separately at the paid/sonnet sites (calls=0 there) so the per-model
+        # call tally is counted exactly once, here, for every served response.
+        await record_model_spend(model, calls=1, redis=self._redis)
         # Empty choices (e.g. content-filtered) → treat as a malformed response,
         # not an unhandled IndexError that would bypass the gateway taxonomy.
         if not getattr(resp, "choices", None):
@@ -313,6 +317,8 @@ class OpenRouterGateway:
                     ) from exc
                 raise
             meter.cost_usd = (res.total_tokens / 1_000_000) * _SONNET_USD_PER_1M_TOKENS
+        # Per-model USD for the sonnet spend (call already tallied in _call).
+        await record_model_spend(res.model, usd=meter.cost_usd, redis=self._redis)
         output = validator.validate(res.data)  # raises QualityValidationError if Sonnet also fails
         # Audit the model that actually served (res.model == self._sonnet_model here,
         # but use the threaded field so provenance stays symmetric with the free pool).
@@ -344,7 +350,10 @@ class OpenRouterGateway:
                     continue  # other upstream error → try next model
                 except json.JSONDecodeError:
                     continue  # billed but unusable → try next model
-                meter.cost_usd += (res.total_tokens / 1_000_000) * self._paid_fallback_usd_per_1m
+                call_usd = (res.total_tokens / 1_000_000) * self._paid_fallback_usd_per_1m
+                meter.cost_usd += call_usd
+                # Per-model USD for this paid response (call already tallied in _call).
+                await record_model_spend(res.model, usd=call_usd, redis=self._redis)
                 try:
                     output = validator.validate(res.data)
                 except QualityValidationError:

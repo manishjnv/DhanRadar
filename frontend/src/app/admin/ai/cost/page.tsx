@@ -311,7 +311,49 @@ export default function AdminAICostPage() {
                       <p className="font-medium text-ink">Cost by AI Model</p>
                       <HealthBadge status={q.data.per_model.instrumented ? 'Healthy' : 'Planned'} />
                     </div>
-                    <p>{q.data.per_model.note ?? 'Cost attribution per AI model is not yet available.'}</p>
+                    {q.data.per_model.instrumented && q.data.per_model.models.length > 0 ? (
+                      <div>
+                        <p className="mb-2">
+                          Calls and paid spend per AI model over the last{' '}
+                          {q.data.per_model.window_days} days.
+                        </p>
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="text-ink-muted">
+                              <th className="text-left font-medium pb-1">Model</th>
+                              <th className="text-right font-medium pb-1">Calls</th>
+                              <th className="text-right font-medium pb-1">Spend (USD)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="font-mono">
+                            {q.data.per_model.models.map((m) => (
+                              <tr key={m.model} className="border-t border-line">
+                                <td className="py-1 pr-2 break-all text-ink">{m.model}</td>
+                                <td className="py-1 text-right tabular-nums">
+                                  {m.calls.toLocaleString('en-IN')}
+                                </td>
+                                <td className="py-1 text-right tabular-nums">
+                                  {m.usd > 0 ? `$${m.usd.toFixed(4)}` : 'free'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t border-line font-mono text-ink">
+                              <td className="py-1 pr-2 font-sans font-medium">Total</td>
+                              <td className="py-1 text-right tabular-nums">
+                                {q.data.per_model.total_calls.toLocaleString('en-IN')}
+                              </td>
+                              <td className="py-1 text-right tabular-nums">
+                                ${q.data.per_model.total_usd.toFixed(4)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    ) : (
+                      <p>{q.data.per_model.note ?? 'Cost attribution per AI model is not yet available.'}</p>
+                    )}
                   </div>
                   <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                     <div className="flex items-center gap-2 mb-2">

@@ -38,6 +38,33 @@ class InstrumentedFalse(BaseModel):
     note: str = ""
 
 
+class ModelSpendRow(BaseModel):
+    """One model's spend over the window: billed call count + accumulated USD.
+
+    Free-pool models show ``calls`` with ``usd=0`` (free tier); paid/premium
+    models also carry ``usd``.
+    """
+
+    model: str
+    calls: int
+    usd: float
+
+
+class PerModelSpend(BaseModel):
+    """Per-model AI spend breakdown (Redis daily counters; PR-2).
+
+    ``instrumented`` is the discriminator the frontend reads: True once the
+    gateway has recorded at least one billed call in the window.
+    """
+
+    instrumented: bool = False
+    window_days: int = 7
+    models: list[ModelSpendRow] = []
+    total_calls: int = 0
+    total_usd: float = 0.0
+    note: str = ""
+
+
 class LatencyInfo(BaseModel):
     """Average LLM response latency over a rolling window (Redis daily counters).
 
@@ -263,8 +290,8 @@ class AiCostResponse(BaseModel):
     """GET /admin/ai/cost — AI budget governor spend + caps."""
 
     budget: BudgetSnapshot
-    per_model: InstrumentedFalse = InstrumentedFalse(
-        note="per-model spend breakdown not tracked; Redis keys aggregate free/premium only"
+    per_model: PerModelSpend = PerModelSpend(
+        note="no per-model spend recorded yet"
     )
     latency: LatencyInfo = LatencyInfo(
         note="no latency samples recorded yet"

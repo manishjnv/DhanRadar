@@ -742,6 +742,23 @@ export interface AdminAILatency {
   note?: string;
 }
 
+/** Mirrors ModelSpendRow in aiops_schemas.py */
+export interface AdminAIModelSpendRow {
+  model: string;
+  calls: number;
+  usd: number;
+}
+
+/** Mirrors PerModelSpend in aiops_schemas.py — per-model AI spend breakdown. */
+export interface AdminAIPerModel {
+  instrumented: boolean;
+  window_days: number;
+  models: AdminAIModelSpendRow[];
+  total_calls: number;
+  total_usd: number;
+  note?: string;
+}
+
 /** Mirrors AiDashboardResponse in aiops_schemas.py */
 export interface AdminAIDashboard {
   model_version: string;
@@ -852,7 +869,7 @@ export interface AdminAIFeedback {
 /** Mirrors AiCostResponse in aiops_schemas.py (budget nested) */
 export interface AdminAICost {
   budget: AdminAIBudget;
-  per_model: AdminAIInstrumented;
+  per_model: AdminAIPerModel;
   latency: AdminAILatency;
 }
 
