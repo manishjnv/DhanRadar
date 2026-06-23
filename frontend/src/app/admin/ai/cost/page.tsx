@@ -34,6 +34,15 @@ import { useAdminAICost, useAdminSetBudgetCaps } from '@/features/admin/api';
 const GRID_COLS_2 = 'grid-cols-2';
 const GRID_COLS_4 = 'grid-cols-4';
 
+// Adaptive USD formatting: free-tier paid-fallback calls cost micro-cents
+// (e.g. $0.000032), which a flat 4-decimal format renders as a misleading
+// "$0.0000". Use 6 decimals below a cent so tiny real spend stays legible, and
+// 4 decimals at/above a cent so larger (Sonnet) spend reads cleanly.
+function formatUsd(usd: number): string {
+  if (usd <= 0) return '$0.0000';
+  return usd < 0.01 ? `$${usd.toFixed(6)}` : `$${usd.toFixed(4)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Skeletons
 // ---------------------------------------------------------------------------
@@ -333,7 +342,7 @@ export default function AdminAICostPage() {
                                   {m.calls.toLocaleString('en-IN')}
                                 </td>
                                 <td className="py-1 text-right tabular-nums">
-                                  {m.usd > 0 ? `$${m.usd.toFixed(4)}` : 'free'}
+                                  {m.usd > 0 ? formatUsd(m.usd) : 'free'}
                                 </td>
                               </tr>
                             ))}
@@ -345,7 +354,7 @@ export default function AdminAICostPage() {
                                 {q.data.per_model.total_calls.toLocaleString('en-IN')}
                               </td>
                               <td className="py-1 text-right tabular-nums">
-                                ${q.data.per_model.total_usd.toFixed(4)}
+                                {formatUsd(q.data.per_model.total_usd)}
                               </td>
                             </tr>
                           </tfoot>
