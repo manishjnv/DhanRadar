@@ -38,6 +38,16 @@ _RETENTION_SECONDS = _RETENTION_DAYS * 86_400
 # LLM round-trip.
 _MAX_SANE_LATENCY_MS = 600_000.0
 
+# Per-model spend (PR-2). Per-UTC-day keys, keyed by model id. ``calls`` is a
+# billed-response tally (free + paid); ``usd`` accumulates only for paid/premium
+# responses (free models stay at 0). A per-day SET enumerates the models seen
+# that day so the read side never needs KEYS/SCAN. Redis keys are binary-safe,
+# so model ids containing "/" and ":" (the usual "vendor/model:tier" shape) are
+# fine embedded in a key unescaped.
+_SPEND_CALLS_KEY = "ai:spend:calls:{model}:{day}"
+_SPEND_USD_KEY = "ai:spend:usd:{model}:{day}"
+_SPEND_MODELS_KEY = "ai:spend:models:{day}"
+
 
 def _day(dt: datetime.datetime) -> str:
     return dt.strftime("%Y%m%d")
@@ -108,4 +118,98 @@ async def read_latency_window(days: int = 7, *, redis: Any = None) -> dict:
         }
     except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
         logger.debug("ai latency read failed", exc_info=True)
+        return absent
+
+
+async def record_model_spend(
+    model: str, *, calls: int = 0, usd: float = 0.0, redis: Any = None
+) -> None:
+    """Add per-model spend to today's rolling counters. Never raises.
+
+    Called at the gateway's debit points: ``calls`` (=1) is recorded once per
+    served response in ``_call`` (free + paid + sonnet); ``usd`` is recorded
+    separately at the paid/sonnet sites where the charge is computed, with
+    ``calls=0`` so the call tally is never double-counted. TTL is set
+    UNCONDITIONALLY on every write (a partial failure must not orphan a key).
+    """
+    try:
+        if not model:
+            return
+        r: Any = redis or get_redis()
+        day = _day(datetime.datetime.now(datetime.UTC))
+        models_key = _SPEND_MODELS_KEY.format(day=day)
+        await r.sadd(models_key, model)
+        await r.expire(models_key, _RETENTION_SECONDS)
+        # `if calls`/`if usd` skip the no-op write for the other site's shape:
+        # _call passes calls=1 (usd default 0); the paid/sonnet sites pass usd>0
+        # (calls default 0). A free model never reaches the USD branch, so a 0.0
+        # USD is never recorded — by design, free models read back as usd=0.
+        if calls:
+            calls_key = _SPEND_CALLS_KEY.format(model=model, day=day)
+            await r.incrby(calls_key, int(calls))
+            await r.expire(calls_key, _RETENTION_SECONDS)
+        if usd:
+            usd_key = _SPEND_USD_KEY.format(model=model, day=day)
+            await r.incrbyfloat(usd_key, float(usd))
+            await r.expire(usd_key, _RETENTION_SECONDS)
+    except Exception:  # noqa: BLE001 — observational metric must never break an AI call
+        logger.debug("ai model-spend record failed", exc_info=True)
+
+
+async def read_spend_window(days: int = 7, *, redis: Any = None) -> dict:
+    """Aggregate per-model spend over the last ``days`` UTC days.
+
+    Returns a dict shaped for ``PerModelSpend`` (aiops_schemas):
+        {instrumented, window_days, models: [{model, calls, usd}], total_calls,
+         total_usd}
+    ``models`` is sorted by usd desc, then calls desc, then name. On a Redis
+    failure or when no spend has been recorded, returns ``instrumented=False``
+    rather than raising — the monitoring surface stays up (no 500).
+    """
+    days = max(1, min(days, _RETENTION_DAYS))
+    absent = {
+        "instrumented": False,
+        "window_days": days,
+        "models": [],
+        "total_calls": 0,
+        "total_usd": 0.0,
+    }
+    try:
+        r: Any = redis or get_redis()
+        now = datetime.datetime.now(datetime.UTC)
+        model_names: set[str] = set()
+        for i in range(days):
+            day = _day(now - datetime.timedelta(days=i))
+            members = await r.smembers(_SPEND_MODELS_KEY.format(day=day))
+            if members:
+                model_names.update(members)
+        if not model_names:
+            return absent
+        rows: list[dict] = []
+        total_calls = 0
+        total_usd = 0.0
+        for model in model_names:
+            calls = 0
+            usd = 0.0
+            for i in range(days):
+                day = _day(now - datetime.timedelta(days=i))
+                raw_calls = await r.get(_SPEND_CALLS_KEY.format(model=model, day=day))
+                raw_usd = await r.get(_SPEND_USD_KEY.format(model=model, day=day))
+                if raw_calls:
+                    calls += int(raw_calls)
+                if raw_usd:
+                    usd += float(raw_usd)
+            total_calls += calls
+            total_usd += usd
+            rows.append({"model": model, "calls": calls, "usd": round(usd, 6)})
+        rows.sort(key=lambda x: (-x["usd"], -x["calls"], x["model"]))
+        return {
+            "instrumented": True,
+            "window_days": days,
+            "models": rows,
+            "total_calls": total_calls,
+            "total_usd": round(total_usd, 6),
+        }
+    except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
+        logger.debug("ai model-spend read failed", exc_info=True)
         return absent

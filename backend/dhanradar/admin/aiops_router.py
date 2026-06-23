@@ -40,7 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.ai_gateway.metrics import read_latency_window
+from dhanradar.ai_gateway.metrics import read_latency_window, read_spend_window
 from dhanradar.budget import (
     _CAP_OVERRIDE_KEYS,
     _REDIS_KEYS,
@@ -75,6 +75,7 @@ from .aiops_schemas import (
     LabelChurnSummary,
     LatencyInfo,
     LowConfidenceRowSummary,
+    PerModelSpend,
     PromptTemplateCreateRequest,
     PromptTemplateRow,
     QualityIssueRow,
@@ -370,13 +371,14 @@ async def get_ai_cost(
     """Return the AI budget governor spend snapshot.
 
     Budget counters are read from Redis (``ai:budget:free:today`` /
-    ``ai:budget:premium:today``).  Per-model spend breakdown is still not tracked
-    (instrumented:false).  Latency is now sourced from the gateway's rolling Redis
-    latency counters (instrumented once samples exist).
+    ``ai:budget:premium:today``).  Per-model spend and latency are now sourced
+    from the gateway's rolling Redis counters (instrumented once the gateway has
+    recorded billed calls).
     """
     budget = await _read_budget_snapshot()
     latency = LatencyInfo(**await read_latency_window(7))
-    return AiCostResponse(budget=budget, latency=latency)
+    per_model = PerModelSpend(**await read_spend_window(7))
+    return AiCostResponse(budget=budget, latency=latency, per_model=per_model)
 
 
 # ---------------------------------------------------------------------------
