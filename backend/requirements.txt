@@ -38,4 +38,6 @@ yfinance>=0.2.40
 kiteconnect>=4.1.0
 # --- ADR-0033(a): SEBI disclosure SPA URL discovery (celery-batch only) ---
 playwright>=1.44.0
+# --- BSE Star MF 2.0 webhook: JOSE (JWS verify + JWE decrypt) ---
+joserfc>=1.0.0
 

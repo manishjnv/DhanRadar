@@ -23,6 +23,7 @@ from dhanradar.admin.scoring_router import router as admin_scoring_router
 from dhanradar.admin.users_router import router as admin_users_router
 from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
+from dhanradar.bse.router import router as bse_router
 from dhanradar.changes.router import router as changes_router
 from dhanradar.compliance.router import router as compliance_router
 from dhanradar.concepts.router import router as concepts_router
@@ -126,6 +127,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(subscriptions_router, prefix="/api/v1")  # legacy /subscriptions/webhook alias
 app.include_router(billing_router, prefix="/api/v1")
+app.include_router(bse_router, prefix="/api/v1")  # BSE Star MF 2.0 webhook receiver (JOSE-verified, LOAD-BEARING)
 app.include_router(mf_router, prefix="/api/v1")  # Phase 5 — MF CAS→report (consent-gated)
 app.include_router(notifications_router, prefix="/api/v1")  # Phase 6 — Notification prefs + test
 app.include_router(compliance_router, prefix="/api/v1")  # §4 — public disclaimer read

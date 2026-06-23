@@ -50,6 +50,7 @@ import dhanradar.models.education  # noqa: E402, F401  — registers education.*
 import dhanradar.models.news  # noqa: E402, F401  — registers news.* tables (B56)
 import dhanradar.models.ai_admin  # noqa: E402, F401  — registers compliance.prompt_templates + ai_budget_caps (Phase 5)
 import dhanradar.signal.models  # noqa: E402, F401  — registers signal.* tables
+import dhanradar.models.bse  # noqa: E402, F401  — registers bse.* tables (Star MF webhook inbox)
 
 target_metadata = Base.metadata
 

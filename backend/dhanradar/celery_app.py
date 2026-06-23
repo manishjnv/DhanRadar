@@ -50,6 +50,8 @@ celery_app = Celery(
         "dhanradar.tasks.mf_fund_manager",
         "dhanradar.tasks.sebi_circulars",
         "dhanradar.tasks.macro_data",
+        # BSE Star MF 2.0 webhook async processing (misc queue).
+        "dhanradar.tasks.bse",
     ],
 )
 
@@ -124,6 +126,8 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.news.*": {"queue": "batch"},
     # Signal daily alerts run in the batch queue (low-volume, once-daily).
     "dhanradar.tasks.signal_alerts.*": {"queue": "batch"},
+    # BSE webhook processing — misc queue (NOT mood; mood worker is mem-capped).
+    "dhanradar.tasks.bse.*": {"queue": "misc"},
 }
 
 # ---------------------------------------------------------------------------
