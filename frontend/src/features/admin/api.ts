@@ -733,6 +733,16 @@ export interface AdminAIInstrumented {
   note?: string;
 }
 
+/** Mirrors GroundednessInfo in aiops_schemas.py — sampled LLM-judge groundedness. */
+export interface AdminAIGroundedness {
+  instrumented: boolean;
+  value: number | null;
+  sample_count: number;
+  low_flags: number;
+  window_days: number;
+  note?: string;
+}
+
 /** Mirrors LatencyInfo in aiops_schemas.py — rolling avg LLM response latency. */
 export interface AdminAILatency {
   instrumented: boolean;
@@ -768,7 +778,7 @@ export interface AdminAIDashboard {
   low_confidence_7d: number;
   label_churn: AdminAILabelChurn;
   avg_latency_ms: AdminAILatency;
-  eval_score: AdminAIInstrumented;
+  eval_score: AdminAIGroundedness;
 }
 
 /** Mirrors EngineVersionRow in aiops_schemas.py */
@@ -810,7 +820,7 @@ export interface AdminAIQualityIssueRow {
 /** Mirrors AiEvalResponse in aiops_schemas.py */
 export interface AdminAIEval {
   quality_issues: AdminAIQualityIssueRow[];
-  groundedness: AdminAIInstrumented;
+  groundedness: AdminAIGroundedness;
 }
 
 /** Mirrors AuditRowSummary in aiops_schemas.py */
@@ -858,7 +868,7 @@ export interface AdminAISafety {
   label_churn_educational: AdminAILabelChurn;
   label_churn_mood: AdminAILabelChurn;
   advice_boundary_breaches: AdminAIBreachInfo;
-  groundedness: AdminAIInstrumented;
+  groundedness: AdminAIGroundedness;
 }
 
 /** Mirrors AiFeedbackResponse in aiops_schemas.py */

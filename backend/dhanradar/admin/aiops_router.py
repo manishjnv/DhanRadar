@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.ai_gateway.metrics import (
     read_advisory_breaches,
+    read_groundedness_window,
     read_latency_window,
     read_spend_window,
 )
@@ -77,6 +78,7 @@ from .aiops_schemas import (
     BudgetCapsSetRequest,
     BudgetSnapshot,
     EngineVersionRow,
+    GroundednessInfo,
     LabelChurnSummary,
     LatencyInfo,
     LowConfidenceRowSummary,
@@ -186,6 +188,7 @@ async def get_ai_dashboard(
     # Rolling avg LLM response latency from the gateway's Redis counters. Read is
     # non-fatal: a Redis failure returns instrumented=False, never 500s the page.
     latency = LatencyInfo(**await read_latency_window(7))
+    eval_score = GroundednessInfo(**await read_groundedness_window(7))
 
     return AiDashboardResponse(
         model_version=cfg.model_version,
@@ -195,6 +198,7 @@ async def get_ai_dashboard(
         low_confidence_7d=low_confidence_7d,
         label_churn=churn,
         avg_latency_ms=latency,
+        eval_score=eval_score,
     )
 
 
@@ -254,8 +258,8 @@ async def get_ai_eval(
     """Return data quality issues + groundedness eval status.
 
     Data quality issues are sourced from ``mf.data_quality_issues`` (the same
-    table read by GET /admin/quality).  Groundedness eval is not yet instrumented
-    and is returned as instrumented:false.
+    table read by GET /admin/quality).  Groundedness is the sampled LLM-judge
+    score from the gateway's Redis counters (instrumented once samples exist).
     """
     from dhanradar.models.mf import MfDataQualityIssue
 
@@ -304,7 +308,8 @@ async def get_ai_eval(
             )
         )
 
-    return AiEvalResponse(quality_issues=quality_issues)
+    groundedness = GroundednessInfo(**await read_groundedness_window(7))
+    return AiEvalResponse(quality_issues=quality_issues, groundedness=groundedness)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +355,8 @@ async def get_ai_safety(
         ),
     )
 
+    groundedness = GroundednessInfo(**await read_groundedness_window(summary["days"]))
+
     return AiSafetyResponse(
         days=summary["days"],
         served_by_type=summary["served_by_type"],
@@ -360,6 +367,7 @@ async def get_ai_safety(
         label_churn_educational=_churn_to_summary(churn_educational_raw),
         label_churn_mood=_churn_to_summary(churn_mood_raw),
         advice_boundary_breaches=advice_boundary_breaches,
+        groundedness=groundedness,
     )
 
 
