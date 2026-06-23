@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     AI_GROUNDEDNESS_SAMPLE_RATE: float = 0.0
     # A sample scoring below this is counted as a low-groundedness flag (health surface).
     AI_GROUNDEDNESS_LOW_THRESHOLD: float = 0.6
+    # Cheap paid model for the groundedness judge when the free pool is 429-throttled (PR-4b).
+    # Empty = disabled (judge returns None when free pool is exhausted).
+    # Example: "deepseek/deepseek-chat-v3-0324" ($0.28/M out, reliable paid tier).
+    AI_GROUNDEDNESS_JUDGE_PAID_MODEL: str = ""
 
     # ------------------------------------------------------------------
     # Observability

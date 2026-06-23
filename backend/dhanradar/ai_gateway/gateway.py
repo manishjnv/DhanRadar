@@ -43,6 +43,7 @@ from dhanradar.ai_gateway.errors import (
 from dhanradar.ai_gateway.metrics import (
     record_advisory_breach,
     record_groundedness,
+    record_judge_spend,
     record_latency,
     record_model_spend,
 )
@@ -101,6 +102,7 @@ class OpenRouterGateway:
         redis: Any = None,
         groundedness_sample_rate: float | None = None,
         groundedness_low_threshold: float | None = None,
+        grounded_judge_paid_model: str | None = None,
     ) -> None:
         self._client = client  # injected (tests) or lazily built
         self._free_models = (
@@ -134,6 +136,15 @@ class OpenRouterGateway:
             groundedness_low_threshold
             if groundedness_low_threshold is not None
             else settings.AI_GROUNDEDNESS_LOW_THRESHOLD
+        )
+        # Paid fallback for the groundedness judge (PR-4b): when the free pool is
+        # entirely 429-throttled this model is tried via the uninstrumented
+        # _judge_call path (no budget_guard, no latency/spend metrics). Its spend
+        # is recorded in a separate ai:judge:spend:* namespace.
+        self._grounded_judge_paid_model = (
+            grounded_judge_paid_model
+            if grounded_judge_paid_model is not None
+            else settings.AI_GROUNDEDNESS_JUDGE_PAID_MODEL
         )
 
     # ------------------------------------------------------------------
@@ -444,12 +455,15 @@ class OpenRouterGateway:
     async def _run_groundedness_judge(
         self, messages: list[dict[str, str]], output: AIOutputBase
     ) -> float | None:
-        """Ask a free-pool model to score (0..1) how well ``output`` is supported by
-        the context in ``messages``. Returns the score or None if no judge produced a
-        parseable answer. Never raises (caller also guards)."""
-        models = self._free_models
-        if not models:
-            return None
+        """Ask a free-pool model (or cheap paid fallback) to score (0..1) how well
+        ``output`` is supported by the context in ``messages``. Returns the score or
+        None if no judge produced a parseable answer. Never raises (caller also guards).
+
+        PR-4b: when the free pool is entirely 429-throttled, falls back to
+        ``self._grounded_judge_paid_model`` (if configured) via the same uninstrumented
+        ``_judge_call`` path. Spend is recorded in the separate ai:judge:spend:* namespace
+        so it never appears in serve-path per-model-spend metrics.
+        """
         context = "\n".join(m.get("content", "") for m in messages)
         # Exclude the forced disclaimer; judge only the substantive output text.
         served = output.model_dump()
@@ -469,7 +483,8 @@ class OpenRouterGateway:
                 "content": f"CONTEXT:\n{context}\n\nOUTPUT:\n{json.dumps(served, default=str)}",
             },
         ]
-        for model in models:
+        # Try free pool first.
+        for model in self._free_models:
             try:
                 data = await self._judge_call(model, judge_messages)
             except (RateLimitError, APIStatusError, json.JSONDecodeError):
@@ -477,6 +492,18 @@ class OpenRouterGateway:
             raw = data.get("grounded")
             if isinstance(raw, (int, float)):
                 return float(raw)
+        # Free pool exhausted (all 429 / bad JSON) — try cheap paid fallback if configured.
+        if self._grounded_judge_paid_model:
+            try:
+                data = await self._judge_call(self._grounded_judge_paid_model, judge_messages)
+                # Record the call unconditionally — the model billed even if the
+                # response didn't parse to a valid score.
+                await record_judge_spend(self._grounded_judge_paid_model, redis=self._redis)
+                raw = data.get("grounded")
+                if isinstance(raw, (int, float)):
+                    return float(raw)
+            except (RateLimitError, APIStatusError, json.JSONDecodeError):
+                pass  # paid judge also failed → fall through to None
         return None
 
     async def _judge_call(self, model: str, messages: list[dict[str, str]]) -> dict:
