@@ -14,11 +14,13 @@ owns admin reads on that table). Subscription data delegated to
 billing.service. Payment events delegated to audit.service. No cross-module
 JOIN/INSERT.
 
-ABSENT signals (stubbed — no migration required):
+ABSENT signals (stubbed):
   - display_name: ABSENT from auth.users → email.split('@')[0]
-  - last_login_at: ABSENT → always None (TODO: no user_activity_log table)
-  - login_history: always [] (no user_activity_log table)
-  - cas_uploads: always [] (no CAS upload query wired yet)
+  - login_history: always [] (deferred — no user_activity_log table)
+
+Wired by migration 0044:
+  - last_login_at: read from auth.users.last_login_at
+  - cas_uploads: live query on mf.mf_cas_jobs for the target user
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from dhanradar.billing.service import get_user_subscription
 from dhanradar.db import get_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.auth import User, UserTierEnum
+from dhanradar.models.mf import MfCasJob
 from dhanradar.redis_client import get_redis
 
 from .users_schemas import (
@@ -190,8 +193,7 @@ async def list_users(
             display_name=_derive_display_name(u.email),
             tier=u.tier.value,
             status=_derive_status(u),
-            # TODO: last_login_at ABSENT — no user_activity_log table
-            last_login_at=None,
+            last_login_at=u.last_login_at,
             created_at=u.created_at,
         )
         for u in users
@@ -236,6 +238,26 @@ async def get_user_detail(
     # Delegate to audit service (module isolation)
     payments = await list_payment_events(db, user_id=user_id, limit=50)
 
+    # Most recent 20 CAS upload jobs for this user (mf.mf_cas_jobs).
+    cas_result = await db.execute(
+        select(MfCasJob)
+        .where(MfCasJob.user_id == uid)
+        .order_by(MfCasJob.created_at.desc())
+        .limit(20)
+    )
+    cas_jobs = cas_result.scalars().all()
+    cas_uploads = [
+        {
+            "job_id": str(j.job_id),
+            "status": j.status,
+            "created_at": j.created_at.isoformat() if j.created_at is not None else None,
+            "completed_at": j.completed_at.isoformat() if j.completed_at is not None else None,
+            "error_message": j.error_message,
+            "portfolio_id": str(j.portfolio_id) if j.portfolio_id is not None else None,
+        }
+        for j in cas_jobs
+    ]
+
     return UserDetailResponse(
         id=str(user.id),
         email=user.email,
@@ -250,10 +272,9 @@ async def get_user_detail(
         suspended_at=user.suspended_at.isoformat() if user.suspended_at is not None else None,
         subscription=subscription,
         payments=payments,
-        # TODO: no user_activity_log table — login_history always []
+        # TODO: login_history deferred — needs a dedicated auth events table
         login_history=[],
-        # TODO: no CAS upload query wired yet — cas_uploads always []
-        cas_uploads=[],
+        cas_uploads=cas_uploads,
     )
 
 

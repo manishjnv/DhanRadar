@@ -138,6 +138,7 @@ export function useAdminSources() {
     queryKey: adminKeys.sources(),
     queryFn: () => api.get<AdminSource[]>('/admin/sources'),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -146,6 +147,7 @@ export function useAdminTasks() {
     queryKey: adminKeys.tasks(),
     queryFn: () => api.get<AdminTask[]>('/admin/tasks'),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -160,6 +162,7 @@ export function useAdminRuns(params?: { source?: string; status?: string; limit?
     queryKey: adminKeys.runs(params),
     queryFn: () => api.get<AdminRun[]>(path),
     staleTime: 15 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -177,6 +180,7 @@ export function useAdminQuality() {
     queryKey: adminKeys.quality(),
     queryFn: () => api.get<AdminQualityIssue[]>('/admin/quality'),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -412,6 +416,7 @@ export function useAdminUserSummary() {
     queryKey: adminKeysExt.userSummary(),
     queryFn: () => api.get<AdminUserSummary>('/admin/users/summary'),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -427,6 +432,7 @@ export function useAdminUsers(params?: { plan?: string; status?: string; search?
     queryKey: adminKeysExt.users(params),
     queryFn: () => api.get<AdminUsersListResponse>(path),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -436,6 +442,7 @@ export function useAdminUserDetail(userId: string) {
     queryFn: () => api.get<AdminUserDetail>(`/admin/users/${userId}`),
     enabled: !!userId,
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -448,6 +455,7 @@ export function useAdminBillingOverview() {
     queryKey: adminKeysExt.billingOverview(),
     queryFn: () => api.get<AdminBillingOverview>('/admin/billing/overview'),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -461,6 +469,7 @@ export function useAdminSubscriptions(params?: { status?: string; limit?: number
     queryKey: adminKeysExt.billingSubscriptions(params),
     queryFn: () => api.get<AdminSubscriptionRow[]>(path),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -473,6 +482,7 @@ export function useAdminBillingPayments(params?: { limit?: number; offset?: numb
     queryKey: adminKeysExt.billingPayments(params),
     queryFn: () => api.get<AdminPaymentRow[]>(path),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -481,6 +491,7 @@ export function useAdminBillingSubMetrics() {
     queryKey: adminKeysExt.billingSubMetrics(),
     queryFn: () => api.get<AdminBillingSubMetrics>('/admin/billing/subscription-metrics'),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -489,6 +500,7 @@ export function useAdminBillingWebhookHealth() {
     queryKey: adminKeysExt.billingWebhookHealth(),
     queryFn: () => api.get<AdminBillingWebhookHealth>('/admin/billing/webhook-health'),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -597,6 +609,7 @@ export function useAdminScoringModel() {
     queryKey: adminKeysP3.scoringModel(),
     queryFn:  () => api.get<AdminScoringModel>('/admin/scoring/model'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -605,6 +618,7 @@ export function useAdminFlags() {
     queryKey: adminKeysP3.flags(),
     queryFn:  () => api.get<AdminFlag[]>('/admin/flags'),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -613,6 +627,7 @@ export function useAdminCasFailures(limit = 50) {
     queryKey: adminKeysP3.supportCasFailures(),
     queryFn:  () => api.get<AdminCasFailure[]>(`/admin/support/cas-failures?limit=${limit}`),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
@@ -621,6 +636,7 @@ export function useAdminAnalyticsOverview() {
     queryKey: adminKeysP3.analyticsOverview(),
     queryFn:  () => api.get<AdminAnalyticsOverview>('/admin/analytics/overview'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -811,6 +827,7 @@ export function useAdminAIVersions() {
     queryKey: adminKeysAI.versions(),
     queryFn:  () => api.get<AdminAIVersions>('/admin/ai/versions'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -819,6 +836,7 @@ export function useAdminAIPrompts() {
     queryKey: adminKeysAI.prompts(),
     queryFn:  () => api.get<AdminAIPrompts>('/admin/ai/prompts'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -827,6 +845,7 @@ export function useAdminAIEval() {
     queryKey: adminKeysAI.eval(),
     queryFn:  () => api.get<AdminAIEval>('/admin/ai/eval'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -844,6 +863,7 @@ export function useAdminAIFeedback() {
     queryKey: adminKeysAI.feedback(),
     queryFn:  () => api.get<AdminAIFeedback>('/admin/ai/feedback'),
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 }
 
@@ -1057,5 +1077,6 @@ export function useAdminAudit(params?: {
     queryKey: adminKeysExt.audit(params),
     queryFn: () => api.get<AdminAuditRow[]>(path),
     staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }

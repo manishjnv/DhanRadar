@@ -605,6 +605,9 @@ async def google_callback(
     except Exception:
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
 
+    # --- Stamp last_login_at for the resolved/created SSO user (best-effort) ---
+    await auth_svc.record_login(user, db)
+
     # --- Issue session cookies (same path as login) ---
     # Re-validate `next` defensively before using it.
     safe_next = google_svc.validate_next(stored_next)

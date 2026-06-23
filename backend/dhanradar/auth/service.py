@@ -25,11 +25,13 @@ Security invariants:
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
 import pyotp
 from fastapi import HTTPException, status
+from sqlalchemy import func as sa_func
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -206,6 +208,7 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
             detail="account_suspended",
         )
 
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -214,6 +217,36 @@ def _raise_invalid_credentials() -> None:
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="invalid_credentials",
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+async def record_login(user: User, db: AsyncSession) -> None:
+    """Best-effort stamp of ``last_login_at`` (server NOW()) on a genuine login.
+
+    Called from every successful authenticate_* path (password, TOTP, email-OTP)
+    and the Google SSO path. Must NOT be called from the refresh-token path.
+
+    NEVER raises: ``last_login_at`` is an observational column, so a failure here
+    — a transient DB error, or migration lag where the column does not exist yet
+    during a rolling deploy — must never break the login. On error it logs and
+    rolls back, and the login proceeds. Commits its own UPDATE; it does not assume
+    an open caller transaction (the SSO path has already committed by this point).
+    """
+    try:
+        await db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(last_login_at=sa_func.now())
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001 — observational; must never break login
+        logger.warning("auth: failed to stamp last_login_at — login continues")
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -633,8 +666,9 @@ async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
             detail="account_suspended",
         )
 
-    # Success — clear failure counter.
+    # Success — clear failure counter, stamp last_login_at.
     await redis.delete(attempts_key)
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -785,8 +819,9 @@ async def authenticate_email_otp(email: str, code: str, db: AsyncSession) -> Use
             detail="account_suspended",
         )
 
-    # Success: single-use enforcement — delete code key + attempts key.
+    # Success: single-use enforcement — delete code key + attempts key, stamp last_login_at.
     await _otp.delete_code_and_attempts(uid)
+    await record_login(user, db)  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 

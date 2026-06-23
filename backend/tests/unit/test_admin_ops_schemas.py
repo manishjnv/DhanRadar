@@ -244,6 +244,90 @@ def test_mood_status_with_signals():
     assert m.upstox_put_call_ratio is True
 
 
+# ---------------------------------------------------------------------------
+# _STATUS_ORDER sort helper — pure unit, no DB/Redis
+# ---------------------------------------------------------------------------
+
+
+def _make_source_row(source_key: str, status: str):
+    """Build a minimal SourceRow for sort-order testing."""
+    from dhanradar.admin.ops_schemas import SourceRow
+
+    return SourceRow(
+        source_key=source_key,
+        name=source_key,
+        tier="Test",
+        description="",
+        method="api",
+        schedule_display="daily",
+        cost="free",
+        last_success_at=None,
+        last_records=None,
+        status=status,
+        paused=(status == "Paused"),
+    )
+
+
+def test_sort_sources_order():
+    """_STATUS_ORDER produces Healthy→Planned→Paused→Failed; stable within each group."""
+    from dhanradar.admin.ops_router import _STATUS_ORDER
+
+    # Build rows in a deliberately scrambled catalog order.
+    rows = [
+        _make_source_row("src_failed_1", "Failed"),
+        _make_source_row("src_healthy_1", "Healthy"),
+        _make_source_row("src_paused_1", "Paused"),
+        _make_source_row("src_planned_1", "Planned"),
+        _make_source_row("src_healthy_2", "Healthy"),
+        _make_source_row("src_failed_2", "Failed"),
+        _make_source_row("src_planned_2", "Planned"),
+    ]
+
+    rows.sort(key=lambda r: _STATUS_ORDER.get(r.status, 99))
+
+    statuses = [r.status for r in rows]
+    # All Healthy entries first, then Planned, then Paused, then Failed.
+    assert statuses == [
+        "Healthy",
+        "Healthy",
+        "Planned",
+        "Planned",
+        "Paused",
+        "Failed",
+        "Failed",
+    ], f"Unexpected order: {statuses}"
+
+
+def test_sort_sources_stable_within_group():
+    """Catalog order is preserved within each status group (stable sort)."""
+    from dhanradar.admin.ops_router import _STATUS_ORDER
+
+    rows = [
+        _make_source_row("first_healthy", "Healthy"),
+        _make_source_row("second_healthy", "Healthy"),
+        _make_source_row("third_healthy", "Healthy"),
+    ]
+    rows.sort(key=lambda r: _STATUS_ORDER.get(r.status, 99))
+    assert [r.source_key for r in rows] == [
+        "first_healthy",
+        "second_healthy",
+        "third_healthy",
+    ]
+
+
+def test_sort_sources_unknown_status_sorts_last():
+    """An unknown status value is placed after Failed (priority 99)."""
+    from dhanradar.admin.ops_router import _STATUS_ORDER
+
+    rows = [
+        _make_source_row("unk", "Unknown"),
+        _make_source_row("fail", "Failed"),
+        _make_source_row("ok", "Healthy"),
+    ]
+    rows.sort(key=lambda r: _STATUS_ORDER.get(r.status, 99))
+    assert [r.source_key for r in rows] == ["ok", "fail", "unk"]
+
+
 def test_mood_status_partial_upstox():
     """When only some Upstox signals are present, booleans are independent."""
     from dhanradar.admin.ops_schemas import MoodStatus
