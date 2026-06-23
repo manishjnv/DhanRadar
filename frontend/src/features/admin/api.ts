@@ -589,6 +589,7 @@ export interface AdminCasFailure {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  support_notes: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +655,17 @@ export function useAdminCasFailures(limit = 50) {
     queryFn:  () => api.get<AdminCasFailure[]>(`/admin/support/cas-failures?limit=${limit}`),
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
+  });
+}
+
+export function useSetCasNotes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, notes }: { jobId: string; notes: string }) =>
+      api.post<{ ok: boolean }>(`/admin/support/cas-failures/${jobId}/notes`, { notes }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: adminKeysP3.supportCasFailures() });
+    },
   });
 }
 

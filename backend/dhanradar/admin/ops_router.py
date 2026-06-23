@@ -27,6 +27,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select, text
@@ -219,32 +220,152 @@ _SOURCE_TO_TASK: dict[str, str] = {
 # integration).
 # ---------------------------------------------------------------------------
 
-_BEAT_TASKS: list[dict[str, str]] = [
-    {"beat_key": "mf-nav-daily-fetch", "task_name": "dhanradar.tasks.mf.nav_daily_fetch", "schedule_display": "Daily 23:30 IST"},
-    {"beat_key": "mf-metrics-refresh", "task_name": "dhanradar.tasks.mf.mf_metrics_refresh", "schedule_display": "Daily 00:15 IST"},
-    {"beat_key": "mf-compute-market-ranks", "task_name": "dhanradar.tasks.mf.compute_market_ranks", "schedule_display": "Daily 01:00 IST"},
-    {"beat_key": "mf-daily-portfolio-refresh", "task_name": "dhanradar.tasks.mf.daily_portfolio_refresh", "schedule_display": "Daily 01:30 IST"},
-    {"beat_key": "mf-purge-cas-files", "task_name": "dhanradar.tasks.mf.purge_cas_files", "schedule_display": "Daily 02:00 IST"},
-    {"beat_key": "notify-drain", "task_name": "dhanradar.tasks.misc.drain_notifications", "schedule_display": "Every 1 min"},
-    {"beat_key": "compliance-archive-audit", "task_name": "dhanradar.tasks.compliance.archive_audit_daily", "schedule_display": "Daily 02:00 IST"},
-    {"beat_key": "compliance-reconcile-disclaimers", "task_name": "dhanradar.tasks.compliance.reconcile_audit_disclaimers", "schedule_display": "Daily 02:30 IST"},
-    {"beat_key": "mood-compute-snapshot", "task_name": "dhanradar.tasks.mood.compute_mood_snapshot", "schedule_display": "Daily 09:00 & 16:00 IST"},
-    {"beat_key": "mf-monthly-rescore", "task_name": "dhanradar.tasks.mf.monthly_rescore_plus_users", "schedule_display": "1st of month 03:00 IST"},
-    {"beat_key": "news-refresh-market", "task_name": "dhanradar.tasks.news.refresh_market_news", "schedule_display": "Every 30 min"},
-    {"beat_key": "mf-reap-stuck-cas", "task_name": "dhanradar.tasks.mf.reap_stuck_cas_jobs", "schedule_display": "Every 5 min"},
-    {"beat_key": "signal-daily-alert", "task_name": "dhanradar.tasks.signal_alerts.daily_signal_alert", "schedule_display": "09:15 IST Mon–Fri"},
-    {"beat_key": "market-data-refresh", "task_name": "dhanradar.tasks.signal_alerts.market_data_refresh", "schedule_display": "Every 15 min 09:00–16:00 IST Mon–Fri"},
-    {"beat_key": "auto-log-no-action", "task_name": "dhanradar.tasks.signal_alerts.auto_log_no_action", "schedule_display": "21:00 IST Mon–Fri"},
-    {"beat_key": "sip-reminder", "task_name": "dhanradar.tasks.signal_alerts.sip_reminder", "schedule_display": "Daily 09:00 IST"},
-    {"beat_key": "check-achievements", "task_name": "dhanradar.tasks.signal_alerts.check_achievements", "schedule_display": "Daily 22:00 IST"},
-    {"beat_key": "mf-constituents-fetch", "task_name": "dhanradar.tasks.mf.mf_constituents_fetch", "schedule_display": "Monthly 10th 04:00 IST"},
-    {"beat_key": "mf-kite-enrich", "task_name": "dhanradar.tasks.mf.mf_kite_enrich", "schedule_display": "Weekly Sat 03:00 IST"},
+_BEAT_TASKS: list[dict] = [
+    {
+        "beat_key": "mf-nav-daily-fetch",
+        "task_name": "dhanradar.tasks.mf.nav_daily_fetch",
+        "schedule_display": "Daily 23:30 IST",
+        "cron": {"hour": 23, "minute": 30},
+    },
+    {
+        "beat_key": "mf-metrics-refresh",
+        "task_name": "dhanradar.tasks.mf.mf_metrics_refresh",
+        "schedule_display": "Daily 00:15 IST",
+        "cron": {"hour": 0, "minute": 15},
+    },
+    {
+        "beat_key": "mf-compute-market-ranks",
+        "task_name": "dhanradar.tasks.mf.compute_market_ranks",
+        "schedule_display": "Daily 01:00 IST",
+        "cron": {"hour": 1, "minute": 0},
+    },
+    {
+        "beat_key": "mf-daily-portfolio-refresh",
+        "task_name": "dhanradar.tasks.mf.daily_portfolio_refresh",
+        "schedule_display": "Daily 01:30 IST",
+        "cron": {"hour": 1, "minute": 30},
+    },
+    {
+        "beat_key": "mf-purge-cas-files",
+        "task_name": "dhanradar.tasks.mf.purge_cas_files",
+        "schedule_display": "Daily 02:00 IST",
+        "cron": {"hour": 2, "minute": 0},
+    },
+    {
+        "beat_key": "notify-drain",
+        "task_name": "dhanradar.tasks.misc.drain_notifications",
+        "schedule_display": "Every 1 min",
+        "cron": {"minute": "*"},
+    },
+    {
+        "beat_key": "compliance-archive-audit",
+        "task_name": "dhanradar.tasks.compliance.archive_audit_daily",
+        "schedule_display": "Daily 02:00 IST",
+        "cron": {"hour": 2, "minute": 0},
+    },
+    {
+        "beat_key": "compliance-reconcile-disclaimers",
+        "task_name": "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
+        "schedule_display": "Daily 02:30 IST",
+        "cron": {"hour": 2, "minute": 30},
+    },
+    {
+        "beat_key": "mood-compute-snapshot",
+        "task_name": "dhanradar.tasks.mood.compute_mood_snapshot",
+        "schedule_display": "Daily 09:00 & 16:00 IST",
+        "cron": {"hour": "9,16", "minute": 0},
+    },
+    {
+        "beat_key": "mf-monthly-rescore",
+        "task_name": "dhanradar.tasks.mf.monthly_rescore_plus_users",
+        "schedule_display": "1st of month 03:00 IST",
+        "cron": {"day_of_month": 1, "hour": 3, "minute": 0},
+    },
+    {
+        "beat_key": "news-refresh-market",
+        "task_name": "dhanradar.tasks.news.refresh_market_news",
+        "schedule_display": "Every 30 min",
+        "cron": {"minute": "*/30"},
+    },
+    {
+        "beat_key": "mf-reap-stuck-cas",
+        "task_name": "dhanradar.tasks.mf.reap_stuck_cas_jobs",
+        "schedule_display": "Every 5 min",
+        "cron": {"minute": "*/5"},
+    },
+    {
+        "beat_key": "signal-daily-alert",
+        "task_name": "dhanradar.tasks.signal_alerts.daily_signal_alert",
+        "schedule_display": "09:15 IST Mon–Fri",
+        "cron": {"hour": 9, "minute": 15, "day_of_week": "1-5"},
+    },
+    {
+        "beat_key": "market-data-refresh",
+        "task_name": "dhanradar.tasks.signal_alerts.market_data_refresh",
+        "schedule_display": "Every 15 min 09:00–16:00 IST Mon–Fri",
+        "cron": {"minute": "*/15", "hour": "9-16", "day_of_week": "1-5"},
+    },
+    {
+        "beat_key": "auto-log-no-action",
+        "task_name": "dhanradar.tasks.signal_alerts.auto_log_no_action",
+        "schedule_display": "21:00 IST Mon–Fri",
+        "cron": {"hour": 21, "minute": 0, "day_of_week": "1-5"},
+    },
+    {
+        "beat_key": "sip-reminder",
+        "task_name": "dhanradar.tasks.signal_alerts.sip_reminder",
+        "schedule_display": "Daily 09:00 IST",
+        "cron": {"hour": 9, "minute": 0},
+    },
+    {
+        "beat_key": "check-achievements",
+        "task_name": "dhanradar.tasks.signal_alerts.check_achievements",
+        "schedule_display": "Daily 22:00 IST",
+        "cron": {"hour": 22, "minute": 0},
+    },
+    {
+        "beat_key": "mf-constituents-fetch",
+        "task_name": "dhanradar.tasks.mf.mf_constituents_fetch",
+        "schedule_display": "Monthly 10th 04:00 IST",
+        "cron": {"day_of_month": 10, "hour": 4, "minute": 0},
+    },
+    {
+        "beat_key": "mf-kite-enrich",
+        "task_name": "dhanradar.tasks.mf.mf_kite_enrich",
+        "schedule_display": "Weekly Sat 03:00 IST",
+        "cron": {"day_of_week": 6, "hour": 3, "minute": 0},
+    },
     # Phase 6 — now registered in celery_app.beat_schedule (no longer planned).
-    {"beat_key": "mf-scheme-master-refresh", "task_name": "dhanradar.tasks.mf.mf_scheme_master_refresh", "schedule_display": "Weekly Sun 03:00 IST"},
-    {"beat_key": "mf-expense-ratio-fetch", "task_name": "dhanradar.tasks.mf.mf_expense_ratio_fetch", "schedule_display": "Monthly 15th 04:00 IST"},
-    {"beat_key": "mf-fund-manager-fetch", "task_name": "dhanradar.tasks.mf.mf_fund_manager_fetch", "schedule_display": "Monthly 15th 04:30 IST"},
-    {"beat_key": "sebi-circulars-fetch", "task_name": "dhanradar.tasks.mf.sebi_circulars_fetch", "schedule_display": "Weekly Wed 05:00 IST"},
-    {"beat_key": "macro-data-refresh", "task_name": "dhanradar.tasks.mf.macro_data_refresh", "schedule_display": "Weekly Sun 06:00 IST"},
+    {
+        "beat_key": "mf-scheme-master-refresh",
+        "task_name": "dhanradar.tasks.mf.mf_scheme_master_refresh",
+        "schedule_display": "Weekly Sun 03:00 IST",
+        "cron": {"day_of_week": 0, "hour": 3, "minute": 0},
+    },
+    {
+        "beat_key": "mf-expense-ratio-fetch",
+        "task_name": "dhanradar.tasks.mf.mf_expense_ratio_fetch",
+        "schedule_display": "Monthly 15th 04:00 IST",
+        "cron": {"day_of_month": 15, "hour": 4, "minute": 0},
+    },
+    {
+        "beat_key": "mf-fund-manager-fetch",
+        "task_name": "dhanradar.tasks.mf.mf_fund_manager_fetch",
+        "schedule_display": "Monthly 15th 04:30 IST",
+        "cron": {"day_of_month": 15, "hour": 4, "minute": 30},
+    },
+    {
+        "beat_key": "sebi-circulars-fetch",
+        "task_name": "dhanradar.tasks.mf.sebi_circulars_fetch",
+        "schedule_display": "Weekly Wed 05:00 IST",
+        "cron": {"day_of_week": 3, "hour": 5, "minute": 0},
+    },
+    {
+        "beat_key": "macro-data-refresh",
+        "task_name": "dhanradar.tasks.mf.macro_data_refresh",
+        "schedule_display": "Weekly Sun 06:00 IST",
+        "cron": {"day_of_week": 0, "hour": 6, "minute": 0},
+    },
 ]
 
 # Map beat_key → celery task name for pause/resume/trigger
@@ -282,6 +403,162 @@ def _duration_s(started_at: datetime | None, finished_at: datetime | None) -> fl
 
 
 # ---------------------------------------------------------------------------
+# _next_run_at — cron-based next-fire-time (no broker connection required)
+# ---------------------------------------------------------------------------
+
+# Celery app timezone — read from celery_app.conf.timezone at module load via the
+# constant below; importing celery_app at request time is fine (conf is read-only
+# here) but we MUST NOT import beat_schedule (triggers broker connection).
+_CELERY_TZ = "Asia/Kolkata"
+
+
+def _next_run_at(cron: dict | None, tz_name: str) -> str | None:
+    """Return the next fire time for a crontab spec as an ISO-8601 string.
+
+    Builds a ``celery.schedules.crontab`` from *cron* kwargs, then uses
+    ``remaining_estimate`` to find the delta to the next fire.  All arithmetic
+    is done in *tz_name* so the result honours IST schedules correctly.
+
+    Returns *None* on any error (missing cron, bad tz, unexpected crontab
+    exception) so the endpoint never breaks due to a scheduling edge-case.
+    """
+    if not cron:
+        return None
+    try:
+        from celery.schedules import crontab as _crontab  # type: ignore[import-untyped]
+
+        tab = _crontab(**cron)
+        now_aware = datetime.now(ZoneInfo(tz_name))
+        remaining = tab.remaining_estimate(now_aware)
+        next_fire = now_aware + remaining
+        return next_fire.isoformat()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# _derive_admin_alerts — shared helper used by both /alerts and /health
+# ---------------------------------------------------------------------------
+
+
+async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
+    """Derive current attention items from DB state (no event log required).
+
+    Encapsulates the same logic previously inlined in ``get_alerts`` so that
+    ``get_health`` can populate its ``recent_alerts`` field without duplicating
+    the derivation.  Behaviour is identical to the original ``get_alerts`` body.
+    """
+    from dhanradar.models.mood import MarketMood
+
+    alerts: list[AdminAlert] = []
+    now = datetime.now(UTC)
+
+    # 1) Market-Mood freshness — the silent-failure case (scheduler never ran).
+    latest = (
+        await db.execute(
+            select(
+                MarketMood.snapshot_time,
+                MarketMood.data_quality,
+                MarketMood.inputs_available,
+            )
+            .order_by(MarketMood.snapshot_date.desc())
+            .limit(1)
+        )
+    ).first()
+    if latest is None:
+        alerts.append(
+            AdminAlert(
+                key="mood_missing",
+                severity="critical",
+                title="Market Mood has never been computed",
+                detail="No DMMI snapshot exists yet — the scheduled mood job may not be running.",
+                href="/admin",
+            )
+        )
+    else:
+        snap_time, dq, inputs = latest
+        age_h = (now - snap_time).total_seconds() / 3600 if snap_time else 999.0
+        # 9 AM / 4 PM IST runs leave a ~17h overnight gap, so >20h means a run was missed.
+        if age_h > 20:
+            alerts.append(
+                AdminAlert(
+                    key="mood_stale",
+                    severity="critical",
+                    title="Market Mood snapshot is stale",
+                    detail=(
+                        f"The last DMMI read is ~{int(age_h)}h old; a scheduled run "
+                        "(≈9 AM / 4 PM IST) was likely missed."
+                    ),
+                    since=_iso(snap_time),
+                    href="/admin",
+                )
+            )
+        elif dq == "degraded" or inputs < 7:
+            alerts.append(
+                AdminAlert(
+                    key="mood_degraded",
+                    severity="warning",
+                    title="Market Mood is running degraded",
+                    detail=f"Only {inputs} of 11 signals are feeding the read; confidence is capped.",
+                    since=_iso(snap_time),
+                    href="/mood",
+                )
+            )
+
+    # 2) Recent data-ingestion failures (last 24h).
+    fail_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(MfIngestionRun)
+            .where(MfIngestionRun.status.in_(["failed", "partial"]))
+            .where(MfIngestionRun.started_at >= now - timedelta(hours=24))
+        )
+    ) or 0
+    if fail_count:
+        alerts.append(
+            AdminAlert(
+                key="ingestion_failures",
+                severity="warning",
+                title=f"{fail_count} data-ingestion failure(s) in 24h",
+                detail="One or more source ingestion runs failed or completed partially.",
+                href="/admin",
+            )
+        )
+
+    # 3) Unreachable data sources (latest health row per source).
+    subq = (
+        select(
+            MfSourceHealth.source,
+            func.max(MfSourceHealth.check_time).label("max_ct"),
+        )
+        .group_by(MfSourceHealth.source)
+        .subquery()
+    )
+    health_rows = (
+        await db.scalars(
+            select(MfSourceHealth).join(
+                subq,
+                (MfSourceHealth.source == subq.c.source)
+                & (MfSourceHealth.check_time == subq.c.max_ct),
+            )
+        )
+    ).all()
+    unhealthy = [r.source for r in health_rows if not r.reachable]
+    if unhealthy:
+        alerts.append(
+            AdminAlert(
+                key="sources_unhealthy",
+                severity="warning",
+                title=f"{len(unhealthy)} data source(s) unreachable",
+                detail="Latest health check failed for: " + ", ".join(sorted(unhealthy)[:6]),
+                href="/admin",
+            )
+        )
+
+    return alerts
+
+
+# ---------------------------------------------------------------------------
 # GET /admin/health
 # ---------------------------------------------------------------------------
 
@@ -303,7 +580,7 @@ async def get_health(
       (Safety Monitor is Phase 4 — AI Ops console). Returns 0 with TODO.
     recent_failures from last 5 failed ingestion_runs.
     recent_signups from last 5 auth.users ordered by created_at desc.
-    recent_alerts: stubbed empty (alert system not yet wired to a DB table).
+    recent_alerts: derived via _derive_admin_alerts (same logic as /admin/alerts bell).
     """
     # Source health: latest row per source
     # Using a subquery to get max check_time per source
@@ -396,8 +673,18 @@ async def get_health(
         for row in signup_rows
     ]
 
-    # recent_alerts: stubbed — no DB-backed alert table yet (Phase 5 Notifications)
-    recent_alerts: list[RecentAlert] = []
+    # recent_alerts: derived from current DB state (same logic as /admin/alerts bell).
+    raw_alerts = await _derive_admin_alerts(db)
+    now_iso = datetime.now(UTC).isoformat()
+    recent_alerts: list[RecentAlert] = [
+        RecentAlert(
+            type=a.key,
+            message=a.title + (" — " + a.detail if a.detail else ""),
+            severity=a.severity,
+            created_at=a.since or now_iso,
+        )
+        for a in raw_alerts[:10]
+    ]
 
     return HealthResponse(
         sources_healthy=sources_healthy,
@@ -427,113 +714,7 @@ async def get_alerts(
     """Attention items for the admin bell, DERIVED from current state (not a
     failure-event log) so a job that NEVER RAN — a dead scheduler — is still caught.
     Read-only; self-clears when the underlying condition resolves. RequireAdmin."""
-    from dhanradar.models.mood import MarketMood
-
-    alerts: list[AdminAlert] = []
-    now = datetime.now(UTC)
-
-    # 1) Market-Mood freshness — the silent-failure case (scheduler never ran).
-    latest = (
-        await db.execute(
-            select(
-                MarketMood.snapshot_time,
-                MarketMood.data_quality,
-                MarketMood.inputs_available,
-            )
-            .order_by(MarketMood.snapshot_date.desc())
-            .limit(1)
-        )
-    ).first()
-    if latest is None:
-        alerts.append(
-            AdminAlert(
-                key="mood_missing",
-                severity="critical",
-                title="Market Mood has never been computed",
-                detail="No DMMI snapshot exists yet — the scheduled mood job may not be running.",
-                href="/admin",
-            )
-        )
-    else:
-        snap_time, dq, inputs = latest
-        age_h = (now - snap_time).total_seconds() / 3600 if snap_time else 999.0
-        # 9 AM / 4 PM IST runs leave a ~17h overnight gap, so >20h means a run was missed.
-        if age_h > 20:
-            alerts.append(
-                AdminAlert(
-                    key="mood_stale",
-                    severity="critical",
-                    title="Market Mood snapshot is stale",
-                    detail=(
-                        f"The last DMMI read is ~{int(age_h)}h old; a scheduled run "
-                        "(≈9 AM / 4 PM IST) was likely missed."
-                    ),
-                    since=_iso(snap_time),
-                    href="/admin",
-                )
-            )
-        elif dq == "degraded" or inputs < 7:
-            alerts.append(
-                AdminAlert(
-                    key="mood_degraded",
-                    severity="warning",
-                    title="Market Mood is running degraded",
-                    detail=f"Only {inputs} of 11 signals are feeding the read; confidence is capped.",
-                    since=_iso(snap_time),
-                    href="/mood",
-                )
-            )
-
-    # 2) Recent data-ingestion failures (last 24h) — same source as the health page.
-    fail_count = (
-        await db.scalar(
-            select(func.count())
-            .select_from(MfIngestionRun)
-            .where(MfIngestionRun.status.in_(["failed", "partial"]))
-            .where(MfIngestionRun.started_at >= now - timedelta(hours=24))
-        )
-    ) or 0
-    if fail_count:
-        alerts.append(
-            AdminAlert(
-                key="ingestion_failures",
-                severity="warning",
-                title=f"{fail_count} data-ingestion failure(s) in 24h",
-                detail="One or more source ingestion runs failed or completed partially.",
-                href="/admin",
-            )
-        )
-
-    # 3) Unreachable data sources (latest health row per source).
-    subq = (
-        select(
-            MfSourceHealth.source,
-            func.max(MfSourceHealth.check_time).label("max_ct"),
-        )
-        .group_by(MfSourceHealth.source)
-        .subquery()
-    )
-    health_rows = (
-        await db.scalars(
-            select(MfSourceHealth).join(
-                subq,
-                (MfSourceHealth.source == subq.c.source)
-                & (MfSourceHealth.check_time == subq.c.max_ct),
-            )
-        )
-    ).all()
-    unhealthy = [r.source for r in health_rows if not r.reachable]
-    if unhealthy:
-        alerts.append(
-            AdminAlert(
-                key="sources_unhealthy",
-                severity="warning",
-                title=f"{len(unhealthy)} data source(s) unreachable",
-                detail="Latest health check failed for: " + ", ".join(sorted(unhealthy)[:6]),
-                href="/admin",
-            )
-        )
-
+    alerts = await _derive_admin_alerts(db)
     return AdminAlertsResponse(count=len(alerts), alerts=alerts)
 
 
@@ -746,10 +927,7 @@ async def list_tasks(
                 task_name=task_name,
                 schedule_display=t["schedule_display"],
                 last_run_at=_iso(run.started_at) if run else None,
-                # next_run_at: would require beat-introspection; not available without
-                # spinning up a beat scheduler instance. Returning null with a TODO.
-                # TODO: integrate with celery-beat DB scheduler or a cron parser.
-                next_run_at=None,
+                next_run_at=_next_run_at(t.get("cron"), _CELERY_TZ),
                 last_status=run.status if run else None,
                 last_duration_s=(
                     _duration_s(run.started_at, run.finished_at) if run else None

@@ -28,6 +28,18 @@ class CasFailureRecord(BaseModel):
     error_message: str | None
     created_at: datetime | None
     completed_at: datetime | None
+    support_notes: str | None = None
+
+
+class CasNotesRequest(BaseModel):
+    """Body for POST /admin/support/cas-failures/{job_id}/notes.
+
+    ``notes`` annotates a failed CAS job for support triage. An empty string is
+    allowed and clears the note (sets the column to ''); the max length caps
+    operator free-text to keep the column bounded.
+    """
+
+    notes: str = Field(..., max_length=2000)
 
 
 class FunnelStats(BaseModel):

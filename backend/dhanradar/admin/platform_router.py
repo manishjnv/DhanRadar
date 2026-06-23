@@ -6,9 +6,10 @@ Implements four read-only admin endpoints:
   GET /admin/support/cas-failures  — Recent CAS job failures for support
   GET /admin/analytics/overview    — Aggregate platform metrics
   GET /admin/notifications/health  — Queue depth + delivery stats
+  POST /admin/support/cas-failures/{job_id}/notes — set operator support note
 
-All routes: RequireAdmin() gate (404 surface-hiding to non-admins).
-NO mutations — this router is strictly read-only.
+All routes: RequireAdmin() gate (404 surface-hiding to non-admins). The single
+mutation (support-notes) is audit-logged via record_admin_action.
 
 Analytics cross-schema counts are the accepted admin-ops exception: aggregate
 reads across auth/mf schemas return no PII, only counts. Module isolation is
@@ -21,12 +22,14 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi import status as http_status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.admin.ops_schemas import OkResponse
 from dhanradar.audit.service import record_admin_action
 from dhanradar.config import settings
 from dhanradar.db import get_db
@@ -47,6 +50,7 @@ from .platform_schemas import (
     BroadcastRequest,
     BroadcastResponse,
     CasFailureRecord,
+    CasNotesRequest,
     FeatureFlagResponse,
     FunnelStats,
     NotificationHealthResponse,
@@ -129,11 +133,73 @@ async def get_cas_failures(
     """Return the most recent CAS job failures for support triage.
 
     Results come from mf.service.list_recent_cas_failures (module isolation).
-    ``support_notes`` per failure is ABSENT — no support_notes column exists.
-    TODO: add support_notes when a notes column is added to mf_cas_jobs.
+    Each record includes any ``support_notes`` an operator has set via
+    POST /admin/support/cas-failures/{job_id}/notes (None when unset).
     """
     rows = await list_recent_cas_failures(db, limit=limit)
     return [CasFailureRecord(**row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/support/cas-failures/{job_id}/notes  (Tier-A mutation)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/support/cas-failures/{job_id}/notes",
+    response_model=OkResponse,
+)
+async def set_cas_support_notes(
+    request: Request,
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: CasNotesRequest,
+    job_id: Annotated[str, Path()],
+) -> OkResponse:
+    """Set (or clear) the operator support note on a CAS job.
+
+    Admin-internal annotation only — never surfaced on a user-facing route.
+    An empty ``notes`` string clears the note. 404 if the job_id is unknown.
+
+    The UPDATE uses an ORM ``update()`` with a bound ``job_id`` parameter (no
+    f-string SQL); ``rowcount == 0`` means no matching row → 404.
+
+    Audit: record_admin_action (fire-and-forget, never raises) with
+    action="set_cas_support_notes", target_type="cas_job", target_id=job_id.
+    """
+    # Parse job_id to a UUID first — job_id is a uuid column, so a malformed
+    # string would otherwise raise a Postgres cast error (500). Treat it as 404.
+    try:
+        job_uuid = UUID(job_id)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="cas_job_not_found",
+        ) from None
+
+    result = await db.execute(
+        update(MfCasJob)
+        .where(MfCasJob.job_id == job_uuid)
+        .values(support_notes=body.notes)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="cas_job_not_found",
+        )
+    await db.commit()
+
+    request_id: str | None = getattr(request.state, "request_id", None)
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="set_cas_support_notes",
+        target_type="cas_job",
+        target_id=job_id,
+        result="ok",
+        request_id=request_id,
+    )
+
+    return OkResponse()
 
 
 # ---------------------------------------------------------------------------
