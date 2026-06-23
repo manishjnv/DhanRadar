@@ -71,8 +71,9 @@ async def test_authenticate_user_stamps_last_login_at(patch_redis):
     result = await svc.authenticate_user("test@example.com", password, db)
 
     assert result is user
-    # record_login issues an UPDATE via db.execute, then db.commit
+    # record_login issues an UPDATE via db.execute + db.add (INSERT), then db.commit
     db.execute.assert_called_once()
+    db.add.assert_called_once()
     db.commit.assert_called_once()
 
 
@@ -153,6 +154,7 @@ async def test_authenticate_totp_stamps_last_login_at(patch_redis):
 
     assert result is user
     db.execute.assert_called_once()
+    db.add.assert_called_once()
     db.commit.assert_called_once()
 
 
@@ -179,27 +181,80 @@ async def test_authenticate_email_otp_stamps_last_login_at(patch_redis):
 
     assert result is user
     db.execute.assert_called_once()
+    db.add.assert_called_once()
     db.commit.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# (5) record_login helper issues the correct UPDATE statement
+# (5) record_login issues UPDATE + INSERT (activity log)
 # ---------------------------------------------------------------------------
 
 
-async def testrecord_login_issues_update_on_correct_user(patch_redis):
-    """record_login must call db.execute with an UPDATE targeting user.id."""
-
+async def test_record_login_issues_update_and_insert(patch_redis):
+    """record_login must:
+    - call db.execute once with an UPDATE targeting auth.users
+    - call db.add once with a UserActivityLog row carrying the supplied method
+    - call db.commit once
+    """
     from dhanradar.auth import service as svc
+    from dhanradar.models.auth import UserActivityLog
 
     user = _make_user()
     db = AsyncMock()
     db.execute = AsyncMock()
+    db.add = MagicMock()  # db.add is synchronous in SQLAlchemy async
+    db.commit = AsyncMock()
 
-    await svc.record_login(user, db)
+    await svc.record_login(user, db, method="password")
 
+    # UPDATE was issued
     db.execute.assert_called_once()
-    call_args = db.execute.call_args[0][0]
-    # The statement should be an UPDATE on the User table
-    assert hasattr(call_args, "table"), "execute() was not called with an UPDATE statement"
-    assert call_args.table.name == "users"
+    update_stmt = db.execute.call_args[0][0]
+    assert hasattr(update_stmt, "table"), "execute() was not called with an UPDATE statement"
+    assert update_stmt.table.name == "users"
+
+    # UserActivityLog row was added
+    db.add.assert_called_once()
+    added_obj = db.add.call_args[0][0]
+    assert isinstance(added_obj, UserActivityLog), (
+        f"db.add() received {type(added_obj)}, expected UserActivityLog"
+    )
+    assert added_obj.event_type == "login"
+    assert added_obj.method == "password"
+    assert added_obj.user_id == user.id
+
+    # Single commit covers both writes
+    db.commit.assert_called_once()
+
+
+async def test_record_login_method_propagated(patch_redis):
+    """The method argument is stored on the inserted UserActivityLog row."""
+    from dhanradar.auth import service as svc
+    from dhanradar.models.auth import UserActivityLog
+
+    for method in ("password", "totp", "email_otp", "sso"):
+        user = _make_user()
+        db = AsyncMock()
+        db.execute = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        await svc.record_login(user, db, method=method)
+
+        added_obj = db.add.call_args[0][0]
+        assert isinstance(added_obj, UserActivityLog)
+        assert added_obj.method == method, f"method mismatch for {method}"
+
+
+async def test_record_login_non_fatal_on_db_error(patch_redis):
+    """record_login must not raise even when db.execute raises."""
+    from dhanradar.auth import service as svc
+
+    user = _make_user()
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=RuntimeError("DB exploded"))
+    db.rollback = AsyncMock()
+
+    # Must not raise — login continues
+    await svc.record_login(user, db, method="password")
+    db.rollback.assert_called_once()

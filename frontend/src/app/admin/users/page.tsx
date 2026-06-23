@@ -33,6 +33,7 @@ import {
   useAdminUserSummary,
   useAdminUsers,
   useAdminUserDetail,
+  useAdminUserActivity,
   useAdminBillingSubMetrics,
   useAdminAudit,
   useSuspendUser,
@@ -40,9 +41,23 @@ import {
   useResetUserAccess,
   type AdminAuditRow,
   type AdminUserDetail,
+  type AdminActivityEvent,
 } from '@/features/admin/api';
 import { displayLabel } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
+
+// ---------------------------------------------------------------------------
+// Login-method humaniser — turns the stored method code into plain words.
+// ---------------------------------------------------------------------------
+function humanizeLoginMethod(method: string | null): string {
+  switch (method) {
+    case 'password':  return 'Password';
+    case 'totp':      return 'Authenticator app';
+    case 'email_otp': return 'Email code';
+    case 'sso':       return 'Google';
+    default:          return method || '—';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Skeletons
@@ -231,11 +246,29 @@ function UserDetailContent({ userId }: { userId: string }) {
         )}
       </div>
 
-      {/* Login history & CAS uploads — not yet unified */}
+      {/* Login history */}
       <div>
-        <h3 className="mb-3 text-h3 font-medium text-ink">Login History</h3>
-        <p className="text-small text-ink-muted">Not yet tracked.</p>
+        <h3 className="mb-3 text-h3 font-medium text-ink">Login history</h3>
+        {data.login_history.length === 0 ? (
+          <p className="text-small text-ink-muted">No logins recorded yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-0">
+            {data.login_history.map((ev, i) => (
+              <li
+                key={ev.request_id ?? `${ev.occurred_at}-${i}`}
+                className="flex items-center justify-between gap-4 border-b border-line py-2 last:border-0"
+              >
+                <span className="text-small text-ink">{humanizeLoginMethod(ev.method)}</span>
+                <span className="font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                  {formatDateTime(ev.occurred_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+
+      {/* CAS uploads — not yet unified */}
       <div>
         <h3 className="mb-3 text-h3 font-medium text-ink">CAS Upload History</h3>
         <p className="text-small text-ink-muted">Not yet tracked.</p>
@@ -318,6 +351,55 @@ function UserDetailContent({ userId }: { userId: string }) {
           await resetAccessMutation.mutateAsync(userId);
         }}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recent Logins table (global feed)
+// ---------------------------------------------------------------------------
+function RecentLoginsTable({ rows }: { rows: AdminActivityEvent[] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No recent logins"
+        description="User sign-ins will appear here once people start logging in."
+        className="py-8"
+      />
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-small">
+        <caption className="sr-only">Recent user logins — most recent first</caption>
+        <thead>
+          <tr className="border-b border-line">
+            {['User', 'Method', 'When'].map((h) => (
+              <th
+                key={h}
+                scope="col"
+                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={`${row.user_id}-${row.occurred_at}-${i}`}
+              className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
+            >
+              <td className="py-2.5 pr-4 text-ink">{row.email}</td>
+              <td className="py-2.5 pr-4 text-ink-secondary">{humanizeLoginMethod(row.method)}</td>
+              <td className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                {formatRelative(row.occurred_at)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -466,6 +548,7 @@ export default function AdminUsersPage() {
     limit: 50,
   });
   const subMetricsQ    = useAdminBillingSubMetrics();
+  const activityQ      = useAdminUserActivity();
   const auditQ         = useAdminAudit({
     action: auditAction || undefined,
     limit: 100,
@@ -485,6 +568,7 @@ export default function AdminUsersPage() {
     summaryQ.refetch();
     usersQ.refetch();
     subMetricsQ.refetch();
+    activityQ.refetch();
     auditQ.refetch();
     setLastRefreshed(new Date());
   }
@@ -657,11 +741,33 @@ export default function AdminUsersPage() {
         )}
       </section>
 
+      {/* Recent Logins — global user-activity feed */}
+      <Section
+        id="section-recent-logins"
+        title="Recent Logins"
+        subtitle="The most recent user sign-ins across the platform."
+        action={
+          <Button size="sm" variant="ghost" onClick={() => activityQ.refetch()}>
+            <RefreshCw size={12} strokeWidth={2} aria-hidden="true" />
+            Refresh
+          </Button>
+        }
+      >
+        {activityQ.isLoading && <TableSkeleton rows={6} />}
+        {activityQ.isError && (
+          <ErrorCard
+            title="Could not load recent logins"
+            onRetry={() => activityQ.refetch()}
+          />
+        )}
+        {activityQ.data && <RecentLoginsTable rows={activityQ.data} />}
+      </Section>
+
       {/* Section D — Activity & Audit Log */}
       <Section
         id="section-audit"
         title="Activity & Audit Log"
-        subtitle="Showing admin actions only — user-activity events (logins, uploads) are not yet unified."
+        subtitle="Recent user logins are shown above. This table lists admin actions and their outcomes."
         action={
           <AuditFilters
             actionFilter={auditAction}
