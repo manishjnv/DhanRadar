@@ -333,6 +333,7 @@ export interface AdminUserDetail {
   tier: string;
   status: string;
   created_at: string;
+  last_login_at: string | null;
   pro_access_until: string | null;
   pro_access_reason: string | null;
   risk_profile: string | null;

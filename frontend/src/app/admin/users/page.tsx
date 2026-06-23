@@ -149,12 +149,11 @@ function UserDetailContent({ userId }: { userId: string }) {
     { label: 'Consent Version',      value: data.dpdp_consent_version || '—' },
     {
       label: 'Last Login',
-      value: (
-        <span
-          className="text-ink-muted"
-          title="Login history is not yet tracked for individual users."
-        >
-          —
+      value: data.last_login_at ? (
+        formatDateTime(data.last_login_at)
+      ) : (
+        <span className="text-ink-muted" title="No login recorded since login tracking went live.">
+          Never
         </span>
       ),
     },

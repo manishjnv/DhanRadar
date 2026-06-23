@@ -81,6 +81,9 @@ class UserDetailResponse(BaseModel):
     # 'active' | 'deletion_requested' | 'suspended'
     status: str
     created_at: datetime
+    # auth.users.last_login_at (migration 0044). NULL until the user's first
+    # genuine login since the column was added (no backfill).
+    last_login_at: datetime | None = None
     pro_access_until: datetime | None = None
     pro_access_reason: str | None = None
     risk_profile: str | None = None
