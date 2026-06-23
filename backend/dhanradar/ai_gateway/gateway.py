@@ -38,7 +38,11 @@ from dhanradar.ai_gateway.errors import (
     QualityValidationError,
     ThreeStrikeSkipError,
 )
-from dhanradar.ai_gateway.metrics import record_latency, record_model_spend
+from dhanradar.ai_gateway.metrics import (
+    record_advisory_breach,
+    record_latency,
+    record_model_spend,
+)
 from dhanradar.ai_gateway.quality import QualityValidator
 from dhanradar.ai_gateway.schemas import AIOutputBase
 from dhanradar.budget import budget_guard
@@ -207,7 +211,7 @@ class OpenRouterGateway:
                 meter.units += 1
                 got_any_response = True
                 try:
-                    result = validator.validate(res.data)
+                    result = await self._validate(validator, res.data)
                 except QualityValidationError as qe:
                     last_quality_error = qe
                     continue  # quality fail → try the next free model
@@ -319,7 +323,8 @@ class OpenRouterGateway:
             meter.cost_usd = (res.total_tokens / 1_000_000) * _SONNET_USD_PER_1M_TOKENS
         # Per-model USD for the sonnet spend (call already tallied in _call).
         await record_model_spend(res.model, usd=meter.cost_usd, redis=self._redis)
-        output = validator.validate(res.data)  # raises QualityValidationError if Sonnet also fails
+        # raises QualityValidationError if Sonnet also fails (advisory breach counted)
+        output = await self._validate(validator, res.data)
         # Audit the model that actually served (res.model == self._sonnet_model here,
         # but use the threaded field so provenance stays symmetric with the free pool).
         return CompletionResult(output=output, model_used=res.model)
@@ -355,11 +360,23 @@ class OpenRouterGateway:
                 # Per-model USD for this paid response (call already tallied in _call).
                 await record_model_spend(res.model, usd=call_usd, redis=self._redis)
                 try:
-                    output = validator.validate(res.data)
+                    output = await self._validate(validator, res.data)
                 except QualityValidationError:
                     continue  # quality fail → try the next fallback model
                 return CompletionResult(output=output, model_used=res.model)
         return None
+
+    async def _validate(self, validator: QualityValidator, data: dict) -> AIOutputBase:
+        """Run the quality validator; on a SEBI advisory-boundary rejection,
+        increment the advice-boundary breach counter (non-fatal) before
+        re-raising. A plain schema failure is NOT counted — only a banned advisory
+        verb in model output (advisory_breach=True) is a boundary breach."""
+        try:
+            return validator.validate(data)
+        except QualityValidationError as qe:
+            if getattr(qe, "advisory_breach", False):
+                await record_advisory_breach(redis=self._redis)
+            raise
 
     async def _record_strike(self, task_type: str, ticker: str | None) -> int:
         """Increment and return the 3-strike-per-(ticker, day) counter."""

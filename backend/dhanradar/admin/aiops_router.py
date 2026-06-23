@@ -40,7 +40,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.ai_gateway.metrics import read_latency_window, read_spend_window
+from dhanradar.ai_gateway.metrics import (
+    read_advisory_breaches,
+    read_latency_window,
+    read_spend_window,
+)
 from dhanradar.budget import (
     _CAP_OVERRIDE_KEYS,
     _REDIS_KEYS,
@@ -60,6 +64,7 @@ from dhanradar.redis_client import get_redis
 from dhanradar.scoring.engine.config import get_config
 
 from .aiops_schemas import (
+    AdviceBoundaryBreachesInfo,
     AiCostResponse,
     AiDashboardResponse,
     AiEvalResponse,
@@ -316,10 +321,10 @@ async def get_ai_safety(
     """Return the safety monitoring snapshot.
 
     Sourced from ``compliance.ai_recommendation_audit`` and
-    ``compliance.ai_low_confidence_log``.  ``advice_boundary_breaches`` is ALWAYS 0
-    and instrumented:false — there is no rejection counter, so a 0 here is NOT
-    confirmation that zero advisory violations occurred; this surface cannot observe
-    whether the boundary held.  Groundedness is not a column in the audit table
+    ``compliance.ai_low_confidence_log``.  ``advice_boundary_breaches`` is now the
+    real per-day count of advisory-screen rejections from the gateway's Redis
+    counter (a breach = the model emitted a banned verb and the gate HELD; a 0 is
+    a meaningful clean reading).  Groundedness is not a column in the audit table
     (instrumented:false).
     """
     summary = await safety_monitor_summary(db, days=days)
@@ -330,6 +335,21 @@ async def get_ai_safety(
     recent_audit = [AuditRowSummary(**row) for row in summary["recent_audit_rows"]]
     recent_lc = [LowConfidenceRowSummary(**row) for row in summary["recent_low_confidence"]]
 
+    breaches = await read_advisory_breaches(days)
+    advice_boundary_breaches = AdviceBoundaryBreachesInfo(
+        value=breaches["value"],
+        window_days=breaches["window_days"],
+        instrumented=breaches["instrumented"],
+        note=(
+            "Count of AI responses rejected by the runtime advisory screen (the SEBI "
+            "boundary held — rejected output is never served). A 0 means no breaches "
+            "in the window."
+            if breaches["instrumented"]
+            else "Breach counter unavailable (Redis read failed) — value is not a "
+            "measured reading."
+        ),
+    )
+
     return AiSafetyResponse(
         days=summary["days"],
         served_by_type=summary["served_by_type"],
@@ -339,6 +359,7 @@ async def get_ai_safety(
         recent_low_confidence=recent_lc,
         label_churn_educational=_churn_to_summary(churn_educational_raw),
         label_churn_mood=_churn_to_summary(churn_mood_raw),
+        advice_boundary_breaches=advice_boundary_breaches,
     )
 
 

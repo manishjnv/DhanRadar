@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.ai_gateway.metrics import read_advisory_breaches
 from dhanradar.audit.service import record_admin_action
 from dhanradar.db import get_db
 from dhanradar.deps import RequireAdmin, UserContext
@@ -630,9 +631,10 @@ async def get_health(
     active_users: int = int(row.total)
     premium_users: int = int(row.premium)
 
-    # TODO(Safety Monitor — Phase 4): query ai_recommendation_audit for breach/flag columns
-    # once the Safety Monitor is wired (Admin.md §15 AI Ops / Safety Monitor).
-    advice_boundary_breaches_today = 0
+    # advice_boundary_breaches_today: today's count of advisory-screen rejections
+    # from the gateway's Redis counter (non-fatal read; 0 on a Redis failure).
+    # low_groundedness_flags_7d stays 0 until groundedness eval lands (PR-4).
+    advice_boundary_breaches_today = (await read_advisory_breaches(1))["value"]
     low_groundedness_flags_7d = 0
 
     # recent_failures: last 5 failed ingestion_runs

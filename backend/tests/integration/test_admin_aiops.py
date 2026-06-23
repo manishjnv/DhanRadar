@@ -313,10 +313,13 @@ async def test_aiops_safety_200(async_client, monkeypatch):
     ]:
         assert field in data, f"Missing field '{field}' in /admin/ai/safety"
 
-    # advisory-verb breaches: always 0 + instrumented:false (violations rejected at gateway)
+    # advisory-boundary breaches (PR-3): now a REAL per-day Redis counter. No
+    # gateway calls run in this test, so value is 0 — but unlike latency/spend, a
+    # 0 read is a MEANINGFUL clean reading (boundary held), so instrumented is True.
     abr = data["advice_boundary_breaches"]
     assert abr["value"] == 0
-    assert abr["instrumented"] is False
+    assert abr["instrumented"] is True
+    assert abr["window_days"] >= 1
 
     # groundedness absent
     assert data["groundedness"]["instrumented"] is False
