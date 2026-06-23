@@ -289,8 +289,9 @@ export default function AdminAISafetyPage() {
                   <CardHeader>
                     <CardTitle id="section-breaches">Advice-Boundary Breaches</CardTitle>
                     <p className="mt-1 text-small text-ink-muted">
-                      Tracks AI outputs that crossed the educational, non-advisory boundary. Blocked AI responses
-                      are filtered before they reach users but may not yet be fully recorded here.
+                      Counts AI responses the advisory screen rejected for crossing the educational,
+                      non-advisory boundary. Rejected responses are filtered before they reach users —
+                      a breach means the model tried and the gate held, never that advice was shown.
                     </p>
                   </CardHeader>
                   <CardBody>
@@ -306,6 +307,14 @@ export default function AdminAISafetyPage() {
                         <HealthBadge status={d.advice_boundary_breaches.instrumented ? 'Healthy' : 'Planned'} />
                       </div>
                     </div>
+                    {d.advice_boundary_breaches.instrumented && (
+                      <p className="mt-3 text-small text-ink-muted">
+                        Rejections recorded over the last {d.advice_boundary_breaches.window_days} days
+                        {d.advice_boundary_breaches.value === 0
+                          ? ' — 0 means the boundary held with no breaches.'
+                          : '. Each is a blocked response, not advice shown to a user.'}
+                      </p>
+                    )}
                     {!d.advice_boundary_breaches.instrumented && (
                       <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber/30 bg-amber/5 p-4">
                         <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber" aria-hidden="true" />

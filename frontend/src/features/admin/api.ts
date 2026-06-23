@@ -842,6 +842,7 @@ export interface AdminAILowConfRow {
 /** Mirrors AdviceBoundaryBreachesInfo in aiops_schemas.py */
 export interface AdminAIBreachInfo {
   value: number;
+  window_days: number;
   instrumented: boolean;
   note: string;
 }
