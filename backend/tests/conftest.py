@@ -300,6 +300,7 @@ async def db_tables(db_engine):
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS news"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS concepts"))
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS signal"))
+        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS bse"))
         await conn.execute(
             text("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         )
