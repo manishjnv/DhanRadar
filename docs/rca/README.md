@@ -15,6 +15,17 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-23 — Admin "user activity not logged": field wired in the backend but invisible in the detail UI
+
+- **Symptom:** the founder repeatedly reported that the admin Users page showed no user activity ("not logged / not updated"), even after `last_login_at` tracking shipped. The data WAS being recorded — `auth.users.last_login_at` was stamped on every genuine login (verified: real stamps in prod) — but it never appeared where they looked.
+- **Root cause:** TWO compounding gaps, neither a data-pipeline bug. (1) **Wired one surface, not all:** PR #319 added `last_login_at` and rendered it in the user-LIST table, but the user-DETAIL view hardcoded `"Last Login: —"` with a stale *"not yet tracked"* tooltip, and `UserDetailResponse` did not even include the field — so in detail the value was always a dash regardless of the data. (2) **No-backfill + persistent sessions:** `last_login_at` (and later `user_activity_log`) is NULL until a user's first *fresh* login after the column was added; an admin browsing on a still-valid session never re-authenticates, so the feed reads empty — which presents as "not logged" when it is actually "no new event yet."
+- **Fix:** PR #320 added `last_login_at` to `UserDetailResponse` (`backend/dhanradar/admin/users_schemas.py`) + populated it in `get_user_detail` (`backend/dhanradar/admin/users_router.py`) + bound the detail field to the real value in `frontend/src/app/admin/users/page.tsx` (was a hardcoded `—`). Follow-ups made activity visible from real usage: PR #321 added the `auth.user_activity_log` events table + per-user "Activity" + a global "Recent Activity" feed; PR #323 logged CAS uploads as activity events too (so the feed fills without waiting on rare logins).
+- **Prevention:**
+  - **When wiring a new backend field, surface it on EVERY view that shows it (list AND detail) and confirm the response SCHEMA includes it** — don't wire one surface and assume the rest. A grep for the field name across the frontend + each `*Response` schema is the cheap check.
+  - **Observational, no-backfill fields are NULL until their first triggering event.** Communicate "needs a fresh login/action to populate; empty ≠ broken" in the UI copy and to the operator, so an empty feed isn't read as a failure.
+  - **Two traps caught in review this session (recorded so they don't recur — neither shipped):** (a) **FastAPI route ordering** — a literal route (`GET /users/activity`) MUST be declared BEFORE a `/{param}` route (`/users/{user_id}`) or FastAPI matches the literal as the path param and the route is shadowed/unreachable. (b) **UUID path params** — parse the path string to `UUID(...)` (→ 404 on failure) BEFORE querying a `uuid` column; a raw malformed string otherwise raises a Postgres `invalid input syntax for type uuid` (500) instead of a clean 404.
+- **Phase/area:** Admin Users / user-activity surfacing (PRs #319–#323).
+
 ### 2026-06-22 — Compose memory-budget guard left red on main: mem-limit bump didn't update its own CI cap
 
 - **Symptom:** the `guards` CI job was failing on `main` from PR #315 (2026-06-22) until it was caught a few hours later while pushing PR #317. `scripts/check_compose_memory.py` exited 1: `COMPOSE MEMORY BUDGET FAILED: 3328M > 3200M`. It went unnoticed because the `guards` job was red behind the habitually-red (advisory) `lint` job, and neither blocks merge.
