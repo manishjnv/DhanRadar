@@ -350,3 +350,91 @@ async def test_webhook_health_200_for_admin(async_client, monkeypatch):
     assert body["recent_count"] >= 0
     assert body["success_count"] >= 0
     assert body["failed_count"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# 11. last_login_at is populated after login and returned by admin endpoints
+# ---------------------------------------------------------------------------
+
+
+async def test_last_login_at_set_after_login_and_visible_in_admin(async_client, monkeypatch):
+    """After a password login, the admin list and detail endpoints must return
+    a non-null last_login_at for that user."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    # Sign up
+    user_id, access = await _signup(async_client, "last_login_test@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    admin_headers = make_auth_headers(access_token=access)
+
+    # The signup endpoint does not call authenticate_user, so last_login_at
+    # is still NULL. Now perform a real login to stamp it.
+    login_r = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": "last_login_test@example.com", "password": "AdminP2Test42!"},
+    )
+    assert login_r.status_code == 200, login_r.text
+
+    # Admin list — last_login_at must be non-null for the user who just logged in
+    list_r = await async_client.get("/api/v1/admin/users", headers=admin_headers)
+    assert list_r.status_code == 200, list_r.text
+    users = list_r.json()["users"]
+    matched = [u for u in users if u["id"] == user_id]
+    assert matched, "user not found in admin list"
+    assert matched[0]["last_login_at"] is not None, (
+        "last_login_at must be non-null after a successful login"
+    )
+
+    # Admin detail — same check
+    detail_r = await async_client.get(f"/api/v1/admin/users/{user_id}", headers=admin_headers)
+    assert detail_r.status_code == 200, detail_r.text
+    # UserDetailResponse doesn't include last_login_at at the top level (it's in UserListItem),
+    # but cas_uploads must be a list (empty since no CAS jobs exist)
+    body = detail_r.json()
+    assert isinstance(body["cas_uploads"], list)
+
+
+# ---------------------------------------------------------------------------
+# 12. cas_uploads returns MfCasJob rows for the user
+# ---------------------------------------------------------------------------
+
+
+async def test_cas_uploads_returns_jobs_for_user(async_client, monkeypatch, db_session):
+    """Admin detail must return the user's MfCasJob rows in cas_uploads."""
+    import uuid as _uuid
+
+    from sqlalchemy import text
+
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    user_id, access = await _signup(async_client, "cas_uploads_test@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    admin_headers = make_auth_headers(access_token=access)
+
+    # Insert a synthetic MfCasJob row directly via the db_session
+    job_id = str(_uuid.uuid4())
+    await db_session.execute(
+        text(
+            "INSERT INTO mf.mf_cas_jobs (job_id, user_id, status, progress_pct, source_hash) "
+            "VALUES (:job_id, :user_id, 'completed', 100, 'testhash123') "
+        ),
+        {"job_id": job_id, "user_id": user_id},
+    )
+    await db_session.commit()
+
+    detail_r = await async_client.get(f"/api/v1/admin/users/{user_id}", headers=admin_headers)
+    assert detail_r.status_code == 200, detail_r.text
+    body = detail_r.json()
+
+    cas = body["cas_uploads"]
+    assert isinstance(cas, list)
+    assert len(cas) >= 1, "expected at least one cas_upload entry"
+    entry = cas[0]
+    assert entry["job_id"] == job_id
+    assert entry["status"] == "completed"
+    assert "created_at" in entry
+    assert "completed_at" in entry
+    assert "error_message" in entry
+    assert "portfolio_id" in entry

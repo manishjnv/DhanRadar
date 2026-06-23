@@ -118,6 +118,13 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Set to the current server time on every genuine login success (password,
+    # TOTP, email-OTP, Google SSO).  NOT updated on token refresh.
+    # NULL for users who have never logged in since migration 0044.
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
