@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     # Rough blended $/1M tokens for the cheap fallback — debits the premium budget
     # counter only (not a billing source of truth); conservative over-estimate.
     AI_PAID_FALLBACK_USD_PER_1M: float = 0.5
+    # Groundedness eval (PR-4): fraction [0..1] of served AI outputs to score with a
+    # sampled LLM-judge. Default 0 = OFF (opt-in): the judge runs on the FREE pool,
+    # uninstrumented, and only the 0..1 score is stored (never the context/output);
+    # a sampled call pays one extra free-pool call of latency (lands on background
+    # commentary/mood jobs). Enable in prod via env (set the value to e.g. 0.2).
+    AI_GROUNDEDNESS_SAMPLE_RATE: float = 0.0
+    # A sample scoring below this is counted as a low-groundedness flag (health surface).
+    AI_GROUNDEDNESS_LOW_THRESHOLD: float = 0.6
 
     # ------------------------------------------------------------------
     # Observability

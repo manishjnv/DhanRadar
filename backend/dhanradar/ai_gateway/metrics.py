@@ -55,6 +55,16 @@ _SPEND_MODELS_KEY = "ai:spend:models:{day}"
 # model TRIED and the gate held.
 _ADVISORY_BREACH_KEY = "ai:advisory_breach:{day}"
 
+# Groundedness eval (PR-4): a sampled LLM-judge scores how well a served AI
+# output is supported by its input context (0..1). Per-UTC-day rolling sum+count
+# for the average, plus a counter of low-groundedness samples (score < threshold)
+# for the health flag. Only the SCORE is stored — never the context or output
+# text (DPDP-safe). instrumented requires samples (a 0 avg is not meaningful
+# without a denominator), unlike the breach counter.
+_GROUNDED_SUM_KEY = "ai:grounded:sum:{day}"
+_GROUNDED_COUNT_KEY = "ai:grounded:count:{day}"
+_GROUNDED_LOWFLAG_KEY = "ai:grounded:lowflags:{day}"
+
 
 def _day(dt: datetime.datetime) -> str:
     return dt.strftime("%Y%m%d")
@@ -262,3 +272,81 @@ async def read_advisory_breaches(days: int = 7, *, redis: Any = None) -> dict:
     except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
         logger.debug("ai advisory-breach read failed", exc_info=True)
         return {"instrumented": False, "value": 0, "window_days": days}
+
+
+async def record_groundedness(
+    score: float, *, low_threshold: float = 0.6, redis: Any = None
+) -> None:
+    """Add one groundedness sample (0..1) to today's rolling counters. Never raises.
+
+    Stores ONLY the score (sum + count for the average), plus a low-flag tally when
+    ``score < low_threshold``. The context/output that produced the score is never
+    persisted (DPDP-safe). Out-of-range scores are clamped to [0, 1].
+    """
+    try:
+        if score != score:  # NaN guard
+            return
+        score = max(0.0, min(1.0, float(score)))
+        r: Any = redis or get_redis()
+        day = _day(datetime.datetime.now(datetime.UTC))
+        sum_key = _GROUNDED_SUM_KEY.format(day=day)
+        count_key = _GROUNDED_COUNT_KEY.format(day=day)
+        await r.incrbyfloat(sum_key, score)
+        await r.incr(count_key)
+        await r.expire(sum_key, _RETENTION_SECONDS)
+        await r.expire(count_key, _RETENTION_SECONDS)
+        if score < low_threshold:
+            low_key = _GROUNDED_LOWFLAG_KEY.format(day=day)
+            await r.incr(low_key)
+            await r.expire(low_key, _RETENTION_SECONDS)
+    except Exception:  # noqa: BLE001 — observational metric must never break an AI call
+        logger.debug("ai groundedness record failed", exc_info=True)
+
+
+async def read_groundedness_window(days: int = 7, *, redis: Any = None) -> dict:
+    """Aggregate groundedness over the last ``days`` UTC days.
+
+    Returns a dict shaped for ``GroundednessInfo``:
+        {instrumented, value, sample_count, low_flags, window_days}
+    ``value`` is the mean score (0..1) or None. ``instrumented`` requires at least
+    one sample — unlike the breach counter, a 0 average is not meaningful without a
+    denominator, so an un-sampled window reads instrumented=False. Degrades to
+    instrumented=False on a Redis failure (never 500s the monitoring surface).
+    """
+    days = max(1, min(days, _RETENTION_DAYS))
+    absent = {
+        "instrumented": False,
+        "value": None,
+        "sample_count": 0,
+        "low_flags": 0,
+        "window_days": days,
+    }
+    try:
+        r: Any = redis or get_redis()
+        now = datetime.datetime.now(datetime.UTC)
+        total_sum = 0.0
+        total_count = 0
+        total_low = 0
+        for i in range(days):
+            day = _day(now - datetime.timedelta(days=i))
+            raw_sum = await r.get(_GROUNDED_SUM_KEY.format(day=day))
+            raw_count = await r.get(_GROUNDED_COUNT_KEY.format(day=day))
+            raw_low = await r.get(_GROUNDED_LOWFLAG_KEY.format(day=day))
+            if raw_sum:
+                total_sum += float(raw_sum)
+            if raw_count:
+                total_count += int(raw_count)
+            if raw_low:
+                total_low += int(raw_low)
+        if total_count <= 0:
+            return absent
+        return {
+            "instrumented": True,
+            "value": round(total_sum / total_count, 3),
+            "sample_count": total_count,
+            "low_flags": total_low,
+            "window_days": days,
+        }
+    except Exception:  # noqa: BLE001 — degraded monitoring read, never a 500
+        logger.debug("ai groundedness read failed", exc_info=True)
+        return absent

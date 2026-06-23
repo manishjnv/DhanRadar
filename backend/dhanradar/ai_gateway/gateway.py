@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
+import random
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -40,6 +42,7 @@ from dhanradar.ai_gateway.errors import (
 )
 from dhanradar.ai_gateway.metrics import (
     record_advisory_breach,
+    record_groundedness,
     record_latency,
     record_model_spend,
 )
@@ -48,6 +51,8 @@ from dhanradar.ai_gateway.schemas import AIOutputBase
 from dhanradar.budget import budget_guard
 from dhanradar.config import settings
 from dhanradar.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
 
 # High-stakes task types eligible for premium Sonnet spillover (architecture §B3).
 HIGH_STAKES_TASKS: frozenset[str] = frozenset(
@@ -94,6 +99,8 @@ class OpenRouterGateway:
         paid_fallback_models: Sequence[str] | None = None,
         paid_fallback_tasks: Iterable[str] | None = None,
         redis: Any = None,
+        groundedness_sample_rate: float | None = None,
+        groundedness_low_threshold: float | None = None,
     ) -> None:
         self._client = client  # injected (tests) or lazily built
         self._free_models = (
@@ -117,6 +124,17 @@ class OpenRouterGateway:
         # module's prompt templates in production. Empty → use the full pool.
         self._task_prefs = task_model_preferences or {}
         self._redis = redis
+        # Groundedness eval sampling (PR-4): fraction of served outputs to judge.
+        self._grounded_sample_rate = (
+            groundedness_sample_rate
+            if groundedness_sample_rate is not None
+            else settings.AI_GROUNDEDNESS_SAMPLE_RATE
+        )
+        self._grounded_low_threshold = (
+            groundedness_low_threshold
+            if groundedness_low_threshold is not None
+            else settings.AI_GROUNDEDNESS_LOW_THRESHOLD
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -132,6 +150,7 @@ class OpenRouterGateway:
         contains_personal_data: bool = True,
         cross_border_consent_verified: bool = False,
         request_id: str | None = None,
+        judge_eligible: bool = True,
     ) -> CompletionResult:
         """Return a ``CompletionResult`` for ``task_type`` or raise.
 
@@ -156,6 +175,10 @@ class OpenRouterGateway:
             request_id: Correlation id threaded from the originating HTTP request;
                 bound into the gateway's log context and forwarded to audit/ledger
                 writes (P1 logging).
+            judge_eligible: Whether this call may run the inline sampled groundedness
+                judge (PR-4). Defaults True for background callers (commentary/mood).
+                SYNCHRONOUS user-facing callers MUST pass False so a sampled judge
+                call never adds latency to a user request.
 
         Raises:
             ConsentNotVerifiedError: if ``contains_personal_data=True`` and
@@ -215,7 +238,11 @@ class OpenRouterGateway:
                 except QualityValidationError as qe:
                     last_quality_error = qe
                     continue  # quality fail → try the next free model
-                return CompletionResult(output=result, model_used=model)
+                return await self._maybe_judge(
+                    CompletionResult(output=result, model_used=model),
+                    messages,
+                    eligible=judge_eligible,
+                )
 
         # --- Cheap paid fallback for configured low-volume tasks ----------
         # (e.g. mood news-sentiment / commentary). Runs when the free pool yields
@@ -225,7 +252,7 @@ class OpenRouterGateway:
         # spend. These tasks are OWNED by this fallback: they skip the Sonnet
         # spillover below. On no usable output it returns None and we fall through.
         if task_type in self._paid_fallback_tasks and self._paid_fallback_models:
-            fb = await self._paid_fallback(messages, validator)
+            fb = await self._paid_fallback(messages, validator, judge_eligible=judge_eligible)
             if fb is not None:
                 return fb
 
@@ -238,7 +265,9 @@ class OpenRouterGateway:
             # Premium Sonnet spillover — but bound it with the SAME 3-strike skip
             # so a persistently-bad high-stakes ticker cannot loop premium spend.
             try:
-                return await self._spillover_to_sonnet(messages, validator)  # returns CompletionResult
+                return await self._spillover_to_sonnet(
+                    messages, validator, judge_eligible=judge_eligible
+                )
             except QualityValidationError:
                 strikes = await self._record_strike(task_type, ticker)
                 if strikes >= _STRIKE_LIMIT:
@@ -305,7 +334,11 @@ class OpenRouterGateway:
         return _LLMResult(data=data, total_tokens=total, model=model)
 
     async def _spillover_to_sonnet(
-        self, messages: list[dict[str, str]], validator: QualityValidator
+        self,
+        messages: list[dict[str, str]],
+        validator: QualityValidator,
+        *,
+        judge_eligible: bool = True,
     ) -> CompletionResult:
         """Premium Sonnet spillover. Records the (charged) cost even if the
         response then fails validation — Sonnet bills on response, so the budget
@@ -327,10 +360,16 @@ class OpenRouterGateway:
         output = await self._validate(validator, res.data)
         # Audit the model that actually served (res.model == self._sonnet_model here,
         # but use the threaded field so provenance stays symmetric with the free pool).
-        return CompletionResult(output=output, model_used=res.model)
+        return await self._maybe_judge(
+            CompletionResult(output=output, model_used=res.model), messages, eligible=judge_eligible
+        )
 
     async def _paid_fallback(
-        self, messages: list[dict[str, str]], validator: QualityValidator
+        self,
+        messages: list[dict[str, str]],
+        validator: QualityValidator,
+        *,
+        judge_eligible: bool = True,
     ) -> CompletionResult | None:
         """Cheap NON-premium, non-Claude paid-model fallback for low-volume tasks.
 
@@ -363,8 +402,98 @@ class OpenRouterGateway:
                     output = await self._validate(validator, res.data)
                 except QualityValidationError:
                     continue  # quality fail → try the next fallback model
-                return CompletionResult(output=output, model_used=res.model)
+                return await self._maybe_judge(
+                    CompletionResult(output=output, model_used=res.model),
+                    messages,
+                    eligible=judge_eligible,
+                )
         return None
+
+    async def _maybe_judge(
+        self, result: CompletionResult, messages: list[dict[str, str]], *, eligible: bool
+    ) -> CompletionResult:
+        """Sampled groundedness eval (PR-4). With probability sample_rate, score how
+        well the served output is supported by its input context and record the 0..1
+        score (Redis). Returns ``result`` UNCHANGED — the judge is observational and
+        non-fatal: any failure (sampling off, no judge model, 429, bad JSON, Redis
+        down) is swallowed so it can never alter or break the served result.
+
+        Runs INLINE, so a sampled call pays one extra free-pool call of latency. It
+        therefore only runs when ``eligible`` is True — set False by SYNCHRONOUS
+        user-facing callers (e.g. the MF research ask route) so a user request is
+        never slowed; background commentary/mood jobs leave it True. The judge uses a
+        dedicated UNINSTRUMENTED call so it never pollutes the latency / per-model-
+        spend / advisory-breach metrics, and bypasses the budget guard (eval
+        overhead, not a user-facing output)."""
+        try:
+            if (
+                not eligible
+                or self._grounded_sample_rate <= 0
+                or random.random() >= self._grounded_sample_rate
+            ):
+                return result
+            score = await self._run_groundedness_judge(messages, result.output)
+            if score is not None:
+                await record_groundedness(
+                    score, low_threshold=self._grounded_low_threshold, redis=self._redis
+                )
+        except Exception:  # noqa: BLE001 — eval must never affect the served result
+            logger.debug("groundedness judge failed", exc_info=True)
+        return result
+
+    async def _run_groundedness_judge(
+        self, messages: list[dict[str, str]], output: AIOutputBase
+    ) -> float | None:
+        """Ask a free-pool model to score (0..1) how well ``output`` is supported by
+        the context in ``messages``. Returns the score or None if no judge produced a
+        parseable answer. Never raises (caller also guards)."""
+        models = self._free_models
+        if not models:
+            return None
+        context = "\n".join(m.get("content", "") for m in messages)
+        # Exclude the forced disclaimer; judge only the substantive output text.
+        served = output.model_dump()
+        served.pop("disclaimer", None)
+        judge_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict groundedness grader. Given CONTEXT and a model "
+                    "OUTPUT, rate from 0.0 to 1.0 how fully the OUTPUT's claims are "
+                    "supported by the CONTEXT (1.0 = every claim is grounded, 0.0 = "
+                    "unsupported/hallucinated). Reply ONLY JSON: {\"grounded\": <float>}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"CONTEXT:\n{context}\n\nOUTPUT:\n{json.dumps(served, default=str)}",
+            },
+        ]
+        for model in models:
+            try:
+                data = await self._judge_call(model, judge_messages)
+            except (RateLimitError, APIStatusError, json.JSONDecodeError):
+                continue  # judge model unavailable / non-JSON → try the next
+            raw = data.get("grounded")
+            if isinstance(raw, (int, float)):
+                return float(raw)
+        return None
+
+    async def _judge_call(self, model: str, messages: list[dict[str, str]]) -> dict:
+        """Minimal UNINSTRUMENTED model call for the groundedness judge: no latency /
+        spend / breach recording, no budget guard — judge calls are eval overhead and
+        must not pollute the user-output metrics or consume the user's budget."""
+        client = self._get_client()
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+        if not getattr(resp, "choices", None):
+            raise json.JSONDecodeError("empty choices from judge", "", 0)
+        content = resp.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        return parsed if isinstance(parsed, dict) else {}
 
     async def _validate(self, validator: QualityValidator, data: dict) -> AIOutputBase:
         """Run the quality validator; on a SEBI advisory-boundary rejection,
