@@ -44,7 +44,7 @@ from dhanradar.auth.security import (
     verify_password,
 )
 from dhanradar.config import settings
-from dhanradar.models.auth import User, UserTierEnum
+from dhanradar.models.auth import User, UserActivityLog, UserTierEnum
 from dhanradar.redis_client import get_redis
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
             detail="account_suspended",
         )
 
-    await record_login(user, db)  # type: ignore[arg-type]
+    await record_login(user, db, method="password")  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -222,23 +222,34 @@ def _raise_invalid_credentials() -> None:
 logger = logging.getLogger(__name__)
 
 
-async def record_login(user: User, db: AsyncSession) -> None:
-    """Best-effort stamp of ``last_login_at`` (server NOW()) on a genuine login.
+async def record_login(user: User, db: AsyncSession, method: str) -> None:
+    """Best-effort stamp of ``last_login_at`` + insert a ``UserActivityLog`` row.
 
     Called from every successful authenticate_* path (password, TOTP, email-OTP)
     and the Google SSO path. Must NOT be called from the refresh-token path.
 
-    NEVER raises: ``last_login_at`` is an observational column, so a failure here
-    — a transient DB error, or migration lag where the column does not exist yet
-    during a rolling deploy — must never break the login. On error it logs and
-    rolls back, and the login proceeds. Commits its own UPDATE; it does not assume
-    an open caller transaction (the SSO path has already committed by this point).
+    NEVER raises: these are observational writes — a failure here must never
+    break the login. On error it logs and rolls back; the login proceeds.
+    Commits its own transaction; it does not assume an open caller transaction
+    (the SSO path has already committed by this point).
+
+    Args:
+        user:   The authenticated User ORM row.
+        db:     Async SQLAlchemy session.
+        method: Auth method used — 'password' | 'totp' | 'email_otp' | 'sso'.
     """
     try:
         await db.execute(
             update(User)
             .where(User.id == user.id)
             .values(last_login_at=sa_func.now())
+        )
+        db.add(
+            UserActivityLog(
+                user_id=user.id,
+                event_type="login",
+                method=method,
+            )
         )
         await db.commit()
     except Exception:  # noqa: BLE001 — observational; must never break login
@@ -668,7 +679,7 @@ async def authenticate_totp(email: str, code: str, db: AsyncSession) -> User:
 
     # Success — clear failure counter, stamp last_login_at.
     await redis.delete(attempts_key)
-    await record_login(user, db)  # type: ignore[arg-type]
+    await record_login(user, db, method="totp")  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 
@@ -821,7 +832,7 @@ async def authenticate_email_otp(email: str, code: str, db: AsyncSession) -> Use
 
     # Success: single-use enforcement — delete code key + attempts key, stamp last_login_at.
     await _otp.delete_code_and_attempts(uid)
-    await record_login(user, db)  # type: ignore[arg-type]
+    await record_login(user, db, method="email_otp")  # type: ignore[arg-type]
     return user  # type: ignore[return-value]
 
 

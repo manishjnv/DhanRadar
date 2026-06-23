@@ -38,11 +38,12 @@ from dhanradar.audit.service import list_admin_actions, list_payment_events, rec
 from dhanradar.billing.service import get_user_subscription
 from dhanradar.db import get_db
 from dhanradar.deps import RequireAdmin, UserContext
-from dhanradar.models.auth import User, UserTierEnum
+from dhanradar.models.auth import User, UserActivityLog, UserTierEnum
 from dhanradar.models.mf import MfCasJob
 from dhanradar.redis_client import get_redis
 
 from .users_schemas import (
+    ActivityEventRow,
     AuditLogItem,
     SuspendRequest,
     UserActionResponse,
@@ -206,6 +207,42 @@ def status_code_400() -> int:
 
 
 # ---------------------------------------------------------------------------
+# GET /admin/users/activity
+# MUST be declared BEFORE /users/{user_id} — otherwise FastAPI matches the
+# literal "activity" as a {user_id} path param and this route is shadowed.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users/activity", response_model=list[ActivityEventRow])
+async def get_recent_activity(
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[ActivityEventRow]:
+    """Global recent-login feed: most recent *limit* login events across all users.
+
+    Joins auth.user_activity_log → auth.users for the email address.
+    Returns events newest-first.  Read-only; RequireAdmin gate.
+    """
+    rows = await db.execute(
+        select(UserActivityLog, User.email)
+        .join(User, UserActivityLog.user_id == User.id)
+        .order_by(UserActivityLog.occurred_at.desc())
+        .limit(limit)
+    )
+    return [
+        ActivityEventRow(
+            user_id=str(log.user_id),
+            email=email,
+            event_type=log.event_type,
+            method=log.method,
+            occurred_at=log.occurred_at.isoformat(),
+        )
+        for log, email in rows.all()
+    ]
+
+
+# ---------------------------------------------------------------------------
 # GET /admin/users/{user_id}
 # ---------------------------------------------------------------------------
 
@@ -258,6 +295,23 @@ async def get_user_detail(
         for j in cas_jobs
     ]
 
+    # Most recent 20 login events for this user (auth.user_activity_log).
+    activity_result = await db.execute(
+        select(UserActivityLog)
+        .where(UserActivityLog.user_id == uid)
+        .order_by(UserActivityLog.occurred_at.desc())
+        .limit(20)
+    )
+    login_history = [
+        {
+            "event_type": j.event_type,
+            "method": j.method,
+            "occurred_at": j.occurred_at.isoformat(),
+            "request_id": j.request_id,
+        }
+        for j in activity_result.scalars().all()
+    ]
+
     return UserDetailResponse(
         id=str(user.id),
         email=user.email,
@@ -273,8 +327,7 @@ async def get_user_detail(
         suspended_at=user.suspended_at.isoformat() if user.suspended_at is not None else None,
         subscription=subscription,
         payments=payments,
-        # TODO: login_history deferred — needs a dedicated auth events table
-        login_history=[],
+        login_history=login_history,
         cas_uploads=cas_uploads,
     )
 

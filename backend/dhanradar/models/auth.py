@@ -15,6 +15,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -200,3 +201,53 @@ class Subscription(Base):
 
     # Relationship
     user: Mapped[User] = relationship("User", back_populates="subscriptions", lazy="raise")
+
+
+# ---------------------------------------------------------------------------
+# auth.user_activity_log
+# ---------------------------------------------------------------------------
+
+class UserActivityLog(Base):
+    """One row per auth event (login, future: logout, totp_setup, …).
+
+    Inserted best-effort by ``record_login`` in auth.service — never raises.
+    The composite index ix_user_activity_user_time (user_id, occurred_at DESC)
+    is created by migration 0045 via a raw DDL statement.
+    """
+
+    __tablename__ = "user_activity_log"
+    __table_args__ = (
+        Index("ix_user_activity_user_id", "user_id"),
+        {"schema": "auth"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # 'login' (only value at launch; extensible to 'logout', 'totp_setup', …)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # 'password' | 'totp' | 'email_otp' | 'sso' — NULL only for non-login events
+    method: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    # Populated in future when the service layer has request context wired in
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Reserved for future structured metadata (e.g. IP geolocation, device)
+    # Attribute name avoids conflict with SQLAlchemy's reserved `.metadata`
+    event_metadata: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'"),
+    )

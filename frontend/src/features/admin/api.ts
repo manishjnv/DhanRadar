@@ -283,6 +283,7 @@ export const adminKeysExt = {
   userSummary:           () => ['admin', 'users', 'summary'] as const,
   users:   (params?: Record<string, unknown>) => ['admin', 'users', 'list', params] as const,
   user:    (id: string)  => ['admin', 'users', 'detail', id] as const,
+  usersActivity: (limit: number) => ['admin', 'users', 'activity', limit] as const,
   billingOverview:       () => ['admin', 'billing', 'overview'] as const,
   billingSubscriptions:  (params?: Record<string, unknown>) => ['admin', 'billing', 'subscriptions', params] as const,
   billingPayments:       (params?: Record<string, unknown>) => ['admin', 'billing', 'payments', params] as const,
@@ -326,6 +327,21 @@ export interface AdminUserPayment {
   request_id: string | null;
 }
 
+export interface LoginEvent {
+  event_type: string;
+  method: string | null;
+  occurred_at: string;
+  request_id: string | null;
+}
+
+export interface AdminActivityEvent {
+  user_id: string;
+  email: string;
+  event_type: string;
+  method: string | null;
+  occurred_at: string;
+}
+
 export interface AdminUserDetail {
   id: string;
   email: string;
@@ -344,7 +360,7 @@ export interface AdminUserDetail {
     current_period_end: string | null;
   } | null;
   payments: AdminUserPayment[];
-  login_history: unknown[];
+  login_history: LoginEvent[];
   cas_uploads: unknown[];
 }
 
@@ -443,6 +459,15 @@ export function useAdminUserDetail(userId: string) {
     queryFn: () => api.get<AdminUserDetail>(`/admin/users/${userId}`),
     enabled: !!userId,
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useAdminUserActivity(limit = 50) {
+  return useQuery({
+    queryKey: adminKeysExt.usersActivity(limit),
+    queryFn: () => api.get<AdminActivityEvent[]>(`/admin/users/activity?limit=${limit}`),
+    staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
   });
 }
