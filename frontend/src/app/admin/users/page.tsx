@@ -59,6 +59,15 @@ function humanizeLoginMethod(method: string | null): string {
   }
 }
 
+// Plain-language description of a user-activity event (login or CAS upload).
+function describeActivity(eventType: string, method: string | null): string {
+  switch (eventType) {
+    case 'login':      return `Login · ${humanizeLoginMethod(method)}`;
+    case 'cas_upload': return 'CAS upload';
+    default:           return eventType.replace(/_/g, ' ');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Skeletons
 // ---------------------------------------------------------------------------
@@ -246,11 +255,11 @@ function UserDetailContent({ userId }: { userId: string }) {
         )}
       </div>
 
-      {/* Login history */}
+      {/* Activity (logins + CAS uploads) */}
       <div>
-        <h3 className="mb-3 text-h3 font-medium text-ink">Login history</h3>
+        <h3 className="mb-3 text-h3 font-medium text-ink">Activity</h3>
         {data.login_history.length === 0 ? (
-          <p className="text-small text-ink-muted">No logins recorded yet.</p>
+          <p className="text-small text-ink-muted">No activity recorded yet.</p>
         ) : (
           <ul className="flex flex-col gap-0">
             {data.login_history.map((ev, i) => (
@@ -258,7 +267,7 @@ function UserDetailContent({ userId }: { userId: string }) {
                 key={ev.request_id ?? `${ev.occurred_at}-${i}`}
                 className="flex items-center justify-between gap-4 border-b border-line py-2 last:border-0"
               >
-                <span className="text-small text-ink">{humanizeLoginMethod(ev.method)}</span>
+                <span className="text-small text-ink">{describeActivity(ev.event_type, ev.method)}</span>
                 <span className="font-mono text-[11px] text-ink-muted whitespace-nowrap">
                   {formatDateTime(ev.occurred_at)}
                 </span>
@@ -362,8 +371,8 @@ function RecentLoginsTable({ rows }: { rows: AdminActivityEvent[] }) {
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No recent logins"
-        description="User sign-ins will appear here once people start logging in."
+        title="No recent activity"
+        description="User logins and CAS uploads will appear here as people use the app."
         className="py-8"
       />
     );
@@ -371,10 +380,10 @@ function RecentLoginsTable({ rows }: { rows: AdminActivityEvent[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
-        <caption className="sr-only">Recent user logins — most recent first</caption>
+        <caption className="sr-only">Recent user activity — most recent first</caption>
         <thead>
           <tr className="border-b border-line">
-            {['User', 'Method', 'When'].map((h) => (
+            {['User', 'Activity', 'When'].map((h) => (
               <th
                 key={h}
                 scope="col"
@@ -392,7 +401,7 @@ function RecentLoginsTable({ rows }: { rows: AdminActivityEvent[] }) {
               className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
             >
               <td className="py-2.5 pr-4 text-ink">{row.email}</td>
-              <td className="py-2.5 pr-4 text-ink-secondary">{humanizeLoginMethod(row.method)}</td>
+              <td className="py-2.5 pr-4 text-ink-secondary">{describeActivity(row.event_type, row.method)}</td>
               <td className="py-2.5 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatRelative(row.occurred_at)}
               </td>
@@ -741,11 +750,11 @@ export default function AdminUsersPage() {
         )}
       </section>
 
-      {/* Recent Logins — global user-activity feed */}
+      {/* Recent Activity — global user-activity feed (logins + CAS uploads) */}
       <Section
-        id="section-recent-logins"
-        title="Recent Logins"
-        subtitle="The most recent user sign-ins across the platform."
+        id="section-recent-activity"
+        title="Recent Activity"
+        subtitle="The most recent user logins and CAS uploads across the platform."
         action={
           <Button size="sm" variant="ghost" onClick={() => activityQ.refetch()}>
             <RefreshCw size={12} strokeWidth={2} aria-hidden="true" />
@@ -756,7 +765,7 @@ export default function AdminUsersPage() {
         {activityQ.isLoading && <TableSkeleton rows={6} />}
         {activityQ.isError && (
           <ErrorCard
-            title="Could not load recent logins"
+            title="Could not load recent activity"
             onRetry={() => activityQ.refetch()}
           />
         )}
@@ -767,7 +776,7 @@ export default function AdminUsersPage() {
       <Section
         id="section-audit"
         title="Activity & Audit Log"
-        subtitle="Recent user logins are shown above. This table lists admin actions and their outcomes."
+        subtitle="Recent user activity is shown above. This table lists admin actions and their outcomes."
         action={
           <AuditFilters
             actionFilter={auditAction}
