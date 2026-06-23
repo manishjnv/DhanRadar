@@ -184,3 +184,31 @@ def test_compute_budget_state_remaining_never_negative():
 
     assert result["free_calls_today"] == 2000
     assert result["free_remaining"] == 0
+
+
+def test_compute_budget_state_accepts_str_values_from_decode_responses():
+    """Regression: the shared Redis client runs decode_responses=True, so
+    redis.get returns ``str`` in production — NOT bytes. The admin AI dashboard
+    and cost pages 500'd with AttributeError('str' has no attribute 'decode')
+    once the budget keys were populated. Pure-str inputs must compute cleanly.
+    """
+    from dhanradar.budget import compute_budget_state
+
+    # Exactly the prod shape observed: free="0" (truthy str), premium a real spend.
+    result = compute_budget_state("0", "0.00149099999999998", free_cap=2000)
+
+    assert result["free_calls_today"] == 0
+    assert result["premium_usd_today"] == pytest.approx(0.001491)
+    assert result["free_remaining"] == 2000
+
+
+def test_compute_budget_state_str_and_bytes_agree():
+    """str and bytes inputs must yield identical results (client-config agnostic)."""
+    from dhanradar.budget import compute_budget_state
+
+    as_bytes = compute_budget_state(b"42", b"3.25", free_cap=1000)
+    as_str = compute_budget_state("42", "3.25", free_cap=1000)
+
+    assert as_bytes == as_str
+    assert as_str["free_calls_today"] == 42
+    assert as_str["premium_usd_today"] == pytest.approx(3.25)
