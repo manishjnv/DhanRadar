@@ -284,6 +284,7 @@ async def db_tables(db_engine):
     import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
     import dhanradar.models.concepts  # noqa: F401 — registers concepts.* tables (C1)
     import dhanradar.signal.models  # noqa: F401 — registers signal.* tables
+    import dhanradar.models.bse  # noqa: F401 — registers bse.* tables (Star MF webhook inbox)
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:
