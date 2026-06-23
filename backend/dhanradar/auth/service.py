@@ -253,7 +253,7 @@ async def record_login(user: User, db: AsyncSession, method: str) -> None:
         )
         await db.commit()
     except Exception:  # noqa: BLE001 — observational; must never break login
-        logger.warning("auth: failed to stamp last_login_at — login continues")
+        logger.warning("auth: failed to record login (last_login_at / activity log) — login continues")
         try:
             await db.rollback()
         except Exception:  # noqa: BLE001

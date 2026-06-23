@@ -216,8 +216,11 @@ class UserActivityLog(Base):
     """
 
     __tablename__ = "user_activity_log"
+    # Composite index matches migration 0045 exactly (name + columns + DESC) so the
+    # model and the DB agree — no autogenerate drift. user_id is the leading column,
+    # so this also serves single-user lookups (no separate single-col index needed).
     __table_args__ = (
-        Index("ix_user_activity_user_id", "user_id"),
+        Index("ix_user_activity_user_time", "user_id", text("occurred_at DESC")),
         {"schema": "auth"},
     )
 
