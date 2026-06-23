@@ -339,21 +339,37 @@ def get_budget_state(redis_client) -> dict:  # type: ignore[type-arg]
     )
 
 
+def _decode_counter(raw: bytes | str | None) -> str:
+    """Normalise a raw Redis counter to a numeric string.
+
+    The shared client runs with ``decode_responses=True`` so ``redis.get`` returns
+    ``str`` in production, but unit tests (and a client without decode) pass
+    ``bytes``. Accept both (and None → "0") so the snapshot never crashes on the
+    type the real client actually returns. Mirrors the existing guard at
+    ``get_effective_caps`` (``raw.decode() if isinstance(raw, bytes) else ...``).
+    """
+    if not raw:
+        return "0"
+    return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+
 def compute_budget_state(
-    free_raw: bytes | None,
-    premium_raw: bytes | None,
+    free_raw: bytes | str | None,
+    premium_raw: bytes | str | None,
     *,
     free_cap: int | None = None,
     premium_soft: float | None = None,
     premium_hard: float | None = None,
 ) -> dict:
-    """Pure computation: derive the budget snapshot from raw Redis byte values.
+    """Pure computation: derive the budget snapshot from raw Redis counter values.
 
     Separated from I/O so it is trivially unit-testable without a Redis instance.
 
     Args:
-        free_raw:     raw bytes from ``redis.get(_REDIS_KEYS["free"])``; None if key absent.
-        premium_raw:  raw bytes from ``redis.get(_REDIS_KEYS["premium"])``; None if key absent.
+        free_raw:     raw value from ``redis.get(_REDIS_KEYS["free"])`` — ``str``
+                      under decode_responses (prod) or ``bytes``; None if key absent.
+        premium_raw:  raw value from ``redis.get(_REDIS_KEYS["premium"])`` — ``str``
+                      or ``bytes``; None if key absent.
         free_cap:     optional override for the free call-count cap (from admin Redis key).
                       Defaults to ``_CAPS["free"]``.
         premium_soft: optional override for the premium soft-cap USD (from admin Redis key).
@@ -370,8 +386,8 @@ def compute_budget_state(
     _premium_soft_cap: float = float(premium_soft) if premium_soft is not None else float(_CAPS["premium_soft"])
     _premium_hard_cap: float = float(premium_hard) if premium_hard is not None else float(_CAPS["premium_hard"])
 
-    free_calls_today: int = int(float(free_raw.decode() if free_raw else "0"))
-    premium_usd_today: float = round(float(premium_raw.decode() if premium_raw else "0"), 6)
+    free_calls_today: int = int(float(_decode_counter(free_raw)))
+    premium_usd_today: float = round(float(_decode_counter(premium_raw)), 6)
 
     return {
         "free_calls_today": free_calls_today,
