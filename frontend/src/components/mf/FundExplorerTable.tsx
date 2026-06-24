@@ -1,19 +1,23 @@
 /**
  * FundExplorerTable — ranked fund comparison table for /mf/explore.
  *
+ * V4 redesign: rounded bordered surface + sticky header, and a band-driven
+ * ring + label assessment cell (shared FundScoreCell) that folds the former
+ * separate Confidence column into the ring fill. Density, name-cleaning, IDCW
+ * disambiguation and all sort/navigation logic are unchanged from main.
+ *
  * Compliance invariants (non-negotiable):
- *   - unified_score NEVER rendered (non-neg #2)
+ *   - unified_score NEVER rendered (non-neg #2) — the ring is band-driven, no number
  *   - No advisory language — only educational labels and factual data
- *   - confidence_band rendered as High/Mid/Low badge, never as a float
+ *   - confidence band shown as ring fill / word, never as a float
  *   - Row click → navigates to Fund Detail page (/mf/fund/[isin]?category=...)
  *   - Table scrolls horizontally on mobile — no column collapsing
  *
- * Density notes (founder call 2026-06-21):
+ * Density notes (founder call 2026-06-21, preserved):
  *   - Body type is 12px (deliberate deviation from the ui-system .dt 13px canon
  *     for Bloomberg/TradingView-style density — user instruction wins).
  *   - Per-factor breakdown (consistency/recency/volatility) lives on the Fund
- *     Detail page (WhyThisLabelPanel); here it is consolidated to one Confidence
- *     column to reclaim horizontal space.
+ *     Detail page (WhyThisLabelPanel).
  *   - Scheme name is cleaned of the redundant "- Regular Plan - Growth Option"
  *     suffix (already shown as chips) and clamped to one line.
  */
@@ -24,10 +28,10 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
-import { LabelChip } from '@/components/ui/LabelChip';
+import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
 import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
 import type { FundExplorerItem } from '@/features/mf/types';
-import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
+import type { Label } from '@/components/charts/ScoreRing';
 
 // ---------------------------------------------------------------------------
 // Sort types (exported so page.tsx can import SortKey)
@@ -37,7 +41,6 @@ export type SortKey = 'rank' | 'return_3m' | 'return_6m' | 'return_1y' | 'return
 
 // ---------------------------------------------------------------------------
 // Fund avatar — deterministic color from scheme name.
-// Uses CSS variables from the brand token set to avoid hardcoded hex.
 // ---------------------------------------------------------------------------
 
 const AVATAR_VAR_COLORS = [
@@ -52,8 +55,7 @@ const AVATAR_VAR_COLORS = [
 ] as const;
 
 // IDCW payout cadence → short display keyword. Disambiguates funds that share a
-// brand + plan + IDCW option but differ only by frequency (e.g. the Sundaram
-// Banking & PSU Direct IDCW variants: Daily/Weekly/Monthly/Quarterly/base).
+// brand + plan + IDCW option but differ only by frequency.
 const FREQ_LABELS: Record<string, string> = {
   daily: 'Daily',
   weekly: 'Weekly',
@@ -74,34 +76,6 @@ function FundAvatar({ name }: { name: string }) {
     >
       {name[0]?.toUpperCase() ?? '?'}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Confidence band badge — single consolidated column (replaces the 3 factor
-// columns). Band-only, never a numeric (non-neg #2, #4).
-// ---------------------------------------------------------------------------
-
-const BAND_CONFIG = {
-  high:   { text: 'text-emerald', label: 'High', ariaLabel: 'High confidence'   },
-  medium: { text: 'text-amber',   label: 'Mid',  ariaLabel: 'Medium confidence' },
-  low:    { text: 'text-red',     label: 'Low',  ariaLabel: 'Low confidence'    },
-} as const;
-
-function BandCell({ value }: { value: 'high' | 'medium' | 'low' | null | undefined }) {
-  if (!value) return <span className="font-mono text-[11px] text-ink-muted">—</span>;
-  const cfg = BAND_CONFIG[value];
-  return (
-    <span
-      aria-label={cfg.ariaLabel}
-      className={cn(
-        'inline-flex items-center px-1.5 py-px rounded border border-current',
-        'font-mono text-[11px] font-semibold uppercase tracking-wide',
-        cfg.text,
-      )}
-    >
-      {cfg.label}
-    </span>
   );
 }
 
@@ -129,7 +103,7 @@ function SortHeader({
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSort(sortKey); }
       }}
       className={cn(
-        'pb-2.5 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold',
+        'py-2.5 px-3 text-right font-mono text-caption uppercase tracking-[0.06em] font-semibold bg-surface-2',
         'cursor-pointer select-none whitespace-nowrap transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal/40',
         isActive ? 'text-royal' : 'text-ink-muted hover:text-ink',
@@ -145,6 +119,8 @@ function SortHeader({
     </th>
   );
 }
+
+const TH = 'py-2.5 px-3 font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted bg-surface-2';
 
 // ---------------------------------------------------------------------------
 // Return cell — mono, colored, +/- prefix; em-dash when null
@@ -187,43 +163,33 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
   }, [router]);
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-sm">
       {/* min-w ensures horizontal scroll on mobile — never collapses columns.
           table-fixed + colgroup give the fund name room and keep returns tight. */}
       <table
-        className="w-full table-fixed border-collapse text-[12px] min-w-[920px]"
+        className="w-full table-fixed border-collapse text-[12px] min-w-[960px]"
         aria-label="Fund rankings — educational data only, not investment advice"
         data-testid="fund-explorer-table"
       >
         <colgroup>
           <col style={{ width: '4%' }} />   {/* # */}
-          <col style={{ width: '40%' }} />  {/* Fund */}
+          <col style={{ width: '38%' }} />  {/* Fund */}
           <col style={{ width: '9%' }} />   {/* Rank */}
-          <col style={{ width: '14%' }} />  {/* Assessment */}
-          <col style={{ width: '8%' }} />   {/* Confidence */}
-          <col style={{ width: '5%' }} />   {/* 3M */}
-          <col style={{ width: '5%' }} />   {/* 6M */}
-          <col style={{ width: '5%' }} />   {/* 1Y */}
-          <col style={{ width: '5%' }} />   {/* 3Y */}
-          <col style={{ width: '5%' }} />   {/* 5Y */}
+          <col style={{ width: '22%' }} />  {/* Assessment (ring + label + band) */}
+          <col style={{ width: '5.4%' }} />  {/* 3M */}
+          <col style={{ width: '5.4%' }} />  {/* 6M */}
+          <col style={{ width: '5.4%' }} />  {/* 1Y */}
+          <col style={{ width: '5.4%' }} />  {/* 3Y */}
+          <col style={{ width: '5.4%' }} />  {/* 5Y */}
         </colgroup>
 
-        {/* thead: .dt th pattern — mono, uppercase, caption, muted, tracking */}
-        <thead>
+        {/* thead: sticky, surface-2 background, mono uppercase headers */}
+        <thead className="sticky top-0 z-[1]">
           <tr className="border-b border-line">
-            <th scope="col" className="pb-2.5 px-3 text-center font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
-              #
-            </th>
-            <th scope="col" className="pb-2.5 px-3 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
-              Fund
-            </th>
+            <th scope="col" className={cn(TH, 'text-center')}>#</th>
+            <th scope="col" className={cn(TH, 'text-left')}>Fund</th>
             <SortHeader label="Rank" sortKey="rank" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <th scope="col" className="pb-2.5 px-3 text-left font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
-              Assessment
-            </th>
-            <th scope="col" className="pb-2.5 px-3 text-center font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">
-              Confidence
-            </th>
+            <th scope="col" className={cn(TH, 'text-left')}>Assessment</th>
             <SortHeader label="3M" sortKey="return_3m" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="6M" sortKey="return_6m" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="1Y" sortKey="return_1y" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
@@ -232,7 +198,6 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
           </tr>
         </thead>
 
-        {/* tbody: .dt td pattern — text, padding, hover surface-2 */}
         <tbody>
           {funds.map((fund, idx) => {
             const detailHref = `/mf/fund/${fund.isin}?category=${encodeURIComponent(fund.sebi_category)}`;
@@ -248,9 +213,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                   {idx + 1}
                 </td>
 
-                {/* Fund — avatar + cleaned name (one line) + plan/option chips.
-                    The fund name <Link> is the keyboard-accessible path;
-                    the row onClick handles mouse clicks. */}
+                {/* Fund — avatar + cleaned name (one line) + plan/option/freq chips */}
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-2.5">
                     <FundAvatar name={fund.scheme_name} />
@@ -261,9 +224,6 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                         title={fund.scheme_name}
                         className="font-medium text-ink leading-tight group-hover:text-royal transition-colors line-clamp-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
                       >
-                        {/* Prefer the server-derived clean name (strips
-                            "(Formerly …)", plan/option, etc.); fall back to the
-                            local helper only for old cached rows with no column. */}
                         {fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)}
                       </Link>
                       <div className="flex items-center flex-wrap gap-1 mt-0.5">
@@ -283,8 +243,6 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                               : 'Div Payout'}
                           </span>
                         )}
-                        {/* Frequency keyword — the distinguishing chip for IDCW
-                            variants that share the same brand/plan/option. */}
                         {fund.idcw_frequency && fund.option_type !== 'growth' && FREQ_LABELS[fund.idcw_frequency] && (
                           <span className="inline-flex items-center px-1.5 py-px rounded bg-surface-3 border border-line font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
                             {FREQ_LABELS[fund.idcw_frequency]}
@@ -297,23 +255,13 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
 
                 {/* Rank — #N/M in mono */}
                 <td className="py-2.5 px-3 text-right whitespace-nowrap tabular-nums">
-                  <span className="font-mono text-[12px] font-semibold text-ink">
-                    #{fund.category_rank}
-                  </span>
-                  <span className="font-mono text-[11px] text-ink-muted">
-                    /{fund.category_total}
-                  </span>
+                  <span className="font-mono text-[12px] font-semibold text-ink">#{fund.category_rank}</span>
+                  <span className="font-mono text-[11px] text-ink-muted">/{fund.category_total}</span>
                 </td>
 
-                {/* Assessment label — band moved to its own column, so no
-                    confidenceBand here (avoids duplication). */}
+                {/* Assessment — band-driven ring + label (folds the old Confidence column) */}
                 <td className="py-2.5 px-3">
-                  <LabelChip label={fund.verb_label as Label} />
-                </td>
-
-                {/* Confidence band — single consolidated column */}
-                <td className="py-2.5 px-3 text-center">
-                  <BandCell value={(fund.confidence_band ?? undefined) as ConfidenceBand | undefined} />
+                  <FundScoreCell label={fund.verb_label as Label} confidenceBand={fund.confidence_band} ringSize={26} />
                 </td>
 
                 {/* Returns */}
@@ -328,7 +276,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
 
           {funds.length === 0 && (
             <tr>
-              <td colSpan={10} className="py-16 text-center">
+              <td colSpan={9} className="py-16 text-center">
                 <p className="text-small font-medium text-ink">No funds match your search</p>
                 <p className="text-caption text-ink-muted mt-1">Try a different name or clear the search</p>
               </td>
