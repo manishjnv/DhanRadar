@@ -167,13 +167,33 @@ class AiDashboardResponse(BaseModel):
 
 
 class BacktestStatus(BaseModel):
-    instrumented: bool = False
-    note: str = "backtest results not stored in rating_engine_changelog"
+    """Backtest pass-gate summary (PR-5). The real per-version outcome lives on each
+    ``EngineVersionRow.backtest`` (``{"passed": bool}`` written at activation); this
+    top-level flag says the §8 gate is tracked. ``versions_with_backtest`` counts how
+    many returned rows carry a recorded outcome (vs not-asserted)."""
+
+    instrumented: bool = True
+    versions_with_backtest: int = 0
+    note: str = (
+        "§8 backtest pass-gate outcome per version (see each row's backtest; "
+        "absent = not asserted). DhanRadar records the activation gate's pass/fail, "
+        "not a historical-accuracy backtest score."
+    )
 
 
 class DriftStatus(BaseModel):
+    """Label-drift signal (PR-5): reuses the existing label-churn review for the
+    active educational-label scoring version — how much the same fund's label moves.
+    ``instrumented`` is True once a churn reading is available."""
+
     instrumented: bool = False
-    note: str = "drift values not stored in rating_engine_changelog"
+    decision: str = "insufficient_data"
+    churn: float = 0.0
+    requires_human_review: bool = False
+    note: str = (
+        "Drift = label churn for the active educational_label scoring version "
+        "(share of funds whose label changed). High churn ⇒ review the methodology."
+    )
 
 
 class AiVersionsResponse(BaseModel):

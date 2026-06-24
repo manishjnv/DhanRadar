@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
+import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminAIVersions,
   type AdminAIRegistryVersion,
@@ -45,7 +46,7 @@ function TableSkeleton() {
 // Registry versions table
 // ---------------------------------------------------------------------------
 const VERSION_HEADERS = [
-  'Version', 'Created by', 'Approved by', 'Approved by Two People', 'Currently Live', 'Activated at', 'Created at',
+  'Version', 'Created by', 'Approved by', 'Approved by Two People', 'Backtest', 'Currently Live', 'Activated at', 'Created at',
 ];
 
 function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
@@ -101,6 +102,15 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
               </td>
               <td className="py-2.5 pr-4">
                 <HealthBadge status={v.two_person_ok ? 'Success' : 'Warning'} />
+              </td>
+              <td className="py-2.5 pr-4">
+                {v.backtest == null || typeof v.backtest.passed !== 'boolean' ? (
+                  <span className="font-mono text-[11px] text-ink-muted" title="§8 backtest gate not asserted for this version">
+                    not asserted
+                  </span>
+                ) : (
+                  <HealthBadge status={v.backtest.passed ? 'Success' : 'Warning'} />
+                )}
               </td>
               <td className="py-2.5 pr-4">
                 <HealthBadge status={v.activated ? 'Healthy' : 'Paused'} />
@@ -182,28 +192,43 @@ export default function AdminAIVersionsPage() {
           </Card>
         </section>
 
-        {/* Section B — Not-yet-instrumented notes */}
+        {/* Section B — Methodology monitoring (backtest gate + label drift) */}
         {q.data && (
           <section aria-labelledby="section-ai-gaps" className="flex flex-col gap-3">
             <h2 id="section-ai-gaps" className="text-h3 font-medium text-ink">
-              Planned Instrumentation
+              Methodology Monitoring
             </h2>
             <div className="flex flex-col gap-2">
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
-                <p className="font-medium text-ink mb-1">Past-performance test</p>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-medium text-ink">Backtest gate</p>
+                  <HealthBadge status={q.data.backtest.instrumented ? 'Healthy' : 'Planned'} />
+                </div>
                 <p>
-                  Not yet available —{' '}
-                  <HealthBadge status={q.data.backtest.instrumented ? 'Healthy' : 'Planned'} />{' '}
-                  Shows how well a scoring version would have labelled funds using historical data. Tracked in the Phase 5 build plan.
+                  The §8 backtest pass-gate outcome is recorded per version (see the
+                  Backtest column above). {q.data.backtest.versions_with_backtest} of{' '}
+                  {q.data.versions.length} shown versions carry a recorded outcome.
+                  DhanRadar records the activation-gate pass/fail, not a historical-accuracy score.
                 </p>
               </div>
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
-                <p className="font-medium text-ink mb-1">Answer-consistency monitor</p>
-                <p>
-                  Not yet available —{' '}
-                  <HealthBadge status={q.data.drift.instrumented ? 'Healthy' : 'Planned'} />{' '}
-                  Alerts when the live scoring version starts producing different results from its baseline. Coming alongside the past-performance test.
-                </p>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-medium text-ink">Label drift</p>
+                  <HealthBadge status={q.data.drift.instrumented ? 'Healthy' : 'Planned'} />
+                </div>
+                {q.data.drift.instrumented ? (
+                  <p>
+                    Label churn for the live scoring version:{' '}
+                    <span className="font-mono text-ink">{(q.data.drift.churn * 100).toFixed(1)}%</span>{' '}
+                    of funds changed label ({displayLabel(q.data.drift.decision, 'decision')})
+                    {q.data.drift.requires_human_review ? ' · review needed' : ''}. High churn ⇒ review the methodology.
+                  </p>
+                ) : (
+                  <p>
+                    Not enough labelled history yet to measure drift — a churn reading appears
+                    once the live scoring version has labelled funds across more than one window.
+                  </p>
+                )}
               </div>
             </div>
           </section>
