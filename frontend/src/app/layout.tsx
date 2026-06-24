@@ -43,9 +43,16 @@ export default function RootLayout({
     // brand faces everywhere; `font-sans` applies Geist Sans by default.
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable} ${instrumentSerif.variable}`}
+      // overflow-x-clip: guard against document-level horizontal scroll on
+      // mobile. Nested scroll-snap carousels (e.g. Fund Detail "Similar Funds")
+      // leak phantom horizontal overflow to the viewport on real mobile Chrome,
+      // letting the whole page drag sideways (made obvious by the fixed dev
+      // banner clipping on the left). `clip` (not `hidden`) stops it without
+      // creating a scroll container — sticky headers and internal
+      // overflow-x-auto carousels/tables keep working.
+      className={`${GeistSans.variable} ${GeistMono.variable} ${instrumentSerif.variable} overflow-x-clip`}
     >
-      <body className="font-sans bg-bg text-ink antialiased">
+      <body className="font-sans bg-bg text-ink antialiased overflow-x-clip">
         <Providers>
           {/* Global pre-release notice — fixed bar; publishes its height as
               --dev-banner-h so the wrapper below reserves space, SiteHeader
