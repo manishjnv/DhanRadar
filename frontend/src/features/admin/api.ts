@@ -790,6 +790,8 @@ export interface AdminAIRegistryVersion {
   activated: boolean;
   activated_at: string | null;
   created_at: string | null;
+  backtest: Record<string, unknown> | null;
+  drift: Record<string, unknown> | null;
 }
 
 /** Mirrors AiVersionsResponse in aiops_schemas.py */

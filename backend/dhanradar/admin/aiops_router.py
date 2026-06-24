@@ -74,9 +74,11 @@ from .aiops_schemas import (
     AiSafetyResponse,
     AiVersionsResponse,
     AuditRowSummary,
+    BacktestStatus,
     BudgetCapsResponse,
     BudgetCapsSetRequest,
     BudgetSnapshot,
+    DriftStatus,
     EngineVersionRow,
     GroundednessInfo,
     LabelChurnSummary,
@@ -215,13 +217,33 @@ async def get_ai_versions(
 ) -> AiVersionsResponse:
     """Return the rating_engine_changelog version registry (read-only).
 
-    ``backtest`` and ``drift`` are absent from the changelog schema and always
-    returned as ``instrumented:false``.  Promotion (activate) is a Phase 5 gated
-    mutation — not available here.
+    ``backtest`` and ``drift`` are per-version JSONB fields written at activation
+    time.  The top-level status objects flip to ``instrumented:true`` once at
+    least one version row carries non-null data.
     """
     raw_versions = await list_engine_versions(db, limit=limit)
     versions = [EngineVersionRow(**row) for row in raw_versions]
-    return AiVersionsResponse(versions=versions)
+    any_backtest = any(v.backtest is not None for v in versions)
+    any_drift = any(v.drift is not None for v in versions)
+    return AiVersionsResponse(
+        versions=versions,
+        backtest=BacktestStatus(
+            instrumented=any_backtest,
+            note=(
+                "backtest data stored in rating_engine_changelog"
+                if any_backtest
+                else "backtest results not stored in rating_engine_changelog"
+            ),
+        ),
+        drift=DriftStatus(
+            instrumented=any_drift,
+            note=(
+                "drift data stored in rating_engine_changelog"
+                if any_drift
+                else "drift values not stored in rating_engine_changelog"
+            ),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

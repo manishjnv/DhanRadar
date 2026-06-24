@@ -159,6 +159,8 @@ async def activate_scoring_model(
             factors_after=factors_after,
             methodology_url=(body.methodology_url or cfg.methodology_url),
             backtest_passed=body.backtest_passed,
+            backtest=body.backtest,
+            drift=body.drift,
         )
     except TwoPersonGateError as exc:
         raise HTTPException(
@@ -193,6 +195,8 @@ async def activate_scoring_model(
         activated=entry["activated"],
         activated_at=entry["activated_at"],
         methodology_url=entry["methodology_url"],
+        backtest=entry.get("backtest"),
+        drift=entry.get("drift"),
     )
 
 

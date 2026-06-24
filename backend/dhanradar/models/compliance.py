@@ -161,6 +161,8 @@ class RatingEngineChangelog(Base):
         JSONB, nullable=False, server_default=text("'{}'")
     )
     methodology_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    backtest: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    drift: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     activated: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )

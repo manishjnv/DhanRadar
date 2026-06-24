@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateDisclaimerRequest(BaseModel):
@@ -49,6 +49,8 @@ class LabelChurnResponse(BaseModel):
 class ActivateModelRequest(BaseModel):
     backtest_passed: bool = False
     methodology_url: str | None = None
+    backtest: dict | None = Field(None, description="Backtest results summary (free-form JSONB).")
+    drift: dict | None = Field(None, description="Drift metrics vs prior version (free-form JSONB).")
 
 
 class ActivateModelResponse(BaseModel):
@@ -59,6 +61,8 @@ class ActivateModelResponse(BaseModel):
     activated: bool
     activated_at: str | None
     methodology_url: str | None
+    backtest: dict | None = None
+    drift: dict | None = None
 
 
 class ModelActivationStatusResponse(BaseModel):
