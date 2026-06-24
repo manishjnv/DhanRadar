@@ -53,7 +53,7 @@ import {
 // ---------------------------------------------------------------------------
 function FundDetailSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-[1320px] flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       <Skeleton className="h-5 w-64 rounded-full" />
       <Skeleton className="h-56 rounded-3xl" />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -67,7 +67,7 @@ function FundDetailSkeleton() {
 
 function FundNotFound({ backHref }: { backHref: string }) {
   return (
-    <div className="mx-auto w-full max-w-[1320px] flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       <Link href={backHref} className="inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
         ← Back to Fund Explorer
       </Link>
@@ -133,7 +133,7 @@ function FundDetailView() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1320px] pb-24">
+    <div className="w-full pb-24">
       <div className="mb-4">
         <Link href={backHref} className="mb-3 inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
           ← Back to Fund Explorer
