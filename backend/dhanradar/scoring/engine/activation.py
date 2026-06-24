@@ -88,6 +88,13 @@ async def activate_model_version(
 
     from dhanradar.compliance import service
 
+    # Persist the real §8 backtest pass-gate outcome (PR-5). assert_activatable above
+    # guarantees backtest_passed is True for any activated row, so this records
+    # {"passed": True}; a caller may still pass a richer backtest dict explicitly.
+    # Surfaced read-only per version on /admin/ai/versions.
+    if backtest is None:
+        backtest = {"passed": backtest_passed}
+
     # Fast-path dup guard. The `uq_engine_changelog_activated_per_version` partial-
     # unique index (migration 0009) is the race-safe backstop: a concurrent activation
     # of the same version that slips past this SELECT is rejected at commit.
