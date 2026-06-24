@@ -438,7 +438,7 @@ function ExplorePageContent() {
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get('category');
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-4 sm:px-6 py-6">
+    <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12 py-6">
       <ExplorerBody initialCategory={initialCategory} />
     </div>
   );
