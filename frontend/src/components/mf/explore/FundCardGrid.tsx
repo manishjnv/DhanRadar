@@ -78,7 +78,7 @@ export function FundCardGrid({ funds }: { funds: FundExplorerItem[] }) {
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {funds.map((fund) => {
         const detailHref = `/mf/fund/${fund.isin}?category=${encodeURIComponent(fund.sebi_category)}`;
         const name = fund.fund_name_short ?? cleanSchemeName(fund.scheme_name);

@@ -12,7 +12,7 @@ import { LEADERBOARDS } from './sampleData';
 
 export function Leaderboards() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
       {LEADERBOARDS.map((l) => (
         <div key={l.cat} className="rounded-xl border border-line bg-surface p-4 shadow-sm">
           <div className="font-mono text-caption uppercase tracking-[0.06em] font-semibold text-ink-muted">🏆 {l.cat}</div>
