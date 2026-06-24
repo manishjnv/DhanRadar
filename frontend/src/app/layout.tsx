@@ -16,6 +16,7 @@ import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import { Instrument_Serif } from 'next/font/google';
 import { Providers } from './providers';
+import { DevBanner } from '@/components/site/DevBanner';
 import './globals.css';
 import '@/styles/tokens.css';
 
@@ -45,7 +46,13 @@ export default function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable} ${instrumentSerif.variable}`}
     >
       <body className="font-sans bg-bg text-ink antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          {/* Global pre-release notice — fixed bar; publishes its height as
+              --dev-banner-h so the wrapper below reserves space, SiteHeader
+              offsets its sticky top, and AppShell shrinks its viewport height. */}
+          <DevBanner />
+          <div style={{ paddingTop: 'var(--dev-banner-h, 0px)' }}>{children}</div>
+        </Providers>
       </body>
     </html>
   );
