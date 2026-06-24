@@ -713,3 +713,123 @@ async def record_engine_changelog(
         "backtest": getattr(row, "backtest", None),
         "drift": getattr(row, "drift", None),
     }
+
+
+# ---------------------------------------------------------------------------
+# AI output feedback — user thumbs up/down on served AI outputs
+# ---------------------------------------------------------------------------
+
+
+class DuplicateFeedbackError(Exception):
+    """Raised when a user submits feedback for an audit_id they already rated."""
+
+    def __init__(self, audit_id: str, user_id: str) -> None:
+        super().__init__(f"feedback already submitted: audit={audit_id} user={user_id}")
+
+
+async def record_feedback(
+    db: Any,
+    *,
+    audit_id: str,
+    user_id: str,
+    helpful: bool,
+    feedback_text: Optional[str] = None,
+) -> dict:
+    """Append one user-feedback row. Append-only — no updates or deletes.
+
+    ``audit_id`` and ``user_id`` are validated as UUID strings on entry
+    (raises ``ValueError`` on bad format → FastAPI renders 422).
+
+    DPDP: ``user_id`` is stored — ``RequireConsent`` must be wired to the
+    calling endpoint before this function is invoked with real-user data
+    (tracked in BLOCKERS.md B64).
+
+    Returns the created row as a dict.
+    """
+    import uuid
+
+    from dhanradar.models.compliance import AiOutputFeedback
+
+    # Validate UUID format early — raises ValueError (→ 422) on bad input.
+    audit_uuid = uuid.UUID(audit_id)
+    user_uuid = uuid.UUID(user_id)
+
+    from sqlalchemy.exc import IntegrityError
+
+    row = AiOutputFeedback(
+        audit_id=audit_uuid,
+        user_id=user_uuid,
+        helpful=helpful,
+        feedback_text=feedback_text,
+    )
+    db.add(row)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise DuplicateFeedbackError(audit_id, user_id)
+    # user_id intentionally omitted from the returned dict (DPDP).
+    return {
+        "id": str(row.id),
+        "audit_id": str(row.audit_id),
+        "helpful": row.helpful,
+        "feedback_text": row.feedback_text,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+async def feedback_summary(db: Any, *, days: int = 30) -> dict:
+    """Return aggregate feedback stats for the admin AI Ops console.
+
+    Returns total count, helpful count, helpful_pct, and the last 20 rows
+    within the requested window.
+    """
+    import datetime
+
+    from sqlalchemy import func, select
+
+    from dhanradar.models.compliance import AiOutputFeedback
+
+    since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+
+    total = (
+        await db.scalar(
+            select(func.count()).select_from(AiOutputFeedback).where(
+                AiOutputFeedback.created_at >= since
+            )
+        )
+    ) or 0
+
+    helpful = (
+        await db.scalar(
+            select(func.count()).select_from(AiOutputFeedback).where(
+                AiOutputFeedback.created_at >= since,
+                AiOutputFeedback.helpful.is_(True),
+            )
+        )
+    ) or 0
+
+    recent_rows = (
+        await db.scalars(
+            select(AiOutputFeedback)
+            .where(AiOutputFeedback.created_at >= since)
+            .order_by(AiOutputFeedback.created_at.desc())
+            .limit(20)
+        )
+    ).all()
+
+    return {
+        "total": total,
+        "helpful": helpful,
+        "helpful_pct": round(helpful / total * 100, 1) if total else None,
+        "recent": [
+            {
+                "id": str(r.id),
+                "audit_id": str(r.audit_id),
+                "helpful": r.helpful,
+                "feedback_text": r.feedback_text,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in recent_rows
+        ],
+    }

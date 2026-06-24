@@ -302,11 +302,25 @@ class AiSafetyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AiFeedbackResponse(BaseModel):
-    """GET /admin/ai/feedback — user feedback on AI labels/explanations."""
+class FeedbackRow(BaseModel):
+    """One row returned in the admin feedback summary."""
 
-    available: bool = False
-    note: str = "No feedback table exists yet; this endpoint is a placeholder."
+    id: str
+    audit_id: str
+    helpful: bool
+    feedback_text: str | None = None
+    created_at: str | None = None
+
+
+class AiFeedbackResponse(BaseModel):
+    """GET /admin/ai/feedback — user feedback aggregates."""
+
+    available: bool = True
+    days: int = 30
+    total: int = 0
+    helpful: int = 0
+    helpful_pct: float | None = None
+    recent: list[FeedbackRow] = []
 
 
 # ---------------------------------------------------------------------------

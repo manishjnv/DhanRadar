@@ -32,6 +32,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -200,6 +201,40 @@ class AiLowConfidenceLog(Base):
     model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AiOutputFeedback(Base):
+    """Append-only user feedback on a served AI output (thumbs up/down).
+
+    Linked to ``compliance.ai_recommendation_audit`` by ``audit_id`` (no hard FK —
+    the audit row is immutable and SEBI-retained, so referential integrity is
+    guaranteed by design; a soft reference avoids lock coupling).
+
+    DPDP note: ``user_id`` is stored. ``RequireConsent`` MUST be wired to the
+    submission endpoint before this table is populated with real-user data
+    (tracked in BLOCKERS.md B64). Append-only — no UPDATE or DELETE path.
+    """
+
+    __tablename__ = "ai_output_feedback"
+    __table_args__ = (
+        # One vote per user per audit output — prevents duplicate-vote spam.
+        UniqueConstraint("audit_id", "user_id", name="uq_ai_output_feedback_per_user_audit"),
+        Index("ix_ai_output_feedback_audit_id", "audit_id"),
+        Index("ix_ai_output_feedback_user_id", "user_id"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    # Soft reference to compliance.ai_recommendation_audit.id (no hard FK — see docstring).
+    audit_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    helpful: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    feedback_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
