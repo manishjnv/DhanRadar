@@ -127,6 +127,10 @@ services:
     volumes:
       # Writer side of the CAS hand-off (read + purged by dhanradar-celery-batch).
       - dhanradar_cas_tmp:/tmp/dhanradar_cas
+      # BSE Star MF 2.0 webhook keys (read-only). Host-only dir; the private key
+      # is root:1001 0640 so the app's appuser (uid/gid 1001) can read it.
+      # Referenced by BSE_PRIVATE_KEY_FILE / BSE_WEBHOOK_PUBLIC_KEY_FILE in .env.
+      - /etc/dhanradar-keys:/etc/dhanradar-keys:ro
     networks:
       - dhanradar
       - metrics
