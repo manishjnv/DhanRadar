@@ -186,7 +186,8 @@ async def test_aiops_dashboard_200(async_client, monkeypatch):
 
 
 async def test_aiops_versions_200(async_client, monkeypatch):
-    """Admin → 200 with versions list and instrumented:false for backtest/drift."""
+    """Admin → 200 with versions list; backtest now instrumented (PR-5: §8 gate
+    tracked per version), drift instrumented:false on an empty DB (insufficient churn)."""
     from dhanradar.config import settings
     from tests.conftest import make_auth_headers
 
@@ -207,9 +208,12 @@ async def test_aiops_versions_200(async_client, monkeypatch):
     assert isinstance(data["versions"], list)
 
     assert "backtest" in data
-    assert data["backtest"]["instrumented"] is False
+    # PR-5: the §8 backtest pass-gate is now tracked per version → instrumented.
+    assert data["backtest"]["instrumented"] is True
+    assert data["backtest"]["versions_with_backtest"] == 0  # mocked empty version list
 
     assert "drift" in data
+    # Drift reuses label-churn; an empty test DB has insufficient data → not instrumented.
     assert data["drift"]["instrumented"] is False
 
 

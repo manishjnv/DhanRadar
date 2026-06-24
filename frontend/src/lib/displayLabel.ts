@@ -150,14 +150,16 @@ export const RUN_STATUS_LABELS: Record<string, string> = {
   skipped: 'Skipped',
 };
 
-// Churn-decision (Label Churn / Answer Consistency). The "review needed" key is
-// the raw governance enum; it is built non-literally below so this educational,
-// non-advisory display map does not trip the ci_guards advisory scan.
+// Churn-decision (Label Churn / Answer Consistency). The held state's raw
+// governance enum VALUE is "pending_publish" (BatchDecision.hold = "pending_publish"),
+// NOT the literal "hold" — keying on "hold" never matched (label_churn_review
+// returns decision.value). "pending_publish" carries no advisory term so it is safe
+// to write literally (unlike "hold", which the ci_guards advisory scan would flag).
 export const DECISION_LABELS: Record<string, string> = {
   publish: 'Stable',
   insufficient_data: 'Not Enough Data',
+  pending_publish: 'Review Needed',
 };
-DECISION_LABELS[['ho', 'ld'].join('')] = 'Review Needed';
 
 // AI / internal terms occasionally surfaced.
 export const AI_TERM_LABELS: Record<string, string> = {

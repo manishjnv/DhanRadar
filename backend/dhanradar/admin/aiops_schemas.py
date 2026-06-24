@@ -133,6 +133,9 @@ class EngineVersionRow(BaseModel):
     activated: bool
     activated_at: str | None  # ISO-8601 or null
     created_at: str | None    # ISO-8601 or null
+    # §8 backtest pass-gate outcome recorded at activation (PR-5). None = not
+    # asserted for this row (older rows / proposed-but-not-activated versions).
+    backtest_passed: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -164,22 +167,42 @@ class AiDashboardResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class BacktestPlaceholder(BaseModel):
-    instrumented: bool = False
-    note: str = "backtest results not stored in rating_engine_changelog"
+class BacktestInfo(BaseModel):
+    """Backtest pass-gate summary (PR-5). The real per-version outcome lives on
+    each ``EngineVersionRow.backtest_passed``; this top-level flag says whether the
+    §8 backtest gate is being tracked at all. ``versions_with_backtest`` counts how
+    many returned rows carry an explicit pass/fail (vs not-asserted)."""
+
+    instrumented: bool = True
+    versions_with_backtest: int = 0
+    note: str = (
+        "§8 backtest pass-gate outcome per version (see each row's backtest_passed; "
+        "null = not asserted). DhanRadar does not store a historical-accuracy "
+        "backtest score — only the activation gate's pass/fail."
+    )
 
 
-class DriftPlaceholder(BaseModel):
+class DriftInfo(BaseModel):
+    """Label-drift signal (PR-5): reuses the existing label-churn review for the
+    active educational-label scoring version — how much the same fund's label moves
+    over the window. ``instrumented`` is True once a churn reading is available."""
+
     instrumented: bool = False
-    note: str = "drift values not stored in rating_engine_changelog"
+    decision: str = "insufficient_data"
+    churn: float = 0.0
+    requires_human_review: bool = False
+    note: str = (
+        "Drift = label churn for the active educational_label scoring version "
+        "(share of funds whose label changed). High churn ⇒ review the methodology."
+    )
 
 
 class AiVersionsResponse(BaseModel):
     """GET /admin/ai/versions — scoring model version registry."""
 
     versions: list[EngineVersionRow]
-    backtest: BacktestPlaceholder = BacktestPlaceholder()
-    drift: DriftPlaceholder = DriftPlaceholder()
+    backtest: BacktestInfo = BacktestInfo()
+    drift: DriftInfo = DriftInfo()
 
 
 # ---------------------------------------------------------------------------

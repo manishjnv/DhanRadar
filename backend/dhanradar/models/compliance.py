@@ -167,6 +167,9 @@ class RatingEngineChangelog(Base):
     activated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # §8 backtest pass-gate outcome asserted at activation (PR-5; migration 0048).
+    # Nullable: NULL = not asserted (older rows / proposed-not-activated versions).
+    backtest_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

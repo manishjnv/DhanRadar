@@ -790,13 +790,30 @@ export interface AdminAIRegistryVersion {
   activated: boolean;
   activated_at: string | null;
   created_at: string | null;
+  backtest_passed: boolean | null;
+}
+
+/** Mirrors BacktestInfo in aiops_schemas.py */
+export interface AdminAIBacktest {
+  instrumented: boolean;
+  versions_with_backtest: number;
+  note: string;
+}
+
+/** Mirrors DriftInfo in aiops_schemas.py */
+export interface AdminAIDrift {
+  instrumented: boolean;
+  decision: string;
+  churn: number;
+  requires_human_review: boolean;
+  note: string;
 }
 
 /** Mirrors AiVersionsResponse in aiops_schemas.py */
 export interface AdminAIVersions {
   versions: AdminAIRegistryVersion[];
-  backtest: AdminAIInstrumented;
-  drift: AdminAIInstrumented;
+  backtest: AdminAIBacktest;
+  drift: AdminAIDrift;
 }
 
 /** Mirrors AiPromptsResponse in aiops_schemas.py */

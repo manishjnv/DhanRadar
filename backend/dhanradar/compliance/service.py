@@ -507,6 +507,7 @@ async def list_engine_versions(db: Any, limit: int = 50) -> list[dict]:
             "activated": r.activated,
             "activated_at": r.activated_at.isoformat() if r.activated_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "backtest_passed": r.backtest_passed,
         }
         for r in rows
     ]
@@ -667,13 +668,17 @@ async def record_engine_changelog(
     methodology_url: Optional[str],
     activated: bool = False,
     activated_at: Optional[datetime] = None,
+    backtest_passed: Optional[bool] = None,
 ) -> dict:
     """Insert one scoring/rating methodology changelog row.
 
     Computes ``two_person_ok`` via ``governance.two_person_gate_ok`` (documented
-    gate; non-blocking at this stage — enforced at activation time). Written by
-    the B6/B28 two-person scoring-activation gate (slice 2) — built ahead; no
-    caller yet.
+    gate; non-blocking at this stage — enforced at activation time). Called by the
+    scoring activation flow (``scoring.engine.activation.activate_model_version``).
+
+    ``backtest_passed`` records the §8 backtest pass-gate outcome asserted at
+    activation (PR-5); None = not asserted. Surfaced read-only on
+    /admin/ai/versions.
     """
     from dhanradar.models.compliance import RatingEngineChangelog
     from dhanradar.scoring.engine import governance
@@ -689,6 +694,7 @@ async def record_engine_changelog(
         methodology_url=methodology_url,
         activated=activated,
         activated_at=activated_at,
+        backtest_passed=backtest_passed,
     )
     db.add(row)
     await db.commit()
@@ -704,4 +710,5 @@ async def record_engine_changelog(
         "activated": row.activated,
         "activated_at": row.activated_at.isoformat() if row.activated_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "backtest_passed": row.backtest_passed,
     }

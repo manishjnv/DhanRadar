@@ -74,9 +74,11 @@ from .aiops_schemas import (
     AiSafetyResponse,
     AiVersionsResponse,
     AuditRowSummary,
+    BacktestInfo,
     BudgetCapsResponse,
     BudgetCapsSetRequest,
     BudgetSnapshot,
+    DriftInfo,
     EngineVersionRow,
     GroundednessInfo,
     LabelChurnSummary,
@@ -215,13 +217,30 @@ async def get_ai_versions(
 ) -> AiVersionsResponse:
     """Return the rating_engine_changelog version registry (read-only).
 
-    ``backtest`` and ``drift`` are absent from the changelog schema and always
-    returned as ``instrumented:false``.  Promotion (activate) is a Phase 5 gated
-    mutation — not available here.
+    ``backtest`` is the §8 backtest pass-gate outcome per version (real, from
+    ``backtest_passed``).  ``drift`` reuses the label-churn review for the active
+    educational-label scoring version (real, existing signal).  Promotion
+    (activate) is a Phase 5 gated mutation — not available here.
     """
     raw_versions = await list_engine_versions(db, limit=limit)
     versions = [EngineVersionRow(**row) for row in raw_versions]
-    return AiVersionsResponse(versions=versions)
+
+    backtest = BacktestInfo(
+        versions_with_backtest=sum(1 for v in versions if v.backtest_passed is not None)
+    )
+
+    # Drift = label churn for the active educational-label scoring version (the
+    # existing safety signal). A real reading is "instrumented"; insufficient data
+    # leaves it not-instrumented.
+    churn_raw = await label_churn_review(db, recommendation_type="educational_label")
+    drift = DriftInfo(
+        instrumented=churn_raw.get("decision", "insufficient_data") != "insufficient_data",
+        decision=churn_raw.get("decision", "insufficient_data"),
+        churn=float(churn_raw.get("churn", 0.0)),
+        requires_human_review=bool(churn_raw.get("requires_human_review", False)),
+    )
+
+    return AiVersionsResponse(versions=versions, backtest=backtest, drift=drift)
 
 
 # ---------------------------------------------------------------------------

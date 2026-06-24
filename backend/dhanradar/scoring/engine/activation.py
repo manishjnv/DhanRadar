@@ -102,6 +102,10 @@ async def activate_model_version(
             methodology_url=methodology_url,
             activated=True,
             activated_at=datetime.now(timezone.utc),
+            # Persist the §8 backtest gate outcome (PR-5). assert_activatable above
+            # guarantees this is True for any activated row; surfaced read-only on
+            # /admin/ai/versions.
+            backtest_passed=backtest_passed,
         )
     except IntegrityError as exc:
         await db.rollback()
