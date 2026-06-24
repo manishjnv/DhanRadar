@@ -219,33 +219,32 @@ async def get_ai_versions(
 ) -> AiVersionsResponse:
     """Return the rating_engine_changelog version registry (read-only).
 
-    ``backtest`` and ``drift`` are per-version JSONB fields written at activation
-    time.  The top-level status objects flip to ``instrumented:true`` once at
-    least one version row carries non-null data.
+    ``backtest`` = the §8 backtest pass-gate outcome recorded per version at
+    activation (``EngineVersionRow.backtest`` = ``{"passed": bool}``); the top-level
+    status reports how many shown versions carry it.  ``drift`` reuses the existing
+    label-churn review for the active educational-label scoring version (real,
+    existing signal — not the per-version drift JSONB column, which is reserved for
+    a future drift engine).
     """
     raw_versions = await list_engine_versions(db, limit=limit)
     versions = [EngineVersionRow(**row) for row in raw_versions]
-    any_backtest = any(v.backtest is not None for v in versions)
-    any_drift = any(v.drift is not None for v in versions)
-    return AiVersionsResponse(
-        versions=versions,
-        backtest=BacktestStatus(
-            instrumented=any_backtest,
-            note=(
-                "backtest data stored in rating_engine_changelog"
-                if any_backtest
-                else "backtest results not stored in rating_engine_changelog"
-            ),
-        ),
-        drift=DriftStatus(
-            instrumented=any_drift,
-            note=(
-                "drift data stored in rating_engine_changelog"
-                if any_drift
-                else "drift values not stored in rating_engine_changelog"
-            ),
-        ),
+
+    backtest = BacktestStatus(
+        versions_with_backtest=sum(1 for v in versions if v.backtest is not None)
     )
+
+    # Drift = label churn for the active educational-label scoring version (the
+    # existing safety signal). A real reading is "instrumented"; insufficient data
+    # leaves it not-instrumented.
+    churn_raw = await label_churn_review(db, recommendation_type="educational_label")
+    drift = DriftStatus(
+        instrumented=churn_raw.get("decision", "insufficient_data") != "insufficient_data",
+        decision=churn_raw.get("decision", "insufficient_data"),
+        churn=float(churn_raw.get("churn", 0.0)),
+        requires_human_review=bool(churn_raw.get("requires_human_review", False)),
+    )
+
+    return AiVersionsResponse(versions=versions, backtest=backtest, drift=drift)
 
 
 # ---------------------------------------------------------------------------

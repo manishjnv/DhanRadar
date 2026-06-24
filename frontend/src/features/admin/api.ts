@@ -781,6 +781,12 @@ export interface AdminAIDashboard {
   eval_score: AdminAIGroundedness;
 }
 
+/** Per-version backtest JSONB: {"passed": bool} written at activation (PR-5). */
+export interface AdminAIBacktestRow {
+  passed?: boolean;
+  [k: string]: unknown;
+}
+
 /** Mirrors EngineVersionRow in aiops_schemas.py */
 export interface AdminAIRegistryVersion {
   model_version: string;
@@ -790,15 +796,31 @@ export interface AdminAIRegistryVersion {
   activated: boolean;
   activated_at: string | null;
   created_at: string | null;
-  backtest: Record<string, unknown> | null;
+  backtest: AdminAIBacktestRow | null;
   drift: Record<string, unknown> | null;
+}
+
+/** Mirrors BacktestStatus in aiops_schemas.py */
+export interface AdminAIBacktest {
+  instrumented: boolean;
+  versions_with_backtest: number;
+  note: string;
+}
+
+/** Mirrors DriftStatus in aiops_schemas.py */
+export interface AdminAIDrift {
+  instrumented: boolean;
+  decision: string;
+  churn: number;
+  requires_human_review: boolean;
+  note: string;
 }
 
 /** Mirrors AiVersionsResponse in aiops_schemas.py */
 export interface AdminAIVersions {
   versions: AdminAIRegistryVersion[];
-  backtest: AdminAIInstrumented;
-  drift: AdminAIInstrumented;
+  backtest: AdminAIBacktest;
+  drift: AdminAIDrift;
 }
 
 /** Mirrors AiPromptsResponse in aiops_schemas.py */
