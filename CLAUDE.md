@@ -185,10 +185,18 @@ DhanRadar session footers have been getting wrong:
   (`or.mjs free-chain`) or a Sonnet subagent, then reviewed/edited by Opus** — never typed on Opus
   from scratch. A `PreToolUse(Write|Edit)` nudge fires on doc/governance paths as a reminder. The
   one-shot drafting exemption (≤~30 lines already in Opus's hot cache) still applies for tiny edits.
-- **Activate Tier-2 (paid OpenRouter `dsf`/`grok-code`) for non-load-bearing batches.** It has been
-  dormant; the $2/day cap is unused headroom. Route reporting queries, dev-only tooling, Storybook,
-  and scratch scripts there with Opus review. Same data-privacy rules as Tier-4 (assume logged; no
-  PII/credentials/prompt-skills/proprietary logic). **Never** Tier-2/Tier-4 in a load-bearing path.
+- **Activate Tier-2 (paid OpenRouter) for non-load-bearing batches.** It has been dormant; the
+  $2/day cap is unused headroom. Route reporting queries, dev-only tooling, Storybook, and scratch
+  scripts there with Opus review. Pick the **capability chain** that fits the job (all auto-fall
+  back on 429/404; founder 7-model paid set verified 2026-06-24 — GLM 5.2 · Kimi 2.7 · Qwen 3.7 ·
+  MiniMax M3 · Grok 4.3 · Nemotron ultra+super · DeepSeek):
+  - `or.mjs dhanradar-code` — **code impl** (coders first: kimi → glm-5.2 → grok-4.3 → qwen37-max → minimax-m3 → dsf).
+  - `or.mjs dhanradar-reason` — **analysis / synthesis / non-security review** (qwen37-max → glm-5.2 → grok-4.3 → nemotron-ultra → minimax-m3 → dsp).
+  - `or.mjs dhanradar-cheap` — **bulk drafting** when Tier-4 free-chain is capped (dsf → nemotron-super → minimax-m3 → qwen3.7-plus).
+  - Single aliases still work (`dsf` cheapest default, `glm-5.2`, `kimi`, `grok-4.3`, …).
+  Same data-privacy rules as Tier-4 (assume logged; no PII/credentials/prompt-skills/proprietary
+  logic). **Never** Tier-2/Tier-4 in a load-bearing path. Security-adjacent review uses
+  `adversarial-chain` (glm-5.2 → qwen37-max → grok-4.3 → dsp), still Opus-gated.
 - **Delegate the Phase-0 warm start; don't read the canon on Opus.** Carried context is re-billed
   every turn, so the bigger long-session cost is what Opus *ingests*, not what it types. Spawn the
   **`warm-start` subagent** (`.claude/agents/warm-start.md`) with the task focus; it reads the
