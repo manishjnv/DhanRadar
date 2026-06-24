@@ -14,7 +14,14 @@
 #
 # CONFIGURABLE ENV VARS (override before calling; defaults shown)
 #   BACKUP_DIR=/var/backups/dhanradar
-#   LOCAL_RETENTION_DAYS=7
+#   LOCAL_RETENTION_DAYS=7          # delete local backup dirs older than N days
+#   MAX_LOCAL_PCT=10               # hard cap: local backups <= N% of total disk
+#   AGE_RECIPIENT_FILE=/etc/dhanradar-keys/backup_age.pub  # age public recipient
+#
+# ENCRYPTION: artifacts are age-encrypted (recipient above) BEFORE upload. The
+#   matching identity /etc/dhanradar-keys/backup_age.key (0600) decrypts them —
+#   KEEP AN OFFLINE COPY of it, or backups are unrecoverable if the box is lost.
+#   Restore with: bash scripts/restore-db.sh [STAMP|latest] [TARGET_DB]
 #
 # SECRETS: this script loads .env but NEVER prints secret values.
 #
@@ -135,6 +142,32 @@ docker compose exec -T dhanradar-redis \
 
 log "Redis artifacts written to ${WORK_DIR}"
 
+# ── 4b. Encrypt artifacts (age) BEFORE they leave the box ────────────────────
+# Backups contain investor data. Encrypt at rest with age so a leaked R2 key (or
+# a stolen backup file) is useless without the offline identity key
+# (/etc/dhanradar-keys/backup_age.key — KEEP AN OFFLINE COPY or backups are
+# unrecoverable if the box is lost). Restore decrypts via scripts/restore-db.sh.
+# Fail-closed: refuse to upload unencrypted if age / the recipient is missing.
+AGE_RECIPIENT_FILE="${AGE_RECIPIENT_FILE:-/etc/dhanradar-keys/backup_age.pub}"
+command -v age > /dev/null 2>&1 \
+  || die "'age' not installed but backup encryption is required (apt-get install age)."
+[[ -s "${AGE_RECIPIENT_FILE}" ]] \
+  || die "age recipient ${AGE_RECIPIENT_FILE} missing/empty — refusing to write unencrypted backups."
+AGE_RECIPIENT="$(grep -m1 '^age1' "${AGE_RECIPIENT_FILE}" | tr -d '[:space:]')"
+[[ -n "${AGE_RECIPIENT}" ]] || die "no age1... recipient found in ${AGE_RECIPIENT_FILE}."
+log "Encrypting artifacts with age (recipient ${AGE_RECIPIENT:0:14}...) ..."
+for _f in "${DB_DUMP}" "${REDIS_RDB}" "${REDIS_AOF_TAR}"; do
+  [[ -s "${_f}" ]] || continue
+  age -r "${AGE_RECIPIENT}" -o "${_f}.age" "${_f}" || die "age encryption failed for ${_f}"
+  rm -f "${_f}"
+done
+# Point the manifest/upload at the encrypted artifacts.
+DB_DUMP="${DB_DUMP}.age"
+REDIS_RDB="${REDIS_RDB}.age"
+REDIS_AOF_TAR="${REDIS_AOF_TAR}.age"
+DB_SIZE="$(stat -c '%s' "${DB_DUMP}" 2>/dev/null || echo 0)"
+log "Artifacts encrypted (age)."
+
 # ── 5. Write MANIFEST ────────────────────────────────────────────────────────
 
 MANIFEST="${WORK_DIR}/MANIFEST"
@@ -163,10 +196,11 @@ sha256_of() {
   echo "backup_utc=${UTC_STAMP}"
   echo "git_sha=${GIT_SHA}"
   echo "alembic_rev=${ALEMBIC_REV}"
+  echo "encryption=age recipient=${AGE_RECIPIENT}"
   echo ""
-  echo "file=db.dump size=${DB_SIZE} sha256=$(sha256_of "${DB_DUMP}")"
-  echo "file=redis-dump.rdb size=$(stat -c '%s' "${REDIS_RDB}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_RDB}")"
-  echo "file=redis-appendonly.tar.gz size=$(stat -c '%s' "${REDIS_AOF_TAR}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_AOF_TAR}")"
+  echo "file=db.dump.age size=${DB_SIZE} sha256=$(sha256_of "${DB_DUMP}")"
+  echo "file=redis-dump.rdb.age size=$(stat -c '%s' "${REDIS_RDB}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_RDB}")"
+  echo "file=redis-appendonly.tar.gz.age size=$(stat -c '%s' "${REDIS_AOF_TAR}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_AOF_TAR}")"
 } > "${MANIFEST}"
 
 log "MANIFEST written."
@@ -213,6 +247,30 @@ find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d \
   -mtime "+${LOCAL_RETENTION_DAYS}" \
   -exec rm -rf {} + \
   && log "Local prune done."
+
+# ── 7b. Local disk-usage cap ─────────────────────────────────────────────────
+# Hard ceiling on local backup storage so the daily dumps can never fill the
+# shared disk: keep the local backup dir under MAX_LOCAL_PCT% of total disk,
+# deleting oldest-first. R2 holds the long-term (7-yr) copies, so trimming local
+# history here is safe. The newest backup is always kept.
+MAX_LOCAL_PCT="${MAX_LOCAL_PCT:-10}"
+TOTAL_BYTES="$(df -B1 --output=size "${BACKUP_DIR}" | tail -1 | tr -d '[:space:]')"
+CAP_BYTES=$(( TOTAL_BYTES * MAX_LOCAL_PCT / 100 ))
+log "Local cap: ${MAX_LOCAL_PCT}% of $(( TOTAL_BYTES/1024/1024/1024 ))GB disk = $(( CAP_BYTES/1024/1024 ))MB ..."
+while true; do
+  CUR_BYTES="$(du -sb "${BACKUP_DIR}" 2>/dev/null | cut -f1)"
+  N_DIRS="$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+  if (( CUR_BYTES <= CAP_BYTES )); then break; fi
+  if (( N_DIRS <= 1 )); then
+    log "WARNING: newest backup alone ($(( CUR_BYTES/1024/1024 ))MB) exceeds the ${MAX_LOCAL_PCT}% cap; keeping it."
+    break
+  fi
+  OLDEST="$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+            | sort -n | head -1 | cut -d' ' -f2-)"
+  log "  over cap ($(( CUR_BYTES/1024/1024 ))MB > $(( CAP_BYTES/1024/1024 ))MB) — removing oldest: ${OLDEST}"
+  rm -rf "${OLDEST}"
+done
+log "Local cap enforced."
 
 # Note: R2 long-term retention (7 years, for the SEBI ai_recommendation_audit trail)
 # is managed by an R2 lifecycle rule on the bucket — not by this script.
