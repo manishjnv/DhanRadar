@@ -70,6 +70,12 @@ docs/infra-notes.md
 
 # local sample artifacts (CAS screenshots etc.) — public repo, may carry PII; never commit
 docs/Sample/
+docs/ui-system/
+docs/project-state/
+docs/research/
+docs/screenshots/
+docs/Admin.md
+docs/Improvement_Feedback.md
 _redact.py
 *.tsbuildinfo
 next-env.d.ts
