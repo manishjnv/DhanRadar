@@ -15,6 +15,7 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dhanradar.admin.aiops_router import router as admin_aiops_router
+from dhanradar.ai_feedback.router import router as ai_feedback_router
 from dhanradar.admin.billing_router import router as admin_billing_router
 from dhanradar.admin.ops_router import router as admin_ops_router
 from dhanradar.admin.platform_router import router as admin_platform_router
@@ -150,6 +151,7 @@ app.include_router(insights_router, prefix="/api/v1")  # Plan Group 3 — portfo
 app.include_router(transparency_router, prefix="/api/v1")  # Plan Group 9 — data transparency + explainability (PU2)
 app.include_router(changes_router, prefix="/api/v1")  # Plan Group 2 — What Changed explainability (read-only)
 app.include_router(concepts_router, prefix="/api/v1")  # C1 — public concept explainers (anonymous-read, crawlable)
+app.include_router(ai_feedback_router, prefix="/api/v1")  # PR-6 — user AI-output feedback (RequireAuth; DPDP B64 pending)
 # INTERNAL ONLY — mounted at /internal/v1 (no /api prefix). The cloudflared
 # ingress routes only ^/api/.* to FastAPI, so this is not reachable through the
 # public tunnel — server-to-server score reads (numerics are tier-gated here).

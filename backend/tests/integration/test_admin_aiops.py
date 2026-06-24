@@ -326,12 +326,12 @@ async def test_aiops_safety_200(async_client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 8. GET /admin/ai/feedback — feedback placeholder
+# 8. GET /admin/ai/feedback — feedback aggregate (real table, migration 0049)
 # ---------------------------------------------------------------------------
 
 
 async def test_aiops_feedback_200(async_client, monkeypatch):
-    """Admin → 200 with available:false (no feedback table yet)."""
+    """Admin → 200 with available:true, zero counts (empty table on fresh DB)."""
     from dhanradar.config import settings
     from tests.conftest import make_auth_headers
 
@@ -343,8 +343,11 @@ async def test_aiops_feedback_200(async_client, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
 
-    assert data["available"] is False
-    assert "note" in data and data["note"]
+    assert data["available"] is True
+    assert data["total"] == 0
+    assert data["helpful"] == 0
+    assert data["helpful_pct"] is None
+    assert isinstance(data["recent"], list)
 
 
 # ---------------------------------------------------------------------------

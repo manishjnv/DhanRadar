@@ -53,6 +53,7 @@ from dhanradar.budget import (
     get_effective_caps,
 )
 from dhanradar.compliance.service import (
+    feedback_summary,
     is_engine_version_activated,
     label_churn_review,
     list_distinct_prompt_versions,
@@ -80,6 +81,7 @@ from .aiops_schemas import (
     BudgetSnapshot,
     DriftStatus,
     EngineVersionRow,
+    FeedbackRow,
     GroundednessInfo,
     LabelChurnSummary,
     LatencyInfo,
@@ -401,13 +403,17 @@ async def get_ai_safety(
 @router.get("/ai/feedback", response_model=AiFeedbackResponse)
 async def get_ai_feedback(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = Query(default=30, ge=1, le=90),
 ) -> AiFeedbackResponse:
-    """Return feedback availability (no feedback table yet — placeholder).
+    """Return aggregate user feedback stats for the AI Ops console.
 
-    This endpoint exists so the AI Ops shell can render a proper 'not available'
-    state rather than a 404.  A feedback table is a Phase 5+ addition.
+    Reads from ``compliance.ai_output_feedback`` (migration 0049). Returns the
+    count of total / helpful ratings plus the 20 most-recent feedback rows
+    within the requested window (default: last 30 days).
     """
-    return AiFeedbackResponse()
+    data = await feedback_summary(db, days=days)
+    return AiFeedbackResponse(**data)
 
 
 # ---------------------------------------------------------------------------
