@@ -322,7 +322,7 @@ const TREND_ARROW: Record<'up' | 'down' | 'flat', string> = { up: '▲', down: '
 
 export function ScoreBreakdownSection() {
   return (
-    <div className="grid gap-3.5 sm:grid-cols-2">
+    <div className="grid gap-3.5 sm:grid-cols-2 2xl:grid-cols-4">
       {SCORE_MODULES.map((m, i) => (
         <div key={m.name} className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
           <div className="flex items-center gap-3">
@@ -351,7 +351,7 @@ export function StickyBar({ head }: { head: FundHead }) {
   const bandWord = head.band ? BAND_WORD[head.band] : null;
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 shadow-[0_-8px_30px_rgba(0,0,0,.18)] backdrop-blur" style={{ background: 'rgba(11,31,58,.97)' }}>
-      <div className="mx-auto flex max-w-[1320px] items-center gap-5 px-4 py-3 text-white sm:px-6">
+      <div className="flex w-full items-center gap-5 px-4 py-3 text-white sm:px-6 lg:px-8">
         <div className="flex shrink-0 items-center gap-3">
           <div>
             <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-white/55">DhanRadar Read</div>
