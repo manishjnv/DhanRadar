@@ -1,0 +1,568 @@
+/**
+ * Calculator Hub V1 — shared presentational primitives.
+ *
+ * Ported 1:1 from the approved CalculatorHubV1 desktop + mobile mockups into
+ * Geist/warm Tailwind tokens. Responsive by construction: card grids collapse
+ * to a single column on small screens, the featured / learn / related rows
+ * become horizontal-scroll rails on mobile (the dedicated mobile layout) and
+ * grids from `sm:` up.
+ *
+ * PURE UI: sliders/toggles are inert placeholders, charts render fixed preview
+ * seed data, no value is a DhanRadar-computed fund score. The calculator engine,
+ * search, and filtering are wired in a later session.
+ */
+'use client';
+
+import * as React from 'react';
+import { cn } from '@/lib/cn';
+import {
+  type Accent,
+  type Featured,
+  type Category,
+  type CalcMini,
+  accentTile,
+  ACCENT_HEX,
+  TAG_ACCENT,
+} from './data';
+
+// ── Icon tile ────────────────────────────────────────────────────────────────
+export function IconTile({
+  emoji,
+  accent,
+  className,
+  style,
+}: {
+  emoji: string;
+  accent: Accent;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={cn('grid place-items-center rounded-xl', className)}
+      style={{ ...accentTile(accent), ...style }}
+      aria-hidden="true"
+    >
+      {emoji}
+    </div>
+  );
+}
+
+// ── Arrow / chevron glyphs (lucide-style inline) ─────────────────────────────
+export function ArrowRight({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+export function ChevronRight({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+export function ChevronDown({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M6 9 L12 15 L18 9" />
+    </svg>
+  );
+}
+export function SearchIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="M16 16 L21 21" />
+    </svg>
+  );
+}
+export function SparkIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z" />
+    </svg>
+  );
+}
+
+// ── "So what" insight strip ──────────────────────────────────────────────────
+export function SoWhat({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-3.5 flex gap-2.5 rounded-xl bg-royal/[0.06] px-3.5 py-3 text-small leading-relaxed text-ink-secondary">
+      <span className="shrink-0 font-bold text-royal" aria-hidden="true">→</span>
+      <p className="m-0">{children}</p>
+    </div>
+  );
+}
+
+// Bold-aware text (renders **bold** spans)
+export function RichText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith('**') && p.endsWith('**') ? (
+          <b key={i} className="font-semibold text-ink">{p.slice(2, -2)}</b>
+        ) : (
+          <React.Fragment key={i}>{p}</React.Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+export function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn('rounded-2xl border border-line bg-surface p-5 shadow-sm', className)}>{children}</div>;
+}
+
+// ── Buttons ──────────────────────────────────────────────────────────────────
+type BtnVariant = 'pri' | 'ghost';
+export function Btn({
+  children,
+  variant = 'ghost',
+  className,
+  onClick,
+  type = 'button',
+  'aria-label': ariaLabel,
+}: {
+  children: React.ReactNode;
+  variant?: BtnVariant;
+  className?: string;
+  onClick?: () => void;
+  type?: 'button' | 'submit';
+  'aria-label'?: string;
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className={cn(
+        'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] border px-3.5 py-2.5 text-small font-semibold transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+        variant === 'pri'
+          ? 'border-transparent bg-royal text-white hover:bg-royal/90'
+          : 'border-line bg-surface-2 text-ink hover:bg-surface-3',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Hero (hub) ───────────────────────────────────────────────────────────────
+export function Hero({
+  title,
+  subtitle,
+  searchPlaceholder,
+  cats,
+  stats,
+}: {
+  title: string;
+  subtitle: string;
+  searchPlaceholder: string;
+  cats: { emoji: string; label: string }[];
+  stats: { label: string; value: string; small?: boolean }[];
+}) {
+  const [active, setActive] = React.useState(0);
+  return (
+    <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-navy via-[#16335E] to-royal p-6 text-white shadow-[0_24px_60px_-20px_rgba(15,23,42,.45)] sm:p-8">
+      {/* decorative glow */}
+      <span aria-hidden="true" className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(37,99,235,.4),transparent_70%)]" />
+      <span aria-hidden="true" className="pointer-events-none absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,.2),transparent_70%)]" />
+      <div className="relative z-[2]">
+        <h1 className="m-0 text-[clamp(26px,5vw,34px)] font-medium leading-[1.05] tracking-[-0.03em]">{title}</h1>
+        <p className="mb-5 mt-2 max-w-xl text-body leading-snug text-slate-300">{subtitle}</p>
+
+        {/* Search (inert placeholder — search wired later) */}
+        <div className="relative max-w-xl">
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted"><SearchIcon /></span>
+          <input
+            type="search"
+            aria-label="Search calculators"
+            placeholder={searchPlaceholder}
+            className="h-[52px] w-full rounded-[14px] border-none bg-white/95 pl-12 pr-4 text-body text-ink shadow-sm outline-none placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-royal"
+          />
+        </div>
+
+        {/* Quick category chips (visual selection only) */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {cats.map((c, i) => (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setActive(i)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-[11px] border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+                i === active
+                  ? 'border-white bg-white text-navy'
+                  : 'border-white/20 bg-white/10 text-white hover:bg-white/20',
+              )}
+            >
+              <span aria-hidden="true">{c.emoji}</span> {c.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Stat strip */}
+        <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-[13px] bg-white/10 sm:grid-cols-4">
+          {stats.map((s) => (
+            <div key={s.label} className="bg-white/[0.04] px-4 py-3">
+              <div className="text-[9.5px] font-semibold uppercase tracking-[0.04em] text-slate-400">{s.label}</div>
+              <div className={cn('mt-1 font-medium', s.small ? 'text-[15px]' : 'text-[20px]')}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Horizontal-scroll rail (mobile) → grid (sm+) ─────────────────────────────
+export function Rail({ children, gridCols, className }: { children: React.ReactNode; gridCols: string; className?: string }) {
+  return (
+    <div
+      className={cn(
+        'flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden',
+        'sm:grid sm:gap-3 sm:overflow-visible',
+        gridCols,
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── Featured card ────────────────────────────────────────────────────────────
+export function FeatureCard({ item, onOpen }: { item: Featured; onOpen: () => void }) {
+  const tagHex = ACCENT_HEX[TAG_ACCENT[item.tag]];
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative w-[200px] shrink-0 rounded-[15px] border border-line bg-surface p-4 text-left shadow-sm transition-all hover:-translate-y-[3px] hover:border-royal hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:w-auto"
+    >
+      <span
+        className="absolute right-3 top-3 rounded-md px-1.5 py-[3px] font-mono text-[8.5px] font-bold uppercase tracking-[0.03em]"
+        style={{ background: `${tagHex}1A`, color: tagHex }}
+      >
+        {item.tag}
+      </span>
+      <IconTile emoji={item.emoji} accent={item.accent} className="mb-3 h-[46px] w-[46px] text-[21px]" />
+      <div className="text-small font-semibold leading-tight text-ink">{item.name}</div>
+      <div className="mt-1.5 text-caption leading-snug tracking-normal text-ink-muted">{item.desc}</div>
+      <div className="mt-3 flex items-center gap-1.5 text-caption font-semibold tracking-normal text-royal">
+        Open <ArrowRight />
+      </div>
+    </button>
+  );
+}
+
+// ── Category card ────────────────────────────────────────────────────────────
+export function CategoryCard({ item, onOpen }: { item: Category; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex items-center gap-3 rounded-[15px] border border-line bg-surface p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+    >
+      <IconTile emoji={item.emoji} accent={item.accent} className="h-[46px] w-[46px] shrink-0 text-[20px]" />
+      <div>
+        <div className="text-small font-semibold text-ink">{item.name}</div>
+        <div className="mt-0.5 text-caption tracking-normal text-ink-muted">{item.count}</div>
+      </div>
+    </button>
+  );
+}
+
+// ── Calculator mini card ─────────────────────────────────────────────────────
+export function CalcMiniCard({ item, onOpen }: { item: CalcMini; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left transition-colors hover:border-royal hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+    >
+      <IconTile emoji={item.emoji} accent={item.accent} className="h-9 w-9 shrink-0 text-[16px]" />
+      <div className="min-w-0">
+        <div className="truncate text-small font-semibold leading-tight text-ink">{item.name}</div>
+        <div className="mt-px text-caption tracking-normal text-ink-muted">{item.category}</div>
+      </div>
+      <span className="ml-auto shrink-0 text-ink-faint"><ChevronRight /></span>
+    </button>
+  );
+}
+
+// ── Filter / hero chips (visual selection only) ──────────────────────────────
+export function ChipRow({ chips, scroll = false }: { chips: string[]; scroll?: boolean }) {
+  const [active, setActive] = React.useState(0);
+  return (
+    <div
+      className={cn(
+        'flex gap-2',
+        scroll
+          ? 'overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible'
+          : 'flex-wrap',
+      )}
+    >
+      {chips.map((c, i) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => setActive(i)}
+          className={cn(
+            'shrink-0 rounded-[10px] border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+            i === active
+              ? 'border-navy bg-navy text-white'
+              : 'border-line bg-surface text-ink-secondary shadow-sm hover:border-royal hover:text-royal',
+          )}
+        >
+          {c}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Learn card ───────────────────────────────────────────────────────────────
+export function LearnCard({ emoji, q, a }: { emoji: string; q: string; a: string }) {
+  return (
+    <div className="w-[220px] shrink-0 rounded-[13px] border border-line bg-surface p-3.5 sm:w-auto">
+      <div className="flex items-center gap-1.5 text-small font-semibold text-ink"><span aria-hidden="true">{emoji}</span> {q}</div>
+      <div className="mt-1.5 text-caption leading-snug tracking-normal text-ink-muted">{a}</div>
+    </div>
+  );
+}
+
+// ── FAQ accordion ────────────────────────────────────────────────────────────
+export function Faq({ items }: { items: { q: string; a: string }[] }) {
+  const [open, setOpen] = React.useState(0);
+  return (
+    <Panel className="p-0">
+      {items.map((it, i) => {
+        const isOpen = open === i;
+        return (
+          <div key={it.q} className={cn('border-b border-line last:border-b-0')}>
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() => setOpen(isOpen ? -1 : i)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left text-small font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal/40"
+            >
+              {it.q}
+              <span className={cn('shrink-0 text-ink-muted transition-transform', isOpen && 'rotate-180')}><ChevronDown /></span>
+            </button>
+            {isOpen && (
+              <div className="max-w-[880px] px-4 pb-4 text-small leading-relaxed text-ink-muted">{it.a}</div>
+            )}
+          </div>
+        );
+      })}
+    </Panel>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SIP DETAIL primitives (inert)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Inert range field (slider is a static placeholder — no recalculation)
+export function RangeField({
+  label,
+  tip,
+  value,
+  min,
+  max,
+  rangeMin,
+  rangeMax,
+  presets,
+}: {
+  label: string;
+  tip: string;
+  value: string;
+  min: number;
+  max: number;
+  rangeMin: string;
+  rangeMax: string;
+  presets: string[];
+}) {
+  return (
+    <div className="mb-5">
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-small font-semibold text-ink">
+          {label}
+          <span title={tip} className="inline-grid h-[15px] w-[15px] cursor-help place-items-center rounded-full bg-surface-3 text-[9px] font-bold text-ink-muted">i</span>
+        </span>
+        <span className="rounded-[9px] bg-royal/10 px-2.5 py-1 font-mono text-small font-bold text-royal">{value}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        defaultValue={(min + max) / 2}
+        aria-label={label}
+        className="h-1.5 w-full accent-royal"
+      />
+      <div className="mt-1.5 flex justify-between font-mono text-[10.5px] text-ink-muted">
+        <span>{rangeMin}</span>
+        <span>{rangeMax}</span>
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {presets.map((p, i) => (
+          <span
+            key={p}
+            className={cn(
+              'rounded-lg border px-2.5 py-1.5 text-caption font-semibold tracking-normal',
+              i === 2
+                ? 'border-royal bg-royal text-white'
+                : 'border-line bg-surface-2 text-ink-secondary',
+            )}
+          >
+            {p}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Inert toggle row
+export function ToggleRow({ title, sub, on = false }: { title: string; sub: string; on?: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 p-3.5">
+      <div>
+        <div className="text-small font-semibold text-ink">{title}</div>
+        <div className="mt-0.5 text-caption tracking-normal text-ink-muted">{sub}</div>
+      </div>
+      <span
+        aria-hidden="true"
+        className={cn('relative h-6 w-[42px] shrink-0 rounded-xl transition-colors', on ? 'bg-royal' : 'bg-line-strong')}
+      >
+        <span className={cn('absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-transform', on && 'translate-x-[18px]')} />
+      </span>
+    </div>
+  );
+}
+
+// KPI tile
+export function Kpi({ label, value, sub, accent, hero }: { label: string; value: string; sub: string; accent?: 'pos'; hero?: boolean }) {
+  if (hero) {
+    return (
+      <div className="relative col-span-full overflow-hidden rounded-[14px] bg-gradient-to-br from-navy to-royal p-4 text-white">
+        <div className="text-caption font-semibold uppercase tracking-[0.04em] text-slate-400">{label}</div>
+        <div className="mt-1.5 font-mono text-[38px] font-bold leading-none tracking-[-0.02em]">{value}</div>
+        <div className="mt-1 text-caption tracking-normal text-slate-300">{sub}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-[14px] border border-line bg-surface p-4">
+      <div className="text-caption font-semibold uppercase tracking-[0.04em] text-ink-muted">{label}</div>
+      <div className={cn('mt-1.5 font-mono text-[24px] font-bold leading-none tracking-[-0.02em]', accent === 'pos' ? 'text-emerald' : 'text-ink')}>{value}</div>
+      <div className="mt-1 text-caption tracking-normal text-ink-muted">{sub}</div>
+    </div>
+  );
+}
+
+// Static growth chart (seed series → SVG; no interactivity)
+export function GrowthChart({ series }: { series: { invested: number; value: number }[] }) {
+  const w = 600;
+  const h = 200;
+  const maxV = series[series.length - 1].value * 1.05;
+  const n = series.length;
+  const stepX = w / n;
+  const pts = (key: 'value' | 'invested') => series.map((d, i) => [(i + 1) * stepX, h - (d[key] / maxV) * (h - 8) - 4] as const);
+  const wealth = [[0, h - 4] as const, ...pts('value')];
+  const inv = [[0, h - 4] as const, ...pts('invested')];
+  const toPath = (p: readonly (readonly [number, number])[]) => 'M' + p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const wd = toPath(wealth);
+  const idd = toPath(inv);
+  const last = wealth[wealth.length - 1];
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="block" role="img" aria-label="Illustrative growth of invested amount versus estimated wealth over time">
+      <defs>
+        <linearGradient id="calc-wg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={ACCENT_HEX.royal} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={ACCENT_HEX.royal} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${idd} L ${w},${h} L 0,${h} Z`} fill="var(--surface-3)" opacity="0.5" />
+      <path d={`${wd} L ${w},${h} L 0,${h} Z`} fill="url(#calc-wg)" />
+      <path d={idd} fill="none" stroke="var(--text-faint)" strokeWidth="2" strokeDasharray="4 3" />
+      <path d={wd} fill="none" stroke={ACCENT_HEX.royal} strokeWidth="2.5" />
+      <circle cx={last[0]} cy={last[1]} r="4.5" fill={ACCENT_HEX.royal} />
+    </svg>
+  );
+}
+
+// Static donut (two-slice: invested vs profit)
+export function Donut({ invested, profit, size = 150, thick = 26 }: { invested: number; profit: number; size?: number; thick?: number }) {
+  const data: [number, string][] = [
+    [invested, 'var(--surface-3)'],
+    [profit, ACCENT_HEX.royal],
+  ];
+  const r = (size - thick) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const total = invested + profit;
+  let acc = 0;
+  return (
+    <svg width={size} height={size} role="img" aria-label="Share of final wealth from money invested versus profit earned">
+      {data.map(([v, c], i) => {
+        const start = (acc / total) * 2 * Math.PI - Math.PI / 2;
+        acc += v;
+        const end = (acc / total) * 2 * Math.PI - Math.PI / 2;
+        const large = end - start > Math.PI ? 1 : 0;
+        const x1 = cx + Math.cos(start) * r;
+        const y1 = cy + Math.sin(start) * r;
+        const x2 = cx + Math.cos(end) * r;
+        const y2 = cy + Math.sin(end) * r;
+        return <path key={i} d={`M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`} fill="none" stroke={c} strokeWidth={thick} />;
+      })}
+    </svg>
+  );
+}
+
+// What-if card
+export function WhatIfCard({ name, val, result, delta, up }: { name: string; val: string; result: string; delta: string; up: boolean }) {
+  return (
+    <div className="rounded-[13px] border border-line p-3.5">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-small font-semibold text-ink">{name}</span>
+        <span className="font-mono text-caption font-bold tracking-normal text-royal">{val}</span>
+      </div>
+      <div className="text-[17px] font-medium text-ink">{result}</div>
+      <div className={cn('mt-0.5 text-caption font-semibold tracking-normal', up ? 'text-emerald' : 'text-red')}>{delta}</div>
+    </div>
+  );
+}
+
+// AI insight card
+export function AiCard({ text }: { text: string }) {
+  return (
+    <div className="flex gap-3 rounded-[14px] border border-line bg-gradient-to-br from-[#FAFBFF] to-white p-4">
+      <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px] bg-royal/10 text-royal"><SparkIcon /></span>
+      <p className="m-0 text-small leading-relaxed text-ink-secondary"><RichText text={text} /></p>
+    </div>
+  );
+}
+
+// Related calculator card
+export function RelatedCard({ emoji, name, desc, accent, onOpen }: { emoji: string; name: string; desc: string; accent: Accent; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-[170px] shrink-0 items-center gap-3 rounded-xl border border-line bg-surface p-3.5 text-left transition-colors hover:border-royal hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:w-auto"
+    >
+      <IconTile emoji={emoji} accent={accent} className="h-9 w-9 shrink-0 text-[16px]" />
+      <div className="min-w-0">
+        <div className="truncate text-small font-semibold text-ink">{name}</div>
+        <div className="truncate text-caption tracking-normal text-ink-muted">{desc}</div>
+      </div>
+    </button>
+  );
+}
