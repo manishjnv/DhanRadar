@@ -507,6 +507,8 @@ async def list_engine_versions(db: Any, limit: int = 50) -> list[dict]:
             "activated": r.activated,
             "activated_at": r.activated_at.isoformat() if r.activated_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "backtest": getattr(r, "backtest", None),
+            "drift": getattr(r, "drift", None),
         }
         for r in rows
     ]
@@ -667,6 +669,8 @@ async def record_engine_changelog(
     methodology_url: Optional[str],
     activated: bool = False,
     activated_at: Optional[datetime] = None,
+    backtest: Optional[dict] = None,
+    drift: Optional[dict] = None,
 ) -> dict:
     """Insert one scoring/rating methodology changelog row.
 
@@ -689,6 +693,8 @@ async def record_engine_changelog(
         methodology_url=methodology_url,
         activated=activated,
         activated_at=activated_at,
+        backtest=backtest,
+        drift=drift,
     )
     db.add(row)
     await db.commit()
@@ -704,4 +710,6 @@ async def record_engine_changelog(
         "activated": row.activated,
         "activated_at": row.activated_at.isoformat() if row.activated_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "backtest": getattr(row, "backtest", None),
+        "drift": getattr(row, "drift", None),
     }

@@ -133,6 +133,8 @@ class EngineVersionRow(BaseModel):
     activated: bool
     activated_at: str | None  # ISO-8601 or null
     created_at: str | None    # ISO-8601 or null
+    backtest: dict | None = None
+    drift: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +166,12 @@ class AiDashboardResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class BacktestPlaceholder(BaseModel):
+class BacktestStatus(BaseModel):
     instrumented: bool = False
     note: str = "backtest results not stored in rating_engine_changelog"
 
 
-class DriftPlaceholder(BaseModel):
+class DriftStatus(BaseModel):
     instrumented: bool = False
     note: str = "drift values not stored in rating_engine_changelog"
 
@@ -178,8 +180,8 @@ class AiVersionsResponse(BaseModel):
     """GET /admin/ai/versions — scoring model version registry."""
 
     versions: list[EngineVersionRow]
-    backtest: BacktestPlaceholder = BacktestPlaceholder()
-    drift: DriftPlaceholder = DriftPlaceholder()
+    backtest: BacktestStatus = BacktestStatus()
+    drift: DriftStatus = DriftStatus()
 
 
 # ---------------------------------------------------------------------------
