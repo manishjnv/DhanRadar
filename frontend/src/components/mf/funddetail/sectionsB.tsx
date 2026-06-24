@@ -32,7 +32,7 @@ import {
 export function SnapshotSection() {
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-line">
-      <div className="grid grid-cols-2 gap-px sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px sm:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7">
         {SNAPSHOT.map((item) => (
           <div key={item.l} className="bg-surface px-4 py-3.5 sm:px-[15px]">
             {/* label + tip */}
@@ -451,7 +451,7 @@ export function RiskCenterSection() {
   return (
     <Panel className="p-5 sm:p-6">
       {/* Simple risk grid — 3-col desktop / 2-col mobile */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
         {RISK_SIMPLE.map((r) => (
           <div key={r.l} className="rounded-xl bg-surface-2 px-3 py-4 text-center">
             <div className={cn('font-mono text-[15px] font-bold', TONE_TEXT[r.tone])}>
