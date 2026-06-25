@@ -235,6 +235,58 @@ if _schemas_py.exists():
 else:
     fails.append("scoring/engine/schemas.py not found — VerbLabel allowlist check skipped")
 
+# 9. No-suppress UI guardrail (founder 2026-06-25) --------------------------
+# A page/section/table/filter/button must NOT be deleted or hidden when its
+# backend data is empty/missing — it must stay mounted and render a "no data"
+# empty state. This flags the two dominant suppression signatures in the React
+# UI:
+#   (a) an emptiness guard that returns null:  if (x.length === 0) return null
+#   (b) a whole section/card/table wrapped in a data-presence guard that removes
+#       it:  {data && <SomethingSection ...   /   {items.length && <FooTable ...
+# Purely cosmetic edits (color/typography/font/alignment/nav/breadcrumb) never
+# match these patterns, so the allowed-exception work is never blocked.
+# Escape hatch: put `no-suppress-ok: <reason>` in a comment on the same line (or
+# the line directly above) for a genuinely-conditional, non-data case.
+_NOSUP_RETURN_NULL = re.compile(
+    r"if\s*\([^)]*(?:\.length\s*===\s*0|\.length\s*<\s*1|!\s*[\w.]+\.length)[^)]*\)\s*return\s+null",
+)
+_NOSUP_INLINE_GUARD = re.compile(
+    r"\{\s*[\w.?]+\s*&&[^}]*<[A-Z]\w*(?:Section|Card|Table|Panel|Grid|Strip|Hero|Banner)\b",
+)
+_NOSUP_OK = re.compile(r"no-suppress-ok", re.I)
+_UI_DIR = ROOT / "frontend" / "src"
+# Pre-existing hits (helpers that return a null VALUE, internal/admin tools, and
+# small sub-blocks) are grandfathered in this baseline so the gate enforces the
+# rule GOING FORWARD — any NEW suppression fails the build. Triage/clear entries
+# over time; never ADD to this file to silence a new customer-facing violation.
+_NOSUP_BASELINE_FILE = ROOT / "scripts" / "no_suppress_baseline.txt"
+_nosup_baseline: set[str] = set()
+if _NOSUP_BASELINE_FILE.exists():
+    for _bl in read(_NOSUP_BASELINE_FILE).splitlines():
+        _bl = _bl.strip()
+        if _bl and not _bl.startswith("#"):
+            _nosup_baseline.add(_bl)
+if _UI_DIR.exists():
+    for p in _UI_DIR.rglob("*.tsx"):
+        if p.name.endswith(".test.tsx"):
+            continue
+        lines = read(p).splitlines()
+        rel = p.relative_to(ROOT).as_posix()  # forward slashes — stable across OS/CI
+        for i, line in enumerate(lines, 1):
+            if _NOSUP_OK.search(line):
+                continue
+            if i >= 2 and _NOSUP_OK.search(lines[i - 2]):
+                continue
+            if _NOSUP_RETURN_NULL.search(line) or _NOSUP_INLINE_GUARD.search(line):
+                key = f"{rel}|{line.strip()}"  # line-text key — stable when lines move
+                if key in _nosup_baseline:
+                    continue  # grandfathered pre-existing case
+                fails.append(
+                    f"{rel}:{i}: UI suppressed on empty data — keep it mounted and render a "
+                    "'no data' state (no-suppress rule). Add 'no-suppress-ok: <reason>' if "
+                    "intentional, or grandfather it in scripts/no_suppress_baseline.txt."
+                )
+
 # Result --------------------------------------------------------------------
 if fails:
     print("CI GUARDS FAILED:")

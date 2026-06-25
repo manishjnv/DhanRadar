@@ -34,12 +34,15 @@ function EmptyOverlapState() {
 }
 
 function CategoryDistributionTable({ data }: { data: OverlapResponse['category_distribution'] }) {
-  if (data.length === 0) return null;
   return (
     <div className="mt-4">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Category Distribution
       </h4>
+      {/* No-suppress rule: keep the heading + show a "no data" line when empty. */}
+      {data.length === 0 ? (
+        <p className="py-2 text-xs text-text-tertiary">No category distribution data yet.</p>
+      ) : (
       <ul className="divide-y divide-border-subtle">
         {data.map((item) => (
           <li key={item.category} className="flex items-start gap-3 py-2">
@@ -58,17 +61,21 @@ function CategoryDistributionTable({ data }: { data: OverlapResponse['category_d
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }
 
 function FundPairList({ data }: { data: OverlapResponse['fund_pairs'] }) {
-  if (data.length === 0) return null;
   return (
     <div className="mt-4">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         Same-Category Pairs
       </h4>
+      {/* No-suppress rule: keep the heading + show a "no data" line when empty. */}
+      {data.length === 0 ? (
+        <p className="py-2 text-xs text-text-tertiary">No same-category fund pairs yet.</p>
+      ) : (
       <ul className="divide-y divide-border-subtle">
         {data.map((pair) => (
           <li
@@ -91,6 +98,7 @@ function FundPairList({ data }: { data: OverlapResponse['fund_pairs'] }) {
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }

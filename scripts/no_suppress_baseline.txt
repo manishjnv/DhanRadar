@@ -1,0 +1,25 @@
+# no-suppress baseline — pre-existing UI-suppression hits grandfathered when the
+# no-suppress guardrail (ci_guards.py #9) was introduced 2026-06-25.
+# Format: <relpath>|<stripped source line>. The gate fails on any NEW hit not
+# listed here. Triage/REMOVE entries over time (convert to a 'no data' state or
+# add an inline 'no-suppress-ok: <reason>'); never ADD a new customer-facing one.
+frontend/src/app/admin/ai/cost/page.tsx|{showSaved && <SavedBanner onDismiss={() => setShowSaved(false)} />}
+frontend/src/app/admin/ai/eval/page.tsx|{q.data && <QualityIssueTable issues={q.data.quality_issues} />}
+frontend/src/app/admin/ai/versions/page.tsx|{q.data && <VersionsTable versions={q.data.versions} />}
+frontend/src/app/admin/billing/page.tsx|{paymentsQ.data && <PaymentsTable payments={paymentsQ.data} />}
+frontend/src/app/admin/flags/page.tsx|{flagsQ.data && <FlagsTable flags={flagsQ.data} />}
+frontend/src/app/admin/scoring/page.tsx|{modelQ.data && <RegistryTable versions={modelQ.data.registry_versions} />}
+frontend/src/app/admin/support/page.tsx|{casQ.data && <CasFailuresTable failures={casQ.data} />}
+frontend/src/app/admin/users/page.tsx|{activityQ.data && <RecentLoginsTable rows={activityQ.data} />}
+frontend/src/app/admin/users/page.tsx|{auditQ.data && <AuditTable rows={auditQ.data} />}
+frontend/src/app/mood/page.tsx|if (!history.length) return null;
+frontend/src/components/changes/WhatChangedPanel.tsx|if (reasons.length === 0) return null;
+frontend/src/components/mf/explore/MarketMoodSection.tsx|if (!items.length) return null;
+frontend/src/components/mf/FactorStrengthBar.tsx|if (rows.length === 0) return null;
+frontend/src/components/mf/PortfolioHealthSummary.tsx|if (visibleLabels.length === 0) return null;
+frontend/src/components/mf/ResearchAssistant.tsx|if (citations.length === 0) return null;
+frontend/src/components/mf/StickyPortfolioBar.tsx|if (!schemes.length) return null;
+frontend/src/components/mood/DriverFactorList.tsx|if (items.length === 0) return null;
+frontend/src/components/mood/MoodPeriods.tsx|if (periods.length === 0) return null;
+frontend/src/components/mood/MoodTimeline.tsx|if (rows.length === 0) return null;
+frontend/src/components/pricing/PricingPlans.tsx|if (apiPlans.length === 0) return null;
