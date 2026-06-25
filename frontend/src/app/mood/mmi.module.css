@@ -50,10 +50,16 @@
   box-sizing: border-box;
 }
 
+/* Full-bleed: the page fills whatever width the shell hands it (MaybeShell
+ * maxWidth="full" → no column cap). The outer chrome (AppShell <main> p-6 for
+ * logged-in, public <main> px-4/sm:px-6 for anon) supplies the gutter, so the
+ * wrap stays edge-to-edge and only adds a gentle, viewport-relative inset on
+ * very wide screens to keep the dense grids from feeling stretched. */
 .wrap {
-  max-width: 1160px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 8px 4px 40px;
+  padding: 8px clamp(0px, 1vw, 28px) 40px;
 }
 
 .mono {
@@ -921,5 +927,21 @@
   }
   .monthStrip {
     overflow-x: auto;
+  }
+}
+
+/* Wide screens — now that the column cap is gone, put the extra width to work
+ * so the page fills large monitors instead of stretching two columns thin. */
+@media (min-width: 1500px) {
+  .signalGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (min-width: 2100px) {
+  .signalGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .chips {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
