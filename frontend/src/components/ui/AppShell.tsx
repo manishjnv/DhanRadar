@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Upload, Compass,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
-  ShieldCheck, Search, GitCompare, Trophy, Wallet,
+  ShieldCheck, Search, GitCompare, Trophy, Wallet, Star,
   type LucideIcon,
 } from 'lucide-react';
 import { CommandPalette } from '@/components/ui/CommandPalette';
@@ -32,6 +32,7 @@ const WORKSPACE: NavItem[] = [
   { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
   { href: '/mf/compare',     label: 'Compare Funds',   icon: GitCompare       },
   { href: '/mf/leaderboard', label: 'Leaderboard',     icon: Trophy           },
+  { href: '/mf/watchlist',   label: 'Watchlist',       icon: Star             },
   { href: '/mood',           label: 'Market Mood',     icon: Compass          },
   { href: '/signal',         label: 'Signal',          icon: Signal           },
   // Tax Guides + Investing Basics intentionally NOT in the sidebar — they live in
