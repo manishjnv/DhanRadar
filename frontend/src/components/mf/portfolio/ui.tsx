@@ -90,10 +90,11 @@ export function Donut({ data, size = 180, thick = 26 }: { data: [string, number,
 
   return (
     <svg width={size} height={size} aria-hidden="true" className="shrink-0">
+      {/* No <svg> <title> here: React 18 hoists <title> as document metadata, so it
+          renders empty on the server but filled on the client → hydration mismatch
+          (#418 → #422). The donut is aria-hidden and values appear in the legend. */}
       {arcs.map((a) => (
-        <path key={a.name} d={a.d} fill="none" stroke={a.col} strokeWidth={thick} strokeLinecap="butt">
-          <title>{a.name}: {a.pct}%</title>
-        </path>
+        <path key={a.name} d={a.d} fill="none" stroke={a.col} strokeWidth={thick} strokeLinecap="butt" />
       ))}
     </svg>
   );
