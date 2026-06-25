@@ -566,10 +566,10 @@ export default function MoodPage() {
                 </div>
               </section>
 
-              {/* INSTITUTIONAL FLOWS — public market facts, DOM-allowed (not computed by DhanRadar) */}
-              {flows && (flows.fii_cr !== null || flows.dii_cr !== null || flows.pcr !== null) && (
-                <InstitutionalFlowsCard flows={flows} />
-              )}
+              {/* INSTITUTIONAL FLOWS — public market facts, DOM-allowed (not computed by DhanRadar).
+                  No-suppress rule: always mounted; the card shows a "no data" state when flows
+                  are absent rather than disappearing. */}
+              <InstitutionalFlowsCard flows={flows} />
 
               {/* WHAT'S DRIVING THIS */}
               <div className={s.sectionTitle}>
@@ -924,13 +924,14 @@ function fmtCrore(v: number): { display: string; direction: string; positive: bo
   };
 }
 
-function InstitutionalFlowsCard({ flows }: { flows: Flows }) {
-  const hasFii  = flows.fii_cr !== null;
-  const hasDii  = flows.dii_cr !== null;
-  const hasPcr  = flows.pcr    !== null;
-  const fii  = hasFii ? fmtCrore(flows.fii_cr as number) : null;
-  const dii  = hasDii ? fmtCrore(flows.dii_cr as number) : null;
-  const asOf = flows.as_of ? relativeTime(flows.as_of) : null;
+function InstitutionalFlowsCard({ flows }: { flows?: Flows }) {
+  const hasFii  = !!flows && flows.fii_cr !== null;
+  const hasDii  = !!flows && flows.dii_cr !== null;
+  const hasPcr  = !!flows && flows.pcr    !== null;
+  const hasAny  = hasFii || hasDii || hasPcr;
+  const fii  = hasFii ? fmtCrore(flows!.fii_cr as number) : null;
+  const dii  = hasDii ? fmtCrore(flows!.dii_cr as number) : null;
+  const asOf = flows?.as_of ? relativeTime(flows.as_of) : null;
 
   return (
     <section className={s.panel} aria-label="Institutional flows">
@@ -941,6 +942,12 @@ function InstitutionalFlowsCard({ flows }: { flows: Flows }) {
           prediction. Flow direction does not predict market moves.
         </p>
       </div>
+      {/* No-suppress rule: card stays mounted; show a "no data" note when no flows are in yet. */}
+      {!hasAny && (
+        <div className={s.driveEmpty}>
+          No institutional flow data yet — this updates after market close.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         {fii && (
           <div className={s.cchip} style={{ minWidth: 140 }}>
@@ -1018,7 +1025,16 @@ function MovedTable({
     ['Since last week', at(7)],
     ['Since last month', at(30)],
   ] as [string, Regime | null][]).filter((r) => r[1] !== null);
-  if (!rows.length) return null;
+  if (!rows.length) {
+    // No-suppress rule: keep the section visible with a "no data" note.
+    return (
+      <div className={s.moved}>
+        <div className={s.movedFoot} style={{ textAlign: 'center' }}>
+          No mood history yet — this fills in as daily readings are recorded.
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={s.moved}>
       {rows.map(([label, prev]) => (
@@ -1113,7 +1129,8 @@ function PeriodsStrip({
       .slice(-VIEW_COUNT[view]);
   }, [history, view, todayRegime, todayDate]);
 
-  if (!cells.length) return null;
+  // No-suppress rule: always render the section (title + window toggle); show a
+  // "no data" note inside the panel when there is no history yet.
   return (
     <>
       <div className={s.sectionTitle}>
@@ -1133,17 +1150,23 @@ function PeriodsStrip({
             </button>
           ))}
         </div>
-        <div className={s.monthStrip}>
-          {cells.map((m) => (
-            <div key={m.key} className={`${s.mcell}${m.today ? ' ' + s.today : ''}`}>
-              <div className={`${s.mName} ${s.mono}`}>{m.label}</div>
-              <div className={s.mDisc} style={{ background: HEX[m.regime] }} />
-              <div className={s.mState} style={{ color: HEX[m.regime] }}>
-                {WORD[m.regime]}
+        {cells.length === 0 ? (
+          <div className={s.driveEmpty} style={{ padding: '6px 2px' }}>
+            No mood history yet — this builds up as daily readings are recorded.
+          </div>
+        ) : (
+          <div className={s.monthStrip}>
+            {cells.map((m) => (
+              <div key={m.key} className={`${s.mcell}${m.today ? ' ' + s.today : ''}`}>
+                <div className={`${s.mName} ${s.mono}`}>{m.label}</div>
+                <div className={s.mDisc} style={{ background: HEX[m.regime] }} />
+                <div className={s.mState} style={{ color: HEX[m.regime] }}>
+                  {WORD[m.regime]}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
