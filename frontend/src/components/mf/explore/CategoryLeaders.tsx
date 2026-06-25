@@ -12,6 +12,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { FundAvatar } from './FundAvatar';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { LabelChip } from '@/components/ui/LabelChip';
 import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
 import type { FundExplorerItem } from '@/features/mf/types';
@@ -26,7 +27,17 @@ export function CategoryLeaders({
   leaders: FundExplorerItem[];
   categoryName: string;
 }) {
-  if (leaders.length === 0) return null;
+  // No-suppress rule: keep the section mounted and show a "no data" state
+  // instead of removing it when there are no ranked leaders for this category.
+  if (leaders.length === 0) {
+    return (
+      <EmptyState
+        title="No category leaders yet"
+        description={`Top-ranked funds for ${categoryName} will appear here once ranking data is available.`}
+        className="rounded-xl border border-dashed border-line bg-surface-2/50 py-10"
+      />
+    );
+  }
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

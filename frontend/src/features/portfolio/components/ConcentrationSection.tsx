@@ -55,12 +55,15 @@ function ConcentrationList({
   title: string;
   items: ConcentrationItem[];
 }) {
-  if (items.length === 0) return null;
   return (
     <div className="mt-4">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
         {title}
       </h4>
+      {/* No-suppress rule: keep the heading + show a "no data" line when empty. */}
+      {items.length === 0 ? (
+        <p className="py-2 text-xs text-text-tertiary">No {title.toLowerCase()} data yet.</p>
+      ) : (
       <ul className="divide-y divide-border-subtle">
         {items.map((item) => (
           <li key={item.name} className="py-2">
@@ -75,6 +78,7 @@ function ConcentrationList({
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }

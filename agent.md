@@ -57,6 +57,25 @@ Use existing tokens, spacing, typography; support dark mode, mobile, accessibili
 Add to `frontend/src/components/` (the adopted `src/` feature-slice structure) and document them in
 the module feature doc / component spec. No magic numbers (token-only).
 
+## Always render — never suppress a component for missing data (founder rule 2026-06-25, binding)
+
+No UI **section, card, table, filter, or button** may be deleted, hidden, conditionally removed,
+or `return null`-ed just because its backend data is empty or missing. The component **stays
+mounted** and renders a clear **"no data" state** (reuse `@/components/ui/EmptyState`, or an inline
+empty/disabled treatment for buttons/filters). The UI is built ahead of its backends, so a visible
+"no data yet" preserves the full intended layout instead of making a page look incomplete.
+
+- **Forbidden:** `{data && <SomeSection/>}` that removes the section, `if (rows.length === 0) return
+  null` in a section/table, a `.map()` with no empty fallback, swapping a section out on data
+  presence.
+- **Allowed any time (cosmetic exception):** small alignment, nav fixes, breadcrumbs, color,
+  typography, and font may be adjusted freely while the backend + functionality are still being
+  built. The rule freezes *removal*, not *refinement*.
+- **Compliance still wins:** no numeric-in-DOM (#2) and no advisory copy, even inside empty states.
+- **Enforced** by `scripts/ci_guards.py` (#9, runs in the `guards` CI job). Pre-existing cases are
+  grandfathered in `scripts/no_suppress_baseline.txt`; a genuinely-conditional non-data case uses an
+  inline `// no-suppress-ok: <reason>` comment. Any NEW suppression fails the build.
+
 ## New pages
 
 Reuse existing layouts, navigation, cards/widgets; maintain visual hierarchy. Build production-
