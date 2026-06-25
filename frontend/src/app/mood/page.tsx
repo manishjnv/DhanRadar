@@ -410,7 +410,7 @@ export default function MoodPage() {
     !!data && (data.data_quality === 'unavailable' || data.regime === 'data_unavailable');
 
   return (
-    <MaybeShell maxWidth="wide">
+    <MaybeShell maxWidth="full">
       <div className={s.root}>
         <div className={s.wrap}>
           {/* BRAND BAR */}
