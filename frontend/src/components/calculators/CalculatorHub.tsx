@@ -1,17 +1,21 @@
 /**
  * Calculator Hub V1 — the page body (client).
  *
- * Renders the approved CalculatorHubV1 desktop + mobile mockups: a hub landing
- * (hero, featured, categories, all-calculators, learn, FAQ) and an inert SIP
- * Calculator detail SHELL reached by activating any calculator card. The
- * hub ⇄ detail switch is a local view toggle (mirrors the mockup's
- * showHub/openCalc) — NOT a route change.
+ * Renders the approved CalculatorHubV1 mockups: a hub landing (hero, featured,
+ * categories, all-calculators, learn, FAQ) and a calculator detail view reached
+ * by activating any calculator card. The hub ⇄ detail switch is a local view
+ * toggle (mirrors the mockup's showHub/openCalc) — NOT a route change.
  *
- * PURE UI: no calculator engine, no search, no filtering, no API. Every figure
- * is fixed preview seed data; sliders/toggles are static placeholders. The two
- * deploy-gating compliance rules are honoured: no advisory verbs, and no
- * DhanRadar-computed fund score appears in the DOM (the values here are plain
- * calculator illustrations, not fund ratings).
+ * The SIP detail is now LIVE — its inputs drive the generic compounding engine
+ * (`computeSip`); KPIs, chart, year table, what-if, and AI insights all recompute
+ * from the user's own inputs. The other cards currently open this same SIP detail
+ * as the first calculator (the remaining 54 are wired in later sessions).
+ *
+ * COMPLIANCE: the figures here are the USER's own computed numbers (not a
+ * DhanRadar fund score) so the no-numeric-in-DOM carve-out applies — same as the
+ * live `SipCalculator`. The assumed return is labelled as the user's assumption,
+ * the disclaimer + sensitivity (What-If) sit beside the result, and the AI cards
+ * are templated from the user's inputs (no LLM call) under the disclosure bundle.
  */
 'use client';
 
@@ -25,9 +29,9 @@ import {
 } from './ui';
 import {
   HERO, HERO_CATS, FEATURED, CATEGORIES, FILTER_CHIPS, ALL_CALCS, LEARN, FAQ,
-  SIP_DETAIL, SIP_DEFAULTS, SIP_KPIS, SIP_WHATIF, SIP_AI, SIP_TABLE, SIP_RELATED,
-  SIP_SERIES, DISCLAIMER_HUB, DISCLAIMER_CALC,
+  SIP_DETAIL, SIP_RELATED, DISCLAIMER_HUB, DISCLAIMER_CALC,
 } from './data';
+import { computeSip, formatInr, formatInrShort } from '@/features/learn/calculators/sip-math';
 
 type View = 'hub' | 'calc';
 
@@ -123,7 +127,75 @@ function HubView({ onOpen }: { onOpen: () => void }) {
 }
 
 // ═══════════════════════════════ CALC DETAIL ════════════════════════════════
+// SIP — the first LIVE calculator. Inputs drive `computeSip`; every figure here
+// is the user's own illustration, not a fund score.
 function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }) {
+  const [monthly, setMonthly] = React.useState(25_000);
+  const [rate, setRate] = React.useState(12);
+  const [years, setYears] = React.useState(15);
+  const [stepUp, setStepUp] = React.useState(false);
+
+  const stepUpPct = stepUp ? 10 : 0;
+  const result = React.useMemo(
+    () => computeSip({ monthlySip: monthly, lumpSum: 0, years, annualRatePct: rate, stepUpPct }),
+    [monthly, rate, years, stepUpPct],
+  );
+
+  const future = result.futureValue;
+  const invested = result.totalInvested;
+  const profit = result.wealthGained;
+  const multiplier = invested > 0 ? future / invested : 0;
+  const profitPct = future > 0 ? Math.round((profit / future) * 100) : 0;
+
+  // What-if — re-run the engine with one input nudged; delta vs the current plan.
+  const baseInput = { monthlySip: monthly, lumpSum: 0, years, annualRatePct: rate, stepUpPct };
+  const fvWith = (patch: Partial<typeof baseInput>) => computeSip({ ...baseInput, ...patch }).futureValue;
+  const realValue = future / Math.pow(1.06, Math.max(years, 0));
+  const signed = (d: number) => `${d >= 0 ? '+' : '−'}${formatInrShort(Math.abs(d))} vs now`;
+
+  const whatIf = [
+    { name: 'Invest ₹5,000 more', val: `${formatInrShort(monthly + 5000)}/mo`, fv: fvWith({ monthlySip: monthly + 5000 }) },
+    { name: 'Invest 5 years longer', val: `${years + 5} yrs`, fv: fvWith({ years: years + 5 }) },
+    { name: 'Earn 2% more', val: `${rate + 2}%`, fv: fvWith({ annualRatePct: rate + 2 }) },
+    { name: 'Earn 2% less', val: `${Math.max(rate - 2, 0)}%`, fv: fvWith({ annualRatePct: Math.max(rate - 2, 0) }) },
+    stepUp
+      ? { name: 'Without step-up', val: 'flat', fv: fvWith({ stepUpPct: 0 }) }
+      : { name: 'Start a 10% step-up', val: '+10%/yr', fv: fvWith({ stepUpPct: 10 }) },
+  ].map((s) => ({ name: s.name, val: s.val, result: formatInrShort(s.fv), delta: signed(s.fv - future), up: s.fv >= future }));
+  whatIf.push({
+    name: 'Worth in today’s money',
+    val: '@6% inflation',
+    result: formatInrShort(realValue),
+    delta: `${formatInrShort(Math.abs(realValue - future))} less`,
+    up: false,
+  });
+
+  // AI insights — templated from the user's OWN numbers (no LLM call, no advice).
+  const dMore = fvWith({ monthlySip: monthly + 5000 }) - future;
+  const dLonger = fvWith({ years: years + 5 }) - future;
+  const dStep = fvWith({ stepUpPct: 10 }) - future;
+  const ai = [
+    `**Investing ₹5,000 more each month** changes this estimate by about **${formatInrShort(dMore)}** — often easier than chasing a higher return.`,
+    `**Staying invested 5 more years** adds roughly **${formatInrShort(dLonger)}**. Time in the market tends to matter most.`,
+    `**At 6% inflation**, this ${formatInrShort(future)} would buy what **${formatInrShort(realValue)}** buys today — plan for real, not just nominal, wealth.`,
+    stepUp
+      ? 'Your **10% yearly step-up** is doing a lot of the work here — growing the SIP with your income compounds hard.'
+      : `**A 10% yearly step-up** could add about **${formatInrShort(dStep)}**, just by raising your SIP as your income grows.`,
+  ];
+
+  // Year-by-year table from the engine series (full, scrollable — no omission).
+  const rows = result.series
+    .filter((p) => p.year >= 1)
+    .map((p) => ({
+      year: p.year,
+      invested: formatInrShort(p.invested),
+      wealth: formatInrShort(p.value),
+      profit: `+${formatInrShort(Math.max(p.value - p.invested, 0))}`,
+      mult: `${p.invested > 0 ? (p.value / p.invested).toFixed(2) : '0.00'}×`,
+    }));
+
+  const reset = () => { setMonthly(25_000); setRate(12); setYears(15); setStepUp(false); };
+
   return (
     <div className="w-full pb-24">
       <Crumb current={SIP_DETAIL.title} onHome={onBack} />
@@ -139,22 +211,52 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
       </div>
 
       <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[360px_1fr]">
-        {/* INPUT PANEL (inert) */}
+        {/* INPUT PANEL (live) */}
         <Panel className="lg:sticky lg:top-[76px]">
           <h3 className="m-0 text-[15px] font-medium text-ink">Your Investment</h3>
           <p className="mb-4 mt-1 text-caption tracking-normal text-ink-muted">Drag the sliders — results update instantly.</p>
 
-          <RangeField label="Monthly SIP" tip="The amount you invest every month" value={SIP_DEFAULTS.monthly} min={500} max={200000} rangeMin={SIP_DEFAULTS.monthlyRangeMin} rangeMax={SIP_DEFAULTS.monthlyRangeMax} presets={SIP_DEFAULTS.sipPresets} />
-          <RangeField label="Expected Annual Growth" tip="CAGR — the average yearly return you expect" value={SIP_DEFAULTS.growth} min={1} max={30} rangeMin={SIP_DEFAULTS.growthRangeMin} rangeMax={SIP_DEFAULTS.growthRangeMax} presets={SIP_DEFAULTS.growthPresets} />
-          <RangeField label="Investment Period" tip="How many years you'll keep investing" value={SIP_DEFAULTS.years} min={1} max={40} rangeMin={SIP_DEFAULTS.yearsRangeMin} rangeMax={SIP_DEFAULTS.yearsRangeMax} presets={SIP_DEFAULTS.yearPresets} />
+          <RangeField
+            label="Monthly SIP"
+            tip="The amount you invest every month"
+            value={monthly}
+            min={500}
+            max={200000}
+            step={500}
+            format={formatInr}
+            presets={[{ label: '₹5K', value: 5000 }, { label: '₹10K', value: 10000 }, { label: '₹25K', value: 25000 }, { label: '₹50K', value: 50000 }, { label: '₹1L', value: 100000 }]}
+            onChange={setMonthly}
+          />
+          <RangeField
+            label="Expected Annual Growth"
+            tip="The average yearly return you assume — your choice, not a DhanRadar prediction"
+            value={rate}
+            min={1}
+            max={30}
+            step={0.5}
+            format={(n) => `${n}%`}
+            presets={[{ label: '8%', value: 8 }, { label: '10%', value: 10 }, { label: '12%', value: 12 }, { label: '15%', value: 15 }]}
+            onChange={setRate}
+          />
+          <RangeField
+            label="Investment Period"
+            tip="How many years you keep investing"
+            value={years}
+            min={1}
+            max={40}
+            step={1}
+            format={(n) => `${n} ${n === 1 ? 'yr' : 'yrs'}`}
+            presets={[{ label: '5y', value: 5 }, { label: '10y', value: 10 }, { label: '15y', value: 15 }, { label: '20y', value: 20 }, { label: '30y', value: 30 }]}
+            onChange={setYears}
+          />
 
           <div className="mb-3.5">
-            <ToggleRow title="Step-up SIP" sub="Increase SIP 10% every year" />
+            <ToggleRow title="Step-up SIP" sub="Increase SIP 10% every year" on={stepUp} onToggle={() => setStepUp((v) => !v)} />
           </div>
 
           <div className="flex gap-2">
             <Btn variant="pri" className="flex-1">Calculate</Btn>
-            <Btn aria-label="Reset inputs">Reset</Btn>
+            <Btn aria-label="Reset inputs" onClick={reset}>Reset</Btn>
             <Btn aria-label="Export results">⬇</Btn>
             <Btn aria-label="Share results">↗</Btn>
           </div>
@@ -163,10 +265,10 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
         {/* RESULT PANEL */}
         <div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Kpi hero label="Estimated Future Wealth" value={SIP_KPIS.future} sub={SIP_KPIS.futureSub} />
-            <Kpi label="Money You Invest" value={SIP_KPIS.invested} sub="Total contributions" />
-            <Kpi label="Profit Earned" value={SIP_KPIS.profit} sub="Growth on your money" accent="pos" />
-            <Kpi label="Wealth Multiplier" value={SIP_KPIS.multiplier} sub="Your money grows this many times" />
+            <Kpi hero label="Estimated Future Wealth" value={formatInrShort(future)} sub={`From ₹${monthly.toLocaleString('en-IN')}/month over ${years} ${years === 1 ? 'year' : 'years'}`} />
+            <Kpi label="Money You Invest" value={formatInrShort(invested)} sub="Total contributions" />
+            <Kpi label="Profit Earned" value={formatInrShort(profit)} sub="Growth on your money" accent="pos" />
+            <Kpi label="Wealth Multiplier" value={`${multiplier.toFixed(1)}×`} sub="Your money grows this many times" />
           </div>
 
           {/* Chart */}
@@ -175,7 +277,7 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
               <div className="text-small font-medium text-ink">Growth Over Time</div>
               <div className="text-caption tracking-normal text-ink-muted">Invested vs Wealth</div>
             </div>
-            <GrowthChart series={SIP_SERIES} />
+            <GrowthChart series={result.series} />
             <div className="mt-3 flex flex-wrap gap-4">
               <span className="inline-flex items-center gap-1.5 text-caption tracking-normal text-ink-secondary"><span className="h-2.5 w-2.5 rounded-[3px] bg-royal" />Estimated Wealth</span>
               <span className="inline-flex items-center gap-1.5 text-caption tracking-normal text-ink-secondary"><span className="h-2.5 w-2.5 rounded-[3px] bg-surface-3" />Money Invested</span>
@@ -186,7 +288,7 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
           <Section className="mt-[18px]">
             <SectionHeader index="✦" title="What If…" info="Small changes, big impact" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {SIP_WHATIF.map((w) => <WhatIfCard key={w.name} {...w} />)}
+              {whatIf.map((w) => <WhatIfCard key={w.name} {...w} />)}
             </div>
           </Section>
 
@@ -194,7 +296,7 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
           <Section>
             <SectionHeader index="✦" title="AI Insights" tag="DhanRadar AI" />
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {SIP_AI.map((t, i) => <AiCard key={i} text={t} />)}
+              {ai.map((t, i) => <AiCard key={i} text={t} />)}
             </div>
             <div className="mt-3">
               <DisclosureBundle notAdvice="For education only — not investment advice. These insights illustrate how your own inputs change an estimate; they are not recommendations to buy, sell, or hold any fund. Estimates assume a constant annual return, which real markets do not provide." />
@@ -214,7 +316,7 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
                   </tr>
                 </thead>
                 <tbody>
-                  {SIP_TABLE.map((r) => (
+                  {rows.map((r) => (
                     <tr key={r.year} className="hover:bg-surface-2">
                       <td className="border-b border-line px-3.5 py-2.5 text-left font-semibold text-ink">Year {r.year}</td>
                       <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-semibold text-ink-muted">{r.invested}</td>
@@ -233,22 +335,22 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
             <SectionHeader index="✦" title="Where Your Wealth Comes From" />
             <Panel>
               <div className="flex flex-col items-center gap-5 sm:flex-row">
-                <Donut invested={45} profit={80} />
+                <Donut invested={Math.max(invested, 0)} profit={Math.max(profit, 0)} />
                 <div className="flex-1 self-stretch">
                   <div className="flex items-center gap-2.5 border-b border-line py-2.5">
                     <span className="h-3 w-3 rounded-[3px] bg-surface-3" />
                     <span className="flex-1 text-small font-semibold text-ink">Money You Invest</span>
-                    <span className="font-mono font-bold text-ink">{SIP_KPIS.invested}</span>
-                    <span className="w-12 text-right font-mono text-ink-muted">{100 - SIP_KPIS.profitPct}%</span>
+                    <span className="font-mono font-bold text-ink">{formatInrShort(invested)}</span>
+                    <span className="w-12 text-right font-mono text-ink-muted">{100 - profitPct}%</span>
                   </div>
                   <div className="flex items-center gap-2.5 py-2.5">
                     <span className="h-3 w-3 rounded-[3px] bg-royal" />
                     <span className="flex-1 text-small font-semibold text-ink">Profit Earned</span>
-                    <span className="font-mono font-bold text-emerald">{SIP_KPIS.profit}</span>
-                    <span className="w-12 text-right font-mono text-ink-muted">{SIP_KPIS.profitPct}%</span>
+                    <span className="font-mono font-bold text-emerald">{formatInrShort(profit)}</span>
+                    <span className="w-12 text-right font-mono text-ink-muted">{profitPct}%</span>
                   </div>
                   <SoWhat>
-                    <b className="font-semibold text-ink">{SIP_KPIS.profitPct}% of your final wealth is pure profit</b> — the power of compounding. The longer you stay invested, the more this share grows.
+                    <b className="font-semibold text-ink">{profitPct}% of your estimated wealth is profit</b> — the power of compounding. The longer you stay invested, the more this share tends to grow.
                   </SoWhat>
                 </div>
               </div>
@@ -271,7 +373,7 @@ function CalcView({ onBack, onOpen }: { onBack: () => void; onOpen: () => void }
       <div className="fixed bottom-[18px] left-1/2 z-[55] flex -translate-x-1/2 items-center gap-3.5 rounded-2xl bg-navy/95 px-4 py-3 shadow-[0_24px_60px_-20px_rgba(15,23,42,.45)] backdrop-blur">
         <div className="text-white">
           <small className="block text-[10px] font-semibold uppercase tracking-[0.04em] text-slate-400">Future Wealth</small>
-          <span className="text-small font-bold">{SIP_KPIS.future}</span>
+          <span className="text-small font-bold">{formatInrShort(future)}</span>
         </div>
         <Btn variant="pri" className="px-3.5">Calculate</Btn>
         <button type="button" className="hidden rounded-[11px] border border-white/15 bg-white/10 px-3.5 py-2.5 text-small font-semibold text-white sm:inline-flex">⬇ Export</button>

@@ -7,7 +7,7 @@
  * Infinity (Goal-Calculator Inv. 6/9).
  */
 import { describe, it, expect } from 'vitest';
-import { computeSip, formatInr, MAX_AMOUNT } from './sip-math';
+import { computeSip, formatInr, formatInrShort, MAX_AMOUNT } from './sip-math';
 
 // Independent reference: month-by-month accumulation (ordinary annuity — each
 // SIP contribution made at period END, so the last payment earns nothing).
@@ -99,6 +99,63 @@ describe('computeSip — edge cases never produce NaN / Infinity', () => {
       expect(finite(p.invested)).toBe(true);
       expect(finite(p.value)).toBe(true);
     }
+  });
+});
+
+describe('computeSip — step-up SIP', () => {
+  const base = { monthlySip: 10_000, lumpSum: 0, years: 10, annualRatePct: 12 };
+
+  it('omitted stepUpPct is identical to stepUpPct = 0 (flat path)', () => {
+    const flat = computeSip(base);
+    const zero = computeSip({ ...base, stepUpPct: 0 });
+    expect(zero.futureValue).toBe(flat.futureValue);
+    expect(zero.totalInvested).toBe(flat.totalInvested);
+  });
+
+  it('a 10%/yr step-up grows both the corpus and the amount invested vs flat', () => {
+    const flat = computeSip(base);
+    const stepped = computeSip({ ...base, stepUpPct: 10 });
+    expect(stepped.futureValue).toBeGreaterThan(flat.futureValue);
+    expect(stepped.totalInvested).toBeGreaterThan(flat.totalInvested);
+  });
+
+  it('invested matches the geometric step-up sum (10k base, 10%/yr, 10y ≈ ₹19.12 L)', () => {
+    // Σ over 10 years of 12 × 10k × 1.1^y = 120000 × (1.1^10 − 1)/0.1 ≈ 1,912,491
+    const r = computeSip({ ...base, stepUpPct: 10 });
+    expect(Math.round(r.totalInvested)).toBeGreaterThan(1_912_000);
+    expect(Math.round(r.totalInvested)).toBeLessThan(1_913_000);
+  });
+
+  it('series is finite, length year 0..N, and monotonically rising', () => {
+    const r = computeSip({ monthlySip: 25_000, lumpSum: 0, years: 15, annualRatePct: 12, stepUpPct: 10 });
+    expect(r.series.length).toBe(16);
+    for (const p of r.series) {
+      expect(Number.isFinite(p.invested)).toBe(true);
+      expect(Number.isFinite(p.value)).toBe(true);
+    }
+    expect(r.series[15].value).toBeGreaterThan(r.series[1].value);
+  });
+
+  it('extreme step-up stays finite (clamped, never Infinity)', () => {
+    const r = computeSip({ monthlySip: 1e9, lumpSum: 0, years: 50, annualRatePct: 50, stepUpPct: 999 });
+    expect(Number.isFinite(r.futureValue)).toBe(true);
+    expect(Number.isFinite(r.totalInvested)).toBe(true);
+  });
+});
+
+describe('formatInrShort — crore / lakh / K abbreviations', () => {
+  it('formats crore to 2dp, lakh to 1dp, thousands to K', () => {
+    expect(formatInrShort(12_500_000)).toBe('₹1.25 Cr');
+    expect(formatInrShort(4_500_000)).toBe('₹45.0 L');
+    expect(formatInrShort(17_000)).toBe('₹17K');
+    expect(formatInrShort(500)).toBe('₹500');
+  });
+
+  it('NaN / Infinity / non-positive → ₹0', () => {
+    expect(formatInrShort(NaN)).toBe('₹0');
+    expect(formatInrShort(Infinity)).toBe('₹0');
+    expect(formatInrShort(0)).toBe('₹0');
+    expect(formatInrShort(-100)).toBe('₹0');
   });
 });
 

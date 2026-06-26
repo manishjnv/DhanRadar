@@ -57,3 +57,4 @@ How to prove this module works end-to-end (commands, tests, MCP/curl checks).
 - [mood-compass.md](mood-compass.md) — Mood Compass module (Phase 2): twice-daily market regime + commentary, `mood.snapshot.published`, public anon API.
 - [consent.md](consent.md) — Consent module (Phase 2, B44): DPDP grant/revoke writer, append-only audit log, point-of-use modal + settings/privacy panel.
 - [portfolio-intelligence.md](portfolio-intelligence.md) — Portfolio Intelligence / Insights (Phase 5 follow-on + PU1): overlap, concentration, and mood-context surfaces.
+- [calculators.md](calculators.md) — Financial Calculators (DESIGN): layered `finance-core` engine, 9 math engines, config-driven template, accuracy-via-golden-vectors, reusable across the app.

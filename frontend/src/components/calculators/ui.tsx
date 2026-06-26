@@ -369,25 +369,27 @@ export function Faq({ items }: { items: { q: string; a: string }[] }) {
 // SIP DETAIL primitives (inert)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Inert range field (slider is a static placeholder — no recalculation)
+// Controlled range field — slider + clickable presets + a live formatted value.
 export function RangeField({
   label,
   tip,
   value,
   min,
   max,
-  rangeMin,
-  rangeMax,
+  step = 1,
+  format,
   presets,
+  onChange,
 }: {
   label: string;
   tip: string;
-  value: string;
+  value: number;
   min: number;
   max: number;
-  rangeMin: string;
-  rangeMax: string;
-  presets: string[];
+  step?: number;
+  format: (n: number) => string;
+  presets: { label: string; value: number }[];
+  onChange: (n: number) => void;
 }) {
   return (
     <div className="mb-5">
@@ -396,43 +398,57 @@ export function RangeField({
           {label}
           <span title={tip} className="inline-grid h-[15px] w-[15px] cursor-help place-items-center rounded-full bg-surface-3 text-[9px] font-bold text-ink-muted">i</span>
         </span>
-        <span className="rounded-[9px] bg-royal/10 px-2.5 py-1 font-mono text-small font-bold text-royal">{value}</span>
+        <span className="rounded-[9px] bg-royal/10 px-2.5 py-1 font-mono text-small font-bold text-royal">{format(value)}</span>
       </div>
       <input
         type="range"
         min={min}
         max={max}
-        defaultValue={(min + max) / 2}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label}
         className="h-1.5 w-full accent-royal"
       />
       <div className="mt-1.5 flex justify-between font-mono text-[10.5px] text-ink-muted">
-        <span>{rangeMin}</span>
-        <span>{rangeMax}</span>
+        <span>{format(min)}</span>
+        <span>{format(max)}</span>
       </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {presets.map((p, i) => (
-          <span
-            key={p}
-            className={cn(
-              'rounded-lg border px-2.5 py-1.5 text-caption font-semibold tracking-normal',
-              i === 2
-                ? 'border-royal bg-royal text-white'
-                : 'border-line bg-surface-2 text-ink-secondary',
-            )}
-          >
-            {p}
-          </span>
-        ))}
+        {presets.map((p) => {
+          const active = value === p.value;
+          return (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => onChange(p.value)}
+              aria-pressed={active}
+              className={cn(
+                'rounded-lg border px-2.5 py-1.5 text-caption font-semibold tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                active
+                  ? 'border-royal bg-royal text-white'
+                  : 'border-line bg-surface-2 text-ink-secondary hover:border-royal hover:text-royal',
+              )}
+            >
+              {p.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// Inert toggle row
-export function ToggleRow({ title, sub, on = false }: { title: string; sub: string; on?: boolean }) {
+// Toggle row — a real switch (controlled via `on` + `onToggle`).
+export function ToggleRow({ title, sub, on = false, onToggle }: { title: string; sub: string; on?: boolean; onToggle?: () => void }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 p-3.5">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className="flex w-full items-center justify-between rounded-xl border border-line bg-surface-2 p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+    >
       <div>
         <div className="text-small font-semibold text-ink">{title}</div>
         <div className="mt-0.5 text-caption tracking-normal text-ink-muted">{sub}</div>
@@ -443,7 +459,7 @@ export function ToggleRow({ title, sub, on = false }: { title: string; sub: stri
       >
         <span className={cn('absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-transform', on && 'translate-x-[18px]')} />
       </span>
-    </div>
+    </button>
   );
 }
 
