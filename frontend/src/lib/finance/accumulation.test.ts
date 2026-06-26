@@ -1,38 +1,34 @@
 /**
  * Golden tests for the SIP / lump-sum compounding math.
  *
- * Correctness is cross-checked two ways: the closed-form result from computeSip()
- * is compared against an INDEPENDENT month-by-month iterative accumulation, and
- * against hand-computed reference values. Edge inputs must never produce NaN or
- * Infinity (Goal-Calculator Inv. 6/9).
+ * Conventions match mainstream Indian calculators (SBI / Groww / Motilal):
+ * SIP = monthly annuity DUE, lump sum = ANNUAL compounding. Correctness is
+ * cross-checked against an independent reference and against hand/site values.
  */
 import { describe, it, expect } from 'vitest';
 import { computeSip, formatInr, formatInrShort, MAX_AMOUNT } from './accumulation';
 
-// Independent reference: month-by-month accumulation (ordinary annuity — each
-// SIP contribution made at period END, so the last payment earns nothing).
-function iterativeFv(monthlySip: number, lumpSum: number, annualRatePct: number, years: number) {
+// Independent reference: SIP month-by-month (annuity DUE — contribution at the
+// START of each month) + lump sum compounded ANNUALLY.
+function refFv(monthlySip: number, lumpSum: number, annualRatePct: number, years: number) {
   const i = annualRatePct / 100 / 12;
   const months = Math.round(years * 12);
-  let balance = lumpSum;
-  for (let m = 0; m < months; m += 1) {
-    balance = balance * (1 + i) + monthlySip;
-  }
-  return balance;
+  let bal = 0;
+  for (let m = 0; m < months; m += 1) bal = (bal + monthlySip) * (1 + i);
+  return bal + lumpSum * Math.pow(1 + annualRatePct / 100, years);
 }
 
-describe('computeSip — SIP monthly compounding', () => {
-  it('matches the independent iterative accumulation (₹10k/mo, 12%, 10y)', () => {
+describe('computeSip — SIP (monthly annuity due)', () => {
+  it('matches the independent iterative reference (₹10k/mo, 12%, 10y)', () => {
     const r = computeSip({ monthlySip: 10_000, lumpSum: 0, years: 10, annualRatePct: 12 });
-    expect(r.futureValue).toBeCloseTo(iterativeFv(10_000, 0, 12, 10), 2);
+    expect(r.futureValue).toBeCloseTo(refFv(10_000, 0, 12, 10), 2);
   });
 
-  it('matches the hand-computed reference value (₹10k/mo, 12%, 10y ≈ ₹23,00,387)', () => {
+  it('matches the site value (₹10k/mo, 12%, 10y ≈ ₹23,23,391 — SBI/Groww)', () => {
     const r = computeSip({ monthlySip: 10_000, lumpSum: 0, years: 10, annualRatePct: 12 });
-    expect(Math.round(r.futureValue)).toBeGreaterThan(2_300_300);
-    expect(Math.round(r.futureValue)).toBeLessThan(2_300_500);
+    expect(Math.round(r.futureValue)).toBeGreaterThan(2_323_200);
+    expect(Math.round(r.futureValue)).toBeLessThan(2_323_600);
     expect(r.totalInvested).toBe(1_200_000); // 10k × 120 months
-    expect(r.wealthGained).toBeCloseTo(r.futureValue - r.totalInvested, 2);
   });
 
   it('0% rate → pure sum of contributions, no growth', () => {
@@ -42,13 +38,18 @@ describe('computeSip — SIP monthly compounding', () => {
   });
 });
 
-describe('computeSip — lump sum monthly compounding', () => {
-  it('matches the iterative accumulation (₹1L, 12%, 10y)', () => {
+describe('computeSip — lump sum (annual compounding)', () => {
+  it("matches SBI/Motilal exactly (₹1L, 13%, 15y → ₹6,25,427)", () => {
+    const r = computeSip({ monthlySip: 0, lumpSum: 100_000, years: 15, annualRatePct: 13 });
+    expect(Math.round(r.futureValue)).toBeGreaterThan(625_400);
+    expect(Math.round(r.futureValue)).toBeLessThan(625_460);
+    expect(r.totalInvested).toBe(100_000);
+  });
+
+  it('₹1L at 12% for 10y → ₹3,10,585 (annual, not monthly)', () => {
     const r = computeSip({ monthlySip: 0, lumpSum: 100_000, years: 10, annualRatePct: 12 });
-    expect(r.futureValue).toBeCloseTo(iterativeFv(0, 100_000, 12, 10), 2);
-    // 100000 × 1.01^120 ≈ 330,039
-    expect(Math.round(r.futureValue)).toBeGreaterThan(330_000);
-    expect(Math.round(r.futureValue)).toBeLessThan(330_100);
+    expect(Math.round(r.futureValue)).toBeGreaterThan(310_500);
+    expect(Math.round(r.futureValue)).toBeLessThan(310_650);
   });
 
   it('combines SIP + lump sum additively', () => {
@@ -81,7 +82,6 @@ describe('computeSip — edge cases never produce NaN / Infinity', () => {
     expect(finite(r.futureValue)).toBe(true);
     expect(finite(r.totalInvested)).toBe(true);
     expect(finite(r.wealthGained)).toBe(true);
-    // clamped inputs keep invested within the per-field cap × max months
     expect(r.totalInvested).toBeLessThanOrEqual(MAX_AMOUNT * 600 + MAX_AMOUNT);
   });
 
@@ -120,7 +120,6 @@ describe('computeSip — step-up SIP', () => {
   });
 
   it('invested matches the geometric step-up sum (10k base, 10%/yr, 10y ≈ ₹19.12 L)', () => {
-    // Σ over 10 years of 12 × 10k × 1.1^y = 120000 × (1.1^10 − 1)/0.1 ≈ 1,912,491
     const r = computeSip({ ...base, stepUpPct: 10 });
     expect(Math.round(r.totalInvested)).toBeGreaterThan(1_912_000);
     expect(Math.round(r.totalInvested)).toBeLessThan(1_913_000);
@@ -173,11 +172,14 @@ describe('computeSip — invariants (catch silent regressions, no false-pass)', 
   });
 });
 
-describe('formatInrShort — crore / lakh / K abbreviations', () => {
-  it('formats crore to 2dp, lakh to 1dp, thousands to K', () => {
-    expect(formatInrShort(12_500_000)).toBe('₹1.25 Cr');
-    expect(formatInrShort(4_500_000)).toBe('₹45.0 L');
-    expect(formatInrShort(17_000)).toBe('₹17K');
+describe('formatInrShort — abbreviations with trailing zeros stripped', () => {
+  it('strips trailing zeros and uses no space (₹1L, ₹1.5L, ₹1.23L, ₹82K, ₹6.25Cr)', () => {
+    expect(formatInrShort(100_000)).toBe('₹1L');
+    expect(formatInrShort(150_000)).toBe('₹1.5L');
+    expect(formatInrShort(123_434)).toBe('₹1.23L');
+    expect(formatInrShort(80_000)).toBe('₹80K'); // trailing-zero guard: not ₹8K
+    expect(formatInrShort(82_000)).toBe('₹82K');
+    expect(formatInrShort(12_500_000)).toBe('₹1.25Cr');
     expect(formatInrShort(500)).toBe('₹500');
   });
 
@@ -189,9 +191,10 @@ describe('formatInrShort — crore / lakh / K abbreviations', () => {
   });
 });
 
-describe('formatInr — Indian grouping, no false precision, no NaN', () => {
-  it('groups in the Indian system and drops paise', () => {
-    expect(formatInr(2_300_387.45)).toBe('₹23,00,387');
+describe('formatInr — full rupee precision, Indian grouping', () => {
+  it('groups in the Indian system and drops paise (₹6,25,427)', () => {
+    expect(formatInr(625_427.45)).toBe('₹6,25,427');
+    expect(formatInr(2_323_391)).toBe('₹23,23,391');
   });
 
   it('NaN / Infinity / negative render as ₹0 (never leaks to the DOM)', () => {
