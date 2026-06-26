@@ -18,3 +18,4 @@ export * from './swp';
 export * from './transfer';
 export * from './scheme';
 export * from './insurance';
+export * from './regime';

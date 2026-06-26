@@ -39,6 +39,11 @@ import { NetWorthDetail } from './NetWorthDetail';
 import { HlvDetail } from './HlvDetail';
 import { TermCoverDetail } from './TermCoverDetail';
 import { HealthCoverDetail } from './HealthCoverDetail';
+import { SipVsLumpsumDetail } from './SipVsLumpsumDetail';
+import { FdVsDebtDetail } from './FdVsDebtDetail';
+import { RegimeDetail } from './RegimeDetail';
+import { RentVsBuyDetail } from './RentVsBuyDetail';
+import { DirectVsRegularDetail } from './DirectVsRegularDetail';
 import { DISCLAIMER_CALC } from './data';
 
 export function CalculatorDetail({ slug }: { slug: string }) {
@@ -95,6 +100,11 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'hlv' && <HlvDetail key={config.slug} config={config} />}
       {config && config.kind === 'term-cover' && <TermCoverDetail key={config.slug} config={config} />}
       {config && config.kind === 'health-cover' && <HealthCoverDetail key={config.slug} config={config} />}
+      {config && config.kind === 'vs-sip-lumpsum' && <SipVsLumpsumDetail key={config.slug} config={config} />}
+      {config && config.kind === 'vs-fd-debt' && <FdVsDebtDetail key={config.slug} config={config} />}
+      {config && config.kind === 'vs-regime' && <RegimeDetail key={config.slug} config={config} />}
+      {config && config.kind === 'vs-rent-buy' && <RentVsBuyDetail key={config.slug} config={config} />}
+      {config && config.kind === 'vs-direct-regular' && <DirectVsRegularDetail key={config.slug} config={config} />}
       {!config && <ComingSoon />}
 
       <p className="mx-auto mt-7 max-w-[880px] text-center text-caption leading-relaxed text-ink-faint">{DISCLAIMER_CALC}</p>

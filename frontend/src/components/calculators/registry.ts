@@ -31,7 +31,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'tax-harvesting' | 'portfolio-tax' | 'redemption-planner' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth' | 'hlv' | 'term-cover' | 'health-cover'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'tax-harvesting' | 'portfolio-tax' | 'redemption-planner' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth' | 'hlv' | 'term-cover' | 'health-cover' | 'vs-sip-lumpsum' | 'vs-fd-debt' | 'vs-regime' | 'vs-rent-buy' | 'vs-direct-regular'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -405,6 +405,38 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'The income an earner would replace, valued in today’s money.',
     kind: 'hlv', inputs: [],
     related: ['term-cover', 'health-cover', 'retirement-planner'],
+  },
+
+  // ── Investment Compare ("Versus") — §12, factual on the user's numbers ──
+  'sip-vs-lumpsum': {
+    slug: 'sip-vs-lumpsum', name: 'SIP vs Lumpsum', emoji: '⚖️',
+    sub: 'Same money, same return — invest monthly or all at once?',
+    kind: 'vs-sip-lumpsum', inputs: [],
+    related: ['sip', 'lumpsum', 'sip-lumpsum'],
+  },
+  'fd-vs-debt-fund': {
+    slug: 'fd-vs-debt-fund', name: 'FD vs Debt Fund', emoji: '⚖️',
+    sub: 'Both taxed at your slab since Apr 2023 — compare post-tax.',
+    kind: 'vs-fd-debt', inputs: [],
+    related: ['fd', 'capital-gains-tax', 'post-tax-return'],
+  },
+  'old-vs-new-regime': {
+    slug: 'old-vs-new-regime', name: 'Old vs New Tax Regime', emoji: '⚖️',
+    sub: 'Your income tax under each regime — see which is lower.',
+    kind: 'vs-regime', inputs: [],
+    related: ['capital-gains-tax', 'post-tax-return', 'sip'],
+  },
+  'rent-vs-buy': {
+    slug: 'rent-vs-buy', name: 'Rent vs Buy', emoji: '⚖️',
+    sub: 'EMI and costs of buying vs renting and investing the difference.',
+    kind: 'vs-rent-buy', inputs: [],
+    related: ['home-loan-emi', 'sip', 'goal-sip'],
+  },
+  'direct-vs-regular': {
+    slug: 'direct-vs-regular', name: 'Direct vs Regular Fund', emoji: '⚖️',
+    sub: 'How a lower expense ratio compounds into more wealth.',
+    kind: 'vs-direct-regular', inputs: [],
+    related: ['sip', 'lumpsum', 'fund-return'],
   },
 };
 
