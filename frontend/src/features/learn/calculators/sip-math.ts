@@ -25,6 +25,8 @@ export interface SipInput {
   years: number;
   /** USER-CHOSEN assumed annual return %, 0–50 — not a DhanRadar prediction. */
   annualRatePct: number;
+  /** Optional annual SIP step-up % (raise the monthly amount each year), 0–50. Default 0. */
+  stepUpPct?: number;
 }
 
 export interface SipYearPoint {
@@ -44,6 +46,7 @@ export interface SipResult {
 // Sane finite bounds — keep every computed figure finite (no Infinity in DOM).
 export const MAX_YEARS = 50;
 export const MAX_RATE_PCT = 50;
+export const MAX_STEPUP_PCT = 50; // cap the annual SIP step-up so the loop can never blow up
 export const MAX_AMOUNT = 1_000_000_000; // ₹100 cr cap on a single input field
 
 /** Coerce any value to a finite number in [min, max]; NaN/Infinity → min. */
@@ -69,32 +72,58 @@ export function computeSip(input: SipInput): SipResult {
   const lumpSum = clampFinite(input.lumpSum, 0, MAX_AMOUNT);
   const years = clampFinite(input.years, 0, MAX_YEARS);
   const rate = clampFinite(input.annualRatePct, 0, MAX_RATE_PCT);
+  const stepUpPct = clampFinite(input.stepUpPct ?? 0, 0, MAX_STEPUP_PCT);
 
   const i = rate / 100 / 12;
   const months = Math.round(years * 12);
-
-  const futureValue = compound(monthlySip, lumpSum, i, months);
-  const totalInvested = monthlySip * months + lumpSum;
-  const wealthGained = Math.max(futureValue - totalInvested, 0);
-
-  // One point per whole year (plus year 0), for the invested-vs-value chart.
-  const series: SipYearPoint[] = [];
   const wholeYears = Math.floor(years);
-  for (let y = 0; y <= wholeYears; y += 1) {
-    const m = y * 12;
-    series.push({
-      year: y,
-      invested: monthlySip * m + lumpSum,
-      value: compound(monthlySip, lumpSum, i, m),
-    });
+
+  // ── Flat SIP (no step-up): unchanged closed-form path ──────────────────────
+  if (stepUpPct === 0) {
+    const futureValue = compound(monthlySip, lumpSum, i, months);
+    const totalInvested = monthlySip * months + lumpSum;
+    const wealthGained = Math.max(futureValue - totalInvested, 0);
+
+    const series: SipYearPoint[] = [];
+    for (let y = 0; y <= wholeYears; y += 1) {
+      const m = y * 12;
+      series.push({
+        year: y,
+        invested: monthlySip * m + lumpSum,
+        value: compound(monthlySip, lumpSum, i, m),
+      });
+    }
+    return { futureValue, totalInvested, wealthGained, series };
   }
 
-  return {
-    futureValue,
-    totalInvested,
-    wealthGained,
-    series,
+  // ── Step-up SIP: the monthly amount rises by `g` each whole year ───────────
+  // Month-by-month accumulation (ordinary annuity, contribution at period end),
+  // identical convention to the flat path so the two are directly comparable.
+  const g = stepUpPct / 100;
+  const sim = (m: number): { fv: number; invested: number } => {
+    let bal = lumpSum;
+    let invested = lumpSum;
+    for (let k = 0; k < m; k += 1) {
+      const sip = monthlySip * Math.pow(1 + g, Math.floor(k / 12));
+      bal = bal * (1 + i) + sip;
+      invested += sip;
+    }
+    return {
+      fv: Number.isFinite(bal) ? bal : 0,
+      invested: Number.isFinite(invested) ? invested : 0,
+    };
   };
+
+  const full = sim(months);
+  const wealthGained = Math.max(full.fv - full.invested, 0);
+
+  const series: SipYearPoint[] = [];
+  for (let y = 0; y <= wholeYears; y += 1) {
+    const s = sim(y * 12);
+    series.push({ year: y, invested: s.invested, value: s.fv });
+  }
+
+  return { futureValue: full.fv, totalInvested: full.invested, wealthGained, series };
 }
 
 /**
@@ -105,4 +134,17 @@ export function computeSip(input: SipInput): SipResult {
 export function formatInr(amount: number): string {
   const safe = Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0;
   return `₹${safe.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
+/**
+ * Compact rupee formatting for KPI tiles — crore / lakh / thousand abbreviations
+ * (e.g. ₹1.25 Cr, ₹45.0 L, ₹17K). Non-finite or non-positive → ₹0 so the DOM
+ * never shows NaN / Infinity / -₹. Display-only meaningful rounding (Inv. 7).
+ */
+export function formatInrShort(amount: number): string {
+  if (!Number.isFinite(amount) || amount <= 0) return '₹0';
+  if (amount >= 1e7) return `₹${(amount / 1e7).toFixed(2)} Cr`;
+  if (amount >= 1e5) return `₹${(amount / 1e5).toFixed(1)} L`;
+  if (amount >= 1e3) return `₹${Math.round(amount / 1e3)}K`;
+  return `₹${Math.round(amount)}`;
 }
