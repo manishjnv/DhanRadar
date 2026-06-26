@@ -11,7 +11,7 @@ import * as React from 'react';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, GrowthChart, AiCard, RelatedCard, SoWhat } from './ui';
-import { computeFd, computeRd, computePpf, formatInr, formatInrShort } from '@/lib/finance';
+import { computeFd, computeRd, computePpf, computeEpf, formatInr, formatInrShort } from '@/lib/finance';
 import { type CalcConfig, getConfig, fmtValue, fmtPreset, fmtUnit } from './registry';
 import { ResultActions, readUrlVals, useUrlSeed, type ExcelTable } from './actions';
 
@@ -32,13 +32,16 @@ export function SchemeDetail({ config }: { config: CalcConfig }) {
 
   const rate = vals.rate ?? 0;
   const years = vals.tenure ?? 0;
-  const amount = config.scheme === 'fd' ? (vals.principal ?? 0) : config.scheme === 'rd' ? (vals.monthly ?? 0) : (vals.yearlyDeposit ?? 0);
+  const amount = config.scheme === 'fd' ? (vals.principal ?? 0)
+    : config.scheme === 'rd' || config.scheme === 'epf' ? (vals.monthly ?? 0)
+    : (vals.yearlyDeposit ?? 0);
 
   const result = React.useMemo(() => {
     if (config.scheme === 'fd') return computeFd(amount, rate, years, 4);
     if (config.scheme === 'rd') return computeRd(amount, rate, years);
+    if (config.scheme === 'epf') return computeEpf({ monthlyBasic: amount, contributionPct: vals.contributionPct ?? 24, annualRatePct: rate, years, salaryGrowthPct: vals.inflation ?? 0 });
     return computePpf(amount, rate, years);
-  }, [config.scheme, amount, rate, years]);
+  }, [config.scheme, amount, rate, years, vals.contributionPct, vals.inflation]);
 
   const { maturity, invested, interest } = result;
   const multiplier = invested > 0 ? maturity / invested : 0;
@@ -47,10 +50,13 @@ export function SchemeDetail({ config }: { config: CalcConfig }) {
   const setKey = (k: string, v: number) => setVals((s) => ({ ...s, [k]: v }));
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 
-  const depositLabel = config.scheme === 'fd' ? `a one-time ${formatInr(amount)}` : config.scheme === 'rd' ? `${formatInr(amount)}/month` : `${formatInr(amount)}/year`;
+  const depositLabel = config.scheme === 'fd' ? `a one-time ${formatInr(amount)}`
+    : config.scheme === 'ppf' ? `${formatInr(amount)}/year`
+    : config.scheme === 'epf' ? `${formatInr(amount)}/month basic`
+    : `${formatInr(amount)}/month`;
   const excelTable: ExcelTable = {
     summary: `${config.name} — ${depositLabel} at ${rate}% for ${years} ${years === 1 ? 'year' : 'years'}. Maturity ${formatInr(maturity)} (invested ${formatInr(invested)}, interest ${formatInr(interest)}).`,
-    note: `Educational illustration only — not investment advice.${config.scheme === 'ppf' ? ' PPF rate is government-notified and changes quarterly; PPF maturity is tax-free.' : ''}`,
+    note: `Educational illustration only — not investment advice.${config.scheme === 'ppf' ? ' PPF rate is government-notified; PPF maturity is tax-free.' : config.scheme === 'epf' ? ' Simplified — the real EPF diverts ~8.33% of the employer share to EPS (pension); rate is government-notified.' : ''}`,
     headers: ['Year', 'Invested', 'Value'],
     rows: result.series.filter((p) => p.year >= 1).map((p) => [p.year, Math.round(p.invested), Math.round(p.value)]),
     colFormats: ['num', 'inr', 'inr'],
@@ -116,9 +122,11 @@ export function SchemeDetail({ config }: { config: CalcConfig }) {
             <SoWhat>
               {config.scheme === 'ppf'
                 ? <>PPF compounds <b className="font-semibold text-ink">once a year</b> at the notified rate and is <b className="font-semibold text-ink">tax-free</b> (EEE). The rate is set by the government and can change each quarter.</>
-                : config.scheme === 'fd'
-                  ? <>An FD compounds <b className="font-semibold text-ink">quarterly</b>. Interest is taxable at your slab rate, so your post-tax return is lower than the headline rate.</>
-                  : <>An RD takes a fixed monthly deposit and compounds <b className="font-semibold text-ink">quarterly</b>. Interest is taxable at your slab.</>}
+                : config.scheme === 'epf'
+                  ? <>EPF builds from your monthly contribution on basic+DA, earns the <b className="font-semibold text-ink">notified rate</b> credited yearly, and is <b className="font-semibold text-ink">tax-free</b> (EEE) on withdrawal after 5 years.</>
+                  : config.scheme === 'fd'
+                    ? <>An FD compounds <b className="font-semibold text-ink">quarterly</b>. Interest is taxable at your slab rate, so your post-tax return is lower than the headline rate.</>
+                    : <>An RD takes a fixed monthly deposit and compounds <b className="font-semibold text-ink">quarterly</b>. Interest is taxable at your slab.</>}
             </SoWhat>
           </Panel>
         </Section>
@@ -127,7 +135,7 @@ export function SchemeDetail({ config }: { config: CalcConfig }) {
           <SectionHeader index="✦" title="AI Insights" tag="DhanRadar AI" />
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <AiCard text={`You'd deposit **${formatInr(invested)}** and receive **${formatInr(maturity)}** — about **${formatInr(interest)}** in interest at ${rate}%.`} />
-            <AiCard text={config.scheme === 'ppf' ? '**PPF interest is tax-free**, which often makes its effective return higher than a taxable FD at the same rate.' : '**Compare the post-tax return** with a debt fund or PPF — the headline rate is before tax for FD/RD.'} />
+            <AiCard text={config.scheme === 'ppf' || config.scheme === 'epf' ? '**PPF/EPF interest is tax-free** (EEE), which often makes the effective return higher than a taxable FD at the same rate.' : '**Compare the post-tax return** with a debt fund or PPF — the headline rate is before tax for FD/RD.'} />
           </div>
           <div className="mt-3">
             <DisclosureBundle notAdvice="For education only — not investment advice. Bank/Post-Office rates and compounding conventions vary; confirm with your provider." />

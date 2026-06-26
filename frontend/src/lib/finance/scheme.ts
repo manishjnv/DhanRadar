@@ -68,6 +68,49 @@ export function computeRd(monthlyDeposit: number, annualRatePct: number, years: 
   return { maturity, invested, interest: Math.max(maturity - invested, 0), series };
 }
 
+export interface EpfInput {
+  monthlyBasic: number; // basic + DA
+  contributionPct: number; // total going into EPF (employee + employer), e.g. 24
+  annualRatePct: number; // notified EPF rate
+  years: number;
+  salaryGrowthPct?: number; // annual increment in basic
+}
+
+/**
+ * EPF — monthly contribution on (basic+DA), interest accrued monthly and credited
+ * annually (EPF convention), with optional annual salary growth.
+ */
+export function computeEpf(input: EpfInput): SchemeResult {
+  const basic0 = clampF(input.monthlyBasic, 0, MAX_AMOUNT);
+  const pct = clampF(input.contributionPct, 0, 100) / 100;
+  const r = clampF(input.annualRatePct, 0, MAX_RATE_PCT) / 100;
+  const y = clampF(input.years, 0, MAX_YEARS);
+  const g = clampF(input.salaryGrowthPct ?? 0, 0, 50) / 100;
+  const im = r / 12;
+  const wholeYears = Math.floor(y);
+
+  let bal = 0;
+  let basic = basic0;
+  let cumContrib = 0;
+  let yearInterest = 0;
+  const series: SchemeYearPoint[] = [{ year: 0, invested: 0, value: 0 }];
+
+  for (let m = 1; m <= wholeYears * 12; m += 1) {
+    const contribution = basic * pct;
+    bal += contribution;
+    cumContrib += contribution;
+    yearInterest += bal * im; // accrue interest on the running balance
+    if (m % 12 === 0) {
+      bal += yearInterest;
+      yearInterest = 0;
+      series.push({ year: m / 12, invested: cumContrib, value: Number.isFinite(bal) ? bal : 0 });
+      basic *= 1 + g; // next year's salary
+    }
+  }
+  const maturity = Number.isFinite(bal) ? bal : 0;
+  return { maturity, invested: cumContrib, interest: Math.max(maturity - cumContrib, 0), series };
+}
+
 /** PPF — annual deposit, compounded annually at the notified rate. */
 export function computePpf(yearlyDeposit: number, annualRatePct: number, years: number): SchemeResult {
   const A = clampF(yearlyDeposit, 0, MAX_AMOUNT);

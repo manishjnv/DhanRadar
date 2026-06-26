@@ -11,7 +11,7 @@ export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
   | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly'
   | 'beginValue' | 'endValue' | 'buyNav' | 'currentNav' | 'amount'
-  | 'corpus' | 'monthlyWithdrawal' | 'principal' | 'yearlyDeposit';
+  | 'corpus' | 'monthlyWithdrawal' | 'principal' | 'yearlyDeposit' | 'contributionPct';
 export type Fmt = 'inr' | 'pct' | 'years' | 'num';
 
 export interface CalcInputSpec {
@@ -31,13 +31,13 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp' | 'scheme'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp' | 'scheme' | 'nps' | 'networth'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
   related: string[]; // related calculator slugs
   rateMap?: { begin: string; end: string; amount?: string }; // E5 'rate' family input mapping
-  scheme?: 'fd' | 'rd' | 'ppf'; // which scheme engine the 'scheme' family uses
+  scheme?: 'fd' | 'rd' | 'ppf' | 'epf'; // which scheme engine the 'scheme' family uses
 }
 
 // Shared tooltips — one wording reused across calculators (founder simple-words rule).
@@ -69,6 +69,7 @@ const MONTHLY_WITHDRAWAL: CalcInputSpec = { key: 'monthlyWithdrawal', label: 'Mo
 const FD_PRINCIPAL: CalcInputSpec = { key: 'principal', label: 'Deposit Amount', tip: 'The lump sum you deposit', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
 const RD_MONTHLY: CalcInputSpec = { key: 'monthly', label: 'Monthly Deposit', tip: 'How much you deposit each month', min: 500, max: 1000000, step: 500, default: 5000, fmt: 'inr', presets: [2000, 5000, 10000, 25000] };
 const PPF_YEARLY: CalcInputSpec = { key: 'yearlyDeposit', label: 'Yearly Deposit', tip: 'How much you put in each year (max ₹1.5 L)', min: 500, max: 150000, step: 500, default: 150000, fmt: 'inr', presets: [50000, 100000, 150000] };
+const CONTRIBUTION_PCT: CalcInputSpec = { key: 'contributionPct', label: 'Total Contribution', tip: 'Employee + employer share going into EPF (~24%)', min: 12, max: 24, step: 0.5, default: 24, fmt: 'pct', presets: [12, 24] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -254,6 +255,25 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'scheme', scheme: 'ppf',
     inputs: [PPF_YEARLY, { ...RATE, label: 'PPF Rate (notified)', default: 7.1 }, { ...TENURE, label: 'Years', default: 15, min: 15, max: 50 }],
     related: ['fd', 'rd', 'sip'],
+  },
+  epf: {
+    slug: 'epf', name: 'EPF Calculator', emoji: '👔',
+    sub: 'See your EPF (provident fund) corpus at retirement.',
+    kind: 'scheme', scheme: 'epf',
+    inputs: [{ ...MONTHLY, label: 'Monthly Basic + DA', default: 25000, min: 1000 }, CONTRIBUTION_PCT, { ...RATE, label: 'EPF Rate', default: 8.25 }, { ...TENURE, label: 'Years to Retirement', default: 25, max: 40 }, { ...INFLATION, label: 'Annual Salary Growth', default: 5, max: 15 }],
+    related: ['ppf', 'nps', 'sip'],
+  },
+  nps: {
+    slug: 'nps', name: 'NPS Calculator', emoji: '📊',
+    sub: 'Your NPS corpus at 60, plus the pension from the annuity.',
+    kind: 'nps', inputs: [],
+    related: ['epf', 'ppf', 'sip'],
+  },
+  'net-worth': {
+    slug: 'net-worth', name: 'Net Worth Calculator', emoji: '💎',
+    sub: 'Add up what you own minus what you owe.',
+    kind: 'networth', inputs: [],
+    related: ['sip', 'goal-sip'],
   },
 };
 
