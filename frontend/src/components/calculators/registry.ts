@@ -9,7 +9,8 @@ import { formatInr, formatInrShort } from '@/lib/finance';
 
 export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
-  | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly';
+  | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly'
+  | 'beginValue' | 'endValue';
 export type Fmt = 'inr' | 'pct' | 'years';
 
 export interface CalcInputSpec {
@@ -29,11 +30,12 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare'; // result-renderer family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
   related: string[]; // related calculator slugs
+  rateMap?: { begin: string; end: string; amount?: string }; // E5 'rate' family input mapping
 }
 
 // Shared tooltips — one wording reused across calculators (founder simple-words rule).
@@ -55,6 +57,8 @@ const LOAN_RATE: CalcInputSpec = { key: 'loanRate', label: 'Interest Rate', tip:
 const TENURE: CalcInputSpec = { key: 'tenure', label: 'Loan Tenure', tip: 'How many years to repay the loan', min: 1, max: 30, step: 1, default: 20, fmt: 'years', presets: [10, 15, 20, 25, 30] };
 const ONE_TIME: CalcInputSpec = { key: 'oneTime', label: 'One-time Prepayment', tip: 'A lump sum you pay now toward the loan', min: 0, max: 10000000, step: 50000, default: 500000, fmt: 'inr', presets: [100000, 500000, 1000000, 2000000] };
 const EXTRA_MONTHLY: CalcInputSpec = { key: 'extraMonthly', label: 'Extra Per Month', tip: 'Extra you pay every month on top of the EMI', min: 0, max: 200000, step: 1000, default: 0, fmt: 'inr', presets: [0, 2000, 5000, 10000] };
+const BEGIN_VALUE: CalcInputSpec = { key: 'beginValue', label: 'Starting Value', tip: 'What it was worth at the start', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
+const END_VALUE: CalcInputSpec = { key: 'endValue', label: 'Ending Value', tip: 'What it is worth now', min: 1000, max: 100000000, step: 1000, default: 200000, fmt: 'inr', presets: [150000, 300000, 500000, 1000000] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -172,6 +176,21 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'Compare two loan offers side by side.',
     kind: 'loan-compare', inputs: [],
     related: ['home-loan-emi', 'prepayment'],
+  },
+
+  // ── E5 returns ──
+  cagr: {
+    slug: 'cagr', name: 'CAGR Calculator', emoji: '📈',
+    sub: 'Find the annual growth rate between two values.',
+    kind: 'rate', inputs: [BEGIN_VALUE, END_VALUE, { ...YEARS, label: 'Period', default: 5 }],
+    rateMap: { begin: 'beginValue', end: 'endValue' },
+    related: ['rule-of-72', 'sip', 'lumpsum'],
+  },
+  'rule-of-72': {
+    slug: 'rule-of-72', name: 'Rule of 72 Calculator', emoji: '📐',
+    sub: 'How long money takes to double, triple, and quadruple.',
+    kind: 'rule', inputs: [{ ...RATE, label: 'Annual Rate', default: 12 }],
+    related: ['cagr', 'sip'],
   },
 };
 
