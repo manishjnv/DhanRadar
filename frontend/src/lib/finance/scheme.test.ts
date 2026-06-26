@@ -3,7 +3,7 @@
  * usual bank / Post-Office values.
  */
 import { describe, it, expect } from 'vitest';
-import { computeFd, computeRd, computePpf } from './scheme';
+import { computeFd, computeRd, computePpf, computeEpf } from './scheme';
 
 describe('computeFd', () => {
   it('₹1L at 7% for 5y, quarterly → ≈ ₹1,41,478', () => {
@@ -51,6 +51,21 @@ describe('computePpf', () => {
     const r = computePpf(100000, 0, 15);
     expect(r.maturity).toBe(1500000);
     expect(r.interest).toBe(0);
+  });
+});
+
+describe('computeEpf', () => {
+  it('₹25k basic, 24% to EPF, 8.25% for 20y → corpus well above contributions', () => {
+    const r = computeEpf({ monthlyBasic: 25000, contributionPct: 24, annualRatePct: 8.25, years: 20 });
+    expect(r.invested).toBe(25000 * 0.24 * 240); // ₹14.4 L contributed
+    expect(r.maturity).toBeGreaterThan(r.invested);
+    expect(r.interest).toBeGreaterThan(0);
+  });
+
+  it('salary growth increases the final corpus', () => {
+    const flat = computeEpf({ monthlyBasic: 25000, contributionPct: 24, annualRatePct: 8.25, years: 20, salaryGrowthPct: 0 });
+    const growing = computeEpf({ monthlyBasic: 25000, contributionPct: 24, annualRatePct: 8.25, years: 20, salaryGrowthPct: 7 });
+    expect(growing.maturity).toBeGreaterThan(flat.maturity);
   });
 });
 
