@@ -160,6 +160,11 @@ export const ALL_CALCS: CalcMini[] = [
   { emoji: '🛡', name: 'Term Cover', category: 'Insurance', accent: 'emerald' },
   { emoji: '🏥', name: 'Health Cover', category: 'Insurance', accent: 'cyan' },
   { emoji: '❤️', name: 'Human Life Value', category: 'Insurance', accent: 'red' },
+  { emoji: '⚖', name: 'SIP vs Lumpsum', category: 'Investment Compare', accent: 'royal' },
+  { emoji: '⚖', name: 'FD vs Debt Fund', category: 'Investment Compare', accent: 'emerald' },
+  { emoji: '⚖', name: 'Old vs New Regime', category: 'Investment Compare', accent: 'amber' },
+  { emoji: '⚖', name: 'Rent vs Buy', category: 'Investment Compare', accent: 'cyan' },
+  { emoji: '⚖', name: 'Direct vs Regular', category: 'Investment Compare', accent: 'red' },
 ];
 
 // ── S4 Learn the basics ──────────────────────────────────────────────────────
