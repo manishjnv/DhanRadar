@@ -17,6 +17,7 @@ import { PrepaymentDetail } from './PrepaymentDetail';
 import { LoanCompareDetail } from './LoanCompareDetail';
 import { RateDetail } from './RateDetail';
 import { RuleDetail } from './RuleDetail';
+import { XirrDetail } from './XirrDetail';
 import { DISCLAIMER_CALC } from './data';
 
 export function CalculatorDetail({ slug }: { slug: string }) {
@@ -51,6 +52,7 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'loan-compare' && <LoanCompareDetail key={config.slug} config={config} />}
       {config && config.kind === 'rate' && <RateDetail key={config.slug} config={config} />}
       {config && config.kind === 'rule' && <RuleDetail key={config.slug} config={config} />}
+      {config && config.kind === 'xirr' && <XirrDetail key={config.slug} config={config} />}
       {!config && <ComingSoon />}
 
       <p className="mx-auto mt-7 max-w-[880px] text-center text-caption leading-relaxed text-ink-faint">{DISCLAIMER_CALC}</p>
