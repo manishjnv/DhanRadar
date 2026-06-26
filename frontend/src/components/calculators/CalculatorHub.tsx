@@ -124,7 +124,7 @@ export function CalculatorHub() {
 
       {/* S5 — Learn the basics */}
       <Section>
-        <SectionHeader index="04" title="Learn the Basics" tag="Plain English" />
+        <SectionHeader index="04" title="Learn the Basics" />
         <Rail gridCols="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {LEARN.map((l) => <LearnCard key={l.q} emoji={l.emoji} q={l.q} a={l.a} />)}
         </Rail>
