@@ -77,6 +77,7 @@ export type Featured = {
 
 export const FEATURED: Featured[] = [
   { emoji: '📈', name: 'SIP Calculator', desc: 'Grow wealth with monthly investing', tag: 'Most Popular', accent: 'royal' },
+  { emoji: '📈', name: 'SIP + Lumpsum', desc: 'Upfront amount + monthly SIP', tag: 'New', accent: 'royal' },
   { emoji: '💵', name: 'Lumpsum Calculator', desc: 'One-time investment growth', tag: 'Popular', accent: 'emerald' },
   { emoji: '🏖', name: 'Retirement Planner', desc: 'Plan your retirement corpus', tag: 'Recommended', accent: 'royal' },
   { emoji: '🔥', name: 'FIRE Calculator', desc: 'Retire early & independent', tag: 'New', accent: 'amber' },
