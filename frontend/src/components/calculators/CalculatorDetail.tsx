@@ -21,6 +21,8 @@ import { XirrDetail } from './XirrDetail';
 import { TaxDetail } from './TaxDetail';
 import { SwpDetail } from './SwpDetail';
 import { SchemeDetail } from './SchemeDetail';
+import { NpsDetail } from './NpsDetail';
+import { NetWorthDetail } from './NetWorthDetail';
 import { DISCLAIMER_CALC } from './data';
 
 export function CalculatorDetail({ slug }: { slug: string }) {
@@ -59,6 +61,8 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'tax' && <TaxDetail key={config.slug} config={config} />}
       {config && config.kind === 'swp' && <SwpDetail key={config.slug} config={config} />}
       {config && config.kind === 'scheme' && <SchemeDetail key={config.slug} config={config} />}
+      {config && config.kind === 'nps' && <NpsDetail key={config.slug} config={config} />}
+      {config && config.kind === 'networth' && <NetWorthDetail key={config.slug} config={config} />}
       {!config && <ComingSoon />}
 
       <p className="mx-auto mt-7 max-w-[880px] text-center text-caption leading-relaxed text-ink-faint">{DISCLAIMER_CALC}</p>
