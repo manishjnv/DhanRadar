@@ -31,7 +31,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth' | 'hlv' | 'term-cover' | 'health-cover'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -368,6 +368,26 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'networth', inputs: [],
     related: ['sip', 'goal-sip'],
   },
+
+  // ── Insurance (E10 — indicative cover estimates, never a product pick) ──
+  'term-cover': {
+    slug: 'term-cover', name: 'Term Cover Estimator', emoji: '🛡️',
+    sub: 'An indicative life-cover amount from your needs and assets.',
+    kind: 'term-cover', inputs: [],
+    related: ['hlv', 'health-cover', 'goal-sip'],
+  },
+  'health-cover': {
+    slug: 'health-cover', name: 'Health Cover Estimator', emoji: '🏥',
+    sub: 'An indicative health sum-insured for your family and city.',
+    kind: 'health-cover', inputs: [],
+    related: ['term-cover', 'hlv', 'emergency-fund'],
+  },
+  hlv: {
+    slug: 'hlv', name: 'Human Life Value Calculator', emoji: '❤️',
+    sub: 'The income an earner would replace, valued in today’s money.',
+    kind: 'hlv', inputs: [],
+    related: ['term-cover', 'health-cover', 'retirement-planner'],
+  },
 };
 
 // Card names differ between the Featured and All grids, so map the variants to a
@@ -389,6 +409,7 @@ const SLUG_OVERRIDES: Record<string, string> = {
   'Rule of 114': 'rule-of-72', // one card covers 72 / 114 / 144
   'FD Calculator': 'fd',
   'RD Calculator': 'rd',
+  'Human Life Value': 'hlv',
 };
 
 export function slugFor(name: string): string {

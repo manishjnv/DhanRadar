@@ -157,6 +157,9 @@ export const ALL_CALCS: CalcMini[] = [
   { emoji: '🎯', name: 'Savings Goal', category: 'General', accent: 'amber' },
   { emoji: '💎', name: 'Net Worth', category: 'General', accent: 'navy' },
   { emoji: '📐', name: 'Rule of 72 / 114', category: 'General', accent: 'cyan' },
+  { emoji: '🛡', name: 'Term Cover', category: 'Insurance', accent: 'emerald' },
+  { emoji: '🏥', name: 'Health Cover', category: 'Insurance', accent: 'cyan' },
+  { emoji: '❤️', name: 'Human Life Value', category: 'Insurance', accent: 'red' },
 ];
 
 // ── S4 Learn the basics ──────────────────────────────────────────────────────
