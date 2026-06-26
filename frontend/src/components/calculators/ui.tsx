@@ -14,6 +14,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import {
   type Accent,
@@ -237,13 +238,12 @@ export function Rail({ children, gridCols, className }: { children: React.ReactN
 }
 
 // ── Featured card ────────────────────────────────────────────────────────────
-export function FeatureCard({ item, onOpen }: { item: Featured; onOpen: () => void }) {
+export function FeatureCard({ item, href }: { item: Featured; href: string }) {
   const tagHex = ACCENT_HEX[TAG_ACCENT[item.tag]];
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group relative w-[200px] shrink-0 rounded-[15px] border border-line bg-surface p-4 text-left shadow-sm transition-all hover:-translate-y-[3px] hover:border-royal hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:w-auto"
+    <Link
+      href={href}
+      className="group relative block w-[200px] shrink-0 rounded-[15px] border border-line bg-surface p-4 text-left shadow-sm transition-all hover:-translate-y-[3px] hover:border-royal hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:w-auto"
     >
       <span
         className="absolute right-3 top-3 rounded-md px-1.5 py-[3px] font-mono text-[8.5px] font-bold uppercase tracking-[0.03em]"
@@ -257,7 +257,7 @@ export function FeatureCard({ item, onOpen }: { item: Featured; onOpen: () => vo
       <div className="mt-3 flex items-center gap-1.5 text-caption font-semibold tracking-normal text-royal">
         Open <ArrowRight />
       </div>
-    </button>
+    </Link>
   );
 }
 
@@ -279,11 +279,10 @@ export function CategoryCard({ item, onOpen }: { item: Category; onOpen: () => v
 }
 
 // ── Calculator mini card ─────────────────────────────────────────────────────
-export function CalcMiniCard({ item, onOpen }: { item: CalcMini; onOpen: () => void }) {
+export function CalcMiniCard({ item, href }: { item: CalcMini; href: string }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Link
+      href={href}
       className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left transition-colors hover:border-royal hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
     >
       <IconTile emoji={item.emoji} accent={item.accent} className="h-9 w-9 shrink-0 text-[16px]" />
@@ -292,7 +291,7 @@ export function CalcMiniCard({ item, onOpen }: { item: CalcMini; onOpen: () => v
         <div className="mt-px text-caption tracking-normal text-ink-muted">{item.category}</div>
       </div>
       <span className="ml-auto shrink-0 text-ink-faint"><ChevronRight /></span>
-    </button>
+    </Link>
   );
 }
 
@@ -567,11 +566,10 @@ export function AiCard({ text }: { text: string }) {
 }
 
 // Related calculator card
-export function RelatedCard({ emoji, name, desc, accent, onOpen }: { emoji: string; name: string; desc: string; accent: Accent; onOpen: () => void }) {
+export function RelatedCard({ emoji, name, desc, accent, href }: { emoji: string; name: string; desc: string; accent: Accent; href: string }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <Link
+      href={href}
       className="flex w-[170px] shrink-0 items-center gap-3 rounded-xl border border-line bg-surface p-3.5 text-left transition-colors hover:border-royal hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:w-auto"
     >
       <IconTile emoji={emoji} accent={accent} className="h-9 w-9 shrink-0 text-[16px]" />
@@ -579,6 +577,6 @@ export function RelatedCard({ emoji, name, desc, accent, onOpen }: { emoji: stri
         <div className="truncate text-small font-semibold text-ink">{name}</div>
         <div className="truncate text-caption tracking-normal text-ink-muted">{desc}</div>
       </div>
-    </button>
+    </Link>
   );
 }
