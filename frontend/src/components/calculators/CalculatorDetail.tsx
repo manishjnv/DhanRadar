@@ -12,6 +12,7 @@ import { IconTile } from './ui';
 import { getConfig, humanizeSlug, CONFIGS } from './registry';
 import { AccumulationDetail } from './AccumulationDetail';
 import { GoalDetail } from './GoalDetail';
+import { LoanDetail } from './LoanDetail';
 import { DISCLAIMER_CALC } from './data';
 
 export function CalculatorDetail({ slug }: { slug: string }) {
@@ -41,6 +42,7 @@ export function CalculatorDetail({ slug }: { slug: string }) {
 
       {config && config.kind === 'accumulation' && <AccumulationDetail key={config.slug} config={config} />}
       {config && config.kind === 'goal' && <GoalDetail key={config.slug} config={config} />}
+      {config && config.kind === 'loan' && <LoanDetail key={config.slug} config={config} />}
       {!config && <ComingSoon />}
 
       <p className="mx-auto mt-7 max-w-[880px] text-center text-caption leading-relaxed text-ink-faint">{DISCLAIMER_CALC}</p>
