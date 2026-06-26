@@ -5,11 +5,11 @@
  * DhanRadar and NOT tied to any fund, score, label, or mood signal. The annual
  * return rate is the USER's own assumption — never an expected or assured value.
  *
- * Convention (documented + consistent across both modes, Goal-Calculator Inv. 12):
- *   everything compounds MONTHLY. i = annualRatePct / 100 / 12, n = years × 12.
- *   - SIP (ordinary annuity, contributions at period end):
- *       FV = P · ((1+i)^n − 1) / i        (i = 0 → FV = P · n)
- *   - Lump sum: FV = L · (1+i)^n
+ * Convention — matches mainstream Indian calculators (SBI / Groww / Motilal):
+ *   - SIP: MONTHLY, annuity DUE (contribution at the START of each month).
+ *       FV = P · ((1+i)^n − 1) / i · (1+i),  i = annualRatePct/100/12, n = years×12
+ *       (i = 0 → FV = P · n)
+ *   - Lump sum: ANNUAL compounding.  FV = L · (1 + annualRatePct/100)^years
  *
  * All inputs are clamped to sane finite ranges so the result can never be NaN or
  * Infinity (Goal-Calculator Inv. 9) — a bad input yields a safe finite number,
@@ -55,17 +55,12 @@ function clampFinite(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-/** Future value of a series + lump sum after `months` at monthly rate `i`. */
-function compound(monthlySip: number, lumpSum: number, i: number, months: number): number {
-  const sipFv = i === 0 ? monthlySip * months : monthlySip * ((Math.pow(1 + i, months) - 1) / i);
-  const lumpFv = lumpSum * Math.pow(1 + i, months);
-  const fv = sipFv + lumpFv;
-  return Number.isFinite(fv) ? fv : 0;
-}
-
 /**
  * Compute the illustrative future value for the user's own assumptions.
- * Deterministic: identical inputs always yield identical outputs (Inv. 12).
+ * Deterministic: identical inputs always yield identical outputs.
+ *
+ * SIP compounds monthly (annuity due); the lump sum compounds annually — the
+ * conventions mainstream Indian calculators use, so the numbers match SBI/Groww.
  */
 export function computeSip(input: SipInput): SipResult {
   const monthlySip = clampFinite(input.monthlySip, 0, MAX_AMOUNT);
@@ -74,56 +69,57 @@ export function computeSip(input: SipInput): SipResult {
   const rate = clampFinite(input.annualRatePct, 0, MAX_RATE_PCT);
   const stepUpPct = clampFinite(input.stepUpPct ?? 0, 0, MAX_STEPUP_PCT);
 
-  const i = rate / 100 / 12;
-  const months = Math.round(years * 12);
+  const i = rate / 100 / 12; // monthly rate (SIP)
+  const annual = rate / 100; // annual rate (lump sum)
+  const g = stepUpPct / 100;
+  const n = Math.round(years * 12);
   const wholeYears = Math.floor(years);
 
-  // ── Flat SIP (no step-up): unchanged closed-form path ──────────────────────
-  if (stepUpPct === 0) {
-    const futureValue = compound(monthlySip, lumpSum, i, months);
-    const totalInvested = monthlySip * months + lumpSum;
-    const wealthGained = Math.max(futureValue - totalInvested, 0);
-
-    const series: SipYearPoint[] = [];
-    for (let y = 0; y <= wholeYears; y += 1) {
-      const m = y * 12;
-      series.push({
-        year: y,
-        invested: monthlySip * m + lumpSum,
-        value: compound(monthlySip, lumpSum, i, m),
-      });
-    }
-    return { futureValue, totalInvested, wealthGained, series };
-  }
-
-  // ── Step-up SIP: the monthly amount rises by `g` each whole year ───────────
-  // Month-by-month accumulation (ordinary annuity, contribution at period end),
-  // identical convention to the flat path so the two are directly comparable.
-  const g = stepUpPct / 100;
-  const sim = (m: number): { fv: number; invested: number } => {
-    let bal = lumpSum;
-    let invested = lumpSum;
-    for (let k = 0; k < m; k += 1) {
-      const sip = monthlySip * Math.pow(1 + g, Math.floor(k / 12));
-      bal = bal * (1 + i) + sip;
-      invested += sip;
-    }
-    return {
-      fv: Number.isFinite(bal) ? bal : 0,
-      invested: Number.isFinite(invested) ? invested : 0,
-    };
+  // Lump sum — ANNUAL compounding: L · (1 + annual)^t.
+  const lumpAt = (yearsElapsed: number): number => {
+    const fv = lumpSum * Math.pow(1 + annual, yearsElapsed);
+    return Number.isFinite(fv) ? fv : 0;
   };
 
-  const full = sim(months);
-  const wealthGained = Math.max(full.fv - full.invested, 0);
+  // SIP — MONTHLY, annuity DUE (contribution at the start of each month).
+  const sipAt = (months: number): number => {
+    if (months <= 0) return 0;
+    if (g === 0) {
+      const fv = i === 0
+        ? monthlySip * months
+        : monthlySip * ((Math.pow(1 + i, months) - 1) / i) * (1 + i);
+      return Number.isFinite(fv) ? fv : 0;
+    }
+    // Step-up: month-by-month (annuity due), amount rises by g each whole year.
+    let bal = 0;
+    for (let k = 0; k < months; k += 1) {
+      const sip = monthlySip * Math.pow(1 + g, Math.floor(k / 12));
+      bal = (bal + sip) * (1 + i);
+    }
+    return Number.isFinite(bal) ? bal : 0;
+  };
+
+  const investedAt = (months: number): number => {
+    if (g === 0) return monthlySip * months;
+    let inv = 0;
+    for (let k = 0; k < months; k += 1) inv += monthlySip * Math.pow(1 + g, Math.floor(k / 12));
+    return Number.isFinite(inv) ? inv : 0;
+  };
+
+  const futureValue = sipAt(n) + lumpAt(years);
+  const totalInvested = investedAt(n) + lumpSum;
+  const wealthGained = Math.max(futureValue - totalInvested, 0);
 
   const series: SipYearPoint[] = [];
   for (let y = 0; y <= wholeYears; y += 1) {
-    const s = sim(y * 12);
-    series.push({ year: y, invested: s.invested, value: s.fv });
+    series.push({
+      year: y,
+      invested: investedAt(y * 12) + lumpSum,
+      value: sipAt(y * 12) + lumpAt(y),
+    });
   }
 
-  return { futureValue: full.fv, totalInvested: full.invested, wealthGained, series };
+  return { futureValue, totalInvested, wealthGained, series };
 }
 
 /**
@@ -137,14 +133,20 @@ export function formatInr(amount: number): string {
 }
 
 /**
- * Compact rupee formatting for KPI tiles — crore / lakh / thousand abbreviations
- * (e.g. ₹1.25 Cr, ₹45.0 L, ₹17K). Non-finite or non-positive → ₹0 so the DOM
- * never shows NaN / Infinity / -₹. Display-only meaningful rounding (Inv. 7).
+ * Compact rupee formatting for tables / chart axes — crore / lakh / thousand
+ * abbreviations with trailing zeros stripped for consistency: ₹1L (not ₹1.0L),
+ * ₹1.5L (not ₹1.50L), ₹1.23L, ₹82K, ₹6.25Cr. Non-finite / non-positive → ₹0.
  */
 export function formatInrShort(amount: number): string {
   if (!Number.isFinite(amount) || amount <= 0) return '₹0';
-  if (amount >= 1e7) return `₹${(amount / 1e7).toFixed(2)} Cr`;
-  if (amount >= 1e5) return `₹${(amount / 1e5).toFixed(1)} L`;
-  if (amount >= 1e3) return `₹${Math.round(amount / 1e3)}K`;
+  // toFixed then drop trailing zeros ONLY after a decimal point (never "80"→"8").
+  const trim = (n: number, dp: number): string => {
+    let s = n.toFixed(dp);
+    if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+  };
+  if (amount >= 1e7) return `₹${trim(amount / 1e7, 2)}Cr`;
+  if (amount >= 1e5) return `₹${trim(amount / 1e5, 2)}L`;
+  if (amount >= 1e3) return `₹${trim(amount / 1e3, 0)}K`;
   return `₹${Math.round(amount)}`;
 }

@@ -16,6 +16,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
+import { formatInr, formatInrShort } from '@/lib/finance';
 import {
   type Accent,
   type Featured,
@@ -494,33 +495,69 @@ export function Kpi({ label, value, sub, accent, hero }: { label: string; value:
   );
 }
 
-// Static growth chart (seed series → SVG; no interactivity)
-export function GrowthChart({ series }: { series: { invested: number; value: number }[] }) {
-  const w = 600;
-  const h = 200;
-  const maxV = series[series.length - 1].value * 1.05;
+// Growth chart with ₹ Y-axis labels, year X-axis labels, and per-point hover
+// tooltips (native SVG <title> — hover any year to see invested vs value).
+export function GrowthChart({ series }: { series: { year: number; invested: number; value: number }[] }) {
+  const W = 600;
+  const H = 240;
+  const padL = 54;
+  const padR = 10;
+  const padT = 10;
+  const padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
   const n = series.length;
-  const stepX = w / n;
-  const pts = (key: 'value' | 'invested') => series.map((d, i) => [(i + 1) * stepX, h - (d[key] / maxV) * (h - 8) - 4] as const);
-  const wealth = [[0, h - 4] as const, ...pts('value')];
-  const inv = [[0, h - 4] as const, ...pts('invested')];
-  const toPath = (p: readonly (readonly [number, number])[]) => 'M' + p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
-  const wd = toPath(wealth);
-  const idd = toPath(inv);
-  const last = wealth[wealth.length - 1];
+  const maxV = Math.max(...series.map((d) => d.value), 1) * 1.05;
+  const xAt = (idx: number) => padL + (n <= 1 ? plotW : (idx / (n - 1)) * plotW);
+  const yAt = (v: number) => padT + plotH - (Math.max(v, 0) / maxV) * plotH;
+  const toPath = (key: 'value' | 'invested') =>
+    'M' + series.map((d, idx) => `${xAt(idx).toFixed(1)},${yAt(d[key]).toFixed(1)}`).join(' L');
+  const wd = toPath('value');
+  const idd = toPath('invested');
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxV);
+  const xStep = Math.max(1, Math.ceil((n - 1) / 6));
+  const baseY = yAt(0);
   return (
-    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="block" role="img" aria-label="Illustrative growth of invested amount versus estimated wealth over time">
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block" role="img" aria-label="Money invested versus estimated value by year; hover a point for the figures.">
       <defs>
         <linearGradient id="calc-wg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={ACCENT_HEX.royal} stopOpacity="0.25" />
+          <stop offset="0%" stopColor={ACCENT_HEX.royal} stopOpacity="0.22" />
           <stop offset="100%" stopColor={ACCENT_HEX.royal} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={`${idd} L ${w},${h} L 0,${h} Z`} fill="var(--surface-3)" opacity="0.5" />
-      <path d={`${wd} L ${w},${h} L 0,${h} Z`} fill="url(#calc-wg)" />
+
+      {/* Y gridlines + ₹ labels */}
+      {yTicks.map((t, k) => (
+        <g key={`y${k}`}>
+          <line x1={padL} y1={yAt(t)} x2={W - padR} y2={yAt(t)} stroke="var(--text-faint)" strokeWidth="1" opacity="0.45" />
+          <text x={padL - 7} y={yAt(t) + 3} textAnchor="end" fontSize="9" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">{formatInrShort(t)}</text>
+        </g>
+      ))}
+
+      {/* Areas */}
+      <path d={`${idd} L ${xAt(n - 1)},${baseY} L ${padL},${baseY} Z`} fill="var(--surface-3)" opacity="0.5" />
+      <path d={`${wd} L ${xAt(n - 1)},${baseY} L ${padL},${baseY} Z`} fill="url(#calc-wg)" />
+
+      {/* Lines */}
       <path d={idd} fill="none" stroke="var(--text-faint)" strokeWidth="2" strokeDasharray="4 3" />
       <path d={wd} fill="none" stroke={ACCENT_HEX.royal} strokeWidth="2.5" />
-      <circle cx={last[0]} cy={last[1]} r="4.5" fill={ACCENT_HEX.royal} />
+
+      {/* X labels, value dots, and hover hit-areas */}
+      {series.map((d, idx) => {
+        const showLabel = idx % xStep === 0 || idx === n - 1;
+        const showDot = showLabel;
+        return (
+          <g key={`x${idx}`}>
+            {showLabel && (
+              <text x={xAt(idx)} y={H - 8} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">{d.year}y</text>
+            )}
+            {showDot && <circle cx={xAt(idx)} cy={yAt(d.value)} r="2.6" fill={ACCENT_HEX.royal} />}
+            <circle cx={xAt(idx)} cy={yAt(d.value)} r="11" fill="transparent" className="cursor-pointer">
+              <title>{`Year ${d.year} · Invested ${formatInr(d.invested)} · Value ${formatInr(d.value)}`}</title>
+            </circle>
+          </g>
+        );
+      })}
     </svg>
   );
 }

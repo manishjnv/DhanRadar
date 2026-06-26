@@ -15,7 +15,7 @@ import * as React from 'react';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, ToggleRow, GrowthChart, Donut, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
-import { computeSip, formatInrShort } from '@/lib/finance';
+import { computeSip, formatInr, formatInrShort } from '@/lib/finance';
 import { type CalcConfig, getConfig, fmtValue, fmtPreset } from './registry';
 
 export function AccumulationDetail({ config }: { config: CalcConfig }) {
@@ -140,9 +140,9 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
       {/* RESULT PANEL */}
       <div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Kpi hero label="Estimated Future Wealth" value={formatInrShort(future)} sub={subLine} />
-          <Kpi label="Money You Invest" value={formatInrShort(invested)} sub="Total contributions" />
-          <Kpi label="Profit Earned" value={formatInrShort(profit)} sub="Growth on your money" accent="pos" />
+          <Kpi hero label="Estimated Future Wealth" value={formatInr(future)} sub={subLine} />
+          <Kpi label="Money You Invest" value={formatInr(invested)} sub="Total contributions" />
+          <Kpi label="Profit Earned" value={formatInr(profit)} sub="Growth on your money" accent="pos" />
           <Kpi label="Wealth Multiplier" value={`${multiplier.toFixed(1)}×`} sub="Your money grows this many times" />
         </div>
 
@@ -215,13 +215,13 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
                 <div className="flex items-center gap-2.5 border-b border-line py-2.5">
                   <span className="h-3 w-3 rounded-[3px] bg-surface-3" />
                   <span className="flex-1 text-small font-semibold text-ink">Money You Invest</span>
-                  <span className="font-mono font-bold text-ink">{formatInrShort(invested)}</span>
+                  <span className="font-mono font-bold text-ink">{formatInr(invested)}</span>
                   <span className="w-12 text-right font-mono text-ink-muted">{100 - profitPct}%</span>
                 </div>
                 <div className="flex items-center gap-2.5 py-2.5">
                   <span className="h-3 w-3 rounded-[3px] bg-royal" />
                   <span className="flex-1 text-small font-semibold text-ink">Profit Earned</span>
-                  <span className="font-mono font-bold text-emerald">{formatInrShort(profit)}</span>
+                  <span className="font-mono font-bold text-emerald">{formatInr(profit)}</span>
                   <span className="w-12 text-right font-mono text-ink-muted">{profitPct}%</span>
                 </div>
                 <SoWhat>
