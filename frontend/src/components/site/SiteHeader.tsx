@@ -36,7 +36,7 @@ const LINK_RING =
 export const PUBLIC_NAV_LINKS = [
   { href: '/mf/explore', label: 'Explore Funds' },
   { href: '/mood', label: 'Market Mood' },
-  { href: '/pricing', label: 'Pricing' },
+  { href: '/calculators', label: 'Calculators' },
 ] as const;
 
 function isActive(pathname: string, href: string) {

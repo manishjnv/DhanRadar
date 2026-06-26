@@ -91,6 +91,71 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'loan', inputs: [LOAN_AMOUNT, LOAN_RATE, TENURE],
     related: ['sip', 'lumpsum'],
   },
+
+  // ── E1 ──
+  'future-value': {
+    slug: 'future-value', name: 'Future Value Calculator', emoji: '💹',
+    sub: 'See what an amount today could grow to.',
+    kind: 'accumulation', inputs: [{ ...LUMP, label: 'Amount Today', default: 100000 }, RATE, YEARS],
+    stepUp: false, stepUpDefault: false, related: ['lumpsum', 'sip'],
+  },
+
+  // ── E2 goal planners (same engine + view, tailored presets) ──
+  'goal-planner': {
+    slug: 'goal-planner', name: 'Goal Planner', emoji: '🎯',
+    sub: 'Find the monthly SIP for any goal — inflation-adjusted.',
+    kind: 'goal', inputs: [TARGET, YEARS, RATE, INFLATION],
+    related: ['goal-sip', 'savings-goal', 'sip'],
+  },
+  'education-planner': {
+    slug: 'education-planner', name: 'Education Planner', emoji: '🎓',
+    sub: 'Find the monthly SIP for education — inflation-adjusted.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Education Cost (today)', default: 2500000 }, YEARS, RATE, { ...INFLATION, label: 'Education Inflation', default: 10 }],
+    related: ['child-education', 'goal-sip', 'sip'],
+  },
+  'child-education': {
+    slug: 'child-education', name: 'Child Education Planner', emoji: '👶',
+    sub: "Plan for your child's higher-education costs.",
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Education Cost (today)', default: 2500000 }, YEARS, RATE, { ...INFLATION, label: 'Education Inflation', default: 10 }],
+    related: ['education-planner', 'goal-sip'],
+  },
+  'marriage-planner': {
+    slug: 'marriage-planner', name: 'Marriage Planner', emoji: '💍',
+    sub: 'Find the monthly SIP to fund a wedding.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Wedding Cost (today)', default: 2000000 }, { ...YEARS, default: 10 }, RATE, INFLATION],
+    related: ['goal-sip', 'savings-goal'],
+  },
+  'house-purchase': {
+    slug: 'house-purchase', name: 'House Purchase Planner', emoji: '🏠',
+    sub: 'Save for a home down payment or purchase.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Amount Needed (today)', default: 3000000 }, { ...YEARS, default: 7 }, RATE, INFLATION],
+    related: ['home-loan-emi', 'goal-sip'],
+  },
+  'car-purchase': {
+    slug: 'car-purchase', name: 'Car Purchase Planner', emoji: '🚗',
+    sub: 'Save for your next car.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Car Price (today)', default: 1000000 }, { ...YEARS, default: 5 }, RATE, INFLATION],
+    related: ['goal-sip', 'savings-goal'],
+  },
+  'vacation-planner': {
+    slug: 'vacation-planner', name: 'Vacation Planner', emoji: '✈️',
+    sub: 'Save for a dream trip.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Trip Cost (today)', default: 500000 }, { ...YEARS, default: 3 }, RATE, INFLATION],
+    related: ['goal-sip', 'savings-goal'],
+  },
+  'emergency-fund': {
+    slug: 'emergency-fund', name: 'Emergency Fund Planner', emoji: '🆘',
+    sub: 'Build a safety net of a few months’ expenses.',
+    kind: 'goal',
+    inputs: [{ ...TARGET, label: 'Fund Target', default: 600000 }, { ...YEARS, label: 'Build Over', default: 2 }, { ...RATE, default: 7 }],
+    related: ['savings-goal', 'goal-sip'],
+  },
 };
 
 // Card names differ between the Featured and All grids, so map the variants to a
@@ -144,4 +209,11 @@ export function fmtPreset(fmt: Fmt, n: number): string {
   if (fmt === 'pct') return `${n}%`;
   if (fmt === 'years') return `${n}y`;
   return formatInrShort(n);
+}
+
+// Unit hint for the editable value box.
+export function fmtUnit(fmt: Fmt): '₹' | '%' | 'yrs' {
+  if (fmt === 'pct') return '%';
+  if (fmt === 'years') return 'yrs';
+  return '₹';
 }
