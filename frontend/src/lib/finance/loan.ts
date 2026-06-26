@@ -83,3 +83,71 @@ export function computeLoan(input: LoanInput): LoanResult {
 
   return { emi, totalInterest, totalPayment, series };
 }
+
+export interface PrepaymentInput {
+  principal: number;
+  annualRatePct: number;
+  years: number;
+  /** One-time prepayment applied at the start (₹). */
+  oneTime?: number;
+  /** Extra amount paid every month on top of the EMI (₹). */
+  extraMonthly?: number;
+}
+
+export interface PrepaymentResult {
+  emi: number; // unchanged EMI (prepaying shortens the tenure, keeps the EMI)
+  baselineMonths: number;
+  baselineInterest: number;
+  newMonths: number;
+  newInterest: number;
+  monthsSaved: number;
+  interestSaved: number;
+}
+
+/**
+ * Prepayment in the "keep the EMI, shorten the tenure" mode (the common case):
+ * apply a one-time lump and/or pay extra each month, and report how many months
+ * and how much interest that saves versus the original schedule.
+ */
+export function computePrepayment(input: PrepaymentInput): PrepaymentResult {
+  const principal = clampFinite(input.principal, 0, MAX_AMOUNT);
+  const rate = clampFinite(input.annualRatePct, 0, MAX_LOAN_RATE_PCT);
+  const years = clampFinite(input.years, 0, MAX_YEARS);
+  const oneTime = clampFinite(input.oneTime ?? 0, 0, MAX_AMOUNT);
+  const extra = clampFinite(input.extraMonthly ?? 0, 0, MAX_AMOUNT);
+
+  const base = computeLoan({ principal, annualRatePct: rate, years });
+  const emi = base.emi;
+  const baselineMonths = Math.round(years * 12);
+  const baselineInterest = Number.isFinite(base.totalInterest) ? base.totalInterest : 0;
+
+  const r = rate / 100 / 12;
+  let bal = Math.max(principal - oneTime, 0);
+  let cumInterest = 0;
+  let m = 0;
+  const cap = baselineMonths + 1; // prepaying never lengthens the tenure
+  while (bal > 1e-6 && m < cap) {
+    const interest = bal * r;
+    let principalComponent = emi + extra - interest;
+    if (principalComponent <= 0) { m = baselineMonths; cumInterest = baselineInterest; break; }
+    if (principalComponent > bal) principalComponent = bal;
+    bal = Math.max(bal - principalComponent, 0);
+    cumInterest += interest;
+    m += 1;
+  }
+
+  // Exact fallback when nothing is prepaid.
+  const noPrepay = oneTime === 0 && extra === 0;
+  const newMonths = noPrepay ? baselineMonths : m;
+  const newInterest = noPrepay ? baselineInterest : (Number.isFinite(cumInterest) ? cumInterest : 0);
+
+  return {
+    emi: Number.isFinite(emi) ? emi : 0,
+    baselineMonths,
+    baselineInterest,
+    newMonths,
+    newInterest,
+    monthsSaved: Math.max(baselineMonths - newMonths, 0),
+    interestSaved: Math.max(baselineInterest - newInterest, 0),
+  };
+}

@@ -9,7 +9,7 @@ import { formatInr, formatInrShort } from '@/lib/finance';
 
 export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
-  | 'loanAmount' | 'loanRate' | 'tenure';
+  | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly';
 export type Fmt = 'inr' | 'pct' | 'years';
 
 export interface CalcInputSpec {
@@ -29,7 +29,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan'; // result-renderer family (E1 / E2 / E7)
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare'; // result-renderer family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -53,6 +53,8 @@ const INFLATION: CalcInputSpec = { key: 'inflation', label: 'Inflation', tip: 'H
 const LOAN_AMOUNT: CalcInputSpec = { key: 'loanAmount', label: 'Loan Amount', tip: 'How much you borrow', min: 100000, max: 100000000, step: 100000, default: 5000000, fmt: 'inr', presets: [2500000, 5000000, 7500000, 10000000] };
 const LOAN_RATE: CalcInputSpec = { key: 'loanRate', label: 'Interest Rate', tip: 'The yearly interest rate on the loan', min: 5, max: 20, step: 0.05, default: 8.5, fmt: 'pct', presets: [7.5, 8.5, 9.5, 10.5] };
 const TENURE: CalcInputSpec = { key: 'tenure', label: 'Loan Tenure', tip: 'How many years to repay the loan', min: 1, max: 30, step: 1, default: 20, fmt: 'years', presets: [10, 15, 20, 25, 30] };
+const ONE_TIME: CalcInputSpec = { key: 'oneTime', label: 'One-time Prepayment', tip: 'A lump sum you pay now toward the loan', min: 0, max: 10000000, step: 50000, default: 500000, fmt: 'inr', presets: [100000, 500000, 1000000, 2000000] };
+const EXTRA_MONTHLY: CalcInputSpec = { key: 'extraMonthly', label: 'Extra Per Month', tip: 'Extra you pay every month on top of the EMI', min: 0, max: 200000, step: 1000, default: 0, fmt: 'inr', presets: [0, 2000, 5000, 10000] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -155,6 +157,21 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'goal',
     inputs: [{ ...TARGET, label: 'Fund Target', default: 600000 }, { ...YEARS, label: 'Build Over', default: 2 }, { ...RATE, default: 7 }],
     related: ['savings-goal', 'goal-sip'],
+  },
+
+  // ── E7 loan extras ──
+  prepayment: {
+    slug: 'prepayment', name: 'Loan Prepayment Calculator', emoji: '💳',
+    sub: 'See how prepaying cuts your loan tenure and interest.',
+    kind: 'prepayment',
+    inputs: [{ ...LOAN_AMOUNT, label: 'Outstanding Loan' }, LOAN_RATE, { ...TENURE, label: 'Remaining Tenure' }, ONE_TIME, EXTRA_MONTHLY],
+    related: ['home-loan-emi', 'loan-comparison'],
+  },
+  'loan-comparison': {
+    slug: 'loan-comparison', name: 'Loan Comparison Calculator', emoji: '⚖️',
+    sub: 'Compare two loan offers side by side.',
+    kind: 'loan-compare', inputs: [],
+    related: ['home-loan-emi', 'prepayment'],
   },
 };
 
