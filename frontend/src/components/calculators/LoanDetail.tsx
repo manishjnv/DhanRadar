@@ -14,7 +14,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, Donut, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
 import { computeLoan, formatInr, formatInrShort } from '@/lib/finance';
-import { type CalcConfig, getConfig, fmtValue, fmtPreset } from './registry';
+import { type CalcConfig, getConfig, fmtValue, fmtPreset, fmtUnit } from './registry';
 
 export function LoanDetail({ config }: { config: CalcConfig }) {
   const initVals = React.useCallback(() => {
@@ -92,6 +92,7 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
             format={(n) => fmtValue(inp.fmt, n)}
             presets={inp.presets.map((v) => ({ label: fmtPreset(inp.fmt, v), value: v }))}
             onChange={(n) => setKey(inp.key, n)}
+            unit={fmtUnit(inp.fmt)}
           />
         ))}
 
@@ -117,7 +118,7 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
           <SectionHeader index="✦" title="What You Actually Pay" />
           <Panel>
             <div className="flex flex-col items-center gap-5 sm:flex-row">
-              <Donut invested={Math.max(principal, 0)} profit={Math.max(totalInterest, 0)} />
+              <Donut invested={Math.max(principal, 0)} profit={Math.max(totalInterest, 0)} labels={['Principal', 'Interest']} />
               <div className="flex-1 self-stretch">
                 <div className="flex items-center gap-2.5 border-b border-line py-2.5">
                   <span className="h-3 w-3 rounded-[3px] bg-surface-3" />

@@ -16,7 +16,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { formatInr, formatInrShort } from '@/lib/finance';
+import { formatInrShort } from '@/lib/finance';
 import {
   type Accent,
   type Featured,
@@ -381,7 +381,7 @@ export function Faq({ items }: { items: { q: string; a: string }[] }) {
 // SIP DETAIL primitives (inert)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Controlled range field — slider + clickable presets + a live formatted value.
+// Controlled range field — slider + an editable number box + clickable presets.
 export function RangeField({
   label,
   tip,
@@ -392,6 +392,7 @@ export function RangeField({
   format,
   presets,
   onChange,
+  unit,
 }: {
   label: string;
   tip: string;
@@ -402,7 +403,16 @@ export function RangeField({
   format: (n: number) => string;
   presets: { label: string; value: number }[];
   onChange: (n: number) => void;
+  unit?: '₹' | '%' | 'yrs';
 }) {
+  // Editable box: type freely while focused; clamp to [min,max] on blur / Enter.
+  const [draft, setDraft] = React.useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const v = Number(draft);
+    setDraft(null);
+    if (Number.isFinite(v)) onChange(Math.min(Math.max(v, min), max));
+  };
   return (
     <div className="mb-5">
       <div className="mb-2.5 flex items-center justify-between">
@@ -410,7 +420,24 @@ export function RangeField({
           {label}
           <span title={tip} className="inline-grid h-[15px] w-[15px] cursor-help place-items-center rounded-full bg-surface-3 text-[9px] font-bold text-ink-muted">i</span>
         </span>
-        <span className="rounded-[9px] bg-royal/10 px-2.5 py-1 font-mono text-small font-bold text-royal">{format(value)}</span>
+        <span className="inline-flex items-center gap-0.5 rounded-[9px] bg-royal/10 px-2 py-1 font-mono text-small font-bold text-royal focus-within:ring-2 focus-within:ring-royal/40">
+          {unit === '₹' && <span aria-hidden="true">₹</span>}
+          <input
+            type="number"
+            inputMode="numeric"
+            value={draft ?? value}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            aria-label={`${label} — type a value`}
+            className="w-[88px] bg-transparent text-right tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          />
+          {unit === '%' && <span aria-hidden="true">%</span>}
+          {unit === 'yrs' && <span className="text-caption" aria-hidden="true">yr</span>}
+        </span>
       </div>
       <input
         type="range"
@@ -517,6 +544,7 @@ export function GrowthChart({ series }: { series: { year: number; invested: numb
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxV);
   const xStep = Math.max(1, Math.ceil((n - 1) / 6));
   const baseY = yAt(0);
+  const [hover, setHover] = React.useState<number | null>(null);
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block" role="img" aria-label="Money invested versus estimated value by year; hover a point for the figures.">
       <defs>
@@ -524,6 +552,9 @@ export function GrowthChart({ series }: { series: { year: number; invested: numb
           <stop offset="0%" stopColor={ACCENT_HEX.royal} stopOpacity="0.22" />
           <stop offset="100%" stopColor={ACCENT_HEX.royal} stopOpacity="0" />
         </linearGradient>
+        <filter id="calc-tip-shadow" x="-20%" y="-30%" width="140%" height="170%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor={ACCENT_HEX.navy} floodOpacity="0.35" />
+        </filter>
       </defs>
 
       {/* Y gridlines + ₹ labels */}
@@ -542,50 +573,121 @@ export function GrowthChart({ series }: { series: { year: number; invested: numb
       <path d={idd} fill="none" stroke="var(--text-faint)" strokeWidth="2" strokeDasharray="4 3" />
       <path d={wd} fill="none" stroke={ACCENT_HEX.royal} strokeWidth="2.5" />
 
-      {/* X labels, value dots, and hover hit-areas */}
+      {/* X labels + value dots */}
       {series.map((d, idx) => {
         const showLabel = idx % xStep === 0 || idx === n - 1;
-        const showDot = showLabel;
         return (
           <g key={`x${idx}`}>
             {showLabel && (
               <text x={xAt(idx)} y={H - 8} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">{d.year}y</text>
             )}
-            {showDot && <circle cx={xAt(idx)} cy={yAt(d.value)} r="2.6" fill={ACCENT_HEX.royal} />}
-            <circle cx={xAt(idx)} cy={yAt(d.value)} r="11" fill="transparent" className="cursor-pointer">
-              <title>{`Year ${d.year} · Invested ${formatInr(d.invested)} · Value ${formatInr(d.value)}`}</title>
-            </circle>
+            {showLabel && <circle cx={xAt(idx)} cy={yAt(d.value)} r="2.6" fill={ACCENT_HEX.royal} />}
           </g>
         );
       })}
+
+      {/* Hover hit-areas — drive the instant tooltip (no native-title delay) */}
+      {series.map((d, idx) => (
+        <circle
+          key={`h${idx}`}
+          cx={xAt(idx)}
+          cy={yAt(d.value)}
+          r="13"
+          fill="transparent"
+          className="cursor-pointer"
+          onMouseEnter={() => setHover(idx)}
+          onMouseLeave={() => setHover((h) => (h === idx ? null : h))}
+        />
+      ))}
+
+      {/* Instant tooltip — 2 lines, rounded, soft shadow, with a guide line + marker */}
+      {hover !== null && (() => {
+        const d = series[hover];
+        const cx = xAt(hover);
+        const cy = yAt(d.value);
+        const tw = 158;
+        const th = 44;
+        const tx = Math.max(padL, Math.min(cx - tw / 2, W - padR - tw));
+        const ty = cy - th - 12 < padT ? cy + 14 : cy - th - 12;
+        return (
+          <g pointerEvents="none">
+            <line x1={cx} y1={padT} x2={cx} y2={baseY} stroke={ACCENT_HEX.royal} strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
+            <circle cx={cx} cy={cy} r="5" fill={ACCENT_HEX.royal} stroke="#fff" strokeWidth="2" />
+            <g transform={`translate(${tx},${ty})`}>
+              <rect width={tw} height={th} rx="8" fill={ACCENT_HEX.navy} filter="url(#calc-tip-shadow)" />
+              <text x="11" y="18" fill="#fff" fontSize="11" fontWeight="700" fontFamily="ui-monospace, monospace">Year {d.year} · {formatInrShort(d.value)}</text>
+              <text x="11" y="33" fill="#cbd5e1" fontSize="9.5" fontFamily="ui-monospace, monospace">Invested {formatInrShort(d.invested)}</text>
+            </g>
+          </g>
+        );
+      })()}
     </svg>
   );
 }
 
-// Static donut (two-slice: invested vs profit)
-export function Donut({ invested, profit, size = 150, thick = 26 }: { invested: number; profit: number; size?: number; thick?: number }) {
-  const data: [number, string][] = [
-    [invested, 'var(--surface-3)'],
-    [profit, ACCENT_HEX.royal],
+// Donut (two-slice) with hover — hover a slice to see its label, amount, and %.
+export function Donut({
+  invested,
+  profit,
+  labels = ['Invested', 'Profit'],
+  size = 150,
+  thick = 26,
+}: {
+  invested: number;
+  profit: number;
+  labels?: [string, string];
+  size?: number;
+  thick?: number;
+}) {
+  const [hover, setHover] = React.useState<number | null>(null);
+  const data = [
+    { v: Math.max(invested, 0), c: 'var(--surface-3)', label: labels[0] },
+    { v: Math.max(profit, 0), c: ACCENT_HEX.royal, label: labels[1] },
   ];
-  const r = (size - thick) / 2;
+  const r = (size - thick - 4) / 2;
   const cx = size / 2;
   const cy = size / 2;
-  const total = invested + profit;
+  const total = data[0].v + data[1].v || 1;
+  const active = hover !== null ? data[hover] : null;
   let acc = 0;
   return (
-    <svg width={size} height={size} role="img" aria-label="Share of final wealth from money invested versus profit earned">
-      {data.map(([v, c], i) => {
+    <svg width={size} height={size} role="img" aria-label={`${labels[0]} versus ${labels[1]}; hover a slice for its amount.`}>
+      {data.map((d, i) => {
         const start = (acc / total) * 2 * Math.PI - Math.PI / 2;
-        acc += v;
+        acc += d.v;
         const end = (acc / total) * 2 * Math.PI - Math.PI / 2;
         const large = end - start > Math.PI ? 1 : 0;
         const x1 = cx + Math.cos(start) * r;
         const y1 = cy + Math.sin(start) * r;
         const x2 = cx + Math.cos(end) * r;
         const y2 = cy + Math.sin(end) * r;
-        return <path key={i} d={`M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`} fill="none" stroke={c} strokeWidth={thick} />;
+        return (
+          <path
+            key={i}
+            d={`M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`}
+            fill="none"
+            stroke={d.c}
+            strokeWidth={hover === i ? thick + 5 : thick}
+            opacity={hover === null || hover === i ? 1 : 0.4}
+            className="cursor-pointer transition-all duration-150"
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+          />
+        );
       })}
+      {/* Center detail */}
+      {active ? (
+        <>
+          <text x={cx} y={cy - 9} textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">{active.label}</text>
+          <text x={cx} y={cy + 7} textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--text-secondary)">{formatInrShort(active.v)}</text>
+          <text x={cx} y={cy + 22} textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">{Math.round((active.v / total) * 100)}%</text>
+        </>
+      ) : (
+        <>
+          <text x={cx} y={cy - 3} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="var(--text-muted)">Total</text>
+          <text x={cx} y={cy + 13} textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--text-secondary)">{formatInrShort(total)}</text>
+        </>
+      )}
     </svg>
   );
 }
