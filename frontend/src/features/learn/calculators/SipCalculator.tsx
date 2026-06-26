@@ -19,7 +19,7 @@ import * as React from 'react';
 
 import { Card, CardBody } from '@/components/ui/Card';
 import { Field, Input } from '@/components/ui/Input';
-import { computeSip, formatInr, MAX_RATE_PCT, MAX_YEARS } from './sip-math';
+import { computeSip, formatInr, MAX_RATE_PCT, MAX_YEARS } from '@/lib/finance/accumulation';
 
 // Mandatory disclaimer copy — rendered next to the result. Exported so the test
 // asserts the exact string is present (compliance regression guard).

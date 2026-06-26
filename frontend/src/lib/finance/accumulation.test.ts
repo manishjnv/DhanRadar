@@ -7,7 +7,7 @@
  * Infinity (Goal-Calculator Inv. 6/9).
  */
 import { describe, it, expect } from 'vitest';
-import { computeSip, formatInr, formatInrShort, MAX_AMOUNT } from './sip-math';
+import { computeSip, formatInr, formatInrShort, MAX_AMOUNT } from './accumulation';
 
 // Independent reference: month-by-month accumulation (ordinary annuity — each
 // SIP contribution made at period END, so the last payment earns nothing).
@@ -140,6 +140,36 @@ describe('computeSip — step-up SIP', () => {
     const r = computeSip({ monthlySip: 1e9, lumpSum: 0, years: 50, annualRatePct: 50, stepUpPct: 999 });
     expect(Number.isFinite(r.futureValue)).toBe(true);
     expect(Number.isFinite(r.totalInvested)).toBe(true);
+  });
+});
+
+describe('computeSip — invariants (catch silent regressions, no false-pass)', () => {
+  const base = { monthlySip: 10_000, lumpSum: 0, years: 10, annualRatePct: 12 };
+
+  it('future value rises strictly with monthly amount, rate, and years', () => {
+    expect(computeSip({ ...base, monthlySip: 12_000 }).futureValue).toBeGreaterThan(computeSip(base).futureValue);
+    expect(computeSip({ ...base, annualRatePct: 14 }).futureValue).toBeGreaterThan(computeSip(base).futureValue);
+    expect(computeSip({ ...base, years: 12 }).futureValue).toBeGreaterThan(computeSip(base).futureValue);
+  });
+
+  it('future value is never less than what was put in, at any non-negative rate', () => {
+    for (const rate of [0, 1, 7, 12, 30]) {
+      const r = computeSip({ monthlySip: 8_000, lumpSum: 20_000, years: 12, annualRatePct: rate });
+      expect(r.futureValue).toBeGreaterThanOrEqual(r.totalInvested - 1e-6);
+    }
+  });
+
+  it('wealthGained equals futureValue − totalInvested exactly (no double counting)', () => {
+    const r = computeSip({ monthlySip: 15_000, lumpSum: 50_000, years: 20, annualRatePct: 11 });
+    expect(r.wealthGained).toBeCloseTo(r.futureValue - r.totalInvested, 2);
+  });
+
+  it('a 10% step-up beats a flat SIP at every rate (and never the reverse)', () => {
+    for (const rate of [0, 8, 12, 20]) {
+      const flat = computeSip({ monthlySip: 10_000, lumpSum: 0, years: 15, annualRatePct: rate });
+      const step = computeSip({ monthlySip: 10_000, lumpSum: 0, years: 15, annualRatePct: rate, stepUpPct: 10 });
+      expect(step.futureValue).toBeGreaterThan(flat.futureValue);
+    }
   });
 });
 
