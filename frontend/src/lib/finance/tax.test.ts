@@ -3,7 +3,10 @@
  * FY 2025-26 rules (equity LTCG 12.5% above ₹1.25 L; STCG 20%; debt at slab).
  */
 import { describe, it, expect } from 'vitest';
-import { computeCapitalGainsTax, computeExitLoad, computeDividendTax } from './tax';
+import {
+  computeCapitalGainsTax, computeExitLoad, computeDividendTax,
+  computeTaxHarvesting, computePortfolioTax, computeRedemptionPlan,
+} from './tax';
 
 describe('computeCapitalGainsTax — equity', () => {
   it('LTCG: ₹2 L gain held 24 mo → tax on (2L − 1.25L) @12.5% = ₹9,375 + 4% cess', () => {
@@ -110,5 +113,86 @@ describe('computeDividendTax', () => {
   it('NaN inputs stay finite', () => {
     const r = computeDividendTax({ dividend: NaN, slabPct: NaN });
     for (const v of [r.tax, r.tds, r.netInHand, r.effectivePct]) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe('computeTaxHarvesting', () => {
+  it('gain under the exemption → harvesting pays ₹0, straight pays on the pooled excess', () => {
+    const r = computeTaxHarvesting({ annualGain: 100000, years: 5 }); // 1L/yr < 1.25L exemption
+    expect(r.taxHarvesting).toBe(0); // each year fully exempt
+    // straight: 5L gain − 1.25L = 3.75L @ 12.5% + 4% cess
+    expect(Math.round(r.taxStraight)).toBe(Math.round(375000 * 0.125 * 1.04));
+    expect(r.taxSaved).toBe(r.taxStraight);
+  });
+
+  it('harvesting never costs more than straight', () => {
+    const r = computeTaxHarvesting({ annualGain: 300000, years: 10 });
+    expect(r.taxHarvesting).toBeLessThanOrEqual(r.taxStraight);
+    expect(r.taxSaved).toBeGreaterThanOrEqual(0);
+    expect(r.yearsExemptionFullyUsed).toBe(true);
+  });
+
+  it('NaN inputs stay finite', () => {
+    const r = computeTaxHarvesting({ annualGain: NaN, years: -3 });
+    for (const v of [r.taxHarvesting, r.taxStraight, r.taxSaved]) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe('computePortfolioTax', () => {
+  it('shares ONE ₹1.25 L exemption across all long-term equity holdings', () => {
+    const r = computePortfolioTax([
+      { buyValue: 100000, sellValue: 200000, holdingMonths: 24, assetType: 'equity' }, // +1L LT
+      { buyValue: 100000, sellValue: 200000, holdingMonths: 24, assetType: 'equity' }, // +1L LT
+    ]);
+    expect(r.exemptionUsed).toBe(125000); // 2L pooled, only 1.25L exempt
+    // taxable 75k @ 12.5% = 9,375 base + 4% cess
+    expect(Math.round(r.ltcgTax)).toBe(9375);
+    expect(Math.round(r.totalTax)).toBe(Math.round(9375 * 1.04));
+  });
+
+  it('mixes short-term equity (20%) and long-term, post-tax value is sell − tax', () => {
+    const r = computePortfolioTax([
+      { buyValue: 100000, sellValue: 150000, holdingMonths: 6, assetType: 'equity' }, // ST +50k @20%
+      { buyValue: 100000, sellValue: 300000, holdingMonths: 24, assetType: 'equity' }, // LT +2L
+    ]);
+    expect(Math.round(r.stcgTax)).toBe(10000); // 50k @ 20%
+    expect(r.exemptionUsed).toBe(125000);
+    expect(Math.round(r.postTaxValue)).toBe(Math.round(450000 - r.totalTax));
+  });
+
+  it('a loss-making holding does not add tax', () => {
+    const r = computePortfolioTax([{ buyValue: 200000, sellValue: 150000, holdingMonths: 24, assetType: 'equity' }]);
+    expect(r.totalTax).toBe(0);
+    expect(r.rows[0].gain).toBe(-50000);
+  });
+});
+
+describe('computeRedemptionPlan', () => {
+  it('redeems long-term equity first (exemption → low tax) before short-term', () => {
+    const r = computeRedemptionPlan([
+      { label: 'ST equity', currentValue: 500000, cost: 300000, holdingMonths: 6, assetType: 'equity' },
+      { label: 'LT equity', currentValue: 500000, cost: 400000, holdingMonths: 24, assetType: 'equity' },
+    ], 300000);
+    expect(r.steps[0].label).toBe('LT equity'); // cheapest tax first
+    expect(r.netRaised).toBeGreaterThanOrEqual(300000 - 1); // covers the need
+    expect(r.shortfall).toBe(0);
+  });
+
+  it('uses the ₹1.25 L exemption on long-term equity gains', () => {
+    const r = computeRedemptionPlan([
+      { label: 'LT', currentValue: 1000000, cost: 900000, holdingMonths: 24, assetType: 'equity' }, // +1L gain, under exemption
+    ], 200000);
+    expect(r.exemptionUsed).toBeGreaterThan(0);
+    expect(r.totalTax).toBe(0); // gain within the exemption
+  });
+
+  it('reports a shortfall when lots cannot raise the cash', () => {
+    const r = computeRedemptionPlan([{ currentValue: 100000, cost: 50000, holdingMonths: 6, assetType: 'equity' }], 500000);
+    expect(r.shortfall).toBeGreaterThan(0);
+  });
+
+  it('NaN inputs stay finite', () => {
+    const r = computeRedemptionPlan([{ currentValue: NaN, cost: NaN, holdingMonths: NaN, assetType: 'equity' }], NaN);
+    for (const v of [r.totalRedeemed, r.totalTax, r.netRaised, r.shortfall]) expect(Number.isFinite(v)).toBe(true);
   });
 });
