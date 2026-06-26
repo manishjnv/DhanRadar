@@ -167,6 +167,18 @@ export const ALL_CALCS: CalcMini[] = [
   { emoji: '⚖', name: 'Direct vs Regular', category: 'Investment Compare', accent: 'red' },
 ];
 
+// Difficulty tag backing the "Beginner" / "Advanced" filter chips. Beginner = the
+// everyday, single-concept calculators a first-time investor reaches for; every
+// other calculator (tax, returns-math, withdrawal/transfer, insurance, NPS,
+// comparisons, multi-phase planners) counts as Advanced. Adjust freely — it only
+// drives the two chips, nothing compliance-bearing.
+export const BEGINNER_CALCS = new Set<string>([
+  'SIP Calculator', 'Lumpsum', 'SIP + Lumpsum', 'SIP Top-up', 'Goal SIP', 'Future Value',
+  'Education Planner', 'Marriage Planner', 'House Purchase', 'Car Purchase', 'Vacation Planner',
+  'Emergency Fund', 'Child Education', 'Goal Planner', 'Home Loan EMI',
+  'FD Calculator', 'RD Calculator', 'PPF', 'EPF', 'Savings Goal', 'Net Worth', 'Rule of 72 / 114',
+]);
+
 // ── S4 Learn the basics ──────────────────────────────────────────────────────
 export const LEARN: { emoji: string; q: string; a: string }[] = [
   { emoji: '📈', q: 'What is CAGR?', a: 'The average yearly growth rate of your investment, smoothed over time.' },

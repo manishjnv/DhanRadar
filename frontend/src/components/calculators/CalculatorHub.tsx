@@ -13,13 +13,16 @@
 import * as React from 'react';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Hero, Rail, FeatureCard, CategoryCard, CalcMiniCard, ChipRow, LearnCard, Faq } from './ui';
-import { HERO, HERO_CATS, FEATURED, CATEGORIES, FILTER_CHIPS, ALL_CALCS, LEARN, FAQ, DISCLAIMER_HUB } from './data';
+import { HERO, HERO_CATS, FEATURED, CATEGORIES, FILTER_CHIPS, ALL_CALCS, BEGINNER_CALCS, LEARN, FAQ, DISCLAIMER_HUB } from './data';
 import { slugFor, isLive } from './registry';
 
 // Match a calculator against the active filter (a chip label or a category name).
 function matchesFilter(c: { name: string; category: string }, filter: string): boolean {
   if (!filter || filter === 'All') return true;
   const f = filter.toLowerCase().trim();
+  // Difficulty chips filter on the Beginner tag, not a category/name.
+  if (f === 'beginner') return BEGINNER_CALCS.has(c.name);
+  if (f === 'advanced') return !BEGINNER_CALCS.has(c.name);
   const norm: Record<string, string> = {
     'goal planning': 'goal',
     'general finance': 'general',
