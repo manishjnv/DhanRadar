@@ -31,7 +31,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth' | 'hlv' | 'term-cover' | 'health-cover'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'tax-harvesting' | 'portfolio-tax' | 'redemption-planner' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth' | 'hlv' | 'term-cover' | 'health-cover'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -260,6 +260,24 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'Tax on mutual fund dividends (IDCW) at your slab rate.',
     kind: 'dividend', inputs: [],
     related: ['capital-gains-tax', 'post-tax-return', 'sip'],
+  },
+  'tax-harvesting': {
+    slug: 'tax-harvesting', name: 'Tax Harvesting Calculator', emoji: '🌾',
+    sub: 'Save tax by booking ₹1.25 L of equity gains tax-free each year.',
+    kind: 'tax-harvesting', inputs: [],
+    related: ['ltcg', 'capital-gains-tax', 'portfolio-tax'],
+  },
+  'portfolio-tax': {
+    slug: 'portfolio-tax', name: 'Portfolio Tax Calculator', emoji: '📊',
+    sub: 'Tax across all your holdings, sharing one ₹1.25 L exemption.',
+    kind: 'portfolio-tax', inputs: [],
+    related: ['capital-gains-tax', 'redemption-planner', 'tax-harvesting'],
+  },
+  'redemption-planner': {
+    slug: 'redemption-planner', name: 'Redemption Planner', emoji: '📤',
+    sub: 'A tax-efficient order to redeem units for a cash need.',
+    kind: 'redemption-planner', inputs: [],
+    related: ['portfolio-tax', 'capital-gains-tax', 'ltcg'],
   },
 
   // ── E3 decumulation ──
