@@ -14,7 +14,7 @@ import * as React from 'react';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Hero, Rail, FeatureCard, CategoryCard, CalcMiniCard, ChipRow, LearnCard, Faq } from './ui';
 import { HERO, HERO_CATS, FEATURED, CATEGORIES, FILTER_CHIPS, ALL_CALCS, LEARN, FAQ, DISCLAIMER_HUB } from './data';
-import { slugFor } from './registry';
+import { slugFor, isLive } from './registry';
 
 export function CalculatorHub() {
   const scrollToAll = React.useCallback(() => {
@@ -41,7 +41,7 @@ export function CalculatorHub() {
       <Section>
         <SectionHeader index="01" title="Featured Calculators" info="Most used by DhanRadar investors" />
         <Rail gridCols="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          {FEATURED.map((f) => <FeatureCard key={f.name} item={f} href={`/calculators/${slugFor(f.name)}`} />)}
+          {FEATURED.map((f) => <FeatureCard key={f.name} item={f} href={`/calculators/${slugFor(f.name)}`} live={isLive(slugFor(f.name))} />)}
         </Rail>
       </Section>
 
@@ -60,7 +60,7 @@ export function CalculatorHub() {
         </div>
         <div className="mb-4"><ChipRow chips={FILTER_CHIPS} scroll /></div>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {ALL_CALCS.map((c, i) => <CalcMiniCard key={`${c.name}-${i}`} item={c} href={`/calculators/${slugFor(c.name)}`} />)}
+          {ALL_CALCS.map((c, i) => <CalcMiniCard key={`${c.name}-${i}`} item={c} href={`/calculators/${slugFor(c.name)}`} live={isLive(slugFor(c.name))} />)}
         </div>
       </Section>
 

@@ -238,7 +238,7 @@ export function Rail({ children, gridCols, className }: { children: React.ReactN
 }
 
 // ── Featured card ────────────────────────────────────────────────────────────
-export function FeatureCard({ item, href }: { item: Featured; href: string }) {
+export function FeatureCard({ item, href, live }: { item: Featured; href: string; live?: boolean }) {
   const tagHex = ACCENT_HEX[TAG_ACCENT[item.tag]];
   return (
     <Link
@@ -254,8 +254,13 @@ export function FeatureCard({ item, href }: { item: Featured; href: string }) {
       <IconTile emoji={item.emoji} accent={item.accent} className="mb-3 h-[46px] w-[46px] text-[21px]" />
       <div className="text-small font-semibold leading-tight text-ink">{item.name}</div>
       <div className="mt-1.5 text-caption leading-snug tracking-normal text-ink-muted">{item.desc}</div>
-      <div className="mt-3 flex items-center gap-1.5 text-caption font-semibold tracking-normal text-royal">
-        Open <ArrowRight />
+      <div className="mt-3 flex items-center gap-2 text-caption font-semibold tracking-normal">
+        {live && (
+          <span className="inline-flex items-center gap-1 rounded text-emerald">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald" aria-hidden="true" />Live
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1.5 text-royal">Open <ArrowRight /></span>
       </div>
     </Link>
   );
@@ -279,7 +284,7 @@ export function CategoryCard({ item, onOpen }: { item: Category; onOpen: () => v
 }
 
 // ── Calculator mini card ─────────────────────────────────────────────────────
-export function CalcMiniCard({ item, href }: { item: CalcMini; href: string }) {
+export function CalcMiniCard({ item, href, live }: { item: CalcMini; href: string; live?: boolean }) {
   return (
     <Link
       href={href}
@@ -287,7 +292,14 @@ export function CalcMiniCard({ item, href }: { item: CalcMini; href: string }) {
     >
       <IconTile emoji={item.emoji} accent={item.accent} className="h-9 w-9 shrink-0 text-[16px]" />
       <div className="min-w-0">
-        <div className="truncate text-small font-semibold leading-tight text-ink">{item.name}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-small font-semibold leading-tight text-ink">{item.name}</span>
+          {live && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald/15 px-1.5 py-0.5 font-mono text-[8.5px] font-bold uppercase tracking-[0.03em] text-emerald">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald" aria-hidden="true" />Live
+            </span>
+          )}
+        </div>
         <div className="mt-px text-caption tracking-normal text-ink-muted">{item.category}</div>
       </div>
       <span className="ml-auto shrink-0 text-ink-faint"><ChevronRight /></span>

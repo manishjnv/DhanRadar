@@ -103,6 +103,13 @@ export function getConfig(slug: string): CalcConfig | undefined {
   return CONFIGS[slug];
 }
 
+// ponytail: temporary "Live" tagging — true when a calculator is actually built +
+// has a working engine. Drives the green "Live" badge on hub cards so the founder
+// knows which calculators are ready to test. Remove the badge once all are live.
+export function isLive(slug: string): boolean {
+  return Object.prototype.hasOwnProperty.call(CONFIGS, slug);
+}
+
 /** Title-cased fallback name for an unbuilt slug ("car-purchase" → "Car Purchase"). */
 export function humanizeSlug(slug: string): string {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
