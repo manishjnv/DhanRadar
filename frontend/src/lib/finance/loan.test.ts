@@ -4,7 +4,7 @@
  * (interest + principal repaid = total paid; balance ends at zero).
  */
 import { describe, it, expect } from 'vitest';
-import { computeLoan } from './loan';
+import { computeLoan, computePrepayment } from './loan';
 
 describe('computeLoan — EMI + amortization', () => {
   it('matches the reference EMI (₹50L, 8.5%, 20y ≈ ₹43,391)', () => {
@@ -50,5 +50,47 @@ describe('computeLoan — EMI + amortization', () => {
       expect(Number.isFinite(p.balance)).toBe(true);
       expect(Number.isFinite(p.interestPaid)).toBe(true);
     }
+  });
+});
+
+describe('computePrepayment — keep EMI, shorten tenure', () => {
+  const base = { principal: 5_000_000, annualRatePct: 8.5, years: 20 };
+
+  it('no prepayment → identical to the baseline (nothing saved)', () => {
+    const r = computePrepayment(base);
+    expect(r.newMonths).toBe(r.baselineMonths);
+    expect(r.monthsSaved).toBe(0);
+    expect(r.interestSaved).toBeCloseTo(0, 0);
+  });
+
+  it('a one-time prepayment shortens the tenure and saves interest (EMI unchanged)', () => {
+    const r = computePrepayment({ ...base, oneTime: 500_000 });
+    expect(r.newMonths).toBeLessThan(r.baselineMonths);
+    expect(r.monthsSaved).toBeGreaterThan(0);
+    expect(r.interestSaved).toBeGreaterThan(0);
+    expect(r.emi).toBeGreaterThan(0);
+  });
+
+  it('extra monthly also shortens the tenure', () => {
+    const r = computePrepayment({ ...base, extraMonthly: 5_000 });
+    expect(r.newMonths).toBeLessThan(r.baselineMonths);
+    expect(r.interestSaved).toBeGreaterThan(0);
+  });
+
+  it('a bigger one-time prepayment saves more interest', () => {
+    const small = computePrepayment({ ...base, oneTime: 200_000 });
+    const big = computePrepayment({ ...base, oneTime: 1_000_000 });
+    expect(big.interestSaved).toBeGreaterThan(small.interestSaved);
+  });
+
+  it('prepaying the full principal clears the loan immediately', () => {
+    const r = computePrepayment({ ...base, oneTime: 5_000_000 });
+    expect(r.newMonths).toBe(0);
+    expect(r.interestSaved).toBeCloseTo(r.baselineInterest, -1);
+  });
+
+  it('edge inputs stay finite (never NaN / Infinity)', () => {
+    const r = computePrepayment({ principal: NaN, annualRatePct: 999, years: -1, oneTime: NaN, extraMonthly: -5 });
+    for (const v of Object.values(r)) expect(Number.isFinite(v)).toBe(true);
   });
 });
