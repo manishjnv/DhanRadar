@@ -79,3 +79,39 @@ export function computeSwp(input: SwpInput): SwpResult {
     series,
   };
 }
+
+// ── E3 inverse — corpus needed to fund an income ─────────────────────────────
+// Reverse of computeSwp: given a monthly income (today's money) and a horizon,
+// the corpus needed today is the present value of every withdrawal discounted at
+// the assumed return, with each year's withdrawal stepped up by inflation.
+// Drives Corpus Calculator + Retirement Planner.
+
+export interface CorpusForIncomeInput {
+  monthlyWithdrawal: number; // income wanted, in today's money
+  years: number; // how long it must last
+  annualRatePct: number; // assumed (post-retirement) return
+  inflationPct?: number; // step the income up this much each year
+}
+
+export interface CorpusForIncomeResult {
+  corpusNeeded: number; // lasts exactly `years`
+  perpetualCorpus: number; // never touches principal (nominal): W / i
+}
+
+export function corpusForIncome(input: CorpusForIncomeInput): CorpusForIncomeResult {
+  const w0 = clampF(input.monthlyWithdrawal, 0, MAX_AMOUNT);
+  const rate = clampF(input.annualRatePct, 0, MAX_RATE_PCT);
+  const infl = clampF(input.inflationPct ?? 0, 0, MAX_INFLATION);
+  const months = Math.round(clampF(input.years, 0, 100) * 12);
+  const i = rate / 100 / 12;
+  const g = infl / 100;
+
+  let pv = 0;
+  for (let m = 0; m < months; m += 1) {
+    const w = w0 * Math.pow(1 + g, Math.floor(m / 12));
+    pv += i === 0 ? w : w / Math.pow(1 + i, m + 1); // discount each withdrawal to today
+  }
+  const perpetual = i > 0 ? w0 / i : 0;
+  const safe = (x: number) => (Number.isFinite(x) ? x : 0);
+  return { corpusNeeded: safe(pv), perpetualCorpus: safe(perpetual) };
+}
