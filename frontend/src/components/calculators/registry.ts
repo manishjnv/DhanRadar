@@ -11,7 +11,7 @@ export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
   | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly'
   | 'beginValue' | 'endValue' | 'buyNav' | 'currentNav' | 'amount'
-  | 'corpus' | 'monthlyWithdrawal';
+  | 'corpus' | 'monthlyWithdrawal' | 'principal' | 'yearlyDeposit';
 export type Fmt = 'inr' | 'pct' | 'years' | 'num';
 
 export interface CalcInputSpec {
@@ -31,12 +31,13 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp' | 'scheme'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
   related: string[]; // related calculator slugs
   rateMap?: { begin: string; end: string; amount?: string }; // E5 'rate' family input mapping
+  scheme?: 'fd' | 'rd' | 'ppf'; // which scheme engine the 'scheme' family uses
 }
 
 // Shared tooltips — one wording reused across calculators (founder simple-words rule).
@@ -65,6 +66,9 @@ const BUY_NAV: CalcInputSpec = { key: 'buyNav', label: 'Buy NAV', tip: 'The fund
 const CURRENT_NAV: CalcInputSpec = { key: 'currentNav', label: 'Current NAV', tip: 'The fund NAV now', min: 1, max: 10000, step: 0.01, default: 75, fmt: 'num', presets: [50, 75, 100, 200] };
 const CORPUS: CalcInputSpec = { key: 'corpus', label: 'Your Corpus', tip: 'The total amount you start with', min: 100000, max: 100000000, step: 100000, default: 10000000, fmt: 'inr', presets: [5000000, 10000000, 25000000, 50000000] };
 const MONTHLY_WITHDRAWAL: CalcInputSpec = { key: 'monthlyWithdrawal', label: 'Monthly Withdrawal', tip: 'How much you take out each month', min: 1000, max: 1000000, step: 1000, default: 50000, fmt: 'inr', presets: [25000, 50000, 75000, 100000] };
+const FD_PRINCIPAL: CalcInputSpec = { key: 'principal', label: 'Deposit Amount', tip: 'The lump sum you deposit', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
+const RD_MONTHLY: CalcInputSpec = { key: 'monthly', label: 'Monthly Deposit', tip: 'How much you deposit each month', min: 500, max: 1000000, step: 500, default: 5000, fmt: 'inr', presets: [2000, 5000, 10000, 25000] };
+const PPF_YEARLY: CalcInputSpec = { key: 'yearlyDeposit', label: 'Yearly Deposit', tip: 'How much you put in each year (max ₹1.5 L)', min: 500, max: 150000, step: 500, default: 150000, fmt: 'inr', presets: [50000, 100000, 150000] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -228,6 +232,29 @@ export const CONFIGS: Record<string, CalcConfig> = {
     inputs: [CORPUS, MONTHLY_WITHDRAWAL, { ...RATE, label: 'Expected Return', default: 8 }, { ...INFLATION, label: 'Raise Withdrawal Yearly', default: 0 }],
     related: ['goal-sip', 'sip', 'lumpsum'],
   },
+
+  // ── Scheme calculators ──
+  fd: {
+    slug: 'fd', name: 'FD Calculator', emoji: '🏦',
+    sub: 'See your fixed deposit maturity value (compounded quarterly).',
+    kind: 'scheme', scheme: 'fd',
+    inputs: [FD_PRINCIPAL, { ...RATE, label: 'Interest Rate', default: 7 }, { ...TENURE, label: 'Tenure', default: 5 }],
+    related: ['rd', 'ppf', 'lumpsum'],
+  },
+  rd: {
+    slug: 'rd', name: 'RD Calculator', emoji: '💰',
+    sub: 'See your recurring deposit maturity value.',
+    kind: 'scheme', scheme: 'rd',
+    inputs: [RD_MONTHLY, { ...RATE, label: 'Interest Rate', default: 7 }, { ...TENURE, label: 'Tenure', default: 5 }],
+    related: ['fd', 'ppf', 'sip'],
+  },
+  ppf: {
+    slug: 'ppf', name: 'PPF Calculator', emoji: '🛡️',
+    sub: 'See your PPF maturity (tax-free) over the term.',
+    kind: 'scheme', scheme: 'ppf',
+    inputs: [PPF_YEARLY, { ...RATE, label: 'PPF Rate (notified)', default: 7.1 }, { ...TENURE, label: 'Years', default: 15, min: 15, max: 50 }],
+    related: ['fd', 'rd', 'sip'],
+  },
 };
 
 // Card names differ between the Featured and All grids, so map the variants to a
@@ -247,6 +274,8 @@ const SLUG_OVERRIDES: Record<string, string> = {
   'Home Down Payment': 'house-purchase', // = House Purchase goal
   'Rule of 72 / 114': 'rule-of-72',
   'Rule of 114': 'rule-of-72', // one card covers 72 / 114 / 144
+  'FD Calculator': 'fd',
+  'RD Calculator': 'rd',
 };
 
 export function slugFor(name: string): string {
