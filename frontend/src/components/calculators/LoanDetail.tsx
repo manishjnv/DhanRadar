@@ -80,6 +80,14 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
   const setKey = (k: string, v: number) => setVals((s) => ({ ...s, [k]: v }));
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 
+  const excelTable = {
+    summary: `${config.name} — EMI ${formatInr(emi)}/mo on ${formatInr(principal)} at ${ratePct}% for ${tenure} years. Total interest ${formatInr(totalInterest)}, total payment ${formatInr(totalPayment)}.`,
+    note: 'Educational illustration only — not financial advice. Lender terms, fees, and rates vary; confirm with your lender.',
+    headers: ['Year', 'Principal Paid', 'Interest Paid', 'Balance Left'],
+    rows: result.series.filter((p) => p.year >= 1).map((p) => [p.year, Math.round(p.principalPaid), Math.round(p.interestPaid), Math.round(p.balance)]),
+    colFormats: ['num', 'inr', 'inr', 'inr'],
+  };
+
   return (
     <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[360px_1fr]">
       {/* INPUT PANEL */}
@@ -106,7 +114,7 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
         <div className="flex gap-2">
           <Btn variant="pri" className="flex-1">Calculate</Btn>
           <Btn aria-label="Reset inputs" onClick={reset}>Reset</Btn>
-          <ResultActions vals={vals} name={config.name} targetRef={resultRef} />
+          <ResultActions vals={vals} name={config.name} targetRef={resultRef} table={excelTable} />
         </div>
       </Panel>
 

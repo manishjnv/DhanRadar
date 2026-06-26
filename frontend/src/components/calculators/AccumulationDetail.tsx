@@ -108,6 +108,14 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
 
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 
+  const excelTable = {
+    summary: `${config.name} — ${subLine}. Estimated future wealth ${formatInr(future)} (invested ${formatInr(invested)}, profit ${formatInr(profit)}).`,
+    note: 'Educational illustration only — not investment advice. Assumes a constant annual return, which real markets do not provide; the return rate is your own assumption, not a DhanRadar prediction. Mutual fund investments are subject to market risk.',
+    headers: ['Year', 'Invested', 'Wealth', 'Profit', 'Multiple'],
+    rows: result.series.filter((p) => p.year >= 1).map((p) => [p.year, Math.round(p.invested), Math.round(p.value), Math.round(Math.max(p.value - p.invested, 0)), p.invested > 0 ? p.value / p.invested : 0]),
+    colFormats: ['num', 'inr', 'inr', 'inr', 'x'],
+  };
+
   return (
     <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[360px_1fr]">
       {/* INPUT PANEL */}
@@ -140,7 +148,7 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
         <div className="flex gap-2">
           <Btn variant="pri" className="flex-1">Calculate</Btn>
           <Btn aria-label="Reset inputs" onClick={reset}>Reset</Btn>
-          <ResultActions vals={vals} name={config.name} targetRef={resultRef} />
+          <ResultActions vals={vals} name={config.name} targetRef={resultRef} table={excelTable} />
         </div>
       </Panel>
 
