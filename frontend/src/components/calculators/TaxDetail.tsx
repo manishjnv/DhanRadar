@@ -38,9 +38,10 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 }
 
 export function TaxDetail({ config }: { config: CalcConfig }) {
+  const defaultMonths = config.taxMode === 'stcg' ? 6 : 24; // STCG = within a year, LTCG = over a year
   const [buyValue, setBuyValue] = React.useState(100000);
   const [sellValue, setSellValue] = React.useState(300000);
-  const [holdingMonths, setHoldingMonths] = React.useState(24);
+  const [holdingMonths, setHoldingMonths] = React.useState(defaultMonths);
   const [assetType, setAssetType] = React.useState<AssetType>('equity');
   const [slabPct, setSlabPct] = React.useState(30);
   const resultRef = React.useRef<HTMLDivElement>(null);
@@ -50,7 +51,7 @@ export function TaxDetail({ config }: { config: CalcConfig }) {
     [buyValue, sellValue, holdingMonths, assetType, slabPct],
   );
   const isDebt = assetType !== 'equity';
-  const reset = () => { setBuyValue(100000); setSellValue(300000); setHoldingMonths(24); setAssetType('equity'); setSlabPct(30); };
+  const reset = () => { setBuyValue(100000); setSellValue(300000); setHoldingMonths(defaultMonths); setAssetType('equity'); setSlabPct(30); };
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 
   const fmtMonths = (n: number) => `${Math.floor(n / 12)}y ${n % 12}m`;

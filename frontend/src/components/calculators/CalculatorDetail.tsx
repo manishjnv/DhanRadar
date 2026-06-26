@@ -19,6 +19,9 @@ import { RateDetail } from './RateDetail';
 import { RuleDetail } from './RuleDetail';
 import { XirrDetail } from './XirrDetail';
 import { TaxDetail } from './TaxDetail';
+import { PostTaxReturnDetail } from './PostTaxReturnDetail';
+import { ExitLoadDetail } from './ExitLoadDetail';
+import { DividendTaxDetail } from './DividendTaxDetail';
 import { SwpDetail } from './SwpDetail';
 import { SchemeDetail } from './SchemeDetail';
 import { NpsDetail } from './NpsDetail';
@@ -59,6 +62,9 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'rule' && <RuleDetail key={config.slug} config={config} />}
       {config && config.kind === 'xirr' && <XirrDetail key={config.slug} config={config} />}
       {config && config.kind === 'tax' && <TaxDetail key={config.slug} config={config} />}
+      {config && config.kind === 'post-tax' && <PostTaxReturnDetail key={config.slug} config={config} />}
+      {config && config.kind === 'exit-load' && <ExitLoadDetail key={config.slug} config={config} />}
+      {config && config.kind === 'dividend' && <DividendTaxDetail key={config.slug} config={config} />}
       {config && config.kind === 'swp' && <SwpDetail key={config.slug} config={config} />}
       {config && config.kind === 'scheme' && <SchemeDetail key={config.slug} config={config} />}
       {config && config.kind === 'nps' && <NpsDetail key={config.slug} config={config} />}

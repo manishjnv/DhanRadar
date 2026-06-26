@@ -3,7 +3,7 @@
  * FY 2025-26 rules (equity LTCG 12.5% above ₹1.25 L; STCG 20%; debt at slab).
  */
 import { describe, it, expect } from 'vitest';
-import { computeCapitalGainsTax } from './tax';
+import { computeCapitalGainsTax, computeExitLoad, computeDividendTax } from './tax';
 
 describe('computeCapitalGainsTax — equity', () => {
   it('LTCG: ₹2 L gain held 24 mo → tax on (2L − 1.25L) @12.5% = ₹9,375 + 4% cess', () => {
@@ -68,5 +68,47 @@ describe('computeCapitalGainsTax — edges', () => {
   it('NaN / negative inputs stay finite', () => {
     const r = computeCapitalGainsTax({ buyValue: NaN, sellValue: -1, holdingMonths: -5, assetType: 'equity' });
     for (const v of [r.gain, r.tax, r.taxableGain, r.postTaxValue, r.effectivePct]) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe('computeExitLoad', () => {
+  it('1% load on ₹1 L redeemed within the 12-mo window → ₹1,000 load', () => {
+    const r = computeExitLoad({ redeemValue: 100000, loadPct: 1, holdingMonths: 6, loadWindowMonths: 12 });
+    expect(r.applies).toBe(true);
+    expect(r.loadAmount).toBe(1000);
+    expect(r.netValue).toBe(99000);
+  });
+
+  it('held beyond the window → no load', () => {
+    const r = computeExitLoad({ redeemValue: 100000, loadPct: 1, holdingMonths: 18, loadWindowMonths: 12 });
+    expect(r.applies).toBe(false);
+    expect(r.loadAmount).toBe(0);
+    expect(r.netValue).toBe(100000);
+  });
+
+  it('NaN / negative inputs stay finite', () => {
+    const r = computeExitLoad({ redeemValue: NaN, loadPct: -1, holdingMonths: -5, loadWindowMonths: NaN });
+    for (const v of [r.loadAmount, r.netValue]) expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
+describe('computeDividendTax', () => {
+  it('₹50,000 dividend at 30% slab → ₹15,000 tax, TDS ₹5,000', () => {
+    const r = computeDividendTax({ dividend: 50000, slabPct: 30 });
+    expect(r.tax).toBe(15000);
+    expect(r.tds).toBe(5000); // 10% over the ₹5,000 threshold
+    expect(r.netInHand).toBe(35000);
+    expect(Math.round(r.effectivePct)).toBe(30);
+  });
+
+  it('dividend at/under ₹5,000 → no TDS', () => {
+    const r = computeDividendTax({ dividend: 5000, slabPct: 20 });
+    expect(r.tds).toBe(0);
+    expect(r.tax).toBe(1000);
+  });
+
+  it('NaN inputs stay finite', () => {
+    const r = computeDividendTax({ dividend: NaN, slabPct: NaN });
+    for (const v of [r.tax, r.tds, r.netInHand, r.effectivePct]) expect(Number.isFinite(v)).toBe(true);
   });
 });

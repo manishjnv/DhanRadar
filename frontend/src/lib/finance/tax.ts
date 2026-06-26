@@ -107,3 +107,66 @@ export function computeCapitalGainsTax(input: CapGainInput): CapGainResult {
     effectivePct: safe(effectivePct),
   };
 }
+
+// ── Exit load ────────────────────────────────────────────────────────────────
+// Most MFs charge an exit load (typically ~1%) if you redeem within a window
+// (commonly 12 months). The load is a % of the redemption value, deducted before
+// you receive the money. Pure, clamped — never NaN.
+
+export interface ExitLoadInput {
+  redeemValue: number; // amount you're redeeming (₹)
+  loadPct: number; // exit load rate (% of redemption value)
+  holdingMonths: number; // how long you've held
+  loadWindowMonths: number; // load applies if held < this many months
+}
+
+export interface ExitLoadResult {
+  applies: boolean;
+  loadAmount: number;
+  netValue: number; // redeemValue − loadAmount
+}
+
+export function computeExitLoad(input: ExitLoadInput): ExitLoadResult {
+  const value = clampF(input.redeemValue, 0, MAX_AMOUNT);
+  const pct = clampF(input.loadPct, 0, 10);
+  const months = clampF(input.holdingMonths, 0, 1200);
+  const windowM = clampF(input.loadWindowMonths, 0, 1200);
+  const applies = months < windowM && pct > 0;
+  const loadAmount = applies ? (value * pct) / 100 : 0;
+  const safe = (x: number) => (Number.isFinite(x) ? x : 0);
+  return { applies, loadAmount: safe(loadAmount), netValue: safe(value - loadAmount) };
+}
+
+// ── Dividend / IDCW tax ──────────────────────────────────────────────────────
+// Since FY 2020-21 dividends (IDCW) are taxed in the investor's hands at their
+// slab rate (added to income). TDS @10% applies if total dividend > ₹5,000/yr.
+// This estimates the slab tax; the TDS is an advance, not extra tax.
+
+export const DIVIDEND_CONFIG = { tdsThreshold: 5000, tdsPct: 10, asOf: 'FY 2025-26' };
+
+export interface DividendTaxInput {
+  dividend: number; // dividend / IDCW received (₹)
+  slabPct: number; // investor's income-tax slab
+}
+
+export interface DividendTaxResult {
+  tax: number; // slab tax on the dividend
+  tds: number; // TDS deducted at source (advance), if over the threshold
+  netInHand: number; // dividend − tax
+  effectivePct: number;
+}
+
+export function computeDividendTax(input: DividendTaxInput): DividendTaxResult {
+  const D = DIVIDEND_CONFIG;
+  const dividend = clampF(input.dividend, 0, MAX_AMOUNT);
+  const slab = clampF(input.slabPct, 0, 50);
+  const tax = (dividend * slab) / 100;
+  const tds = dividend > D.tdsThreshold ? (dividend * D.tdsPct) / 100 : 0;
+  const safe = (x: number) => (Number.isFinite(x) ? x : 0);
+  return {
+    tax: safe(tax),
+    tds: safe(tds),
+    netInHand: safe(dividend - tax),
+    effectivePct: dividend > 0 ? safe((tax / dividend) * 100) : 0,
+  };
+}

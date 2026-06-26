@@ -31,13 +31,14 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp' | 'scheme' | 'nps' | 'networth'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'scheme' | 'nps' | 'networth'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
   related: string[]; // related calculator slugs
   rateMap?: { begin: string; end: string; amount?: string }; // E5 'rate' family input mapping
   scheme?: 'fd' | 'rd' | 'ppf' | 'epf'; // which scheme engine the 'scheme' family uses
+  taxMode?: 'stcg' | 'ltcg'; // TaxDetail default framing (STCG = short-term, LTCG = long-term)
 }
 
 // Shared tooltips — one wording reused across calculators (founder simple-words rule).
@@ -228,7 +229,37 @@ export const CONFIGS: Record<string, CalcConfig> = {
     slug: 'capital-gains-tax', name: 'Capital Gains Tax Calculator', emoji: '🧾',
     sub: 'Tax on mutual fund gains — LTCG / STCG, FY 2025-26.',
     kind: 'tax', inputs: [],
-    related: ['xirr', 'cagr', 'sip'],
+    related: ['stcg', 'ltcg', 'post-tax-return'],
+  },
+  stcg: {
+    slug: 'stcg', name: 'STCG Calculator', emoji: '📋',
+    sub: 'Short-term capital gains tax on funds sold within a year.',
+    kind: 'tax', taxMode: 'stcg', inputs: [],
+    related: ['ltcg', 'capital-gains-tax', 'exit-load'],
+  },
+  ltcg: {
+    slug: 'ltcg', name: 'LTCG Calculator', emoji: '📑',
+    sub: 'Long-term capital gains tax, with the ₹1.25 L equity exemption.',
+    kind: 'tax', taxMode: 'ltcg', inputs: [],
+    related: ['stcg', 'capital-gains-tax', 'tax-harvesting'],
+  },
+  'post-tax-return': {
+    slug: 'post-tax-return', name: 'Post-Tax Return Calculator', emoji: '✅',
+    sub: 'Your real take-home return after capital-gains tax.',
+    kind: 'post-tax', inputs: [],
+    related: ['capital-gains-tax', 'sip', 'lumpsum'],
+  },
+  'exit-load': {
+    slug: 'exit-load', name: 'Exit Load Calculator', emoji: '💸',
+    sub: 'The fee charged when you redeem a fund too early.',
+    kind: 'exit-load', inputs: [],
+    related: ['capital-gains-tax', 'stcg', 'sip'],
+  },
+  'dividend-tax': {
+    slug: 'dividend-tax', name: 'Dividend Tax Calculator', emoji: '💵',
+    sub: 'Tax on mutual fund dividends (IDCW) at your slab rate.',
+    kind: 'dividend', inputs: [],
+    related: ['capital-gains-tax', 'post-tax-return', 'sip'],
   },
 
   // ── E3 decumulation ──
