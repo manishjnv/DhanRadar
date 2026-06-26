@@ -268,11 +268,11 @@ export function FeatureCard({ item, href, live }: { item: Featured; href: string
 }
 
 // ── Category card ────────────────────────────────────────────────────────────
-export function CategoryCard({ item, onOpen }: { item: Category; onOpen: () => void }) {
+export function CategoryCard({ item, onSelect }: { item: Category; onSelect: (name: string) => void }) {
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={() => onSelect(item.name)}
       className="flex items-center gap-3 rounded-[15px] border border-line bg-surface p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
     >
       <IconTile emoji={item.emoji} accent={item.accent} className="h-[46px] w-[46px] shrink-0 text-[20px]" />
@@ -308,9 +308,11 @@ export function CalcMiniCard({ item, href, live }: { item: CalcMini; href: strin
   );
 }
 
-// ── Filter / hero chips (visual selection only) ──────────────────────────────
-export function ChipRow({ chips, scroll = false }: { chips: string[]; scroll?: boolean }) {
-  const [active, setActive] = React.useState(0);
+// ── Filter chips — controlled when `active`/`onSelect` are passed ─────────────
+export function ChipRow({ chips, scroll = false, active, onSelect }: { chips: string[]; scroll?: boolean; active?: string; onSelect?: (chip: string) => void }) {
+  const [internal, setInternal] = React.useState(chips[0] ?? '');
+  const current = active ?? internal;
+  const select = (c: string) => { setInternal(c); onSelect?.(c); };
   return (
     <div
       className={cn(
@@ -320,14 +322,15 @@ export function ChipRow({ chips, scroll = false }: { chips: string[]; scroll?: b
           : 'flex-wrap',
       )}
     >
-      {chips.map((c, i) => (
+      {chips.map((c) => (
         <button
           key={c}
           type="button"
-          onClick={() => setActive(i)}
+          onClick={() => select(c)}
+          aria-pressed={current === c}
           className={cn(
             'shrink-0 rounded-[10px] border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-            i === active
+            current === c
               ? 'border-navy bg-navy text-white'
               : 'border-line bg-surface text-ink-secondary shadow-sm hover:border-royal hover:text-royal',
           )}
