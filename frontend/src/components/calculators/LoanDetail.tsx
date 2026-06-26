@@ -13,7 +13,7 @@ import * as React from 'react';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, Donut, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
-import { computeLoan, formatInrShort } from '@/lib/finance';
+import { computeLoan, formatInr, formatInrShort } from '@/lib/finance';
 import { type CalcConfig, getConfig, fmtValue, fmtPreset } from './registry';
 
 export function LoanDetail({ config }: { config: CalcConfig }) {
@@ -106,9 +106,9 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
       {/* RESULT PANEL */}
       <div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Kpi hero label="Monthly EMI" value={`${formatInrShort(emi)}/mo`} sub={`On ${formatInrShort(principal)} at ${ratePct}% for ${tenure} ${tenure === 1 ? 'year' : 'years'}`} />
-          <Kpi label="Total Interest" value={formatInrShort(totalInterest)} sub="Paid over the loan" />
-          <Kpi label="Total Payment" value={formatInrShort(totalPayment)} sub="Principal + interest" />
+          <Kpi hero label="Monthly EMI" value={`${formatInr(emi)}/mo`} sub={`On ${formatInr(principal)} at ${ratePct}% for ${tenure} ${tenure === 1 ? 'year' : 'years'}`} />
+          <Kpi label="Total Interest" value={formatInr(totalInterest)} sub="Paid over the loan" />
+          <Kpi label="Total Payment" value={formatInr(totalPayment)} sub="Principal + interest" />
           <Kpi label="Interest vs Loan" value={`${interestPct}%`} sub="Interest as % of amount borrowed" />
         </div>
 
@@ -122,13 +122,13 @@ export function LoanDetail({ config }: { config: CalcConfig }) {
                 <div className="flex items-center gap-2.5 border-b border-line py-2.5">
                   <span className="h-3 w-3 rounded-[3px] bg-surface-3" />
                   <span className="flex-1 text-small font-semibold text-ink">Principal (what you borrow)</span>
-                  <span className="font-mono font-bold text-ink">{formatInrShort(principal)}</span>
+                  <span className="font-mono font-bold text-ink">{formatInr(principal)}</span>
                   <span className="w-12 text-right font-mono text-ink-muted">{100 - interestShare}%</span>
                 </div>
                 <div className="flex items-center gap-2.5 py-2.5">
                   <span className="h-3 w-3 rounded-[3px] bg-royal" />
                   <span className="flex-1 text-small font-semibold text-ink">Interest (cost of the loan)</span>
-                  <span className="font-mono font-bold text-royal">{formatInrShort(totalInterest)}</span>
+                  <span className="font-mono font-bold text-royal">{formatInr(totalInterest)}</span>
                   <span className="w-12 text-right font-mono text-ink-muted">{interestShare}%</span>
                 </div>
                 <SoWhat>

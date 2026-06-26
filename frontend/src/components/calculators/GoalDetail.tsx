@@ -15,7 +15,7 @@ import * as React from 'react';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, GrowthChart, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
-import { solveGoal, computeSip, formatInrShort } from '@/lib/finance';
+import { solveGoal, computeSip, formatInr, formatInrShort } from '@/lib/finance';
 import { type CalcConfig, getConfig, fmtValue, fmtPreset } from './registry';
 
 export function GoalDetail({ config }: { config: CalcConfig }) {
@@ -111,10 +111,10 @@ export function GoalDetail({ config }: { config: CalcConfig }) {
       {/* RESULT PANEL */}
       <div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Kpi hero label="Monthly SIP Needed" value={`${formatInrShort(requiredMonthly)}/mo`} sub={`To reach ${formatInrShort(inflatedTarget)} in ${years} ${years === 1 ? 'year' : 'years'}`} />
-          <Kpi label="Goal’s Future Cost" value={formatInrShort(inflatedTarget)} sub={hasInflation && inflation > 0 ? `${inflation}% inflation on ${formatInrShort(target)}` : 'In today’s money'} />
-          <Kpi label="Or One-time Today" value={formatInrShort(requiredLump)} sub="Lump sum instead of monthly" />
-          <Kpi label="Total You’ll Invest" value={formatInrShort(totalInvested)} sub="Across the whole period" accent="pos" />
+          <Kpi hero label="Monthly SIP Needed" value={`${formatInr(requiredMonthly)}/mo`} sub={`To reach ${formatInr(inflatedTarget)} in ${years} ${years === 1 ? 'year' : 'years'}`} />
+          <Kpi label="Goal’s Future Cost" value={formatInr(inflatedTarget)} sub={hasInflation && inflation > 0 ? `${inflation}% inflation on ${formatInrShort(target)}` : 'In today’s money'} />
+          <Kpi label="Or One-time Today" value={formatInr(requiredLump)} sub="Lump sum instead of monthly" />
+          <Kpi label="Total You’ll Invest" value={formatInr(totalInvested)} sub="Across the whole period" accent="pos" />
         </div>
 
         {/* Plan growth */}

@@ -51,19 +51,22 @@ export function solveGoal(input: GoalInput): GoalResult {
   const infl = clampFinite(input.inflationPct ?? 0, 0, MAX_INFLATION_PCT);
   const current = clampFinite(input.currentSavings ?? 0, 0, MAX_AMOUNT);
 
-  const i = rate / 100 / 12;
+  const i = rate / 100 / 12; // monthly rate (SIP)
+  const annual = rate / 100; // annual rate (lump / savings)
   const n = Math.round(years * 12);
-  const growth = Math.pow(1 + i, n); // (1+i)^n
+  const monthlyGrowth = Math.pow(1 + i, n); // (1+i)^n
+  const annualGrowth = Math.pow(1 + annual, years); // (1+annual)^years
 
   const inflatedTarget = targetToday * Math.pow(1 + infl / 100, years);
-  const futureOfSavings = current * growth;
+  const futureOfSavings = current * annualGrowth; // existing savings compound annually
   const shortfall = Math.max(inflatedTarget - futureOfSavings, 0);
 
-  // Required SIP (ordinary annuity): P = FV · i / ((1+i)^n − 1); i = 0 → FV / n.
-  const annuityFactor = i === 0 ? n : (growth - 1) / i;
-  const requiredMonthly = annuityFactor > 0 ? shortfall / annuityFactor : 0;
-  // Required lump today: L = FV / (1+i)^n.
-  const requiredLump = growth > 0 ? shortfall / growth : 0;
+  // Required SIP — invert the annuity-DUE formula (matches computeSip):
+  //   FV = P · ((1+i)^n − 1)/i · (1+i)   (i = 0 → FV / n)
+  const dueFactor = i === 0 ? n : ((monthlyGrowth - 1) / i) * (1 + i);
+  const requiredMonthly = dueFactor > 0 ? shortfall / dueFactor : 0;
+  // Required one-time lump today — invert annual compounding: L = FV / (1+annual)^years.
+  const requiredLump = annualGrowth > 0 ? shortfall / annualGrowth : 0;
 
   const safe = (x: number) => (Number.isFinite(x) ? x : 0);
   return {
