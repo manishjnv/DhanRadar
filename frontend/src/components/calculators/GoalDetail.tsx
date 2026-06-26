@@ -17,15 +17,22 @@ import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, GrowthChart, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
 import { solveGoal, computeSip, formatInr, formatInrShort } from '@/lib/finance';
 import { type CalcConfig, getConfig, fmtValue, fmtPreset, fmtUnit } from './registry';
+import { ResultActions, readUrlVals, useUrlSeed } from './actions';
 
 export function GoalDetail({ config }: { config: CalcConfig }) {
   const initVals = React.useCallback(() => {
+    const url = readUrlVals(config.inputs.map((i) => i.key));
     const o: Record<string, number> = {};
-    config.inputs.forEach((inp) => { o[inp.key] = inp.default; });
+    config.inputs.forEach((inp) => {
+      const v = url[inp.key];
+      o[inp.key] = v !== undefined ? Math.min(Math.max(v, inp.min), inp.max) : inp.default;
+    });
     return o;
   }, [config]);
 
   const [vals, setVals] = React.useState<Record<string, number>>(initVals);
+  const resultRef = React.useRef<HTMLDivElement>(null);
+  useUrlSeed(config.inputs, setVals);
 
   const target = vals.target ?? 0;
   const years = vals.years ?? 0;
@@ -104,13 +111,12 @@ export function GoalDetail({ config }: { config: CalcConfig }) {
         <div className="flex gap-2">
           <Btn variant="pri" className="flex-1">Calculate</Btn>
           <Btn aria-label="Reset inputs" onClick={reset}>Reset</Btn>
-          <Btn aria-label="Export results">⬇</Btn>
-          <Btn aria-label="Share results">↗</Btn>
+          <ResultActions vals={vals} name={config.name} targetRef={resultRef} />
         </div>
       </Panel>
 
       {/* RESULT PANEL */}
-      <div>
+      <div ref={resultRef}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Kpi hero label="Monthly SIP Needed" value={`${formatInr(requiredMonthly)}/mo`} sub={`To reach ${formatInr(inflatedTarget)} in ${years} ${years === 1 ? 'year' : 'years'}`} />
           <Kpi label="Goal’s Future Cost" value={formatInr(inflatedTarget)} sub={hasInflation && inflation > 0 ? `${inflation}% inflation on ${formatInrShort(target)}` : 'In today’s money'} />
@@ -166,7 +172,7 @@ export function GoalDetail({ config }: { config: CalcConfig }) {
         )}
 
         {/* Sticky bar */}
-        <div className="fixed bottom-[18px] left-1/2 z-[55] flex -translate-x-1/2 items-center gap-3.5 rounded-2xl bg-navy/95 px-4 py-3 shadow-[0_24px_60px_-20px_rgba(15,23,42,.45)] backdrop-blur">
+        <div data-no-export="true" className="fixed bottom-[18px] left-1/2 z-[55] flex -translate-x-1/2 items-center gap-3.5 rounded-2xl bg-navy/95 px-4 py-3 shadow-[0_24px_60px_-20px_rgba(15,23,42,.45)] backdrop-blur">
           <div className="text-white">
             <small className="block text-[10px] font-semibold uppercase tracking-[0.04em] text-slate-400">Monthly SIP</small>
             <span className="text-small font-bold">{formatInrShort(requiredMonthly)}/mo</span>

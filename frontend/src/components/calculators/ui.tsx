@@ -545,6 +545,7 @@ export function GrowthChart({ series }: { series: { year: number; invested: numb
   const xStep = Math.max(1, Math.ceil((n - 1) / 6));
   const baseY = yAt(0);
   const [hover, setHover] = React.useState<number | null>(null);
+  const lastHover = React.useRef(0);
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block" role="img" aria-label="Money invested versus estimated value by year; hover a point for the figures.">
       <defs>
@@ -595,22 +596,25 @@ export function GrowthChart({ series }: { series: { year: number; invested: numb
           r="13"
           fill="transparent"
           className="cursor-pointer"
-          onMouseEnter={() => setHover(idx)}
+          onMouseEnter={() => { lastHover.current = idx; setHover(idx); }}
           onMouseLeave={() => setHover((h) => (h === idx ? null : h))}
         />
       ))}
 
-      {/* Instant tooltip — 2 lines, rounded, soft shadow, with a guide line + marker */}
-      {hover !== null && (() => {
-        const d = series[hover];
-        const cx = xAt(hover);
+      {/* Tooltip — stays mounted and fades in/out smoothly (uses the last point
+          while fading out so it doesn't blink between points). */}
+      {(() => {
+        const idx = hover ?? lastHover.current;
+        const d = series[idx];
+        if (!d) return null;
+        const cx = xAt(idx);
         const cy = yAt(d.value);
         const tw = 158;
         const th = 44;
         const tx = Math.max(padL, Math.min(cx - tw / 2, W - padR - tw));
         const ty = cy - th - 12 < padT ? cy + 14 : cy - th - 12;
         return (
-          <g pointerEvents="none">
+          <g pointerEvents="none" className={cn('transition-opacity duration-200 ease-out', hover !== null ? 'opacity-100' : 'opacity-0')}>
             <line x1={cx} y1={padT} x2={cx} y2={baseY} stroke={ACCENT_HEX.royal} strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
             <circle cx={cx} cy={cy} r="5" fill={ACCENT_HEX.royal} stroke="#fff" strokeWidth="2" />
             <g transform={`translate(${tx},${ty})`}>
