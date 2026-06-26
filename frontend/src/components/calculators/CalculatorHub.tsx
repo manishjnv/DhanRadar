@@ -30,14 +30,31 @@ function matchesFilter(c: { name: string; category: string }, filter: string): b
   return cat === target || cat.includes(target) || c.name.toLowerCase().includes(f);
 }
 
+// Free-text search over a calculator's name + category.
+function matchesQuery(c: { name: string; category: string }, query: string): boolean {
+  const q = query.toLowerCase().trim();
+  if (!q) return true;
+  return c.name.toLowerCase().includes(q) || c.category.toLowerCase().includes(q);
+}
+
 export function CalculatorHub() {
   const [filter, setFilter] = React.useState('All');
+  const [query, setQuery] = React.useState('');
   const scrollToAll = React.useCallback(() => {
     if (typeof document === 'undefined') return;
     document.getElementById('all-calculators')?.scrollIntoView({ behavior: 'smooth' });
   }, []);
-  const selectCategory = React.useCallback((name: string) => { setFilter(name); scrollToAll(); }, [scrollToAll]);
-  const filtered = ALL_CALCS.filter((c) => matchesFilter(c, filter));
+  const selectCategory = React.useCallback((name: string) => { setQuery(''); setFilter(name); scrollToAll(); }, [scrollToAll]);
+  // Typing a query reveals the results section the first time it becomes non-empty.
+  const onSearchChange = React.useCallback((v: string) => {
+    if (v && !query) scrollToAll();
+    setQuery(v);
+  }, [query, scrollToAll]);
+  const searching = query.trim().length > 0;
+  // A search spans every calculator; the chips/categories browse when not searching.
+  const filtered = searching
+    ? ALL_CALCS.filter((c) => matchesQuery(c, query))
+    : ALL_CALCS.filter((c) => matchesFilter(c, filter));
 
   return (
     <div className="w-full pb-16">
@@ -52,6 +69,11 @@ export function CalculatorHub() {
         searchPlaceholder={HERO.searchPlaceholder}
         cats={HERO_CATS}
         stats={HERO.stats}
+        searchValue={query}
+        onSearchChange={onSearchChange}
+        onSearchSubmit={scrollToAll}
+        onSelectCat={selectCategory}
+        activeCat={filter}
       />
 
       {/* S2 — Featured */}
@@ -73,13 +95,13 @@ export function CalculatorHub() {
       {/* S4 — All calculators */}
       <Section>
         <div id="all-calculators" className="scroll-mt-24">
-          <SectionHeader index="03" title="All Calculators" info={filter === 'All' ? `${ALL_CALCS.length} calculators` : `${filtered.length} of ${ALL_CALCS.length}`} />
+          <SectionHeader index="03" title="All Calculators" info={searching ? `${filtered.length} found for “${query.trim()}”` : filter === 'All' ? `${ALL_CALCS.length} calculators` : `${filtered.length} of ${ALL_CALCS.length}`} />
         </div>
         <div className="mb-4"><ChipRow chips={FILTER_CHIPS} scroll active={filter} onSelect={setFilter} /></div>
         {filtered.length === 0 ? (
           <div className="rounded-2xl border border-line bg-surface-2 p-8 text-center">
-            <p className="text-small font-medium text-ink">No calculators in “{filter}” yet</p>
-            <button type="button" onClick={() => setFilter('All')} className="mt-2 inline-block rounded text-small font-medium text-royal underline underline-offset-2 hover:text-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">Show all calculators</button>
+            <p className="text-small font-medium text-ink">{searching ? <>No calculators match “{query}”</> : <>No calculators in “{filter}” yet</>}</p>
+            <button type="button" onClick={() => { setFilter('All'); setQuery(''); }} className="mt-2 inline-block rounded text-small font-medium text-royal underline underline-offset-2 hover:text-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">Show all calculators</button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
