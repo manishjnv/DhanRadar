@@ -3,7 +3,7 @@
  * (W ≤ corpus·i never depletes), the 0%-rate split, and monotonic behaviour.
  */
 import { describe, it, expect } from 'vitest';
-import { computeSwp, SWP_MAX_MONTHS } from './swp';
+import { computeSwp, corpusForIncome, SWP_MAX_MONTHS } from './swp';
 
 describe('computeSwp', () => {
   it('withdrawing only the interest is sustainable (never depletes)', () => {
@@ -45,5 +45,32 @@ describe('computeSwp', () => {
     expect(Number.isFinite(r.monthsLasted)).toBe(true);
     expect(Number.isFinite(r.totalWithdrawn)).toBe(true);
     for (const p of r.series) expect(Number.isFinite(p.balance)).toBe(true);
+  });
+});
+
+describe('corpusForIncome (E3 inverse)', () => {
+  it('round-trips computeSwp: the corpus it returns lasts ~the requested horizon', () => {
+    const W = 50000;
+    const years = 25;
+    const rate = 8;
+    const { corpusNeeded } = corpusForIncome({ monthlyWithdrawal: W, years, annualRatePct: rate });
+    const back = computeSwp({ corpus: corpusNeeded, monthlyWithdrawal: W, annualRatePct: rate });
+    expect(Math.abs(back.monthsLasted - years * 12)).toBeLessThanOrEqual(1); // depletes right at the horizon
+  });
+
+  it('0% return → corpus is just the sum of withdrawals', () => {
+    const r = corpusForIncome({ monthlyWithdrawal: 10000, years: 10, annualRatePct: 0 });
+    expect(r.corpusNeeded).toBe(10000 * 120);
+  });
+
+  it('inflation-indexed income needs a bigger corpus', () => {
+    const flat = corpusForIncome({ monthlyWithdrawal: 50000, years: 25, annualRatePct: 8 });
+    const indexed = corpusForIncome({ monthlyWithdrawal: 50000, years: 25, annualRatePct: 8, inflationPct: 6 });
+    expect(indexed.corpusNeeded).toBeGreaterThan(flat.corpusNeeded);
+  });
+
+  it('NaN inputs stay finite', () => {
+    const r = corpusForIncome({ monthlyWithdrawal: NaN, years: -1, annualRatePct: NaN });
+    for (const v of [r.corpusNeeded, r.perpetualCorpus]) expect(Number.isFinite(v)).toBe(true);
   });
 });

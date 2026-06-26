@@ -53,6 +53,17 @@ export function ruleOf(annualRatePct: number): RuleResult {
   };
 }
 
+/**
+ * E6 — real (inflation-adjusted) annual rate: (1+nominal)/(1+inflation) − 1.
+ * The return the money earns *above* the rise in prices. Clamped to a finite %.
+ */
+export function realReturn(nominalPct: number, inflationPct: number): number {
+  const n = clampFinite(nominalPct, -100, MAX_RATE_PCT) / 100;
+  const f = clampFinite(inflationPct, 0, MAX_RATE_PCT) / 100;
+  const real = (1 + n) / (1 + f) - 1;
+  return Number.isFinite(real) ? real * 100 : 0;
+}
+
 export interface CashFlow {
   date: Date;
   amount: number; // outflows (investments) negative, inflows (redemptions) positive

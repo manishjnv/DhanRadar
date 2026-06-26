@@ -31,7 +31,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'scheme' | 'nps' | 'networth'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'post-tax' | 'exit-load' | 'dividend' | 'swp' | 'stp' | 'sip-delay' | 'inflation-return' | 'retirement' | 'fire' | 'passive-income' | 'corpus' | 'scheme' | 'nps' | 'networth'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -269,6 +269,62 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'swp',
     inputs: [CORPUS, MONTHLY_WITHDRAWAL, { ...RATE, label: 'Expected Return', default: 8 }, { ...INFLATION, label: 'Raise Withdrawal Yearly', default: 0 }],
     related: ['goal-sip', 'sip', 'lumpsum'],
+  },
+
+  // ── E4 transfer (STP) ──
+  stp: {
+    slug: 'stp', name: 'STP Calculator', emoji: '🔄',
+    sub: 'Move money monthly from one fund to another — see both grow.',
+    kind: 'stp', inputs: [],
+    related: ['swp', 'sip', 'lumpsum'],
+  },
+
+  // ── E6 inflation / cost-of-delay ──
+  'sip-delay': {
+    slug: 'sip-delay', name: 'SIP Delay Calculator', emoji: '⏰',
+    sub: 'See what waiting to start your SIP really costs.',
+    kind: 'sip-delay', inputs: [],
+    related: ['sip', 'step-up-sip', 'goal-sip'],
+  },
+  'inflation-adjusted-return': {
+    slug: 'inflation-adjusted-return', name: 'Inflation-Adjusted Return Calculator', emoji: '📉',
+    sub: 'Your real return after inflation eats into it.',
+    kind: 'inflation-return', inputs: [],
+    related: ['sip', 'cagr', 'future-value'],
+  },
+
+  // ── Retirement (E1→E3 / E2) ──
+  'retirement-planner': {
+    slug: 'retirement-planner', name: 'Retirement Planner', emoji: '🏖',
+    sub: 'The corpus you need at retirement and the SIP to build it.',
+    kind: 'retirement', inputs: [],
+    related: ['fire-calculator', 'corpus-calculator', 'swp'],
+  },
+  'fire-calculator': {
+    slug: 'fire-calculator', name: 'FIRE Calculator', emoji: '🔥',
+    sub: 'Your financial-independence number and years to reach it.',
+    kind: 'fire', inputs: [],
+    related: ['retirement-planner', 'passive-income', 'swp'],
+  },
+  'passive-income': {
+    slug: 'passive-income', name: 'Passive Income Calculator', emoji: '💵',
+    sub: 'The monthly income a corpus can sustainably provide.',
+    kind: 'passive-income', inputs: [],
+    related: ['swp', 'corpus-calculator', 'fire-calculator'],
+  },
+  'corpus-calculator': {
+    slug: 'corpus-calculator', name: 'Corpus Calculator', emoji: '🏦',
+    sub: 'The corpus needed to fund a monthly income in retirement.',
+    kind: 'corpus', inputs: [],
+    related: ['retirement-planner', 'passive-income', 'goal-sip'],
+  },
+
+  // ── E7 loan delta ──
+  'interest-savings': {
+    slug: 'interest-savings', name: 'Interest Savings Calculator', emoji: '💰',
+    sub: 'How much interest a lower rate or shorter tenure saves.',
+    kind: 'loan-compare', inputs: [],
+    related: ['home-loan-emi', 'prepayment', 'loan-comparison'],
   },
 
   // ── Scheme calculators ──
