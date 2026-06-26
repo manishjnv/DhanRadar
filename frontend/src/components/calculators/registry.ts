@@ -7,7 +7,7 @@
  */
 import { formatInr, formatInrShort } from '@/lib/finance';
 
-export type InputKey = 'monthly' | 'lumpSum' | 'rate' | 'years';
+export type InputKey = 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current';
 export type Fmt = 'inr' | 'pct' | 'years';
 
 export interface CalcInputSpec {
@@ -27,10 +27,10 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation'; // result-renderer family (only E1 today)
+  kind: 'accumulation' | 'goal'; // result-renderer family (E1 / E2)
   inputs: CalcInputSpec[];
-  stepUp: boolean; // show the step-up toggle
-  stepUpDefault: boolean; // step-up on by default (Step-up SIP)
+  stepUp?: boolean; // show the step-up toggle (accumulation only)
+  stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
   related: string[]; // related calculator slugs
 }
 
@@ -46,6 +46,8 @@ const RATE: CalcInputSpec = { key: 'rate', label: 'Expected Annual Growth', tip:
 const YEARS: CalcInputSpec = { key: 'years', label: 'Investment Period', tip: TIPS.years, min: 1, max: 40, step: 1, default: 15, fmt: 'years', presets: [5, 10, 15, 20, 30] };
 const MONTHLY: CalcInputSpec = { key: 'monthly', label: 'Monthly SIP', tip: TIPS.monthly, min: 500, max: 200000, step: 500, default: 25000, fmt: 'inr', presets: [5000, 10000, 25000, 50000, 100000] };
 const LUMP: CalcInputSpec = { key: 'lumpSum', label: 'One-time Amount', tip: TIPS.lumpSum, min: 1000, max: 10000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
+const TARGET: CalcInputSpec = { key: 'target', label: 'Goal Amount (today’s cost)', tip: 'How much the goal costs in today’s money', min: 100000, max: 50000000, step: 50000, default: 5000000, fmt: 'inr', presets: [1000000, 2500000, 5000000, 10000000] };
+const INFLATION: CalcInputSpec = { key: 'inflation', label: 'Inflation', tip: 'How fast the goal’s cost rises each year', min: 0, max: 12, step: 0.5, default: 6, fmt: 'pct', presets: [4, 6, 8] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -66,6 +68,18 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'accumulation', inputs: [MONTHLY, RATE, YEARS], stepUp: true, stepUpDefault: true,
     related: ['sip', 'lumpsum'],
   },
+  'goal-sip': {
+    slug: 'goal-sip', name: 'Goal SIP Calculator', emoji: '🎯',
+    sub: 'Find the monthly SIP to reach a goal — adjusted for inflation.',
+    kind: 'goal', inputs: [TARGET, YEARS, RATE, INFLATION],
+    related: ['savings-goal', 'sip', 'lumpsum'],
+  },
+  'savings-goal': {
+    slug: 'savings-goal', name: 'Savings Goal Calculator', emoji: '🎯',
+    sub: 'Find the monthly saving to reach a target amount.',
+    kind: 'goal', inputs: [TARGET, YEARS, RATE],
+    related: ['goal-sip', 'sip'],
+  },
 };
 
 // Card names differ between the Featured and All grids, so map the variants to a
@@ -76,6 +90,9 @@ const SLUG_OVERRIDES: Record<string, string> = {
   'Lumpsum Calculator': 'lumpsum',
   'SIP Top-up': 'step-up-sip',
   'Step-up SIP': 'step-up-sip',
+  'Goal SIP': 'goal-sip',
+  'Goal SIP Calculator': 'goal-sip',
+  'Savings Goal': 'savings-goal',
 };
 
 export function slugFor(name: string): string {
