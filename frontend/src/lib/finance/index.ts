@@ -10,3 +10,4 @@
  * E3 decumulation, … as calculators are built).
  */
 export * from './accumulation';
+export * from './goal';
