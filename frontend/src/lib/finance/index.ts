@@ -13,3 +13,4 @@ export * from './accumulation';
 export * from './goal';
 export * from './loan';
 export * from './returns';
+export * from './tax';
