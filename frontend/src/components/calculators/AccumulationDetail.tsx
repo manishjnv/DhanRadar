@@ -16,7 +16,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Btn, Panel, Kpi, RangeField, ToggleRow, GrowthChart, Donut, WhatIfCard, AiCard, RelatedCard, SoWhat } from './ui';
 import { computeSip, formatInr, formatInrShort } from '@/lib/finance';
-import { type CalcConfig, getConfig, fmtValue, fmtPreset } from './registry';
+import { type CalcConfig, getConfig, fmtValue, fmtPreset, fmtUnit } from './registry';
 
 export function AccumulationDetail({ config }: { config: CalcConfig }) {
   const initVals = React.useCallback(() => {
@@ -120,6 +120,7 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
             format={(n) => fmtValue(inp.fmt, n)}
             presets={inp.presets.map((v) => ({ label: fmtPreset(inp.fmt, v), value: v }))}
             onChange={(n) => setKey(inp.key, n)}
+            unit={fmtUnit(inp.fmt)}
           />
         ))}
 
