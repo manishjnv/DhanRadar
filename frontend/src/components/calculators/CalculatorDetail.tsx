@@ -22,6 +22,9 @@ import { TaxDetail } from './TaxDetail';
 import { PostTaxReturnDetail } from './PostTaxReturnDetail';
 import { ExitLoadDetail } from './ExitLoadDetail';
 import { DividendTaxDetail } from './DividendTaxDetail';
+import { TaxHarvestingDetail } from './TaxHarvestingDetail';
+import { PortfolioTaxDetail } from './PortfolioTaxDetail';
+import { RedemptionPlannerDetail } from './RedemptionPlannerDetail';
 import { SwpDetail } from './SwpDetail';
 import { StpDetail } from './StpDetail';
 import { SipDelayDetail } from './SipDelayDetail';
@@ -75,6 +78,9 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'post-tax' && <PostTaxReturnDetail key={config.slug} config={config} />}
       {config && config.kind === 'exit-load' && <ExitLoadDetail key={config.slug} config={config} />}
       {config && config.kind === 'dividend' && <DividendTaxDetail key={config.slug} config={config} />}
+      {config && config.kind === 'tax-harvesting' && <TaxHarvestingDetail key={config.slug} config={config} />}
+      {config && config.kind === 'portfolio-tax' && <PortfolioTaxDetail key={config.slug} config={config} />}
+      {config && config.kind === 'redemption-planner' && <RedemptionPlannerDetail key={config.slug} config={config} />}
       {config && config.kind === 'swp' && <SwpDetail key={config.slug} config={config} />}
       {config && config.kind === 'stp' && <StpDetail key={config.slug} config={config} />}
       {config && config.kind === 'sip-delay' && <SipDelayDetail key={config.slug} config={config} />}
