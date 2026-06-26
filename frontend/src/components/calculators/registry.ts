@@ -7,7 +7,9 @@
  */
 import { formatInr, formatInrShort } from '@/lib/finance';
 
-export type InputKey = 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current';
+export type InputKey =
+  | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
+  | 'loanAmount' | 'loanRate' | 'tenure';
 export type Fmt = 'inr' | 'pct' | 'years';
 
 export interface CalcInputSpec {
@@ -27,7 +29,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal'; // result-renderer family (E1 / E2)
+  kind: 'accumulation' | 'goal' | 'loan'; // result-renderer family (E1 / E2 / E7)
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -48,6 +50,9 @@ const MONTHLY: CalcInputSpec = { key: 'monthly', label: 'Monthly SIP', tip: TIPS
 const LUMP: CalcInputSpec = { key: 'lumpSum', label: 'One-time Amount', tip: TIPS.lumpSum, min: 1000, max: 10000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
 const TARGET: CalcInputSpec = { key: 'target', label: 'Goal Amount (today’s cost)', tip: 'How much the goal costs in today’s money', min: 100000, max: 50000000, step: 50000, default: 5000000, fmt: 'inr', presets: [1000000, 2500000, 5000000, 10000000] };
 const INFLATION: CalcInputSpec = { key: 'inflation', label: 'Inflation', tip: 'How fast the goal’s cost rises each year', min: 0, max: 12, step: 0.5, default: 6, fmt: 'pct', presets: [4, 6, 8] };
+const LOAN_AMOUNT: CalcInputSpec = { key: 'loanAmount', label: 'Loan Amount', tip: 'How much you borrow', min: 100000, max: 100000000, step: 100000, default: 5000000, fmt: 'inr', presets: [2500000, 5000000, 7500000, 10000000] };
+const LOAN_RATE: CalcInputSpec = { key: 'loanRate', label: 'Interest Rate', tip: 'The yearly interest rate on the loan', min: 5, max: 20, step: 0.05, default: 8.5, fmt: 'pct', presets: [7.5, 8.5, 9.5, 10.5] };
+const TENURE: CalcInputSpec = { key: 'tenure', label: 'Loan Tenure', tip: 'How many years to repay the loan', min: 1, max: 30, step: 1, default: 20, fmt: 'years', presets: [10, 15, 20, 25, 30] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -79,6 +84,12 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'Find the monthly saving to reach a target amount.',
     kind: 'goal', inputs: [TARGET, YEARS, RATE],
     related: ['goal-sip', 'sip'],
+  },
+  'home-loan-emi': {
+    slug: 'home-loan-emi', name: 'Home Loan EMI Calculator', emoji: '🏠',
+    sub: 'See your monthly EMI and how much interest you pay over the loan.',
+    kind: 'loan', inputs: [LOAN_AMOUNT, LOAN_RATE, TENURE],
+    related: ['sip', 'lumpsum'],
   },
 };
 
