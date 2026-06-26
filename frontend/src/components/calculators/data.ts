@@ -143,7 +143,6 @@ export const ALL_CALCS: CalcMini[] = [
   { emoji: '🔥', name: 'FIRE Calculator', category: 'Retirement', accent: 'amber' },
   { emoji: '💵', name: 'Passive Income', category: 'Retirement', accent: 'emerald' },
   { emoji: '🏦', name: 'Corpus Calculator', category: 'Retirement', accent: 'royal' },
-  { emoji: '📤', name: 'Withdrawal Planner', category: 'Retirement', accent: 'royal' },
   { emoji: '🏠', name: 'Home Loan EMI', category: 'Loan', accent: 'cyan' },
   { emoji: '💳', name: 'Prepayment', category: 'Loan', accent: 'royal' },
   { emoji: '⚖', name: 'Loan Comparison', category: 'Loan', accent: 'royal' },
@@ -155,8 +154,7 @@ export const ALL_CALCS: CalcMini[] = [
   { emoji: '📊', name: 'NPS', category: 'General', accent: 'royal' },
   { emoji: '🎯', name: 'Savings Goal', category: 'General', accent: 'amber' },
   { emoji: '💎', name: 'Net Worth', category: 'General', accent: 'navy' },
-  { emoji: '📐', name: 'Rule of 72', category: 'General', accent: 'cyan' },
-  { emoji: '📏', name: 'Rule of 114', category: 'General', accent: 'red' },
+  { emoji: '📐', name: 'Rule of 72 / 114', category: 'General', accent: 'cyan' },
 ];
 
 // ── S4 Learn the basics ──────────────────────────────────────────────────────
