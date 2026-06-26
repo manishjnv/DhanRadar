@@ -14,3 +14,4 @@ export * from './goal';
 export * from './loan';
 export * from './returns';
 export * from './tax';
+export * from './swp';
