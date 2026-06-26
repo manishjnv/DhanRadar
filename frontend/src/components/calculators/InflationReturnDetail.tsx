@@ -135,7 +135,7 @@ export function InflationReturnDetail({ config }: { config: CalcConfig }) {
             {row(`${formatInr(sample)} grows to (nominal)`, formatInr(nominalFv))}
             {row('Real value in today\'s money', formatInr(realFv), true)}
             <SoWhat>
-              Real return is what your money earns <b className="font-semibold text-ink">above</b> rising prices. At {nominal}% nominal and {inflation}% inflation, you keep only {realPct.toFixed(2)}% in real terms. That {formatInr(nominalFv)} nominal sum buys only {formatInr(realFv)} worth of goods at today's prices — inflation quietly erodes the rest.
+              Real return is what your money earns <b className="font-semibold text-ink">above</b> rising prices. At {nominal}% nominal and {inflation}% inflation, you keep only {realPct.toFixed(2)}% in real terms. That {formatInr(nominalFv)} nominal sum buys only {formatInr(realFv)} worth of goods at today’s prices — inflation quietly erodes the rest.
             </SoWhat>
           </Panel>
         </Section>

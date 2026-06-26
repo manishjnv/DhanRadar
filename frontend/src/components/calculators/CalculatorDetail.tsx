@@ -33,6 +33,9 @@ import { CorpusDetail } from './CorpusDetail';
 import { SchemeDetail } from './SchemeDetail';
 import { NpsDetail } from './NpsDetail';
 import { NetWorthDetail } from './NetWorthDetail';
+import { HlvDetail } from './HlvDetail';
+import { TermCoverDetail } from './TermCoverDetail';
+import { HealthCoverDetail } from './HealthCoverDetail';
 import { DISCLAIMER_CALC } from './data';
 
 export function CalculatorDetail({ slug }: { slug: string }) {
@@ -83,6 +86,9 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'scheme' && <SchemeDetail key={config.slug} config={config} />}
       {config && config.kind === 'nps' && <NpsDetail key={config.slug} config={config} />}
       {config && config.kind === 'networth' && <NetWorthDetail key={config.slug} config={config} />}
+      {config && config.kind === 'hlv' && <HlvDetail key={config.slug} config={config} />}
+      {config && config.kind === 'term-cover' && <TermCoverDetail key={config.slug} config={config} />}
+      {config && config.kind === 'health-cover' && <HealthCoverDetail key={config.slug} config={config} />}
       {!config && <ComingSoon />}
 
       <p className="mx-auto mt-7 max-w-[880px] text-center text-caption leading-relaxed text-ink-faint">{DISCLAIMER_CALC}</p>

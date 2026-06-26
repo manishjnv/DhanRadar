@@ -17,3 +17,4 @@ export * from './tax';
 export * from './swp';
 export * from './transfer';
 export * from './scheme';
+export * from './insurance';
