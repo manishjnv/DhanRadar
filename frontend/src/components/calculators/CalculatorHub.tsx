@@ -59,6 +59,15 @@ export function CalculatorHub() {
     ? ALL_CALCS.filter((c) => matchesQuery(c, query))
     : ALL_CALCS.filter((c) => matchesFilter(c, filter));
 
+  // Counts derived from the data so they auto-update as calculators are added.
+  const heroStats = [
+    { label: 'Total Calculators', value: String(ALL_CALCS.length) },
+    { label: 'Categories', value: String(CATEGORIES.length) },
+    ...HERO.stats,
+  ];
+  const heroSearchPlaceholder = `Search ${ALL_CALCS.length} calculators — SIP, tax, retirement, loan…`;
+  const categoryTiles = CATEGORIES.map((c) => ({ cat: c, count: ALL_CALCS.filter((x) => x.category === c.match).length }));
+
   return (
     <div className="w-full pb-16">
       <nav className="mb-3.5 flex flex-wrap items-center gap-1.5 text-caption text-ink-muted" aria-label="Breadcrumb">
@@ -69,9 +78,9 @@ export function CalculatorHub() {
       <Hero
         title={HERO.title}
         subtitle={HERO.subtitle}
-        searchPlaceholder={HERO.searchPlaceholder}
+        searchPlaceholder={heroSearchPlaceholder}
         cats={HERO_CATS}
-        stats={HERO.stats}
+        stats={heroStats}
         searchValue={query}
         onSearchChange={onSearchChange}
         onSearchSubmit={scrollToAll}
@@ -91,7 +100,7 @@ export function CalculatorHub() {
       <Section>
         <SectionHeader index="02" title="Browse by Category" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {CATEGORIES.map((c) => <CategoryCard key={c.name} item={c} onSelect={selectCategory} />)}
+          {categoryTiles.map(({ cat, count }) => <CategoryCard key={cat.name} item={cat} count={count} onSelect={selectCategory} />)}
         </div>
       </Section>
 

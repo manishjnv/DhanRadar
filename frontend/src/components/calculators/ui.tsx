@@ -287,7 +287,7 @@ export function FeatureCard({ item, href, live }: { item: Featured; href: string
 }
 
 // ── Category card ────────────────────────────────────────────────────────────
-export function CategoryCard({ item, onSelect }: { item: Category; onSelect: (name: string) => void }) {
+export function CategoryCard({ item, count, onSelect }: { item: Category; count: number; onSelect: (name: string) => void }) {
   return (
     <button
       type="button"
@@ -297,7 +297,7 @@ export function CategoryCard({ item, onSelect }: { item: Category; onSelect: (na
       <IconTile emoji={item.emoji} accent={item.accent} className="h-[46px] w-[46px] shrink-0 text-[20px]" />
       <div>
         <div className="text-small font-semibold text-ink">{item.name}</div>
-        <div className="mt-0.5 text-caption tracking-normal text-ink-muted">{item.count}</div>
+        <div className="mt-0.5 text-caption tracking-normal text-ink-muted">{count} calculator{count === 1 ? '' : 's'}</div>
       </div>
     </button>
   );

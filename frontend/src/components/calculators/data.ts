@@ -46,13 +46,13 @@ export const HERO = {
   title: 'Financial Calculators',
   subtitle:
     'Plan investments, estimate returns, calculate taxes, and achieve your financial goals — all in one place, understandable in under a minute.',
-  searchPlaceholder: 'Search 50+ calculators — SIP, tax, retirement, loan…',
+  // The "{n} calculators" count is filled in by the hub from ALL_CALCS.length.
+  searchPlaceholder: 'Search calculators — SIP, tax, retirement, loan…',
   searchPlaceholderMobile: 'Search SIP, tax, retirement…',
+  // Editorial stats only; Total Calculators + Categories are derived in the hub.
   stats: [
-    { label: 'Total Calculators', value: '52' },
-    { label: 'Categories', value: '8' },
     { label: 'Most Popular', value: 'SIP Calculator', small: true },
-    { label: 'Featured', value: 'FIRE Planner', small: true },
+    { label: 'Featured', value: 'FIRE Calculator', small: true },
   ] as { label: string; value: string; small?: boolean }[],
 };
 
@@ -90,17 +90,19 @@ export const FEATURED: Featured[] = [
 ];
 
 // ── S2 Categories ────────────────────────────────────────────────────────────
-export type Category = { emoji: string; name: string; count: string; accent: Accent };
+// `match` = the ALL_CALCS card `category` this tile counts; the live count is
+// derived from ALL_CALCS in the hub, so it auto-updates as calculators are added.
+export type Category = { emoji: string; name: string; match: string; accent: Accent };
 
 export const CATEGORIES: Category[] = [
-  { emoji: '📈', name: 'Mutual Fund', count: '12 calculators', accent: 'royal' },
-  { emoji: '🧾', name: 'Tax', count: '9 calculators', accent: 'amber' },
-  { emoji: '🎯', name: 'Goal Planning', count: '8 calculators', accent: 'royal' },
-  { emoji: '🏖', name: 'Retirement', count: '5 calculators', accent: 'emerald' },
-  { emoji: '🏠', name: 'Loan', count: '4 calculators', accent: 'cyan' },
-  { emoji: '🛡', name: 'Insurance', count: '3 calculators', accent: 'emerald' },
-  { emoji: '⚖', name: 'Investment Compare', count: '4 calculators', accent: 'red' },
-  { emoji: '💰', name: 'General Finance', count: '9 calculators', accent: 'amber' },
+  { emoji: '📈', name: 'Mutual Fund', match: 'Mutual Fund', accent: 'royal' },
+  { emoji: '🧾', name: 'Tax', match: 'Tax', accent: 'amber' },
+  { emoji: '🎯', name: 'Goal Planning', match: 'Goal', accent: 'royal' },
+  { emoji: '🏖', name: 'Retirement', match: 'Retirement', accent: 'emerald' },
+  { emoji: '🏠', name: 'Loan', match: 'Loan', accent: 'cyan' },
+  { emoji: '🛡', name: 'Insurance', match: 'Insurance', accent: 'emerald' },
+  { emoji: '⚖', name: 'Investment Compare', match: 'Investment Compare', accent: 'red' },
+  { emoji: '💰', name: 'General Finance', match: 'General', accent: 'amber' },
 ];
 
 // ── S3 All calculators + filter chips ────────────────────────────────────────
