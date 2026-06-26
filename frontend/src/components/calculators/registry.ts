@@ -30,7 +30,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -207,6 +207,14 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'Your true return when you invest on different dates (like SIPs).',
     kind: 'xirr', inputs: [],
     related: ['cagr', 'fund-return', 'sip'],
+  },
+
+  // ── E8 tax ──
+  'capital-gains-tax': {
+    slug: 'capital-gains-tax', name: 'Capital Gains Tax Calculator', emoji: '🧾',
+    sub: 'Tax on mutual fund gains — LTCG / STCG, FY 2025-26.',
+    kind: 'tax', inputs: [],
+    related: ['xirr', 'cagr', 'sip'],
   },
 };
 
