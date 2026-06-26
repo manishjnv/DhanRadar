@@ -80,16 +80,39 @@ jobs:
       RAZORPAY_WEBHOOK_SECRET: ci_webhook_secret
     steps:
       - uses: actions/checkout@v4
+      # Path filter: heavy steps run only when backend-relevant files changed.
+      # checkout + this filter ALWAYS run, so the job still concludes `success`
+      # (green) when skipped — the auto-deploy poller requires this check green,
+      # and a skipped JOB would read as not-success and stall every deploy.
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            run:
+              - 'backend/**'
+              - 'infra/**'
+              - 'docker-compose*.yml'
+              - '.github/workflows/ci.yml'
       - uses: actions/setup-python@v5
+        if: steps.filter.outputs.run == 'true'
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install deps
+        if: steps.filter.outputs.run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - name: pytest
+        if: steps.filter.outputs.run == 'true'
         working-directory: backend
         run: python -m pytest -q
+      - name: No backend changes
+        if: steps.filter.outputs.run != 'true'
+        run: echo "No backend/infra changes — backend tests skipped; job green."
 
   # ---------------------------------------------------------------------------
   # Migrations (B40) — exercise the REAL Alembic chain on the TimescaleDB image,
@@ -128,14 +151,31 @@ jobs:
       RAZORPAY_WEBHOOK_SECRET: ci_webhook_secret
     steps:
       - uses: actions/checkout@v4
+      # Same poller-safe path filter as the backend job (see note there).
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            run:
+              - 'backend/**'
+              - 'infra/**'
+              - 'docker-compose*.yml'
+              - '.github/workflows/ci.yml'
       - uses: actions/setup-python@v5
+        if: steps.filter.outputs.run == 'true'
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install deps
+        if: steps.filter.outputs.run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - name: Init schemas + extensions (01_init.sql, verbatim)
+        if: steps.filter.outputs.run == 'true'
         run: |
           # Run the production init file UNMODIFIED so CI exercises exactly what
           # KVM4 runs. 01_init.sql now self-guards pg_partman/pg_cron in per-extension
@@ -146,14 +186,20 @@ jobs:
           psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
             -f infra/postgres/init/01_init.sql
       - name: alembic upgrade head
+        if: steps.filter.outputs.run == 'true'
         working-directory: backend
         run: python -m alembic upgrade head
       - name: alembic downgrade base (prove reversibility)
+        if: steps.filter.outputs.run == 'true'
         working-directory: backend
         run: python -m alembic downgrade base
       - name: alembic upgrade head (re-apply clean)
+        if: steps.filter.outputs.run == 'true'
         working-directory: backend
         run: python -m alembic upgrade head
+      - name: No migration-relevant changes
+        if: steps.filter.outputs.run != 'true'
+        run: echo "No backend/infra changes — migration chain skipped; job green."
 
   # ---------------------------------------------------------------------------
   # Frontend — runs fully only once the foundation (frontend/src) is present
@@ -164,10 +210,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Same poller-safe path filter as the backend job (see note there).
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            run:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
       - uses: actions/setup-node@v4
+        if: steps.filter.outputs.run == 'true'
         with:
           node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
       - name: Build + checks (guarded on frontend/src)
+        if: steps.filter.outputs.run == 'true'
         working-directory: frontend
         run: |
           if [ ! -d src ]; then
@@ -188,3 +246,6 @@ jobs:
           # B45: prove the app builds with the MSW mock layer OFF — the prod
           # build must never depend on mocks (it has only ever run on MSW).
           NEXT_PUBLIC_API_MOCKING=disabled npm run build
+      - name: No frontend changes
+        if: steps.filter.outputs.run != 'true'
+        run: echo "No frontend changes — frontend build skipped; job green."
