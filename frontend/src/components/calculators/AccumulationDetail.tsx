@@ -102,9 +102,13 @@ export function AccumulationDetail({ config }: { config: CalcConfig }) {
   const reset = () => { setVals(initVals()); setStepUp(config.stepUpDefault); };
   const setKey = (k: string, v: number) => setVals((s) => ({ ...s, [k]: v }));
 
-  const subLine = hasMonthly
-    ? `From ₹${monthly.toLocaleString('en-IN')}/month over ${years} ${years === 1 ? 'year' : 'years'}`
-    : `From a one-time ₹${lumpSum.toLocaleString('en-IN')} over ${years} ${years === 1 ? 'year' : 'years'}`;
+  const hasLump = config.inputs.some((i) => i.key === 'lumpSum');
+  const yLabel = `${years} ${years === 1 ? 'year' : 'years'}`;
+  const subLine = hasMonthly && hasLump
+    ? `₹${lumpSum.toLocaleString('en-IN')} upfront + ₹${monthly.toLocaleString('en-IN')}/month over ${yLabel}`
+    : hasMonthly
+      ? `From ₹${monthly.toLocaleString('en-IN')}/month over ${yLabel}`
+      : `From a one-time ₹${lumpSum.toLocaleString('en-IN')} over ${yLabel}`;
 
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 

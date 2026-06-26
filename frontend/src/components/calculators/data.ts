@@ -112,6 +112,7 @@ export type CalcMini = { emoji: string; name: string; category: string; accent: 
 export const ALL_CALCS: CalcMini[] = [
   { emoji: '📈', name: 'SIP Calculator', category: 'Mutual Fund', accent: 'royal' },
   { emoji: '💵', name: 'Lumpsum', category: 'Mutual Fund', accent: 'emerald' },
+  { emoji: '📈', name: 'SIP + Lumpsum', category: 'Mutual Fund', accent: 'royal' },
   { emoji: '💸', name: 'SWP', category: 'Mutual Fund', accent: 'emerald' },
   { emoji: '🔄', name: 'STP', category: 'Mutual Fund', accent: 'cyan' },
   { emoji: '⏰', name: 'SIP Delay', category: 'Mutual Fund', accent: 'amber' },

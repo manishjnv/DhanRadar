@@ -84,6 +84,12 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'accumulation', inputs: [LUMP, RATE, YEARS], stepUp: false, stepUpDefault: false,
     related: ['sip', 'step-up-sip'],
   },
+  'sip-lumpsum': {
+    slug: 'sip-lumpsum', name: 'SIP + Lumpsum Calculator', emoji: '📈',
+    sub: 'An upfront amount plus a monthly SIP — see them grow together.',
+    kind: 'accumulation', inputs: [{ ...LUMP, label: 'Upfront Amount', default: 100000 }, MONTHLY, RATE, YEARS], stepUp: true, stepUpDefault: false,
+    related: ['sip', 'lumpsum', 'step-up-sip'],
+  },
   'step-up-sip': {
     slug: 'step-up-sip', name: 'Step-up SIP Calculator', emoji: '📊',
     sub: 'See how raising your SIP a little every year grows your wealth.',
