@@ -10,8 +10,8 @@ import { formatInr, formatInrShort } from '@/lib/finance';
 export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
   | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly'
-  | 'beginValue' | 'endValue';
-export type Fmt = 'inr' | 'pct' | 'years';
+  | 'beginValue' | 'endValue' | 'buyNav' | 'currentNav' | 'amount';
+export type Fmt = 'inr' | 'pct' | 'years' | 'num';
 
 export interface CalcInputSpec {
   key: InputKey;
@@ -30,7 +30,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -59,6 +59,9 @@ const ONE_TIME: CalcInputSpec = { key: 'oneTime', label: 'One-time Prepayment', 
 const EXTRA_MONTHLY: CalcInputSpec = { key: 'extraMonthly', label: 'Extra Per Month', tip: 'Extra you pay every month on top of the EMI', min: 0, max: 200000, step: 1000, default: 0, fmt: 'inr', presets: [0, 2000, 5000, 10000] };
 const BEGIN_VALUE: CalcInputSpec = { key: 'beginValue', label: 'Starting Value', tip: 'What it was worth at the start', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
 const END_VALUE: CalcInputSpec = { key: 'endValue', label: 'Ending Value', tip: 'What it is worth now', min: 1000, max: 100000000, step: 1000, default: 200000, fmt: 'inr', presets: [150000, 300000, 500000, 1000000] };
+const FR_AMOUNT: CalcInputSpec = { key: 'amount', label: 'Amount Invested', tip: 'How much you invested', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
+const BUY_NAV: CalcInputSpec = { key: 'buyNav', label: 'Buy NAV', tip: 'The fund NAV when you invested', min: 1, max: 10000, step: 0.01, default: 50, fmt: 'num', presets: [25, 50, 100, 250] };
+const CURRENT_NAV: CalcInputSpec = { key: 'currentNav', label: 'Current NAV', tip: 'The fund NAV now', min: 1, max: 10000, step: 0.01, default: 75, fmt: 'num', presets: [50, 75, 100, 200] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -192,6 +195,19 @@ export const CONFIGS: Record<string, CalcConfig> = {
     kind: 'rule', inputs: [{ ...RATE, label: 'Annual Rate', default: 12 }],
     related: ['cagr', 'sip'],
   },
+  'fund-return': {
+    slug: 'fund-return', name: 'Fund Return Calculator', emoji: '💰',
+    sub: 'Find your return from the buy and current NAV.',
+    kind: 'rate', inputs: [FR_AMOUNT, BUY_NAV, CURRENT_NAV, { ...YEARS, label: 'Holding Period', default: 3 }],
+    rateMap: { begin: 'buyNav', end: 'currentNav', amount: 'amount' },
+    related: ['cagr', 'xirr', 'sip'],
+  },
+  xirr: {
+    slug: 'xirr', name: 'XIRR Calculator', emoji: '🧮',
+    sub: 'Your true return when you invest on different dates (like SIPs).',
+    kind: 'xirr', inputs: [],
+    related: ['cagr', 'fund-return', 'sip'],
+  },
 };
 
 // Card names differ between the Featured and All grids, so map the variants to a
@@ -233,10 +249,13 @@ export function humanizeSlug(slug: string): string {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const plainNum = (n: number) => (n % 1 === 0 ? String(n) : n.toFixed(2));
+
 // Format a value for a given input type (slider badge + min/max labels).
 export function fmtValue(fmt: Fmt, n: number): string {
   if (fmt === 'pct') return `${n}%`;
   if (fmt === 'years') return `${n} ${n === 1 ? 'yr' : 'yrs'}`;
+  if (fmt === 'num') return plainNum(n);
   return formatInr(n);
 }
 
@@ -244,12 +263,14 @@ export function fmtValue(fmt: Fmt, n: number): string {
 export function fmtPreset(fmt: Fmt, n: number): string {
   if (fmt === 'pct') return `${n}%`;
   if (fmt === 'years') return `${n}y`;
+  if (fmt === 'num') return plainNum(n);
   return formatInrShort(n);
 }
 
 // Unit hint for the editable value box.
-export function fmtUnit(fmt: Fmt): '₹' | '%' | 'yrs' {
+export function fmtUnit(fmt: Fmt): '₹' | '%' | 'yrs' | undefined {
   if (fmt === 'pct') return '%';
   if (fmt === 'years') return 'yrs';
+  if (fmt === 'num') return undefined;
   return '₹';
 }
