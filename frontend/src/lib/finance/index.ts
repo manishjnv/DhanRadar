@@ -15,4 +15,5 @@ export * from './loan';
 export * from './returns';
 export * from './tax';
 export * from './swp';
+export * from './transfer';
 export * from './scheme';

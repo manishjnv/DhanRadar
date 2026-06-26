@@ -23,6 +23,13 @@ import { PostTaxReturnDetail } from './PostTaxReturnDetail';
 import { ExitLoadDetail } from './ExitLoadDetail';
 import { DividendTaxDetail } from './DividendTaxDetail';
 import { SwpDetail } from './SwpDetail';
+import { StpDetail } from './StpDetail';
+import { SipDelayDetail } from './SipDelayDetail';
+import { InflationReturnDetail } from './InflationReturnDetail';
+import { RetirementDetail } from './RetirementDetail';
+import { FireDetail } from './FireDetail';
+import { PassiveIncomeDetail } from './PassiveIncomeDetail';
+import { CorpusDetail } from './CorpusDetail';
 import { SchemeDetail } from './SchemeDetail';
 import { NpsDetail } from './NpsDetail';
 import { NetWorthDetail } from './NetWorthDetail';
@@ -66,6 +73,13 @@ export function CalculatorDetail({ slug }: { slug: string }) {
       {config && config.kind === 'exit-load' && <ExitLoadDetail key={config.slug} config={config} />}
       {config && config.kind === 'dividend' && <DividendTaxDetail key={config.slug} config={config} />}
       {config && config.kind === 'swp' && <SwpDetail key={config.slug} config={config} />}
+      {config && config.kind === 'stp' && <StpDetail key={config.slug} config={config} />}
+      {config && config.kind === 'sip-delay' && <SipDelayDetail key={config.slug} config={config} />}
+      {config && config.kind === 'inflation-return' && <InflationReturnDetail key={config.slug} config={config} />}
+      {config && config.kind === 'retirement' && <RetirementDetail key={config.slug} config={config} />}
+      {config && config.kind === 'fire' && <FireDetail key={config.slug} config={config} />}
+      {config && config.kind === 'passive-income' && <PassiveIncomeDetail key={config.slug} config={config} />}
+      {config && config.kind === 'corpus' && <CorpusDetail key={config.slug} config={config} />}
       {config && config.kind === 'scheme' && <SchemeDetail key={config.slug} config={config} />}
       {config && config.kind === 'nps' && <NpsDetail key={config.slug} config={config} />}
       {config && config.kind === 'networth' && <NetWorthDetail key={config.slug} config={config} />}
