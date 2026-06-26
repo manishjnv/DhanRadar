@@ -74,6 +74,14 @@ export function PrepaymentDetail({ config }: { config: CalcConfig }) {
   const setKey = (k: string, v: number) => setVals((s) => ({ ...s, [k]: v }));
   const related = config.related.map(getConfig).filter((c): c is CalcConfig => Boolean(c));
 
+  const excelTable = {
+    summary: `${config.name} — outstanding ${formatInr(principal)} at ${ratePct}%, prepay ${formatInr(oneTime)} now${extraMonthly ? ` + ${formatInr(extraMonthly)}/mo` : ''}. Saves ${formatInr(interestSaved)} interest and ${formatMonths(monthsSaved)}.`,
+    note: 'Educational illustration only — not financial advice. Check your lender prepayment terms and any charges before acting.',
+    headers: ['Scenario', 'Loan Term (months)', 'Total Interest'],
+    rows: [['Without prepayment', baselineMonths, Math.round(baselineInterest)], ['With prepayment', newMonths, Math.round(newInterest)]],
+    colFormats: ['text', 'num', 'inr'],
+  };
+
   return (
     <div className="grid grid-cols-1 items-start gap-[18px] lg:grid-cols-[360px_1fr]">
       {/* INPUT PANEL */}
@@ -100,7 +108,7 @@ export function PrepaymentDetail({ config }: { config: CalcConfig }) {
         <div className="flex gap-2">
           <Btn variant="pri" className="flex-1">Calculate</Btn>
           <Btn aria-label="Reset inputs" onClick={reset}>Reset</Btn>
-          <ResultActions vals={vals} name={config.name} targetRef={resultRef} />
+          <ResultActions vals={vals} name={config.name} targetRef={resultRef} table={excelTable} />
         </div>
       </Panel>
 
