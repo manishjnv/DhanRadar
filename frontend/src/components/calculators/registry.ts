@@ -93,6 +93,12 @@ const SLUG_OVERRIDES: Record<string, string> = {
   'Goal SIP': 'goal-sip',
   'Goal SIP Calculator': 'goal-sip',
   'Savings Goal': 'savings-goal',
+  // True duplicates merged to one canonical calculator (SEO/discovery cards may
+  // still differ, but they open the same engine).
+  'Withdrawal Planner': 'swp', // = SWP (E3 decumulation)
+  'Home Down Payment': 'house-purchase', // = House Purchase goal
+  'Rule of 72 / 114': 'rule-of-72',
+  'Rule of 114': 'rule-of-72', // one card covers 72 / 114 / 144
 };
 
 export function slugFor(name: string): string {
