@@ -10,7 +10,8 @@ import { formatInr, formatInrShort } from '@/lib/finance';
 export type InputKey =
   | 'monthly' | 'lumpSum' | 'rate' | 'years' | 'target' | 'inflation' | 'current'
   | 'loanAmount' | 'loanRate' | 'tenure' | 'oneTime' | 'extraMonthly'
-  | 'beginValue' | 'endValue' | 'buyNav' | 'currentNav' | 'amount';
+  | 'beginValue' | 'endValue' | 'buyNav' | 'currentNav' | 'amount'
+  | 'corpus' | 'monthlyWithdrawal';
 export type Fmt = 'inr' | 'pct' | 'years' | 'num';
 
 export interface CalcInputSpec {
@@ -30,7 +31,7 @@ export interface CalcConfig {
   name: string;
   emoji: string;
   sub: string;
-  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax'; // result family
+  kind: 'accumulation' | 'goal' | 'loan' | 'prepayment' | 'loan-compare' | 'rate' | 'rule' | 'xirr' | 'tax' | 'swp'; // result family
   inputs: CalcInputSpec[];
   stepUp?: boolean; // show the step-up toggle (accumulation only)
   stepUpDefault?: boolean; // step-up on by default (Step-up SIP)
@@ -62,6 +63,8 @@ const END_VALUE: CalcInputSpec = { key: 'endValue', label: 'Ending Value', tip: 
 const FR_AMOUNT: CalcInputSpec = { key: 'amount', label: 'Amount Invested', tip: 'How much you invested', min: 1000, max: 100000000, step: 1000, default: 100000, fmt: 'inr', presets: [50000, 100000, 500000, 1000000] };
 const BUY_NAV: CalcInputSpec = { key: 'buyNav', label: 'Buy NAV', tip: 'The fund NAV when you invested', min: 1, max: 10000, step: 0.01, default: 50, fmt: 'num', presets: [25, 50, 100, 250] };
 const CURRENT_NAV: CalcInputSpec = { key: 'currentNav', label: 'Current NAV', tip: 'The fund NAV now', min: 1, max: 10000, step: 0.01, default: 75, fmt: 'num', presets: [50, 75, 100, 200] };
+const CORPUS: CalcInputSpec = { key: 'corpus', label: 'Your Corpus', tip: 'The total amount you start with', min: 100000, max: 100000000, step: 100000, default: 10000000, fmt: 'inr', presets: [5000000, 10000000, 25000000, 50000000] };
+const MONTHLY_WITHDRAWAL: CalcInputSpec = { key: 'monthlyWithdrawal', label: 'Monthly Withdrawal', tip: 'How much you take out each month', min: 1000, max: 1000000, step: 1000, default: 50000, fmt: 'inr', presets: [25000, 50000, 75000, 100000] };
 
 export const CONFIGS: Record<string, CalcConfig> = {
   sip: {
@@ -215,6 +218,15 @@ export const CONFIGS: Record<string, CalcConfig> = {
     sub: 'Tax on mutual fund gains — LTCG / STCG, FY 2025-26.',
     kind: 'tax', inputs: [],
     related: ['xirr', 'cagr', 'sip'],
+  },
+
+  // ── E3 decumulation ──
+  swp: {
+    slug: 'swp', name: 'SWP Calculator', emoji: '💸',
+    sub: 'How long your corpus lasts with regular withdrawals.',
+    kind: 'swp',
+    inputs: [CORPUS, MONTHLY_WITHDRAWAL, { ...RATE, label: 'Expected Return', default: 8 }, { ...INFLATION, label: 'Raise Withdrawal Yearly', default: 0 }],
+    related: ['goal-sip', 'sip', 'lumpsum'],
   },
 };
 
