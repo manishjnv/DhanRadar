@@ -161,14 +161,23 @@ export function Hero({
   searchPlaceholder,
   cats,
   stats,
+  searchValue = '',
+  onSearchChange,
+  onSearchSubmit,
+  onSelectCat,
+  activeCat,
 }: {
   title: string;
   subtitle: string;
   searchPlaceholder: string;
   cats: { emoji: string; label: string }[];
   stats: { label: string; value: string; small?: boolean }[];
+  searchValue?: string;
+  onSearchChange?: (v: string) => void;
+  onSearchSubmit?: () => void;
+  onSelectCat?: (label: string) => void;
+  activeCat?: string;
 }) {
-  const [active, setActive] = React.useState(0);
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-navy via-[#16335E] to-royal p-6 text-white shadow-[0_24px_60px_-20px_rgba(15,23,42,.45)] sm:p-8">
       {/* decorative glow */}
@@ -178,34 +187,44 @@ export function Hero({
         <h1 className="m-0 text-[clamp(26px,5vw,34px)] font-medium leading-[1.05] tracking-[-0.03em]">{title}</h1>
         <p className="mb-5 mt-2 max-w-xl text-body leading-snug text-slate-300">{subtitle}</p>
 
-        {/* Search (inert placeholder — search wired later) */}
-        <div className="relative max-w-xl">
+        {/* Search */}
+        <form
+          className="relative max-w-xl"
+          onSubmit={(e) => { e.preventDefault(); onSearchSubmit?.(); }}
+          role="search"
+        >
           <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted"><SearchIcon /></span>
           <input
             type="search"
             aria-label="Search calculators"
             placeholder={searchPlaceholder}
+            value={searchValue}
+            onChange={(e) => onSearchChange?.(e.target.value)}
             className="h-[52px] w-full rounded-[14px] border-none bg-white/95 pl-12 pr-4 text-body text-ink shadow-sm outline-none placeholder:text-ink-muted focus-visible:ring-2 focus-visible:ring-royal"
           />
-        </div>
+        </form>
 
-        {/* Quick category chips (visual selection only) */}
+        {/* Quick category chips */}
         <div className="mt-4 flex flex-wrap gap-2">
-          {cats.map((c, i) => (
-            <button
-              key={c.label}
-              type="button"
-              onClick={() => setActive(i)}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-[11px] border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
-                i === active
-                  ? 'border-white bg-white text-navy'
-                  : 'border-white/20 bg-white/10 text-white hover:bg-white/20',
-              )}
-            >
-              <span aria-hidden="true">{c.emoji}</span> {c.label}
-            </button>
-          ))}
+          {cats.map((c) => {
+            const isActive = activeCat === c.label;
+            return (
+              <button
+                key={c.label}
+                type="button"
+                onClick={() => onSelectCat?.(c.label)}
+                aria-pressed={isActive}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-[11px] border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+                  isActive
+                    ? 'border-white bg-white text-navy'
+                    : 'border-white/20 bg-white/10 text-white hover:bg-white/20',
+                )}
+              >
+                <span aria-hidden="true">{c.emoji}</span> {c.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Stat strip */}
