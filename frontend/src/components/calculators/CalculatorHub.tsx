@@ -16,11 +16,28 @@ import { Hero, Rail, FeatureCard, CategoryCard, CalcMiniCard, ChipRow, LearnCard
 import { HERO, HERO_CATS, FEATURED, CATEGORIES, FILTER_CHIPS, ALL_CALCS, LEARN, FAQ, DISCLAIMER_HUB } from './data';
 import { slugFor, isLive } from './registry';
 
+// Match a calculator against the active filter (a chip label or a category name).
+function matchesFilter(c: { name: string; category: string }, filter: string): boolean {
+  if (!filter || filter === 'All') return true;
+  const f = filter.toLowerCase().trim();
+  const norm: Record<string, string> = {
+    'goal planning': 'goal',
+    'general finance': 'general',
+    'investment compare': 'compare',
+  };
+  const target = norm[f] ?? f;
+  const cat = c.category.toLowerCase();
+  return cat === target || cat.includes(target) || c.name.toLowerCase().includes(f);
+}
+
 export function CalculatorHub() {
+  const [filter, setFilter] = React.useState('All');
   const scrollToAll = React.useCallback(() => {
     if (typeof document === 'undefined') return;
     document.getElementById('all-calculators')?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+  const selectCategory = React.useCallback((name: string) => { setFilter(name); scrollToAll(); }, [scrollToAll]);
+  const filtered = ALL_CALCS.filter((c) => matchesFilter(c, filter));
 
   return (
     <div className="w-full pb-16">
@@ -49,19 +66,26 @@ export function CalculatorHub() {
       <Section>
         <SectionHeader index="02" title="Browse by Category" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {CATEGORIES.map((c) => <CategoryCard key={c.name} item={c} onOpen={scrollToAll} />)}
+          {CATEGORIES.map((c) => <CategoryCard key={c.name} item={c} onSelect={selectCategory} />)}
         </div>
       </Section>
 
       {/* S4 — All calculators */}
       <Section>
         <div id="all-calculators" className="scroll-mt-24">
-          <SectionHeader index="03" title="All Calculators" info={`${ALL_CALCS.length} calculators`} />
+          <SectionHeader index="03" title="All Calculators" info={filter === 'All' ? `${ALL_CALCS.length} calculators` : `${filtered.length} of ${ALL_CALCS.length}`} />
         </div>
-        <div className="mb-4"><ChipRow chips={FILTER_CHIPS} scroll /></div>
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {ALL_CALCS.map((c, i) => <CalcMiniCard key={`${c.name}-${i}`} item={c} href={`/calculators/${slugFor(c.name)}`} live={isLive(slugFor(c.name))} />)}
-        </div>
+        <div className="mb-4"><ChipRow chips={FILTER_CHIPS} scroll active={filter} onSelect={setFilter} /></div>
+        {filtered.length === 0 ? (
+          <div className="rounded-2xl border border-line bg-surface-2 p-8 text-center">
+            <p className="text-small font-medium text-ink">No calculators in “{filter}” yet</p>
+            <button type="button" onClick={() => setFilter('All')} className="mt-2 inline-block rounded text-small font-medium text-royal underline underline-offset-2 hover:text-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">Show all calculators</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((c, i) => <CalcMiniCard key={`${c.name}-${i}`} item={c} href={`/calculators/${slugFor(c.name)}`} live={isLive(slugFor(c.name))} />)}
+          </div>
+        )}
       </Section>
 
       {/* S5 — Learn the basics */}
