@@ -245,7 +245,11 @@ class MfPortfolioTransaction(Base):
     __tablename__ = "portfolio_transactions"
     __table_args__ = (
         UniqueConstraint(
+            # B82: `source` is in the key so two sources can't collide on a shared source_ref and an
+            # amended re-issue can't double-count. CAS derives a deterministic source_ref fingerprint
+            # → re-uploads hit ON CONFLICT (idempotent). Wide natural-key columns stay as defence.
             "portfolio_id",
+            "source",
             "instrument_id",
             "folio_number",
             "txn_date",
@@ -285,6 +289,9 @@ class MfPortfolioTransaction(Base):
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     source_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    # B82/I11: the parser/engine version that produced this row, so a snapshot is reproducible from
+    # ledger + NAV-as-of + version. Nullable (back-compat; older rows predate it).
+    parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
