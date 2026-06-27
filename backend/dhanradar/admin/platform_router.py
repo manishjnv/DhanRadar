@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.admin.ops_schemas import OkResponse
 from dhanradar.audit.service import record_admin_action
 from dhanradar.config import settings
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.mf.service import list_recent_cas_failures
 from dhanradar.models.auth import Subscription, User
@@ -127,7 +127,7 @@ async def list_feature_flags(
 @router.get("/support/cas-failures", response_model=list[CasFailureRecord])
 async def get_cas_failures(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[CasFailureRecord]:
     """Return the most recent CAS job failures for support triage.
@@ -152,7 +152,7 @@ async def get_cas_failures(
 async def set_cas_support_notes(
     request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     body: CasNotesRequest,
     job_id: Annotated[str, Path()],
 ) -> OkResponse:
@@ -210,7 +210,7 @@ async def set_cas_support_notes(
 @router.get("/analytics/overview", response_model=AnalyticsOverviewResponse)
 async def get_analytics_overview(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> AnalyticsOverviewResponse:
     """Return aggregate platform metrics.
 
@@ -296,7 +296,7 @@ async def get_analytics_overview(
 @router.get("/notifications/health", response_model=NotificationHealthResponse)
 async def get_notifications_health(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> NotificationHealthResponse:
     """Return notification subsystem health: queue depth, delivery stats, templates.
 

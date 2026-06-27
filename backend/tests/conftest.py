@@ -126,6 +126,8 @@ os.environ["COOKIE_SECURE"] = "false"
 # setdefault and silently run the least-priv tests as the OWNER (false-green), and it must match the
 # password db_tables creates the role with.
 os.environ["DHANRADAR_APP_DB_PASSWORD"] = "dhanradar_app_test"
+# B81: the BYPASSRLS admin role password (cross-user reader tests connect as dhanradar_admin).
+os.environ["DHANRADAR_ADMIN_DB_PASSWORD"] = "dhanradar_admin_test"
 
 # ---------------------------------------------------------------------------
 # RSA keypair fixture
@@ -363,6 +365,44 @@ async def db_tables(db_engine):
             )
         )
 
+    # B81: create the BYPASSRLS dhanradar_admin role (cross-user reader tests connect as it) and
+    # APPLY RLS to the enforced tables — create_all does NOT run migration 0053, so without this the
+    # RLS tests would run against a no-RLS DB and false-green. Same DDL the migration installs.
+    from dhanradar.db_security import RLS_ENFORCED, rls_statements
+
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                f"""
+                DO $$
+                DECLARE s text;
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_admin') THEN
+                        CREATE ROLE dhanradar_admin NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS
+                            LOGIN PASSWORD 'dhanradar_admin_test';
+                    END IF;
+                    EXECUTE format('GRANT CONNECT ON DATABASE %I TO dhanradar_admin', current_database());
+                    FOREACH s IN ARRAY {_schema_array} LOOP
+                        EXECUTE format('GRANT USAGE ON SCHEMA %I TO dhanradar_admin', s);
+                        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO dhanradar_admin', s);
+                        EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO dhanradar_admin', s);
+                        EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO dhanradar_admin', s);
+                    END LOOP;
+                    -- Mirror migration 0053: the BYPASSRLS admin role still can't mutate the audit ledger.
+                    IF to_regnamespace('audit') IS NOT NULL THEN
+                        EXECUTE 'REVOKE UPDATE, DELETE ON ALL TABLES IN SCHEMA audit FROM dhanradar_admin';
+                    END IF;
+                    IF to_regclass('compliance.ai_recommendation_audit') IS NOT NULL THEN
+                        EXECUTE 'REVOKE UPDATE, DELETE ON TABLE compliance.ai_recommendation_audit FROM dhanradar_admin';
+                    END IF;
+                END $$;
+                """
+            )
+        )
+        for _t in RLS_ENFORCED:
+            for _stmt in rls_statements(_t):
+                await conn.execute(text(_stmt))
+
     yield
 
 
@@ -431,6 +471,30 @@ async def app_session(app_db_engine):
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     SessionLocal = async_sessionmaker(app_db_engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as session:
+        yield session
+
+
+@pytest_asyncio.fixture()
+async def admin_db_engine(db_tables):
+    """Async engine connected as the BYPASSRLS dhanradar_admin role (B81) — for cross-user reader
+    tests (the policy does NOT scope it; it sees all owners)."""
+    from sqlalchemy import pool
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from dhanradar.config import settings
+
+    engine = create_async_engine(settings.admin_database_url, poolclass=pool.NullPool, future=True)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture()
+async def admin_session(admin_db_engine):
+    """Function-scoped session on the dhanradar_admin (BYPASSRLS) connection."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    SessionLocal = async_sessionmaker(admin_db_engine, expire_on_commit=False, class_=AsyncSession)
     async with SessionLocal() as session:
         yield session
 

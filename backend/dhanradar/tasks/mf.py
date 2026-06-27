@@ -253,7 +253,8 @@ async def _run_pipeline(
 ) -> str:
     from sqlalchemy import update
 
-    from dhanradar.db import TaskSessionLocal
+    # ponytail: CAS via bypass — multi-commit (parsing/scoring/done) makes per-user SET LOCAL fragile; PR-2 can re-set per txn
+    from dhanradar.db import admin_task_session
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
@@ -275,7 +276,7 @@ async def _run_pipeline(
     parsed = parse_cas(path, password)  # raises CasParseError on bad password/format
     rengine = RatingEngine()
 
-    async with TaskSessionLocal() as db:
+    async with admin_task_session() as db:
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="parsing", progress_pct=40)
         )
@@ -784,10 +785,10 @@ async def _compute_cohort(
 async def _mark_failed(job_id: str, message: str) -> None:
     from sqlalchemy import update
 
-    from dhanradar.db import TaskSessionLocal
+    from dhanradar.db import admin_task_session
     from dhanradar.models.mf import MfCasJob
 
-    async with TaskSessionLocal() as db:
+    async with admin_task_session() as db:
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(
                 status="failed", error_message=message[:500]
@@ -1330,7 +1331,7 @@ def monthly_rescore_plus_users() -> str:
 async def _monthly_rescore() -> str:
     from sqlalchemy import select
 
-    from dhanradar.db import TaskSessionLocal
+    from dhanradar.db import admin_task_session
     from dhanradar.deps import is_plus
     from dhanradar.mf import history as mf_history
     from dhanradar.mf.snapshot import CashFlow as _CashFlow
@@ -1345,7 +1346,7 @@ async def _monthly_rescore() -> str:
     today = date.today()
     redis = get_redis()
 
-    async with TaskSessionLocal() as db:
+    async with admin_task_session() as db:
         # All distinct (portfolio, isin) pairs that currently have holdings.
         pid_isin_rows = (
             await db.execute(
@@ -1392,7 +1393,7 @@ async def _monthly_rescore() -> str:
 
     for pid in portfolio_ids:
         try:
-            async with TaskSessionLocal() as db:
+            async with admin_task_session() as db:
                 # Resolve the owning user_id + portfolio name for this portfolio.
                 port_row = (
                     await db.execute(
@@ -1548,13 +1549,13 @@ def reap_stuck_cas_jobs() -> str:
 async def _reap_stuck_cas_jobs() -> str:
     from sqlalchemy import select, update
 
-    from dhanradar.db import TaskSessionLocal
+    from dhanradar.db import admin_task_session
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)  # noqa: UP017 — matches pre-existing style
 
-    async with TaskSessionLocal() as db:
+    async with admin_task_session() as db:
         # SELECT the rows we are about to reap so we can clear their dedup keys.
         result = await db.execute(
             select(MfCasJob.job_id, MfCasJob.user_id, MfCasJob.portfolio_id, MfCasJob.source_hash)
@@ -1618,7 +1619,7 @@ def daily_portfolio_refresh() -> str:
 async def _daily_portfolio_refresh_pipeline() -> str:
     from sqlalchemy import select
 
-    from dhanradar.db import TaskSessionLocal
+    from dhanradar.db import admin_task_session
     from dhanradar.models.mf import MfPortfolio
     from dhanradar.redis_client import get_redis
 
@@ -1626,7 +1627,7 @@ async def _daily_portfolio_refresh_pipeline() -> str:
     refreshed = 0
     failed = 0
 
-    async with TaskSessionLocal() as db:
+    async with admin_task_session() as db:
         portfolios = (
             await db.execute(
                 select(MfPortfolio).where(MfPortfolio.latest_job_id.isnot(None))

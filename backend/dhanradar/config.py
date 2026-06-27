@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     DHANRADAR_APP_DB_USER: str = "dhanradar_app"
     DHANRADAR_APP_DB_PASSWORD: str | None = None
 
+    # BYPASSRLS role for legitimate CROSS-USER readers (admin console + Celery aggregate jobs +
+    # webhooks) — B81. Required in prod once RLS is enforced (same fail-closed gate as the app pw).
+    DHANRADAR_ADMIN_DB_USER: str = "dhanradar_admin"
+    DHANRADAR_ADMIN_DB_PASSWORD: str | None = None
+
     # ------------------------------------------------------------------
     # Redis
     # ------------------------------------------------------------------
@@ -424,15 +429,23 @@ class Settings(BaseSettings):
         # would leave I12 append-only + I5 RLS unenforced with only a WARN). Mirror the consent
         # kill-switch above. Safe: the deploy order is migrate → set DHANRADAR_APP_DB_PASSWORD →
         # compose up, so prod always boots with it set (deploy.sh syncs it onto the role).
-        if (
-            self.ENV.strip().lower() not in _CONSENT_BYPASS_ALLOWED_ENVS
-            and not self.DHANRADAR_APP_DB_PASSWORD
-        ):
-            raise ValueError(
-                f"DHANRADAR_APP_DB_PASSWORD is required in ENV={self.ENV!r} (B80): the runtime must "
-                "connect as the least-privilege dhanradar_app role, not the DB superuser. Set it in "
-                ".env before starting (deploy.sh applies it to the role)."
-            )
+        if self.ENV.strip().lower() not in _CONSENT_BYPASS_ALLOWED_ENVS:
+            missing = [
+                name
+                for name, val in (
+                    ("DHANRADAR_APP_DB_PASSWORD", self.DHANRADAR_APP_DB_PASSWORD),  # B80
+                    ("DHANRADAR_ADMIN_DB_PASSWORD", self.DHANRADAR_ADMIN_DB_PASSWORD),  # B81
+                )
+                if not val
+            ]
+            if missing:
+                raise ValueError(
+                    f"{', '.join(missing)} required in ENV={self.ENV!r} (B80/B81): the runtime must "
+                    "connect as the least-privilege dhanradar_app role (never the DB superuser), and "
+                    "cross-user readers (admin/Celery/webhooks) as the BYPASSRLS dhanradar_admin role "
+                    "— else RLS silently empties their queries. Set both in .env before starting "
+                    "(deploy.sh applies them to the roles)."
+                )
 
     def _dsn(self, user: str, password: str) -> str:
         return (
@@ -465,6 +478,25 @@ class Settings(BaseSettings):
         """OWNER DSN — used ONLY by Alembic env.py. DDL + table/trigger ownership stay with the
         owner so the app role (dhanradar_app) cannot DISABLE TRIGGER or otherwise bypass I12/I5."""
         return self._dsn(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def admin_database_url(self) -> str:
+        """BYPASSRLS DSN (admin console + Celery aggregate jobs + webhooks) — B81. These read across
+        users and would silently get 0 rows under RLS as dhanradar_app. Falls back to the runtime
+        DSN when the admin password is unset (dev: usually the owner, which bypasses RLS anyway);
+        prod requires it via model_post_init (fail-closed)."""
+        if self.DHANRADAR_ADMIN_DB_PASSWORD:
+            return self._dsn(self.DHANRADAR_ADMIN_DB_USER, self.DHANRADAR_ADMIN_DB_PASSWORD)
+        # Fall back to the OWNER (superuser → bypasses RLS) — NOT the app role (NOBYPASSRLS), which
+        # would silently 0-row every cross-user job. Prod requires the password (model_post_init).
+        import logging
+
+        logging.getLogger("dhanradar.config").warning(
+            "DHANRADAR_ADMIN_DB_PASSWORD unset — cross-user readers (admin/Celery/webhooks) fall back "
+            "to the OWNER role. Set it to use the dedicated BYPASSRLS dhanradar_admin role (B81)."
+        )
+        return self.migration_database_url
 
 
 settings = Settings()  # type: ignore[call-arg]

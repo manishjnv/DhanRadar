@@ -28,7 +28,11 @@ DEFAULT_RULES: dict = {
 
 
 async def _refresh_sip_day(db: AsyncSession, rules_row: SignalRules) -> None:
-    """Populate sip_day on rules_row from the most recent CAS portfolio, if available."""
+    """Populate sip_day on rules_row from the most recent CAS portfolio, if available.
+
+    RLS PRECONDITION (B81): reads mf.mf_portfolios (RLS-enforced), so `db` MUST have app.user_id set
+    to rules_row.user_id — true on the per-user signal route (deps sets it). A GUC-less background
+    caller would get 0 portfolios silently; it must set the GUC (set_rls_user) or use the admin session."""
     from sqlalchemy import select as sa_select
 
     from dhanradar.mf import service as mf_service
