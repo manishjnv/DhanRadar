@@ -42,6 +42,26 @@ warn()  { echo -e "${YELLOW}[warn]${RESET}  $*" >&2; }
 fail()  { echo -e "${RED}[FATAL]${RESET} $*" >&2; exit 1; }
 abort() { echo -e "${RED}[abort]${RESET} $*" >&2; exit 1; }
 
+# sync_role_password <role> <env-var> — set a Postgres role's password from .env (B80/B81).
+# Host-read + SQL-escaped + piped via STDIN so the password never appears in `ps` (no -c arg);
+# ALTER ROLE … PASSWORD is redacted in Postgres logs by default. Owner role/db hardcoded to match
+# the fresh-DB tripwire (compose pins POSTGRES_USER/DB = dhanradar). Skips (warn) when unset.
+sync_role_password() {
+    local role="$1" var="$2"
+    if grep -q "^${var}=." .env 2>/dev/null; then
+        info "Syncing ${role} role password from .env…"
+        local pw esc
+        pw="$(grep -m1 "^${var}=" .env | cut -d= -f2-)"
+        esc="${pw//\'/\'\'}"
+        printf "ALTER ROLE %s PASSWORD '%s';" "${role}" "${esc}" \
+            | $COMPOSE exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+            || abort "Failed to set ${role} password (role missing? run migrations first)."
+        unset pw esc
+    else
+        warn "${var} not set in .env — ${role} not configured (its RLS-bound / bypass path is inactive)."
+    fi
+}
+
 # wait_healthy <service-name> <timeout-secs>
 # Polls the Docker health status of the given compose service until it is
 # "healthy" or the timeout is exceeded.  Aborts on timeout.
@@ -197,27 +217,13 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
     # does not (ModuleNotFoundError). `python -m` adds CWD, matching the CI job.
     $COMPOSE run --rm -T dhanradar-fastapi python -m alembic upgrade head
 
-    # 4b. (B80) Sync the least-privilege app role's password from .env so the runtime DSN
-    #     (dhanradar_app) can connect. Migration 0051 creates the role; the password is applied
-    #     here out-of-band — kept out of the migration logs AND this shell: it is expanded INSIDE
-    #     the postgres container from its env_file. Idempotent (re-asserts each deploy). Skipped
-    #     (with a warning) when unset: the app then falls back to the OWNER role per config.py —
-    #     least-privilege inactive but no outage. Run BEFORE `up` so the new app connects cleanly.
-    if grep -q '^DHANRADAR_APP_DB_PASSWORD=.' .env 2>/dev/null; then
-        info "Syncing dhanradar_app role password from .env (B80 least-privilege)…"
-        # Read on the host; double single-quotes for the SQL string literal (injection-safe); pipe
-        # the statement via STDIN so the password never appears in `ps` (no -c arg). `ALTER ROLE …
-        # PASSWORD` is redacted in Postgres logs by default. Owner role/db are hardcoded to match
-        # the fresh-DB tripwire above (compose pins POSTGRES_USER/DB = dhanradar).
-        _app_pw="$(grep -m1 '^DHANRADAR_APP_DB_PASSWORD=' .env | cut -d= -f2-)"
-        _app_pw_esc="${_app_pw//\'/\'\'}"
-        printf "ALTER ROLE dhanradar_app PASSWORD '%s';" "${_app_pw_esc}" \
-            | $COMPOSE exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
-            || abort "Failed to set dhanradar_app password (role missing? run migrations first — see migration 0051)."
-        unset _app_pw _app_pw_esc
-    else
-        warn "DHANRADAR_APP_DB_PASSWORD not set in .env — app will connect as the OWNER role (B80 least-privilege NOT active). Set it to activate."
-    fi
+    # 4b. (B80/B81) Sync the DB role passwords from .env onto the roles (created by migrations
+    #     0051/0053) BEFORE `up`, so the app connects as the least-privilege dhanradar_app (RLS-bound)
+    #     and cross-user readers (admin/Celery/webhooks) as the BYPASSRLS dhanradar_admin. Each is
+    #     idempotent (re-asserts every deploy) and skipped-with-a-warning when unset (the role's path
+    #     then falls back per config.py — no outage). See sync_role_password above.
+    sync_role_password dhanradar_app DHANRADAR_APP_DB_PASSWORD
+    sync_role_password dhanradar_admin DHANRADAR_ADMIN_DB_PASSWORD
 
     # 5. Bring up the full stack
     info "Starting full stack…"

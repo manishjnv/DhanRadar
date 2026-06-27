@@ -80,3 +80,42 @@ async def task_session() -> AsyncGenerator[AsyncSession, None]:
     `engine`, whose cached asyncpg connections become bound to a dead loop."""
     async with TaskSessionLocal() as session:
         yield session
+
+
+# ---------------------------------------------------------------------------
+# Admin / BYPASSRLS engine — legitimate CROSS-USER readers (B81).
+# ---------------------------------------------------------------------------
+# `engine` + `task_engine` connect as dhanradar_app (NOSUPERUSER NOBYPASSRLS), so RLS scopes them to
+# one owner via the app.user_id GUC. The admin console, Celery aggregate jobs (rescore, snapshot
+# refresh, ranks/percentiles, notification delivery) and webhooks read ACROSS users and would
+# silently get 0 rows under RLS — they connect as dhanradar_admin (BYPASSRLS) instead. NullPool for
+# the same loop-safety reason as task_engine (admin routes are low-traffic, so the pool loss is fine).
+admin_engine = create_async_engine(
+    settings.admin_database_url,
+    poolclass=NullPool,
+    echo=settings.ENV == "development",
+    future=True,
+)
+
+AdminSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    admin_engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+
+async def get_admin_db() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency for ADMIN routes (RequireAdmin) — yields a BYPASSRLS (dhanradar_admin)
+    session so operator/aggregate reads span all users. NEVER use on a user-facing route (it would
+    bypass owner-scoping)."""
+    async with AdminSessionLocal() as session:
+        yield session
+
+
+@asynccontextmanager
+async def admin_task_session() -> AsyncGenerator[AsyncSession, None]:
+    """BYPASSRLS session for Celery jobs / webhooks that LEGITIMATELY span users (rescore, snapshot
+    refresh, ranks, notification delivery, webhook handling). NullPool, loop-safe like task_session.
+    A PER-USER task must instead use task_session + db_security.set_rls_user (never this)."""
+    async with AdminSessionLocal() as session:
+        yield session

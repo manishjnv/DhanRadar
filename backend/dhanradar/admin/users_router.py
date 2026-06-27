@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.audit.service import list_admin_actions, list_payment_events, record_admin_action
 from dhanradar.billing.service import get_user_subscription
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.auth import User, UserActivityLog, UserTierEnum
 from dhanradar.models.mf import MfCasJob
@@ -86,7 +86,7 @@ def _derive_status(user: User) -> str:
 @router.get("/users/summary", response_model=UserSummaryResponse)
 async def get_users_summary(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> UserSummaryResponse:
     """Aggregate user counts for the admin dashboard summary card."""
     now = datetime.now(UTC)
@@ -132,7 +132,7 @@ async def get_users_summary(
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     plan: Annotated[str | None, Query(description="Filter by tier value")] = None,
     status: Annotated[
         str | None,
@@ -216,7 +216,7 @@ def status_code_400() -> int:
 @router.get("/users/activity", response_model=list[ActivityEventRow])
 async def get_recent_activity(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[ActivityEventRow]:
     """Global recent-login feed: most recent *limit* login events across all users.
@@ -251,7 +251,7 @@ async def get_recent_activity(
 async def get_user_detail(
     user_id: str,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> UserDetailResponse:
     """Full detail for one user including latest subscription and payment events."""
     try:
@@ -342,7 +342,7 @@ async def suspend_user(
     user_id: str,
     body: SuspendRequest,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> UserActionResponse:
     """Administratively suspend a user account (blocks login).
 
@@ -391,7 +391,7 @@ async def suspend_user(
 async def unsuspend_user(
     user_id: str,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> UserActionResponse:
     """Restore a suspended user account.
 
@@ -451,7 +451,7 @@ _EMAIL_OTP_SEND_COUNT_KEY = "auth:email_otp_send_count:{user_id}"   # daily send
 async def reset_user_access(
     user_id: str,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> UserActionResponse:
     """Unlock a user who is locked out of login by clearing all auth failure/lockout counters.
 
@@ -535,7 +535,7 @@ async def reset_user_access(
 @router.get("/audit", response_model=list[AuditLogItem])
 async def get_audit_log(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     since: Annotated[datetime | None, Query(description="Filter ts >= since")] = None,
     until: Annotated[datetime | None, Query(description="Filter ts <= until")] = None,
     action: Annotated[str | None, Query(description="Filter by action")] = None,

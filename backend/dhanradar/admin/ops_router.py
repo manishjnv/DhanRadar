@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.ai_gateway.metrics import read_advisory_breaches, read_groundedness_window
 from dhanradar.audit.service import record_admin_action
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.mf import (
     MfFund,
@@ -567,7 +567,7 @@ async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
 @router.get("/health", response_model=HealthResponse)
 async def get_health(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> HealthResponse:
     """Operational health summary for the Overview page.
 
@@ -712,7 +712,7 @@ async def get_health(
 @router.get("/alerts", response_model=AdminAlertsResponse)
 async def get_alerts(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> AdminAlertsResponse:
     """Attention items for the admin bell, DERIVED from current state (not a
     failure-event log) so a job that NEVER RAN — a dead scheduler — is still caught.
@@ -729,7 +729,7 @@ async def get_alerts(
 @router.get("/sources", response_model=list[SourceRow])
 async def list_sources(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> list[SourceRow]:
     """Return source catalog joined with last run from ingestion_runs + paused state."""
     redis = get_redis()
@@ -893,7 +893,7 @@ def _assert_source_exists(source_key: str) -> None:
 @router.get("/tasks", response_model=list[TaskRow])
 async def list_tasks(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> list[TaskRow]:
     """Return all beat-schedule tasks with last run data from ingestion_runs."""
     redis = get_redis()
@@ -1046,7 +1046,7 @@ def _resolve_task(task_name: str) -> str:
 @router.get("/runs", response_model=list[RunListRow])
 async def list_runs(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     source: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
@@ -1087,7 +1087,7 @@ async def list_runs(
 async def get_run(
     run_id: int,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> RunDetailResponse:
     """Return full detail for a single ingestion run."""
     r = await db.get(MfIngestionRun, run_id)
@@ -1121,7 +1121,7 @@ async def get_run(
 @router.get("/quality", response_model=list[QualityRow])
 async def list_quality(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> list[QualityRow]:
     """Return active data quality issues from mf.data_quality_issues.
 
@@ -1190,7 +1190,7 @@ async def acknowledge_quality(
     body: AcknowledgeRequest,
     request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> OkResponse:
     """Suppress a quality issue for duration_days (sets acknowledged_until)."""
     from dhanradar.models.mf import MfDataQualityIssue
@@ -1241,7 +1241,7 @@ async def acknowledge_quality(
 @router.get("/mood-status", response_model=MoodStatus)
 async def get_mood_status(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> MoodStatus:
     """Latest Market-Mood snapshot coverage for the admin Operations page.
 
