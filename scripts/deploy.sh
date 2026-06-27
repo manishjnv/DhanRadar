@@ -197,6 +197,28 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
     # does not (ModuleNotFoundError). `python -m` adds CWD, matching the CI job.
     $COMPOSE run --rm -T dhanradar-fastapi python -m alembic upgrade head
 
+    # 4b. (B80) Sync the least-privilege app role's password from .env so the runtime DSN
+    #     (dhanradar_app) can connect. Migration 0051 creates the role; the password is applied
+    #     here out-of-band — kept out of the migration logs AND this shell: it is expanded INSIDE
+    #     the postgres container from its env_file. Idempotent (re-asserts each deploy). Skipped
+    #     (with a warning) when unset: the app then falls back to the OWNER role per config.py —
+    #     least-privilege inactive but no outage. Run BEFORE `up` so the new app connects cleanly.
+    if grep -q '^DHANRADAR_APP_DB_PASSWORD=.' .env 2>/dev/null; then
+        info "Syncing dhanradar_app role password from .env (B80 least-privilege)…"
+        # Read on the host; double single-quotes for the SQL string literal (injection-safe); pipe
+        # the statement via STDIN so the password never appears in `ps` (no -c arg). `ALTER ROLE …
+        # PASSWORD` is redacted in Postgres logs by default. Owner role/db are hardcoded to match
+        # the fresh-DB tripwire above (compose pins POSTGRES_USER/DB = dhanradar).
+        _app_pw="$(grep '^DHANRADAR_APP_DB_PASSWORD=' .env | head -1 | cut -d= -f2-)"
+        _app_pw_esc="${_app_pw//\'/\'\'}"
+        printf "ALTER ROLE dhanradar_app PASSWORD '%s';" "${_app_pw_esc}" \
+            | $COMPOSE exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+            || abort "Failed to set dhanradar_app password (role missing? run migrations first — see migration 0051)."
+        unset _app_pw _app_pw_esc
+    else
+        warn "DHANRADAR_APP_DB_PASSWORD not set in .env — app will connect as the OWNER role (B80 least-privilege NOT active). Set it to activate."
+    fi
+
     # 5. Bring up the full stack
     info "Starting full stack…"
     $COMPOSE up -d

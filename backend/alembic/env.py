@@ -59,7 +59,9 @@ target_metadata = Base.metadata
 # ---------------------------------------------------------------------------
 from dhanradar.config import settings  # noqa: E402
 
-_DB_URL: str = settings.database_url
+# Migrations need the OWNER/superuser role (DDL, table+trigger ownership) — NOT the least-priv
+# runtime role the app uses (B80). database_url is dhanradar_app; migration_database_url is the owner.
+_DB_URL: str = settings.migration_database_url
 
 
 # ---------------------------------------------------------------------------

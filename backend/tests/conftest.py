@@ -119,6 +119,10 @@ os.environ["JWT_PUBLIC_KEY"] = _SESSION_PUBLIC_PEM
 os.environ["JWT_PRIVATE_KEY_FILE"] = ""
 os.environ["JWT_PUBLIC_KEY_FILE"] = ""
 os.environ["COOKIE_SECURE"] = "false"
+# B80: the runtime DSN is the least-privilege dhanradar_app role. db_tables creates that role with
+# this password; app_db_engine connects as it to prove the de-superusered privileges. db_engine
+# (owner) keeps using migration_database_url (superuser) for schema/table creation + truncation.
+os.environ.setdefault("DHANRADAR_APP_DB_PASSWORD", "dhanradar_app_test")
 
 # ---------------------------------------------------------------------------
 # RSA keypair fixture
@@ -248,8 +252,11 @@ async def db_engine():
 
     from dhanradar.config import settings
 
+    # OWNER DSN (superuser) — schema/table creation + truncation need it, and it bypasses the RLS
+    # that B81 adds so the 400+ existing tests keep seeing their seeded rows. The least-priv app
+    # role is exercised separately via app_db_engine.
     engine = create_async_engine(
-        settings.database_url,
+        settings.migration_database_url,
         pool_size=2,
         max_overflow=2,
         echo=False,
@@ -317,6 +324,32 @@ async def db_tables(db_engine):
     async with db_engine.begin() as conn:
         await conn.run_sync(MetaBase.metadata.create_all)
 
+    # B80: create the least-privilege dhanradar_app role + grants so app_db_engine can connect.
+    # Owner runs this (idempotent). Mirrors migration 0051 over the schemas db_tables creates.
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                DO $$
+                DECLARE s text;
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_app') THEN
+                        CREATE ROLE dhanradar_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+                            LOGIN PASSWORD 'dhanradar_app_test';
+                    END IF;
+                    EXECUTE format('GRANT CONNECT ON DATABASE %I TO dhanradar_app', current_database());
+                    FOREACH s IN ARRAY ARRAY['auth','billing','mf','notify','compliance','mood',
+                        'consent','audit','education','news','concepts','signal','bse'] LOOP
+                        EXECUTE format('GRANT USAGE ON SCHEMA %I TO dhanradar_app', s);
+                        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO dhanradar_app', s);
+                        EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO dhanradar_app', s);
+                        EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO dhanradar_app', s);
+                    END LOOP;
+                END $$;
+                """
+            )
+        )
+
     yield
 
 
@@ -358,6 +391,35 @@ async def db_session(db_engine, db_tables):
                 "RESTART IDENTITY CASCADE"
             )
         )
+
+
+@pytest_asyncio.fixture()
+async def app_db_engine(db_tables):
+    """Async engine connected as the LEAST-PRIVILEGE dhanradar_app role (B80).
+
+    Use this (not db_engine, which is the owner/superuser) to prove the de-superusered runtime
+    privileges: dhanradar_app is bound by the append-only trigger, cannot DISABLE TRIGGER or set
+    session_replication_role, but can still SET LOCAL the purge GUC and do normal DML. NullPool so
+    each connection is fresh on the test's own event loop.
+    """
+    from sqlalchemy import pool
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from dhanradar.config import settings
+
+    engine = create_async_engine(settings.database_url, poolclass=pool.NullPool, future=True)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture()
+async def app_session(app_db_engine):
+    """Function-scoped async session on the dhanradar_app (least-privilege) connection."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    SessionLocal = async_sessionmaker(app_db_engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as session:
+        yield session
 
 
 @pytest.fixture()
