@@ -24,9 +24,12 @@ readers). This bounds each PR's blast radius — a missed cross-user reader sile
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 #: Session GUC the owner policy reads. SET LOCAL (transaction-scoped) only — a plain SET would leak
 #: across the pooled FastAPI engine to the next request.
@@ -58,8 +61,12 @@ PERSONAL_TABLES: tuple[str, ...] = (
     "compliance.ai_output_feedback",
 )
 
-#: Tables RLS is ENFORCED on in this PR (PR-1). PR-2 grows this toward PERSONAL_TABLES.
+#: Tables RLS is ENFORCED on. PR-1 enforced the 8 mf.* core tables; PR-2 added the remaining
+#: signal/notify/auth/compliance personal tables — so RLS_ENFORCED now == PERSONAL_TABLES (full I5).
+#: A future personal table is added to BOTH PERSONAL_TABLES and here in the same change (the
+#: full-coverage test asserts the two sets are equal, so a personal table can't ship unenforced).
 RLS_ENFORCED: tuple[str, ...] = (
+    # mf (PR-1)
     "mf.mf_portfolios",
     "mf.mf_user_holdings",
     "mf.portfolio_transactions",
@@ -68,6 +75,17 @@ RLS_ENFORCED: tuple[str, ...] = (
     "mf.mf_user_fund_score_history",
     "mf.user_fund_scores",
     "mf.mf_sip_transactions",
+    # signal / notify / auth / compliance (PR-2)
+    "signal.signal_rules",
+    "signal.signal_dip_fund",
+    "signal.signal_deployments",
+    "signal.signal_journal",
+    "signal.signal_notifications",
+    "notify.notification_preferences",
+    "notify.notification_log",
+    "auth.subscriptions",
+    "auth.user_activity_log",
+    "compliance.ai_output_feedback",
 )
 
 #: user_id-bearing tables that are NOT owner-read (append-only audit / admin-cross-user). Documented,
@@ -111,12 +129,48 @@ async def set_rls_user(db: Any, user_id: str) -> None:
     """Scope the CURRENT transaction's RLS to `user_id` (SET LOCAL app.user_id, parameterized via
     set_config(...,is_local=true) — no injection, resets at commit/rollback so it never leaks across
     the pooled connection). Call after auth resolves the user (FastAPI: current_user_or_anonymous)
-    and in per-user background writers before touching a personal table.
+    and in per-user request writers before touching a personal table.
 
-    NOTE: is_local=true means it RESETS at COMMIT/ROLLBACK. A request/task that commits mid-flow and
-    then reads a personal table again must re-call this (else the policy denies all → 0 rows). The
-    multi-commit CAS pipeline therefore uses the BYPASSRLS admin engine instead (see tasks/mf.py)."""
+    NOTE: is_local=true means it RESETS at COMMIT/ROLLBACK. A request that commits mid-flow and then
+    writes a personal table again must re-call this (else the policy denies all → 0 rows / a WITH
+    CHECK rejection) — see auth.record_login and the cas_upload activity write, which re-call it after
+    an intervening commit. A MULTI-commit per-user background writer (the CAS pipeline) uses
+    `rls_user_session` instead, which re-applies the GUC automatically on every transaction begin."""
     await db.execute(
         text("SELECT set_config(:guc, :uid, true)"),
         {"guc": APP_USER_GUC, "uid": str(user_id)},
     )
+
+
+@asynccontextmanager
+async def rls_user_session(user_id: str) -> AsyncIterator[Any]:
+    """A NullPool task session whose RLS owner GUC (`app.user_id`) is RE-APPLIED on EVERY transaction
+    begin — the only robust way to keep one owner scope across a MULTI-commit per-user writer.
+
+    Why an event, not a single set_rls_user: the CAS pipeline commits 3+ times (progress states) AND
+    its helpers commit per fund (mf.history.append_score_history). A SET LOCAL is cleared by each
+    commit, and on a NullPool engine the next transaction checks out a FRESH connection (so even a
+    session-level SET is lost) — so the GUC must be re-set at the start of every transaction. The
+    `after_begin` Session event fires on each begin (within the greenlet context, so the sync
+    exec_driver_sql on the given connection is allowed for the async engine) and re-applies it. The
+    value is SET LOCAL (transaction-scoped) and the connection is destroyed on release (NullPool), so
+    it can never leak to another user.
+
+    `user_id` is validated as a UUID up front, so a malformed owner raises here (never a silently
+    unscoped bypass write). The re-apply runs on the sync `connection` the event hands us via bound
+    params (SQLAlchemy translates the driver paramstyle) — no injection, no exec_driver_sql paramstyle
+    mismatch."""
+    from dhanradar.db import task_session
+
+    uid = str(UUID(str(user_id)))  # canonical UUID or ValueError — fail rather than write unscoped
+
+    async with task_session() as db:
+
+        @event.listens_for(db.sync_session, "after_begin")
+        def _apply_owner_guc(session: Any, transaction: Any, connection: Any) -> None:
+            connection.execute(
+                text("SELECT set_config(:guc, :uid, true)"),
+                {"guc": APP_USER_GUC, "uid": uid},
+            )
+
+        yield db

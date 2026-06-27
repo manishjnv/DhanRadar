@@ -121,12 +121,52 @@ def test_rls_enforced_is_subset_of_personal():
     assert set(RLS_ENFORCED) <= set(PERSONAL_TABLES)
 
 
-def test_migration_0053_table_list_matches_rls_enforced():
-    """B83 drift text-assert: the migration's inlined table literals == db_security.RLS_ENFORCED, so
-    a table dropped from the constant but left in the migration (or vice versa) fails CI."""
-    src = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "0053_rls_personal_tables_and_admin_role.py"
-    found = set(re.findall(r'"(mf\.[a-z_]+)"', src.read_text(encoding="utf-8")))
+def test_full_i5_personal_tables_all_enforced():
+    """PR-2 completes I5: every classified PERSONAL_TABLE is now FORCE-RLS enforced — no deferred
+    personal table. A future personal table added to PERSONAL_TABLES but not RLS_ENFORCED fails here,
+    forcing a conscious enforce-now-or-justify decision (the staged PR-1→PR-2 rollout is done)."""
+    assert set(RLS_ENFORCED) == set(PERSONAL_TABLES), (
+        f"PERSONAL tables not RLS-enforced: {set(PERSONAL_TABLES) - set(RLS_ENFORCED)}"
+    )
+
+
+def test_rls_migrations_table_list_matches_rls_enforced():
+    """B83 drift text-assert: the inlined table literals across the RLS migrations (0053 mf.* + 0054
+    signal/notify/auth/compliance) == db_security.RLS_ENFORCED, so a table dropped from the constant
+    but left in a migration (or vice versa) — in EITHER file — fails CI."""
+    versions = Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    schema_alt = "|".join(re.escape(s) for s in APP_SCHEMAS)
+    pat = re.compile(rf'"((?:{schema_alt})\.[a-z_]+)"')
+    found: set[str] = set()
+    for fname in (
+        "0053_rls_personal_tables_and_admin_role.py",
+        "0054_rls_signal_notify_auth_compliance.py",
+    ):
+        found |= set(pat.findall((versions / fname).read_text(encoding="utf-8")))
     assert found == set(RLS_ENFORCED), f"migration vs RLS_ENFORCED drift: {found ^ set(RLS_ENFORCED)}"
+
+
+def test_schema_grant_lists_match_app_schemas():
+    """B83 drift text-assert: the two FROZEN copies of the app-schema GRANT list — migration 0052's
+    `_SCHEMAS` (the prod migration path) and infra/postgres/init/01_init.sql's grant FOREACH ARRAY
+    (fresh-volume path) — must equal db_schemas.APP_SCHEMAS. A 14th schema added to APP_SCHEMAS but
+    forgotten in either copy is the exact B80 grant-gap recurrence (CI's `migrations` job runs them
+    but never connects AS dhanradar_app to notice the missing grant). Pure text assert (no DB)."""
+    backend = Path(__file__).resolve().parents[2]
+    repo = backend.parent
+    expected = set(APP_SCHEMAS)
+
+    mig = (
+        backend / "alembic" / "versions" / "0052_app_db_role_grants_real_schemas.py"
+    ).read_text(encoding="utf-8")
+    mig_block = re.search(r"_SCHEMAS\s*=\s*\[(.*?)\]", mig, re.DOTALL).group(1)
+    mig_schemas = set(re.findall(r'"(\w+)"', mig_block))
+    assert mig_schemas == expected, f"0052._SCHEMAS drift vs APP_SCHEMAS: {mig_schemas ^ expected}"
+
+    init = (repo / "infra" / "postgres" / "init" / "01_init.sql").read_text(encoding="utf-8")
+    init_arr = re.search(r"FOREACH\s+s\s+IN\s+ARRAY\s+ARRAY\[(.*?)\]", init, re.DOTALL).group(1)
+    init_schemas = set(re.findall(r"'(\w+)'", init_arr))
+    assert init_schemas == expected, f"01_init.sql grant list drift vs APP_SCHEMAS: {init_schemas ^ expected}"
 
 
 # --- trap (b): isolation WITH positive control (AS dhanradar_app) ---------------------------------

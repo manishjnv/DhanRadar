@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.config import settings
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.redis_client import get_redis
 from dhanradar.subscriptions import service as sub_svc
 
@@ -52,7 +52,10 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 )
 async def razorpay_webhook(
     request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    # B81: a webhook has NO authenticated request user, so it cannot set the app.user_id GUC — it
+    # reads/writes auth.subscriptions ACROSS users (event → owner lookup). It therefore runs on the
+    # BYPASSRLS admin engine; the app engine would fail the subscription upsert WITH CHECK.
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> dict:
     """
     Receive and process Razorpay subscription lifecycle events.
@@ -115,8 +118,9 @@ async def razorpay_webhook(
         logger.info("Razorpay webhook: duplicate event %s ignored", event_id)
         return {"status": "duplicate_ignored"}
 
-    # Delegate to service using the request-scoped session (Depends(get_db)),
-    # so the test override applies and the session stays on the request's loop.
+    # Delegate to service using the BYPASSRLS admin session (Depends(get_admin_db)) — the webhook
+    # owns no request user, so it bypasses RLS to upsert the matched subscription's owner row. Tests
+    # override get_admin_db onto the shared test session (conftest), so the override still applies.
     await sub_svc.handle_subscription_event(event_data, db)
 
     return {"status": "ok"}
