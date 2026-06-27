@@ -174,6 +174,11 @@ class MfPortfolio(Base):
         Index("ix_mf_portfolios_user", "user_id"),
         _SCHEMA,
     )
+    # B85: guarantee created_at (server_default func.now()) is fetched via INSERT…RETURNING at flush,
+    # so the create/rename handlers serialize it WITHOUT a post-commit db.refresh (a refresh re-SELECTs
+    # under the reset RLS GUC → 0 rows → 500). id (PK server_default) is already RETURNING-fetched; this
+    # makes the non-PK server default explicit rather than relying on SA's eager_defaults="auto" heuristic.
+    __mapper_args__ = {"eager_defaults": True}
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")

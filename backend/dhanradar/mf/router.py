@@ -177,8 +177,8 @@ async def create_portfolio(
     portfolio = MfPortfolio(user_id=uid, name=body.name)
     db.add(portfolio)
     await db.commit()
-    await db.refresh(portfolio)
-
+    # B85: no db.refresh — commit resets the SET LOCAL app.user_id GUC, so a refresh would re-SELECT
+    # under FORCE RLS → 0 rows → 500. id/created_at are RETURNING-populated (kept by expire_on_commit=False).
     return PortfolioSummary(
         id=str(portfolio.id),
         name=portfolio.name,
@@ -200,8 +200,8 @@ async def rename_portfolio(
     portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
     portfolio.name = body.name
     await db.commit()
-    await db.refresh(portfolio)
-
+    # B85: no db.refresh — commit resets the SET LOCAL app.user_id GUC, so a refresh would re-SELECT
+    # under FORCE RLS → 0 rows → 500. id/created_at stay loaded (kept by expire_on_commit=False).
     return PortfolioSummary(
         id=str(portfolio.id),
         name=portfolio.name,
@@ -266,7 +266,8 @@ async def upload_cas(
             portfolio = MfPortfolio(user_id=uid, name="Default")
             db.add(portfolio)
             await db.commit()
-            await db.refresh(portfolio)
+            # B85: no db.refresh (see create_portfolio) — commit resets the GUC; id is
+            # RETURNING-populated post-commit, so a refresh would only re-SELECT → 0 rows under RLS → 500.
             resolved_portfolio_id = str(portfolio.id)
         elif count == 1:
             row = (
