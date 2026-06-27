@@ -112,7 +112,7 @@ def parsed_to_snapshot_holdings(
         nav = nav_map.get(p.isin, p.nav)
         current_value = (p.units * nav) if (nav is not None) else (p.value or 0.0)
         invested = p.cost if p.cost is not None else 0.0
-        cashflows = [CashFlow(when=t.when, amount=t.amount) for t in p.txns]
+        cashflows = [CashFlow(when=t.when, amount=t.amount) for t in p.txns if t.amount]
         if current_value:
             cashflows.append(CashFlow(when=p.as_of_date or date.today(), amount=current_value))
         out.append(
@@ -290,33 +290,29 @@ async def _run_pipeline(
         )
         await db.commit()
 
-        await _upsert_holdings(db, user_id, parsed, portfolio_id)
-
-        # B2: append the CAS transactions to the append-only ledger (the spine). Idempotent
-        # diff-and-append — ON CONFLICT DO NOTHING on uq_portfolio_txn, so re-uploading the same CAS
-        # adds nothing. Runs under rls_user_session (after_begin re-applies the owner GUC), so RLS
-        # WITH CHECK enforces the uploader as owner. ADDITIVE this sprint: holdings stay the
-        # authoritative write and the report is built from them, so a ledger hiccup is BEST-EFFORT —
-        # logged + rolled back, never failing the user's report (mirrors the AI-commentary pattern
-        # below). B3 makes holdings a projection FROM the ledger; the ledger becomes load-bearing for
-        # the report then, and this should flip to a hard failure.
+        # B2/B3: append the CAS transactions to the append-only ledger (the spine) FIRST, then project
+        # holdings FROM the ledger. Idempotent diff-and-append (ON CONFLICT DO NOTHING). Runs under
+        # rls_user_session (after_begin re-applies the owner GUC), so RLS WITH CHECK enforces the
+        # uploader as owner. HARD-FAIL (B3): holdings now DERIVE from the ledger, so a dropped ledger
+        # write would mean wrong holdings — let the failure propagate and fail the job (the outer
+        # handler marks it failed + purges) rather than completing with stale holdings.
         from dhanradar.mf.cas import build_cas_ledger_rows
         from dhanradar.mf.ledger import append_transactions
 
-        try:
-            ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
-            ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
-            await db.commit()
-            _slog.info(
-                "mf.ledger.appended",
-                job_id=job_id,
-                inserted=ledger_inserted,
-                skipped=ledger_skipped,
-                total=len(ledger_rows),
-            )
-        except Exception:  # noqa: BLE001 — additive: a ledger failure must not break the report
-            logger.exception("mf.ledger.append failed job=%s — report still completes", job_id)
-            await db.rollback()
+        ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
+        ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
+        await db.commit()
+        _slog.info(
+            "mf.ledger.appended",
+            job_id=job_id,
+            inserted=ledger_inserted,
+            skipped=ledger_skipped,
+            total=len(ledger_rows),
+        )
+
+        # B3: holdings are now a PROJECTION of the ledger (units + net-invested), not a direct copy of
+        # the parsed file.
+        await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
 
         # Persist SIP transactions so get_sip_day() can infer the user's SIP date
         from dhanradar.models.mf import MfSipTransaction
@@ -498,25 +494,91 @@ async def _run_pipeline(
     return f"done: {len(parsed)} schemes"
 
 
-async def _upsert_holdings(
+async def _project_and_write_holdings(
     db: Any, user_id: str, parsed: list[ParsedHolding], portfolio_id: str
 ) -> None:
-    from sqlalchemy import func
+    """B3 cutover: holdings are a PROJECTION of the ledger, not a direct copy of the parsed file.
+
+    Read the portfolio's full ledger (just appended), project current holdings (units = Σ unit deltas;
+    invested = Σ net capital invested, plan §13), and UPSERT each parsed holding using the projected
+    values WHERE the ledger has txns for it. A holding without ledger txns (txn-less CDSL / summary CAS)
+    stays snapshot-derived from the CAS close balance/cost (plan §32 step 2 'legacy'). UPSERT, never
+    truncate, so a partial/older CAS can't erase funds from a prior upload (§22).
+
+    Runs under the caller's rls_user_session → RLS scopes the ledger read and WITH-CHECK scopes the
+    holding write to the uploader (user_id is the uploader, never the file). avg_cost_nav stays the
+    CAS-reported per-holding NAV (market context, not a ledger fact). The holding folio stays RAW
+    (unchanged uq_mf_holding); the projection is looked up by the ledger's NORMALIZED folio. (Folio
+    double-map: if one scheme appears under two raw folios that normalize to the same key, the ledger
+    dedups but the holding upsert keeps two raw rows — a bounded, pre-existing B82 hazard, not B3.)
+
+    SAFETY: if a holding HAS ledger txns but Σ units != the AMC close balance (an un-captured txn type
+    or a deduped identical txn), the AMC close is authoritative → fall back to the parsed snapshot and
+    warn, rather than ship wrong units. So the cutover can never regress units below today's behaviour;
+    it only upgrades to ledger-derived values where the ledger fully reconstructs the position."""
+    import uuid as _uuid
+    from decimal import Decimal
+
+    from sqlalchemy import func, select
     from sqlalchemy.dialects.postgresql import insert
 
-    from dhanradar.models.mf import MfUserHolding
+    from dhanradar.mf.cas import normalize_folio
+    from dhanradar.mf.projection import (
+        ENGINE_VERSION,
+        UNITS_GAP_TOLERANCE,
+        project_holdings_from_ledger,
+    )
+    from dhanradar.models.mf import MfPortfolioTransaction, MfUserHolding
 
+    pid = _uuid.UUID(portfolio_id)
+    ledger_rows = (
+        await db.execute(
+            select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.folio_number,
+                MfPortfolioTransaction.units,
+                MfPortfolioTransaction.amount,
+                MfPortfolioTransaction.txn_type,
+                MfPortfolioTransaction.txn_date,
+            ).where(MfPortfolioTransaction.portfolio_id == pid)
+        )
+    ).mappings().all()
+    projected = project_holdings_from_ledger(ledger_rows)
+
+    projected_n = 0
     for p in parsed:
+        proj = projected.get((p.isin, normalize_folio(p.folio_number)))
+        if proj is not None and abs(proj["units"] - Decimal(str(p.units))) <= UNITS_GAP_TOLERANCE:
+            # Ledger COMPLETE for this holding (Σ units == the AMC close balance) → use the projection.
+            units, invested, as_of = proj["units"], proj["invested_amount"], proj["as_of"]
+            projected_n += 1
+        else:
+            # No ledger txns (txn-less CDSL/summary) OR the ledger is INCOMPLETE (Σ units != the AMC
+            # close — an un-captured txn type / a deduped identical txn). The AMC close is authoritative,
+            # so fall back to the parsed snapshot rather than ship wrong units; warn on a partial gap so
+            # it drives a cas.py txn-mapping extension (the B3 gap detector).
+            if proj is not None:
+                _slog.warning(
+                    "mf.holdings.units_gap",
+                    isin=p.isin,
+                    folio=p.folio_number,
+                    projected=str(proj["units"]),
+                    cas_close=p.units,
+                )
+            units, invested, as_of = p.units, p.cost, p.as_of_date
         stmt = insert(MfUserHolding).values(
             user_id=user_id, portfolio_id=portfolio_id, isin=p.isin,
-            folio_number=p.folio_number, units=p.units,
-            avg_cost_nav=p.nav, invested_amount=p.cost, source="cas", as_of_date=p.as_of_date,
+            folio_number=p.folio_number, units=units,
+            avg_cost_nav=p.nav, invested_amount=invested, source="cas", as_of_date=as_of,
         ).on_conflict_do_update(
             constraint="uq_mf_holding",
-            set_={"units": p.units, "invested_amount": p.cost, "source": "cas",
-                  "as_of_date": p.as_of_date, "updated_at": func.now()},
+            set_={"units": units, "invested_amount": invested, "source": "cas",
+                  "as_of_date": as_of, "updated_at": func.now()},
         )
         await db.execute(stmt)
+    _slog.info(
+        "mf.holdings.projected", projected=projected_n, total=len(parsed), engine=ENGINE_VERSION
+    )
     await db.commit()
 
 

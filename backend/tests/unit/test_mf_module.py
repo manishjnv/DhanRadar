@@ -590,8 +590,11 @@ def test_b65_dividend_payout_kept_as_inflow():
 
 
 def test_b65_internal_and_tax_rows_excluded():
-    """DIVIDEND_REINVEST, STAMP_DUTY_TAX, STT_TAX, and MISC txns carry no external
-    cash movement and must be excluded from the parsed txn list."""
+    """B65 cashflow exclusion preserved + B3 ledger capture:
+    - STAMP_DUTY_TAX / STT_TAX / MISC carry no external cash AND no units → fully excluded.
+    - DIVIDEND_REINVEST carries reinvested UNITS but no external cash → captured for the ledger (B3)
+      with amount=0, so it stays XIRR-neutral (the cashflow path filters amount==0). The PURCHASE is
+      the only cashflow-bearing txn."""
 
     def _reader(_p, _pw):
         return {"folios": [{"folio": "F1", "schemes": [
@@ -601,16 +604,22 @@ def test_b65_internal_and_tax_rows_excluded():
                  {"date": "2024-01-01", "amount": 4000.0, "type": "PURCHASE"},
                  {"date": "2024-01-01", "amount": 8.0,    "type": "STAMP_DUTY_TAX"},
                  {"date": "2024-01-01", "amount": 0.5,    "type": "STT_TAX"},
-                 {"date": "2024-06-01", "amount": 200.0,  "type": "DIVIDEND_REINVEST"},
+                 {"date": "2024-06-01", "amount": 200.0, "units": 4.0, "type": "DIVIDEND_REINVEST"},
                  {"date": "2025-01-01", "amount": 5.0,    "type": "MISC"},
              ]},
         ]}]}
 
     holdings = parse_cas("x.pdf", None, reader=_reader)
     txns = holdings[0].txns
-    # Only the PURCHASE row survives.
-    assert len(txns) == 1
-    assert txns[0].amount == -4000.0
+    by_type = {t.txn_type: t for t in txns}
+    # tax/misc fully excluded; purchase (cashflow) + dividend_reinvest (ledger) survive.
+    assert set(by_type) == {"purchase", "dividend_reinvest"}, by_type
+    assert by_type["purchase"].amount == -4000.0
+    # reinvest captured for the ledger: units kept, amount 0 (XIRR-neutral).
+    assert by_type["dividend_reinvest"].amount == 0.0
+    assert by_type["dividend_reinvest"].units == 4.0
+    # the only cashflow-bearing (non-zero amount) txn is the purchase — B65 preserved.
+    assert [t for t in txns if t.amount] == [by_type["purchase"]]
 
 
 def test_b65_missing_type_defaults_to_negate():
