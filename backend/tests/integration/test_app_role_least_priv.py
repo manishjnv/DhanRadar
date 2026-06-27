@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from dhanradar.db_schemas import APP_SCHEMAS
+from dhanradar.db_security import set_rls_user
 from dhanradar.mf.ledger import APPEND_ONLY_TRIGGER_STATEMENTS
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfPortfolio, MfPortfolioTransaction
@@ -68,7 +69,10 @@ async def test_app_role_is_bound_by_append_only_trigger(db_session, app_session)
     """As a normal role, dhanradar_app cannot skip the trigger — UPDATE and DELETE both raise.
     (If grants were missing this would be a privilege error; asserting 'append-only' proves it is
     the trigger, i.e. the role HAS DML but is bound by I12.)"""
-    _, _, txn = await _seed_owner(db_session, email="b80-trig@test.dev", with_trigger=True)
+    user, _, txn = await _seed_owner(db_session, email="b80-trig@test.dev", with_trigger=True)
+    # B81: RLS scopes dhanradar_app to its owner — set app.user_id so the row is visible (else the
+    # UPDATE/DELETE match 0 rows and the trigger never fires). SET LOCAL resets at rollback → re-set.
+    await set_rls_user(app_session, str(user.id))
     with pytest.raises(DBAPIError) as exc:
         await app_session.execute(
             text("UPDATE mf.portfolio_transactions SET amount = -99 WHERE id = :i"),
@@ -76,6 +80,7 @@ async def test_app_role_is_bound_by_append_only_trigger(db_session, app_session)
         )
     assert "append-only" in str(exc.value)
     await app_session.rollback()
+    await set_rls_user(app_session, str(user.id))
     with pytest.raises(DBAPIError) as exc2:
         await app_session.execute(
             text("DELETE FROM mf.portfolio_transactions WHERE id = :i"), {"i": str(txn.id)}
@@ -87,7 +92,8 @@ async def test_app_role_is_bound_by_append_only_trigger(db_session, app_session)
 async def test_app_role_can_arm_purge_and_delete(db_session, app_session):
     """delete_portfolio's controlled purge must keep working under least-priv: dhanradar_app CAN
     set the custom namespaced GUC (settable by any role) and then the trigger permits the DELETE."""
-    _, _, txn = await _seed_owner(db_session, email="b80-purge@test.dev", with_trigger=True)
+    user, _, txn = await _seed_owner(db_session, email="b80-purge@test.dev", with_trigger=True)
+    await set_rls_user(app_session, str(user.id))  # B81: scope to owner so the row is visible/deletable
     await app_session.execute(text("SET LOCAL mf.allow_ledger_purge = 'on'"))
     await app_session.execute(
         text("DELETE FROM mf.portfolio_transactions WHERE id = :i"), {"i": str(txn.id)}
@@ -172,6 +178,7 @@ async def test_app_role_cannot_mutate_audit_ledger(db_session, app_session):
 async def test_app_role_normal_crud_works(db_session, app_session):
     """Sanity: the de-superusered role still has full DML on personal tables (no outage)."""
     user, pf, _ = await _seed_owner(db_session, email="b80-crud@test.dev")
+    await set_rls_user(app_session, str(user.id))  # B81: WITH CHECK needs app.user_id = the owner
     await app_session.execute(
         text(
             "INSERT INTO mf.mf_user_holdings (user_id, portfolio_id, isin, folio_number, units, source) "
