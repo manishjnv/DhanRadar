@@ -15,6 +15,36 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-28 — B85: RLS commit-then-read 500 — `db.refresh()` after commit on FORCE-RLS mf_portfolios
+
+- **Symptom:** create/rename portfolio + first CAS upload would HTTP 500 the moment the app runs as
+  `dhanradar_app` (the B80/B81 activation deploy). Latent today (prod still superuser → RLS bypassed).
+  Found by the independent B81 PR-2 (#398) review, NOT by CI.
+- **Root cause:** three handlers in `mf/router.py` (create_portfolio:180, rename_portfolio:203,
+  upload_cas default-create:269) did `await db.commit()` then `await db.refresh(portfolio)` on the
+  now-FORCE-RLS `mf.mf_portfolios`. The per-request `app.user_id` GUC is `SET LOCAL` (reset on commit),
+  so the refresh re-SELECTed with no GUC → RLS denied all → 0 rows → SQLAlchemy `InvalidRequestError`
+  → 500. A PR-1 regression PR-2 missed while fixing 3 sibling commit-then-read sites. **Why CI missed
+  it:** the HTTP test harness (`async_client` / `override_get_db`) routes `get_db` → the OWNER/superuser
+  session → RLS-INERT — NO HTTP/integration test exercised RLS, so the same gap also left PR-2's
+  `upsert_preferences` fix untested.
+- **Fix:** deleted the 3 `db.refresh` lines (`mf/router.py`) — `id`/`created_at` are RETURNING-populated
+  at flush + kept by `expire_on_commit=False`; added `MfPortfolio.__mapper_args__={"eager_defaults":True}`
+  to make the non-PK `created_at` RETURNING-fetch explicit. Added `rls_async_client`/`override_get_db_rls`
+  (get_db → the dhanradar_app RLS-bound session) so HTTP tests run under FORCE RLS, + app_session-level
+  regression tests for the 3 handlers and `upsert_preferences`.
+- **Prevention:**
+  - **Class guard** `test_no_personal_table_refresh_in_per_user_routers` — fails if any `*router.py`
+    using `Depends(get_db)` contains `.refresh(`. Closes the commit-then-refresh CLASS, not the 3
+    instances (admin `get_admin_db`/BYPASSRLS routers exempt).
+  - **RLS-capable HTTP harness** (`rls_async_client`) — the systemic gap closure. Route personal-data
+    route tests through it (real `dhanradar_app` + per-request GUC) so a future RLS handler bug fails
+    CI, not prod. An owner-session HTTP test is RLS-inert and proves nothing about RLS.
+  - **Rule:** a request handler must not `db.refresh()` (or any post-commit personal-table round-trip)
+    — build the response from RETURNING-populated ORM attributes; the request GUC is `SET LOCAL` and
+    dies on every commit.
+- **Phase/area:** Backend — B81 RLS regression in the MF portfolio handlers + the RLS-inert test harness.
+
 ### 2026-06-28 — B81 PR-2: enabling RLS silently broke a per-request commit-then-read (caught in review)
 
 - **Symptom:** PR-2 added FORCE RLS to `notify.notification_preferences`. `POST /notifications/preferences`

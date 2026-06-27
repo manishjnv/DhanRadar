@@ -549,6 +549,56 @@ async def async_client(override_get_db, patch_redis, patch_settings_keys):
 
 
 # ---------------------------------------------------------------------------
+# B85 — RLS-CAPABLE HTTP harness
+#
+# The default override_get_db / async_client route get_db → the OWNER (superuser) db_session, which
+# BYPASSES RLS — so no HTTP test exercises FORCE RLS (that gap hid B85's commit-then-refresh 500 and
+# PR-2's upsert_preferences read). These variants route get_db → the dhanradar_app (NOSUPERUSER,
+# NOBYPASSRLS) app_session, so a request runs under FORCE RLS exactly like prod once de-superusered
+# (B80/B81): current_user_or_anonymous sets the per-request app.user_id GUC on THIS session, and any
+# post-commit personal-table round-trip 0-rows like prod. get_admin_db still → the BYPASSRLS
+# admin_session (its real role). Use rls_async_client for personal-data route tests; seed via the owner
+# db_session (cross-connection, committed rows are visible).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def override_get_db_rls(app_session, admin_session):
+    from dhanradar.db import get_admin_db, get_db
+    from dhanradar.main import app
+
+    async def _app_db():
+        yield app_session
+
+    async def _admin_db():
+        yield admin_session
+
+    app.dependency_overrides[get_db] = _app_db
+    app.dependency_overrides[get_admin_db] = _admin_db
+    yield
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_admin_db, None)
+
+
+@pytest_asyncio.fixture()
+async def rls_async_client(override_get_db_rls, patch_redis, patch_settings_keys):
+    """async_client whose get_db → the dhanradar_app RLS-bound session — requests run under FORCE RLS.
+    The catching harness for RLS handler bugs (an owner-session HTTP test is RLS-inert and misses them)."""
+    import httpx
+    from httpx import ASGITransport
+
+    from dhanradar.main import app
+
+    transport = ASGITransport(app=app)  # type: ignore[arg-type]
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        follow_redirects=True,
+    ) as client:
+        yield client
+
+
+# ---------------------------------------------------------------------------
 # Cookie helpers for integration tests
 # ---------------------------------------------------------------------------
 
