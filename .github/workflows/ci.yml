@@ -237,6 +237,10 @@ jobs:
           # files (tokens.css / tailwind.tokens.cjs) have drifted from tokens.json.
           # Use check (not gen) so stale committed tokens are caught, not masked.
           npm run check:tokens --if-present
+          # Enforce the concept-registry single source (§5): fail if the committed
+          # generated registry / lock has drifted from concepts.json + components.json,
+          # or if a change breaks the additive-only contract (I4) or I8.
+          npm run check:concepts --if-present
           npm run gen:api --if-present
           npm run typecheck --if-present
           npm run lint --if-present
