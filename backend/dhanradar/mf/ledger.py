@@ -64,3 +64,32 @@ async def allow_ledger_purge(db: Any) -> None:
     # GUC names are identifiers (not bindable params); LEDGER_PURGE_GUC is a trusted module
     # constant, never user input — do not interpolate a runtime value here.
     await db.execute(text(f"SET LOCAL {LEDGER_PURGE_GUC} = 'on'"))
+
+
+async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int, int]:
+    """SOLE writer of the append-only ledger (B2). Bulk `INSERT ... ON CONFLICT ON CONSTRAINT
+    uq_portfolio_txn DO NOTHING` — so re-ingesting the same txns is a no-op (diff-and-append, §22);
+    only genuinely-new rows land. Returns (inserted, skipped).
+
+    Runs on the CALLER's session — the CAS pipeline's `rls_user_session`, so RLS WITH CHECK enforces
+    each row's `user_id` == the GUC owner: a row for any other user is REJECTED by the policy (the row
+    can only belong to the authenticated uploader). DO NOTHING (never DO UPDATE) keeps it an INSERT, so
+    the append-only trigger (which blocks UPDATE/DELETE, I12) never fires. NEVER write the ledger with a
+    bare ORM `add` — idempotency, RLS, and immutability all depend on this single path (test-enforced).
+    """
+    if not rows:
+        return (0, 0)
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.models.mf import MfPortfolioTransaction
+
+    stmt = (
+        pg_insert(MfPortfolioTransaction)
+        .values(rows)
+        .on_conflict_do_nothing(constraint="uq_portfolio_txn")
+        .returning(MfPortfolioTransaction.id)
+    )
+    result = await db.execute(stmt)
+    inserted = len(result.fetchall())  # RETURNING yields only inserted rows; conflicts are skipped
+    return inserted, len(rows) - inserted

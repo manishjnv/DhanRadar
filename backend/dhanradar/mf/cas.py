@@ -57,6 +57,24 @@ _TXN_FLOW_EXCLUDED = frozenset(
      "TDS_TAX", "MISC", "UNKNOWN"}
 )
 
+#: casparser txn type → canonical ledger txn_type (plan §11 vocab). Only the cashflow types B2 ingests
+#: are mapped; the _TXN_FLOW_EXCLUDED types (dividend_reinvest/tax/misc) are not yet written to the
+#: ledger. An unmapped type falls back to its lowercased name (honest, not dropped).
+_CANON_TXN_TYPE = {
+    "PURCHASE": "purchase",
+    "PURCHASE_SIP": "sip",
+    "REDEMPTION": "redemption",
+    "SWITCH_IN": "switch_in",
+    "SWITCH_IN_MERGER": "switch_in",
+    "SWITCH_OUT": "switch_out",
+    "SWITCH_OUT_MERGER": "switch_out",
+    "DIVIDEND_PAYOUT": "dividend_payout",
+    "REVERSAL": "reversal",
+}
+
+#: Bump when the CAS parse/normalization changes — stamped on every ledger row for I11 replay (B82).
+PARSER_VERSION = "cas-1"
+
 
 class CasParseError(Exception):
     """The CAS could not be parsed (bad password, corrupt, or unsupported format)."""
@@ -67,6 +85,10 @@ class ParsedTxn:
     when: date
     amount: float  # signed INVESTOR convention: outflows negative, inflows positive (normalized in parse_cas, B65)
     is_sip: bool = False
+    # B2 ledger fields — defaulted for back-compat (parse_cas always sets them):
+    txn_type: str = ""  # canonical ledger txn_type (purchase/sip/redemption/switch_in/switch_out/dividend_payout/reversal)
+    units: float = 0.0  # signed by direction (purchase +, redemption -) — casparser convention, kept as-is
+    nav: float | None = None  # per-txn NAV → nav_or_price on the ledger
 
 
 @dataclass(frozen=True)
@@ -171,7 +193,14 @@ def parse_cas(
                     excluded_txns += 1
                     continue
                 amount = float(amt) if ttype in _TXN_INFLOW_AS_PRINTED else -float(amt)
-                txns.append(ParsedTxn(when=when, amount=amount, is_sip=(ttype == "PURCHASE_SIP")))
+                txns.append(ParsedTxn(
+                    when=when,
+                    amount=amount,
+                    is_sip=(ttype == "PURCHASE_SIP"),
+                    txn_type=_CANON_TXN_TYPE.get(ttype, ttype.lower()),
+                    units=_opt_float(t.get("units")) or 0.0,
+                    nav=_opt_float(t.get("nav")),
+                ))
             holdings.append(
                 ParsedHolding(
                     isin=isin,
@@ -251,3 +280,68 @@ def _opt_float(v: Any) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Ledger row construction (B2) — CAS holdings → canonical append-only ledger rows
+# ---------------------------------------------------------------------------
+
+_FOLIO_PLAN_SUFFIX = re.compile(r"\s*/\s*0+\s*$")
+
+
+def normalize_folio(folio: str) -> str:
+    """Canonical folio for ledger/holdings agreement (B82): trim whitespace and strip a trailing `/0`
+    plan suffix CAMS appends (e.g. `12345/0` → `12345`). Conservative — only a slash-zeros tail is
+    removed, never digits from the folio body."""
+    if not folio:
+        return ""
+    return _FOLIO_PLAN_SUFFIX.sub("", folio.strip()).strip()
+
+
+def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
+    """Deterministic per-txn fingerprint. casparser exposes NO stable txn id, so source_ref must be
+    derived so a re-upload of the same statement reproduces it → ON CONFLICT skip (idempotent). Encodes
+    units, so two same-amount/different-units txns don't collide. A genuine duplicate (every field
+    identical) is indistinguishable in a CAS and de-dups to one row — accepted, best-effort."""
+    import hashlib
+
+    raw = f"{isin}|{folio_norm}|{t.when.isoformat()}|{t.txn_type}|{t.amount:.2f}|{t.units:.4f}"
+    return "cas:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def build_cas_ledger_rows(
+    parsed: list[ParsedHolding], *, user_id: str, portfolio_id: str
+) -> list[dict[str, Any]]:
+    """Map parsed CAS holdings → canonical append-only ledger rows (mf.portfolio_transactions), reusing
+    the B65 signed `amount` from parse_cas (never raw casparser amounts). `user_id` is the AUTHENTICATED
+    uploader (task arg) — a ParsedHolding carries NO user_id, so a row can never be owned by the file.
+
+    v1 ingests the cashflow txns parse_cas surfaces; dividend_reinvest/bonus/split/tax are not yet in
+    the ledger — B3's holdings replay-parity vs mf_user_holdings will surface any units gap and drive
+    the extension (don't add them speculatively)."""
+    import uuid as _uuid
+
+    uid = _uuid.UUID(user_id)
+    pid = _uuid.UUID(portfolio_id)
+    rows: list[dict[str, Any]] = []
+    for p in parsed:
+        folio_norm = normalize_folio(p.folio_number)
+        for t in p.txns:
+            rows.append(
+                {
+                    "user_id": uid,
+                    "portfolio_id": pid,
+                    "asset_class": "mf",
+                    "instrument_id": p.isin,
+                    "folio_number": folio_norm,
+                    "txn_type": t.txn_type,
+                    "txn_date": t.when,
+                    "units": t.units,
+                    "nav_or_price": t.nav,
+                    "amount": t.amount,
+                    "source": "cas",
+                    "source_ref": _cas_source_ref(p.isin, folio_norm, t),
+                    "parser_version": PARSER_VERSION,
+                }
+            )
+    return rows
