@@ -122,7 +122,10 @@ os.environ["COOKIE_SECURE"] = "false"
 # B80: the runtime DSN is the least-privilege dhanradar_app role. db_tables creates that role with
 # this password; app_db_engine connects as it to prove the de-superusered privileges. db_engine
 # (owner) keeps using migration_database_url (superuser) for schema/table creation + truncation.
-os.environ.setdefault("DHANRADAR_APP_DB_PASSWORD", "dhanradar_app_test")
+# HARD set (not setdefault): an empty-string DHANRADAR_APP_DB_PASSWORD in the env would defeat
+# setdefault and silently run the least-priv tests as the OWNER (false-green), and it must match the
+# password db_tables creates the role with.
+os.environ["DHANRADAR_APP_DB_PASSWORD"] = "dhanradar_app_test"
 
 # ---------------------------------------------------------------------------
 # RSA keypair fixture
@@ -325,11 +328,15 @@ async def db_tables(db_engine):
         await conn.run_sync(MetaBase.metadata.create_all)
 
     # B80: create the least-privilege dhanradar_app role + grants so app_db_engine can connect.
-    # Owner runs this (idempotent). Mirrors migration 0051 over the schemas db_tables creates.
+    # Schema set derives from the single source dhanradar.db_schemas.APP_SCHEMAS (the per-schema
+    # regression test asserts APP_SCHEMAS == reality, so the grant set can't drift like 0051 did).
+    from dhanradar.db_schemas import APP_SCHEMAS
+
+    _schema_array = "ARRAY[" + ", ".join(f"'{s}'" for s in APP_SCHEMAS) + "]"
     async with db_engine.begin() as conn:
         await conn.execute(
             text(
-                """
+                f"""
                 DO $$
                 DECLARE s text;
                 BEGIN
@@ -338,13 +345,19 @@ async def db_tables(db_engine):
                             LOGIN PASSWORD 'dhanradar_app_test';
                     END IF;
                     EXECUTE format('GRANT CONNECT ON DATABASE %I TO dhanradar_app', current_database());
-                    FOREACH s IN ARRAY ARRAY['auth','billing','mf','notify','compliance','mood',
-                        'consent','audit','education','news','concepts','signal','bse'] LOOP
+                    FOREACH s IN ARRAY {_schema_array} LOOP
                         EXECUTE format('GRANT USAGE ON SCHEMA %I TO dhanradar_app', s);
                         EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO dhanradar_app', s);
                         EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO dhanradar_app', s);
                         EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO dhanradar_app', s);
                     END LOOP;
+                    -- Match migration 0052: the audit ledger is append-only (INSERT/SELECT only).
+                    IF to_regnamespace('audit') IS NOT NULL THEN
+                        EXECUTE 'REVOKE UPDATE, DELETE ON ALL TABLES IN SCHEMA audit FROM dhanradar_app';
+                    END IF;
+                    IF to_regclass('compliance.ai_recommendation_audit') IS NOT NULL THEN
+                        EXECUTE 'REVOKE UPDATE, DELETE ON TABLE compliance.ai_recommendation_audit FROM dhanradar_app';
+                    END IF;
                 END $$;
                 """
             )

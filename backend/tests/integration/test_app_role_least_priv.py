@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from dhanradar.db_schemas import APP_SCHEMAS
 from dhanradar.mf.ledger import APPEND_ONLY_TRIGGER_STATEMENTS
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfPortfolio, MfPortfolioTransaction
@@ -103,6 +104,69 @@ async def test_app_role_is_not_superuser(app_session):
     field surfaces (so an operator can alert if a deploy fell back to the owner role)."""
     is_super = await app_session.scalar(text("SELECT current_setting('is_superuser')"))
     assert str(is_super).lower() == "off"
+
+
+async def test_app_role_has_no_bypassrls(app_session):
+    """B81 (RLS) depends on dhanradar_app being NOBYPASSRLS — otherwise FORCE RLS would not bind it
+    and owner-scoping would silently leak across users."""
+    bypass = await app_session.scalar(
+        text("SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user")
+    )
+    assert bypass is False
+
+
+async def test_app_role_can_read_every_app_schema(db_session, app_session):
+    """REGRESSION for the B80 grant-gap (the test that would have caught it): dhanradar_app must be
+    able to read a table in EVERY schema that has tables — this failed for 7 schemas (audit,
+    billing, bse, concepts, education, notify, signal) before the 0052 fix. Also asserts the
+    centralized APP_SCHEMAS equals the schemas that actually have tables, so adding a schema (or a
+    typo like notif→notify) without granting it fails here instead of in prod."""
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT table_schema, min(table_name) AS t FROM information_schema.tables "
+                "WHERE table_type = 'BASE TABLE' "
+                "AND table_schema NOT IN ('pg_catalog', 'information_schema', 'public') "
+                "AND table_schema NOT LIKE '\\_timescaledb%' "
+                "GROUP BY table_schema"
+            )
+        )
+    ).all()
+    table_by_schema = {s: t for s, t in rows}
+    real_schemas = set(table_by_schema)
+
+    # No drift: the single-source constant == the schemas that actually have tables. (The test DB
+    # is built by ORM create_all, so every app schema needs a registered model in conftest's
+    # db_tables — which is already required for the suite to run; a future raw-SQL-only schema must
+    # add its model there too, the same place the grant set is derived from.)
+    assert real_schemas == set(APP_SCHEMAS), (
+        f"APP_SCHEMAS drift — ungranted-schema-with-tables={real_schemas - set(APP_SCHEMAS)}, "
+        f"phantom-in-APP_SCHEMAS={set(APP_SCHEMAS) - real_schemas}"
+    )
+
+    # dhanradar_app can SELECT a table in each (would 'permission denied' for an ungranted schema).
+    for schema, table in table_by_schema.items():
+        await app_session.execute(text(f'SELECT 1 FROM "{schema}"."{table}" LIMIT 1'))
+    await app_session.rollback()
+
+
+async def test_app_role_cannot_mutate_audit_ledger(db_session, app_session):
+    """Audit tables are append-only (SEBI 7-yr / DPDP): dhanradar_app may INSERT + SELECT but must
+    NOT UPDATE or DELETE (the 0052 REVOKE — DB-level enforcement until the immutability trigger
+    ships). Checked via has_table_privilege so no real audit row is touched."""
+    audit_table = await db_session.scalar(
+        text(
+            "SELECT format('%I.%I', table_schema, table_name) FROM information_schema.tables "
+            "WHERE table_schema = 'audit' AND table_type = 'BASE TABLE' ORDER BY table_name LIMIT 1"
+        )
+    )
+    assert audit_table is not None, "expected at least one audit table"
+    privs = {}
+    for p in ("INSERT", "SELECT", "UPDATE", "DELETE"):
+        privs[p] = await app_session.scalar(
+            text("SELECT has_table_privilege(:t, :p)").bindparams(t=audit_table, p=p)
+        )
+    assert privs == {"INSERT": True, "SELECT": True, "UPDATE": False, "DELETE": False}, privs
 
 
 async def test_app_role_normal_crud_works(db_session, app_session):
