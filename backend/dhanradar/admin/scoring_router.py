@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.compliance.service import is_engine_version_activated, list_engine_versions
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.mf import MfFund
 from dhanradar.scoring.engine.config import get_config
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/admin", tags=["admin-scoring-read"])
 @router.get("/scoring/model", response_model=ScoringModelResponse)
 async def get_scoring_model(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> ScoringModelResponse:
     """Return the current scoring engine config, registry history, and coverage.
 

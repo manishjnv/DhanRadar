@@ -39,7 +39,7 @@ from dhanradar.billing.service import (
     list_subscriptions,
     subscription_metrics,
 )
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 
 from .billing_schemas import (
@@ -69,7 +69,7 @@ _FAILED_STATUS = "failed"
 @router.get("/billing/overview", response_model=BillingOverviewResponse)
 async def get_billing_overview(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> BillingOverviewResponse:
     """MRR, ARPU, active subscriptions, past-due count, and trial count."""
     data = await compute_billing_overview(db)
@@ -84,7 +84,7 @@ async def get_billing_overview(
 @router.get("/billing/subscriptions", response_model=list[SubscriptionListItem])
 async def get_subscriptions(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     status: Annotated[str | None, Query(description="Filter by raw Razorpay status")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -102,7 +102,7 @@ async def get_subscriptions(
 @router.get("/billing/payments", response_model=list[PaymentEventItem])
 async def get_payments(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PaymentEventItem]:
@@ -119,7 +119,7 @@ async def get_payments(
 @router.get("/billing/subscription-metrics", response_model=SubscriptionMetricsResponse)
 async def get_subscription_metrics(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> SubscriptionMetricsResponse:
     """Premium count, trials, 30-day renewals and churn (best-effort)."""
     data = await subscription_metrics(db)
@@ -134,7 +134,7 @@ async def get_subscription_metrics(
 @router.get("/billing/webhook-health", response_model=WebhookHealthResponse)
 async def get_webhook_health(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> WebhookHealthResponse:
     """Best-effort webhook health derived from audit.payment_events (last 24h).
 
@@ -178,7 +178,7 @@ async def get_webhook_health(
 async def post_refund(
     request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     body: RefundRequest,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> RefundResponse:
@@ -238,7 +238,7 @@ async def post_user_plan(
     request: Request,
     user_id: str,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     body: PlanChangeRequest,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,  # accepted, ignored
 ) -> PlanChangeResponse:

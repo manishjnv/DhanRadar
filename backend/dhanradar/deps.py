@@ -105,6 +105,14 @@ async def current_user_or_anonymous(
     # Bind hashed user ref into the structlog context (raw user_id never logged).
     bind_contextvars(user_ref=hash_user_ref(user_id))
 
+    # B81: scope this request's transaction to the authenticated owner so RLS on personal tables
+    # returns only their rows. SET LOCAL (set_config ..., is_local=true) — resets at commit/rollback,
+    # never leaks across the pooled connection. FastAPI caches Depends(get_db), so this same session
+    # is the one the route uses → the GUC is set before the route's personal-table queries.
+    from dhanradar.db_security import set_rls_user
+
+    await set_rls_user(db, user_id)
+
     return UserContext(
         user_id=user_id,
         tier=tier,

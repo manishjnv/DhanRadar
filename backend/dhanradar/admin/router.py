@@ -27,7 +27,7 @@ from dhanradar.compliance.service import (
     ActivationConflictError,
     DisclaimerConflictError,
 )
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.scoring.engine import activation
 from dhanradar.scoring.engine.config import get_config
@@ -54,7 +54,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def create_disclaimer(
     body: CreateDisclaimerRequest,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> CreateDisclaimerResponse:
     """Create a new disclaimer version (INACTIVE). Activation is a separate step."""
     try:
@@ -86,7 +86,7 @@ async def activate_disclaimer(
     version: str,
     request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> ActivateDisclaimerResponse:
     """Promote a disclaimer version to active (single-active-per-type invariant)."""
     try:
@@ -133,7 +133,7 @@ async def activate_scoring_model(
     body: ActivateModelRequest,
     request: Request,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> ActivateModelResponse:
     """Activate a scoring model_version (B6/B28 two-person + backtest gate).
 
@@ -207,7 +207,7 @@ async def activate_scoring_model(
 async def get_scoring_model_status(
     model_version: str,
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> ModelActivationStatusResponse:
     """Return the activation status of a scoring model_version (B6/B28).
 
@@ -239,7 +239,7 @@ async def get_scoring_model_status(
 )
 async def get_label_churn(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     recommendation_type: str = "educational_label",
 ) -> LabelChurnResponse:
     """Churn review over the two most-recent audit batch days for a recommendation type."""

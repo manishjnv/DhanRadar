@@ -60,7 +60,7 @@ from dhanradar.compliance.service import (
     list_engine_versions,
     safety_monitor_summary,
 )
-from dhanradar.db import get_db
+from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.redis_client import get_redis
 from dhanradar.scoring.engine.config import get_config
@@ -146,7 +146,7 @@ def _churn_to_summary(churn: dict) -> LabelChurnSummary:
 @router.get("/ai", response_model=AiDashboardResponse)
 async def get_ai_dashboard(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> AiDashboardResponse:
     """Return the AI Ops at-a-glance dashboard.
 
@@ -214,7 +214,7 @@ async def get_ai_dashboard(
 @router.get("/ai/versions", response_model=AiVersionsResponse)
 async def get_ai_versions(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     limit: int = Query(default=50, ge=1, le=200),
 ) -> AiVersionsResponse:
     """Return the rating_engine_changelog version registry (read-only).
@@ -255,7 +255,7 @@ async def get_ai_versions(
 @router.get("/ai/prompts", response_model=AiPromptsResponse)
 async def get_ai_prompts(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> AiPromptsResponse:
     """Return prompt version metadata (no DB registry — derived from audit trail).
@@ -276,7 +276,7 @@ async def get_ai_prompts(
 @router.get("/ai/eval", response_model=AiEvalResponse)
 async def get_ai_eval(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
 ) -> AiEvalResponse:
     """Return data quality issues + groundedness eval status.
 
@@ -343,7 +343,7 @@ async def get_ai_eval(
 @router.get("/ai/safety", response_model=AiSafetyResponse)
 async def get_ai_safety(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     days: int = Query(default=7, ge=1, le=90),
 ) -> AiSafetyResponse:
     """Return the safety monitoring snapshot.
@@ -402,7 +402,7 @@ async def get_ai_safety(
 @router.get("/ai/feedback", response_model=AiFeedbackResponse)
 async def get_ai_feedback(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     days: int = Query(default=30, ge=1, le=90),
 ) -> AiFeedbackResponse:
     """Return aggregate user feedback stats for the AI Ops console.
@@ -450,7 +450,7 @@ async def get_ai_cost(
 @router.post("/ai/prompts", response_model=PromptTemplateRow, status_code=201)
 async def create_prompt_template(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     body: PromptTemplateCreateRequest,
 ) -> PromptTemplateRow:
     """Create a new (INACTIVE) prompt template version.
@@ -511,7 +511,7 @@ async def create_prompt_template(
 )
 async def activate_prompt_template(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     template_key: str,
     version: int,
 ) -> PromptTemplateRow:
@@ -590,7 +590,7 @@ async def activate_prompt_template(
 @router.post("/ai/cost/caps", response_model=BudgetCapsResponse)
 async def set_budget_caps(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
     body: BudgetCapsSetRequest,
 ) -> BudgetCapsResponse:
     """Set (or reset) the live AI budget caps without a redeploy.
