@@ -11,6 +11,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import type { Strength, Band3 } from './sampleData';
+import { HelpTip } from '@/components/ui/HelpTip';
 
 // ───────────────────────────────────────────────────────────────────────────
 // tone → text colour
@@ -68,19 +69,11 @@ export function Panel({ children, className }: { children: React.ReactNode; clas
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Info-tip "i" bubble (KPI snapshot / advanced risk)
+// Info-tip "i" bubble — thin alias over the shared HelpTip primitive.
+// Call sites unchanged; styling now comes from HelpTip.
 // ───────────────────────────────────────────────────────────────────────────
 export function InfoTip({ tip }: { tip: string }) {
-  return (
-    <button
-      type="button"
-      title={tip}
-      aria-label={tip}
-      className="inline-grid h-3.5 w-3.5 cursor-help place-items-center rounded-full bg-surface-3 text-[9px] font-bold text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
-    >
-      i
-    </button>
-  );
+  return <HelpTip tip={tip} />;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

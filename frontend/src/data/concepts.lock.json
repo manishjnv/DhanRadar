@@ -1,0 +1,157 @@
+{
+  "portfolio.summary": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "holdings.list": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "PERSONAL"
+  },
+  "holdings.xirr": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "holdings.pnl": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.valuation_series": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.allocation": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.allocation_sector": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.overlap": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.concentration": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "portfolio.health": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "portfolio.diversification": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "portfolio.risk": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.risk_advanced": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.cost": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.performance": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.benchmark": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "portfolio.projection": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "portfolio.tax": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
+  "goals.list": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "PERSONAL"
+  },
+  "goals.progress": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "fund.label": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "COMPLIANCE"
+  },
+  "portfolio.score_raw": {
+    "visibility_class": "gated",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "mood.current": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "portfolio.recommendations": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "portfolio.opportunities": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "DERIVED"
+  },
+  "portfolio.ai_feed": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "AI_GENERATED"
+  },
+  "portfolio.ai_summary": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "AI_GENERATED"
+  },
+  "portfolio.timeline": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "PERSONAL"
+  },
+  "portfolio.reports": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "SYSTEM"
+  },
+  "advice.suitability": {
+    "visibility_class": "gated",
+    "data_class": "derived-personal",
+    "content_class": "COMPLIANCE"
+  },
+  "sync.status": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "SYSTEM"
+  }
+}

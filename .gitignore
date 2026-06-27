@@ -45,6 +45,10 @@ pnpm-debug.log*
 *.log
 *.pid
 data/
+# …but frontend/src/data holds the concept-registry SOURCE (UI_DATA_ARCHITECTURE_PLAN.md §5),
+# not runtime data — keep it tracked despite the generic data/ rule above.
+!frontend/src/data/
+!frontend/src/data/**
 postgres-data/
 redis-data/
 # Deploy state (last-good SHA + alembic rev recorded by scripts/deploy.sh)

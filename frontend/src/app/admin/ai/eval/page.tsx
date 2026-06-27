@@ -19,6 +19,7 @@ export const dynamic = 'force-dynamic';
 
 import * as React from 'react';
 import { RefreshCw, CheckCircle2, Info } from 'lucide-react';
+import { HelpTip } from '@/components/ui/HelpTip';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -120,13 +121,9 @@ function QualityIssueTable({ issues }: { issues: AdminAIQualityIssueRow[] }) {
                       )}
                     </span>
                     {help && (
-                      <span
-                        title={help}
-                        className="mt-px shrink-0 cursor-help text-ink-muted"
-                        aria-label={`Help: ${help}`}
-                      >
-                        <Info size={11} />
-                      </span>
+                      <HelpTip tip={help} className="mt-px shrink-0 text-ink-muted">
+                        <Info size={11} aria-hidden="true" />
+                      </HelpTip>
                     )}
                   </span>
                 </td>

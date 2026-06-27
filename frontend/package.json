@@ -11,6 +11,8 @@
     "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/types/api.ts",
     "gen:tokens": "node scripts/gen-tokens.mjs",
     "check:tokens": "node scripts/gen-tokens.mjs --check",
+    "gen:concepts": "node scripts/gen-concepts.mjs",
+    "check:concepts": "node scripts/gen-concepts.mjs --check",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
