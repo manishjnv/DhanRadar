@@ -70,7 +70,8 @@ END
 $$;
 
 GRANT CONNECT ON DATABASE dhanradar TO dhanradar_app;
-GRANT CREATE ON DATABASE dhanradar TO dhanradar_app;
+-- NB: NO `GRANT CREATE ON DATABASE` — the runtime role must not create schemas/objects
+-- (least-privilege, B80). Migration 0051 also REVOKEs it for already-provisioned DBs.
 
 -- ---------------------------------------------------------------------------
 -- Schemas per domain concern

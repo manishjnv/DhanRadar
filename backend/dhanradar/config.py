@@ -28,9 +28,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     POSTGRES_HOST: str = "dhanradar-postgres"
     POSTGRES_PORT: int = 5432
+    # Owner / superuser role: used by Alembic migrations + owns every table & trigger.
     POSTGRES_USER: str = "dhanradar"
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str = "dhanradar"
+
+    # Least-privilege RUNTIME role (B80). The FastAPI app + Celery connect as this so the
+    # append-only trigger (I12) and RLS (I5) actually bind them. When the password is unset,
+    # database_url falls back to the owner role with a loud warning — a half-configured env runs
+    # (no outage) at the old privilege until the password is set on the box. Field names ARE the
+    # env-var names (this file's convention: POSTGRES_PASSWORD, RAZORPAY_KEY_ID, …).
+    DHANRADAR_APP_DB_USER: str = "dhanradar_app"
+    DHANRADAR_APP_DB_PASSWORD: str | None = None
 
     # ------------------------------------------------------------------
     # Redis
@@ -410,14 +419,36 @@ class Settings(BaseSettings):
                 self.ENV,
             )
 
+    def _dsn(self, user: str, password: str) -> str:
+        return (
+            f"postgresql+asyncpg://{user}:{password}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
     @computed_field  # type: ignore[misc]
     @property
     def database_url(self) -> str:
-        """Async-compatible DSN for SQLAlchemy + asyncpg."""
-        return (
-            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        """RUNTIME DSN (app + Celery) — the least-privilege dhanradar_app role (B80), so the
+        append-only trigger (I12) and RLS (I5) bind the app. Falls back to the owner role with a
+        startup warning when APP_DB_PASSWORD is unset, so a half-configured deploy never errors —
+        it runs at the old (superuser) privilege until the app password is set on the box."""
+        import logging
+
+        if self.DHANRADAR_APP_DB_PASSWORD:
+            return self._dsn(self.DHANRADAR_APP_DB_USER, self.DHANRADAR_APP_DB_PASSWORD)
+        logging.getLogger("dhanradar.config").warning(
+            "DHANRADAR_APP_DB_PASSWORD unset — DB connection uses the OWNER/superuser role (%s). "
+            "I12 append-only + I5 RLS are NOT hard-enforced until the app role is configured (B80).",
+            self.POSTGRES_USER,
         )
+        return self._dsn(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def migration_database_url(self) -> str:
+        """OWNER DSN — used ONLY by Alembic env.py. DDL + table/trigger ownership stay with the
+        owner so the app role (dhanradar_app) cannot DISABLE TRIGGER or otherwise bypass I12/I5."""
+        return self._dsn(self.POSTGRES_USER, self.POSTGRES_PASSWORD)
 
 
 settings = Settings()  # type: ignore[call-arg]
