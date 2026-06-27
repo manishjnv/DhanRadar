@@ -95,22 +95,23 @@ CREATE SCHEMA IF NOT EXISTS notif;
 CREATE SCHEMA IF NOT EXISTS gamif;
 CREATE SCHEMA IF NOT EXISTS onboarding;
 
--- Grant usage on all schemas to the app role
-GRANT USAGE ON SCHEMA
-    auth, consent, compliance, admin,
-    mf, etf, stock, news, search, portfolio,
-    mood, scoring, market_data, ai, notif, gamif, onboarding
-TO dhanradar_app;
-
--- Grant default privileges for future tables/sequences
-ALTER DEFAULT PRIVILEGES IN SCHEMA
-    auth, consent, compliance, admin,
-    mf, etf, stock, news, search, portfolio,
-    mood, scoring, market_data, ai, notif, gamif, onboarding
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dhanradar_app;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA
-    auth, consent, compliance, admin,
-    mf, etf, stock, news, search, portfolio,
-    mood, scoring, market_data, ai, notif, gamif, onboarding
-GRANT USAGE, SELECT ON SEQUENCES TO dhanradar_app;
+-- Grant the app role on the REAL schema set — the schemas migrations actually create (= the
+-- single source `dhanradar.db_schemas.APP_SCHEMAS`), NOT the aspirational module list above.
+-- (The original B80 defect was granting that aspirational list, leaving 7 real schemas with zero
+-- grants → a prod outage when the app de-superusers. See docs/rca.) init runs BEFORE migrations, so
+-- a schema not yet created (e.g. billing/notify/audit/…) is skipped here and granted by migration
+-- 0052 once it exists. EXECUTE on functions is included (the old lists omitted it).
+DO $$
+DECLARE s text;
+BEGIN
+    FOREACH s IN ARRAY ARRAY['auth','billing','mf','notify','compliance','mood','consent',
+        'audit','education','news','concepts','signal','bse'] LOOP
+        IF to_regnamespace(s) IS NULL THEN
+            CONTINUE;  -- created later by its migration; migration 0052 grants it
+        END IF;
+        EXECUTE format('GRANT USAGE ON SCHEMA %I TO dhanradar_app', s);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dhanradar_app', s);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO dhanradar_app', s);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT EXECUTE ON FUNCTIONS TO dhanradar_app', s);
+    END LOOP;
+END $$;

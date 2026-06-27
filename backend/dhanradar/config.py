@@ -419,6 +419,21 @@ class Settings(BaseSettings):
                 self.ENV,
             )
 
+        # B80 fail-closed boot guard: outside dev/test/ci the runtime MUST connect as the
+        # least-privilege dhanradar_app role — never silently fall back to the DB superuser (which
+        # would leave I12 append-only + I5 RLS unenforced with only a WARN). Mirror the consent
+        # kill-switch above. Safe: the deploy order is migrate → set DHANRADAR_APP_DB_PASSWORD →
+        # compose up, so prod always boots with it set (deploy.sh syncs it onto the role).
+        if (
+            self.ENV.strip().lower() not in _CONSENT_BYPASS_ALLOWED_ENVS
+            and not self.DHANRADAR_APP_DB_PASSWORD
+        ):
+            raise ValueError(
+                f"DHANRADAR_APP_DB_PASSWORD is required in ENV={self.ENV!r} (B80): the runtime must "
+                "connect as the least-privilege dhanradar_app role, not the DB superuser. Set it in "
+                ".env before starting (deploy.sh applies it to the role)."
+            )
+
     def _dsn(self, user: str, password: str) -> str:
         return (
             f"postgresql+asyncpg://{user}:{password}"
@@ -429,9 +444,10 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """RUNTIME DSN (app + Celery) — the least-privilege dhanradar_app role (B80), so the
-        append-only trigger (I12) and RLS (I5) bind the app. Falls back to the owner role with a
-        startup warning when APP_DB_PASSWORD is unset, so a half-configured deploy never errors —
-        it runs at the old (superuser) privilege until the app password is set on the box."""
+        append-only trigger (I12) and RLS (I5) bind the app. In dev/test/ci ONLY, falls back to the
+        owner role with a startup warning when the app password is unset (local convenience). In any
+        other ENV, model_post_init has already FAILED the boot (fail-closed) before this is reached,
+        so prod can never silently run as superuser."""
         import logging
 
         if self.DHANRADAR_APP_DB_PASSWORD:
