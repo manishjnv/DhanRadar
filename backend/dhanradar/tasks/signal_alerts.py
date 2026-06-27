@@ -139,7 +139,9 @@ def daily_signal_alert() -> str:
     """
     from sqlalchemy import select
 
-    from dhanradar.db import task_session
+    from dhanradar.db import (
+        admin_task_session,  # B81: cross-user scan (all users' signal_*) → BYPASSRLS
+    )
     from dhanradar.signal import service
     from dhanradar.signal.models import SignalRules
 
@@ -155,7 +157,7 @@ def daily_signal_alert() -> str:
             return f"signal_alert: state={signal_state}, no notifications sent"
 
         sent = 0
-        async with task_session() as db:
+        async with admin_task_session() as db:
             stmt = select(SignalRules).where(SignalRules.alerts_on.is_(True))
             result = await db.execute(stmt)
             users_with_alerts = list(result.scalars().all())
@@ -226,7 +228,9 @@ def auto_log_no_action() -> str:
     """
     from sqlalchemy import and_, func, select
 
-    from dhanradar.db import task_session
+    from dhanradar.db import (
+        admin_task_session,  # B81: cross-user scan (all users' signal_*) → BYPASSRLS
+    )
     from dhanradar.signal.models import SignalJournal, SignalRules
 
     async def _go() -> str:
@@ -257,7 +261,7 @@ def auto_log_no_action() -> str:
         today = date.today()
         inserted = 0
 
-        async with task_session() as db:
+        async with admin_task_session() as db:
             result = await db.execute(select(SignalRules))
             all_rules = list(result.scalars().all())
 
@@ -312,7 +316,9 @@ def sip_reminder() -> str:
     """
     from sqlalchemy import and_, func, select
 
-    from dhanradar.db import task_session
+    from dhanradar.db import (
+        admin_task_session,  # B81: cross-user scan (all users' signal_*) → BYPASSRLS
+    )
     from dhanradar.signal import service
     from dhanradar.signal.models import SignalNotification, SignalRules
 
@@ -321,7 +327,7 @@ def sip_reminder() -> str:
         cutoff = now_utc - timedelta(days=25)
         sent = 0
 
-        async with task_session() as db:
+        async with admin_task_session() as db:
             result = await db.execute(select(SignalRules))
             all_rules = list(result.scalars().all())
 
@@ -416,14 +422,16 @@ def check_achievements() -> str:
     """
     from sqlalchemy import select
 
-    from dhanradar.db import task_session
+    from dhanradar.db import (
+        admin_task_session,  # B81: cross-user scan (all users' signal_*) → BYPASSRLS
+    )
     from dhanradar.signal import service
     from dhanradar.signal.models import SignalRules
 
     async def _go() -> str:
         unlocked_total = 0
 
-        async with task_session() as db:
+        async with admin_task_session() as db:
             result = await db.execute(select(SignalRules))
             all_rules = list(result.scalars().all())
 

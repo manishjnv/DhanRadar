@@ -505,15 +505,20 @@ def override_get_db(db_session):
     Install app.dependency_overrides[get_db] to route DB calls through the
     test session. Returns the override dict so the test can verify or extend.
     """
-    from dhanradar.db import get_db
+    from dhanradar.db import get_admin_db, get_db
     from dhanradar.main import app
 
     async def _override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
+    # B81: the Razorpay webhook (+ admin routes) depend on get_admin_db (BYPASSRLS in prod). Route it
+    # through the SAME owner-role test session — request tests keep their shared-session visibility,
+    # and the owner role bypasses RLS exactly like dhanradar_admin does in prod.
+    app.dependency_overrides[get_admin_db] = _override_get_db
     yield
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_admin_db, None)
 
 
 @pytest_asyncio.fixture()

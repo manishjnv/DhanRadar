@@ -59,14 +59,17 @@ def drain_notifications() -> str:
 
 
 async def _drain() -> str:
-    from dhanradar.db import TaskSessionLocal
+    # B81: the drain reads/writes notify.* for ARBITRARY users pulled off the Redis queue (no per-user
+    # context), so it runs on the BYPASSRLS admin engine — the app engine would silently see 0 prefs
+    # and fail every notification_log WITH CHECK.
+    from dhanradar.db import AdminSessionLocal
     from dhanradar.redis_client import get_redis
 
     redis = get_redis()
     now = service.now_ist_time()
     delivered = 0
 
-    async with TaskSessionLocal() as db:
+    async with AdminSessionLocal() as db:
         for channel in _DELIVER_CHANNELS:
             qkey = service.queue_key(channel)
             pending = min(await redis.llen(qkey), _MAX_PER_TICK)
