@@ -48,6 +48,7 @@ from dhanradar.db import get_db
 from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous, is_plus
 from dhanradar.mf import history as mf_history
 from dhanradar.mf import service
+from dhanradar.mf.ledger import allow_ledger_purge
 from dhanradar.mf.schemas import (
     CasJobStatus,
     CasUploadResponse,
@@ -220,6 +221,9 @@ async def delete_portfolio(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
 
     portfolio = await _own_portfolio(db, portfolio_id, user.user_id)
+    # The ledger is append-only (I12); deleting a portfolio is a sanctioned purge, so opt this
+    # transaction's CASCADE into the trigger bypass before the delete (see mf.ledger).
+    await allow_ledger_purge(db)
     await db.delete(portfolio)
     await db.commit()
 

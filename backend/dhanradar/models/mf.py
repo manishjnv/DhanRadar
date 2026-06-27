@@ -226,6 +226,65 @@ class MfUserHolding(Base):
     )
 
 
+class MfPortfolioTransaction(Base):
+    """Append-only transaction ledger — the SOURCE OF TRUTH (UI_DATA_ARCHITECTURE_PLAN §11).
+
+    Holdings/snapshots/analytics are derived, replayable PROJECTIONS of these rows. A DB
+    trigger (migration 0050) forbids UPDATE/DELETE (I12); corrections are reversal rows,
+    never mutations. `asset_class` is present from day one so equity/ETF/gold/bond/NPS slot
+    in additively. `amount` is signed in the B65 investor convention (outflow negative,
+    inflow positive). RLS (I5) is deferred to a schema-wide change; `user_id` is the anchor
+    and owner-scoping is in-query today, like every other mf personal table.
+    """
+
+    __tablename__ = "portfolio_transactions"
+    __table_args__ = (
+        UniqueConstraint(
+            "portfolio_id",
+            "instrument_id",
+            "folio_number",
+            "txn_date",
+            "txn_type",
+            "amount",
+            "source_ref",
+            name="uq_portfolio_txn",
+        ),
+        Index("ix_portfolio_txn_portfolio_date", "portfolio_id", "txn_date"),
+        Index("ix_portfolio_txn_user", "user_id"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_class: Mapped[str] = mapped_column(Text, nullable=False, server_default="mf")
+    instrument_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # '' (not NULL) when an asset class has no folio — keeps the idempotency unique
+    # constraint reliable (NULLs are distinct in a UNIQUE index).
+    folio_number: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    txn_type: Mapped[str] = mapped_column(Text, nullable=False)
+    txn_date: Mapped[date] = mapped_column(Date, nullable=False)
+    units: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False, server_default="0")
+    nav_or_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    # Signed: outflow negative, inflow positive (B65 investor convention).
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfPortfolioSnapshot(Base):
     __tablename__ = "mf_portfolio_snapshots"
     __table_args__ = (
