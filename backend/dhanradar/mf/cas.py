@@ -52,9 +52,13 @@ CasReader = Callable[[str, str | None], Any]
 #     DIVIDEND_REINVEST, SEGREGATION, STT_TAX, STAMP_DUTY_TAX, TDS_TAX,
 #     MISC, UNKNOWN
 _TXN_INFLOW_AS_PRINTED = frozenset({"DIVIDEND_PAYOUT"})
+# Unit-affecting but NO external cashflow — recorded in the ledger with amount=0 (their UNITS matter
+# for the holdings projection, B3): dividend_reinvest adds the reinvested units. Amount 0 is B65-neutral
+# (XIRR ignores it) so the cashflow/report path is unchanged.
+_TXN_UNIT_ONLY = frozenset({"DIVIDEND_REINVEST"})
+# Fully excluded — no units AND no external cashflow (immaterial charges / noise).
 _TXN_FLOW_EXCLUDED = frozenset(
-    {"DIVIDEND_REINVEST", "SEGREGATION", "STT_TAX", "STAMP_DUTY_TAX",
-     "TDS_TAX", "MISC", "UNKNOWN"}
+    {"SEGREGATION", "STT_TAX", "STAMP_DUTY_TAX", "TDS_TAX", "MISC", "UNKNOWN"}
 )
 
 #: casparser txn type → canonical ledger txn_type (plan §11 vocab). Only the cashflow types B2 ingests
@@ -69,6 +73,7 @@ _CANON_TXN_TYPE = {
     "SWITCH_OUT": "switch_out",
     "SWITCH_OUT_MERGER": "switch_out",
     "DIVIDEND_PAYOUT": "dividend_payout",
+    "DIVIDEND_REINVEST": "dividend_reinvest",
     "REVERSAL": "reversal",
 }
 
@@ -191,6 +196,18 @@ def parse_cas(
                 ttype = str(getattr(ttype_raw, "value", ttype_raw) or "").upper()
                 if ttype in _TXN_FLOW_EXCLUDED:
                     excluded_txns += 1
+                    continue
+                if ttype in _TXN_UNIT_ONLY:
+                    # Reinvested units, no external cash → amount 0 (XIRR-neutral); captured so the
+                    # holdings projection's Σ units reaches the AMC close balance (B3 units parity).
+                    txns.append(ParsedTxn(
+                        when=when,
+                        amount=0.0,
+                        is_sip=False,
+                        txn_type=_CANON_TXN_TYPE.get(ttype, ttype.lower()),
+                        units=_opt_float(t.get("units")) or 0.0,
+                        nav=_opt_float(t.get("nav")),
+                    ))
                     continue
                 amount = float(amt) if ttype in _TXN_INFLOW_AS_PRINTED else -float(amt)
                 txns.append(ParsedTxn(

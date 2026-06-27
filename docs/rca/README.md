@@ -15,6 +15,33 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-28 — B3: holdings projection could ship WRONG units on a PARTIAL ledger gap (caught in review)
+
+- **Symptom:** the B3 cutover makes holdings a projection of the ledger (units = Σ ledger unit-deltas).
+  The first implementation fell back to the AMC close balance ONLY when a holding had ZERO ledger txns.
+  A holding with SOME txns but missing others (an un-captured txn type — bonus/split — or two identical
+  txns deduped to one by the deterministic source_ref fingerprint) would project Σ units < the AMC
+  close and write that smaller, WRONG units silently — a holdings regression. (Caught by the independent
+  adversarial review BEFORE merge, not in prod.)
+- **Root cause:** a projection trusted to be complete without validating against the authoritative
+  source. casparser's close balance (`p.units`) is the AMC's reported position; the ledger reconstructs
+  it ONLY if every unit-affecting txn type is captured. B2/B3 v1 captures purchase/redemption/switch/
+  dividend_reinvest but not bonus/split, and the source_ref dedups two genuinely-identical txns — so Σ
+  ledger units can legitimately fall short of the AMC close.
+- **Fix:** `mf/projection.py` `UNITS_GAP_TOLERANCE` + a guard in `tasks/mf.py::_project_and_write_holdings`:
+  use the projection ONLY when `abs(Σ units − AMC close) <= 0.001`; otherwise fall back to the parsed
+  snapshot (AMC units + cost) and `_slog.warning("mf.holdings.units_gap", …)`. The cutover can never
+  regress units below today's behaviour; it upgrades to ledger-derived values only where the ledger
+  fully reconstructs the position. Added `test_units_gap_falls_back_to_amc_close`.
+- **Prevention:**
+  - **Rule — a projection of an external source must VALIDATE against that source's authoritative figure
+    and FALL BACK (not silently diverge) when they disagree.** Log the disagreement so the gap drives
+    the next txn-mapping extension, rather than silently shipping a wrong number.
+  - Replay-parity is asserted on UNITS (the reconstructable invariant); cost parity only where
+    representable (purchase-only) — the AMC FIFO cost basis is parsed from the PDF, not a ledger
+    function, so it is a documented residual, not a target.
+- **Phase/area:** Backend — B3 holdings-from-ledger projection.
+
 ### 2026-06-28 — B85: RLS commit-then-read 500 — `db.refresh()` after commit on FORCE-RLS mf_portfolios
 
 - **Symptom:** create/rename portfolio + first CAS upload would HTTP 500 the moment the app runs as
