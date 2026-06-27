@@ -72,7 +72,8 @@ async def test_authenticate_user_stamps_last_login_at(patch_redis):
 
     assert result is user
     # record_login issues an UPDATE via db.execute + db.add (INSERT), then db.commit
-    db.execute.assert_called_once()
+    # record_login issues 2 executes — the UPDATE (last_login_at) + the B81 set_rls_user GUC.
+    assert db.execute.call_count == 2
     db.add.assert_called_once()
     db.commit.assert_called_once()
 
@@ -153,7 +154,8 @@ async def test_authenticate_totp_stamps_last_login_at(patch_redis):
     result = await svc.authenticate_totp("test@example.com", code, db)
 
     assert result is user
-    db.execute.assert_called_once()
+    # record_login issues 2 executes — the UPDATE (last_login_at) + the B81 set_rls_user GUC.
+    assert db.execute.call_count == 2
     db.add.assert_called_once()
     db.commit.assert_called_once()
 
@@ -180,7 +182,8 @@ async def test_authenticate_email_otp_stamps_last_login_at(patch_redis):
     result = await svc.authenticate_email_otp("test@example.com", code, db)
 
     assert result is user
-    db.execute.assert_called_once()
+    # record_login issues 2 executes — the UPDATE (last_login_at) + the B81 set_rls_user GUC.
+    assert db.execute.call_count == 2
     db.add.assert_called_once()
     db.commit.assert_called_once()
 
@@ -207,11 +210,14 @@ async def test_record_login_issues_update_and_insert(patch_redis):
 
     await svc.record_login(user, db, method="password")
 
-    # UPDATE was issued
-    db.execute.assert_called_once()
-    update_stmt = db.execute.call_args[0][0]
-    assert hasattr(update_stmt, "table"), "execute() was not called with an UPDATE statement"
+    # record_login issues 2 executes: the UPDATE (last_login_at) then the B81 set_rls_user GUC.
+    assert db.execute.call_count == 2
+    update_stmt = db.execute.call_args_list[0][0][0]
+    assert hasattr(update_stmt, "table"), "first execute() was not an UPDATE statement"
     assert update_stmt.table.name == "users"
+    # The second execute sets the RLS owner GUC so the UserActivityLog INSERT passes WITH CHECK.
+    guc_call = db.execute.call_args_list[1]
+    assert guc_call[0][1] == {"guc": "app.user_id", "uid": str(user.id)}
 
     # UserActivityLog row was added
     db.add.assert_called_once()
