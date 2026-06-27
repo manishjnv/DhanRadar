@@ -253,8 +253,13 @@ async def _run_pipeline(
 ) -> str:
     from sqlalchemy import update
 
-    # ponytail: CAS via bypass — multi-commit (parsing/scoring/done) makes per-user SET LOCAL fragile; PR-2 can re-set per txn
-    from dhanradar.db import admin_task_session
+    # B81 PR-2: CAS writes the uploader's personal tables (cas_job/holdings/sip/scores/history/
+    # snapshot), so it runs RLS WITH-CHECK enforced AS THE OWNER, not on the bypass admin engine.
+    # rls_user_session re-applies the app.user_id GUC on every transaction begin, so the owner scope
+    # survives the pipeline's 3+ progress commits AND the per-fund commit inside append_score_history
+    # (a plain SET LOCAL would be cleared by each). user_id is the authenticated uploader (task arg),
+    # never from the parsed file.
+    from dhanradar.db_security import rls_user_session
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
@@ -276,7 +281,10 @@ async def _run_pipeline(
     parsed = parse_cas(path, password)  # raises CasParseError on bad password/format
     rengine = RatingEngine()
 
-    async with admin_task_session() as db:
+    async with rls_user_session(user_id) as db:
+        # The after_begin GUC re-apply scopes every transaction below to the uploader, so the first
+        # MfCasJob UPDATE matches the row (without it the policy denies it and the UPDATE no-ops) and
+        # every holdings/sip/score/snapshot write is RLS WITH-CHECK enforced for this owner.
         await db.execute(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="parsing", progress_pct=40)
         )

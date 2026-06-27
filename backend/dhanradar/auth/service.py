@@ -239,11 +239,17 @@ async def record_login(user: User, db: AsyncSession, method: str) -> None:
         method: Auth method used — 'password' | 'totp' | 'email_otp' | 'sso'.
     """
     try:
+        from dhanradar.db_security import set_rls_user
+
         await db.execute(
             update(User)
             .where(User.id == user.id)
             .values(last_login_at=sa_func.now())
         )
+        # auth.user_activity_log is FORCE-RLS (B81): the WITH CHECK requires app.user_id == the row's
+        # owner. Login runs before current_user_or_anonymous, so the request GUC is unset here — set it
+        # to the just-authenticated user so this owner-write is RLS-enforced (not bypassed).
+        await set_rls_user(db, str(user.id))
         db.add(
             UserActivityLog(
                 user_id=user.id,

@@ -15,6 +15,34 @@ Every bug fix gets an entry here. This is a standing rule: a fix is not "done" u
 
 ## Log
 
+### 2026-06-28 — B81 PR-2: enabling RLS silently broke a per-request commit-then-read (caught in review)
+
+- **Symptom:** PR-2 added FORCE RLS to `notify.notification_preferences`. `POST /notifications/preferences`
+  would then return all-default (empty) prefs after **every** successful save — the write committed, but
+  the confirming read returned 0 rows. (Caught by the independent reader-completeness review **before**
+  merge, not in prod.)
+- **Root cause:** `notifications/service.py::upsert_preferences` commits internally (line 200/208) and
+  THEN calls `get_preferences` (line 210) to read back. The per-request `app.user_id` GUC is set with
+  `SET LOCAL` (transaction-scoped) by `current_user_or_anonymous`; the internal commit **clears it**, so
+  the post-commit SELECT ran with no GUC → the owner policy `user_id = NULLIF(current_setting(...),'')`
+  evaluated `user_id = NULL` = FALSE → deny-all → 0 rows → the all-None defaults branch. Invisible
+  before PR-2 (no RLS on the table) and invisible to the existing endpoint tests (they run through the
+  owner/superuser session via `override_get_db`, which **bypasses RLS**).
+- **Fix:** `await set_rls_user(db, user_id)` after the commit, before the `get_preferences` read
+  (`notifications/service.py:210`) — re-establishes the owner GUC for the confirming read; a no-op on
+  the BYPASSRLS admin engine. Same re-set-after-commit pattern already used in `auth.record_login` and
+  the `cas_upload` activity write.
+- **Prevention:**
+  - **Rule — enabling RLS on a table breaks any per-request path that commits and then reads/writes that
+    table again** (the request GUC is `SET LOCAL`, cleared by every commit). When adding a table to
+    `RLS_ENFORCED`, grep its readers/writers for **commit-then-touch** in the same request, not just
+    cross-user Celery/webhook readers. The multi-commit CAS path uses `rls_user_session` (re-applies the
+    GUC on every `after_begin`) for exactly this reason; single request paths re-call `set_rls_user`.
+  - Endpoint tests via `override_get_db` run as the **owner (RLS-bypassing)** session, so they will NOT
+    catch this class — the dedicated app-role (`app_session`) RLS tests are the only gate. Don't claim an
+    RLS-touching endpoint safe on the HTTP tests alone.
+- **Phase/area:** Backend — B81 PR-2 RLS (signal/notify/auth/compliance) + the per-request GUC lifecycle.
+
 ### 2026-06-27 — B81 RLS (#395) auto-merged to main with a RED backend suite (`backend` is not a required check)
 
 - **Symptom:** B81 PR-1 (#395, RLS on the 8 mf.* tables) was opened with auto-merge armed. The live-PG `backend` job FAILED (7 RLS-induced test regressions), but the PR **auto-merged to main anyway** at the pre-fix commit — main's backend suite went red. The fix (set_rls_user in the B80 app-role tests + patch `admin_task_session` in the rewired-task unit tests) had been pushed to the branch, but only AFTER the merge had already fired.

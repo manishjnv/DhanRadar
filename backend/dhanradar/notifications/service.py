@@ -207,6 +207,13 @@ async def upsert_preferences(db: Any, user_id: str, fields: dict) -> dict:
             await db.execute(insert(NotificationPreference).values(user_id=uid).on_conflict_do_nothing())
             await db.commit()
 
+    # B81: the commit(s) above clear the request's SET LOCAL app.user_id GUC; re-set it so the
+    # confirming read below is RLS-scoped to this owner (else FORCE RLS on notification_preferences
+    # returns 0 rows → a stale all-defaults response after every save). No-op on the BYPASSRLS admin
+    # engine. Same re-set-after-commit pattern as auth.record_login / cas_upload.
+    from dhanradar.db_security import set_rls_user
+
+    await set_rls_user(db, user_id)
     return await get_preferences(db, user_id)
 
 

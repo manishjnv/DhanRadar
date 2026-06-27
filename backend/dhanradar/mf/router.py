@@ -340,6 +340,11 @@ async def upload_cas(
     # admin activity feed. The job is already committed above — this must NEVER fail
     # the upload (mirrors auth.record_login's non-fatal pattern).
     try:
+        # The MfCasJob commit above reset the request's SET LOCAL app.user_id GUC; re-set it so this
+        # FORCE-RLS (B81) owner-write into auth.user_activity_log passes WITH CHECK (not bypassed).
+        from dhanradar.db_security import set_rls_user
+
+        await set_rls_user(db, user.user_id)
         db.add(UserActivityLog(user_id=uid, event_type="cas_upload", request_id=request_id))
         await db.commit()
     except Exception:  # noqa: BLE001 — observational; must never break the upload
