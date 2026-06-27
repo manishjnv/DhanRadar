@@ -209,7 +209,7 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
         # the statement via STDIN so the password never appears in `ps` (no -c arg). `ALTER ROLE …
         # PASSWORD` is redacted in Postgres logs by default. Owner role/db are hardcoded to match
         # the fresh-DB tripwire above (compose pins POSTGRES_USER/DB = dhanradar).
-        _app_pw="$(grep '^DHANRADAR_APP_DB_PASSWORD=' .env | head -1 | cut -d= -f2-)"
+        _app_pw="$(grep -m1 '^DHANRADAR_APP_DB_PASSWORD=' .env | cut -d= -f2-)"
         _app_pw_esc="${_app_pw//\'/\'\'}"
         printf "ALTER ROLE dhanradar_app PASSWORD '%s';" "${_app_pw_esc}" \
             | $COMPOSE exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
