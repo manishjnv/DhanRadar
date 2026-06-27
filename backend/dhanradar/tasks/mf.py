@@ -292,6 +292,32 @@ async def _run_pipeline(
 
         await _upsert_holdings(db, user_id, parsed, portfolio_id)
 
+        # B2: append the CAS transactions to the append-only ledger (the spine). Idempotent
+        # diff-and-append — ON CONFLICT DO NOTHING on uq_portfolio_txn, so re-uploading the same CAS
+        # adds nothing. Runs under rls_user_session (after_begin re-applies the owner GUC), so RLS
+        # WITH CHECK enforces the uploader as owner. ADDITIVE this sprint: holdings stay the
+        # authoritative write and the report is built from them, so a ledger hiccup is BEST-EFFORT —
+        # logged + rolled back, never failing the user's report (mirrors the AI-commentary pattern
+        # below). B3 makes holdings a projection FROM the ledger; the ledger becomes load-bearing for
+        # the report then, and this should flip to a hard failure.
+        from dhanradar.mf.cas import build_cas_ledger_rows
+        from dhanradar.mf.ledger import append_transactions
+
+        try:
+            ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
+            ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
+            await db.commit()
+            _slog.info(
+                "mf.ledger.appended",
+                job_id=job_id,
+                inserted=ledger_inserted,
+                skipped=ledger_skipped,
+                total=len(ledger_rows),
+            )
+        except Exception:  # noqa: BLE001 — additive: a ledger failure must not break the report
+            logger.exception("mf.ledger.append failed job=%s — report still completes", job_id)
+            await db.rollback()
+
         # Persist SIP transactions so get_sip_day() can infer the user's SIP date
         from dhanradar.models.mf import MfSipTransaction
         sip_rows = [
