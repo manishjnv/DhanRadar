@@ -333,7 +333,7 @@ async def test_reap_stuck_cas_jobs_marks_old_queued_job_failed():
     dedup_clear_mock = AsyncMock()
 
     with (
-        patch("dhanradar.db.TaskSessionLocal", return_value=sess),
+        patch("dhanradar.db.admin_task_session", return_value=sess),
         patch("dhanradar.redis_client.get_redis", return_value=AsyncMock()),
         patch("dhanradar.mf.service.dedup_clear", dedup_clear_mock),
     ):
@@ -353,7 +353,7 @@ async def test_reap_stuck_cas_jobs_does_not_touch_recent_job():
 
     sess, calls = _make_reaper_session([])  # empty → nothing to reap
 
-    with patch("dhanradar.db.TaskSessionLocal", return_value=sess):
+    with patch("dhanradar.db.admin_task_session", return_value=sess):
         summary = await _reap_stuck_cas_jobs()
 
     assert "0" in summary
@@ -371,7 +371,7 @@ async def test_reap_stuck_cas_jobs_does_not_touch_done_job():
     # Simulate DB correctly excluding 'done' jobs → empty result set.
     sess, calls = _make_reaper_session([])
 
-    with patch("dhanradar.db.TaskSessionLocal", return_value=sess):
+    with patch("dhanradar.db.admin_task_session", return_value=sess):
         summary = await _reap_stuck_cas_jobs()
 
     assert "0" in summary
