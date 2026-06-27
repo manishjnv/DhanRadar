@@ -389,7 +389,7 @@ async def test_monthly_rescore_skips_free_users(monkeypatch):
     # patching sqlalchemy.ext.asyncio.async_sessionmaker was a no-op (the real
     # TaskSessionLocal is created at dhanradar.db import time), which left this
     # test running against a real DB connection and asserting vacuously.
-    with patch("dhanradar.db.TaskSessionLocal", _FakeSessionMaker()):
+    with patch("dhanradar.db.admin_task_session", _FakeSessionMaker()):
         with patch("dhanradar.scoring.engine.RatingEngine", MagicMock()):
             with patch("dhanradar.redis_client.get_redis", lambda: MagicMock()):
                 summary = await mf_tasks._monthly_rescore()

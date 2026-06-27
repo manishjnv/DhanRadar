@@ -500,7 +500,7 @@ async def _run_rescore_with_patches(
     from dhanradar.notifications import service as notif_service
     monkeypatch.setattr(notif_service, "publish_notification", _fake_publish)
 
-    with patch("dhanradar.db.TaskSessionLocal", _FakeSessionMaker()):
+    with patch("dhanradar.db.admin_task_session", _FakeSessionMaker()):
         with patch("dhanradar.scoring.engine.RatingEngine", MagicMock()):
             with patch("dhanradar.db.engine", MagicMock()):
                 with patch("dhanradar.redis_client.get_redis", lambda: MagicMock()):
