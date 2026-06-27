@@ -17,6 +17,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { formatInrShort } from '@/lib/finance';
+import { HelpTip } from '@/components/ui/HelpTip';
 import {
   type Accent,
   type Featured,
@@ -440,7 +441,7 @@ export function RangeField({
       <div className="mb-2.5 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-small font-semibold text-ink">
           {label}
-          <span title={tip} className="inline-grid h-[15px] w-[15px] cursor-help place-items-center rounded-full bg-surface-3 text-[9px] font-bold text-ink-muted">i</span>
+          <HelpTip tip={tip} />
         </span>
         <span className="inline-flex items-center gap-0.5 rounded-[9px] bg-royal/10 px-2 py-1 font-mono text-small font-bold text-royal focus-within:ring-2 focus-within:ring-royal/40">
           {unit === '₹' && <span aria-hidden="true">₹</span>}

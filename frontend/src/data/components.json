@@ -1,0 +1,32 @@
+{
+  "$comment": "Component Manifest (UI_DATA_ARCHITECTURE_PLAN.md §5/§17). One row per UI component on the Portfolio page. `concepts` ids MUST each resolve to a concept in concepts.json (I8, gate: gen-concepts). `empty_state_copy` feeds <DataState> (no-suppress, §17). `tooltip` is a static ≤12-word string (§28.3, grep-coverable for #1/#2). `has_tooltip_fn`=true means a dynamic tooltip_fn lives in tooltipFns.ts (kept to the 2 real data-point charts, §28.5/§28.7). Render state is NOT stored — it derives from the live envelope status.",
+  "version": 1,
+  "components": [
+    { "page": "/mf/portfolio", "section": "Hero", "component": "HeroSection", "concepts": ["portfolio.summary", "portfolio.score_raw"], "empty_state_copy": "Upload a statement to see your portfolio.", "tooltip": "Your portfolio's overall strength, shown as a band.", "compliance_note": "score_raw renders as a BAND only; #2 strips the numeric at the boundary" },
+    { "page": "/mf/portfolio", "section": "S01", "component": "HealthSection", "concepts": ["portfolio.health"], "empty_state_copy": "Your portfolio health appears once funds load.", "compliance_note": "label from the rule table, not a function of a score (#1)" },
+    { "page": "/mf/portfolio", "section": "S02", "component": "ActionSection", "concepts": ["portfolio.recommendations"], "empty_state_copy": "Things to review will show up here.", "compliance_note": "non-advisory decision support — review/diversify, never buy/sell (#1)" },
+    { "page": "/mf/portfolio", "section": "S03", "component": "DmmiSection", "concepts": ["mood.current", "portfolio.allocation"], "empty_state_copy": "Market mood vs your mix appears here." },
+    { "page": "/mf/portfolio", "section": "S04", "component": "AllocSection", "concepts": ["portfolio.allocation", "portfolio.allocation_sector"], "empty_state_copy": "Your allocation shows once funds load.", "has_tooltip_fn": true },
+    { "page": "/mf/portfolio", "section": "S05", "component": "GoalSection", "concepts": ["goals.list", "goals.progress"], "empty_state_copy": "Add a goal to track your progress." },
+    { "page": "/mf/portfolio", "section": "S06", "component": "PerfSection", "concepts": ["portfolio.performance", "portfolio.benchmark"], "empty_state_copy": "Your returns vs the market appear here.", "has_tooltip_fn": true },
+    { "page": "/mf/portfolio", "section": "S07", "component": "HoldingsSection", "concepts": ["holdings.list", "holdings.xirr", "holdings.pnl", "fund.label"], "empty_state_copy": "No funds yet — upload a statement to begin." },
+    { "page": "/mf/portfolio", "section": "S08", "component": "TopPerfSection", "concepts": ["holdings.list", "holdings.xirr", "fund.label"], "empty_state_copy": "Your standout funds appear once data loads." },
+    { "page": "/mf/portfolio", "section": "S09", "component": "UnderReviewSection", "concepts": ["fund.label", "portfolio.overlap"], "empty_state_copy": "Funds worth a look will be flagged here.", "compliance_note": "flag for review only — non-advisory (#1)" },
+    { "page": "/mf/portfolio", "section": "S10", "component": "OverlapSection", "concepts": ["portfolio.overlap"], "empty_state_copy": "Overlap between your funds appears here.", "tooltip": "How many of the same stocks two funds hold." },
+    { "page": "/mf/portfolio", "section": "S11", "component": "DivSection", "concepts": ["portfolio.diversification"], "empty_state_copy": "Your diversification band appears here.", "tooltip": "How well your money is spread, shown as a band." },
+    { "page": "/mf/portfolio", "section": "S12", "component": "RiskSection", "concepts": ["portfolio.risk", "portfolio.risk_advanced"], "empty_state_copy": "Your portfolio risk reading appears here.", "tooltip": "How much your portfolio's value tends to move." },
+    { "page": "/mf/portfolio", "section": "S13", "component": "CostSection", "concepts": ["portfolio.cost"], "empty_state_copy": "Your fee burden appears once funds load." },
+    { "page": "/mf/portfolio", "section": "S14", "component": "AmcSection", "concepts": ["portfolio.allocation", "fund.label"], "empty_state_copy": "Your fund-house mix appears here." },
+    { "page": "/mf/portfolio", "section": "S15", "component": "TimelineSection", "concepts": ["portfolio.timeline"], "empty_state_copy": "Key portfolio events will appear here." },
+    { "page": "/mf/portfolio", "section": "S16", "component": "RecSection", "concepts": ["portfolio.recommendations"], "empty_state_copy": "Suggestions to review will appear here.", "compliance_note": "non-advisory decision support (#1)" },
+    { "page": "/mf/portfolio", "section": "S17", "component": "ProjSection", "concepts": ["portfolio.projection"], "empty_state_copy": "Enter an assumption to see a what-if.", "compliance_note": "illustrative — your assumption, not a DhanRadar prediction; sensitivity strip required (§13)" },
+    { "page": "/mf/portfolio", "section": "S18", "component": "OpportunitiesSection", "concepts": ["portfolio.opportunities"], "empty_state_copy": "Gaps in your mix will appear here.", "compliance_note": "non-advisory — surfaces gaps, never names a fund to buy (#1)" },
+    { "page": "/mf/portfolio", "section": "S19", "component": "AiSection", "concepts": ["portfolio.ai_feed"], "empty_state_copy": "Plain-language notes appear once data loads.", "compliance_note": "AI prose under the disclosure bundle, no advice, no score (#1/#2)" },
+    { "page": "/mf/portfolio", "section": "S20", "component": "ReportSection", "concepts": ["portfolio.reports"], "empty_state_copy": "Generate a report once your funds load." },
+    { "page": "/mf/portfolio", "section": "S21", "component": "FaqSection", "concepts": [], "empty_state_copy": "Frequently asked questions." },
+    { "page": "/mf/portfolio", "section": "Empty", "component": "EmptyHero", "concepts": ["sync.status"], "empty_state_copy": "Upload your statement to get started." },
+    { "page": "/mf/portfolio", "section": "Empty", "component": "BenefitsGrid", "concepts": [], "empty_state_copy": "What you'll unlock." },
+    { "page": "/mf/portfolio", "section": "Empty", "component": "AutoSyncBanner", "concepts": ["sync.status"], "empty_state_copy": "Auto-sync is coming soon." },
+    { "page": "/mf/portfolio", "section": "Bar", "component": "StickyBar", "concepts": ["sync.status"], "empty_state_copy": "" }
+  ]
+}
