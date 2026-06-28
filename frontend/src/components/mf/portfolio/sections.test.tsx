@@ -22,6 +22,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HeroSection } from './sections';
 import { HoldingsSection } from './sections';
 import { RiskSection } from './sections';
+import { EmptyHero } from './sections';
 
 // ---------------------------------------------------------------------------
 // Mock the API hooks
@@ -464,5 +465,56 @@ describe('RiskSection', () => {
     expect(screen.getByText('Beta')).toBeDefined();
     // coming soon now covers Sharpe + Sortino (B88) + Alpha + Beta
     expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EmptyHero upload-phase tests
+// ---------------------------------------------------------------------------
+
+describe('EmptyHero upload phases', () => {
+  function renderEmpty(props: Partial<Parameters<typeof EmptyHero>[0]> = {}) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <EmptyHero onViewSample={() => {}} {...props} />
+      </QueryClientProvider>,
+    );
+  }
+
+  // 7. uploading phase shows status label
+  it('uploadPhase=uploading: status label visible', () => {
+    renderEmpty({ uploadPhase: 'uploading', uploadStatusLabel: 'Uploading your statement…' });
+    expect(screen.getByTestId('upload-status')).toBeDefined();
+    expect(screen.getByText('Uploading your statement…')).toBeDefined();
+  });
+
+  // 8. processing phase shows progress
+  it('uploadPhase=processing: progress bar and label render', () => {
+    renderEmpty({ uploadPhase: 'processing', uploadProgress: 60, uploadStatusLabel: 'Processing your statement…' });
+    expect(screen.getByTestId('upload-status')).toBeDefined();
+    expect(screen.getByText('Processing your statement…')).toBeDefined();
+    expect(screen.getByText('60%')).toBeDefined();
+  });
+
+  // 9. done phase shows success message
+  it('uploadPhase=done: success message renders', () => {
+    renderEmpty({ uploadPhase: 'done' });
+    expect(screen.getByTestId('upload-status')).toBeDefined();
+    expect(screen.getByText(/portfolio is ready/i)).toBeDefined();
+  });
+
+  // 10. error phase shows error message and retry
+  it('uploadPhase=error: error message and Try again button render', () => {
+    renderEmpty({ uploadPhase: 'error', uploadError: 'Something went wrong — please try again.' });
+    expect(screen.getByTestId('upload-status')).toBeDefined();
+    expect(screen.getByText(/something went wrong/i)).toBeDefined();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeDefined();
+  });
+
+  // idle phase: no status block
+  it('uploadPhase=idle (default): no status block shown', () => {
+    renderEmpty({ uploadPhase: 'idle' });
+    expect(screen.queryByTestId('upload-status')).toBeNull();
   });
 });
