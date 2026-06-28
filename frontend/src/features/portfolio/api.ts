@@ -246,7 +246,7 @@ export interface RiskAdvancedPayload {
   as_of: string | null;
 }
 
-const SKIP_RETRY_WITH_402 = [401, 402, 404];
+const SKIP_RETRY_WITH_402 = [401, 402, 404]; // never retry — 402 is the tier-gate, distinct from an OpenRouter balance 402
 
 export function usePortfolioRisk(portfolioId: string) {
   return useQuery<DataEnvelope<RiskPayload>>({

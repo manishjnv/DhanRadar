@@ -342,7 +342,6 @@ describe('RiskSection', () => {
   beforeEach(() => vi.clearAllMocks());
 
   function renderRisk(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     riskEnvelope: any,
     advOverride: { data?: typeof ADV_PRESENT; isError?: boolean; error?: Error | null } = {},
   ) {
