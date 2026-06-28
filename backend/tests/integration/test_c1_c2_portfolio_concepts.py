@@ -145,7 +145,10 @@ async def _seed_portfolio_with_holding(db_session, uid: str) -> str:
         )
     )
     await db_session.execute(
-        text("INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES ('INF200K01VT2', :d, 120.0)"),
+        text(
+            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES ('INF200K01VT2', :d, 120.0)"
+            " ON CONFLICT (isin, nav_date) DO NOTHING"
+        ),
         {"d": date(2026, 3, 31)},
     )
     await db_session.execute(
