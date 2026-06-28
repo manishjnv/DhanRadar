@@ -259,12 +259,23 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
         return (num / den) if den > 0 else None
 
     return PortfolioRisk(
+        # B88: volatility drives the INDICATIVE band only — value-weighted σ (Σwσ) OVERSTATES the true
+        # portfolio σ = √(w'Σw) (ignores correlation<1), so it is an upper-bound proxy, relabelled
+        # indicative in the payload, never presented as the precise portfolio σ.
         volatility_pct=weighted("volatility_pct"),
-        max_drawdown_pct=weighted("max_drawdown_pct"),
-        sharpe_ratio=weighted("sharpe_ratio"),
-        sortino_ratio=weighted("sortino_ratio"),
+        # B88 (DEFER): Sharpe/Sortino are RATIOS (a value-weighted average of fund ratios ≠ the portfolio
+        # ratio) and max-drawdown does not aggregate linearly (fund drawdowns occur at different times).
+        # A true portfolio Sharpe/Sortino/drawdown needs the portfolio RETURN/VALUATION series (not built)
+        # — the same series alpha/beta/recovery already wait for. Don't ship a wrong number → None.
+        max_drawdown_pct=None,
+        sharpe_ratio=None,
+        sortino_ratio=None,
+        # Rolling RETURNS aggregate by weight (Σw·r is exact for returns) → the weighted rolling AVERAGE is
+        # a defensible estimate and is kept. rolling_1y_pct_positive is a per-fund hit-RATE (not a return);
+        # value-weighting it is the SAME defect class as Sharpe/σ (the portfolio's % positive depends on
+        # correlation/timing), so it is DEFERRED too (B88 / adversarial follow-up).
         rolling_1y_avg_pct=weighted("rolling_1y_avg_pct"),
-        rolling_1y_pct_positive=weighted("rolling_1y_pct_positive"),
+        rolling_1y_pct_positive=None,
         fund_count=len(rm.holdings),
         funds_with_metrics=sum(1 for h in rm.holdings if h.isin in metrics),
         as_of=rm.as_of,
@@ -272,13 +283,16 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
 
 
 def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
-    """C3 free `portfolio.risk` — the risk band + standard volatility/drawdown figures (DOM-allowed).
-    `recovery_months` needs a daily-valuation series (not built) → None ('coming soon')."""
+    """C3 free `portfolio.risk` — an INDICATIVE risk band derived from the value-weighted AVERAGE fund
+    volatility (`risk_band_basis`), plus that average. The band is an upper-bound proxy, not the true
+    portfolio σ (B88) — labelled indicative. `max_drawdown_pct` is deferred (it doesn't aggregate) and
+    `recovery_months` needs the daily-valuation series → both None ('coming soon')."""
     return {
         "portfolio_id": portfolio_id,
         "risk_band": _vol_band(r.volatility_pct),
+        "risk_band_basis": "average fund volatility",  # B88: indicative — NOT the true portfolio σ
         "volatility_pct": r.volatility_pct,
-        "max_drawdown_pct": r.max_drawdown_pct,
+        "max_drawdown_pct": r.max_drawdown_pct,  # None — deferred to the valuation-series wave (B88)
         "recovery_months": None,
         "fund_count": r.fund_count,
         "funds_with_metrics": r.funds_with_metrics,
@@ -287,12 +301,13 @@ def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
 
 
 def risk_advanced_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
-    """C3 plus `portfolio.risk_advanced` — the deeper standard ratios (Sharpe/Sortino/rolling). `alpha`/`beta`
-    need a benchmark return series (not built) → None ('coming soon'). Still no DhanRadar composite."""
+    """C3 plus `portfolio.risk_advanced` — the rolling-return stats (returns aggregate by weight, so the
+    value-weighted rolling average is defensible). Sharpe/Sortino (ratios — B88) and alpha/beta need the
+    portfolio valuation/benchmark series (not built) → None ('coming soon'). Still no DhanRadar composite."""
     return {
         "portfolio_id": portfolio_id,
-        "sharpe_ratio": r.sharpe_ratio,
-        "sortino_ratio": r.sortino_ratio,
+        "sharpe_ratio": r.sharpe_ratio,  # None — deferred (B88)
+        "sortino_ratio": r.sortino_ratio,  # None — deferred (B88)
         "rolling_1y_avg_pct": r.rolling_1y_avg_pct,
         "rolling_1y_pct_positive": r.rolling_1y_pct_positive,
         "alpha": None,
