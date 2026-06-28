@@ -33,7 +33,8 @@ export interface ComponentDef {
   concepts: readonly string[]; // each MUST resolve to a ConceptDef (I8)
   tier_override?: AccessTier; // the only axis a component may override (§6)
   empty_state_copy?: string; // no-suppress copy for <DataState> (§17)
-  tooltip?: string; // static, ≤12 words (§28.3)
+  tooltip?: string; // static section-level tip, ≤12 words (§28.3)
+  field_tooltips?: Record<string, string>; // per-KPI-label tips, each ≤12 words (§28.3)
   has_tooltip_fn?: boolean; // true → a dynamic tip lives in tooltipFns.ts (§28.7)
   compliance_note?: string;
 }
