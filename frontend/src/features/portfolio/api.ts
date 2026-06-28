@@ -211,11 +211,13 @@ export function usePortfolioSummaryById(portfolioId: string) {
  */
 export interface RiskPayload {
   portfolio_id: string;
-  /** Risk band — factual descriptor, never advisory verb */
+  /** Risk band — INDICATIVE factual descriptor (from avg fund volatility, B88), never advisory verb */
   risk_band: 'low' | 'moderate' | 'high' | 'very_high' | null;
-  /** Standard volatility metric — DOM-allowed standard ratio */
+  /** What the indicative band is based on, e.g. "average fund volatility" (B88) */
+  risk_band_basis: string | null;
+  /** Average annualised volatility of the funds — indicative, not the true portfolio σ (B88) */
   volatility_pct: number | null;
-  /** Standard max-drawdown metric — DOM-allowed standard ratio */
+  /** Deferred (B88) — portfolio drawdown needs the valuation series; null → "coming soon" */
   max_drawdown_pct: number | null;
   /** Always null server-side — render as "coming soon" */
   recovery_months: null;

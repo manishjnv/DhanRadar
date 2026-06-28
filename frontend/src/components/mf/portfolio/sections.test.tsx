@@ -303,8 +303,9 @@ const RISK_PRESENT = {
   data: {
     portfolio_id: 'port-1',
     risk_band: 'moderate' as const,
+    risk_band_basis: 'average fund volatility',
     volatility_pct: 14.3,
-    max_drawdown_pct: -18.7,
+    max_drawdown_pct: null, // B88: deferred
     recovery_months: null,
     fund_count: 6,
     funds_with_metrics: 5,
@@ -319,10 +320,10 @@ const ADV_PRESENT = {
   status: 'present' as const,
   data: {
     portfolio_id: 'port-1',
-    sharpe_ratio: 1.42,
-    sortino_ratio: 2.01,
+    sharpe_ratio: null, // B88: deferred
+    sortino_ratio: null, // B88: deferred
     rolling_1y_avg_pct: 17.8,
-    rolling_1y_pct_positive: 82,
+    rolling_1y_pct_positive: null, // B88: deferred (per-fund hit-rate doesn't aggregate)
     alpha: null,
     beta: null,
     as_of: '2026-06-28',
@@ -389,12 +390,13 @@ describe('RiskSection', () => {
     expect(screen.getByText(/risk data will appear/i)).toBeDefined();
   });
 
-  it('present => standard ratios render', () => {
+  it('present => volatility + indicative band render; drawdown deferred (B88)', () => {
     renderRisk(RISK_PRESENT);
     expect(screen.getByText(/Price Swings/i)).toBeDefined();
-    expect(screen.getByText(/Biggest Fall/i)).toBeDefined();
-    expect(screen.getByText('±14.3%')).toBeDefined();
-    expect(screen.getByText('−18.7%')).toBeDefined();
+    expect(screen.getByText('±14.3%')).toBeDefined(); // the avg fund volatility (the band basis)
+    expect(screen.getByText(/Indicative — based on average fund volatility/i)).toBeDefined();
+    expect(screen.getByText(/Biggest Fall/i)).toBeDefined(); // present as a coming-soon card
+    expect(screen.queryByText('−18.7%')).toBeNull(); // B88: no aggregated drawdown number
   });
 
   // ── Risk band renders as word badge, never a number ──────────────────────
@@ -440,23 +442,27 @@ describe('RiskSection', () => {
 
   // ── Advanced panel — success state renders ratios ────────────────────────
 
-  it('advanced panel renders Sharpe and Sortino when data present', async () => {
+  it('advanced panel: Sharpe/Sortino deferred (B88), rolling return renders', async () => {
     renderRisk(RISK_PRESENT, { data: ADV_PRESENT });
     const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
     fireEvent.click(advBtn);
+    // B88: Sharpe/Sortino labels present as coming-soon cards — NO 1.42/2.01 value.
     expect(screen.getByText(/Sharpe Ratio/i)).toBeDefined();
-    expect(screen.getByText('1.42')).toBeDefined();
     expect(screen.getByText(/Sortino Ratio/i)).toBeDefined();
-    expect(screen.getByText('2.01')).toBeDefined();
+    expect(screen.queryByText('1.42')).toBeNull();
+    expect(screen.queryByText('2.01')).toBeNull();
+    // rolling return (aggregates by weight) IS rendered
+    expect(screen.getByText(/Rolling 1Y Avg/i)).toBeDefined();
+    expect(screen.getByText('17.8%')).toBeDefined();
   });
 
-  it('advanced panel renders alpha and beta as coming-soon, not a number', async () => {
+  it('advanced panel renders Sharpe/Sortino/alpha/beta as coming-soon, not numbers (B88)', async () => {
     renderRisk(RISK_PRESENT, { data: ADV_PRESENT });
     const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
     fireEvent.click(advBtn);
     expect(screen.getByText('Alpha')).toBeDefined();
     expect(screen.getByText('Beta')).toBeDefined();
-    // coming soon appears at least twice (alpha + beta)
-    expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(2);
+    // coming soon now covers Sharpe + Sortino (B88) + Alpha + Beta
+    expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(4);
   });
 });

@@ -51,7 +51,7 @@ def _all_values(value):
 
 def _risk(**kw) -> PortfolioRisk:
     d = dict(
-        volatility_pct=15.0, max_drawdown_pct=-34.0, sharpe_ratio=1.18, sortino_ratio=1.64,
+        volatility_pct=15.0, max_drawdown_pct=None, sharpe_ratio=None, sortino_ratio=None,  # B88: deferred
         rolling_1y_avg_pct=12.0, rolling_1y_pct_positive=70.0, fund_count=3, funds_with_metrics=3,
         as_of="2026-03-31",
     )
@@ -74,14 +74,17 @@ def test_risk_payload_standard_ratios_no_composite():
     p = risk_payload(_risk(volatility_pct=15.0), "pid-1")
     keys = _all_keys(p)
     assert {"unified_score", "score", "risk_score", "composite_score", "factor_weights"} & keys == set()
-    assert p["risk_band"] == "high" and p["volatility_pct"] == 15.0  # standard ratios DO serialize
-    assert p["max_drawdown_pct"] == -34.0 and p["recovery_months"] is None  # not built → coming soon
+    assert p["risk_band"] == "high" and p["volatility_pct"] == 15.0  # the indicative band + its basis
+    assert p["risk_band_basis"] == "average fund volatility"  # B88: indicative, not the true portfolio σ
+    assert p["max_drawdown_pct"] is None and p["recovery_months"] is None  # B88-deferred + not built
 
 
 def test_risk_advanced_payload_ratios_and_unbuilt():
     p = risk_advanced_payload(_risk(), "pid-1")
     assert "unified_score" not in _all_keys(p) and "score" not in _all_keys(p)
-    assert p["sharpe_ratio"] == 1.18 and p["sortino_ratio"] == 1.64
+    # B88: Sharpe/Sortino (ratios) deferred → None; rolling returns (aggregate by weight) are kept.
+    assert p["sharpe_ratio"] is None and p["sortino_ratio"] is None
+    assert p["rolling_1y_avg_pct"] == 12.0
     assert p["alpha"] is None and p["beta"] is None  # need a benchmark series → coming soon
 
 
@@ -92,7 +95,7 @@ def test_advanced_serializes_for_paid_tier():
     withheld = serialize_concept("portfolio.risk_advanced", p, RequestCtx(tier="free"))
     assert withheld["status"] == "withheld" and withheld["meta"]["reason"] == "tier"
     served = serialize_concept("portfolio.risk_advanced", p, RequestCtx(tier="pro"))
-    assert served["status"] == "present" and served["data"]["sharpe_ratio"] == 1.18
+    assert served["status"] == "present" and served["data"]["rolling_1y_avg_pct"] == 12.0
 
 
 # --- PG: the endpoint end-to-end through the boundary, under RLS -----------------------------------
@@ -180,8 +183,11 @@ async def test_c3_risk_endpoint_value_weighted_no_composite(db_session, rls_asyn
     env = r.json()
     assert env["status"] == "present" and env["meta"]["access_tier"] == "free"
     d = env["data"]
-    # value-weighted volatility = (1000×10 + 3000×20) / 4000 = 17.5 → band "high"
+    # value-weighted volatility = (1000×10 + 3000×20) / 4000 = 17.5 → band "high" (INDICATIVE, B88)
     assert abs(d["volatility_pct"] - 17.5) < 1e-6 and d["risk_band"] == "high"
+    assert d["risk_band_basis"] == "average fund volatility"  # B88: indicative, not the true portfolio σ
+    # B88: Sharpe/Sortino/max-drawdown are deferred (can't average ratios; σ/drawdown need the series).
+    assert d["max_drawdown_pct"] is None
     assert d["recovery_months"] is None and d["fund_count"] == 2 and d["funds_with_metrics"] == 2
     # #2: the raw composite (71) never appears, key OR value.
     assert "unified_score" not in _all_keys(env)
