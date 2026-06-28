@@ -35,6 +35,7 @@ import {
   TimelineSection, RecSection, ProjSection, OpportunitiesSection,
   AiSection, ReportSection, FaqSection,
 } from '@/components/mf/portfolio/sections';
+import { useLatestPortfolio } from '@/features/mf/api';
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function PortfolioSkeleton() {
@@ -56,6 +57,9 @@ type PageState = 'empty' | 'dash';
 // ── Main view ─────────────────────────────────────────────────────────────────
 function PortfolioView() {
   const [pageState, setPageState] = React.useState<PageState>('dash');
+  // Resolve the user's active portfolio id. 404 = no portfolio yet (show empty state).
+  const { data: latestPortfolio } = useLatestPortfolio();
+  const portfolioId = latestPortfolio?.portfolio_id ?? '';
 
   return (
     <div className="w-full pb-32">
@@ -108,7 +112,7 @@ function PortfolioView() {
       {pageState === 'dash' && (
         <div className="flex flex-col gap-6">
           {/* S1 Hero */}
-          <HeroSection />
+          <HeroSection portfolioId={portfolioId} />
 
           {/* S01 Portfolio Health */}
           <section>
@@ -148,8 +152,8 @@ function PortfolioView() {
 
           {/* S07 Holdings */}
           <section>
-            <SectionHeader index="07" title="Fund Holdings" info="9 funds · ₹48.3 L total" />
-            <HoldingsSection />
+            <SectionHeader index="07" title="Fund Holdings" />
+            <HoldingsSection portfolioId={portfolioId} />
           </section>
 
           {/* S08 Top Performers */}

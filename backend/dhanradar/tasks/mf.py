@@ -98,6 +98,7 @@ def parsed_to_snapshot_holdings(
     parsed: list[ParsedHolding],
     nav_map: dict[str, float] | None = None,
     category_map: dict[str, str] | None = None,
+    invested_map: dict[tuple[str, str], float] | None = None,
 ) -> list[Holding]:
     """Map parsed CAS holdings → snapshot.Holding, applying the latest NAV when
     available (else falling back to the CAS-reported valuation). Pure + testable.
@@ -107,11 +108,14 @@ def parsed_to_snapshot_holdings(
     whose ISIN is not in the master stays ``"uncategorized"`` (honest)."""
     nav_map = nav_map or {}
     category_map = category_map or {}
+    invested_map = invested_map or {}
     out: list[Holding] = []
     for p in parsed:
         nav = nav_map.get(p.isin, p.nav)
         current_value = (p.units * nav) if (nav is not None) else (p.value or 0.0)
-        invested = p.cost if p.cost is not None else 0.0
+        # B86: one invested definition — the ledger net-invested written to the holdings table; the CAS
+        # cost is the fallback only for holdings the ledger can't fully reconstruct (matches the table).
+        invested = invested_map.get((p.isin, p.folio_number), p.cost if p.cost is not None else 0.0)
         cashflows = [CashFlow(when=t.when, amount=t.amount) for t in p.txns if t.amount]
         if current_value:
             cashflows.append(CashFlow(when=p.as_of_date or date.today(), amount=current_value))
@@ -311,8 +315,9 @@ async def _run_pipeline(
         )
 
         # B3: holdings are now a PROJECTION of the ledger (units + net-invested), not a direct copy of
-        # the parsed file.
-        await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
+        # the parsed file. B86: capture the net-invested map so the fresh report/snapshot use the SAME
+        # invested as the holdings table (one invested definition everywhere).
+        invested_map = await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
 
         # Persist SIP transactions so get_sip_day() can infer the user's SIP date
         from dhanradar.models.mf import MfSipTransaction
@@ -361,7 +366,7 @@ async def _run_pipeline(
         category_map = await _fetch_fund_categories(db, [p.isin for p in parsed])
 
         snapshot_holdings = parsed_to_snapshot_holdings(
-            parsed, nav_map=latest_nav, category_map=category_map
+            parsed, nav_map=latest_nav, category_map=category_map, invested_map=invested_map
         )
         snap = build_snapshot(snapshot_holdings)
         # B65 observability: an uncomputable XIRR must be visible in worker logs,
@@ -423,7 +428,9 @@ async def _run_pipeline(
                 "fund_name_short": derive_short_name(p.scheme_name, p.isin),
                 "idcw_frequency": parse_idcw_frequency(p.scheme_name),
                 "category": category_map.get(p.isin),
-                "units": p.units, "invested_amount": p.cost, "current_value": p.value,
+                "units": p.units,
+                "invested_amount": invested_map.get((p.isin, p.folio_number), p.cost),
+                "current_value": p.value,
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
                 "contributing_signals": result.contributing_signals,
                 "contradicting_signals": result.contradicting_signals,
@@ -496,7 +503,7 @@ async def _run_pipeline(
 
 async def _project_and_write_holdings(
     db: Any, user_id: str, parsed: list[ParsedHolding], portfolio_id: str
-) -> None:
+) -> dict[tuple[str, str], float]:
     """B3 cutover: holdings are a PROJECTION of the ledger, not a direct copy of the parsed file.
 
     Read the portfolio's full ledger (just appended), project current holdings (units = Σ unit deltas;
@@ -545,6 +552,10 @@ async def _project_and_write_holdings(
     ).mappings().all()
     projected = project_holdings_from_ledger(ledger_rows)
 
+    # B86: the FINAL invested written per (isin, raw folio) — net-invested where the ledger fully
+    # reconstructs the holding, else the AMC-cost fallback — returned so the fresh report/snapshot use
+    # the SAME invested as the holdings table (one invested definition everywhere).
+    invested_map: dict[tuple[str, str], float] = {}
     projected_n = 0
     for p in parsed:
         proj = projected.get((p.isin, normalize_folio(p.folio_number)))
@@ -576,10 +587,14 @@ async def _project_and_write_holdings(
                   "as_of_date": as_of, "updated_at": func.now()},
         )
         await db.execute(stmt)
+        # float for the report/snapshot; 0.0 for a None-cost holding (every reader coerces
+        # invested_amount or 0 → 0.0, so the report stays consistent with the table). Never float(None).
+        invested_map[(p.isin, p.folio_number)] = float(invested) if invested is not None else 0.0
     _slog.info(
         "mf.holdings.projected", projected=projected_n, total=len(parsed), engine=ENGINE_VERSION
     )
     await db.commit()
+    return invested_map
 
 
 async def _load_nav_series(

@@ -13,7 +13,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
-import { Logo, BandRing, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA } from './ui';
+import { Logo, BandRing, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
   ALLOC, ALLOC_TABS, GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
@@ -23,6 +23,13 @@ import {
   toStrength, ringColor, STRENGTH_WORD, STRENGTH_COLOR,
   type HealthLight,
 } from './sampleData';
+import { DataState } from '@/components/ui/DataState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import {
+  usePortfolioHoldings,
+  usePortfolioSummaryById,
+  type Holding,
+} from '@/features/portfolio/api';
 
 const { E, B, A, R, O } = COLORS;
 
@@ -120,63 +127,82 @@ export function AutoSyncBanner() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S1 — HERO (dashboard)
+// S1 — HERO (dashboard) — live data
 // ═══════════════════════════════════════════════════════════════════════════
-export function HeroSection() {
+
+function fmtCurrency(n: number): string {
+  const lakh = 100_000;
+  return n >= lakh
+    ? `₹${(n / lakh).toFixed(2)} L`
+    : `₹${n.toLocaleString('en-IN')}`;
+}
+
+function fmtPct(n: number): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+
+export function HeroSection({ portfolioId }: { portfolioId: string }) {
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioSummaryById(portfolioId);
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const summary = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+
+  const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
+  const band = summary?.confidence_band ?? null;
+
   return (
     <div
       className="relative overflow-hidden rounded-[24px] p-7 text-white shadow-lg sm:p-8"
-      style={{ background: 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)' }}
+      style={{ background: heroGradient }}
     >
       <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.28),transparent 70%)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute -bottom-32 left-[32%] h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.3),transparent 70%)' }} aria-hidden="true" />
       <div className="relative z-[2]">
-        {/* Top row: value + ring */}
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          {/* Left: value block */}
-          <div className="flex-1">
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Portfolio Value</div>
-            <div className="font-sans text-[38px] font-extrabold leading-none tracking-tight sm:text-[46px]">{HERO.totalValue}</div>
-            <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-small font-bold text-emerald-300">{HERO.gain}</div>
-            <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
-              <span>Invested: <span className="font-bold text-white">{HERO.invested}</span></span>
-              <span>Today: <span className="font-bold text-emerald-300">{HERO.todayGain}</span></span>
+        <DataState
+          status={status}
+          reason={reason}
+          emptyCopy="Upload your CAS to see your portfolio summary."
+          onRetry={() => refetch()}
+          skeleton={<Skeleton className="h-40 w-full rounded-xl bg-white/10" />}
+        >
+          {summary && (
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+              {/* Left: user's own money figures — allowed in DOM */}
+              <div className="flex-1">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Portfolio Value</div>
+                <div className="font-sans text-[38px] font-extrabold leading-none tracking-tight sm:text-[46px]">
+                  {fmtCurrency(summary.total_value)}
+                </div>
+                <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-small font-bold text-emerald-300">
+                  {summary.gain >= 0 ? '+' : ''}{fmtCurrency(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
+                  <span>Invested: <span className="font-bold text-white">{fmtCurrency(summary.total_invested)}</span></span>
+                  {summary.xirr_pct !== null && (
+                    <span>XIRR: <span className="font-bold text-emerald-300">{fmtPct(summary.xirr_pct)}</span></span>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
+                  <span>Funds: <span className="font-bold text-white">{summary.fund_count}</span></span>
+                  <span>Scored: <span className="font-bold text-white">{summary.funds_scored}</span></span>
+                </div>
+              </div>
+              {/* Right: BandRing (confidence_band) + plain word — NO advisory verdict, NO score */}
+              <div className="text-center">
+                <div className="relative inline-grid place-items-center">
+                  <BandRingFromBand band={band} size={120} stroke={11} />
+                  {/* ponytail: NO inner number — non-neg #2 */}
+                </div>
+                <div className="mt-2 font-sans text-[13px] font-bold text-slate-300">Data Confidence</div>
+                <div className="mt-1 font-sans font-bold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8', fontSize: 15 }}>
+                  {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-400">{band ? BAND_WORD[band] : 'Confidence unavailable'}</div>
+              </div>
             </div>
-          </div>
-          {/* Right: BandRing + strength word (NO raw score) */}
-          <div className="text-center">
-            <div className="relative inline-grid place-items-center">
-              <BandRing score={HERO.portfolioScore} size={120} stroke={11} />
-              {/* NO inner number */}
-            </div>
-            <div className="mt-2 font-sans font-bold text-white" style={{ fontSize: 15 }}>{HERO.label}</div>
-            <div className="mt-0.5 text-[11.5px]" style={{ color: '#94A3B8' }}>{HERO.sub}</div>
-            <div className="mt-1 font-sans font-bold" style={{ color: STRENGTH_COLOR[toStrength(HERO.portfolioScore)] }}>
-              {STRENGTH_WORD[toStrength(HERO.portfolioScore)]}
-            </div>
-          </div>
-        </div>
-        {/* Stats grid */}
-        <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-xl bg-white/10 sm:grid-cols-6">
-          {HERO.stats.map((s) => (
-            <div key={s.label} className="bg-white/[0.04] px-3 py-2.5">
-              <div className="text-[9.5px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{s.label}</div>
-              <div className="mt-0.5 font-sans text-[15px] font-extrabold leading-tight" style={{ color: s.color ?? '#fff' }}>{s.value}</div>
-            </div>
-          ))}
-        </div>
-        {/* Status pills */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {HERO.statusPills.map((pill) => (
-            <span
-              key={pill.text}
-              className="rounded-full px-3 py-1 text-[11.5px] font-semibold"
-              style={{ background: `${pill.color}28`, color: pill.color }}
-            >
-              {pill.text}
-            </span>
-          ))}
-        </div>
+          )}
+        </DataState>
       </div>
     </div>
   );
@@ -451,33 +477,27 @@ export function PerfSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S07 — FUND HOLDINGS
+// S07 — FUND HOLDINGS — live data
 // ═══════════════════════════════════════════════════════════════════════════
-const STATUS_FILTERS = ['All', 'In Form', 'On Track', 'Needs Review', 'Active SIP'];
+const STATUS_FILTERS = ['All', 'In Form', 'On Track', 'Off Track', 'Out of Form'];
 
-export function HoldingsSection() {
+function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState('All');
 
-  const totalValue = HOLDINGS.reduce((s, h) => s + h.value, 0);
+  const totalValue = holdings.reduce((s, h) => s + h.current_value, 0);
 
-  const filtered = HOLDINGS.filter((h) => {
-    const matchSearch = h.name.toLowerCase().includes(search.toLowerCase());
-    const matchFilter =
-      filter === 'All' ? true :
-      filter === 'Needs Review' ? h.status === 'Off Track' :
-      filter === 'Active SIP' ? true :
-      h.status === filter;
+  const filtered = holdings.filter((h) => {
+    const displayLabel = h.label ? LABEL_DISPLAY[h.label] : '';
+    const matchSearch = h.scheme_name.toLowerCase().includes(search.toLowerCase());
+    const matchFilter = filter === 'All' || displayLabel === filter;
     return matchSearch && matchFilter;
   });
 
-  const fmt = (n: number) => `₹${(n / 100000).toFixed(2)} L`;
-  const pnl = (h: typeof HOLDINGS[0]) => h.value - h.invested;
-  const pnlPct = (h: typeof HOLDINGS[0]) => ((h.value - h.invested) / h.invested * 100).toFixed(1);
-  const weight = (h: typeof HOLDINGS[0]) => ((h.value / totalValue) * 100).toFixed(1);
+  const fmt = (n: number) => `₹${(n / 100_000).toFixed(2)} L`;
 
   return (
-    <Card className="mt-4 p-5">
+    <>
       {/* Filters row */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
@@ -505,62 +525,52 @@ export function HoldingsSection() {
       </div>
       {/* Table — horizontal scroll inside card */}
       <div className="overflow-x-auto">
-        <table className="min-w-[1080px] w-full border-collapse text-small">
+        <table className="min-w-[900px] w-full border-collapse text-small">
           <thead>
             <tr className="border-b border-line text-left">
-              {['Fund', 'Score', 'Value', 'Invested', 'P&L', 'Return %', 'XIRR', 'Weight', 'Risk', 'Status'].map((col) => (
+              {['Fund', 'Band', 'Label', 'Value', 'Invested', 'P&L', 'Weight'].map((col) => (
                 <th key={col} className="whitespace-nowrap py-2.5 pr-4 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted first:pl-0">{col}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {filtered.map((h) => {
-              const gain = pnl(h);
-              const gainPct = pnlPct(h);
-              const gainColor = gain >= 0 ? E : R;
+              const gain = h.invested_amount !== null ? h.current_value - h.invested_amount : null;
+              const gainColor = gain === null ? '#94A3B8' : gain >= 0 ? E : R;
+              const weightPct = totalValue > 0 ? ((h.current_value / totalValue) * 100).toFixed(1) : '—';
+              const displayLabel = h.label ? LABEL_DISPLAY[h.label] : 'Insufficient Data';
               return (
-                <tr key={h.name} className="group hover:bg-surface-2">
+                <tr key={h.isin} className="group hover:bg-surface-2">
                   {/* Fund */}
                   <td className="py-3 pr-4">
-                    <div className="flex items-center gap-2.5">
-                      <Logo letter={h.logo} color={h.color} size={28} radius={7} font={11} />
-                      <div>
-                        <div className="font-semibold text-ink leading-tight max-w-[200px] truncate" title={h.name}>{h.name}</div>
-                        <div className="text-[10px] text-ink-muted leading-tight">{h.cat}</div>
-                      </div>
+                    <div>
+                      <div className="font-semibold text-ink leading-tight max-w-[220px] truncate" title={h.scheme_name}>{h.scheme_name}</div>
+                      <div className="text-[10px] text-ink-muted leading-tight">{h.category ?? '—'}</div>
                     </div>
                   </td>
-                  {/* Score — BandRing + strength WORD, NOT raw number */}
+                  {/* Band ring + word (confidence_band) — NO numeric score */}
                   <td className="py-3 pr-4">
                     <span className="inline-flex items-center gap-1.5">
-                      <BandRing score={h.score} size={28} stroke={4} />
-                      <span className="font-bold text-[11px]" style={{ color: ringColor(h.score) }}>
-                        {STRENGTH_WORD[toStrength(h.score)]}
+                      <BandRingFromBand band={h.confidence_band} size={28} stroke={4} />
+                      <span className="font-bold text-[11px]" style={{ color: h.confidence_band ? BAND_COLOR[h.confidence_band] : '#94A3B8' }}>
+                        {h.confidence_band ? h.confidence_band.charAt(0).toUpperCase() + h.confidence_band.slice(1) : '—'}
                       </span>
                     </span>
                   </td>
-                  {/* Value */}
-                  <td className="py-3 pr-4 font-mono font-bold text-ink">{fmt(h.value)}</td>
-                  {/* Invested */}
-                  <td className="py-3 pr-4 font-mono text-ink-secondary">{fmt(h.invested)}</td>
-                  {/* P&L */}
-                  <td className="py-3 pr-4 font-mono font-bold" style={{ color: gainColor }}>
-                    {gain >= 0 ? '+' : ''}{fmt(gain)}
+                  {/* Educational label — no advisory verb */}
+                  <td className="py-3 pr-4">
+                    <StatusTag status={displayLabel} />
                   </td>
-                  {/* Return % */}
+                  {/* User's own value — allowed */}
+                  <td className="py-3 pr-4 font-mono font-bold text-ink">{fmt(h.current_value)}</td>
+                  {/* User's own invested — allowed */}
+                  <td className="py-3 pr-4 font-mono text-ink-secondary">{h.invested_amount !== null ? fmt(h.invested_amount) : '—'}</td>
+                  {/* P&L — user's own — allowed */}
                   <td className="py-3 pr-4 font-mono font-bold" style={{ color: gainColor }}>
-                    {gain >= 0 ? '+' : ''}{gainPct}%
-                  </td>
-                  {/* XIRR */}
-                  <td className="py-3 pr-4 font-mono font-bold" style={{ color: h.xirr >= 0 ? E : R }}>
-                    {h.xirr >= 0 ? '+' : ''}{h.xirr}%
+                    {gain !== null ? `${gain >= 0 ? '+' : ''}${fmt(Math.abs(gain))}` : '—'}
                   </td>
                   {/* Weight */}
-                  <td className="py-3 pr-4 font-mono text-ink-secondary">{weight(h)}%</td>
-                  {/* Risk */}
-                  <td className="py-3 pr-4"><RiskBadge risk={h.risk} /></td>
-                  {/* Status */}
-                  <td className="py-3"><StatusTag status={h.status} /></td>
+                  <td className="py-3 pr-4 font-mono text-ink-secondary">{weightPct}%</td>
                 </tr>
               );
             })}
@@ -570,6 +580,32 @@ export function HoldingsSection() {
           <div className="py-8 text-center text-small text-ink-muted">No funds match your search or filter.</div>
         )}
       </div>
+    </>
+  );
+}
+
+export function HoldingsSection({ portfolioId }: { portfolioId: string }) {
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHoldings(portfolioId);
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const holdings = envelope?.data?.holdings ?? [];
+  const reason = envelope?.meta.reason ?? null;
+
+  return (
+    <Card className="mt-4 p-5">
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="No holdings found. Upload your CAS statement to see your funds here."
+        onRetry={() => refetch()}
+        skeleton={
+          <div className="flex flex-col gap-3">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-xl" />)}
+          </div>
+        }
+      >
+        <HoldingsTable holdings={holdings} />
+      </DataState>
     </Card>
   );
 }
