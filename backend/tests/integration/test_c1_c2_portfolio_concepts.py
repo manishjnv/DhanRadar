@@ -139,8 +139,8 @@ async def _seed_portfolio_with_holding(db_session, uid: str) -> str:
     ).scalar_one()
     await db_session.execute(
         text(
-            "INSERT INTO mf.mf_funds (isin, scheme_name, category, sebi_category)"
-            " VALUES ('INF200K01VT2', 'Parag Parikh Flexi Cap', 'Equity', 'Flexi Cap Fund')"
+            "INSERT INTO mf.mf_funds (isin, scheme_name, category, sebi_category, is_segregated)"
+            " VALUES ('INF200K01VT2', 'Parag Parikh Flexi Cap', 'Equity', 'Flexi Cap Fund', false)"
             " ON CONFLICT (isin) DO NOTHING"
         )
     )
