@@ -46,7 +46,53 @@ const PRI_COLOR = { high: R, med: A, low: B };
 // EMPTY STATE
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function EmptyHero({ onViewSample }: { onViewSample: () => void }) {
+interface EmptyHeroProps {
+  onViewSample: () => void;
+  onUpload?: (file: File) => void;
+  uploadPhase?: 'idle' | 'uploading' | 'processing' | 'done' | 'error';
+  uploadProgress?: number;
+  uploadStatusLabel?: string;
+  uploadError?: string | null;
+  estimatedSeconds?: number | null;
+  onRetryWithPassword?: (file: File, password: string) => void;
+}
+
+export function EmptyHero({
+  onViewSample,
+  onUpload,
+  uploadPhase = 'idle',
+  uploadProgress = 0,
+  uploadStatusLabel = '',
+  uploadError = null,
+  estimatedSeconds = null,
+  onRetryWithPassword,
+}: EmptyHeroProps) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const lastFileRef = React.useRef<File | null>(null);
+  const [password, setPassword] = React.useState('');
+
+  function handleFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || !onUpload) return;
+    lastFileRef.current = file;
+    setPassword('');
+    onUpload(file);
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
+  }
+
+  const showPasswordPrompt =
+    uploadPhase === 'error' &&
+    uploadError &&
+    /password|encrypt|protect/i.test(uploadError);
+
   return (
     <div
       className="relative overflow-hidden rounded-[24px] p-8 text-white shadow-lg sm:p-10"
@@ -64,15 +110,115 @@ export function EmptyHero({ onViewSample }: { onViewSample: () => void }) {
         <p className="max-w-[560px] text-small leading-relaxed text-slate-300 sm:text-body">
           Get a complete picture of your mutual fund portfolio — health score, overlap analysis, goal tracking, risk breakdown, and plain-English recommendations — in one place.
         </p>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          className="sr-only"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+
         {/* Drop zone */}
-        <div className="w-full max-w-sm rounded-2xl border-2 border-dashed border-white/30 bg-white/[0.04] p-8 transition-colors hover:border-white/50">
+        <div
+          role={onUpload ? 'button' : undefined}
+          tabIndex={onUpload ? 0 : undefined}
+          aria-label={onUpload ? 'Click or drop a CAS file here to upload' : undefined}
+          className="w-full max-w-sm rounded-2xl border-2 border-dashed border-white/30 bg-white/[0.04] p-8 transition-colors hover:border-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          onClick={() => onUpload && fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUpload && fileInputRef.current?.click(); } }}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
           <div className="flex flex-col items-center gap-2">
             <span className="text-4xl" aria-hidden="true">📄</span>
             <p className="text-small font-semibold text-white">Drop your CAS file here</p>
-            <p className="text-caption text-slate-400">PDF or XML · CDSL / NSDL / CAMS</p>
-            <CTA variant="primary" className="mt-2">Choose File</CTA>
+            <p className="text-caption text-slate-400">PDF · CDSL / NSDL / CAMS</p>
+            <CTA
+              variant="primary"
+              className="mt-2"
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); onUpload && fileInputRef.current?.click(); }}
+            >
+              Choose File
+            </CTA>
           </div>
         </div>
+
+        {/* Upload status block — always rendered when not idle (NO-SUPPRESS) */}
+        {uploadPhase !== 'idle' && (
+          <div className="w-full max-w-sm rounded-xl border border-white/20 bg-white/[0.07] p-4 text-left" data-testid="upload-status">
+            {uploadPhase === 'uploading' && (
+              <div className="flex items-center gap-2 text-small font-semibold text-white">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+                {uploadStatusLabel || 'Uploading your statement…'}
+              </div>
+            )}
+
+            {uploadPhase === 'processing' && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between text-small font-semibold text-white">
+                  <span>{uploadStatusLabel || 'Processing…'}</span>
+                  <span className="font-mono text-caption text-slate-300">{uploadProgress}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                {estimatedSeconds !== null && (
+                  <p className="text-caption text-slate-400">Estimated: ~{estimatedSeconds}s remaining</p>
+                )}
+              </div>
+            )}
+
+            {uploadPhase === 'done' && (
+              <div className="flex items-center gap-2 text-small font-semibold text-emerald-300">
+                <span aria-hidden="true">✓</span>
+                Your portfolio is ready — scroll down to see your data.
+              </div>
+            )}
+
+            {uploadPhase === 'error' && (
+              <div className="flex flex-col gap-3">
+                <p className="text-small text-red-300">{uploadError || 'Upload failed — please try again.'}</p>
+                {showPasswordPrompt && onRetryWithPassword ? (
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter CAS password (PAN + DOB)"
+                      className="w-full rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-small text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-white/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (lastFileRef.current && password) {
+                          onRetryWithPassword(lastFileRef.current, password);
+                          setPassword('');
+                        }
+                      }}
+                      className="rounded-lg bg-white/20 px-4 py-2 text-small font-semibold text-white hover:bg-white/30 focus-visible:outline-none"
+                    >
+                      Retry with password
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => lastFileRef.current && onUpload?.(lastFileRef.current)}
+                    className="self-start rounded-lg bg-white/20 px-4 py-2 text-small font-semibold text-white hover:bg-white/30 focus-visible:outline-none"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* CTAs */}
         <div className="flex flex-wrap justify-center gap-3">
           <button
