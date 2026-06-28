@@ -27,10 +27,39 @@ GH_REPO="manishjnv/DhanRadar"
 REQUIRED_CHECKS="guards backend migrations frontend"   # blocking CI jobs (not advisory lint)
 MARKER=/var/lib/dhanradar/last-deployed-sha
 LOG=/var/log/dhanradar-autodeploy.log
+FAILCOUNT=/var/lib/dhanradar/autodeploy-failcount      # B90: consecutive deploy-failure streak
+ALERT_THRESHOLD=3                                       # B90: email after N (~9min) failed polls
 
-cd "$REPO_DIR"
 ts()  { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "$(ts) $*" >> "$LOG"; }
+
+# B90 — surface a stalled pipeline instead of failing silently (RCA 2026-06-28: the deploy fail-closed
+# on unset DB passwords and nobody noticed for ~24h).
+# should_alert: pure predicate, true exactly once per streak (at the threshold) so we don't spam.
+should_alert() { [ "${1:-0}" -eq "$ALERT_THRESHOLD" ]; }
+# send_failure_alert: best-effort email via Resend. Creds read from .env (gitignored — NEVER in this
+# PUBLIC repo). No-ops with a log line if RESEND_API_KEY / ALERT_EMAIL are unset. Never breaks the poll.
+send_failure_alert() {
+  local n="$1" sha="$2" rc="$3" key to
+  key=$(grep -m1 "^RESEND_API_KEY=" .env 2>/dev/null | cut -d= -f2-)
+  to=$(grep -m1 "^ALERT_EMAIL=" .env 2>/dev/null | cut -d= -f2-)
+  if [ -z "$key" ] || [ -z "$to" ]; then log "alert skipped — RESEND_API_KEY/ALERT_EMAIL unset in .env"; return 0; fi
+  if curl -fsS -m 15 -X POST https://api.resend.com/emails \
+      -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" \
+      -d "{\"from\":\"noreply@dhanradar.com\",\"to\":\"${to}\",\"subject\":\"[DhanRadar] auto-deploy FAILED ${n}x (main@${sha:0:7})\",\"text\":\"deploy.sh failed ${n} consecutive polls deploying main@${sha:0:7} (rc=${rc}); the backend is NOT advancing. Logs on KVM4: /var/log/dhanradar-autodeploy.log + /var/log/dhanradar-manual-deploy.log\"}" \
+      >/dev/null 2>>"$LOG"; then log "alert email sent (${n}x failures)"; else log "alert email send FAILED"; fi
+}
+# selftest: `bash scripts/auto-deploy-poll.sh selftest` — one alert fires per failure streak (no I/O).
+run_selftest() {
+  local alerts=0 n
+  for n in 1 2 3 4 5; do if should_alert "$n"; then alerts=$((alerts+1)); fi; done   # streak 1 -> 1 (at 3)
+  for n in 1 2 3;       do if should_alert "$n"; then alerts=$((alerts+1)); fi; done   # streak 2 -> 1 (at 3)
+  if [ "$alerts" -eq 2 ]; then echo "selftest OK (alerts=$alerts)"; return 0; else echo "selftest FAIL (alerts=$alerts, want 2)"; return 1; fi
+}
+
+if [ "${1:-}" = "selftest" ]; then run_selftest; exit $?; fi
+
+cd "$REPO_DIR"
 
 git fetch origin main --quiet
 REMOTE=$(git rev-parse origin/main)
@@ -73,13 +102,21 @@ CHANGED=$(git diff --name-only "$BASE" "$REMOTE" 2>/dev/null || echo "__ALL__")
 if [ "$CHANGED" = "__ALL__" ] || \
    printf '%s\n' "$CHANGED" | grep -qvE '^(docs/|\.github/|\.claude/|scripts/|.*\.md$)'; then
   log "deploy ${BASE:0:7}->${REMOTE:0:7} (runtime change, CI green)"
-  bash scripts/deploy.sh deploy >> "$LOG" 2>&1
-  log "deploy OK -> $(git rev-parse --short HEAD)"
+  if bash scripts/deploy.sh deploy >> "$LOG" 2>&1; then
+    log "deploy OK -> $(git rev-parse --short HEAD)"
+  else
+    rc=$?
+    n=$(( $(cat "$FAILCOUNT" 2>/dev/null || echo 0) + 1 ))
+    mkdir -p "$(dirname "$FAILCOUNT")"; echo "$n" > "$FAILCOUNT"
+    log "deploy FAILED (rc=${rc}) ${REMOTE:0:7} — consecutive failures: ${n}"
+    if should_alert "$n"; then send_failure_alert "$n" "$REMOTE" "$rc"; fi
+    exit 1   # B90: do NOT mark handled — retry next poll (replaces the implicit set -e abort)
+  fi
 else
   log "${BASE:0:7}->${REMOTE:0:7} docs/ci/scripts-only — fast-forwarded, no rebuild"
 fi
 
-# Mark handled ONLY after success. `set -e` aborts before here if deploy.sh failed,
-# so a transient failure is retried on the next poll.
+# Mark handled ONLY after a fully successful poll; clear the failure streak.
 mkdir -p "$(dirname "$MARKER")"
 echo "$REMOTE" > "$MARKER"
+rm -f "$FAILCOUNT"   # B90: streak broken on any fully-handled poll
