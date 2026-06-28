@@ -25,6 +25,8 @@ import {
 } from './sampleData';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { HelpTip } from '@/components/ui/HelpTip';
+import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 import {
   usePortfolioHoldings,
   usePortfolioSummaryById,
@@ -297,6 +299,10 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const reason = envelope?.meta.reason ?? null;
 
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
+  // ponytail: tips from data accessors only — no hardcoded strings
+  const heroTip = sectionTooltip('HeroSection');
+  const xiirrTip = fieldTooltip('HeroSection', 'xirr');
+  const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
 
   return (
@@ -318,7 +324,10 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
               {/* Left: user's own money figures — allowed in DOM */}
               <div className="flex-1">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Portfolio Value</div>
+                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Total Portfolio Value
+                  {heroTip && <HelpTip tip={heroTip} />}
+                </div>
                 <div className="font-sans text-[38px] font-extrabold leading-none tracking-tight sm:text-[46px]">
                   {fmtCurrency(summary.total_value)}
                 </div>
@@ -328,7 +337,10 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
                   <span>Invested: <span className="font-bold text-white">{fmtCurrency(summary.total_invested)}</span></span>
                   {summary.xirr_pct !== null && (
-                    <span>XIRR: <span className="font-bold text-emerald-300">{fmtPct(summary.xirr_pct)}</span></span>
+                    <span className="inline-flex items-center gap-1">
+                      XIRR: <span className="font-bold text-emerald-300">{fmtPct(summary.xirr_pct)}</span>
+                      {xiirrTip && <HelpTip tip={xiirrTip} />}
+                    </span>
                   )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
@@ -342,7 +354,10 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   <BandRingFromBand band={band} size={120} stroke={11} />
                   {/* ponytail: NO inner number — non-neg #2 */}
                 </div>
-                <div className="mt-2 font-sans text-[13px] font-bold text-slate-300">Data Confidence</div>
+                <div className="mt-2 inline-flex items-center gap-1 font-sans text-[13px] font-bold text-slate-300">
+                  Data Confidence
+                  {bandTip && <HelpTip tip={bandTip} />}
+                </div>
                 <div className="mt-1 font-sans font-bold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8', fontSize: 15 }}>
                   {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
                 </div>
@@ -632,6 +647,8 @@ const STATUS_FILTERS = ['All', 'In Form', 'On Track', 'Off Track', 'Out of Form'
 function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState('All');
+  const bandTip = fieldTooltip('HoldingsSection', 'band');
+  const labelTip = fieldTooltip('HoldingsSection', 'label');
 
   const totalValue = holdings.reduce((s, h) => s + h.current_value, 0);
 
@@ -676,8 +693,14 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         <table className="min-w-[900px] w-full border-collapse text-small">
           <thead>
             <tr className="border-b border-line text-left">
-              {['Fund', 'Band', 'Label', 'Value', 'Invested', 'P&L', 'Weight'].map((col) => (
-                <th key={col} className="whitespace-nowrap py-2.5 pr-4 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted first:pl-0">{col}</th>
+              {(['Fund', 'Band', 'Label', 'Value', 'Invested', 'P&L', 'Weight'] as const).map((col) => (
+                <th key={col} className="whitespace-nowrap py-2.5 pr-4 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted first:pl-0">
+                  <span className="inline-flex items-center gap-1">
+                    {col}
+                    {col === 'Band' && bandTip && <HelpTip tip={bandTip} />}
+                    {col === 'Label' && labelTip && <HelpTip tip={labelTip} />}
+                  </span>
+                </th>
               ))}
             </tr>
           </thead>
@@ -738,9 +761,16 @@ export function HoldingsSection({ portfolioId }: { portfolioId: string }) {
   const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
   const holdings = envelope?.data?.holdings ?? [];
   const reason = envelope?.meta.reason ?? null;
+  const holdingsTip = sectionTooltip('HoldingsSection');
 
   return (
     <Card className="mt-4 p-5">
+      {holdingsTip && (
+        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+          Fund Holdings
+          <HelpTip tip={holdingsTip} />
+        </div>
+      )}
       <DataState
         status={status}
         reason={reason}
@@ -934,10 +964,13 @@ function fmtPctRisk(n: number | null, prefix = '±'): string {
 }
 
 /** Shared "coming soon" card for fields not yet built server-side. */
-function ComingSoonCard({ label, desc }: { label: string; desc: string }) {
+function ComingSoonCard({ label, desc, tip }: { label: string; desc: string; tip?: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface-2 p-4">
-      <div className="text-caption text-ink-muted">{label}</div>
+      <div className="flex items-center gap-1 text-caption text-ink-muted">
+        {label}
+        {tip && <HelpTip tip={tip} />}
+      </div>
       <div className="mt-0.5 font-sans text-[15px] font-extrabold text-ink-faint">— Coming soon</div>
       <div className="mt-1 text-caption text-ink-secondary">{desc}</div>
     </div>
@@ -952,6 +985,12 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
   const is402 = isError && (error as { problem?: { status?: number } } | null)?.problem?.status === 402;
   const status = isLoading ? 'loading' : is402 ? 'withheld' : isError ? 'error' : (envelope?.status ?? 'empty');
   const adv = envelope?.data ?? null;
+
+  const sharpeTip = fieldTooltip('RiskSection', 'sharpe');
+  const sortinoTip = fieldTooltip('RiskSection', 'sortino');
+  const rollingAvgTip = fieldTooltip('RiskSection', 'rolling_avg');
+  const alphaTip = fieldTooltip('RiskSection', 'alpha');
+  const betaTip = fieldTooltip('RiskSection', 'beta');
 
   return (
     <DataState
@@ -970,10 +1009,13 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
           {/* Standard ratios — DOM-allowed */}
           {/* B88: a true portfolio Sharpe/Sortino needs the portfolio return series (not built) —
               averaging per-fund ratios is meaningless, so defer rather than show a wrong number. */}
-          <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." />
-          <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." />
+          <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." tip={sharpeTip} />
+          <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." tip={sortinoTip} />
           <div className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">Rolling 1Y Avg</div>
+            <div className="flex items-center gap-1 text-caption text-ink-muted">
+              Rolling 1Y Avg
+              {rollingAvgTip && <HelpTip tip={rollingAvgTip} />}
+            </div>
             <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_avg_pct, '')}</div>
             <div className="mt-1 text-caption text-ink-secondary">Average 1-year rolling return.</div>
           </div>
@@ -981,8 +1023,8 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
               (depends on correlation/timing) — deferred like Sharpe/Sortino until the valuation series. */}
           <ComingSoonCard label="Positive 1Y Windows" desc="% of 1-year periods with positive returns. Needs your portfolio return history — being built." />
           {/* alpha/beta always null server-side — render as coming soon */}
-          <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." />
-          <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." />
+          <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." tip={alphaTip} />
+          <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." tip={betaTip} />
         </div>
       )}
     </DataState>
@@ -999,8 +1041,21 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
   const bandDisplay = risk?.risk_band ? (RISK_BAND_DISPLAY[risk.risk_band] ?? risk.risk_band) : null;
   const bandConf = risk?.risk_band ? (RISK_BAND_TO_CONF[risk.risk_band] ?? null) : null;
 
+  // ponytail: all tips from data accessors — zero hardcoded copy
+  const riskTip = sectionTooltip('RiskSection');
+  const riskBandTip = fieldTooltip('RiskSection', 'risk_band');
+  const volatilityTip = fieldTooltip('RiskSection', 'volatility');
+  const maxDrawdownTip = fieldTooltip('RiskSection', 'max_drawdown');
+  const recoveryTip = fieldTooltip('RiskSection', 'recovery');
+
   return (
     <Card className="mt-4 p-5">
+      {riskTip && (
+        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+          Risk Center
+          <HelpTip tip={riskTip} />
+        </div>
+      )}
       <DataState
         status={status}
         reason={reason}
@@ -1019,7 +1074,10 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
               <div className="flex items-center gap-3">
                 <BandRingFromBand band={bandConf} size={48} stroke={6} />
                 <div>
-                  <div className="text-caption text-ink-muted">Risk Level</div>
+                  <div className="flex items-center gap-1 text-caption text-ink-muted">
+                    Risk Level
+                    {riskBandTip && <HelpTip tip={riskBandTip} />}
+                  </div>
                   {bandDisplay
                     ? <RiskBadge risk={bandDisplay} />
                     : <span className="text-[10.5px] font-bold text-ink-faint">Insufficient data</span>
@@ -1037,15 +1095,18 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
             {/* Standard ratio cards — DOM-allowed (non-neg #2 exempts standard ratios) */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="text-caption text-ink-muted">Price Swings</div>
+                <div className="flex items-center gap-1 text-caption text-ink-muted">
+                  Price Swings
+                  {volatilityTip && <HelpTip tip={volatilityTip} />}
+                </div>
                 <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.volatility_pct)}</div>
                 <div className="mt-1 text-caption text-ink-secondary">Average annualised volatility of your funds (indicative).</div>
               </div>
               {/* B88: portfolio drawdown doesn't aggregate linearly (fund falls happen at different times)
                   — needs the portfolio valuation series (not built). Defer, don't show a wrong number. */}
-              <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." />
+              <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." tip={maxDrawdownTip} />
               {/* recovery_months always null — render as coming soon (NO-SUPPRESS) */}
-              <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." />
+              <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." tip={recoveryTip} />
               <div className="rounded-xl border border-line bg-surface-2 p-4">
                 <div className="text-caption text-ink-muted">Coverage</div>
                 <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
