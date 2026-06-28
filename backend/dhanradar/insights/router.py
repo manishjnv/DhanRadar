@@ -24,9 +24,14 @@ from dhanradar.db import get_db
 from dhanradar.deps import UserContext, current_user_or_anonymous
 from dhanradar.insights import service
 from dhanradar.insights.schemas import ConcentrationResponse, MoodContextResponse, OverlapResponse
+from dhanradar.mf.portfolio_read import (
+    holdings_payload,
+    load_portfolio_read_model,
+    summary_payload,
+)
 from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, serialize_concept
-from dhanradar.models.mf import MfPortfolio, MfUserHolding, UserFundScore
+from dhanradar.models.mf import MfPortfolio
 
 router = APIRouter(tags=["portfolio-intelligence"])
 
@@ -82,73 +87,62 @@ async def portfolio_concentration(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
 
 
+async def _owned_portfolio_id(db: AsyncSession, portfolio_id: str, user_id: str) -> uuid.UUID:
+    """The portfolio UUID iff it belongs to user_id; 404 otherwise (also 404 on a malformed UUID — never
+    leaks existence). RLS is the second layer."""
+    try:
+        pid = uuid.UUID(portfolio_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    owned = await db.scalar(
+        select(MfPortfolio.id).where(MfPortfolio.id == pid, MfPortfolio.user_id == uuid.UUID(user_id))
+    )
+    if owned is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    return pid
+
+
 @router.get("/portfolio/{portfolio_id}/holdings")
 async def portfolio_holdings(
     portfolio_id: str,
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """`holdings.list` (A3 pilot) — the user's own holdings served THROUGH the single serialization
-    boundary (§10 layer 8). RLS scopes the rows to the owner; the boundary wraps them in the governance
-    envelope and strips any raw DhanRadar score (#2). Each fund carries its educational label +
-    confidence band (DOM-allowed) — NEVER the unified_score. Anonymous → 401; another user's portfolio → 404.
+    """C1 `holdings.list` — the owner's holdings, enriched (fund name/category, latest-NAV current value)
+    and served THROUGH the serialization boundary (§10 layer 8). Each fund carries its educational label +
+    confidence band (DOM-allowed) — NEVER the unified_score (hand-built payload + the A3 #2 scrub backstop).
+    `invested_amount` is ledger net-invested (B86). Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
-    try:
-        pid = uuid.UUID(portfolio_id)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
-    owned = await db.scalar(
-        select(MfPortfolio.id).where(
-            MfPortfolio.id == pid, MfPortfolio.user_id == uuid.UUID(user.user_id)
-        )
-    )
-    if owned is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
-
-    # RLS-scoped read of the owner's holdings + the educational label/band. unified_score is NEVER
-    # selected (correct by construction); the boundary's #2 scrub is the defence-in-depth backstop.
-    rows = (
-        await db.execute(
-            select(
-                MfUserHolding.isin,
-                MfUserHolding.folio_number,
-                MfUserHolding.units,
-                MfUserHolding.invested_amount,
-                MfUserHolding.avg_cost_nav,
-                MfUserHolding.as_of_date,
-                UserFundScore.verb_label,
-                UserFundScore.confidence_band,
-            )
-            .select_from(MfUserHolding)
-            .outerjoin(
-                UserFundScore,
-                (UserFundScore.portfolio_id == MfUserHolding.portfolio_id)
-                & (UserFundScore.isin == MfUserHolding.isin),
-            )
-            .where(MfUserHolding.portfolio_id == pid)
-            .order_by(MfUserHolding.isin)
-        )
-    ).mappings().all()
-
-    holdings = [
-        {
-            "isin": r["isin"],
-            "folio_number": r["folio_number"],
-            "units": float(r["units"]) if r["units"] is not None else None,
-            "invested_amount": float(r["invested_amount"]) if r["invested_amount"] is not None else None,
-            "current_nav": float(r["avg_cost_nav"]) if r["avg_cost_nav"] is not None else None,
-            "as_of": r["as_of_date"].isoformat() if r["as_of_date"] else None,
-            "label": r["verb_label"],  # educational label (DOM-allowed, #1)
-            "confidence_band": r["confidence_band"],  # band, not a number (#2)
-        }
-        for r in rows
-    ]
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rm = await load_portfolio_read_model(db, portfolio_id)
     return serialize_concept(
         "holdings.list",
-        {"portfolio_id": portfolio_id, "holdings": holdings},
+        holdings_payload(rm, portfolio_id),
         RequestCtx(tier=user.tier),
         source="cas",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/summary")
+async def portfolio_summary(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """C2 `portfolio.summary` — the owner's value/invested/gain/XIRR (their own DOM-allowed numbers) + an
+    overall data-confidence band, served THROUGH the boundary. HAND-BUILT: no portfolio composite score and
+    no invented verdict label (#1/#2). `total_invested` is ledger net-invested (B86). 401/404 as above.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    return serialize_concept(
+        "portfolio.summary",
+        summary_payload(rm, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
         engine_version=ENGINE_VERSION,
     )
 
