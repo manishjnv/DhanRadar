@@ -27,9 +27,9 @@ import datetime
 import uuid as _uuid
 
 import pytest
+from sqlalchemy import update
 
 from dhanradar.models.auth import User, UserTierEnum
-from sqlalchemy import update
 from tests.conftest import extract_cookie, make_auth_headers
 
 pytestmark = pytest.mark.integration
@@ -266,10 +266,10 @@ async def test_drain_delivers_to_fake_telegram(
     5. Assert the fake was called once with the correct chat_id, the delivered
        text contains NOT_ADVICE, and the queue is now empty.
     """
-    import dhanradar.tasks.misc as misc
     import dhanradar.db as _db_mod
-    from dhanradar.notifications.channels import DeliveryResult
+    import dhanradar.tasks.misc as misc
     from dhanradar.notifications import service
+    from dhanradar.notifications.channels import DeliveryResult
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine.schemas import NOT_ADVICE
 
@@ -328,10 +328,10 @@ async def test_drain_quiet_hours_defers_normal_job(
     """When the current IST time falls inside the user's quiet window, a normal-
     priority job must be re-queued (not delivered) and deliver_telegram must NOT
     be called."""
-    import dhanradar.tasks.misc as misc
     import dhanradar.db as _db_mod
-    from dhanradar.notifications.channels import DeliveryResult
+    import dhanradar.tasks.misc as misc
     from dhanradar.notifications import service
+    from dhanradar.notifications.channels import DeliveryResult
     from dhanradar.redis_client import get_redis
 
     # Redirect _drain to the test engine

@@ -12,10 +12,15 @@ readme = "README.md"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Alembic-generated migrations are immutable boilerplate — don't lint/reformat them.
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+# E501: handled by line-length/formatter. UP042: keep `(str, enum.Enum)` — StrEnum changes
+# str(member) ("X.free" → "free"), risky for the load-bearing tier/scoring/label enums used in
+# DB columns + string comparisons; (str, Enum) is intentional, not a bug.
+ignore = ["E501", "UP042"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

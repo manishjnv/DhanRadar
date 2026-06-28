@@ -99,12 +99,11 @@ async def test_scheme_master_pipeline_writes_runs_and_funds(
     """
     from sqlalchemy import select
 
+    # Patch the provider: fetch returns fixture text; parse returns fixture rows.
+    import dhanradar.market_data.amfi_scheme_master as _provider_mod
     from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfFund, MfIngestionRun
     from dhanradar.tasks.mf_scheme_master import _mf_scheme_master_pipeline
-
-    # Patch the provider: fetch returns fixture text; parse returns fixture rows.
-    import dhanradar.market_data.amfi_scheme_master as _provider_mod
 
     async def _fake_fetch(client):  # noqa: ARG001
         return _FIXTURE_TEXT

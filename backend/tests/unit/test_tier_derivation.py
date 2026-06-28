@@ -18,7 +18,6 @@ import pytest
 from dhanradar.models.auth import UserTierEnum
 from dhanradar.subscriptions.service import _derive_tier
 
-
 # ---------------------------------------------------------------------------
 # Inactive statuses → always free regardless of plan
 # ---------------------------------------------------------------------------

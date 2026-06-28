@@ -20,9 +20,10 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from alembic import context
 
 # ---------------------------------------------------------------------------
 # Alembic Config object — provides access to alembic.ini values.
@@ -37,20 +38,20 @@ if config.config_file_name is not None:
 # Import ALL models so their tables are registered in Base.metadata.
 # Add new model modules here as they are created in later phases.
 # ---------------------------------------------------------------------------
-from dhanradar.models.base import Base  # noqa: E402
+import dhanradar.models.ai_admin  # noqa: E402, F401  — registers compliance.prompt_templates + ai_budget_caps (Phase 5)
+import dhanradar.models.audit  # noqa: E402, F401  — registers audit.* tables (B57)
 import dhanradar.models.auth  # noqa: E402, F401  — registers auth.users + auth.subscriptions
 import dhanradar.models.billing  # noqa: E402, F401  — registers billing.plans
-import dhanradar.models.mf  # noqa: E402, F401  — registers the mf.* tables
-import dhanradar.models.notifications  # noqa: E402, F401  — registers notify.* tables
-import dhanradar.models.compliance  # noqa: E402, F401  — registers compliance.* tables
-import dhanradar.models.mood  # noqa: E402, F401  — registers mood.* tables
-import dhanradar.models.consent  # noqa: E402, F401  — registers consent.* tables (B44)
-import dhanradar.models.audit  # noqa: E402, F401  — registers audit.* tables (B57)
-import dhanradar.models.education  # noqa: E402, F401  — registers education.* tables (G8)
-import dhanradar.models.news  # noqa: E402, F401  — registers news.* tables (B56)
-import dhanradar.models.ai_admin  # noqa: E402, F401  — registers compliance.prompt_templates + ai_budget_caps (Phase 5)
-import dhanradar.signal.models  # noqa: E402, F401  — registers signal.* tables
 import dhanradar.models.bse  # noqa: E402, F401  — registers bse.* tables (Star MF webhook inbox)
+import dhanradar.models.compliance  # noqa: E402, F401  — registers compliance.* tables
+import dhanradar.models.consent  # noqa: E402, F401  — registers consent.* tables (B44)
+import dhanradar.models.education  # noqa: E402, F401  — registers education.* tables (G8)
+import dhanradar.models.mf  # noqa: E402, F401  — registers the mf.* tables
+import dhanradar.models.mood  # noqa: E402, F401  — registers mood.* tables
+import dhanradar.models.news  # noqa: E402, F401  — registers news.* tables (B56)
+import dhanradar.models.notifications  # noqa: E402, F401  — registers notify.* tables
+import dhanradar.signal.models  # noqa: E402, F401  — registers signal.* tables
+from dhanradar.models.base import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

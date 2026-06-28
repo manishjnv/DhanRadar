@@ -12,7 +12,6 @@ bucketed. Missing inputs are dropped (never imputed) and decrement `inputs_avail
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 # 11 inputs/weights — architecture Mood Compass pipeline (Σ = 1.00).
 WEIGHTS: dict[str, float] = {
@@ -114,7 +113,7 @@ def factor_tier(value: float | None, weight: float) -> str:
     return "slight"
 
 
-def compute_mood(inputs: dict[str, Optional[float]]) -> Optional[MoodResult]:
+def compute_mood(inputs: dict[str, float | None]) -> MoodResult | None:
     """Compute the regime snapshot. Returns None if ALL inputs are missing (the
     caller skips + retries — architecture all-missing failure mode)."""
     present = {

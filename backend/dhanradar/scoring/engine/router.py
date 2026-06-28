@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hmac
 import json
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, status
 
@@ -30,7 +30,7 @@ from dhanradar.redis_client import get_redis
 router = APIRouter(prefix="/internal/v1", tags=["internal-scoring"])
 
 
-def _require_internal_token(x_internal_token: Optional[str]) -> None:
+def _require_internal_token(x_internal_token: str | None) -> None:
     token = settings.INTERNAL_API_TOKEN
     if not token:
         # Fail-closed: the internal numeric endpoint is OFF unless a token is set.
@@ -45,7 +45,7 @@ def _require_internal_token(x_internal_token: Optional[str]) -> None:
 async def get_internal_score(
     instrument_type: str,
     identifier: str,
-    x_internal_token: Annotated[Optional[str], Header(alias="X-Internal-Token")] = None,
+    x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
 ) -> dict[str, Any]:
     _require_internal_token(x_internal_token)
     redis = get_redis()

@@ -24,8 +24,8 @@ import hashlib
 import html as _html
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def bump_audit_metric(name: str, amount: int = 1) -> None:
         from dhanradar.redis_client import get_redis
 
         redis = get_redis()
-        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        day = datetime.now(UTC).strftime("%Y%m%d")
         key = f"metrics:compliance:{name}:{day}"
         await redis.incrby(key, amount)
         await redis.expire(key, 35 * 86400)  # self-clean; alerting reads are recent
@@ -94,16 +94,16 @@ def content_hash(payload: dict) -> str:
 async def record_served_label(
     *,
     surface: str,
-    label: Optional[str],
-    model: Optional[str],
+    label: str | None,
+    model: str | None,
     disclaimer_version: str,
     recommendation_type: str = "educational_label",
-    user_id: Optional[str] = None,
-    identifier: Optional[str] = None,
-    confidence_band: Optional[str] = None,
-    prompt_version: Optional[str] = None,
-    session_id: Optional[str] = None,
-    request_id: Optional[str] = None,
+    user_id: str | None = None,
+    identifier: str | None = None,
+    confidence_band: str | None = None,
+    prompt_version: str | None = None,
+    session_id: str | None = None,
+    request_id: str | None = None,
 ) -> bool:
     """Persist one audit row. Returns True iff written. NEVER raises — a failure is
     logged and swallowed (the caller's serve path must not break on audit).
@@ -128,7 +128,7 @@ async def record_served_label(
         async with TaskSessionLocal() as db:
             db.add(
                 AiRecommendationAudit(
-                    served_at=datetime.now(timezone.utc),  # server-set, never caller-supplied
+                    served_at=datetime.now(UTC),  # server-set, never caller-supplied
                     user_id=UUID(user_id) if user_id and user_id != "anonymous" else None,
                     recommendation_type=recommendation_type,
                     label=label,
@@ -150,7 +150,7 @@ async def record_served_label(
         return False
 
 
-async def get_active_disclaimer(db: Any, disclaimer_type: str) -> Optional[dict]:
+async def get_active_disclaimer(db: Any, disclaimer_type: str) -> dict | None:
     """Return the active disclaimer for a type (Redis-cached 1h; Postgres fallback)."""
     from dhanradar.redis_client import get_redis
 
@@ -251,7 +251,7 @@ async def activate_disclaimer(db: Any, *, version: str, activated_by: str) -> di
     if row is None:
         raise KeyError(version)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Deactivate all currently-active disclaimers of the same type in one UPDATE,
     # then activate the target row — single transaction, single commit. The
@@ -275,7 +275,7 @@ async def activate_disclaimer(db: Any, *, version: str, activated_by: str) -> di
     effective_from_iso = now.isoformat()
 
     # Best-effort R2 HTML snapshot — source of truth is the committed DB row.
-    snapshot_key: Optional[str] = None
+    snapshot_key: str | None = None
     snapshot_status: str
     try:
         safe_content = _html.escape(row.content)
@@ -325,7 +325,7 @@ def _snapshot_from_rows(rows: Any) -> dict:
     """
     result: dict = {}
     for row in rows:
-        date_key = row.served_at.astimezone(timezone.utc).date().isoformat()
+        date_key = row.served_at.astimezone(UTC).date().isoformat()
         if row.user_id is not None:
             subject = str(row.user_id)
         elif row.session_id:
@@ -421,13 +421,13 @@ async def label_churn_review(db: Any, *, recommendation_type: str = "educational
 
 async def log_low_confidence(
     *,
-    surface: Optional[str] = None,
-    confidence_score: Optional[float] = None,
-    confidence_band: Optional[str] = None,
-    model: Optional[str] = None,
-    reason: Optional[str] = None,
-    identifier: Optional[str] = None,
-    request_id: Optional[str] = None,
+    surface: str | None = None,
+    confidence_score: float | None = None,
+    confidence_band: str | None = None,
+    model: str | None = None,
+    reason: str | None = None,
+    identifier: str | None = None,
+    request_id: str | None = None,
 ) -> bool:
     """Fire-and-forget insert of one low-confidence event log row.
 
@@ -533,7 +533,7 @@ async def safety_monitor_summary(db: Any, *, days: int = 7) -> dict:
 
     from dhanradar.models.compliance import AiLowConfidenceLog, AiRecommendationAudit
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
 
     # Count by recommendation_type
     type_rows = (
@@ -663,14 +663,14 @@ async def record_engine_changelog(
     *,
     model_version: str,
     created_by: str,
-    approved_by: Optional[str],
+    approved_by: str | None,
     factors_before: dict,
     factors_after: dict,
-    methodology_url: Optional[str],
+    methodology_url: str | None,
     activated: bool = False,
-    activated_at: Optional[datetime] = None,
-    backtest: Optional[dict] = None,
-    drift: Optional[dict] = None,
+    activated_at: datetime | None = None,
+    backtest: dict | None = None,
+    drift: dict | None = None,
 ) -> dict:
     """Insert one scoring/rating methodology changelog row.
 
@@ -733,7 +733,7 @@ async def record_feedback(
     audit_id: str,
     user_id: str,
     helpful: bool,
-    feedback_text: Optional[str] = None,
+    feedback_text: str | None = None,
 ) -> dict:
     """Append one user-feedback row. Append-only — no updates or deletes.
 

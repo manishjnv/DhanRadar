@@ -7,8 +7,7 @@ No DB, no network — storage.put_object and sys.stdin are monkeypatched.
 from __future__ import annotations
 
 import io
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,8 +28,8 @@ def _make_stdin(data: bytes) -> io.BytesIO:
 
 def test_uploads_stdin_bytes_to_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: non-empty stdin → put_object called once with correct args; returns 0."""
-    from dhanradar.ops import r2_put
     from dhanradar import storage
+    from dhanradar.ops import r2_put
 
     mock_put = MagicMock()
     monkeypatch.setattr(storage, "put_object", mock_put)
@@ -50,8 +49,8 @@ def test_uploads_stdin_bytes_to_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_refuses_empty_backup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty stdin → put_object NOT called; returns 3."""
-    from dhanradar.ops import r2_put
     from dhanradar import storage
+    from dhanradar.ops import r2_put
 
     mock_put = MagicMock()
     monkeypatch.setattr(storage, "put_object", mock_put)
@@ -66,8 +65,8 @@ def test_refuses_empty_backup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_missing_key_arg(monkeypatch: pytest.MonkeyPatch) -> None:
     """No key argument → returns 2; put_object not called."""
-    from dhanradar.ops import r2_put
     from dhanradar import storage
+    from dhanradar.ops import r2_put
 
     mock_put = MagicMock()
     monkeypatch.setattr(storage, "put_object", mock_put)
@@ -80,8 +79,8 @@ def test_missing_key_arg(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_storage_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     """put_object raises StorageNotConfigured → returns 4."""
-    from dhanradar.ops import r2_put
     from dhanradar import storage
+    from dhanradar.ops import r2_put
 
     monkeypatch.setattr(
         storage,
@@ -98,8 +97,8 @@ def test_storage_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_unexpected_exception_returns_1(monkeypatch: pytest.MonkeyPatch) -> None:
     """put_object raises an unexpected exception → returns 1."""
-    from dhanradar.ops import r2_put
     from dhanradar import storage
+    from dhanradar.ops import r2_put
 
     monkeypatch.setattr(
         storage,

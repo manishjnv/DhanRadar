@@ -52,7 +52,6 @@ encapsulate this pattern. This is a test-harness limitation, not an app bug.
 from __future__ import annotations
 
 import os
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -284,19 +283,19 @@ async def db_tables(db_engine):
     """
     from sqlalchemy import text
 
-    from dhanradar.models.auth import Base  # noqa: F401 — registers all models
-    import dhanradar.models.billing  # noqa: F401 — registers billing.plans
-    import dhanradar.models.mf  # noqa: F401 — registers the mf.* tables
-    import dhanradar.models.notifications  # noqa: F401 — registers notify.* tables
-    import dhanradar.models.compliance  # noqa: F401 — registers compliance.* tables
-    import dhanradar.models.mood  # noqa: F401 — registers mood.* tables
-    import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
     import dhanradar.models.audit  # noqa: F401 — registers audit.* tables (B57)
-    import dhanradar.models.education  # noqa: F401 — registers education.* tables (G8)
-    import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
-    import dhanradar.models.concepts  # noqa: F401 — registers concepts.* tables (C1)
-    import dhanradar.signal.models  # noqa: F401 — registers signal.* tables
+    import dhanradar.models.billing  # noqa: F401 — registers billing.plans
     import dhanradar.models.bse  # noqa: F401 — registers bse.* tables (Star MF webhook inbox)
+    import dhanradar.models.compliance  # noqa: F401 — registers compliance.* tables
+    import dhanradar.models.concepts  # noqa: F401 — registers concepts.* tables (C1)
+    import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
+    import dhanradar.models.education  # noqa: F401 — registers education.* tables (G8)
+    import dhanradar.models.mf  # noqa: F401 — registers the mf.* tables
+    import dhanradar.models.mood  # noqa: F401 — registers mood.* tables
+    import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
+    import dhanradar.models.notifications  # noqa: F401 — registers notify.* tables
+    import dhanradar.signal.models  # noqa: F401 — registers signal.* tables
+    from dhanradar.models.auth import Base  # noqa: F401 — registers all models
     from dhanradar.models.base import Base as MetaBase
 
     async with db_engine.begin() as conn:

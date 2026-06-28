@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -78,11 +78,11 @@ def build_problem(
     status: int,
     request_id: str,
     *,
-    detail: Optional[Any] = None,
-    type_slug: Optional[str] = None,
-    title: Optional[str] = None,
-    instance: Optional[str] = None,
-    extra: Optional[dict[str, Any]] = None,
+    detail: Any | None = None,
+    type_slug: str | None = None,
+    title: str | None = None,
+    instance: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct an RFC7807 problem body (dict)."""
     slug = type_slug or _STATUS_SLUG.get(status, "error")
@@ -105,7 +105,7 @@ def build_problem(
     return body
 
 
-def _problem_response(status: int, body: dict[str, Any], headers: Optional[dict] = None) -> JSONResponse:
+def _problem_response(status: int, body: dict[str, Any], headers: dict | None = None) -> JSONResponse:
     # jsonable_encoder guarantees the body is serializable — a non-serializable
     # extension value can never crash the handler mid-response (→ raw 500).
     return JSONResponse(
@@ -120,8 +120,8 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     """Map (Starlette/FastAPI) HTTPException → problem+json, preserving detail."""
     status = exc.status_code
     detail = exc.detail
-    type_slug: Optional[str] = None
-    detail_value: Optional[Any] = None
+    type_slug: str | None = None
+    detail_value: Any | None = None
     extra: dict[str, Any] = {}
 
     if isinstance(detail, dict):

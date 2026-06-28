@@ -12,10 +12,8 @@ All tests are unit-level: no DB, no Redis, no network.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
+from datetime import UTC, date, datetime
+from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
 # Helpers

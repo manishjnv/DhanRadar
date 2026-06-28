@@ -18,20 +18,16 @@ asyncio_mode = "auto" (pyproject.toml) — no @pytest.mark.asyncio decorator nee
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
 
-from dhanradar.ai_gateway.errors import GatewayError
+from dhanradar.ai_gateway.errors import GatewayError, QualityValidationError
 from dhanradar.ai_gateway.gateway import CompletionResult
 from dhanradar.ai_gateway.quality import QualityValidator
-from dhanradar.ai_gateway.errors import QualityValidationError
-from dhanradar.budget import BudgetExhaustedError
 from dhanradar.deps import ConsentRequiredError
 from dhanradar.mf.research import (
-    MFResearchAnswer,
     _DAILY_CAP,
     _QUESTION_MAX_CHARS,
+    MFResearchAnswer,
     build_research_messages,
     generate_research_answer,
 )

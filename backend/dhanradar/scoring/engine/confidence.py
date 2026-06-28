@@ -16,7 +16,6 @@ Then structural rules (spec §5.2), all fail-safe (only ever LOWER confidence):
 from __future__ import annotations
 
 import statistics
-from typing import Optional
 
 from dhanradar.scoring.engine.schemas import Axis, ConfidenceBand
 
@@ -25,7 +24,7 @@ _MEDIUM = 0.50
 _FLOOR = 0.30
 
 
-def factor_agreement(axis_scores: dict[Axis, Optional[float]]) -> float:
+def factor_agreement(axis_scores: dict[Axis, float | None]) -> float:
     """1 − normalized dispersion of the present axis scores (spec §5)."""
     present = [s for s in axis_scores.values() if s is not None]
     if len(present) < 2:

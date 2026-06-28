@@ -25,7 +25,7 @@ Covered (in order):
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -173,7 +173,7 @@ async def test_audit_check_constraint_rejects_buy_sell(db_session):
     """INSERT with recommendation_type='buy_sell' must raise IntegrityError from
     the DB-level CHECK (ck_audit_no_buy_sell)."""
     bad_row = AiRecommendationAudit(
-        served_at=datetime.now(timezone.utc),
+        served_at=datetime.now(UTC),
         recommendation_type="buy_sell",
         content_hash="x" * 64,
         disclaimer_version="2026-06-06.v1",
@@ -203,7 +203,7 @@ async def test_archive_exports_row(db_session, monkeypatch):
     yesterday_noon_ist = (now_ist - timedelta(days=1)).replace(
         hour=12, minute=0, second=0, microsecond=0
     )
-    yesterday_noon_utc = yesterday_noon_ist.astimezone(timezone.utc)
+    yesterday_noon_utc = yesterday_noon_ist.astimezone(UTC)
 
     # Seed one audit row with served_at = yesterday 12:00 IST.
     row = AiRecommendationAudit(
@@ -286,7 +286,7 @@ async def test_reconcile_audit_disclaimers_finds_orphan(db_session, monkeypatch)
 
     # Seed two audit rows: one tied to the registered version, one orphan.
     row_ok = AiRecommendationAudit(
-        served_at=datetime.now(timezone.utc),
+        served_at=datetime.now(UTC),
         recommendation_type="educational_label",
         label="on_track",
         content_hash="a" * 64,
@@ -294,7 +294,7 @@ async def test_reconcile_audit_disclaimers_finds_orphan(db_session, monkeypatch)
         surface="mf_report",
     )
     row_orphan = AiRecommendationAudit(
-        served_at=datetime.now(timezone.utc),
+        served_at=datetime.now(UTC),
         recommendation_type="educational_label",
         label="off_track",
         content_hash="b" * 64,
@@ -329,7 +329,7 @@ async def test_reconcile_audit_disclaimers_ok_when_all_registered(db_session, mo
 
     # Seed one audit row tied to the registered version only.
     row = AiRecommendationAudit(
-        served_at=datetime.now(timezone.utc),
+        served_at=datetime.now(UTC),
         recommendation_type="educational_label",
         label="on_track",
         content_hash="c" * 64,

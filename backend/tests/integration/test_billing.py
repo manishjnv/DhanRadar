@@ -248,8 +248,8 @@ async def test_webhook_remounted_processes_valid_event(async_client, db_session,
     end-to-end (the plan's 'both paths' acceptance), not only reject a bad sig."""
     from sqlalchemy import select
 
-    from dhanradar.config import settings
     import dhanradar.subscriptions.service as sub_svc
+    from dhanradar.config import settings
     from dhanradar.models.auth import User, UserTierEnum
 
     monkeypatch.setattr(

@@ -33,7 +33,7 @@ from dhanradar.scoring.engine import (
 )
 from dhanradar.scoring.engine.config import ConfigError, EngineConfig, load_config
 from dhanradar.scoring.engine.governance import BatchDecision, two_person_gate_ok
-from dhanradar.scoring.engine.schemas import PublicScore, ScoringResult
+from dhanradar.scoring.engine.schemas import PublicScore
 
 
 # --- fakes -------------------------------------------------------------------

@@ -28,10 +28,11 @@ Exit codes
 from __future__ import annotations
 
 import sys
-from typing import IO, Optional, Sequence
+from collections.abc import Sequence
+from typing import IO
 
 
-def main(argv: Optional[Sequence[str]] = None, *, _stdin: Optional[IO[bytes]] = None) -> int:
+def main(argv: Sequence[str] | None = None, *, _stdin: IO[bytes] | None = None) -> int:
     """Upload stdin bytes to R2 under the given key.
 
     Parameters

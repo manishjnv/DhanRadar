@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import pytest
 
+from dhanradar.market_data.adapter import MarketDataAdapter
 from dhanradar.market_data.circuit_breaker import CircuitBreaker, _State
-from dhanradar.market_data.config import DataKind, DataRequest, load_ladders, DEFAULT_LADDERS
+from dhanradar.market_data.config import DEFAULT_LADDERS, DataKind, DataRequest, load_ladders
 from dhanradar.market_data.events import NavRefreshed, PriceRefreshed
 from dhanradar.market_data.exceptions import AllProvidersFailedError, ProviderError
-from dhanradar.market_data.adapter import MarketDataAdapter
 from dhanradar.market_data.providers.base import MarketDataProvider
 from dhanradar.market_data.providers.stubs import AMFINavProvider, NSEDumpProvider
-
 
 # ---------------------------------------------------------------------------
 # Fake clock helper

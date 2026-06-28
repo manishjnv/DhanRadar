@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dhanradar.market_data.sebi import CircularRow, fetch_circulars, parse_circulars
 from dhanradar.market_data.exceptions import ProviderError
+from dhanradar.market_data.sebi import CircularRow, fetch_circulars, parse_circulars
 
 # ---------------------------------------------------------------------------
 # Fixture HTML — mirrors the SEBI circulars table structure

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional
 
 DEFAULT_CHURN_THRESHOLD = 0.05  # >5% of the universe → hold
 DEFAULT_MAX_LABEL_SHARE = 0.80  # no single label may exceed 80% of a batch
@@ -88,7 +87,7 @@ class TwoPersonGateError(ValueError):
     """A methodology change failed the two-person gate (approved_by ≠ created_by)."""
 
 
-def two_person_gate_ok(created_by: Optional[str], approved_by: Optional[str]) -> bool:
+def two_person_gate_ok(created_by: str | None, approved_by: str | None) -> bool:
     return bool(approved_by) and approved_by != created_by
 
 
@@ -96,7 +95,7 @@ def make_changelog_entry(
     *,
     model_version: str,
     created_by: str,
-    approved_by: Optional[str],
+    approved_by: str | None,
     factors_before: dict,
     factors_after: dict,
     methodology_url: str,

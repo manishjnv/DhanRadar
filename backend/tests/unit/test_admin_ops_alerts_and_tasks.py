@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Task 2 — _next_run_at
@@ -131,9 +132,6 @@ def _make_db_for_alerts(
 
     db.scalars = AsyncMock(side_effect=_scalars)
     return db
-
-
-import pytest
 
 
 @pytest.mark.asyncio

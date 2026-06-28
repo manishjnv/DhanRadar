@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, time, timedelta
-from typing import Any, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from dhanradar.notifications.schemas import NotificationJob
@@ -53,7 +53,7 @@ async def publish_notification(
     user_id: str,
     channel: str,
     template_id: str,
-    data: Optional[dict] = None,
+    data: dict | None = None,
     priority: str = "normal",
 ) -> NotificationJob:
     """Enqueue one notification. Returns the job (also LPUSH'd as JSON). The drain
@@ -73,7 +73,7 @@ async def publish_notification(
 # Quiet hours — pure window check (IST wall-clock), handles midnight wrap.
 # ---------------------------------------------------------------------------
 
-def in_quiet_hours(current: time, start: Optional[time], end: Optional[time]) -> bool:
+def in_quiet_hours(current: time, start: time | None, end: time | None) -> bool:
     """True if `current` falls in [start, end). A null start/end → no quiet hours.
     Supports a wrapping window (e.g. 22:00–07:00). Equal start==end → empty window
     (never quiet), the safe reading (we would rather deliver than silently swallow)."""
@@ -122,11 +122,11 @@ async def rate_cap_increment(redis: Any, user_id: str, channel: str) -> int:
 # Preferences — read / upsert against notify.notification_preferences.
 # ---------------------------------------------------------------------------
 
-def _fmt_time(t: Optional[time]) -> Optional[str]:
+def _fmt_time(t: time | None) -> str | None:
     return t.strftime("%H:%M") if t is not None else None
 
 
-def parse_hhmm(s: Optional[str]) -> Optional[time]:
+def parse_hhmm(s: str | None) -> time | None:
     """Parse an 'HH:MM' string (or None) to a `time`. Public — the drain uses it."""
     if not s:
         return None
@@ -447,7 +447,7 @@ def broadcast_available() -> bool:
 
 
 async def log_delivery(
-    db: Any, user_id: str, channel: str, template_id: str, status: str, error_text: Optional[str] = None
+    db: Any, user_id: str, channel: str, template_id: str, status: str, error_text: str | None = None
 ) -> None:
     """Append one row to notify.notification_log. `error_text` must be an OPAQUE
     code (never a raw provider body/PII)."""
