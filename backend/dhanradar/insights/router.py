@@ -27,10 +27,13 @@ from dhanradar.insights.schemas import ConcentrationResponse, MoodContextRespons
 from dhanradar.mf.portfolio_read import (
     holdings_payload,
     load_portfolio_read_model,
+    load_portfolio_risk,
+    risk_advanced_payload,
+    risk_payload,
     summary_payload,
 )
 from dhanradar.mf.projection import ENGINE_VERSION
-from dhanradar.mf.serialization import RequestCtx, serialize_concept
+from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
 from dhanradar.models.mf import MfPortfolio
 
 router = APIRouter(tags=["portfolio-intelligence"])
@@ -141,6 +144,44 @@ async def portfolio_summary(
     return serialize_concept(
         "portfolio.summary",
         summary_payload(rm, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/risk")
+async def portfolio_risk(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    advanced: bool = False,
+) -> dict:
+    """C3 `portfolio.risk` (free) — the portfolio's risk band + value-weighted volatility / max-drawdown
+    (standard ratios, DOM-allowed) served THROUGH the boundary. `?advanced=true` serves
+    `portfolio.risk_advanced` (plus: Sharpe/Sortino/rolling); A3 withholds it for a free caller → HTTP 402
+    (the client renders the upgrade state). The DhanRadar risk COMPOSITE is NEVER selected (hand-built;
+    standard ratios only). Anonymous → 401; another user's portfolio → 404.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    r = await load_portfolio_risk(db, portfolio_id)
+    if advanced:
+        env = serialize_concept(
+            "portfolio.risk_advanced",
+            risk_advanced_payload(r, portfolio_id),
+            RequestCtx(tier=user.tier),
+            source="computed",
+            engine_version=ENGINE_VERSION,
+        )
+        if is_tier_withheld(env):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="tier_upgrade_required"
+            )
+        return env
+    return serialize_concept(
+        "portfolio.risk",
+        risk_payload(r, portfolio_id),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

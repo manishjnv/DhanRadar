@@ -16,11 +16,12 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { HeroSection } from './sections';
 import { HoldingsSection } from './sections';
+import { RiskSection } from './sections';
 
 // ---------------------------------------------------------------------------
 // Mock the API hooks
@@ -30,11 +31,15 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioSummaryById: vi.fn(),
   usePortfolioOverlap: vi.fn(),
   usePortfolioConcentration: vi.fn(),
+  usePortfolioRisk: vi.fn(),
+  usePortfolioRiskAdvanced: vi.fn(),
 }));
 
 import {
   usePortfolioHoldings,
   usePortfolioSummaryById,
+  usePortfolioRisk,
+  usePortfolioRiskAdvanced,
 } from '@/features/portfolio/api';
 
 // ---------------------------------------------------------------------------
@@ -271,5 +276,187 @@ describe('HoldingsSection', () => {
     const text = document.body.textContent ?? '';
     assertNoAdvisoryVerbs(text);
     assertNoNumericScore(text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RiskSection tests
+// ---------------------------------------------------------------------------
+
+const RISK_META = {
+  reason: null,
+  as_of: '2026-06-28T00:00:00Z',
+  is_stale: false,
+  source: 'computed' as const,
+  visibility_class: 'educational' as const,
+  data_class: 'derived-personal' as const,
+  access_tier: 'free' as const,
+  content_class: 'DERIVED' as const,
+  gate: null,
+  disclaimer_version: '2026-06-01',
+  engine_version: 'v1',
+  quality: 0.9,
+};
+
+const RISK_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'port-1',
+    risk_band: 'moderate' as const,
+    volatility_pct: 14.3,
+    max_drawdown_pct: -18.7,
+    recovery_months: null,
+    fund_count: 6,
+    funds_with_metrics: 5,
+    as_of: '2026-06-28',
+  },
+  meta: RISK_META,
+};
+
+const RISK_EMPTY = { status: 'empty' as const, data: null, meta: { ...RISK_META, reason: 'empty' as const } };
+
+const ADV_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'port-1',
+    sharpe_ratio: 1.42,
+    sortino_ratio: 2.01,
+    rolling_1y_avg_pct: 17.8,
+    rolling_1y_pct_positive: 82,
+    alpha: null,
+    beta: null,
+    as_of: '2026-06-28',
+  },
+  meta: RISK_META,
+};
+
+/** Minimal ApiError-shaped object — just needs a .problem.status for the 402 branch. */
+function make402() {
+  const e = new Error('402 Payment Required') as Error & { problem: { status: number } };
+  e.name = 'ApiError';
+  e.problem = { status: 402 };
+  return e;
+}
+
+describe('RiskSection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderRisk(
+    riskEnvelope: any,
+    advOverride: { data?: typeof ADV_PRESENT; isError?: boolean; error?: Error | null } = {},
+  ) {
+    const riskMock = vi.mocked(usePortfolioRisk);
+    const advMock = vi.mocked(usePortfolioRiskAdvanced);
+
+    const isLoading = riskEnvelope.status === 'loading';
+    const isError = riskEnvelope.status === 'error';
+    riskMock.mockReturnValue({
+      data: isLoading || isError ? undefined : riskEnvelope,
+      isLoading,
+      isError,
+      error: isError ? new Error('fail') : null,
+      refetch: vi.fn(),
+    } as any);
+
+    advMock.mockReturnValue({
+      data: advOverride.data ?? undefined,
+      isLoading: false,
+      isError: advOverride.isError ?? false,
+      error: advOverride.error ?? null,
+      refetch: vi.fn(),
+    } as any);
+
+    return render(<RiskSection portfolioId="port-1" />, { wrapper });
+  }
+
+  // ── 4 DataState states ───────────────────────────────────────────────────
+
+  it('loading => skeleton, standard ratios not visible', () => {
+    renderRisk({ status: 'loading', data: null, meta: RISK_META });
+    expect(screen.queryByText(/Price Swings/i)).toBeNull();
+    expect(screen.queryByText(/Biggest Fall/i)).toBeNull();
+  });
+
+  it('error => ErrorCard rendered', () => {
+    renderRisk({ status: 'error', data: null, meta: RISK_META });
+    // ErrorCard renders "Something went wrong" heading
+    expect(screen.getByText(/something went wrong/i)).toBeDefined();
+  });
+
+  it('empty => EmptyState visible, no ratios', () => {
+    renderRisk(RISK_EMPTY);
+    expect(screen.queryByText(/Price Swings/i)).toBeNull();
+    expect(screen.getByText(/risk data will appear/i)).toBeDefined();
+  });
+
+  it('present => standard ratios render', () => {
+    renderRisk(RISK_PRESENT);
+    expect(screen.getByText(/Price Swings/i)).toBeDefined();
+    expect(screen.getByText(/Biggest Fall/i)).toBeDefined();
+    expect(screen.getByText('±14.3%')).toBeDefined();
+    expect(screen.getByText('−18.7%')).toBeDefined();
+  });
+
+  // ── Risk band renders as word badge, never a number ──────────────────────
+
+  it('risk band renders as display word (Moderate), not raw enum or number', () => {
+    renderRisk(RISK_PRESENT);
+    expect(screen.getByText('Moderate')).toBeDefined();
+    // raw backend value must not appear directly
+    expect(screen.queryByText('moderate')).toBeNull();
+  });
+
+  // ── No numeric composite score in DOM (non-neg #2) ───────────────────────
+
+  it('does not render a numeric composite risk score', () => {
+    renderRisk(RISK_PRESENT);
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/risk score/i);
+    expect(text).not.toMatch(/composite/i);
+  });
+
+  // ── Recovery months comes-soon card (NO-SUPPRESS) ────────────────────────
+
+  it('renders Recovery Time as coming-soon, never a real value', () => {
+    renderRisk(RISK_PRESENT);
+    expect(screen.getByText(/Recovery Time/i)).toBeDefined();
+    // ComingSoonCard renders "— Coming soon" in a sibling div; check the whole DOM
+    expect(screen.getAllByText(/Coming soon/i).length).toBeGreaterThanOrEqual(1);
+    // No months number anywhere
+    expect(document.body.textContent).not.toMatch(/\d+ months?/i);
+  });
+
+  // ── Advanced panel — 402 upgrade state ──────────────────────────────────
+
+  it('advanced panel shows upgrade copy when 402', async () => {
+    renderRisk(RISK_PRESENT, { isError: true, error: make402() });
+    const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
+    fireEvent.click(advBtn);
+    // DataState withheld/tier renders the tier copy
+    expect(screen.getByText(/DhanRadar Plus/i)).toBeDefined();
+    // Sharpe/Sortino must NOT appear (upgrade wall, not data)
+    expect(screen.queryByText(/Sharpe Ratio/i)).toBeNull();
+  });
+
+  // ── Advanced panel — success state renders ratios ────────────────────────
+
+  it('advanced panel renders Sharpe and Sortino when data present', async () => {
+    renderRisk(RISK_PRESENT, { data: ADV_PRESENT });
+    const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
+    fireEvent.click(advBtn);
+    expect(screen.getByText(/Sharpe Ratio/i)).toBeDefined();
+    expect(screen.getByText('1.42')).toBeDefined();
+    expect(screen.getByText(/Sortino Ratio/i)).toBeDefined();
+    expect(screen.getByText('2.01')).toBeDefined();
+  });
+
+  it('advanced panel renders alpha and beta as coming-soon, not a number', async () => {
+    renderRisk(RISK_PRESENT, { data: ADV_PRESENT });
+    const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
+    fireEvent.click(advBtn);
+    expect(screen.getByText('Alpha')).toBeDefined();
+    expect(screen.getByText('Beta')).toBeDefined();
+    // coming soon appears at least twice (alpha + beta)
+    expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(2);
   });
 });
