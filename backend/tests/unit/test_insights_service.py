@@ -14,18 +14,17 @@ Guards:
 from __future__ import annotations
 
 import re
-import unittest
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from dhanradar.insights.schemas import ConcentrationResponse, OverlapResponse
 from dhanradar.insights.service import (
+    _category_observation,
     _concentration_context,
     _fund_pair_observation,
-    _category_observation,
 )
-from dhanradar.insights.schemas import ConcentrationResponse, OverlapResponse
 from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION, DISCLOSURE_BUNDLE, NOT_ADVICE
 
 # ---------------------------------------------------------------------------

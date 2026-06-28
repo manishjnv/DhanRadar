@@ -29,7 +29,6 @@ import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
-import pytest
 
 from dhanradar.market_data.amc_managers import (
     FundManagerRow,

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from dhanradar.scoring.engine.schemas import VerbLabel
 
@@ -23,7 +23,7 @@ _STATE_TTL_SECONDS = 180 * 24 * 3600  # ~180d; eval state outlives normal cadenc
 
 
 class HysteresisStore(Protocol):
-    async def get(self, key: str) -> Optional[dict]: ...
+    async def get(self, key: str) -> dict | None: ...
     async def set(self, key: str, state: dict) -> None: ...
 
 
@@ -40,7 +40,7 @@ class RedisHysteresisStore:
             self._redis = get_redis()
         return self._redis
 
-    async def get(self, key: str) -> Optional[dict]:
+    async def get(self, key: str) -> dict | None:
         raw = await self._r().get(key)
         return json.loads(raw) if raw else None
 
@@ -53,7 +53,7 @@ class HysteresisOutcome:
     published_label: VerbLabel
     eval_seq: int
     flip_pending: bool  # a divergent label is accumulating but has not yet flipped
-    prior_label: Optional[VerbLabel] = None  # label published BEFORE this eval (None on first-ever)
+    prior_label: VerbLabel | None = None  # label published BEFORE this eval (None on first-ever)
 
 
 def _key(instrument_type: str, identifier: str) -> str:

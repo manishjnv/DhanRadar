@@ -10,15 +10,12 @@ Verifies:
 
 from __future__ import annotations
 
-import pytest
-
 from dhanradar.signal.scoring import (
     breadth_score,
     compute_signal_state,
     nifty_score,
     vix_score,
 )
-
 
 # ---------------------------------------------------------------------------
 # nifty_score bands

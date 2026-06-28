@@ -15,13 +15,13 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dhanradar.admin.aiops_router import router as admin_aiops_router
-from dhanradar.ai_feedback.router import router as ai_feedback_router
 from dhanradar.admin.billing_router import router as admin_billing_router
 from dhanradar.admin.ops_router import router as admin_ops_router
 from dhanradar.admin.platform_router import router as admin_platform_router
 from dhanradar.admin.router import router as admin_router
 from dhanradar.admin.scoring_router import router as admin_scoring_router
 from dhanradar.admin.users_router import router as admin_users_router
+from dhanradar.ai_feedback.router import router as ai_feedback_router
 from dhanradar.auth.router import router as auth_router
 from dhanradar.billing.router import router as billing_router
 from dhanradar.bse.router import router as bse_router

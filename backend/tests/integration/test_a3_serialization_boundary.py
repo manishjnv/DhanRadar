@@ -40,6 +40,20 @@ def _all_keys(value) -> set[str]:
     return out
 
 
+def _all_values(value):
+    """Every leaf value anywhere in a nested structure (recursive) — to prove the raw score value never
+    appears even under a renamed key. Structural, unlike a substring check on the raw JSON which a
+    random UUID can trip (a hex UUID can contain the score's digits)."""
+    if isinstance(value, dict):
+        for v in value.values():
+            yield from _all_values(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _all_values(v)
+    else:
+        yield value
+
+
 # --- I1: #2 numeric strip (the headline) ----------------------------------------------------------
 
 
@@ -221,7 +235,6 @@ async def test_holdings_pilot_endpoint_through_boundary(db_session, rls_async_cl
         f"/api/v1/portfolio/{pid}/holdings", headers=make_auth_headers(access_token=token)
     )
     assert r.status_code == 200, f"{r.status_code}: {r.text}"
-    body = r.text
     env = r.json()
     # envelope shape + registry tags
     assert env["status"] == "present"
@@ -230,9 +243,11 @@ async def test_holdings_pilot_endpoint_through_boundary(db_session, rls_async_cl
     # educational label/band + the user's own numbers present
     assert h["label"] == "on_track" and h["confidence_band"] == "high"
     assert h["units"] == 10.5 and h["invested_amount"] == 1000.0
-    # #2: the raw score never appears, anywhere
+    # #2: the raw score never appears — neither as a key nor as a numeric value anywhere. Structural
+    # check, NOT a substring on the body: a random portfolio_id UUID can contain the score's digits.
     assert "unified_score" not in _all_keys(env)
-    assert "87" not in body, "raw unified_score leaked into the holdings response (#2 violation)"
+    numbers = [v for v in _all_values(env) if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    assert 87 not in numbers, "raw unified_score (87) leaked as a value (#2 violation)"
 
 
 async def test_holdings_pilot_rejects_other_user(db_session, rls_async_client):

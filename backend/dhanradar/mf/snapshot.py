@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import datetime
 import math
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from scipy.optimize import brentq
-
 
 # ---------------------------------------------------------------------------
 # Dataclasses (frozen — value objects, never mutated)
@@ -53,7 +51,7 @@ class PortfolioSnapshot:
 
     total_invested: float
     current_value: float
-    xirr_pct: Optional[float]                          # None when uncomputable
+    xirr_pct: float | None                          # None when uncomputable
     category_allocation: dict[str, float]               # category → % of total CV
     overlap_matrix: dict[str, dict[str, float]]         # isin → isin → overlap %
 
@@ -62,7 +60,7 @@ class PortfolioSnapshot:
 # XIRR — annualized money-weighted return
 # ---------------------------------------------------------------------------
 
-def xirr(cashflows: list[CashFlow]) -> Optional[float]:
+def xirr(cashflows: list[CashFlow]) -> float | None:
     """Return annualized IRR as a percent (e.g. 12.34 for 12.34 %).
 
     Uses Brent's method on NPV(rate) = Σ amount / (1+rate)^(days/365),
@@ -133,7 +131,7 @@ def category_allocation(holdings: list[Holding]) -> dict[str, float]:
 
 def overlap_matrix(
     holdings: list[Holding],
-    constituents: Optional[dict[str, dict[str, float]]] = None,
+    constituents: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, dict[str, float]]:
     """Pairwise portfolio-overlap % between MF schemes.
 
@@ -172,7 +170,7 @@ def overlap_matrix(
 
 def build_snapshot(
     holdings: list[Holding],
-    constituents: Optional[dict[str, dict[str, float]]] = None,
+    constituents: dict[str, dict[str, float]] | None = None,
 ) -> PortfolioSnapshot:
     """Aggregate holdings into a PortfolioSnapshot.
 

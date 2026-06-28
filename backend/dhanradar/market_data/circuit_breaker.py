@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import enum
 import time as _time
-from typing import Callable
+from collections.abc import Callable
 
 
 class _State(str, enum.Enum):

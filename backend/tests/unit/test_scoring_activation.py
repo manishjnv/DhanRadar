@@ -15,7 +15,6 @@ from dhanradar.scoring.engine.activation import (
 )
 from dhanradar.scoring.engine.governance import TwoPersonGateError
 
-
 # ---------------------------------------------------------------------------
 # assert_activatable — pure gate, no DB
 # ---------------------------------------------------------------------------

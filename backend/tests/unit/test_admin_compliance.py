@@ -8,14 +8,13 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from dhanradar.compliance.service import _snapshot_from_rows
 from dhanradar.scoring.engine import governance
-
 
 # ---------------------------------------------------------------------------
 # 1. _snapshot_from_rows
@@ -39,9 +38,9 @@ def test_snapshot_from_rows_keys_and_latest_wins():
     uid_a = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
     uid_b = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 
-    day1 = datetime(2026, 6, 5, 10, 0, 0, tzinfo=timezone.utc)
-    day2 = datetime(2026, 6, 6, 10, 0, 0, tzinfo=timezone.utc)
-    day2_later = datetime(2026, 6, 6, 14, 0, 0, tzinfo=timezone.utc)
+    day1 = datetime(2026, 6, 5, 10, 0, 0, tzinfo=UTC)
+    day2 = datetime(2026, 6, 6, 10, 0, 0, tzinfo=UTC)
+    day2_later = datetime(2026, 6, 6, 14, 0, 0, tzinfo=UTC)
 
     rows = [
         # day1: user A → on_track, user B → off_track
@@ -71,7 +70,7 @@ def test_snapshot_from_rows_keys_and_latest_wins():
 
 def test_snapshot_from_rows_request_id_fallback():
     """Falls back to request_id when both user_id and session_id are absent."""
-    day = datetime(2026, 6, 6, 10, 0, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 6, 6, 10, 0, 0, tzinfo=UTC)
     rows = [_row(day, "on_track", request_id="req-001")]
     snap = _snapshot_from_rows(rows)
     assert snap["2026-06-06"]["req-001"] == "on_track"
@@ -79,7 +78,7 @@ def test_snapshot_from_rows_request_id_fallback():
 
 def test_snapshot_from_rows_content_hash_fallback():
     """Final fallback is content_hash when all other keys are None."""
-    day = datetime(2026, 6, 6, 10, 0, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 6, 6, 10, 0, 0, tzinfo=UTC)
     ch = "c" * 64
     rows = [_row(day, "off_track", content_hash=ch)]
     snap = _snapshot_from_rows(rows)

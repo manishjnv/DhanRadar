@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
 
 MODEL_VERSION = "v1"
 
@@ -66,7 +66,7 @@ class SubFactor:
     (dropped + remaining weights renormalized, spec §3.2 — never imputed)."""
 
     name: str
-    value: Optional[float]  # normalized 0–100, or None if missing
+    value: float | None  # normalized 0–100, or None if missing
     weight: float  # within-axis weight (relative; renormalized over present ones)
 
 
@@ -127,7 +127,7 @@ class PublicScore:
     # Named confidence quality signals — same shape as ScoringResult.confidence_factors.
     # String bands (high/medium/low) only; never floats (non-neg #2).
     confidence_factors: dict[str, str] = field(default_factory=dict)
-    prior_label: Optional[VerbLabel] = None  # label before this eval; lets a surface say
+    prior_label: VerbLabel | None = None  # label before this eval; lets a surface say
     #                                          "previously <x>, now insufficient data" (label, not numeric)
 
 
@@ -140,8 +140,8 @@ class ScoringResult:
     identifier: str
     verb_label: VerbLabel
     confidence_band: ConfidenceBand
-    unified_score: Optional[int]  # 0–100, internal/tier-gated; None when refused
-    confidence: Optional[float]  # 0–1, internal; None when refused
+    unified_score: int | None  # 0–100, internal/tier-gated; None when refused
+    confidence: float | None  # 0–1, internal; None when refused
     eval_seq: int
     valid_until: str
     model_version: str = MODEL_VERSION
@@ -153,7 +153,7 @@ class ScoringResult:
     # data_coverage←overall_axis_coverage. Empty when confidence was refused (insufficient_data).
     confidence_factors: dict[str, FactorStrength] = field(default_factory=dict)
     band_disagreement: bool = False  # rule label vs score-band leaning disagreed (rule wins)
-    prior_label: Optional[VerbLabel] = None  # label published before this eval
+    prior_label: VerbLabel | None = None  # label published before this eval
     disclaimer_version: str = DISCLAIMER_VERSION
     disclosure: str = DISCLOSURE_BUNDLE
     not_advice: str = NOT_ADVICE

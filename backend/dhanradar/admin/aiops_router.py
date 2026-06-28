@@ -81,7 +81,6 @@ from .aiops_schemas import (
     BudgetSnapshot,
     DriftStatus,
     EngineVersionRow,
-    FeedbackRow,
     GroundednessInfo,
     LabelChurnSummary,
     LatencyInfo,

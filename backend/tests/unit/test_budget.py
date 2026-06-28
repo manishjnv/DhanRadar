@@ -33,7 +33,7 @@ def test_next_utc_midnight_is_in_the_future():
     from dhanradar.budget import _next_utc_midnight_ts
 
     ts = _next_utc_midnight_ts()
-    now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    now_ts = int(datetime.datetime.now(datetime.UTC).timestamp())
     assert ts > now_ts, "Next UTC midnight must be in the future"
 
 
@@ -41,7 +41,7 @@ def test_next_utc_midnight_is_exactly_midnight():
     from dhanradar.budget import _next_utc_midnight_ts
 
     ts = _next_utc_midnight_ts()
-    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+    dt = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC)
     assert dt.hour == 0, f"Expected hour=0 but got {dt.hour}"
     assert dt.minute == 0, f"Expected minute=0 but got {dt.minute}"
     assert dt.second == 0, f"Expected second=0 but got {dt.second}"
@@ -52,7 +52,7 @@ def test_next_utc_midnight_is_at_most_24h_away():
     from dhanradar.budget import _next_utc_midnight_ts
 
     ts = _next_utc_midnight_ts()
-    now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    now_ts = int(datetime.datetime.now(datetime.UTC).timestamp())
     assert ts - now_ts <= 86400, "Next UTC midnight must be at most 24 hours away"
 
 
@@ -65,7 +65,7 @@ async def test_budget_guard_free_initialises_key(patch_redis):
     On first entry, budget_guard("free") must create the Redis key with a TTL
     set to expire at next UTC midnight.
     """
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["free"]
 
@@ -84,7 +84,7 @@ async def test_budget_guard_free_initialises_key(patch_redis):
 
 async def test_budget_guard_premium_initialises_key(patch_redis):
     """Same initialisation check for the premium budget."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["premium"]
 
@@ -102,7 +102,7 @@ async def test_budget_guard_free_does_not_increment_counter(patch_redis):
     A guarded block that records nothing on the meter (units=0) must leave the
     counter at 0: the up-front reservation is fully reconciled away on clean exit.
     """
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["free"]
     async with budget_guard("free"):
@@ -124,7 +124,7 @@ async def test_budget_guard_free_raises_when_cap_exceeded(patch_redis):
     Pre-set the free counter to the cap value (1000). Entering budget_guard
     must raise BudgetExhaustedError before yielding.
     """
-    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, BudgetExhaustedError, budget_guard
 
     key = _REDIS_KEYS["free"]
     cap = int(_CAPS["free"])
@@ -144,7 +144,7 @@ async def test_budget_guard_free_raises_when_cap_exceeded(patch_redis):
 
 async def test_budget_guard_free_at_cap_minus_one_does_not_raise(patch_redis):
     """One below the free cap must NOT raise."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["free"]
     cap = int(_CAPS["free"])
@@ -164,7 +164,7 @@ async def test_budget_guard_premium_raises_when_hard_cap_exceeded(patch_redis):
     """
     Set premium counter to >= 9.50 (hard cap). Must raise BudgetExhaustedError.
     """
-    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, BudgetExhaustedError, budget_guard
 
     key = _REDIS_KEYS["premium"]
     hard_cap = float(_CAPS["premium_hard"])
@@ -183,7 +183,7 @@ async def test_budget_guard_premium_raises_when_hard_cap_exceeded(patch_redis):
 
 async def test_budget_guard_premium_below_hard_cap_does_not_raise(patch_redis):
     """Just below the premium hard cap (9.49) must NOT raise."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["premium"]
     hard_cap = float(_CAPS["premium_hard"])
@@ -214,7 +214,7 @@ def test_budget_exhausted_error_message():
 
 async def test_budget_guard_free_increments_by_meter_units(patch_redis):
     """Setting meter.units increments the free counter by that amount on clean exit."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["free"]
     async with budget_guard("free") as meter:
@@ -224,7 +224,7 @@ async def test_budget_guard_free_increments_by_meter_units(patch_redis):
 
 async def test_budget_guard_premium_increments_by_meter_cost(patch_redis):
     """Setting meter.cost_usd increments the premium counter by that USD amount."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["premium"]
     async with budget_guard("premium") as meter:
@@ -234,7 +234,7 @@ async def test_budget_guard_premium_increments_by_meter_cost(patch_redis):
 
 async def test_budget_guard_does_not_increment_on_exception(patch_redis):
     """A guarded block that raises consumes NO budget (increment only on clean exit)."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["free"]
     with pytest.raises(RuntimeError):
@@ -252,7 +252,7 @@ async def test_premium_reject_does_not_inflate_counter(patch_redis):
     """A rejected premium call must RELEASE its reservation — the counter must
     settle back at the true value, never at value+reserve (else a single rejected
     call would permanently wedge the budget)."""
-    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, BudgetExhaustedError, budget_guard
 
     key = _REDIS_KEYS["premium"]
     hard_cap = float(_CAPS["premium_hard"])
@@ -268,7 +268,7 @@ async def test_premium_reject_does_not_inflate_counter(patch_redis):
 
 async def test_free_reject_does_not_inflate_counter(patch_redis):
     """Same release-on-reject invariant for the free count cap."""
-    from dhanradar.budget import budget_guard, BudgetExhaustedError, _REDIS_KEYS, _CAPS
+    from dhanradar.budget import _CAPS, _REDIS_KEYS, BudgetExhaustedError, budget_guard
 
     key = _REDIS_KEYS["free"]
     cap = int(_CAPS["free"])
@@ -287,11 +287,11 @@ async def test_premium_concurrent_reservation_is_visible(patch_redis):
     the cap; a second budget_guard entry must then be rejected — it cannot read a
     stale pre-reservation value and also pass the cap check."""
     from dhanradar.budget import (
-        budget_guard,
-        BudgetExhaustedError,
-        _REDIS_KEYS,
         _CAPS,
         _PREMIUM_RESERVE_USD,
+        _REDIS_KEYS,
+        BudgetExhaustedError,
+        budget_guard,
     )
 
     key = _REDIS_KEYS["premium"]
@@ -309,7 +309,7 @@ async def test_premium_concurrent_reservation_is_visible(patch_redis):
 async def test_premium_reconciles_reservation_to_actual_cost(patch_redis):
     """On clean exit the reservation is reconciled to the actual cost — the final
     counter equals the actual spend, not the (larger) reservation."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS, _PREMIUM_RESERVE_USD
+    from dhanradar.budget import _PREMIUM_RESERVE_USD, _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["premium"]
     actual = 0.012
@@ -325,7 +325,7 @@ async def test_reserve_override_is_applied_in_flight_then_reconciled(patch_redis
     reconciled to the actual recorded spend on clean exit. Admission itself keys
     off the pre-reservation value, so the reserve does not move the cap boundary —
     it sizes the in-flight hold."""
-    from dhanradar.budget import budget_guard, _REDIS_KEYS
+    from dhanradar.budget import _REDIS_KEYS, budget_guard
 
     key = _REDIS_KEYS["premium"]
     async with budget_guard("premium", reserve=0.40) as meter:
@@ -345,11 +345,11 @@ async def test_premium_concurrent_gather_admits_exactly_one(patch_redis):
     import asyncio
 
     from dhanradar.budget import (
-        budget_guard,
-        BudgetExhaustedError,
-        _REDIS_KEYS,
         _CAPS,
         _PREMIUM_RESERVE_USD,
+        _REDIS_KEYS,
+        BudgetExhaustedError,
+        budget_guard,
     )
 
     key = _REDIS_KEYS["premium"]

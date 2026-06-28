@@ -25,9 +25,7 @@ Class-based (not closure) to comply with the project anti-pattern rule.
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from dhanradar.redis_client import get_redis
 

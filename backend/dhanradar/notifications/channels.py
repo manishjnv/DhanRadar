@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -48,7 +48,7 @@ def _classify_status(status_code: int) -> tuple[bool, bool, str]:
 
 
 async def deliver_telegram(
-    chat_id: str, text: str, *, client: Optional[httpx.AsyncClient] = None
+    chat_id: str, text: str, *, client: httpx.AsyncClient | None = None
 ) -> DeliveryResult:
     """Send via Telegram sendMessage (parse_mode HTML). Missing token ⇒ disabled."""
     if not settings.TELEGRAM_BOT_TOKEN:
@@ -63,7 +63,7 @@ async def deliver_telegram(
 
 
 async def deliver_email(
-    to: str, subject: str, html: str, text: str, *, client: Optional[httpx.AsyncClient] = None
+    to: str, subject: str, html: str, text: str, *, client: httpx.AsyncClient | None = None
 ) -> DeliveryResult:
     """Send via Resend. Missing API key ⇒ disabled (fail-closed, logged)."""
     if not settings.RESEND_API_KEY:
@@ -82,7 +82,7 @@ async def deliver_email(
 
 
 async def _post(
-    url: str, *, json: dict, headers: dict, client: Optional[httpx.AsyncClient], what: str
+    url: str, *, json: dict, headers: dict, client: httpx.AsyncClient | None, what: str
 ) -> DeliveryResult:
     """Shared POST with timeout + opaque error classification. Network/timeout
     errors are transient; HTTP status decides otherwise. The provider body is

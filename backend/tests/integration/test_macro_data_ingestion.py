@@ -30,7 +30,6 @@ NOTE: This test is NOT runnable locally without a running Postgres instance
 
 from __future__ import annotations
 
-import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import func, select, text
