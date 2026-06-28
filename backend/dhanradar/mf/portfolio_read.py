@@ -17,7 +17,13 @@ from dataclasses import dataclass
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.models.mf import MfFund, MfPortfolioSnapshot, MfUserHolding, UserFundScore
+from dhanradar.models.mf import (
+    MfFund,
+    MfFundMetrics,
+    MfPortfolioSnapshot,
+    MfUserHolding,
+    UserFundScore,
+)
 
 
 @dataclass(frozen=True)
@@ -187,4 +193,109 @@ def summary_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
         "as_of": rm.as_of,
+    }
+
+
+# --- C3: portfolio risk (value-weighted aggregate of the per-fund mf_fund_metrics) ----------------
+
+# Annualised-volatility (%) thresholds → a factual risk band (a standard-measure descriptor, NOT a verdict
+# and NOT a composite score). Tuned to typical Indian-MF category vols (debt ~2-5, hybrid ~6-10,
+# large-cap ~12-16, mid/small ~18-24+).
+_VOL_BANDS = ((8.0, "low"), (14.0, "moderate"), (22.0, "high"))
+
+
+@dataclass(frozen=True)
+class PortfolioRisk:
+    volatility_pct: float | None
+    max_drawdown_pct: float | None
+    sharpe_ratio: float | None
+    sortino_ratio: float | None
+    rolling_1y_avg_pct: float | None
+    rolling_1y_pct_positive: float | None
+    fund_count: int
+    funds_with_metrics: int
+    as_of: str | None
+
+
+def _vol_band(vol_pct: float | None) -> str | None:
+    """Annualised volatility % → a factual risk band (low|moderate|high|very_high). None when no metric."""
+    if vol_pct is None:
+        return None
+    for ceiling, band in _VOL_BANDS:
+        if vol_pct < ceiling:
+            return band
+    return "very_high"
+
+
+async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioRisk:
+    """Portfolio-level risk = the **value-weighted** aggregate of the per-fund precomputed STANDARD ratios
+    (`mf_fund_metrics`, refreshed nightly), weighted by each holding's current value. Only standard ratios
+    (Sharpe/Sortino/volatility/max-drawdown/rolling) — NEVER the DhanRadar composite (it isn't in this table
+    and is never selected). Funds missing a metric are skipped for that metric (weights renormalise over the
+    funds that have it). True portfolio beta/alpha need a portfolio+benchmark return series (not built yet) —
+    the payloads return None for those (the client renders 'coming soon')."""
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    isins = [h.isin for h in rm.holdings]
+    metrics: dict[str, MfFundMetrics] = {}
+    if isins:
+        metrics = {
+            m.isin: m
+            for m in (
+                await db.execute(select(MfFundMetrics).where(MfFundMetrics.isin.in_(isins)))
+            ).scalars().all()
+        }
+
+    # ponytail: weights are current_value (units × latest NAV), which falls back to avg_cost_nav for a
+    # fund with no live NAV (load_portfolio_read_model) — a minor weight distortion for stale funds.
+    # funds_with_metrics surfaces metric coverage; upgrade = require a live NAV or surface NAV-staleness.
+    def weighted(attr: str) -> float | None:
+        num = den = 0.0
+        for h in rm.holdings:
+            m = metrics.get(h.isin)
+            v = getattr(m, attr, None) if m is not None else None
+            if v is not None and h.current_value > 0:
+                num += h.current_value * float(v)
+                den += h.current_value
+        return (num / den) if den > 0 else None
+
+    return PortfolioRisk(
+        volatility_pct=weighted("volatility_pct"),
+        max_drawdown_pct=weighted("max_drawdown_pct"),
+        sharpe_ratio=weighted("sharpe_ratio"),
+        sortino_ratio=weighted("sortino_ratio"),
+        rolling_1y_avg_pct=weighted("rolling_1y_avg_pct"),
+        rolling_1y_pct_positive=weighted("rolling_1y_pct_positive"),
+        fund_count=len(rm.holdings),
+        funds_with_metrics=sum(1 for h in rm.holdings if h.isin in metrics),
+        as_of=rm.as_of,
+    )
+
+
+def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
+    """C3 free `portfolio.risk` — the risk band + standard volatility/drawdown figures (DOM-allowed).
+    `recovery_months` needs a daily-valuation series (not built) → None ('coming soon')."""
+    return {
+        "portfolio_id": portfolio_id,
+        "risk_band": _vol_band(r.volatility_pct),
+        "volatility_pct": r.volatility_pct,
+        "max_drawdown_pct": r.max_drawdown_pct,
+        "recovery_months": None,
+        "fund_count": r.fund_count,
+        "funds_with_metrics": r.funds_with_metrics,
+        "as_of": r.as_of,
+    }
+
+
+def risk_advanced_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
+    """C3 plus `portfolio.risk_advanced` — the deeper standard ratios (Sharpe/Sortino/rolling). `alpha`/`beta`
+    need a benchmark return series (not built) → None ('coming soon'). Still no DhanRadar composite."""
+    return {
+        "portfolio_id": portfolio_id,
+        "sharpe_ratio": r.sharpe_ratio,
+        "sortino_ratio": r.sortino_ratio,
+        "rolling_1y_avg_pct": r.rolling_1y_avg_pct,
+        "rolling_1y_pct_positive": r.rolling_1y_pct_positive,
+        "alpha": None,
+        "beta": None,
+        "as_of": r.as_of,
     }

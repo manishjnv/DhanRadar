@@ -198,3 +198,86 @@ export function usePortfolioSummaryById(portfolioId: string) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Risk types (DataEnvelope) — standard financial ratios, DOM-allowed.
+// Compliance: no numeric DhanRadar composite/score in either type (non-neg #2).
+// ---------------------------------------------------------------------------
+
+/**
+ * Standard risk payload returned by GET /portfolio/{id}/risk.
+ * `risk_band` is a factual descriptor ("moderate" / "high") — never an advisory verb.
+ * `recovery_months` is always null server-side (feature not built yet).
+ */
+export interface RiskPayload {
+  portfolio_id: string;
+  /** Risk band — factual descriptor, never advisory verb */
+  risk_band: 'low' | 'moderate' | 'high' | 'very_high' | null;
+  /** Standard volatility metric — DOM-allowed standard ratio */
+  volatility_pct: number | null;
+  /** Standard max-drawdown metric — DOM-allowed standard ratio */
+  max_drawdown_pct: number | null;
+  /** Always null server-side — render as "coming soon" */
+  recovery_months: null;
+  fund_count: number;
+  funds_with_metrics: number;
+  as_of: string | null;
+}
+
+/**
+ * Advanced risk payload returned by GET /portfolio/{id}/risk?advanced=true.
+ * Requires Plus tier; free users get HTTP 402.
+ * `alpha`/`beta` are always null server-side (not built yet).
+ */
+export interface RiskAdvancedPayload {
+  portfolio_id: string;
+  /** Standard Sharpe ratio — DOM-allowed */
+  sharpe_ratio: number | null;
+  /** Standard Sortino ratio — DOM-allowed */
+  sortino_ratio: number | null;
+  /** Rolling 1-year average return % — DOM-allowed */
+  rolling_1y_avg_pct: number | null;
+  /** % of rolling 1Y windows that were positive — DOM-allowed */
+  rolling_1y_pct_positive: number | null;
+  /** Always null server-side */
+  alpha: null;
+  /** Always null server-side */
+  beta: null;
+  as_of: string | null;
+}
+
+const SKIP_RETRY_WITH_402 = [401, 402, 404];
+
+export function usePortfolioRisk(portfolioId: string) {
+  return useQuery<DataEnvelope<RiskPayload>>({
+    queryKey: queryKeys.portfolio.risk(portfolioId),
+    queryFn: () => api.get<DataEnvelope<RiskPayload>>(`/portfolio/${portfolioId}/risk`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Advanced risk hook — free users receive HTTP 402; the component reads
+ * `isError` + the thrown ApiError.problem.status to render the upgrade card.
+ * `enabled` defaults to true; pass false to defer until user expands the panel.
+ */
+export function usePortfolioRiskAdvanced(portfolioId: string, enabled = true) {
+  return useQuery<DataEnvelope<RiskAdvancedPayload>>({
+    queryKey: queryKeys.portfolio.riskAdvanced(portfolioId),
+    queryFn: () =>
+      api.get<DataEnvelope<RiskAdvancedPayload>>(`/portfolio/${portfolioId}/risk?advanced=true`),
+    enabled: !!portfolioId && enabled,
+    // 402 is a tier gate — never retry, treat like 401/404
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY_WITH_402.includes(error.problem.status))
+        return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
