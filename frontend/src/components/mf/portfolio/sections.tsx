@@ -782,11 +782,6 @@ const RISK_BAND_TO_CONF: Record<string, 'high' | 'medium' | 'low'> = {
   very_high: 'low',
 };
 
-function fmtRatio(n: number | null): string {
-  if (n === null) return '—';
-  return n.toFixed(2);
-}
-
 function fmtPctRisk(n: number | null, prefix = '±'): string {
   if (n === null) return '—';
   return `${prefix}${Math.abs(n).toFixed(1)}%`;
@@ -827,28 +822,18 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
       {adv && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/* Standard ratios — DOM-allowed */}
-          <div className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">Sharpe Ratio</div>
-            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtRatio(adv.sharpe_ratio)}</div>
-            <div className="mt-1 text-caption text-ink-secondary">Return per unit of total risk.</div>
-          </div>
-          <div className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">Sortino Ratio</div>
-            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtRatio(adv.sortino_ratio)}</div>
-            <div className="mt-1 text-caption text-ink-secondary">Return per unit of downside risk only.</div>
-          </div>
+          {/* B88: a true portfolio Sharpe/Sortino needs the portfolio return series (not built) —
+              averaging per-fund ratios is meaningless, so defer rather than show a wrong number. */}
+          <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." />
+          <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." />
           <div className="rounded-xl border border-line bg-surface-2 p-4">
             <div className="text-caption text-ink-muted">Rolling 1Y Avg</div>
             <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_avg_pct, '')}</div>
             <div className="mt-1 text-caption text-ink-secondary">Average 1-year rolling return.</div>
           </div>
-          <div className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">Positive 1Y Windows</div>
-            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
-              {adv.rolling_1y_pct_positive !== null ? `${adv.rolling_1y_pct_positive.toFixed(0)}%` : '—'}
-            </div>
-            <div className="mt-1 text-caption text-ink-secondary">% of 1-year periods with positive returns.</div>
-          </div>
+          {/* B88: a per-fund hit-rate (% positive windows) doesn't value-aggregate to a portfolio figure
+              (depends on correlation/timing) — deferred like Sharpe/Sortino until the valuation series. */}
+          <ComingSoonCard label="Positive 1Y Windows" desc="% of 1-year periods with positive returns. Needs your portfolio return history — being built." />
           {/* alpha/beta always null server-side — render as coming soon */}
           <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." />
           <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." />
@@ -893,6 +878,9 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
                     ? <RiskBadge risk={bandDisplay} />
                     : <span className="text-[10.5px] font-bold text-ink-faint">Insufficient data</span>
                   }
+                  {bandDisplay && risk.risk_band_basis && (
+                    <div className="mt-0.5 text-[10px] text-ink-faint">Indicative — based on {risk.risk_band_basis}</div>
+                  )}
                 </div>
               </div>
               {risk.as_of && (
@@ -905,13 +893,11 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
               <div className="rounded-xl border border-line bg-surface-2 p-4">
                 <div className="text-caption text-ink-muted">Price Swings</div>
                 <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.volatility_pct)}</div>
-                <div className="mt-1 text-caption text-ink-secondary">Annualised volatility of your portfolio.</div>
+                <div className="mt-1 text-caption text-ink-secondary">Average annualised volatility of your funds (indicative).</div>
               </div>
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="text-caption text-ink-muted">Biggest Fall</div>
-                <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.max_drawdown_pct, '−')}</div>
-                <div className="mt-1 text-caption text-ink-secondary">Largest peak-to-trough decline.</div>
-              </div>
+              {/* B88: portfolio drawdown doesn't aggregate linearly (fund falls happen at different times)
+                  — needs the portfolio valuation series (not built). Defer, don't show a wrong number. */}
+              <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." />
               {/* recovery_months always null — render as coming soon (NO-SUPPRESS) */}
               <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." />
               <div className="rounded-xl border border-line bg-surface-2 p-4">
