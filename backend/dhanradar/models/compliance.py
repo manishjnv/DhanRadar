@@ -22,7 +22,6 @@ Compliance-engineering invariants (deliberate, see docs/features/compliance-audi
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -71,7 +70,7 @@ class Disclaimer(Base):
     effective_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    effective_to: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -104,19 +103,19 @@ class AiRecommendationAudit(Base):
         DateTime(timezone=True), primary_key=True, nullable=False, server_default=func.now()
     )
     # NO FK/CASCADE — the audit outlives a DPDP erasure of the user.
-    user_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     recommendation_type: Mapped[str] = mapped_column(Text, nullable=False)
-    label: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # B26: the served verb-label
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)  # B26: the served verb-label
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)  # SHA-256 of the served payload
-    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # model_used / engine version
-    prompt_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    confidence_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 4), nullable=True)
-    confidence_band: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)  # model_used / engine version
+    prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence_band: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Denormalized, NOT-NULL, no hard FK (never lose an audit row to a referential hiccup).
     disclaimer_version: Mapped[str] = mapped_column(Text, nullable=False)
-    surface: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # mf_report | notification_*
-    session_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    request_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    surface: Mapped[str | None] = mapped_column(Text, nullable=True)  # mf_report | notification_*
+    session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -151,7 +150,7 @@ class RatingEngineChangelog(Base):
     )
     model_version: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[str] = mapped_column(Text, nullable=False)
-    approved_by: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     two_person_ok: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -161,13 +160,13 @@ class RatingEngineChangelog(Base):
     factors_after: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'")
     )
-    methodology_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    backtest: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    drift: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    methodology_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backtest: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    drift: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     activated: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    activated_at: Mapped[Optional[datetime]] = mapped_column(
+    activated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -194,13 +193,13 @@ class AiLowConfidenceLog(Base):
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    surface: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    identifier: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    confidence_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 4), nullable=True)
-    confidence_band: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    request_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    surface: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence_band: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -234,7 +233,7 @@ class AiOutputFeedback(Base):
     audit_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     helpful: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    feedback_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feedback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

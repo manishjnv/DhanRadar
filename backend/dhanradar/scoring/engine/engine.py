@@ -22,15 +22,16 @@ from __future__ import annotations
 
 import datetime
 import json
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from dhanradar.scoring.engine.config import EngineConfig, get_config
 from dhanradar.scoring.engine.confidence import (
     apply_structural_caps,
     band_for,
     compute_confidence,
     factor_agreement,
 )
+from dhanradar.scoring.engine.config import EngineConfig, get_config
 from dhanradar.scoring.engine.events import ScoringResultPublished
 from dhanradar.scoring.engine.hysteresis import (
     HysteresisStore,
@@ -65,19 +66,19 @@ def _to_strength(value: float) -> str:
 
 
 def _utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 class RatingEngine:
     def __init__(
         self,
         *,
-        config: Optional[EngineConfig] = None,
-        hysteresis_store: Optional[HysteresisStore] = None,
-        event_sink: Optional[Callable[[ScoringResultPublished], Awaitable[None]]] = None,
+        config: EngineConfig | None = None,
+        hysteresis_store: HysteresisStore | None = None,
+        event_sink: Callable[[ScoringResultPublished], Awaitable[None]] | None = None,
         result_store: Any = None,
         valid_for_seconds: int = _DEFAULT_VALID_FOR,
-        now: Optional[Callable[[], datetime.datetime]] = None,
+        now: Callable[[], datetime.datetime] | None = None,
     ) -> None:
         self._config = config or get_config()
         self._store = hysteresis_store or RedisHysteresisStore()
@@ -96,7 +97,7 @@ class RatingEngine:
         cfg = self._config
 
         # 1. Per-axis aggregation (drop-and-renormalize missing sub-factors).
-        axis_scores: dict[Axis, Optional[float]] = {}
+        axis_scores: dict[Axis, float | None] = {}
         axis_coverage: dict[Axis, float] = {}
         for axis in Axis:
             score, cov = aggregate_axis(inputs.axes.get(axis, []))

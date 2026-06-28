@@ -28,7 +28,7 @@ import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select, text
 
 pytestmark = pytest.mark.integration
 
@@ -90,10 +90,9 @@ async def _cleanup(db_session) -> None:
 
 async def test_pipeline_writes_run_and_circulars(db_tables, patch_redis, db_session):
     """Two valid circular rows arrive → written to mf.sebi_circulars + ingestion_runs."""
+    import dhanradar.market_data.sebi as _sebi_mod
     from dhanradar.models.mf import MfIngestionRun, MfSebiCircular
     from dhanradar.tasks.sebi_circulars import _sebi_circulars_pipeline
-
-    import dhanradar.market_data.sebi as _sebi_mod
 
     async def _fake_fetch(client):  # noqa: ARG001
         return _FIXTURE_HTML
@@ -161,10 +160,9 @@ async def test_pipeline_writes_run_and_circulars(db_tables, patch_redis, db_sess
 
 async def test_rerun_does_not_duplicate_circulars(db_tables, patch_redis, db_session):
     """A second pipeline run upserts without duplicating sebi_circulars rows."""
+    import dhanradar.market_data.sebi as _sebi_mod
     from dhanradar.models.mf import MfIngestionRun, MfSebiCircular
     from dhanradar.tasks.sebi_circulars import _sebi_circulars_pipeline
-
-    import dhanradar.market_data.sebi as _sebi_mod
 
     async def _fake_fetch(client):  # noqa: ARG001
         return _FIXTURE_HTML

@@ -21,7 +21,7 @@ Infrastructure contract:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -275,8 +275,8 @@ async def test_label_churn_hold_over_threshold(
     monkeypatch.setattr(_db_mod, "engine", db_session.bind)
     headers = make_auth_headers(access_token=access)
 
-    day1 = datetime(2026, 6, 5, 10, 0, 0, tzinfo=timezone.utc)
-    day2 = datetime(2026, 6, 6, 10, 0, 0, tzinfo=timezone.utc)
+    day1 = datetime(2026, 6, 5, 10, 0, 0, tzinfo=UTC)
+    day2 = datetime(2026, 6, 6, 10, 0, 0, tzinfo=UTC)
 
     # 20 distinct users; all on_track on day1.
     user_ids = [uuid.uuid4() for _ in range(20)]
@@ -437,9 +437,9 @@ async def test_scoring_activate_happy_path(
     with full registry row; subsequent GET /status shows registry_activated=True,
     provisional=False."""
     from dhanradar.config import settings
+    from dhanradar.scoring.engine import activation as _activation
     from dhanradar.scoring.engine.config import get_config
     from tests.conftest import make_auth_headers
-    from dhanradar.scoring.engine import activation as _activation
 
     _activation._activated_cache.clear()
 
@@ -504,8 +504,8 @@ async def test_scoring_activate_double_activation_409(
     """Activating the same model_version twice → second request returns 409
     model_already_activated."""
     from dhanradar.config import settings
-    from tests.conftest import make_auth_headers
     from dhanradar.scoring.engine import activation as _activation
+    from tests.conftest import make_auth_headers
 
     _activation._activated_cache.clear()
 

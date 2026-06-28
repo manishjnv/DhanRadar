@@ -13,7 +13,6 @@ content (templates render label + disclosure, never a numeric score, non-neg #2/
 from __future__ import annotations
 
 from datetime import datetime, time
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -26,7 +25,8 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dhanradar.models.base import Base
@@ -51,11 +51,11 @@ class NotificationPreference(Base):
         ForeignKey("auth.users.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    telegram_chat_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    telegram_chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    whatsapp_number: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Y2, not delivered P1
-    quiet_hours_start: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
-    quiet_hours_end: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    whatsapp_number: Mapped[str | None] = mapped_column(Text, nullable=True)  # Y2, not delivered P1
+    quiet_hours_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    quiet_hours_end: Mapped[time | None] = mapped_column(Time, nullable=True)
     channels_enabled: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'")
     )
@@ -86,7 +86,7 @@ class NotificationLog(Base):
     channel: Mapped[str] = mapped_column(Text, nullable=False)  # telegram | email
     template_id: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

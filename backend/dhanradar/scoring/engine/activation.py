@@ -15,8 +15,8 @@ owns the changelog table writes/reads.  Do NOT import the compliance ORM model h
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from dhanradar.scoring.engine import governance
 
@@ -70,8 +70,8 @@ async def activate_model_version(
     factors_after: dict,
     methodology_url: str,
     backtest_passed: bool,
-    backtest: Optional[dict] = None,
-    drift: Optional[dict] = None,
+    backtest: dict | None = None,
+    drift: dict | None = None,
 ) -> dict:
     """Run the gate, guard against double-activation, and write an activated
     rating_engine_changelog row (the activation record). Returns the changelog dict.
@@ -110,7 +110,7 @@ async def activate_model_version(
             factors_after=factors_after,
             methodology_url=methodology_url,
             activated=True,
-            activated_at=datetime.now(timezone.utc),
+            activated_at=datetime.now(UTC),
             backtest=backtest,
             drift=drift,
         )

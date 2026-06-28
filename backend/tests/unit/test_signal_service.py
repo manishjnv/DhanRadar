@@ -1,13 +1,14 @@
 """Signal service and model import smoke test."""
 
-import pytest
+from datetime import UTC
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 
 def test_signal_models_importable():
-    from dhanradar.signal.models import SignalRules, SignalDipFund
-    from dhanradar.signal.models import SignalDeployment, SignalJournal
+    from dhanradar.signal.models import SignalDeployment, SignalDipFund, SignalJournal, SignalRules
     assert SignalRules.__tablename__ == "signal_rules"
     assert SignalDipFund.__tablename__ == "signal_dip_fund"
     assert SignalDeployment.__tablename__ == "signal_deployments"
@@ -17,7 +18,7 @@ def test_signal_models_importable():
 @pytest.mark.asyncio
 async def test_get_or_create_rules_creates_defaults_when_not_found():
     """First call for a user with no row seeds the default thresholds."""
-    from dhanradar.signal.service import get_or_create_rules, DEFAULT_RULES
+    from dhanradar.signal.service import DEFAULT_RULES, get_or_create_rules
 
     db = AsyncMock()
     db.get.return_value = None
@@ -54,8 +55,9 @@ async def test_get_or_create_rules_returns_existing_row():
 @pytest.mark.asyncio
 async def test_add_dip_fund_cash_increments_balance():
     """add_dip_fund_cash adds the amount to the existing balance."""
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, timezone
+
     from dhanradar.signal.models import SignalDipFund
     from dhanradar.signal.service import add_dip_fund_cash
 
@@ -63,8 +65,8 @@ async def test_add_dip_fund_cash_increments_balance():
     existing.user_id = None
     existing.balance = Decimal("10000.00")
     existing.monthly_addition = Decimal("5000.00")
-    existing.last_updated = datetime.now(timezone.utc)
-    existing.created_at = datetime.now(timezone.utc)
+    existing.last_updated = datetime.now(UTC)
+    existing.created_at = datetime.now(UTC)
 
     db = AsyncMock()
     db.get.return_value = existing
@@ -79,6 +81,7 @@ async def test_add_dip_fund_cash_increments_balance():
 def test_signal_rules_out_round_trips_orm_row():
     """SignalRulesOut correctly serialises an ORM row."""
     from decimal import Decimal
+
     from dhanradar.signal.models import SignalRules
     from dhanradar.signal.schemas import SignalRulesOut
 

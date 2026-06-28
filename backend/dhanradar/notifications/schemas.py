@@ -12,7 +12,7 @@ copy — they never expose a score field.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,11 +45,11 @@ class NotificationJob(BaseModel):
 
 
 class PreferencesResponse(BaseModel):
-    telegram_chat_id: Optional[str] = None
+    telegram_chat_id: str | None = None
     email_verified: bool = False
-    whatsapp_number: Optional[str] = None
-    quiet_hours_start: Optional[str] = None  # "HH:MM" IST, or null
-    quiet_hours_end: Optional[str] = None
+    whatsapp_number: str | None = None
+    quiet_hours_start: str | None = None  # "HH:MM" IST, or null
+    quiet_hours_end: str | None = None
     channels_enabled: dict[str, bool] = {}
 
 
@@ -57,11 +57,11 @@ class PreferencesUpdate(BaseModel):
     """Partial update — only provided fields are written. `None` for a nullable
     address clears it; omit a field to leave it unchanged."""
 
-    telegram_chat_id: Optional[Annotated[str, Field(pattern=_TG_CHAT_ID)]] = None
-    whatsapp_number: Optional[str] = Field(default=None, max_length=24)
-    quiet_hours_start: Optional[Annotated[str, Field(pattern=_HHMM)]] = None
-    quiet_hours_end: Optional[Annotated[str, Field(pattern=_HHMM)]] = None
-    channels_enabled: Optional[dict[str, bool]] = None
+    telegram_chat_id: Annotated[str, Field(pattern=_TG_CHAT_ID)] | None = None
+    whatsapp_number: str | None = Field(default=None, max_length=24)
+    quiet_hours_start: Annotated[str, Field(pattern=_HHMM)] | None = None
+    quiet_hours_end: Annotated[str, Field(pattern=_HHMM)] | None = None
+    channels_enabled: dict[str, bool] | None = None
 
     # Sentinel-free partial update: the router distinguishes "field absent" via
     # model_fields_set, so a client must send the key to change it.

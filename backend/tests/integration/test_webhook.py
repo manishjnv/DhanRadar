@@ -40,7 +40,7 @@ import json
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from dhanradar.models.auth import User, UserTierEnum
 from tests.conftest import extract_cookie, make_auth_headers

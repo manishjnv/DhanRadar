@@ -29,7 +29,11 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from dhanradar.market_data.amc_expense import ExpenseRatioRow, fetch_expense_ratios, parse_expense_ratios
+from dhanradar.market_data.amc_expense import (
+    ExpenseRatioRow,
+    fetch_expense_ratios,
+    parse_expense_ratios,
+)
 from dhanradar.market_data.amc_registry import AMC_FACTSHEET_SOURCES, BOT_BLOCKED_AMCS
 
 # ---------------------------------------------------------------------------

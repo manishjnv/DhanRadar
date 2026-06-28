@@ -17,7 +17,6 @@ is deferred with that module — not created here.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
 
 from sqlalchemy import Date, DateTime, Integer, Numeric, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -37,8 +36,8 @@ class MarketMood(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     # Server-side numerics (never serialized to a client surface, non-neg #2).
-    mood_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)  # 0–100
-    confidence_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 4), nullable=True)  # 0–1
+    mood_score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)  # 0–100
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)  # 0–1
     # Public-safe projections.
     regime: Mapped[str] = mapped_column(Text, nullable=False)  # bucket label
     confidence_band: Mapped[str] = mapped_column(Text, nullable=False)  # high|medium|low|insufficient_data
@@ -46,8 +45,8 @@ class MarketMood(Base):
     input_vector: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
     contributing_factors: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'"))
     contradicting_factors: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'"))
-    ai_commentary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    model_used: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_commentary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_used: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_quality: Mapped[str] = mapped_column(Text, nullable=False, server_default="ok")  # ok|degraded
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

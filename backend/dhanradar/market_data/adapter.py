@@ -15,7 +15,7 @@ No imports from auth / billing / scoring.
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from dhanradar.market_data.circuit_breaker import CircuitBreaker
 from dhanradar.market_data.config import DataKind, DataRequest

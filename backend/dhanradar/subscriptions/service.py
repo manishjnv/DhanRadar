@@ -17,8 +17,8 @@ All SQL via parameterized ORM — no f-string interpolation.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -104,15 +104,14 @@ async def handle_subscription_event(
         logger.warning("Razorpay webhook: missing subscription entity in payload")
         return
 
-    rzp_sub_id: Optional[str] = subscription_payload.get("id")
-    plan_id: Optional[str] = subscription_payload.get("plan_id", "")
+    rzp_sub_id: str | None = subscription_payload.get("id")
+    plan_id: str | None = subscription_payload.get("plan_id", "")
     sub_status: str = subscription_payload.get("status", "")
-    customer_id: Optional[str] = subscription_payload.get("customer_id")
     notes: dict = subscription_payload.get("notes", {})
 
     # We store user_id in subscription notes during checkout creation.
     # Razorpay notes is a dict; we look for "user_id" key.
-    user_id_str: Optional[str] = notes.get("user_id") if isinstance(notes, dict) else None
+    user_id_str: str | None = notes.get("user_id") if isinstance(notes, dict) else None
 
     if not rzp_sub_id or not user_id_str:
         logger.warning(
@@ -129,11 +128,11 @@ async def handle_subscription_event(
         return
 
     # Timestamps from Razorpay are Unix epoch integers.
-    def _ts(val: Any) -> Optional[datetime]:
+    def _ts(val: Any) -> datetime | None:
         if val is None:
             return None
         try:
-            return datetime.fromtimestamp(int(val), tz=timezone.utc)
+            return datetime.fromtimestamp(int(val), tz=UTC)
         except (TypeError, ValueError, OSError):
             return None
 
@@ -160,14 +159,14 @@ async def handle_subscription_event(
                 "status": sub_status,
                 "current_period_start": current_start,
                 "current_period_end": current_end,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             },
         )
     )
     await db.execute(stmt)
 
     # --- Update users.tier ---
-    user: Optional[User] = await db.scalar(
+    user: User | None = await db.scalar(
         select(User).where(User.id == user_uuid)
     )
     if user is None:

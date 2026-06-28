@@ -8,11 +8,9 @@ No DB — pure import and attribute inspection.
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import pathlib
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

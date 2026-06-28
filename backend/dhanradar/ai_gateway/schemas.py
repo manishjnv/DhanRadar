@@ -50,7 +50,7 @@ class AIOutputBase(BaseModel):
     disclaimer: str = Field(default=AI_DISCLAIMER)
 
     @model_validator(mode="after")
-    def _enforce_invariants(self) -> "AIOutputBase":
+    def _enforce_invariants(self) -> AIOutputBase:
         # High-confidence claims need more evidence (§B3 / §S).
         if self.confidence > 0.7 and len(self.contributing_signals) < 3:
             raise ValueError(
@@ -62,7 +62,7 @@ class AIOutputBase(BaseModel):
         object.__setattr__(self, "disclaimer", AI_DISCLAIMER)
         return self
 
-    def model_copy(self, *, update: dict | None = None, deep: bool = False) -> "AIOutputBase":
+    def model_copy(self, *, update: dict | None = None, deep: bool = False) -> AIOutputBase:
         """``model_copy`` does NOT re-run validators in Pydantic v2, so a caller
         could otherwise ``model_copy(update={"disclaimer": "..."})`` and strip the
         SEBI label. Force it back on every copy — the disclaimer is non-strippable

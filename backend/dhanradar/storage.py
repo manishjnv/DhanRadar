@@ -10,7 +10,7 @@ account-level endpoint with the bucket passed separately (infra-notes R2 block).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from dhanradar.config import settings
 
@@ -54,7 +54,7 @@ def presigned_url(key: str, expires_seconds: int = 3600) -> str:
     )
 
 
-def public_url(key: str) -> Optional[str]:
+def public_url(key: str) -> str | None:
     """A non-expiring URL via the configured public base — used for PUBLIC cards
     (mood/badge). Returns None if no public base is configured (caller then signs)."""
     base = settings.R2_PUBLIC_BASE_URL.rstrip("/")

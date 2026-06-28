@@ -15,10 +15,8 @@ Pure functions (no I/O), so they are golden-set testable. Two layers:
 from __future__ import annotations
 
 import statistics
-from typing import Optional
 
 from dhanradar.scoring.engine.schemas import Axis, SubFactor
-
 
 # ---------------------------------------------------------------------------
 # Sub-factor normalization helpers (spec §3.1)
@@ -74,7 +72,7 @@ def normalize_subfactor(x: float, peer_values: list[float], direction: int = 1) 
 # Aggregation used by the engine (spec §3.2 missing-data handling)
 # ---------------------------------------------------------------------------
 
-def aggregate_axis(subfactors: list[SubFactor]) -> tuple[Optional[float], float]:
+def aggregate_axis(subfactors: list[SubFactor]) -> tuple[float | None, float]:
     """Return (axis_score 0–100 | None, coverage_fraction 0–1).
 
     Missing (value=None) sub-factors are DROPPED and the remaining within-axis
@@ -91,9 +89,9 @@ def aggregate_axis(subfactors: list[SubFactor]) -> tuple[Optional[float], float]
 
 
 def composite(
-    axis_scores: dict[Axis, Optional[float]],
+    axis_scores: dict[Axis, float | None],
     axis_weights: dict[Axis, float],
-) -> tuple[Optional[int], bool, list[Axis]]:
+) -> tuple[int | None, bool, list[Axis]]:
     """Weighted composite over PRESENT axes, reweighted proportionally.
 
     Returns (unified_score 0–100 int | None, partial_coverage, present_axes).

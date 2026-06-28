@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from dhanradar import storage
 from dhanradar.notifications.templates import LABEL_DISPLAY
@@ -78,7 +78,7 @@ def _render_png(template: str, data: dict) -> bytes:
 
 
 async def generate_share_card(
-    template: str, data: dict, *, redis: Optional[Any] = None
+    template: str, data: dict, *, redis: Any | None = None
 ) -> str:
     """Render → upload to R2 → return a URL. Caches the URL in Redis (1h) keyed by
     (template, data hash) when a redis client is provided."""

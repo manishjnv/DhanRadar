@@ -12,10 +12,9 @@ Covered:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from dhanradar.compliance.service import bump_audit_metric, content_hash, record_served_label
-
 
 # ---------------------------------------------------------------------------
 # content_hash — deterministic + key-order-independent + distinct payloads ≠
@@ -103,7 +102,7 @@ async def test_bump_audit_metric_increments_daily_key(patch_redis):
     twice and asserts the counter advances from "1" to "2" for the key
     ``metrics:compliance:audit_write_failures:{today UTC}``.
     """
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today = datetime.now(UTC).strftime("%Y%m%d")
     expected_key = f"metrics:compliance:audit_write_failures:{today}"
 
     await bump_audit_metric("audit_write_failures")

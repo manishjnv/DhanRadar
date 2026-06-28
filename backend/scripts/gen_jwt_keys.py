@@ -46,9 +46,9 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.hazmat.backends import default_backend
     except ImportError:
         print(
             "ERROR: 'cryptography' package not found.\n"

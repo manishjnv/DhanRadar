@@ -15,7 +15,7 @@ import asyncio
 import gzip
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from dhanradar.celery_app import celery_app
@@ -50,8 +50,8 @@ async def _archive() -> str:
     now_ist = datetime.now(_IST)
     day_start_ist = (now_ist - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     day_end_ist = day_start_ist + timedelta(days=1)
-    start_utc = day_start_ist.astimezone(timezone.utc)
-    end_utc = day_end_ist.astimezone(timezone.utc)
+    start_utc = day_start_ist.astimezone(UTC)
+    end_utc = day_end_ist.astimezone(UTC)
     key = f"{_ARCHIVE_PREFIX}{day_start_ist:%Y/%m/%d}.jsonl.gz"
 
     async with TaskSessionLocal() as db:
