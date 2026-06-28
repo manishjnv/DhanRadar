@@ -526,6 +526,70 @@ describe('EmptyHero upload phases', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Password field wiring tests
+// ---------------------------------------------------------------------------
+
+describe('EmptyHero password field', () => {
+  function renderEmpty(props: Partial<Parameters<typeof EmptyHero>[0]> = {}) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <EmptyHero onViewSample={() => {}} {...props} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('renders the password input in idle state', () => {
+    renderEmpty({ uploadPhase: 'idle' });
+    expect(screen.getByTestId('password-field-empty-hero')).toBeDefined();
+    // label present
+    expect(screen.getByLabelText(/PDF password/i)).toBeDefined();
+  });
+
+  it('password input does NOT render while upload is in flight', () => {
+    renderEmpty({ uploadPhase: 'uploading' });
+    expect(screen.queryByTestId('password-field-empty-hero')).toBeNull();
+  });
+
+  it('password input re-shown after error (parse_failed / wrong password)', () => {
+    renderEmpty({ uploadPhase: 'error', uploadError: 'Incorrect password — please enter the correct CAS password.' });
+    // password field rendered again
+    expect(screen.getByTestId('password-field-empty-hero')).toBeDefined();
+  });
+
+  it('calls onUpload with the entered password when user picks a file', async () => {
+    const onUpload = vi.fn();
+    renderEmpty({ uploadPhase: 'idle', onUpload });
+
+    // Type a password
+    const pwdInput = screen.getByLabelText(/PDF password/i);
+    fireEvent.change(pwdInput, { target: { value: 'ABCDE1234F' } });
+
+    // Simulate file pick via the hidden input
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['dummy'], 'cas.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+    fireEvent.change(fileInput);
+
+    expect(onUpload).toHaveBeenCalledWith(file, 'ABCDE1234F');
+  });
+
+  it('calls onUpload WITHOUT password when user picks a file with empty password field', async () => {
+    const onUpload = vi.fn();
+    renderEmpty({ uploadPhase: 'idle', onUpload });
+
+    // Password field left empty — do NOT type anything
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['dummy'], 'cas.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+    fireEvent.change(fileInput);
+
+    // onUpload called with file and empty string (hook handles empty→undefined internally)
+    expect(onUpload).toHaveBeenCalledWith(file, '');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HelpTip wiring tests (§28) — copy from accessors, no hardcoded strings
 // ---------------------------------------------------------------------------
 

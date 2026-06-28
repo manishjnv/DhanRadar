@@ -107,7 +107,12 @@ export function useCasUpload(portfolioId: string): {
         },
         onError: (err) => {
           setPhase('error');
-          setErrorMessage(err instanceof Error ? err.message : 'Upload failed — please try again.');
+          const msg = err instanceof Error ? err.message : 'Upload failed — please try again.';
+          // ponytail: 401 from upload = not logged in; surface a friendly prompt with a login link
+          const friendly = /401|not.?auth/i.test(msg)
+            ? 'Please log in to upload your CAS. Click "Log in" in the menu above.'
+            : msg;
+          setErrorMessage(friendly);
         },
       },
     );

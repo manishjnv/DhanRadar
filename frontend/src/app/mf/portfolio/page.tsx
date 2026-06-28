@@ -104,7 +104,7 @@ function PortfolioView() {
         <div className="flex flex-col gap-5">
           <EmptyHero
             onViewSample={() => setPageState('dash')}
-            onUpload={(file) => casUpload.start(file)}
+            onUpload={(file, pwd) => casUpload.start(file, pwd)}
             uploadPhase={casUpload.phase}
             uploadProgress={casUpload.progressPct}
             uploadStatusLabel={casUpload.statusLabel}
@@ -279,6 +279,7 @@ function StickyBar({ casUpload }: StickyBarProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { phase, statusLabel, errorMessage, progressPct } = casUpload;
   const isInFlight = phase === 'uploading' || phase === 'processing';
+  const [password, setPassword] = React.useState('');
 
   return (
     <div
@@ -293,7 +294,7 @@ function StickyBar({ casUpload }: StickyBarProps) {
         className="sr-only"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) casUpload.start(file);
+          if (file) casUpload.start(file, password || undefined);
           // Reset so the same file can be re-selected
           e.target.value = '';
         }}
@@ -315,17 +316,46 @@ function StickyBar({ casUpload }: StickyBarProps) {
             <span className="font-semibold text-emerald-400">✓ Updated — your data is ready.</span>
           )}
           {phase === 'error' && (
-            <div className="flex items-center gap-2">
-              <span className="text-red-400">{errorMessage || 'Upload failed.'}</span>
-              <button
-                type="button"
-                className="text-white/70 underline hover:text-white"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Try again
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-red-400">{errorMessage || 'Upload failed.'}</span>
+              </div>
+              {/* Password field re-shown on error so the user can enter it and retry */}
+              <div className="flex items-center gap-2" data-testid="sticky-bar-password-retry">
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="PDF password (optional)"
+                  autoComplete="off"
+                  aria-label="PDF password (optional)"
+                  className="flex-1 rounded-md border border-white/25 bg-white/10 px-2 py-1 text-caption text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-white/40"
+                />
+                <button
+                  type="button"
+                  className="text-white/70 underline hover:text-white text-caption"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Password field — shown in idle state so user can pre-fill before picking a file */}
+      {phase === 'idle' && (
+        <div className="border-b border-white/10 px-3 pt-2 pb-1.5" data-testid="sticky-bar-password-idle">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="PDF password (optional) — enter before uploading"
+            autoComplete="off"
+            aria-label="PDF password (optional)"
+            className="w-full rounded-md border border-white/20 bg-white/8 px-2.5 py-1.5 text-caption text-white/80 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-white/30"
+          />
         </div>
       )}
 

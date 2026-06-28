@@ -13,6 +13,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
+import { Input } from '@/components/ui/Input';
 import { Logo, BandRing, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
@@ -50,7 +51,8 @@ const PRI_COLOR = { high: R, med: A, low: B };
 
 interface EmptyHeroProps {
   onViewSample: () => void;
-  onUpload?: (file: File) => void;
+  /** Called when user picks/drops a file. Receives the file + any password already entered. */
+  onUpload?: (file: File, password?: string) => void;
   uploadPhase?: 'idle' | 'uploading' | 'processing' | 'done' | 'error';
   uploadProgress?: number;
   uploadStatusLabel?: string;
@@ -77,8 +79,8 @@ export function EmptyHero({
     const file = files?.[0];
     if (!file || !onUpload) return;
     lastFileRef.current = file;
-    setPassword('');
-    onUpload(file);
+    // Pass the current password (if any) along with the file on first upload.
+    onUpload(file, password);
   }
 
   function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
@@ -146,6 +148,25 @@ export function EmptyHero({
             </CTA>
           </div>
         </div>
+
+        {/* Optional PDF password — shown when not mid-flight so the user can enter before upload */}
+        {(uploadPhase === 'idle' || uploadPhase === 'error') && (
+          <div className="w-full max-w-sm flex flex-col gap-1.5" data-testid="password-field-empty-hero">
+            <label htmlFor="cas-pdf-password" className="text-small font-medium text-slate-300">
+              PDF password <span className="text-slate-500 font-normal">(optional)</span>
+            </label>
+            <Input
+              id="cas-pdf-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="e.g. PAN followed by date of birth"
+              autoComplete="off"
+              className="border-white/25 bg-white/10 text-white placeholder:text-slate-400 focus:ring-white/40"
+            />
+            <p className="text-caption text-slate-500">Your CAS password — usually your PAN, from the statement email.</p>
+          </div>
+        )}
 
         {/* Upload status block — always rendered when not idle (NO-SUPPRESS) */}
         {uploadPhase !== 'idle' && (
