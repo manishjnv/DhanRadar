@@ -36,6 +36,7 @@ import {
   AiSection, ReportSection, FaqSection,
 } from '@/components/mf/portfolio/sections';
 import { useLatestPortfolio } from '@/features/mf/api';
+import { useCasUpload } from '@/features/mf/cas-upload';
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function PortfolioSkeleton() {
@@ -60,6 +61,8 @@ function PortfolioView() {
   // Resolve the user's active portfolio id. 404 = no portfolio yet (show empty state).
   const { data: latestPortfolio } = useLatestPortfolio();
   const portfolioId = latestPortfolio?.portfolio_id ?? '';
+
+  const casUpload = useCasUpload(portfolioId);
 
   return (
     <div className="w-full pb-32">
@@ -99,7 +102,16 @@ function PortfolioView() {
       {/* ── EMPTY STATE ──────────────────────────────────────────────────────── */}
       {pageState === 'empty' && (
         <div className="flex flex-col gap-5">
-          <EmptyHero onViewSample={() => setPageState('dash')} />
+          <EmptyHero
+            onViewSample={() => setPageState('dash')}
+            onUpload={(file) => casUpload.start(file)}
+            uploadPhase={casUpload.phase}
+            uploadProgress={casUpload.progressPct}
+            uploadStatusLabel={casUpload.statusLabel}
+            uploadError={casUpload.errorMessage}
+            estimatedSeconds={casUpload.estimatedSeconds}
+            onRetryWithPassword={(file, pwd) => casUpload.start(file, pwd)}
+          />
           <section className="mt-2">
             <SectionHeader title="What you'll unlock" />
             <BenefitsGrid />
@@ -253,36 +265,91 @@ function PortfolioView() {
       )}
 
       {/* Sticky action bar (dashboard only) */}
-      {pageState === 'dash' && <StickyBar />}
+      {pageState === 'dash' && <StickyBar casUpload={casUpload} />}
     </div>
   );
 }
 
 // ── Sticky action bar ─────────────────────────────────────────────────────────
-function StickyBar() {
+interface StickyBarProps {
+  casUpload: ReturnType<typeof useCasUpload>;
+}
+
+function StickyBar({ casUpload }: StickyBarProps) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { phase, statusLabel, errorMessage, progressPct } = casUpload;
+  const isInFlight = phase === 'uploading' || phase === 'processing';
+
   return (
     <div
       className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-[16px] shadow-xl max-w-[calc(100%-1.25rem)]"
       style={{ background: 'rgba(11,31,58,.97)', backdropFilter: 'blur(12px)' }}
     >
+      {/* Hidden file input for CAS upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) casUpload.start(file);
+          // Reset so the same file can be re-selected
+          e.target.value = '';
+        }}
+      />
+
+      {/* Status strip — shown when upload is in progress or done/error (NO-SUPPRESS) */}
+      {phase !== 'idle' && (
+        <div className="border-b border-white/10 px-3 pt-2 pb-1.5 text-caption text-white/80">
+          {isInFlight && (
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+              <span>{statusLabel}</span>
+              {phase === 'processing' && (
+                <span className="font-mono text-white/60">{progressPct}%</span>
+              )}
+            </div>
+          )}
+          {phase === 'done' && (
+            <span className="font-semibold text-emerald-400">✓ Updated — your data is ready.</span>
+          )}
+          {phase === 'error' && (
+            <div className="flex items-center gap-2">
+              <span className="text-red-400">{errorMessage || 'Upload failed.'}</span>
+              <button
+                type="button"
+                className="text-white/70 underline hover:text-white"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Actions scroll horizontally inside the bar so nothing clips on narrow screens */}
       <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {(
           [
-            { label: '⬆ Upload Latest CAS', primary: true },
+            { label: '⬆ Upload Latest CAS', primary: true, action: () => fileInputRef.current?.click() },
             { label: '↻ Refresh' },
             { label: '📄 Generate Report' },
             { label: '⬇ Export' },
             { label: '⚡ Auto Sync', soon: true },
-          ] as { label: string; primary?: boolean; soon?: boolean }[]
-        ).map(({ label, primary, soon }) => (
+          ] as { label: string; primary?: boolean; soon?: boolean; action?: () => void }[]
+        ).map(({ label, primary, soon, action }) => (
           <button
             key={label}
             type="button"
+            disabled={primary && isInFlight}
+            onClick={action}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3.5 py-2 text-small font-semibold text-white transition-colors focus-visible:outline-none',
               primary ? 'border-royal bg-royal' : 'border-white/14 bg-white/10 hover:bg-white/20',
               soon && 'opacity-65',
+              primary && isInFlight && 'cursor-not-allowed opacity-60',
             )}
           >
             {label}
