@@ -120,6 +120,28 @@ export const conceptKey = (concept: ConceptId, ...scope: (string | number)[]) =>
 const genPath = join(dataDir, 'concepts.generated.ts');
 const lockStr = JSON.stringify(desiredLock, null, 2) + '\n';
 
+// Backend serialization-boundary registry (A3, §10 layer 8): the SAME source of truth, emitted as a
+// committed JSON the backend image carries (its Dockerfile copies dhanradar/ only, not frontend/), so
+// the backend boundary derives visibility/data_class/tier/content_class from concepts.json — never a
+// hand-copied list. `npm run check:concepts` (CI) fails if this drifts.
+const backendReg = {};
+for (const c of concepts) {
+  backendReg[c.concept] = {
+    visibility_class: c.visibility_class,
+    data_class: c.data_class,
+    access_tier: c.access_tier,
+    content_class: c.content_class,
+    gate_flag: c.gate_flag ?? null,
+    status: c.status,
+  };
+}
+const backendPath = join(root, '..', 'backend', 'dhanradar', 'mf', 'concepts_registry.json');
+const backendStr = JSON.stringify(
+  { _generated: 'gen-concepts.mjs from frontend/src/data/concepts.json — DO NOT EDIT', concepts: backendReg },
+  null,
+  2,
+) + '\n';
+
 if (CHECK) {
   let stale = false;
   const curGen = existsSync(genPath) ? readFileSync(genPath, 'utf8') : '';
@@ -132,11 +154,18 @@ if (CHECK) {
     stale = true;
     console.error('✗  STALE: src/data/concepts.lock.json — run `npm run gen:concepts` and commit it');
   }
+  const curBackend = existsSync(backendPath) ? readFileSync(backendPath, 'utf8') : '';
+  if (curBackend !== backendStr) {
+    stale = true;
+    console.error('✗  STALE: backend/dhanradar/mf/concepts_registry.json — run `npm run gen:concepts`');
+  }
   if (stale) process.exit(1);
   console.log(`✓  concept registry in sync (${concepts.length} concepts, ${components.length} components).`);
 } else {
   writeFileSync(genPath, generated, 'utf8');
   writeFileSync(lockPath, lockStr, 'utf8');
+  writeFileSync(backendPath, backendStr, 'utf8');
   console.log(`✓  src/data/concepts.generated.ts (${concepts.length} concepts)`);
   console.log(`✓  src/data/concepts.lock.json`);
+  console.log(`✓  backend/dhanradar/mf/concepts_registry.json`);
 }
