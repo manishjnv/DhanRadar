@@ -183,7 +183,7 @@ function PortfolioView() {
           {/* S12 Risk */}
           <section>
             <SectionHeader index="12" title="Risk Center" info="In plain English" />
-            <RiskSection />
+            <RiskSection portfolioId={portfolioId} />
           </section>
 
           {/* S13 Cost */}

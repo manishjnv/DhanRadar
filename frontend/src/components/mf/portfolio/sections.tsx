@@ -28,6 +28,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import {
   usePortfolioHoldings,
   usePortfolioSummaryById,
+  usePortfolioRisk,
+  usePortfolioRiskAdvanced,
   type Holding,
 } from '@/features/portfolio/api';
 
@@ -756,23 +758,174 @@ export function DivSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S12 — RISK CENTER
+// S12 — RISK CENTER — live data
+// COMPLIANCE: no numeric DhanRadar composite score (non-neg #2).
+//             Standard ratios (Sharpe/Sortino/volatility/max-drawdown) ARE
+//             allowed and DO render — they are NOT the composite (non-neg #2).
+//             risk_band renders as a badge+word only, never a number.
+//             No advisory verbs (non-neg #1).
 // ═══════════════════════════════════════════════════════════════════════════
-export function RiskSection() {
+
+/** Maps backend risk_band → display word for RiskBadge (factual descriptors, not advisory verbs). */
+const RISK_BAND_DISPLAY: Record<string, string> = {
+  low:       'Low',
+  moderate:  'Moderate',
+  high:      'High',
+  very_high: 'Very High',
+};
+
+/** Maps backend risk_band → a confidence Band3 so BandRingFromBand can render it. */
+const RISK_BAND_TO_CONF: Record<string, 'high' | 'medium' | 'low'> = {
+  low:       'high',
+  moderate:  'medium',
+  high:      'low',
+  very_high: 'low',
+};
+
+function fmtRatio(n: number | null): string {
+  if (n === null) return '—';
+  return n.toFixed(2);
+}
+
+function fmtPctRisk(n: number | null, prefix = '±'): string {
+  if (n === null) return '—';
+  return `${prefix}${Math.abs(n).toFixed(1)}%`;
+}
+
+/** Shared "coming soon" card for fields not yet built server-side. */
+function ComingSoonCard({ label, desc }: { label: string; desc: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface-2 p-4">
+      <div className="text-caption text-ink-muted">{label}</div>
+      <div className="mt-0.5 font-sans text-[15px] font-extrabold text-ink-faint">— Coming soon</div>
+      <div className="mt-1 text-caption text-ink-secondary">{desc}</div>
+    </div>
+  );
+}
+
+function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boolean }) {
+  const { data: envelope, isLoading, isError, error, refetch } = usePortfolioRiskAdvanced(portfolioId, open);
+
+  // 402 = free user hitting a Plus-only endpoint — render upgrade card, never hide
+  // ponytail: duck-type .problem.status; avoids importing ApiError into sections.tsx
+  const is402 = isError && (error as { problem?: { status?: number } } | null)?.problem?.status === 402;
+  const status = isLoading ? 'loading' : is402 ? 'withheld' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const adv = envelope?.data ?? null;
+
+  return (
+    <DataState
+      status={status}
+      reason={is402 ? 'tier' : (envelope?.meta.reason ?? null)}
+      tierCopy="Advanced risk metrics — available on DhanRadar Plus"
+      onRetry={() => refetch()}
+      skeleton={
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+        </div>
+      }
+    >
+      {adv && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Standard ratios — DOM-allowed */}
+          <div className="rounded-xl border border-line bg-surface-2 p-4">
+            <div className="text-caption text-ink-muted">Sharpe Ratio</div>
+            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtRatio(adv.sharpe_ratio)}</div>
+            <div className="mt-1 text-caption text-ink-secondary">Return per unit of total risk.</div>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2 p-4">
+            <div className="text-caption text-ink-muted">Sortino Ratio</div>
+            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtRatio(adv.sortino_ratio)}</div>
+            <div className="mt-1 text-caption text-ink-secondary">Return per unit of downside risk only.</div>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2 p-4">
+            <div className="text-caption text-ink-muted">Rolling 1Y Avg</div>
+            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_avg_pct, '')}</div>
+            <div className="mt-1 text-caption text-ink-secondary">Average 1-year rolling return.</div>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2 p-4">
+            <div className="text-caption text-ink-muted">Positive 1Y Windows</div>
+            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
+              {adv.rolling_1y_pct_positive !== null ? `${adv.rolling_1y_pct_positive.toFixed(0)}%` : '—'}
+            </div>
+            <div className="mt-1 text-caption text-ink-secondary">% of 1-year periods with positive returns.</div>
+          </div>
+          {/* alpha/beta always null server-side — render as coming soon */}
+          <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." />
+          <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." />
+        </div>
+      )}
+    </DataState>
+  );
+}
+
+export function RiskSection({ portfolioId }: { portfolioId: string }) {
   const [advOpen, setAdvOpen] = React.useState(false);
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioRisk(portfolioId);
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const risk = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+  const bandDisplay = risk?.risk_band ? (RISK_BAND_DISPLAY[risk.risk_band] ?? risk.risk_band) : null;
+  const bandConf = risk?.risk_band ? (RISK_BAND_TO_CONF[risk.risk_band] ?? null) : null;
 
   return (
     <Card className="mt-4 p-5">
-      {/* Risk summary cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {RISK_CARDS.map((rc) => (
-          <div key={rc.label} className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">{rc.label}</div>
-            <div className="mt-0.5 font-sans text-[18px] font-extrabold" style={{ color: rc.color }}>{rc.value}</div>
-            <div className="mt-1 text-caption text-ink-secondary">{rc.desc}</div>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Risk data will appear once your portfolio has enough NAV history."
+        onRetry={() => refetch()}
+        skeleton={
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
           </div>
-        ))}
-      </div>
+        }
+      >
+        {risk && (
+          <>
+            {/* Risk band row — badge+word only, NO numeric score (non-neg #2) */}
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-3">
+                <BandRingFromBand band={bandConf} size={48} stroke={6} />
+                <div>
+                  <div className="text-caption text-ink-muted">Risk Level</div>
+                  {bandDisplay
+                    ? <RiskBadge risk={bandDisplay} />
+                    : <span className="text-[10.5px] font-bold text-ink-faint">Insufficient data</span>
+                  }
+                </div>
+              </div>
+              {risk.as_of && (
+                <span className="text-[10px] text-ink-faint sm:ml-auto">As of {risk.as_of}</span>
+              )}
+            </div>
+
+            {/* Standard ratio cards — DOM-allowed (non-neg #2 exempts standard ratios) */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Price Swings</div>
+                <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.volatility_pct)}</div>
+                <div className="mt-1 text-caption text-ink-secondary">Annualised volatility of your portfolio.</div>
+              </div>
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Biggest Fall</div>
+                <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.max_drawdown_pct, '−')}</div>
+                <div className="mt-1 text-caption text-ink-secondary">Largest peak-to-trough decline.</div>
+              </div>
+              {/* recovery_months always null — render as coming soon (NO-SUPPRESS) */}
+              <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." />
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Coverage</div>
+                <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
+                  {risk.funds_with_metrics}/{risk.fund_count} funds
+                </div>
+                <div className="mt-1 text-caption text-ink-secondary">Funds with enough data for risk metrics.</div>
+              </div>
+            </div>
+          </>
+        )}
+      </DataState>
+
       {/* Advanced metrics accordion */}
       <div className="mt-4">
         <button
@@ -780,21 +933,12 @@ export function RiskSection() {
           onClick={() => setAdvOpen((v) => !v)}
           className="flex w-full items-center justify-between rounded-xl border border-line bg-surface-2 px-4 py-3 text-small font-semibold text-ink hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
         >
-          Advanced Risk Metrics
+          Advanced Risk Metrics <span className="text-[10px] text-violet font-bold ml-1.5">Plus</span>
           <span aria-hidden="true" className="ml-2 text-ink-faint">{advOpen ? '▲' : '▼'}</span>
         </button>
         {advOpen && (
-          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {ADV_METRICS.map((m) => (
-              <div key={m.name} className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-ink">{m.name}</span>
-                  <span className="font-mono text-[13px] font-extrabold text-ink">{m.value}</span>
-                </div>
-                <div className="text-caption text-ink-muted">{m.desc}</div>
-                <div className="mt-1.5 text-caption font-semibold text-ink-secondary">→ {m.judge}</div>
-              </div>
-            ))}
+          <div className="mt-2">
+            <AdvancedPanel portfolioId={portfolioId} open={advOpen} />
           </div>
         )}
       </div>
