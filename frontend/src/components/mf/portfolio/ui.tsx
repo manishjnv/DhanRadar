@@ -16,6 +16,7 @@ import { cn } from '@/lib/cn';
 import { toBand, ringColor, riskColor } from './sampleData';
 
 const BAND_FILL: Record<'high' | 'medium' | 'low', number> = { high: 0.85, medium: 0.55, low: 0.3 };
+export const BAND_COLOR: Record<'high' | 'medium' | 'low', string> = { high: '#00B386', medium: '#1E5EFF', low: '#F5A623' };
 
 // ── Brand-letter tile ────────────────────────────────────────────────────────
 export function Logo({ letter, color, size = 34, radius = 9, font = 13 }: { letter: string; color: string; size?: number; radius?: number; font?: number }) {
@@ -43,6 +44,39 @@ export function BandRing({ score, size = 30, stroke = 4 }: { score: number; size
     </svg>
   );
 }
+
+/** BandRingFromBand — takes a `Band3 | null` directly (no numeric score).
+ *  Use this when the backend returns a band string, not a score.
+ *  null → renders low-fill grey ring (data unavailable). */
+export function BandRingFromBand({ band, size = 30, stroke = 4 }: { band: 'high' | 'medium' | 'low' | null; size?: number; stroke?: number }) {
+  const safeBand = band ?? 'low';
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const frac = BAND_FILL[safeBand];
+  const col = band ? BAND_COLOR[safeBand] : 'var(--surface-3)';
+  return (
+    <svg width={size} height={size} aria-hidden="true" style={{ transform: 'rotate(-90deg)' }} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={col} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${(circ * frac).toFixed(1)} ${(circ * (1 - frac)).toFixed(1)}`} />
+    </svg>
+  );
+}
+
+/** Map backend snake_case educational labels to display strings for StatusTag. */
+export const LABEL_DISPLAY: Record<string, string> = {
+  in_form:           'In Form',
+  on_track:          'On Track',
+  off_track:         'Off Track',
+  out_of_form:       'Out of Form',
+  insufficient_data: 'Insufficient Data',
+};
+
+/** Map confidence_band to a plain-English data-confidence word (NOT a verdict). */
+export const BAND_WORD: Record<string, string> = {
+  high:   'High data confidence',
+  medium: 'Medium data confidence',
+  low:    'Low data confidence',
+};
 
 // ── Half-circle gauge (DMMI — market index, DOM value allowed) ───────────────
 export function Semicircle({ val, size = 200 }: { val: number; size?: number }) {
