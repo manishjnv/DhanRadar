@@ -27,6 +27,8 @@ import { MaybeShell } from '@/components/ui/MaybeShell';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import {
   EmptyHero, BenefitsGrid, AutoSyncBanner,
   HeroSection, HealthSection, ActionSection, DmmiSection, AllocSection,
@@ -123,6 +125,23 @@ function PortfolioView() {
       {/* ── DASHBOARD STATE ───────────────────────────────────────────────────── */}
       {pageState === 'dash' && (
         <div className="flex flex-col gap-6">
+          {/* In-flow header toolbar — actions in page flow, never floating (ui-system §header) */}
+          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="header-toolbar">
+            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: refresh stub — no backend call wired yet */}}>
+              ↻ Refresh
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: report stub */}}>
+              Generate Report
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: export stub */}}>
+              Export
+            </Button>
+            <Button variant="ghost" size="sm" disabled>
+              Auto Sync
+              <span className="ml-1 rounded-[5px] bg-violet px-1 py-px text-[8px] font-bold uppercase text-white">Soon</span>
+            </Button>
+          </div>
+
           {/* S1 Hero */}
           <HeroSection portfolioId={portfolioId} />
 
@@ -264,134 +283,186 @@ function PortfolioView() {
         </div>
       )}
 
-      {/* Sticky action bar (dashboard only) */}
-      {pageState === 'dash' && <StickyBar casUpload={casUpload} />}
+      {/* One persistent upload affordance — FAB, dashboard only (the empty state uses EmptyHero's card) */}
+      {pageState === 'dash' && <UploadFAB casUpload={casUpload} />}
     </div>
   );
 }
 
-// ── Sticky action bar ─────────────────────────────────────────────────────────
-interface StickyBarProps {
+// ── Upload FAB + inline popover ───────────────────────────────────────────────
+// ponytail: no Dialog/Popover dependency — a fixed card is all we need here.
+interface UploadFABProps {
   casUpload: ReturnType<typeof useCasUpload>;
 }
 
-function StickyBar({ casUpload }: StickyBarProps) {
+function UploadFAB({ casUpload }: UploadFABProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [open, setOpen] = React.useState(false);
+  const [password, setPassword] = React.useState('');
   const { phase, statusLabel, errorMessage, progressPct } = casUpload;
   const isInFlight = phase === 'uploading' || phase === 'processing';
-  const [password, setPassword] = React.useState('');
+
+  // Keep popover open when upload is in progress/error so progress is visible.
+  React.useEffect(() => {
+    if (isInFlight || phase === 'error') setOpen(true);
+  }, [isInFlight, phase]);
+
+  // Close on Escape (when closeable).
+  React.useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !isInFlight) setOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, isInFlight]);
+
+  function handleFile(file: File) {
+    casUpload.start(file, password || undefined);
+    // Reset so the same file can be re-selected later
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  const canClose = !isInFlight;
 
   return (
-    <div
-      className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-[16px] shadow-xl max-w-[calc(100%-1.25rem)]"
-      style={{ background: 'rgba(11,31,58,.97)', backdropFilter: 'blur(12px)' }}
-    >
-      {/* Hidden file input for CAS upload */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        className="sr-only"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) casUpload.start(file, password || undefined);
-          // Reset so the same file can be re-selected
-          e.target.value = '';
-        }}
-      />
+    <>
+      {/* Popover — compact card anchored above the FAB */}
+      {open && (
+        <div
+          className="fixed bottom-24 right-6 z-50 w-full max-w-[22rem] rounded-2xl border border-line bg-surface shadow-2xl"
+          data-testid="upload-popover"
+        >
+          {/* Header row */}
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <span className="text-small font-bold text-ink">Upload CAS Statement</span>
+            {canClose && (
+              <button
+                type="button"
+                aria-label="Close upload panel"
+                onClick={() => setOpen(false)}
+                className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+              >
+                ✕
+              </button>
+            )}
+          </div>
 
-      {/* Status strip — shown when upload is in progress or done/error (NO-SUPPRESS) */}
-      {phase !== 'idle' && (
-        <div className="border-b border-white/10 px-3 pt-2 pb-1.5 text-caption text-white/80">
-          {isInFlight && (
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
-              <span>{statusLabel}</span>
-              {phase === 'processing' && (
-                <span className="font-mono text-white/60">{progressPct}%</span>
-              )}
-            </div>
-          )}
-          {phase === 'done' && (
-            <span className="font-semibold text-emerald-400">✓ Updated — your data is ready.</span>
-          )}
-          {phase === 'error' && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-red-400">{errorMessage || 'Upload failed.'}</span>
-              </div>
-              {/* Password field re-shown on error so the user can enter it and retry */}
-              <div className="flex items-center gap-2" data-testid="sticky-bar-password-retry">
-                <input
+          <div className="flex flex-col gap-4 p-4">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+
+            {/* File pick drop zone (simplified; mirrors EmptyHero pattern) */}
+            {(phase === 'idle' || phase === 'done') && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-line bg-surface-2 py-5 text-small font-semibold text-ink-secondary hover:border-royal/50 hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                data-testid="popover-file-pick"
+              >
+                <span className="text-2xl" aria-hidden="true">📄</span>
+                Choose File or drop here
+                <span className="text-caption font-normal text-ink-muted">PDF · CDSL / NSDL / CAMS</span>
+              </button>
+            )}
+
+            {/* PDF password — shown when idle or error */}
+            {(phase === 'idle' || phase === 'error' || phase === 'done') && (
+              <div className="flex flex-col gap-1" data-testid="popover-password-field">
+                <label htmlFor="fab-cas-pdf-password" className="text-small font-medium text-ink">
+                  PDF password <span className="text-ink-muted font-normal">(optional)</span>
+                </label>
+                <Input
+                  id="fab-cas-pdf-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="PDF password (optional)"
+                  placeholder="Usually your PAN"
                   autoComplete="off"
-                  aria-label="PDF password (optional)"
-                  className="flex-1 rounded-md border border-white/25 bg-white/10 px-2 py-1 text-caption text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-white/40"
                 />
-                <button
-                  type="button"
-                  className="text-white/70 underline hover:text-white text-caption"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Try again
-                </button>
+                <p className="text-caption text-ink-muted">Your CAS password — usually your PAN, from the statement email.</p>
               </div>
-            </div>
-          )}
+            )}
+
+            {/* Progress / status block — NO-SUPPRESS when not idle */}
+            {phase !== 'idle' && (
+              <div className="rounded-xl border border-line bg-surface-2 p-3" data-testid="popover-status">
+                {isInFlight && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 text-small font-semibold text-ink">
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-royal/30 border-t-royal" aria-hidden="true" />
+                      {statusLabel}
+                    </div>
+                    {phase === 'processing' && (
+                      <div>
+                        <div className="mb-1 flex justify-between text-caption text-ink-muted">
+                          <span>Processing…</span>
+                          <span className="font-mono font-bold text-ink">{progressPct}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                          <div
+                            className="h-full rounded-full bg-royal transition-all duration-500"
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {phase === 'done' && (
+                  <p className="text-small font-semibold text-emerald-600">
+                    ✓ Updated — your portfolio is ready.
+                  </p>
+                )}
+                {phase === 'error' && (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-small text-red-600">{errorMessage || 'Upload failed — please try again.'}</p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="self-start rounded-lg border border-line bg-surface px-3 py-1.5 text-small font-semibold text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Password field — shown in idle state so user can pre-fill before picking a file */}
-      {phase === 'idle' && (
-        <div className="border-b border-white/10 px-3 pt-2 pb-1.5" data-testid="sticky-bar-password-idle">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="PDF password (optional) — enter before uploading"
-            autoComplete="off"
-            aria-label="PDF password (optional)"
-            className="w-full rounded-md border border-white/20 bg-white/8 px-2.5 py-1.5 text-caption text-white/80 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-white/30"
-          />
-        </div>
-      )}
-
-      {/* Actions scroll horizontally inside the bar so nothing clips on narrow screens */}
-      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {(
-          [
-            { label: '⬆ Upload Latest CAS', primary: true, action: () => fileInputRef.current?.click() },
-            { label: '↻ Refresh' },
-            { label: '📄 Generate Report' },
-            { label: '⬇ Export' },
-            { label: '⚡ Auto Sync', soon: true },
-          ] as { label: string; primary?: boolean; soon?: boolean; action?: () => void }[]
-        ).map(({ label, primary, soon, action }) => (
-          <button
-            key={label}
-            type="button"
-            disabled={primary && isInFlight}
-            onClick={action}
-            className={cn(
-              'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3.5 py-2 text-small font-semibold text-white transition-colors focus-visible:outline-none',
-              primary ? 'border-royal bg-royal' : 'border-white/14 bg-white/10 hover:bg-white/20',
-              soon && 'opacity-65',
-              primary && isInFlight && 'cursor-not-allowed opacity-60',
-            )}
-          >
-            {label}
-            {soon && (
-              <span className="ml-1 rounded-[5px] bg-violet px-1 py-px text-[8px] font-bold uppercase text-white">
-                Soon
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
+      {/* FAB — fixed bottom-right, primary brand colour */}
+      <button
+        type="button"
+        aria-label="Upload CAS"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="upload-fab"
+        className={cn(
+          'fixed bottom-6 right-6 z-50 inline-flex items-center gap-2 rounded-2xl bg-royal px-4 py-3 text-small font-bold text-white shadow-lg',
+          'hover:bg-royal/90 active:bg-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/60',
+          isInFlight && 'cursor-not-allowed opacity-80',
+        )}
+      >
+        {/* Upload arrow */}
+        <span aria-hidden="true">↑</span>
+        {/* Label collapses on very narrow screens */}
+        <span className="hidden sm:inline">Upload CAS</span>
+        {/* Dot indicator while in-flight */}
+        {isInFlight && (
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white/70" aria-hidden="true" />
+        )}
+      </button>
+    </>
   );
 }
 
