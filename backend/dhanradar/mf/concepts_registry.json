@@ -1,0 +1,253 @@
+{
+  "_generated": "gen-concepts.mjs from frontend/src/data/concepts.json — DO NOT EDIT",
+  "concepts": {
+    "portfolio.summary": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "holdings.list": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "free",
+      "content_class": "PERSONAL",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "holdings.xirr": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "holdings.pnl": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.valuation_series": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.allocation": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.allocation_sector": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "data-starved"
+    },
+    "portfolio.overlap": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "data-starved"
+    },
+    "portfolio.concentration": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "portfolio.health": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.diversification": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.risk": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.risk_advanced": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "plus",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.cost": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.performance": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.benchmark": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.projection": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "portfolio.tax": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "goals.list": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "free",
+      "content_class": "PERSONAL",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "goals.progress": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "fund.label": {
+      "visibility_class": "educational",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "COMPLIANCE",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "portfolio.score_raw": {
+      "visibility_class": "gated",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": "portfolio_score_raw",
+      "status": "gated-never"
+    },
+    "mood.current": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "portfolio.recommendations": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.opportunities": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.ai_feed": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "AI_GENERATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.ai_summary": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "plus",
+      "content_class": "AI_GENERATED",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.timeline": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "free",
+      "content_class": "PERSONAL",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "portfolio.reports": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "plus",
+      "content_class": "SYSTEM",
+      "gate_flag": null,
+      "status": "build"
+    },
+    "advice.suitability": {
+      "visibility_class": "gated",
+      "data_class": "derived-personal",
+      "access_tier": "plus",
+      "content_class": "COMPLIANCE",
+      "gate_flag": "advice_suitability",
+      "status": "gated-never"
+    },
+    "sync.status": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "free",
+      "content_class": "SYSTEM",
+      "gate_flag": null,
+      "status": "build"
+    }
+  }
+}
