@@ -121,11 +121,8 @@ async def test_overlap_anonymous_401(async_client, patch_redis) -> None:
     assert resp.json().get("detail") == "not_authenticated"
 
 
-async def test_concentration_anonymous_401(async_client, patch_redis) -> None:
-    pid = str(_uuid.uuid4())
-    resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
-    assert resp.status_code == 401, resp.text
-    assert resp.json().get("detail") == "not_authenticated"
+# NB: concentration moved to the A3 boundary in M2.1 — its 401/404/200/#2 coverage now lives in
+# tests/integration/test_m2_1_portfolio_analytics.py (rls_async_client). Overlap stays here (raw Pydantic).
 
 
 # ---------------------------------------------------------------------------
@@ -140,18 +137,6 @@ async def test_overlap_wrong_portfolio_404(async_client, db_session, patch_redis
     try:
         app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
         resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
-    finally:
-        app.dependency_overrides.pop(current_user_or_anonymous, None)
-    assert resp.status_code == 404, resp.text
-    assert resp.json().get("detail") == "portfolio_not_found"
-
-
-async def test_concentration_wrong_portfolio_404(async_client, db_session, patch_redis) -> None:
-    user_id = await _seed_user(db_session)
-    pid = str(_uuid.uuid4())
-    try:
-        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
-        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
     finally:
         app.dependency_overrides.pop(current_user_or_anonymous, None)
     assert resp.status_code == 404, resp.text
@@ -183,26 +168,6 @@ async def test_overlap_empty_portfolio_200(async_client, db_session, patch_redis
     _assert_no_unified_score(body)
 
 
-async def test_concentration_empty_portfolio_200(async_client, db_session, patch_redis) -> None:
-    user_id = await _seed_user(db_session)
-    pid = await _seed_empty_portfolio(db_session, user_id)
-    try:
-        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
-        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
-    finally:
-        app.dependency_overrides.pop(current_user_or_anonymous, None)
-
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["portfolio_id"] == pid
-    assert body["by_category"] == []
-    assert body["by_amc"] == []
-    assert body["by_fund"] == []
-    assert body["data_completeness"] == "empty"
-    _assert_disclosure_present(body)
-    _assert_no_unified_score(body)
-
-
 # ---------------------------------------------------------------------------
 # Disclosure present on every 200
 # ---------------------------------------------------------------------------
@@ -214,18 +179,6 @@ async def test_overlap_disclosure_always_present(async_client, db_session, patch
     try:
         app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
         resp = await async_client.get(f"/api/v1/portfolio/{pid}/overlap")
-    finally:
-        app.dependency_overrides.pop(current_user_or_anonymous, None)
-    assert resp.status_code == 200, resp.text
-    _assert_disclosure_present(resp.json())
-
-
-async def test_concentration_disclosure_always_present(async_client, db_session, patch_redis) -> None:
-    user_id = await _seed_user(db_session)
-    pid = await _seed_empty_portfolio(db_session, user_id)
-    try:
-        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
-        resp = await async_client.get(f"/api/v1/portfolio/{pid}/concentration")
     finally:
         app.dependency_overrides.pop(current_user_or_anonymous, None)
     assert resp.status_code == 200, resp.text

@@ -27,6 +27,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HeroSection } from './sections';
 import { HoldingsSection } from './sections';
 import { RiskSection } from './sections';
+import { AllocSection } from './sections';
+import { DivSection } from './sections';
 import { EmptyHero } from './sections';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 
@@ -36,8 +38,9 @@ import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 vi.mock('@/features/portfolio/api', () => ({
   usePortfolioHoldings: vi.fn(),
   usePortfolioSummaryById: vi.fn(),
-  usePortfolioOverlap: vi.fn(),
+  usePortfolioAllocation: vi.fn(),
   usePortfolioConcentration: vi.fn(),
+  usePortfolioDiversification: vi.fn(),
   usePortfolioRisk: vi.fn(),
   usePortfolioRiskAdvanced: vi.fn(),
 }));
@@ -45,6 +48,9 @@ vi.mock('@/features/portfolio/api', () => ({
 import {
   usePortfolioHoldings,
   usePortfolioSummaryById,
+  usePortfolioAllocation,
+  usePortfolioConcentration,
+  usePortfolioDiversification,
   usePortfolioRisk,
   usePortfolioRiskAdvanced,
 } from '@/features/portfolio/api';
@@ -471,6 +477,187 @@ describe('RiskSection', () => {
     expect(screen.getByText('Beta')).toBeDefined();
     // coming soon now covers Sharpe + Sortino (B88) + Alpha + Beta
     expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AllocSection tests (live allocation + concentration sub-panel)
+// ---------------------------------------------------------------------------
+
+const ALLOC_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    by: 'category',
+    buckets: [
+      { bucket: 'Large Cap', value: 250_000, weight_pct: 52.3 },
+      { bucket: 'Flexi Cap', value: 150_000, weight_pct: 31.4 },
+      { bucket: 'Mid Cap', value: 78_000, weight_pct: 16.3 },
+    ],
+    total_value: 478_000,
+    fund_count: 6,
+    as_of: '2026-06-28',
+  },
+  meta: EMPTY_META,
+};
+
+const CONC_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    band: 'moderate' as const,
+    top_fund: { name: 'Mirae Asset Large Cap Fund', weight_pct: 28.4 },
+    top_amc: { name: 'Mirae Asset', weight_pct: 41.0 },
+    by_amc: [
+      { name: 'Mirae Asset', weight_pct: 41.0 },
+      { name: 'Parag Parikh', weight_pct: 31.4 },
+    ],
+    fund_count: 6,
+    amc_count: 3,
+    as_of: '2026-06-28',
+  },
+  meta: EMPTY_META,
+};
+
+const CONC_EMPTY = { status: 'empty' as const, data: null, meta: { ...EMPTY_META, reason: 'empty' as const } };
+
+describe('AllocSection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderAlloc(
+    allocEnvelope: any,
+    concEnvelope: any = CONC_EMPTY,
+  ) {
+    const allocMock = vi.mocked(usePortfolioAllocation);
+    const concMock = vi.mocked(usePortfolioConcentration);
+
+    const isLoading = allocEnvelope.status === 'loading';
+    const isError = allocEnvelope.status === 'error';
+    allocMock.mockReturnValue({
+      data: isLoading || isError ? undefined : allocEnvelope,
+      isLoading,
+      isError,
+      error: isError ? new Error('fail') : null,
+      refetch: vi.fn(),
+    } as any);
+
+    const cLoading = concEnvelope.status === 'loading';
+    const cError = concEnvelope.status === 'error';
+    concMock.mockReturnValue({
+      data: cLoading || cError ? undefined : concEnvelope,
+      isLoading: cLoading,
+      isError: cError,
+      error: cError ? new Error('fail') : null,
+      refetch: vi.fn(),
+    } as any);
+
+    return render(<AllocSection portfolioId="pid" />, { wrapper });
+  }
+
+  it('loading => skeleton, no bucket name', () => {
+    renderAlloc(LOADING_STATE);
+    expect(screen.queryByText('Large Cap')).toBeNull();
+  });
+
+  it('present => shows a bucket name and its weight %', () => {
+    renderAlloc(ALLOC_PRESENT, CONC_PRESENT);
+    // "Large Cap" appears in both the donut legend and the weight bar
+    expect(screen.getAllByText('Large Cap').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/52\.3%/).length).toBeGreaterThan(0);
+  });
+
+  it('present => concentration sub-panel shows top_fund name', () => {
+    renderAlloc(ALLOC_PRESENT, CONC_PRESENT);
+    expect(screen.getByText('Mirae Asset Large Cap Fund')).toBeDefined();
+  });
+
+  it('empty => EmptyState visible, no bucket name', () => {
+    renderAlloc(EMPTY_STATE);
+    expect(screen.queryByText('Large Cap')).toBeNull();
+    expect(screen.getAllByText(/Nothing here yet|allocation shows/i).length).toBeGreaterThan(0);
+  });
+
+  it('error => ErrorCard, no bucket name', () => {
+    renderAlloc(ERROR_STATE);
+    expect(screen.queryByText('Large Cap')).toBeNull();
+    expect(screen.getByText(/something went wrong/i)).toBeDefined();
+  });
+
+  it('no advisory verbs, no numeric composite score in present state', () => {
+    renderAlloc(ALLOC_PRESENT, CONC_PRESENT);
+    const text = document.body.textContent ?? '';
+    assertNoAdvisoryVerbs(text);
+    assertNoNumericScore(text);
+    // no "ideal"/"recommended" allocation comparison (implies advice)
+    expect(text).not.toMatch(/ideal|recommended/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DivSection tests (live diversification)
+// ---------------------------------------------------------------------------
+
+const DIV_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    band: 'high' as const,
+    category_count: 5,
+    top_category: 'Large Cap',
+    top_category_pct: 38.2,
+    fund_count: 6,
+    as_of: '2026-06-28',
+  },
+  meta: EMPTY_META,
+};
+
+describe('DivSection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderDiv(envelope: any) {
+    const mock = vi.mocked(usePortfolioDiversification);
+    const isLoading = envelope.status === 'loading';
+    const isError = envelope.status === 'error';
+    mock.mockReturnValue({
+      data: isLoading || isError ? undefined : envelope,
+      isLoading,
+      isError,
+      error: isError ? new Error('fail') : null,
+      refetch: vi.fn(),
+    } as any);
+    return render(<DivSection portfolioId="pid" />, { wrapper });
+  }
+
+  it('loading => skeleton, no facts', () => {
+    renderDiv(LOADING_STATE);
+    expect(screen.queryByText('Well spread')).toBeNull();
+  });
+
+  it('present => shows band WORD (not a number) and top category', () => {
+    renderDiv(DIV_PRESENT);
+    expect(screen.getByText('Well spread')).toBeDefined(); // high band → word
+    expect(screen.getByText('Large Cap')).toBeDefined();
+    expect(screen.getByText(/38\.2%/)).toBeDefined(); // user's own %
+  });
+
+  it('empty => EmptyState visible, no band word', () => {
+    renderDiv(EMPTY_STATE);
+    expect(screen.queryByText('Well spread')).toBeNull();
+    expect(screen.getAllByText(/Nothing here yet|diversification reading/i).length).toBeGreaterThan(0);
+  });
+
+  it('error => ErrorCard', () => {
+    renderDiv(ERROR_STATE);
+    expect(screen.getByText(/something went wrong/i)).toBeDefined();
+  });
+
+  it('no advisory verbs, no numeric composite score, no "Top N% of portfolios"', () => {
+    renderDiv(DIV_PRESENT);
+    const text = document.body.textContent ?? '';
+    assertNoAdvisoryVerbs(text);
+    assertNoNumericScore(text);
+    expect(text).not.toMatch(/Top \d+% of portfolios/i);
+    expect(text).not.toMatch(/ideal/i);
   });
 });
 

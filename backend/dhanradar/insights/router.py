@@ -3,8 +3,13 @@ DhanRadar — Portfolio Intelligence router (Plan Group 3).
 
 Mounted at `/api/v1` (no extra prefix).
 Paths:
-  GET /api/v1/portfolio/{portfolio_id}/overlap
-  GET /api/v1/portfolio/{portfolio_id}/concentration
+  GET /api/v1/portfolio/{portfolio_id}/overlap          (raw Pydantic — data-starved, untouched)
+  GET /api/v1/portfolio/{portfolio_id}/holdings         (C1, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/summary          (C2, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/risk             (C3, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/allocation       (M2.1, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/concentration    (M2.1, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/diversification  (M2.1, A3 envelope)
 
 Auth: cookie RS256 JWT only (`current_user_or_anonymous` → 401 if anonymous).
 IDOR: user sees ONLY their own portfolios — service raises ValueError on mismatch → 404.
@@ -23,8 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.db import get_db
 from dhanradar.deps import UserContext, current_user_or_anonymous
 from dhanradar.insights import service
-from dhanradar.insights.schemas import ConcentrationResponse, MoodContextResponse, OverlapResponse
+from dhanradar.insights.schemas import MoodContextResponse, OverlapResponse
 from dhanradar.mf.portfolio_read import (
+    allocation_payload,
+    concentration_payload,
+    diversification_payload,
     holdings_payload,
     load_portfolio_read_model,
     load_portfolio_risk,
@@ -63,29 +71,6 @@ async def portfolio_overlap(
     _require_auth(user)
     try:
         return await service.get_overlap(db, user.user_id, portfolio_id)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
-
-
-@router.get(
-    "/portfolio/{portfolio_id}/concentration",
-    response_model=ConcentrationResponse,
-)
-async def portfolio_concentration(
-    portfolio_id: str,
-    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> ConcentrationResponse:
-    """
-    Factual concentration observations for the user's own portfolio.
-
-    Cold-start / single-fund / no holdings → valid 200 with empty lists, never 404.
-    Another user's portfolio_id → 404 (portfolio_not_found).
-    Anonymous → 401.
-    """
-    _require_auth(user)
-    try:
-        return await service.get_concentration(db, user.user_id, portfolio_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
 
@@ -182,6 +167,76 @@ async def portfolio_risk(
     return serialize_concept(
         "portfolio.risk",
         risk_payload(r, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/allocation")
+async def portfolio_allocation(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    by: str = "category",
+) -> dict:
+    """M2.1 `portfolio.allocation` — the owner's value-weighted split by `category` (default) or `amc`,
+    served THROUGH the A3 boundary. bucket/value/weight_pct are the user's own calculated facts (§13,
+    DOM-allowed); no DhanRadar composite is selected (hand-built). `by=sector|cap` → empty buckets
+    ('coming soon', data-starved). Anonymous → 401; another user's portfolio → 404.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    return serialize_concept(
+        "portfolio.allocation",
+        allocation_payload(rm, portfolio_id, by),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/concentration")
+async def portfolio_concentration(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """M2.1 `portfolio.concentration` — top-fund / top-AMC weights + an indicative concentration band,
+    served THROUGH the A3 boundary (was previously a raw Pydantic response bypassing it). Weights are the
+    user's own % (§13, DOM-allowed); the band is a factual descriptor — no DhanRadar composite (hand-built).
+    Cold-start / single-fund / no holdings → 200 with null top/empty list. 401/404 as above.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    return serialize_concept(
+        "portfolio.concentration",
+        concentration_payload(rm, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/diversification")
+async def portfolio_diversification(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """M2.1 `portfolio.diversification` — a band/word read of how widely the holdings spread across
+    categories, served THROUGH the A3 boundary. #2: band word only — the raw spread measure never
+    serializes (same shape as C3 `risk_band`); the category count/top-category % are the user's own
+    facts (DOM-allowed). No DhanRadar composite. Anonymous → 401; another user's portfolio → 404.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    return serialize_concept(
+        "portfolio.diversification",
+        diversification_payload(rm, portfolio_id),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

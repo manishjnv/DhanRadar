@@ -20,8 +20,6 @@ from uuid import UUID
 
 from dhanradar.insights.schemas import (
     CategoryOverlap,
-    ConcentrationItem,
-    ConcentrationResponse,
     FundPairOverlap,
     MoodContextResponse,
     OverlapResponse,
@@ -117,30 +115,12 @@ def _category_observation(category: str, pct: float, fund_count: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Concentration framing helpers (pure — no I/O)
-# ---------------------------------------------------------------------------
-
-def _concentration_context(dimension: str, name: str, pct: float) -> str:
-    """Return an educational context line — factual, never prescriptive."""
-    if dimension == "category":
-        return (
-            f"{pct:.1f}% of your portfolio's current value is in {name} funds. "
-            "Category concentration reflects the share of holdings in a single fund type."
-        )
-    if dimension == "amc":
-        return (
-            f"{pct:.1f}% of your portfolio's current value is managed by {name}. "
-            "AMC concentration shows how much of your holdings is with one fund house."
-        )
-    # fund dimension
-    return (
-        f"{name} represents {pct:.1f}% of your portfolio's current value. "
-        "Fund concentration shows the weight of a single scheme in the overall portfolio."
-    )
-
-
-# ---------------------------------------------------------------------------
 # DB-backed aggregation
+#
+# NB: `portfolio.concentration` moved to the A3 boundary in M2.1 — see
+# `dhanradar.mf.portfolio_read.concentration_payload` + `insights/router.py`. The old
+# `get_concentration` / `_concentration_context` (raw Pydantic, bypassing the boundary) were removed.
+# `get_overlap` stays here (data-starved; constituent logic kept for when that feed lands).
 # ---------------------------------------------------------------------------
 
 _CONSTITUENT_COMPLETENESS = "constituent_data"
@@ -457,186 +437,6 @@ def _category_fund_pairs(
     return fund_pairs, completeness
 
 
-async def get_concentration(db: Any, user_id: str, portfolio_id: str) -> ConcentrationResponse:
-    """
-    Build the concentration response for the given portfolio.
-
-    - Verifies portfolio belongs to user (IDOR guard → ValueError on mismatch).
-    - Computes category, AMC, and per-fund concentration as factual percentages.
-    - Educational context line per item — never prescriptive.
-    - Cold-start / single-fund / empty → valid 200 with empty lists.
-    """
-    from sqlalchemy import select
-
-    from dhanradar.models.mf import MfFund, MfPortfolio, MfUserHolding
-
-    uid = _parse_uid(user_id)
-    try:
-        pid = UUID(portfolio_id)
-    except (ValueError, TypeError):
-        pid = None
-
-    disc = _safe_disclosure()
-
-    if uid is None or pid is None:
-        return ConcentrationResponse(
-            portfolio_id=portfolio_id,
-            as_of_date=None,
-            by_category=[],
-            by_amc=[],
-            by_fund=[],
-            observation_summary="No portfolio data available.",
-            data_completeness=_EMPTY_COMPLETENESS,
-            **disc,
-        )
-
-    port_result = await db.execute(
-        select(MfPortfolio).where(MfPortfolio.id == pid, MfPortfolio.user_id == uid)
-    )
-    portfolio = port_result.scalar_one_or_none()
-    if portfolio is None:
-        raise ValueError("portfolio_not_found")
-
-    holdings_result = await db.execute(
-        select(
-            MfUserHolding.isin,
-            MfUserHolding.units,
-            MfUserHolding.invested_amount,
-            MfUserHolding.as_of_date,
-        ).where(
-            MfUserHolding.portfolio_id == pid,
-            MfUserHolding.user_id == uid,
-        )
-    )
-    rows = holdings_result.fetchall()
-
-    if not rows:
-        return ConcentrationResponse(
-            portfolio_id=portfolio_id,
-            as_of_date=None,
-            by_category=[],
-            by_amc=[],
-            by_fund=[],
-            observation_summary="No holdings found in this portfolio yet.",
-            data_completeness=_EMPTY_COMPLETENESS,
-            **disc,
-        )
-
-    isins = list({r.isin for r in rows})
-    fund_meta_result = await db.execute(
-        select(MfFund.isin, MfFund.scheme_name, MfFund.category, MfFund.amc_name).where(
-            MfFund.isin.in_(isins)
-        )
-    )
-    fund_meta: dict[str, dict[str, str]] = {
-        r.isin: {
-            "name": r.scheme_name or r.isin,
-            "category": r.category or "Uncategorized",
-            "amc": r.amc_name or "Unknown",
-        }
-        for r in fund_meta_result.fetchall()
-    }
-
-    as_of_dates = [r.as_of_date for r in rows if r.as_of_date is not None]
-    as_of_date_str = max(as_of_dates).isoformat() if as_of_dates else None
-
-    # Compute value per ISIN (use invested_amount as best-effort proxy when no live NAV)
-    isin_value: dict[str, float] = {}
-    for r in rows:
-        v = float(r.invested_amount) if r.invested_amount else 0.0
-        isin_value[r.isin] = isin_value.get(r.isin, 0.0) + v
-
-    total_value = sum(isin_value.values())
-
-    if total_value == 0.0:
-        return ConcentrationResponse(
-            portfolio_id=portfolio_id,
-            as_of_date=as_of_date_str,
-            by_category=[],
-            by_amc=[],
-            by_fund=[],
-            observation_summary="Holdings exist but cost basis is not yet available.",
-            data_completeness=_PARTIAL_COMPLETENESS,
-            **disc,
-        )
-
-    # --- By category ---
-    cat_value: dict[str, float] = {}
-    for isin, val in isin_value.items():
-        cat = fund_meta.get(isin, {}).get("category", "Uncategorized")
-        cat_value[cat] = cat_value.get(cat, 0.0) + val
-
-    by_category = sorted(
-        [
-            ConcentrationItem(
-                name=cat,
-                allocation_pct=round(v / total_value * 100, 2),
-                context=_concentration_context("category", cat, round(v / total_value * 100, 2)),
-            )
-            for cat, v in cat_value.items()
-        ],
-        key=lambda x: x.allocation_pct,
-        reverse=True,
-    )
-
-    # --- By AMC ---
-    amc_value: dict[str, float] = {}
-    for isin, val in isin_value.items():
-        amc = fund_meta.get(isin, {}).get("amc", "Unknown")
-        amc_value[amc] = amc_value.get(amc, 0.0) + val
-
-    by_amc = sorted(
-        [
-            ConcentrationItem(
-                name=amc,
-                allocation_pct=round(v / total_value * 100, 2),
-                context=_concentration_context("amc", amc, round(v / total_value * 100, 2)),
-            )
-            for amc, v in amc_value.items()
-        ],
-        key=lambda x: x.allocation_pct,
-        reverse=True,
-    )
-
-    # --- By fund ---
-    by_fund = sorted(
-        [
-            ConcentrationItem(
-                name=fund_meta.get(isin, {}).get("name", isin),
-                allocation_pct=round(val / total_value * 100, 2),
-                context=_concentration_context(
-                    "fund",
-                    fund_meta.get(isin, {}).get("name", isin),
-                    round(val / total_value * 100, 2),
-                ),
-            )
-            for isin, val in isin_value.items()
-        ],
-        key=lambda x: x.allocation_pct,
-        reverse=True,
-    )
-
-    fund_count = len(isins)
-    amc_count = len(amc_value)
-    cat_count = len(cat_value)
-    summary = (
-        f"Your portfolio spans {amc_count} {'AMC' if amc_count == 1 else 'AMCs'} "
-        f"and {fund_count} {'fund' if fund_count == 1 else 'funds'} "
-        f"across {cat_count} {'category' if cat_count == 1 else 'categories'}."
-    )
-
-    return ConcentrationResponse(
-        portfolio_id=portfolio_id,
-        as_of_date=as_of_date_str,
-        by_category=by_category,
-        by_amc=by_amc,
-        by_fund=by_fund,
-        observation_summary=summary,
-        data_completeness=_COMPLETE_COMPLETENESS,
-        **disc,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Mood-context helpers (pure — no I/O)
 # ---------------------------------------------------------------------------
@@ -840,7 +640,7 @@ async def get_mood_context(
         band = "empty"
         top_category = None
     else:
-        # Top-category % (same math as by_category in get_concentration)
+        # Top-category % (value-weighted, same math as the analytics concentration payload)
         cat_value: dict[str, float] = {}
         for isin, val in isin_value.items():
             cat = fund_meta.get(isin, "Uncategorized")
