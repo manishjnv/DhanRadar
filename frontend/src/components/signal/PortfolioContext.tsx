@@ -40,7 +40,7 @@ export function PortfolioContext({
             Upload your CAS to see portfolio context here.
           </p>
           <Link
-            href="/mf/upload"
+            href="/mf/portfolio"
             className="rounded-lg bg-royal px-4 py-2 text-small font-medium text-white hover:opacity-90 transition-opacity"
           >
             Upload CAS
