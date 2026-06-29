@@ -69,17 +69,15 @@ Thumbs.db
 # session). Local runtime artifact, not an instruction file — never commit it.
 AGENTS.md
 
-# private ops runbook — never in the public repo
-docs/infra-notes.md
-
-# local sample artifacts (CAS screenshots etc.) — public repo, may carry PII; never commit
-docs/Sample/
-docs/ui-system/
-docs/project-state/
-docs/research/
-docs/screenshots/
-docs/Admin.md
-docs/Improvement_Feedback.md
+# Strategic docs & specs — LOCAL-ONLY, kept OUT of the public repo (founder 2026-06-29).
+# The entire docs/ tree (architecture, plans, data-platform, features, ops, rca, specs, and
+# the local CAS sample PDFs that may carry PII), the sources/ vision specs, and the operating
+# overlays (agent.md, CLAUDE.md) are private. Only the root README.md stays public.
+# (Supersedes the earlier per-folder docs/ rules.) Index/glossary: docs/project-state/DOC_INDEX.md.
+docs/
+sources/
+/agent.md
+/CLAUDE.md
 _redact.py
 *.tsbuildinfo
 next-env.d.ts
