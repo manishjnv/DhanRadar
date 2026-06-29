@@ -52,32 +52,9 @@ class OverlapResponse(BaseModel):
     disclaimer_version: str
 
 
-# ---------------------------------------------------------------------------
-# Concentration endpoint schemas
-# ---------------------------------------------------------------------------
-
-class ConcentrationItem(BaseModel):
-    """A single concentration data point — factual % + educational context line."""
-
-    name: str          # e.g. "Large Cap" / "SBI Mutual Fund" / fund scheme name
-    allocation_pct: float
-    context: str       # educational: what this % means in portfolio terms — NOT advisory
-
-
-class ConcentrationResponse(BaseModel):
-    portfolio_id: str
-    as_of_date: str | None
-    # Each list is factual portfolio composition — allowed in DOM (user's own data)
-    by_category: list[ConcentrationItem]
-    by_amc: list[ConcentrationItem]
-    by_fund: list[ConcentrationItem]
-    observation_summary: str  # e.g. "Your portfolio spans 3 AMCs and 4 funds across 3 categories."
-    # Cold-start / single-fund / empty portfolio — valid 200 with empty lists
-    data_completeness: str  # "partial" | "complete" | "empty"
-    # Disclosure (non-neg #9)
-    disclosure: str
-    not_advice: str
-    disclaimer_version: str
+# NB: `portfolio.concentration` moved to the A3 boundary in M2.1 (DataEnvelope, not a bespoke schema) —
+# see `dhanradar.mf.portfolio_read.concentration_payload`. The old ConcentrationItem/ConcentrationResponse
+# were removed; the overlap schemas below stay (overlap is data-starved, still raw Pydantic).
 
 
 # ---------------------------------------------------------------------------

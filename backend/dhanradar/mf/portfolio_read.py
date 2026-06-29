@@ -39,6 +39,7 @@ class EnrichedHolding:
     label: str | None  # verb_label — educational (#1), never an advisory verb
     confidence_band: str | None  # high|medium|low band — never a numeric score (#2)
     as_of: str | None
+    amc: str | None = None  # fund house — public fact (M2.1 allocation/concentration by AMC)
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
                 label=score.verb_label if score else None,
                 confidence_band=score.confidence_band if score else None,
                 as_of=as_of,
+                amc=(fund.amc_name if fund else None),
             )
         )
 
@@ -313,4 +315,141 @@ def risk_advanced_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
         "alpha": None,
         "beta": None,
         "as_of": r.as_of,
+    }
+
+
+# --- M2.1: pure-from-holdings analytics (allocation / concentration / diversification) ------------
+#
+# All three are hand-built #2-safe payloads from `load_portfolio_read_model` (current value = units ×
+# latest NAV). The user's OWN allocation %, holding weights and ₹ values are #2-EXEMPT calculated facts
+# (§13) — DOM-allowed; only the DhanRadar COMPOSITE score is forbidden, and none is ever selected here.
+# concentration/diversification emit a factual BAND WORD (never a raw seed score) — the SAME shape as C3
+# `risk_band` (B87 gates a SCORED concept, not a rule-table band; precedented by risk, not triggered).
+
+
+def _value_buckets(rm: PortfolioReadModel, attr: str) -> list[dict]:
+    """Value-weighted buckets over `current_value`, grouped by holding attribute `attr` (category|amc).
+    Returns ``[{bucket, value, weight_pct}]`` sorted by weight desc. Empty when total value is 0. The
+    bucket ₹ and % are the user's OWN numbers (§13 #2-exempt) — no DhanRadar composite."""
+    totals: dict[str, float] = {}
+    for h in rm.holdings:
+        bucket = getattr(h, attr) or "Uncategorized"
+        totals[bucket] = totals.get(bucket, 0.0) + h.current_value
+    total = sum(totals.values())
+    if total <= 0:
+        return []
+    rows = [
+        {"bucket": b, "value": round(v, 2), "weight_pct": round(v / total * 100.0, 2)}
+        for b, v in totals.items()
+    ]
+    rows.sort(key=lambda r: r["weight_pct"], reverse=True)
+    return rows
+
+
+def allocation_payload(rm: PortfolioReadModel, portfolio_id: str, by: str = "category") -> dict:
+    """`portfolio.allocation` — value-weighted split of the holdings by `category` (default) or `amc`.
+    bucket/value/weight_pct are the user's OWN calculated facts (§13, DOM-allowed). `by=sector|cap` are
+    DATA-STARVED → empty buckets (the client renders 'coming soon'). No DhanRadar composite."""
+    attr = "amc" if by == "amc" else "category"
+    buckets = _value_buckets(rm, attr) if by in ("category", "amc") else []
+    return {
+        "portfolio_id": portfolio_id,
+        "by": by,
+        "buckets": buckets,
+        "total_value": round(rm.total_value, 2),
+        "fund_count": len(rm.holdings),
+        "as_of": rm.as_of,
+    }
+
+
+# Top single-holding weight (%) → a factual concentration band (a spread descriptor, NOT advice and NOT
+# a composite score). v1 heuristic for retail MF portfolios.
+# ponytail: top-weight thresholds; upgrade to an HHI/effective-N basis if it misreads in practice.
+_CONC_BANDS = ((15.0, "low"), (30.0, "moderate"), (50.0, "high"))
+
+
+def _concentration_band(top_weight_pct: float | None, fund_count: int) -> str | None:
+    """Largest holding's % of total value → concentration band (low|moderate|high|very_high). A single
+    fund → very_high. None when the portfolio is empty."""
+    if fund_count == 0 or top_weight_pct is None:
+        return None
+    if fund_count == 1:
+        return "very_high"
+    for ceiling, band in _CONC_BANDS:
+        if top_weight_pct < ceiling:
+            return band
+    return "very_high"
+
+
+def concentration_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
+    """`portfolio.concentration` — how much value sits in the largest fund / fund house. top_fund/top_amc
+    weights and the by_amc breakdown are the user's OWN % (§13, DOM-allowed); `band` is a factual
+    descriptor. Funds are aggregated by ISIN across folios. No DhanRadar composite is ever selected."""
+    total = rm.total_value
+    by_amc = _value_buckets(rm, "amc")
+
+    fund_rows: list[dict] = []
+    if total > 0:
+        agg: dict[str, tuple[str, float]] = {}
+        for h in rm.holdings:
+            name, val = agg.get(h.isin, (h.scheme_name, 0.0))
+            agg[h.isin] = (name, val + h.current_value)
+        fund_rows = sorted(
+            ({"name": n, "weight_pct": round(v / total * 100.0, 2)} for n, v in agg.values()),
+            key=lambda r: r["weight_pct"],
+            reverse=True,
+        )
+
+    top_fund = fund_rows[0] if fund_rows else None
+    top_amc = (
+        {"name": by_amc[0]["bucket"], "weight_pct": by_amc[0]["weight_pct"]} if by_amc else None
+    )
+    band = _concentration_band(top_fund["weight_pct"] if top_fund else None, len(rm.holdings))
+    return {
+        "portfolio_id": portfolio_id,
+        "band": band,
+        "top_fund": top_fund,
+        "top_amc": top_amc,
+        "by_amc": [{"name": r["bucket"], "weight_pct": r["weight_pct"]} for r in by_amc],
+        "fund_count": len(rm.holdings),
+        "amc_count": len(by_amc),
+        "as_of": rm.as_of,
+    }
+
+
+def _diversification_band(cat_weights_pct: list[float], fund_count: int) -> str | None:
+    """Category spread → a diversification band (low|medium|high). Derived from the effective number of
+    categories (1/HHI over the category-weight fractions) plus the top-category weight — both the user's
+    OWN allocation. A rule-table descriptor (high = well spread), NOT a DhanRadar score. None when empty."""
+    if fund_count == 0 or not cat_weights_pct:
+        return None
+    if fund_count == 1:
+        return "low"
+    fractions = [w / 100.0 for w in cat_weights_pct]
+    hhi = sum(f * f for f in fractions)
+    eff_n = (1.0 / hhi) if hhi > 0 else 0.0
+    top = max(cat_weights_pct)
+    if eff_n < 1.5 or top >= 70.0:
+        return "low"
+    if eff_n < 2.5 or top >= 50.0:
+        return "medium"
+    return "high"
+
+
+def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
+    """`portfolio.diversification` — a band/word read of how widely the holdings are spread across
+    categories (#2: band only, the rule-table inputs are the user's own counts/% — DOM-allowed). The raw
+    spread measure is never serialized (same shape as C3 `risk_band`). No DhanRadar composite."""
+    cats = _value_buckets(rm, "category")
+    cat_weights = [c["weight_pct"] for c in cats]
+    band = _diversification_band(cat_weights, len(rm.holdings))
+    top = cats[0] if cats else None
+    return {
+        "portfolio_id": portfolio_id,
+        "band": band,
+        "category_count": len(cats),
+        "top_category": top["bucket"] if top else None,
+        "top_category_pct": top["weight_pct"] if top else None,
+        "fund_count": len(rm.holdings),
+        "as_of": rm.as_of,
     }

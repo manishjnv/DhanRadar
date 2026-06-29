@@ -14,25 +14,29 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { Input } from '@/components/ui/Input';
-import { Logo, BandRing, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
+import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
-  ALLOC, ALLOC_TABS, GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
-  UNDER_REVIEW, OVERLAP, DIV_SCORE, DIV_BARS, RISK_CARDS, ADV_METRICS,
+  GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
+  UNDER_REVIEW, RISK_CARDS, ADV_METRICS,
   COST_CARDS, AMC_LIST, TIMELINE, RECS, PROJ, PROJ_TABS, WATCHLIST,
   AI_FEED, REPORTS, FAQ, BENEFITS, AUTOSYNC_PILLS,
-  toStrength, ringColor, STRENGTH_WORD, STRENGTH_COLOR,
+  STRENGTH_COLOR,
   type HealthLight,
 } from './sampleData';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { HelpTip } from '@/components/ui/HelpTip';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
+import { tooltipFns } from '@/data/tooltipFns';
 import {
   usePortfolioHoldings,
   usePortfolioSummaryById,
   usePortfolioRisk,
   usePortfolioRiskAdvanced,
+  usePortfolioAllocation,
+  usePortfolioConcentration,
+  usePortfolioDiversification,
   type Holding,
 } from '@/features/portfolio/api';
 
@@ -485,69 +489,177 @@ export function DmmiSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S04 — ALLOCATION CENTER
+// S04 — ALLOCATION CENTER — live data
+// COMPLIANCE: user's own ₹/% only (DOM-allowed); NO ideal/recommended marker,
+//             NO advisory SoWhat, NO composite score (non-neg #1/#2).
 // ═══════════════════════════════════════════════════════════════════════════
-export function AllocSection() {
-  const [tab, setTab] = React.useState(ALLOC_TABS[0]);
-  const { rows, sowhat } = ALLOC[tab];
+
+const ALLOC_PALETTE = [COLORS.B, COLORS.E, COLORS.A, COLORS.V, COLORS.C, COLORS.O, COLORS.P, COLORS.T, COLORS.G, COLORS.R];
+
+/** Factual concentration band → plain descriptor word (non-advisory). */
+const CONCENTRATION_WORD: Record<string, string> = {
+  low:       'Well spread',
+  moderate:  'Some concentration',
+  high:      'Concentrated',
+  very_high: 'Highly concentrated',
+};
+
+const ALLOC_BY_TABS: ReadonlyArray<{ key: 'category' | 'amc'; label: string }> = [
+  { key: 'category', label: 'By Category' },
+  { key: 'amc', label: 'By AMC' },
+];
+
+/** Concentration sub-panel — own DataState, value-weighted facts only. */
+function ConcentrationPanel({ portfolioId }: { portfolioId: string }) {
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioConcentration(portfolioId);
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const conc = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+
+  const topFundTip = fieldTooltip('AllocSection', 'top_fund');
+  const topAmcTip = fieldTooltip('AllocSection', 'top_amc');
+
+  return (
+    <div className="mt-6 border-t border-line pt-5">
+      <div className="mb-3 text-small font-bold text-ink">Concentration</div>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Concentration appears once your funds load."
+        onRetry={() => refetch()}
+        skeleton={<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{[1, 2].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}</div>}
+      >
+        {conc && (
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Top fund — user's own weight % */}
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="flex items-center gap-1 text-caption text-ink-muted">
+                  Largest fund
+                  {topFundTip && <HelpTip tip={topFundTip} />}
+                </div>
+                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_fund?.name ?? undefined}>{conc.top_fund?.name ?? '—'}</div>
+                <div className="font-mono text-[15px] font-extrabold text-ink">{conc.top_fund ? `${conc.top_fund.weight_pct}%` : '—'}</div>
+              </div>
+              {/* Top AMC — user's own weight % */}
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="flex items-center gap-1 text-caption text-ink-muted">
+                  Biggest fund house
+                  {topAmcTip && <HelpTip tip={topAmcTip} />}
+                </div>
+                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_amc?.name ?? undefined}>{conc.top_amc?.name ?? '—'}</div>
+                <div className="font-mono text-[15px] font-extrabold text-ink">{conc.top_amc ? `${conc.top_amc.weight_pct}%` : '—'}</div>
+              </div>
+              {/* Band as descriptor WORD, never a number */}
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Spread</div>
+                <div className="mt-0.5 font-bold text-ink">{conc.band ? (CONCENTRATION_WORD[conc.band] ?? conc.band) : '—'}</div>
+                <div className="mt-1 text-caption text-ink-secondary">{conc.amc_count} fund houses · {conc.fund_count} funds</div>
+              </div>
+            </div>
+            {/* by_amc — mini weight bars (user's own %) */}
+            {conc.by_amc.length > 0 && (
+              <div className="flex flex-col gap-2.5">
+                {conc.by_amc.map((a, i) => (
+                  <div key={a.name}>
+                    <div className="mb-1 flex items-center justify-between text-caption">
+                      <span className="truncate font-semibold text-ink" title={a.name}>{a.name}</span>
+                      <span className="font-mono font-bold text-ink-secondary">{a.weight_pct}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(a.weight_pct, 100)}%`, background: ALLOC_PALETTE[i % ALLOC_PALETTE.length] }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </DataState>
+    </div>
+  );
+}
+
+export function AllocSection({ portfolioId }: { portfolioId: string }) {
+  const [by, setBy] = React.useState<'category' | 'amc'>('category');
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioAllocation(portfolioId, by);
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const alloc = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+  const allocTip = sectionTooltip('AllocSection');
 
   return (
     <Card className="mt-4 p-5">
-      {/* Tabs — horizontal scroll, hidden scrollbar */}
+      {allocTip && (
+        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+          Allocation Center
+          <HelpTip tip={allocTip} />
+        </div>
+      )}
+      {/* By Category / By AMC toggle */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {ALLOC_TABS.map((t) => (
+        {ALLOC_BY_TABS.map((t) => (
           <button
-            key={t}
+            key={t.key}
             type="button"
-            onClick={() => setTab(t)}
+            onClick={() => setBy(t.key)}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-3.5 py-2 text-caption font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              tab === t ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
+              by === t.key ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
             )}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
-      {/* Body — stacks on mobile, side-by-side on lg */}
-      <div className="mt-5 flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_1.2fr]">
-        {/* Donut */}
-        <div className="flex flex-col items-center gap-4">
-          <Donut data={rows.map(([name, cur, , col]) => [name, cur, col] as [string, number, string])} size={200} thick={30} />
-          {/* Legend */}
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5">
-            {rows.map(([name, , , col]) => (
-              <span key={name} className="flex items-center gap-1.5 text-caption text-ink-secondary">
-                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: col }} />
-                {name}
-              </span>
-            ))}
-          </div>
-        </div>
-        {/* Bars */}
-        <div className="flex flex-col gap-3">
-          {rows.map(([name, cur, ideal, col]) => {
-            const diff = cur - ideal;
-            const diffText = diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
-            const diffColor = Math.abs(diff) <= 3 ? E : diff > 0 ? O : B;
-            return (
-              <div key={name}>
-                <div className="mb-1 flex items-center justify-between text-caption">
-                  <span className="font-semibold text-ink">{name}</span>
-                  <span className="font-mono font-bold" style={{ color: diffColor }}>{cur}% <span className="text-ink-faint">({diffText})</span></span>
-                </div>
-                <div className="relative h-2 overflow-hidden rounded-full bg-surface-3">
-                  <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(cur, 100)}%`, background: col }} />
-                  {/* Ideal marker */}
-                  <div className="absolute inset-y-0 w-0.5 bg-white/60" style={{ left: `${Math.min(ideal, 100)}%` }} />
-                </div>
-                <div className="mt-0.5 text-[10px] text-ink-faint">Ideal: {ideal}%</div>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Your allocation shows once your funds load."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="mt-5 h-52 w-full rounded-xl" />}
+      >
+        {alloc && (
+          <div className="mt-5 flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_1.2fr]">
+            {/* Donut — user's own weight_pct per bucket */}
+            <div className="flex flex-col items-center gap-4">
+              <Donut
+                data={alloc.buckets.map((b, i) => [b.bucket, b.weight_pct, ALLOC_PALETTE[i % ALLOC_PALETTE.length]] as [string, number, string])}
+                size={200}
+                thick={30}
+              />
+              {/* Legend — each item carries the user's own % via the SafePoint tooltip_fn */}
+              <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                {alloc.buckets.map((b, i) => (
+                  <span key={b.bucket} className="flex items-center gap-1.5 text-caption text-ink-secondary" title={tooltipFns.allocation_donut({ label: b.bucket, ownValue: `${b.weight_pct}%` })}>
+                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: ALLOC_PALETTE[i % ALLOC_PALETTE.length] }} />
+                    {b.bucket}
+                  </span>
+                ))}
               </div>
-            );
-          })}
-          <SoWhat>{sowhat}</SoWhat>
-        </div>
-      </div>
+            </div>
+            {/* Weight bars — user's own %, NO ideal/recommended marker (non-neg #1) */}
+            <div className="flex flex-col gap-3">
+              {alloc.buckets.map((b, i) => (
+                <div key={b.bucket} title={tooltipFns.allocation_donut({ label: b.bucket, ownValue: `${b.weight_pct}%` })}>
+                  <div className="mb-1 flex items-center justify-between text-caption">
+                    <span className="font-semibold text-ink">{b.bucket}</span>
+                    <span className="font-mono font-bold text-ink-secondary">{b.weight_pct}%</span>
+                  </div>
+                  <div className="relative h-2 overflow-hidden rounded-full bg-surface-3">
+                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(b.weight_pct, 100)}%`, background: ALLOC_PALETTE[i % ALLOC_PALETTE.length] }} />
+                  </div>
+                </div>
+              ))}
+              <div className="mt-1 text-caption text-ink-muted">{alloc.fund_count} funds across {alloc.buckets.length} {by === 'amc' ? 'fund houses' : 'categories'}.</div>
+            </div>
+          </div>
+        )}
+      </DataState>
+
+      {/* Concentration sub-panel — its own DataState */}
+      <ConcentrationPanel portfolioId={portfolioId} />
     </Card>
   );
 }
@@ -872,84 +984,108 @@ export function UnderReviewSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S10 — OVERLAP ANALYSIS
+// S10 — OVERLAP ANALYSIS — data-starved (needs each fund's stock holdings).
+// NO-SUPPRESS: render a coming-soon card, never null.
 // ═══════════════════════════════════════════════════════════════════════════
 export function OverlapSection() {
+  const overlapTip = sectionTooltip('OverlapSection');
   return (
-    <div className="mt-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {OVERLAP.map((ov) => (
-          <Card key={`${ov.aName}-${ov.bName}`} className="p-5">
-            {/* Fund pair */}
-            <div className="mb-3 flex items-center gap-3">
-              <Logo letter={ov.aLogo} color={ov.aColor} size={32} radius={8} font={12} />
-              <div className="text-caption text-ink-muted">vs</div>
-              <Logo letter={ov.bLogo} color={ov.bColor} size={32} radius={8} font={12} />
-              <div className="flex-1 min-w-0">
-                <div className="truncate text-small font-bold text-ink">{ov.aName}</div>
-                <div className="truncate text-caption text-ink-muted">{ov.bName}</div>
-              </div>
-            </div>
-            {/* Overlap bar */}
-            <div className="mb-2 flex items-center justify-between text-small">
-              <span className="font-bold text-ink">Overlap</span>
-              <span className="font-mono font-extrabold" style={{ color: ov.vColor }}>{ov.pct}%</span>
-            </div>
-            <div className="mb-3 h-2.5 overflow-hidden rounded-full bg-surface-3">
-              <div className="h-full rounded-full" style={{ width: `${ov.pct}%`, background: ov.vColor }} />
-            </div>
-            <span
-              className="mb-3 inline-flex items-center rounded-md px-2 py-0.5 text-[10.5px] font-bold"
-              style={{ background: `${ov.vColor}18`, color: ov.vColor }}
-            >
-              {ov.verdict}
-            </span>
-            <SoWhat>{ov.rec}</SoWhat>
-          </Card>
-        ))}
-      </div>
-    </div>
+    <Card className="mt-4 p-5">
+      {overlapTip && (
+        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+          Fund Overlap
+          <HelpTip tip={overlapTip} />
+        </div>
+      )}
+      <ComingSoonCard
+        label="Fund overlap"
+        desc="Fund overlap is being built — it needs each fund's stock holdings."
+      />
+    </Card>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S11 — DIVERSIFICATION
+// S11 — DIVERSIFICATION — live data
+// COMPLIANCE: band as a WORD + BandRing (non-neg #2 — never a number); user's
+//             own facts only; NO "Top N% of portfolios", NO ideal markers (#1).
 // ═══════════════════════════════════════════════════════════════════════════
-export function DivSection() {
+
+/** Diversification band → plain descriptor word (high = well-spread). */
+const DIV_WORD: Record<string, string> = {
+  low:    'Limited',
+  medium: 'Moderate',
+  high:   'Well spread',
+};
+
+/** Diversification band → confidence Band3 so BandRingFromBand can render it. */
+const DIV_BAND_TO_CONF: Record<string, 'high' | 'medium' | 'low'> = {
+  low:    'low',
+  medium: 'medium',
+  high:   'high',
+};
+
+export function DivSection({ portfolioId }: { portfolioId: string }) {
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioDiversification(portfolioId);
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const div = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+  const divTip = sectionTooltip('DivSection');
+  const topCatTip = fieldTooltip('DivSection', 'top_category');
+
+  const band = div?.band ?? null;
+  const bandConf = band ? (DIV_BAND_TO_CONF[band] ?? null) : null;
+  const bandWord = band ? (DIV_WORD[band] ?? band) : null;
+
   return (
     <Card className="mt-4 p-5">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-        {/* Overall score as BandRing + strength WORD, NOT "78" */}
-        <div className="text-center sm:w-48 sm:shrink-0">
-          <div className="relative inline-grid place-items-center">
-            <BandRing score={DIV_SCORE} size={140} stroke={12} />
-          </div>
-          <div className="mt-2 font-sans font-bold text-[20px]" style={{ color: ringColor(DIV_SCORE) }}>
-            {STRENGTH_WORD[toStrength(DIV_SCORE)]}
-          </div>
-          <div className="text-[12px] text-ink-muted font-semibold mt-1">Overall Diversification</div>
-          <div className="text-[11px] text-ink-faint mt-0.5">Top 18% of portfolios</div>
+      {divTip && (
+        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+          Diversification Center
+          <HelpTip tip={divTip} />
         </div>
-        {/* Dimension bars */}
-        <div className="flex-1 flex flex-col gap-4">
-          {DIV_BARS.map((d) => (
-            <div key={d.name}>
-              <div className="mb-1.5 flex items-center justify-between text-small">
-                <span className="font-semibold text-ink">{d.name}</span>
-                <span className="font-mono font-bold text-ink-secondary">{d.cur}% <span className="text-ink-faint text-caption">/ {d.ideal}% ideal</span></span>
+      )}
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Your diversification reading appears once your funds load."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-32 w-full rounded-xl" />}
+      >
+        {div && (
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
+            {/* Band as ring + WORD, never a number (non-neg #2) */}
+            <div className="text-center sm:w-48 sm:shrink-0">
+              <div className="relative inline-grid place-items-center">
+                <BandRingFromBand band={bandConf} size={140} stroke={12} />
               </div>
-              <div className="relative h-2.5 overflow-hidden rounded-full bg-surface-3">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-                  style={{ width: `${d.cur}%`, background: d.cur >= d.ideal - 5 ? E : d.cur >= d.ideal * 0.5 ? A : R }}
-                />
-                <div className="absolute inset-y-0 w-0.5 bg-white/60" style={{ left: `${d.ideal}%` }} />
+              <div className="mt-2 font-sans font-bold text-[20px]" style={{ color: bandConf ? BAND_COLOR[bandConf] : '#94A3B8' }}>
+                {bandWord ?? '—'}
               </div>
-              <div className="mt-1 text-caption text-ink-muted">{d.tip}</div>
+              <div className="mt-1 text-[12px] font-semibold text-ink-muted">How well your money is spread</div>
             </div>
-          ))}
-        </div>
-      </div>
+            {/* Facts — user's own counts and % */}
+            <div className="flex flex-1 flex-col gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-line bg-surface-2 p-4">
+                  <div className="text-caption text-ink-muted">Fund categories</div>
+                  <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{div.category_count}</div>
+                  <div className="mt-1 text-caption text-ink-secondary">Across {div.fund_count} funds.</div>
+                </div>
+                <div className="rounded-xl border border-line bg-surface-2 p-4">
+                  <div className="flex items-center gap-1 text-caption text-ink-muted">
+                    Largest category
+                    {topCatTip && <HelpTip tip={topCatTip} />}
+                  </div>
+                  <div className="mt-0.5 truncate font-bold text-ink" title={div.top_category ?? undefined}>{div.top_category ?? '—'}</div>
+                  <div className="font-mono text-[15px] font-extrabold text-ink">{div.top_category_pct !== null ? `${div.top_category_pct}%` : '—'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </DataState>
     </Card>
   );
 }

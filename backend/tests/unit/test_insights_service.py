@@ -19,10 +19,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dhanradar.insights.schemas import ConcentrationResponse, OverlapResponse
+from dhanradar.insights.schemas import OverlapResponse
 from dhanradar.insights.service import (
     _category_observation,
-    _concentration_context,
     _fund_pair_observation,
 )
 from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION, DISCLOSURE_BUNDLE, NOT_ADVICE
@@ -95,24 +94,9 @@ class TestCategoryObservation:
         assert hits == [], f"Advisory verbs found: {hits}"
 
 
-class TestConcentrationContext:
-    def test_category_context(self) -> None:
-        ctx = _concentration_context("category", "Large Cap", 55.0)
-        assert "55.0" in ctx
-        hits = _scan_advisory(ctx)
-        assert hits == [], f"Advisory verbs found: {hits}"
-
-    def test_amc_context(self) -> None:
-        ctx = _concentration_context("amc", "SBI MF", 45.0)
-        assert "45.0" in ctx
-        hits = _scan_advisory(ctx)
-        assert hits == [], f"Advisory verbs found: {hits}"
-
-    def test_fund_context(self) -> None:
-        ctx = _concentration_context("fund", "Nippon India Small Cap", 30.0)
-        assert "30.0" in ctx
-        hits = _scan_advisory(ctx)
-        assert hits == [], f"Advisory verbs found: {hits}"
+# NB: concentration moved to the A3 boundary in M2.1 (DataEnvelope, no bespoke schema/service). Its
+# #2/band/RLS coverage lives in tests/integration/test_m2_1_portfolio_analytics.py. The old
+# _concentration_context / get_concentration / ConcentrationResponse were removed.
 
 
 # ---------------------------------------------------------------------------
@@ -136,29 +120,9 @@ class TestSchemaDisclosureFields:
         assert resp.not_advice == NOT_ADVICE
         assert resp.disclaimer_version == DISCLAIMER_VERSION
 
-    def test_concentration_response_has_disclosure(self) -> None:
-        resp = ConcentrationResponse(
-            portfolio_id="pid",
-            as_of_date=None,
-            by_category=[],
-            by_amc=[],
-            by_fund=[],
-            observation_summary="Test.",
-            data_completeness="empty",
-            disclosure=DISCLOSURE_BUNDLE,
-            not_advice=NOT_ADVICE,
-            disclaimer_version=DISCLAIMER_VERSION,
-        )
-        assert resp.disclosure == DISCLOSURE_BUNDLE
-        assert resp.not_advice == NOT_ADVICE
-
     def test_no_unified_score_in_overlap_schema_fields(self) -> None:
         """unified_score must never appear in any client-facing schema (non-neg #2)."""
         field_names = list(OverlapResponse.model_fields.keys())
-        assert "unified_score" not in field_names
-
-    def test_no_unified_score_in_concentration_schema_fields(self) -> None:
-        field_names = list(ConcentrationResponse.model_fields.keys())
         assert "unified_score" not in field_names
 
 
@@ -202,25 +166,6 @@ async def test_overlap_empty_portfolio_valid_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concentration_empty_portfolio_valid_shape() -> None:
-    """Empty portfolio must return a valid ConcentrationResponse — not a crash."""
-    from dhanradar.insights.service import get_concentration
-
-    db = _mock_db_empty_portfolio(portfolio_exists=True)
-    uid = "00000000-0000-0000-0000-000000000001"
-    pid = "00000000-0000-0000-0000-000000000002"
-
-    result = await get_concentration(db, uid, pid)
-
-    assert isinstance(result, ConcentrationResponse)
-    assert result.by_category == []
-    assert result.by_amc == []
-    assert result.by_fund == []
-    assert result.data_completeness == "empty"
-    assert result.disclosure == DISCLOSURE_BUNDLE
-
-
-@pytest.mark.asyncio
 async def test_overlap_wrong_portfolio_raises_valueerror() -> None:
     """Non-existent / wrong-user portfolio → ValueError (router maps to 404)."""
     from dhanradar.insights.service import get_overlap
@@ -234,18 +179,6 @@ async def test_overlap_wrong_portfolio_raises_valueerror() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concentration_wrong_portfolio_raises_valueerror() -> None:
-    from dhanradar.insights.service import get_concentration
-
-    db = _mock_db_empty_portfolio(portfolio_exists=False)
-    uid = "00000000-0000-0000-0000-000000000001"
-    pid = "00000000-0000-0000-0000-000000000002"
-
-    with pytest.raises(ValueError, match="portfolio_not_found"):
-        await get_concentration(db, uid, pid)
-
-
-@pytest.mark.asyncio
 async def test_overlap_invalid_uid_returns_empty() -> None:
     """Malformed user ID → graceful empty response, no crash."""
     from dhanradar.insights.service import get_overlap
@@ -255,20 +188,6 @@ async def test_overlap_invalid_uid_returns_empty() -> None:
     assert result.data_completeness == "empty"
     assert result.fund_pairs == []
     # DB must NOT have been called for malformed uid
-    db.execute.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_concentration_invalid_pid_returns_empty() -> None:
-    """Malformed portfolio ID → graceful empty response, no crash."""
-    from dhanradar.insights.service import get_concentration
-
-    db = AsyncMock()
-    result = await get_concentration(
-        db, "00000000-0000-0000-0000-000000000001", "bad-portfolio-id"
-    )
-    assert result.data_completeness == "empty"
-    assert result.by_category == []
     db.execute.assert_not_called()
 
 
@@ -306,9 +225,3 @@ class TestAdvisoryVerbAbsentInAllFramingText:
             obs = _fund_pair_observation("Fund X", "Fund Y", pct)
             hits = _scan_advisory(obs)
             assert hits == [], f"Advisory verbs found in fund_pair_observation: {hits}"
-
-    def test_concentration_context_advisory_free(self) -> None:
-        for dim in ["category", "amc", "fund"]:
-            ctx = _concentration_context(dim, "Test Name", 40.0)
-            hits = _scan_advisory(ctx)
-            assert hits == [], f"Advisory verbs found in concentration_context: {hits}"

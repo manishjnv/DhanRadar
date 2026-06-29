@@ -2,109 +2,123 @@
  * Portfolio Intelligence feature — TanStack Query hooks.
  *
  * Wraps:
- *   GET /api/v1/portfolio/{portfolioId}/overlap
- *   GET /api/v1/portfolio/{portfolioId}/concentration
- *   GET /api/v1/portfolio/{portfolioId}/holdings   (DataEnvelope)
- *   GET /api/v1/portfolio/{portfolioId}/summary    (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/allocation?by=category|amc  (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/concentration              (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/diversification            (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/holdings                   (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/summary                    (DataEnvelope)
+ *   GET /api/v1/portfolio/{portfolioId}/risk                       (DataEnvelope)
  *
  * Compliance:
- *   - No numeric DhanRadar score in response types (non-neg #2)
- *   - All text is observational — framing helpers live on the backend
- *   - disclosure/not_advice/disclaimer_version must be rendered adjacent to data
+ *   - No numeric DhanRadar composite score in response types (non-neg #2).
+ *     value/weight_pct/counts are the user's OWN figures — DOM-allowed.
+ *   - `band` is a factual descriptor word, never a number.
  */
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
 import type { DataEnvelope } from '@/data/envelope';
 
+const SKIP_RETRY = [401, 404];
+
 // ---------------------------------------------------------------------------
-// Overlap types
+// Allocation types (DataEnvelope) — user's own ₹/% breakdown, DOM-allowed.
 // ---------------------------------------------------------------------------
 
-export interface FundPairOverlap {
-  fund_a_isin: string;
-  fund_a_name: string;
-  fund_b_isin: string;
-  fund_b_name: string;
-  /** Factual % of shared category allocation — user's own data, allowed in DOM */
-  overlap_pct: number;
-  /** Backend-authored observational text — NEVER advisory */
-  observation: string;
+export interface AllocationBucket {
+  bucket: string;
+  /** User's own value in this bucket — DOM-allowed */
+  value: number;
+  /** User's own % weight of this bucket — DOM-allowed */
+  weight_pct: number;
 }
 
-export interface CategoryOverlap {
-  category: string;
-  /** Factual allocation % — allowed in DOM */
-  allocation_pct: number;
+export interface AllocationData {
+  portfolio_id: string;
+  by: string;
+  buckets: AllocationBucket[];
+  total_value: number;
   fund_count: number;
-  observation: string;
-}
-
-export interface OverlapResponse {
-  portfolio_id: string;
-  as_of_date: string | null;
-  fund_pairs: FundPairOverlap[];
-  category_distribution: CategoryOverlap[];
-  observation_summary: string;
-  data_completeness: 'empty' | 'partial' | 'complete';
-  disclosure: string;
-  not_advice: string;
-  disclaimer_version: string;
+  as_of: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Concentration types
+// Concentration types (DataEnvelope) — factual descriptor band + user's own %.
 // ---------------------------------------------------------------------------
 
-export interface ConcentrationItem {
+export interface NamedWeight {
   name: string;
-  /** Factual allocation % — allowed in DOM */
-  allocation_pct: number;
-  /** Backend-authored educational context — NEVER advisory */
-  context: string;
+  /** User's own % weight — DOM-allowed */
+  weight_pct: number;
 }
 
-export interface ConcentrationResponse {
+export interface ConcentrationData {
   portfolio_id: string;
-  as_of_date: string | null;
-  by_category: ConcentrationItem[];
-  by_amc: ConcentrationItem[];
-  by_fund: ConcentrationItem[];
-  observation_summary: string;
-  data_completeness: 'empty' | 'partial' | 'complete';
-  disclosure: string;
-  not_advice: string;
-  disclaimer_version: string;
+  /** Factual descriptor word, never a number (non-neg #2) */
+  band: 'low' | 'moderate' | 'high' | 'very_high' | null;
+  top_fund: NamedWeight | null;
+  top_amc: NamedWeight | null;
+  by_amc: NamedWeight[];
+  fund_count: number;
+  amc_count: number;
+  as_of: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Hooks
+// Diversification types (DataEnvelope) — factual descriptor band + user's own facts.
 // ---------------------------------------------------------------------------
 
-export function usePortfolioOverlap(portfolioId: string) {
-  return useQuery({
-    queryKey: queryKeys.portfolio.overlap(portfolioId),
-    queryFn: () => api.get<OverlapResponse>(`/portfolio/${portfolioId}/overlap`),
+export interface DiversificationData {
+  portfolio_id: string;
+  /** Factual descriptor word; high = well-spread (non-neg #2) */
+  band: 'low' | 'medium' | 'high' | null;
+  category_count: number;
+  top_category: string | null;
+  top_category_pct: number | null;
+  fund_count: number;
+  as_of: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Hooks — allocation / concentration / diversification (DataEnvelope)
+// ---------------------------------------------------------------------------
+
+export function usePortfolioAllocation(portfolioId: string, by: 'category' | 'amc' = 'category') {
+  return useQuery<DataEnvelope<AllocationData>>({
+    queryKey: queryKeys.portfolio.allocation(portfolioId, by),
+    queryFn: () => api.get<DataEnvelope<AllocationData>>(`/portfolio/${portfolioId}/allocation?by=${by}`),
     enabled: !!portfolioId,
     retry: (count, error) => {
-      // 401/404 are definitional — don't retry
-      if (error instanceof ApiError && [401, 404].includes(error.problem.status)) return false;
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
       return count < 1;
     },
-    staleTime: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
 export function usePortfolioConcentration(portfolioId: string) {
-  return useQuery({
+  return useQuery<DataEnvelope<ConcentrationData>>({
     queryKey: queryKeys.portfolio.concentration(portfolioId),
-    queryFn: () => api.get<ConcentrationResponse>(`/portfolio/${portfolioId}/concentration`),
+    queryFn: () => api.get<DataEnvelope<ConcentrationData>>(`/portfolio/${portfolioId}/concentration`),
     enabled: !!portfolioId,
     retry: (count, error) => {
-      if (error instanceof ApiError && [401, 404].includes(error.problem.status)) return false;
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
       return count < 1;
     },
-    staleTime: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function usePortfolioDiversification(portfolioId: string) {
+  return useQuery<DataEnvelope<DiversificationData>>({
+    queryKey: queryKeys.portfolio.diversification(portfolioId),
+    queryFn: () => api.get<DataEnvelope<DiversificationData>>(`/portfolio/${portfolioId}/diversification`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
 
@@ -170,8 +184,6 @@ export interface SummaryPayload {
 // ---------------------------------------------------------------------------
 // Hooks — DataEnvelope variants
 // ---------------------------------------------------------------------------
-
-const SKIP_RETRY = [401, 404];
 
 export function usePortfolioHoldings(portfolioId: string) {
   return useQuery<DataEnvelope<HoldingsPayload>>({

@@ -170,8 +170,8 @@ function PortfolioView() {
 
           {/* S04 Allocation */}
           <section>
-            <SectionHeader index="04" title="Allocation Center" info="Current vs recommended" />
-            <AllocSection />
+            <SectionHeader index="04" title="Allocation Center" info="Your fund mix" />
+            <AllocSection portfolioId={portfolioId} />
           </section>
 
           {/* S05 Goals */}
@@ -212,8 +212,8 @@ function PortfolioView() {
 
           {/* S11 Diversification */}
           <section>
-            <SectionHeader index="11" title="Diversification Center" info="Current vs ideal" />
-            <DivSection />
+            <SectionHeader index="11" title="Diversification Center" info="How well your money is spread" />
+            <DivSection portfolioId={portfolioId} />
           </section>
 
           {/* S12 Risk */}
