@@ -29,7 +29,7 @@ const COLUMNS = [
     heading: 'Product',
     links: [
       { href: '/mf/explore', label: 'Explore Funds' },
-      { href: '/mf/upload', label: 'Upload CAS' },
+      { href: '/mf/portfolio', label: 'Upload CAS' },
       { href: '/mood', label: 'Market Mood' },
       { href: '/calculators', label: 'Calculators' },
       { href: '/pricing', label: 'Pricing' },

@@ -198,7 +198,7 @@ function PortfolioSnapshot() {
           </p>
         </div>
         <Button asChild size="md">
-          <Link href="/mf/upload">Upload your CAS → 60s report</Link>
+          <Link href="/mf/portfolio">Upload your CAS → 60s report</Link>
         </Button>
       </Card>
     );
@@ -245,7 +245,7 @@ function PortfolioSnapshot() {
         </div>
         <div className="sm:ml-auto">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/mf/upload">View full report</Link>
+            <Link href="/mf/portfolio">View full report</Link>
           </Button>
         </div>
       </div>
