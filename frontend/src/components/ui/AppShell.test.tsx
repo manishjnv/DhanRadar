@@ -137,19 +137,20 @@ describe('AppShell', () => {
     const user = userEvent.setup();
     renderShell();
 
-    // Desktop aside has "Upload CAS" link in DOM (CSS hidden md:flex, still in DOM)
-    const uploadLinksBeforeOpen = screen.getAllByRole('link', { name: /upload cas/i });
-    expect(uploadLinksBeforeOpen.length).toBeGreaterThanOrEqual(1);
+    // Desktop aside has the "Portfolio" nav link in DOM (CSS hidden md:flex, still in DOM).
+    // (The legacy "Upload CAS" side-nav item was decommissioned — upload now lives on /mf/portfolio.)
+    const portfolioLinksBeforeOpen = screen.getAllByRole('link', { name: /^portfolio$/i });
+    expect(portfolioLinksBeforeOpen.length).toBeGreaterThanOrEqual(1);
 
-    // Open drawer and confirm "Upload CAS" link appears inside the dialog too
+    // Open drawer and confirm the "Portfolio" link appears inside the dialog too
     await user.click(screen.getByRole('button', { name: /open navigation/i }));
     const drawer = screen.getByRole('dialog', { name: /navigation/i });
-    const uploadLinkInDrawer = within(drawer).getByRole('link', { name: /upload cas/i });
-    expect(uploadLinkInDrawer).toBeInTheDocument();
+    const portfolioLinkInDrawer = within(drawer).getByRole('link', { name: /^portfolio$/i });
+    expect(portfolioLinkInDrawer).toBeInTheDocument();
 
-    // After opening the drawer there are now 2 "Upload CAS" links (aside + drawer)
-    const uploadLinksAfterOpen = screen.getAllByRole('link', { name: /upload cas/i });
-    expect(uploadLinksAfterOpen.length).toBeGreaterThanOrEqual(2);
+    // After opening the drawer there are now 2 "Portfolio" links (aside + drawer)
+    const portfolioLinksAfterOpen = screen.getAllByRole('link', { name: /^portfolio$/i });
+    expect(portfolioLinksAfterOpen.length).toBeGreaterThanOrEqual(2);
   });
 
   it('backdrop click closes the drawer', async () => {

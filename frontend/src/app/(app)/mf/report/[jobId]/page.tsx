@@ -553,7 +553,7 @@ export default function ReportPage({ params }: { params: { jobId: string } }) {
               : "The upload failed - the CAS PDF may be password-protected, not a CAS statement, or corrupted. Nothing was saved."}
           </p>
           <a
-            href="/mf/upload"
+            href="/mf/portfolio"
             className="mt-4 inline-block text-small font-medium text-ink underline"
           >
             Upload again &rarr;

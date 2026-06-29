@@ -59,7 +59,7 @@ function CASBanner() {
         Link your portfolio for deeper context
       </p>
       <a
-        href="/mf/upload"
+        href="/mf/portfolio"
         className="rounded-lg bg-royal px-3 py-1.5 text-caption font-medium text-white hover:opacity-90 transition-opacity shrink-0"
       >
         Upload CAS

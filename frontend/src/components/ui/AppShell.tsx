@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, Upload, Compass,
+  LayoutDashboard, Compass,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
   ShieldCheck, Search, GitCompare, Trophy, Wallet, Star,
   type LucideIcon,
@@ -27,7 +27,6 @@ interface NavItem {
 
 const WORKSPACE: NavItem[] = [
   { href: '/dashboard',      label: 'Dashboard',       icon: LayoutDashboard },
-  { href: '/mf/upload',      label: 'Upload CAS',      icon: Upload           },
   { href: '/mf/portfolio',   label: 'Portfolio',       icon: Wallet           },
   { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
   { href: '/mf/compare',     label: 'Compare Funds',   icon: GitCompare       },
