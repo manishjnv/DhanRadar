@@ -39,6 +39,7 @@ import {
 } from '@/components/mf/portfolio/sections';
 import { useLatestPortfolio } from '@/features/mf/api';
 import { useCasUpload } from '@/features/mf/cas-upload';
+import { formatUpdated } from './formatUpdated';
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function PortfolioSkeleton() {
@@ -66,20 +67,24 @@ function PortfolioView() {
 
   const casUpload = useCasUpload(portfolioId);
 
+  // Updated stamp — set after mount so SSR and client agree (no hydration mismatch).
+  const [updatedAt, setUpdatedAt] = React.useState<string | null>(null);
+  React.useEffect(() => { setUpdatedAt(formatUpdated(new Date())); }, []);
+
   return (
     <div className="w-full pb-32">
       {/* Breadcrumb + state toggle */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <nav className="flex flex-wrap items-center gap-1.5 text-caption text-ink-muted" aria-label="Breadcrumb">
-          <Link href="/mf/explore" className="hover:text-ink">Mutual Funds</Link>
+          <Link href="/dashboard" className="hover:text-ink">Dashboard</Link>
           <span className="text-ink-faint">›</span>
-          <span className="font-semibold text-ink-secondary">
-            {pageState === 'empty' ? 'Get Started' : 'Command Center'}
-          </span>
-          {pageState === 'dash' && (
+          <Link href="/mf/portfolio" aria-current="page" className="font-semibold text-ink-secondary hover:text-ink">
+            Portfolio
+          </Link>
+          {pageState === 'dash' && updatedAt && (
             <>
               <span className="text-ink-faint">·</span>
-              <span className="text-ink-faint">Updated 25 Jun 2026, 6:00 PM</span>
+              <span className="text-ink-faint">Updated {updatedAt}</span>
             </>
           )}
         </nav>
