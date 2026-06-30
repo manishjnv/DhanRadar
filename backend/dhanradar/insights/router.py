@@ -34,6 +34,7 @@ from dhanradar.mf.portfolio_read import (
     concentration_payload,
     diversification_payload,
     holdings_payload,
+    load_day_change,
     load_portfolio_read_model,
     load_portfolio_risk,
     load_portfolio_valuation_series,
@@ -128,9 +129,10 @@ async def portfolio_summary(
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
+    day_change = await load_day_change(db, portfolio_id)
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(rm, portfolio_id),
+        summary_payload(rm, portfolio_id, day_change),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
@@ -296,3 +298,5 @@ async def portfolio_valuation_series(
         source="computed",
         engine_version=ENGINE_VERSION,
     )
+
+
