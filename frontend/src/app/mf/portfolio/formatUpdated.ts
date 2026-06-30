@@ -12,7 +12,7 @@
 export function formatUpdated(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   const mon = d.toLocaleString('en-US', { month: 'short' });
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+  const ampm = d.getHours() >= 12 ? 'pm' : 'am';
   const hour12 = d.getHours() % 12 || 12;
-  return `${day} ${mon} ${d.getFullYear()}, ${hour12}:00 ${ampm}`;
+  return `${day} ${mon}, ${hour12}:00 ${ampm}`;
 }

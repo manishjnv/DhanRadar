@@ -64,11 +64,11 @@ export function BandRingFromBand({ band, size = 30, stroke = 4 }: { band: 'high'
 
 /** Map backend snake_case educational labels to display strings for StatusTag. */
 export const LABEL_DISPLAY: Record<string, string> = {
-  in_form:           'In Form',
-  on_track:          'On Track',
-  off_track:         'Off Track',
-  out_of_form:       'Out of Form',
-  insufficient_data: 'Insufficient Data',
+  in_form:           'In form',
+  on_track:          'On track',
+  off_track:         'Off track',
+  out_of_form:       'Out of form',
+  insufficient_data: 'Not enough data yet',
 };
 
 /** Map confidence_band to a plain-English data-confidence word (NOT a verdict). */
@@ -209,10 +209,10 @@ export function RichText({ text }: { text: string }) {
 
 // ── StatusTag — educational label pill ───────────────────────────────────────
 const STATUS_COLORS: Record<string, string> = {
-  'In Form': '#00B386',
-  'On Track': '#1E5EFF',
-  'Off Track': '#E5484D',
-  'Out of Form': '#E5484D',
+  'In form': '#00B386',
+  'On track': '#1E5EFF',
+  'Off track': '#E5484D',
+  'Out of form': '#E5484D',
 };
 export function StatusTag({ status }: { status: string }) {
   const col = STATUS_COLORS[status] ?? '#F5A623';

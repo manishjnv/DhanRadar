@@ -288,18 +288,18 @@ describe('Closing the popover', () => {
   });
 });
 
-// 9. Breadcrumb "Updated" stamp formatter — dd Mmm yyyy, H:00 AM/PM (hour-rounded).
+// 9. Breadcrumb "Updated" stamp formatter — dd Mmm, H:00 am/pm (hour-rounded, no year).
 describe('formatUpdated', () => {
   it('formats PM, pads the day, and zeroes the minutes', () => {
-    // 28 Jun 2026, 21:43 → 9:00 PM (12h conversion + minute rounding)
-    expect(formatUpdated(new Date(2026, 5, 28, 21, 43))).toBe('28 Jun 2026, 9:00 PM');
+    // 28 Jun 2026, 21:43 → 9:00 pm (12h conversion + minute rounding)
+    expect(formatUpdated(new Date(2026, 5, 28, 21, 43))).toBe('28 Jun, 9:00 pm');
   });
 
-  it('formats midnight as 12:00 AM and single-digit days as dd', () => {
-    expect(formatUpdated(new Date(2026, 0, 5, 0, 12))).toBe('05 Jan 2026, 12:00 AM');
+  it('formats midnight as 12:00 am and single-digit days as dd', () => {
+    expect(formatUpdated(new Date(2026, 0, 5, 0, 12))).toBe('05 Jan, 12:00 am');
   });
 
-  it('formats noon as 12:00 PM', () => {
-    expect(formatUpdated(new Date(2026, 11, 31, 12, 0))).toBe('31 Dec 2026, 12:00 PM');
+  it('formats noon as 12:00 pm', () => {
+    expect(formatUpdated(new Date(2026, 11, 31, 12, 0))).toBe('31 Dec, 12:00 pm');
   });
 });

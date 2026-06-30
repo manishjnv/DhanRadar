@@ -306,14 +306,22 @@ export function AutoSyncBanner() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function fmtCurrency(n: number): string {
+  const crore = 10_000_000;
   const lakh = 100_000;
-  return n >= lakh
-    ? `₹${(n / lakh).toFixed(2)} L`
-    : `₹${n.toLocaleString('en-IN')}`;
+  if (n >= crore) return `₹${(n / crore).toFixed(2)} Cr`;
+  if (n >= lakh)  return `₹${(n / lakh).toFixed(2)} L`;
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
 function fmtPct(n: number): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+
+/** Format an ISO date string (YYYY-MM-DD) as "30 Jun 2026". */
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  const mon = d.toLocaleString('en-US', { month: 'short' });
+  return `${d.getDate()} ${mon} ${d.getFullYear()}`;
 }
 
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
@@ -386,7 +394,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 <div className="mt-1 font-sans font-bold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8', fontSize: 15 }}>
                   {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
                 </div>
-                <div className="mt-0.5 text-[11px] text-slate-400">{band ? BAND_WORD[band] : 'Confidence unavailable'}</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">{band ? BAND_WORD[band] : 'Not enough data yet'}</div>
               </div>
             </div>
           )}
@@ -775,7 +783,7 @@ export function PerfSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S07 — FUND HOLDINGS — live data
 // ═══════════════════════════════════════════════════════════════════════════
-const STATUS_FILTERS = ['All', 'In Form', 'On Track', 'Off Track', 'Out of Form'];
+const STATUS_FILTERS = ['All', 'In form', 'On track', 'Off track', 'Out of form'];
 
 function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   const [search, setSearch] = React.useState('');
@@ -792,7 +800,7 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
     return matchSearch && matchFilter;
   });
 
-  const fmt = (n: number) => `₹${(n / 100_000).toFixed(2)} L`;
+  const fmt = (n: number) => fmtCurrency(n);
 
   return (
     <>
@@ -842,7 +850,7 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
               const gain = h.invested_amount !== null ? h.current_value - h.invested_amount : null;
               const gainColor = gain === null ? '#94A3B8' : gain >= 0 ? E : R;
               const weightPct = totalValue > 0 ? ((h.current_value / totalValue) * 100).toFixed(1) : '—';
-              const displayLabel = h.label ? LABEL_DISPLAY[h.label] : 'Insufficient Data';
+              const displayLabel = h.label ? LABEL_DISPLAY[h.label] : 'Not enough data yet';
               return (
                 <tr key={h.isin} className="group hover:bg-surface-2">
                   {/* Fund */}
@@ -1245,7 +1253,7 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
                 </div>
               </div>
               {risk.as_of && (
-                <span className="text-[10px] text-ink-faint sm:ml-auto">As of {risk.as_of}</span>
+                <span className="text-[10px] text-ink-faint sm:ml-auto">As of {fmtDate(risk.as_of)}</span>
               )}
             </div>
 
@@ -1311,7 +1319,7 @@ export function CostSection() {
         ))}
       </div>
       <SoWhat>
-        At 0.80% weighted expense ratio you are already below the industry average of 1.2%. Moving your 2 priciest funds to their direct plan equivalents could save another ₹8,000/yr.
+        At 0.80% weighted expense ratio, this sample portfolio is below the 1.2% industry average. Actual costs depend on your specific funds.
       </SoWhat>
     </Card>
   );
@@ -1346,7 +1354,7 @@ export function AmcSection() {
           </div>
         ))}
       </div>
-      <SoWhat>No single AMC exceeds 22% — your fund house spread is healthy. Invesco is the weakest link at Fair quality; it is still acceptable at 8% exposure.</SoWhat>
+      <SoWhat>No single AMC exceeds 22% in this sample. The quality ratings here are illustrative — check actual fund-house track records independently.</SoWhat>
     </Card>
   );
 }
@@ -1450,7 +1458,7 @@ export function ProjSection() {
           </div>
         ))}
       </div>
-      <SoWhat>These projections assume a 15% annualised return (your current XIRR) and that SIPs continue uninterrupted. Actual returns will vary with market conditions.</SoWhat>
+      <SoWhat>These projections use a 15% annual return assumption — this is sample data, not your actual XIRR. Real returns will vary; markets can fall as well as rise.</SoWhat>
     </Card>
   );
 }
