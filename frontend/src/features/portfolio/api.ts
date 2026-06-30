@@ -174,6 +174,8 @@ export interface SummaryPayload {
   gain_pct: number;
   /** User's own XIRR — allowed in DOM */
   xirr_pct: number | null;
+  /** User's own 1-day value change — allowed in DOM; null until ≥2 daily-valuation rows exist (M2.2) */
+  day_change?: number | null;
   fund_count: number;
   funds_scored: number;
   /** Data-confidence band for the portfolio as a whole — a data-quality descriptor, NOT a verdict */
