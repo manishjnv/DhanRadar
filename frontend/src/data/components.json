@@ -28,6 +28,6 @@
     { "page": "/mf/portfolio", "section": "Empty", "component": "BenefitsGrid", "concepts": [], "empty_state_copy": "What you'll unlock." },
     { "page": "/mf/portfolio", "section": "Empty", "component": "AutoSyncBanner", "concepts": ["sync.status"], "empty_state_copy": "Auto-sync is coming soon." },
     { "page": "/mf/portfolio", "section": "Bar", "component": "StickyBar", "concepts": ["sync.status"], "empty_state_copy": "" },
-    { "page": "/mf/portfolio", "section": "S0", "component": "PortfolioVsMarket", "concepts": ["portfolio.valuation_series", "portfolio.benchmark"], "empty_state_copy": "Upload your CAS to compare with Nifty.", "tooltip": "Your portfolio return vs Nifty 50 over time.", "compliance_note": "portfolio % + Nifty price % only — no score, no verdict (#1/#2); price-index disclosure in footer (#9)" }
+    { "page": "/mf/portfolio", "section": "S0", "component": "PortfolioVsMarket", "concepts": ["portfolio.valuation_series", "portfolio.benchmark"], "empty_state_copy": "Upload your CAS to compare with Nifty.", "tooltip": "Your portfolio return vs the Nifty index over time.", "compliance_note": "portfolio % + Nifty price % only — no score, no verdict (#1/#2); price-index disclosure in footer (#9)" }
   ]
 }

@@ -70,6 +70,7 @@ vi.mock('@/components/mf/portfolio/sections', () => ({
   AiSection: () => <div />,
   ReportSection: () => <div />,
   FaqSection: () => <div />,
+  PortfolioVsMarket: () => <div />,
 }));
 
 vi.mock('@/components/ui/MaybeShell', () => ({
