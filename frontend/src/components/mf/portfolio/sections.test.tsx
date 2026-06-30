@@ -30,6 +30,7 @@ import { RiskSection } from './sections';
 import { AllocSection } from './sections';
 import { DivSection } from './sections';
 import { EmptyHero } from './sections';
+import { PortfolioVsMarket } from './sections';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,8 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioDiversification: vi.fn(),
   usePortfolioRisk: vi.fn(),
   usePortfolioRiskAdvanced: vi.fn(),
+  usePortfolioValueSeries: vi.fn(),
+  useNiftyCloseSeries: vi.fn(),
 }));
 
 import {
@@ -53,6 +56,8 @@ import {
   usePortfolioDiversification,
   usePortfolioRisk,
   usePortfolioRiskAdvanced,
+  usePortfolioValueSeries,
+  useNiftyCloseSeries,
 } from '@/features/portfolio/api';
 
 // ---------------------------------------------------------------------------
@@ -156,7 +161,16 @@ function assertNoNumericScore(text: string) {
 // ---------------------------------------------------------------------------
 
 describe('HeroSection', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default sparkline hooks to loading so existing hero tests are unaffected.
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: true, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({
+      data: undefined, isLoading: true, isError: false,
+    } as any);
+  });
 
   function renderHero(envelope: typeof SUMMARY_PRESENT | typeof LOADING_STATE | typeof EMPTY_STATE | typeof ERROR_STATE) {
     const mock = vi.mocked(usePortfolioSummaryById);
@@ -873,5 +887,119 @@ describe('HelpTip wiring', () => {
     // Fallback: tooltip text is in DOM regardless (opacity-0 → opacity-100 is CSS, not unmount)
     expect(screen.getByText(expected!)).toBeDefined();
     void triggerBtn; // suppress unused warning
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PortfolioVsMarket tests
+// ---------------------------------------------------------------------------
+
+const VS_LOADING = { data: undefined, isLoading: true, isError: false, error: null, refetch: vi.fn() };
+const VS_ERROR   = { data: undefined, isLoading: false, isError: true, error: new Error('fail'), refetch: vi.fn() };
+
+const VS_PORT_EMPTY = {
+  data: { status: 'present', data: { portfolio_id: 'pid', point_count: 0, points: [] }, meta: {} },
+  isLoading: false, isError: false, error: null, refetch: vi.fn(),
+};
+
+const VS_PORT_ONE_POINT = {
+  data: { status: 'present', data: { portfolio_id: 'pid', point_count: 1, points: [
+    { date: '2026-07-01', value: 100_000, invested: 90_000 },
+  ]}, meta: {} },
+  isLoading: false, isError: false, error: null, refetch: vi.fn(),
+};
+
+const VS_PORT_PRESENT = {
+  data: { status: 'present', data: { portfolio_id: 'pid', point_count: 3, points: [
+    { date: '2026-07-01', value: 100_000, invested: 90_000 },
+    { date: '2026-07-02', value: 102_000, invested: 90_000 },
+    { date: '2026-07-03', value: 104_000, invested: 90_000 },
+  ]}, meta: {} },
+  isLoading: false, isError: false, error: null, refetch: vi.fn(),
+};
+
+const VS_NIFTY_EMPTY = {
+  data: { benchmark: 'nifty50_price', disclosure: 'Nifty 50 price index · excludes dividends', point_count: 0, points: [] },
+  isLoading: false, isError: false,
+};
+
+const VS_NIFTY_PRESENT = {
+  data: { benchmark: 'nifty50_price', disclosure: 'Nifty 50 price index · excludes dividends', point_count: 3, points: [
+    { close_date: '2026-07-01', close_value: 24_500 },
+    { close_date: '2026-07-02', close_value: 24_550 },
+    { close_date: '2026-07-03', close_value: 24_600 },
+  ]},
+  isLoading: false, isError: false,
+};
+
+describe('PortfolioVsMarket', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderPvm(portMock = VS_PORT_PRESENT as any, niftyMock = VS_NIFTY_PRESENT as any) {
+    vi.mocked(usePortfolioValueSeries).mockReturnValue(portMock);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue(niftyMock);
+    return render(<PortfolioVsMarket portfolioId="pid" />, { wrapper });
+  }
+
+  it('loading => skeleton, no chart content', () => {
+    renderPvm(VS_LOADING, VS_LOADING);
+    // Should not show any "vs Nifty" text while loading
+    expect(screen.queryByText(/portfolio vs market/i)).toBeNull();
+  });
+
+  it('error => retry button visible', () => {
+    renderPvm(VS_ERROR, VS_NIFTY_EMPTY);
+    expect(screen.getByRole('button', { name: /retry/i })).toBeDefined();
+  });
+
+  it('empty/cold-start (no portfolio points) => shows "Markets while you wait" + upload CTA', () => {
+    renderPvm(VS_PORT_EMPTY, VS_NIFTY_EMPTY);
+    expect(screen.getByText(/Markets while you wait/i)).toBeDefined();
+    // Shows upload copy when no data
+    expect(screen.getByText(/Upload your CAS/i)).toBeDefined();
+  });
+
+  it('present => disclosure footer renders with price-index caveat', () => {
+    renderPvm();
+    // Disclosure footer must mention price index
+    const allText = document.body.textContent ?? '';
+    expect(allText).toMatch(/price index/i);
+    expect(allText).toMatch(/excludes dividends/i);
+  });
+
+  it('present => "Portfolio vs Market" heading visible', () => {
+    renderPvm();
+    expect(screen.getAllByText(/Portfolio vs Market/i).length).toBeGreaterThan(0);
+  });
+
+  it('building state => shows building notice when < 2 portfolio points', () => {
+    renderPvm(VS_PORT_ONE_POINT, VS_NIFTY_PRESENT);
+    expect(screen.getByText(/Building/i)).toBeDefined();
+  });
+
+  it('present => time pills render', () => {
+    renderPvm();
+    // At least the default pill (6M) should be visible
+    expect(screen.getByText('6M')).toBeDefined();
+    expect(screen.getByText('1Y')).toBeDefined();
+  });
+
+  it('no advisory verbs in present state', () => {
+    renderPvm();
+    const text = document.body.textContent ?? '';
+    assertNoAdvisoryVerbs(text);
+  });
+
+  it('no numeric DhanRadar score in present state', () => {
+    renderPvm();
+    const text = document.body.textContent ?? '';
+    assertNoNumericScore(text);
+  });
+
+  it('factual ▲/▼ framing — never "beat the market" advisory assertion', () => {
+    renderPvm();
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/beat the market/i);
+    expect(text).not.toMatch(/outperform/i);
   });
 });

@@ -35,7 +35,7 @@ import {
   GoalSection, PerfSection, HoldingsSection, TopPerfSection, UnderReviewSection,
   OverlapSection, DivSection, RiskSection, CostSection, AmcSection,
   TimelineSection, RecSection, ProjSection, OpportunitiesSection,
-  AiSection, ReportSection, FaqSection,
+  AiSection, ReportSection, FaqSection, PortfolioVsMarket,
 } from '@/components/mf/portfolio/sections';
 import { useLatestPortfolio } from '@/features/mf/api';
 import { useCasUpload } from '@/features/mf/cas-upload';
@@ -149,6 +149,12 @@ function PortfolioView() {
 
           {/* S1 Hero */}
           <HeroSection portfolioId={portfolioId} />
+
+          {/* S0 Portfolio vs Market — comparison chart (after hero, before health scorecard) */}
+          <PortfolioVsMarket
+            portfolioId={portfolioId}
+            onUploadCas={() => setPageState('empty')}
+          />
 
           {/* S01 Portfolio Health */}
           <section>

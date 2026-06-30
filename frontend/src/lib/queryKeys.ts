@@ -87,4 +87,10 @@ export const queryKeys = {
   breadth: {
     current: () => ['market', 'breadth'] as const,
   },
+  portfolio_series: {
+    valueSeries: (portfolioId: string) => ['portfolio', portfolioId, 'valuation-series'] as const,
+  },
+  benchmark: {
+    nifty50: (params?: { from?: string; to?: string }) => ['benchmark', 'nifty50', params] as const,
+  },
 } as const;

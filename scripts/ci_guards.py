@@ -182,7 +182,7 @@ SECRET_RES = [
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"""(password|secret|token|api_key)\s*[:=]\s*["'][^"']{12,}["']""", re.I),
 ]
-SKIP_DIRS = {".git", "node_modules", ".next", "docs", "scripts", "__pycache__", ".venv"}
+SKIP_DIRS = {".git", "node_modules", ".next", "docs", "scripts", "__pycache__", ".venv", ".mypy_cache"}
 SKIP_SUFFIX = {".md", ".lock"}
 for p in ROOT.rglob("*"):
     if not p.is_file():

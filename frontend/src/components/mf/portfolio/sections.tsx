@@ -37,7 +37,11 @@ import {
   usePortfolioAllocation,
   usePortfolioConcentration,
   usePortfolioDiversification,
+  usePortfolioValueSeries,
+  useNiftyCloseSeries,
   type Holding,
+  type ValueSeriesPoint,
+  type NiftyClosePoint,
 } from '@/features/portfolio/api';
 
 const { E, B, A, R, O } = COLORS;
@@ -417,6 +421,10 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                       </div>
                     </div>
                   </div>
+                </div>
+                {/* Center: compact sparkline (shows on sm+; below on mobile) */}
+                <div className="order-last min-w-0 flex-1 sm:order-none sm:mx-4">
+                  <HeroSparkline portfolioId={portfolioId} />
                 </div>
                 {/* Right: data completeness — 3-dot meter, NO ring/gauge, NO number (#2) */}
                 <div className="shrink-0 sm:text-right">
@@ -1634,3 +1642,501 @@ export function FaqSection() {
 
 // suppress unused import warnings — O is used in PRI_COLOR
 void O;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PORTFOLIO VS MARKET — live data (Portfolio % return vs Nifty 50 price index)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Time pill config ─────────────────────────────────────────────────────────
+type Pill = '1M' | '3M' | '6M' | '1Y' | '3Y' | 'ALL';
+const PILLS: Pill[] = ['1M', '3M', '6M', '1Y', '3Y', 'ALL'];
+const PILL_DAYS: Record<Pill, number> = {
+  '1M': 30, '3M': 90, '6M': 180, '1Y': 365, '3Y': 1095, 'ALL': Infinity,
+};
+
+// ── Chart coordinate helpers ─────────────────────────────────────────────────
+const CW = 1000;  // SVG viewBox width
+const CH = 160;   // SVG viewBox height
+const CTOP = 10;  // chart area top margin
+const CBOT = 22;  // bottom margin (month labels)
+const CPLOT = CH - CTOP - CBOT; // plotted height
+
+function yVal(pct: number, yMin: number, yMax: number): number {
+  const range = yMax - yMin || 1;
+  return CTOP + (1 - (pct - yMin) / range) * CPLOT;
+}
+function xVal(i: number, n: number): number {
+  return n <= 1 ? CW / 2 : (i / (n - 1)) * CW;
+}
+function toPath(rebased: number[], yMin: number, yMax: number): string {
+  return rebased
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${xVal(i, rebased.length).toFixed(1)},${yVal(v, yMin, yMax).toFixed(1)}`)
+    .join(' ');
+}
+
+// ── Rebase a value series to 0% ─────────────────────────────────────────────
+function rebase(values: number[]): number[] {
+  if (values.length === 0) return [];
+  const base = values[0];
+  if (base === 0) return values.map(() => 0);
+  return values.map(v => ((v / base) - 1) * 100);
+}
+
+// ── Slice portfolio to the requested window ──────────────────────────────────
+function slicePortfolioWindow(pts: ValueSeriesPoint[], days: number): ValueSeriesPoint[] {
+  if (days === Infinity || pts.length === 0) return pts;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutStr = cutoff.toISOString().slice(0, 10);
+  return pts.filter(p => p.date >= cutStr);
+}
+
+// ── Find nearest prior Nifty close for a given date ──────────────────────────
+function nearestNifty(nifty: NiftyClosePoint[], targetDate: string): number | null {
+  let best: NiftyClosePoint | null = null;
+  for (const p of nifty) {
+    if (p.close_date <= targetDate && (!best || p.close_date > best.close_date)) best = p;
+  }
+  return best ? best.close_value : null;
+}
+
+// ── Align Nifty values to portfolio dates ────────────────────────────────────
+function alignNiftyToPortfolio(port: ValueSeriesPoint[], nifty: NiftyClosePoint[]): number[] {
+  return port.map(p => nearestNifty(nifty, p.date) ?? 0);
+}
+
+// ── Format month label ────────────────────────────────────────────────────────
+const SHORT_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtMonLabel(iso: string): string {
+  const d = new Date(iso);
+  return `${SHORT_MON[d.getMonth()]}'${String(d.getFullYear()).slice(2)}`;
+}
+
+// ── Generate axis label positions ────────────────────────────────────────────
+function axisLabels(dates: string[], n: number): { x: number; label: string }[] {
+  if (n < 2) return [];
+  const count = Math.min(5, n);
+  const step = (n - 1) / (count - 1);
+  return Array.from({ length: count }, (_, k) => {
+    const idx = Math.min(Math.round(k * step), n - 1);
+    return { x: xVal(idx, n), label: fmtMonLabel(dates[idx]) };
+  });
+}
+
+// ── Tiny inline SVG for hero sparkline ───────────────────────────────────────
+function MiniSparkline({ portPct, niftyPct }: { portPct: number[]; niftyPct: number[] }) {
+  const all = [...portPct, ...niftyPct];
+  const yMin = Math.min(...all, 0) - 1;
+  const yMax = Math.max(...all, 0) + 1;
+  const portPath = toPath(portPct, yMin, yMax);
+  const niftyPath = toPath(niftyPct, yMin, yMax);
+  const zeroY = yVal(0, yMin, yMax).toFixed(1);
+  return (
+    <svg
+      viewBox={`0 0 ${CW} ${CH}`}
+      preserveAspectRatio="none"
+      width="100%"
+      height="70"
+      role="img"
+      aria-label="Portfolio vs Nifty 90-day return trend"
+    >
+      <line x1="0" y1={zeroY} x2={CW} y2={zeroY} stroke="rgba(255,255,255,.16)" strokeDasharray="4 5" />
+      {niftyPath && <path d={niftyPath} fill="none" stroke="#f5c451" strokeWidth="1.6" />}
+      {portPath && (
+        <>
+          <defs>
+            <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#5b8cff" stopOpacity="0.32" />
+              <stop offset="1" stopColor="#5b8cff" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={`${portPath} L${CW},${CH} L0,${CH} Z`} fill="url(#spark-grad)" />
+          <path d={portPath} fill="none" stroke="#5b8cff" strokeWidth="2.2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+// ── The full interactive chart ────────────────────────────────────────────────
+interface VsChartProps {
+  portPct: number[];
+  niftyPct: number[];
+  portValues: number[];   // raw ₹ values for hover cards
+  niftyValues: number[];  // raw Nifty levels for hover cards
+  dates: string[];
+  hoverIdx: number | null;
+  onHover: (idx: number | null) => void;
+}
+
+function VsChart({ portPct, niftyPct, portValues, niftyValues, dates, hoverIdx, onHover }: VsChartProps) {
+  const n = portPct.length;
+  const all = [...portPct, ...niftyPct];
+  const yMin = Math.min(...all, 0) - Math.abs(Math.min(...all, 0)) * 0.12 - 0.5;
+  const yMax = Math.max(...all, 0) + Math.abs(Math.max(...all, 0)) * 0.12 + 0.5;
+
+  const portPath = toPath(portPct, yMin, yMax);
+  const niftyPath = toPath(niftyPct, yMin, yMax);
+  const zeroY = yVal(0, yMin, yMax).toFixed(1);
+  const labels = axisLabels(dates, n);
+
+  function handleMove(clientX: number, rect: DOMRect) {
+    const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onHover(Math.round(relX * (n - 1)));
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${CW} ${CH}`}
+      preserveAspectRatio="none"
+      width="100%"
+      height="150"
+      role="img"
+      aria-label="Portfolio vs Nifty 50 performance chart"
+      style={{ display: 'block' }}
+      onMouseMove={e => handleMove(e.clientX, e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={() => onHover(null)}
+      onTouchMove={e => {
+        e.preventDefault();
+        handleMove(e.touches[0].clientX, e.currentTarget.getBoundingClientRect());
+      }}
+      onTouchEnd={() => onHover(null)}
+    >
+      {/* zero line */}
+      <line x1="0" y1={zeroY} x2={CW} y2={zeroY} stroke="rgba(255,255,255,.18)" strokeDasharray="3 4" />
+
+      {/* Nifty line */}
+      {niftyPath && <path d={niftyPath} fill="none" stroke="#f5c451" strokeWidth="2" />}
+
+      {/* Portfolio area + line */}
+      {portPath && (
+        <>
+          <defs>
+            <linearGradient id="pvs-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#5b8cff" stopOpacity="0.3" />
+              <stop offset="1" stopColor="#5b8cff" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={`${portPath} L${CW},${CTOP + CPLOT} L0,${CTOP + CPLOT} Z`} fill="url(#pvs-grad)" />
+          <path d={portPath} fill="none" stroke="#5b8cff" strokeWidth="2.5" />
+        </>
+      )}
+
+      {/* Hover crosshair + dots */}
+      {hoverIdx !== null && hoverIdx < n && (() => {
+        const cx = xVal(hoverIdx, n).toFixed(1);
+        const pyY = yVal(portPct[hoverIdx], yMin, yMax).toFixed(1);
+        const nyY = yVal(niftyPct[hoverIdx], yMin, yMax).toFixed(1);
+        return (
+          <>
+            <line x1={cx} y1={CTOP} x2={cx} y2={CTOP + CPLOT} stroke="rgba(255,255,255,.35)" />
+            <circle cx={cx} cy={pyY} r="4.5" fill="#5b8cff" stroke="#0B1F3A" strokeWidth="1.5" />
+            <circle cx={cx} cy={nyY} r="4.5" fill="#f5c451" stroke="#0B1F3A" strokeWidth="1.5" />
+          </>
+        );
+      })()}
+
+      {/* Month axis labels */}
+      {labels.map(({ x, label }, li) => (
+        <text key={li} x={x} y={CH - 4} fill="#64748b" fontSize="13" textAnchor="middle">
+          {label}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+// ── PortfolioVsMarket — public export ─────────────────────────────────────────
+export function PortfolioVsMarket({
+  portfolioId,
+  onUploadCas,
+}: {
+  portfolioId: string;
+  /** Called when the user clicks "Upload CAS" in the empty state. */
+  onUploadCas?: () => void;
+}) {
+  const vsSeries = usePortfolioValueSeries(portfolioId);
+  const niftySeries = useNiftyCloseSeries();
+  const [activePill, setActivePill] = React.useState<Pill>('6M');
+  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
+
+  const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
+  const pvmTip = sectionTooltip('PortfolioVsMarket');
+
+  // ── Loading state ───────────────────────────────────────────────────────────
+  const isLoading = vsSeries.isLoading || niftySeries.isLoading;
+  if (isLoading) {
+    return (
+      <div className="rounded-[20px] p-5" style={{ background: heroGradient }}>
+        <Skeleton className="h-56 w-full rounded-xl bg-white/10" />
+      </div>
+    );
+  }
+
+  // ── Error state ─────────────────────────────────────────────────────────────
+  if (vsSeries.isError) {
+    return (
+      <div className="rounded-[20px] p-5" style={{ background: heroGradient }}>
+        <div className="text-[13px] font-medium text-red-300">
+          Could not load chart data.
+          <button
+            type="button"
+            className="ml-2 underline"
+            onClick={() => { vsSeries.refetch(); niftySeries.refetch(); }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const portAllPoints: ValueSeriesPoint[] = vsSeries.data?.data?.points ?? [];
+  const niftyAllPoints: NiftyClosePoint[] = niftySeries.data?.points ?? [];
+
+  // ── Empty / cold-start state (no portfolio data) ────────────────────────────
+  if (portAllPoints.length === 0 || !portfolioId) {
+    return (
+      <div
+        id="portfolio-vs-market"
+        className="relative overflow-hidden rounded-[20px] p-5 text-white"
+        style={{ background: heroGradient }}
+      >
+        <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.24),transparent 70%)' }} aria-hidden="true" />
+        <div className="relative z-[2]">
+          {/* Header */}
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-[15px] font-semibold text-white">Portfolio vs Market</div>
+              <div className="text-[11px] text-slate-400">Markets while you wait</div>
+            </div>
+            {pvmTip && <HelpTip tip={pvmTip} />}
+          </div>
+
+          {/* Nifty-only sparkline (if available) */}
+          {niftyAllPoints.length >= 2 && (() => {
+            const last90 = niftyAllPoints.slice(-90);
+            const niftyPct = rebase(last90.map(p => p.close_value));
+            const yMin = Math.min(...niftyPct, 0) - 1;
+            const yMax = Math.max(...niftyPct, 0) + 1;
+            return (
+              <svg
+                viewBox={`0 0 ${CW} 120`}
+                preserveAspectRatio="none"
+                width="100%"
+                height="110"
+                role="img"
+                aria-label="Nifty 50 90-day performance"
+                style={{ display: 'block', marginTop: '8px' }}
+              >
+                <line x1="0" y1={yVal(0, yMin, yMax).toFixed(1)} x2={CW} y2={yVal(0, yMin, yMax).toFixed(1)} stroke="rgba(255,255,255,.14)" strokeDasharray="3 4" />
+                <path d={toPath(niftyPct, yMin, yMax)} fill="none" stroke="#f5c451" strokeWidth="2.2" />
+              </svg>
+            );
+          })()}
+
+          {/* Legend + CTA */}
+          <div className="mt-2 flex items-center gap-3 text-[12px] text-slate-300">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-2 w-5 rounded-full" style={{ background: '#f5c451' }} aria-hidden="true" />
+              Nifty 50
+            </span>
+          </div>
+          <div className="mt-4 text-[12px] text-slate-400">
+            Upload your CAS to add your portfolio line and compare.
+          </div>
+          {onUploadCas && (
+            <button
+              type="button"
+              className="mt-3 rounded-xl bg-royal px-4 py-2 text-[13px] font-semibold text-white hover:opacity-90"
+              onClick={onUploadCas}
+            >
+              Upload CAS
+            </button>
+          )}
+          <div className="mt-4 text-[10px] text-slate-500">
+            vs Nifty 50 (price index) · excludes dividends · educational only, not a verdict
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Compute windowed / aligned series ───────────────────────────────────────
+  const windowedPort = slicePortfolioWindow(portAllPoints, PILL_DAYS[activePill]);
+
+  // Reset hoverIdx when pill changes if it's out of range.
+  const safeHoverIdx = hoverIdx !== null && hoverIdx < windowedPort.length ? hoverIdx : null;
+
+  const isBuilding = windowedPort.length < 2;
+  const displayPort = isBuilding ? portAllPoints : windowedPort;
+
+  const alignedNiftyValues = alignNiftyToPortfolio(displayPort, niftyAllPoints);
+  const portPct = rebase(displayPort.map(p => p.value));
+  const niftyPct = rebase(alignedNiftyValues);
+
+  // Pick hover index: the latest if no hover (show end-of-period values in cards).
+  const cardIdx = safeHoverIdx !== null ? safeHoverIdx : displayPort.length - 1;
+  const pPct = portPct[cardIdx] ?? 0;
+  const nPct = niftyPct[cardIdx] ?? 0;
+  const isAhead = pPct >= nPct;
+  const edgePct = pPct - nPct;
+  const portValueAtHover = displayPort[cardIdx]?.value ?? 0;
+  // Hypothetical Nifty ₹ — what the starting portfolio value would be worth if it matched Nifty.
+  const startValue = displayPort[0]?.value ?? 0;
+  const niftyHypValue = startValue * (1 + nPct / 100);
+
+  const hoverDate = safeHoverIdx !== null ? fmtDate(displayPort[safeHoverIdx].date) : undefined;
+  const pillLabel = `${activePill === 'ALL' ? 'All time' : activePill} · % return`;
+
+  return (
+    <div
+      id="portfolio-vs-market"
+      className="relative overflow-hidden rounded-[20px] p-5 text-white"
+      style={{ background: heroGradient }}
+    >
+      <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.24),transparent 70%)' }} aria-hidden="true" />
+      <div className="relative z-[2]">
+        {/* Header */}
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <div className="text-[15px] font-semibold text-white">Portfolio vs Market</div>
+            <div className="text-[11px] text-slate-400">{hoverDate ?? pillLabel}</div>
+          </div>
+          {pvmTip && <HelpTip tip={pvmTip} />}
+        </div>
+
+        {/* Building notice */}
+        {isBuilding && (
+          <div className="mb-3 rounded-xl bg-white/10 px-3 py-2 text-[12px] text-slate-300">
+            Building — {portAllPoints.length} day{portAllPoints.length !== 1 ? 's' : ''} of data so far.
+            The chart grows as daily valuations accrue.
+          </div>
+        )}
+
+        {/* Top cards: You vs Nifty */}
+        <div className="mb-3 flex items-stretch gap-0">
+          <div className="flex-1 rounded-l-xl bg-[rgba(91,140,255,.18)] px-3 py-2">
+            <div className="text-[11px] font-semibold text-[#9cc0ff]">Your Portfolio</div>
+            <div className={`mt-0.5 text-[20px] font-bold ${isAhead ? 'text-emerald-300' : 'text-red-300'}`}>
+              {isAhead ? '▲ ' : '▼ '}{fmtPct(pPct)}
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-400">{fmtCurrency(portValueAtHover)}</div>
+          </div>
+          <div className="z-[3] self-center rounded-full border border-white/20 bg-[#0B1F3A] px-1.5 py-0.5 text-[9px] font-bold text-slate-400" style={{ marginInline: '-9px' }}>
+            VS
+          </div>
+          <div className="flex-1 rounded-r-xl bg-[rgba(245,196,81,.14)] px-3 py-2">
+            <div className="text-[11px] font-semibold text-[#f5c451]">Nifty 50</div>
+            <div className="mt-0.5 text-[20px] font-bold text-[#ffe39a]">{fmtPct(nPct)}</div>
+            <div className="mt-0.5 text-[10px] text-slate-400">{fmtCurrency(niftyHypValue)} if in Nifty</div>
+          </div>
+        </div>
+
+        {/* Chart */}
+        <VsChart
+          portPct={portPct}
+          niftyPct={niftyPct}
+          portValues={displayPort.map(p => p.value)}
+          niftyValues={alignedNiftyValues}
+          dates={displayPort.map(p => p.date)}
+          hoverIdx={safeHoverIdx}
+          onHover={setHoverIdx}
+        />
+
+        {/* Tooltip (visible on hover) */}
+        {safeHoverIdx !== null && (
+          <div className="mt-1 rounded-xl border border-white/10 bg-[rgba(8,18,38,.9)] p-2 text-[12px]">
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-400">{fmtDate(displayPort[safeHoverIdx].date)}</div>
+            <div className="flex items-center gap-1.5 text-slate-200">
+              <span className="inline-block h-2 w-3 rounded-full bg-[#5b8cff]" aria-hidden="true" />
+              You <span className="ml-auto font-semibold">{fmtPct(portPct[safeHoverIdx])}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-200">
+              <span className="inline-block h-2 w-3 rounded-full bg-[#f5c451]" aria-hidden="true" />
+              Nifty <span className="ml-auto font-semibold">{fmtPct(niftyPct[safeHoverIdx])}</span>
+            </div>
+            <div className={`mt-1 border-t border-white/10 pt-1 font-semibold ${edgePct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+              {edgePct >= 0 ? '+' : ''}{edgePct.toFixed(2)}% vs Nifty
+            </div>
+          </div>
+        )}
+
+        {/* Time pills */}
+        <div className="mt-3 flex gap-1 rounded-xl bg-white/6 p-1">
+          {PILLS.map(pill => (
+            <button
+              key={pill}
+              type="button"
+              onClick={() => { setActivePill(pill); setHoverIdx(null); }}
+              className={cn(
+                'flex-1 rounded-lg py-1.5 text-[12px] font-semibold transition-colors',
+                activePill === pill
+                  ? 'bg-royal text-white shadow'
+                  : 'text-slate-400 hover:text-white',
+              )}
+            >
+              {pill}
+            </button>
+          ))}
+        </div>
+
+        {/* Disclosure footer (non-neg #9 — price-index caveat) */}
+        <div className="mt-3 text-[10px] text-slate-500">
+          vs Nifty 50 (price index) · excludes dividends · educational only, not a verdict · not financial advice
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── HeroSparkline — compact 90d sparkline for the hero center column ──────────
+export function HeroSparkline({ portfolioId }: { portfolioId: string }) {
+  const vsSeries = usePortfolioValueSeries(portfolioId);
+  const niftySeries = useNiftyCloseSeries();
+
+  if (vsSeries.isLoading || niftySeries.isLoading) {
+    return <Skeleton className="h-20 w-full rounded-xl bg-white/10" />;
+  }
+
+  const portPoints = vsSeries.data?.data?.points ?? [];
+  const niftyAll = niftySeries.data?.points ?? [];
+
+  // Need ≥ 2 portfolio points for a meaningful sparkline.
+  if (portPoints.length < 2) {
+    return (
+      <div className="flex flex-col items-center justify-center py-3 text-center">
+        <div className="text-[11px] font-medium text-slate-400">Trend builds daily</div>
+        <div className="mt-1 text-[10px] text-slate-500">Appears once 2+ daily snapshots exist</div>
+      </div>
+    );
+  }
+
+  const last90port = portPoints.slice(-90);
+  const alignedNifty = alignNiftyToPortfolio(last90port, niftyAll);
+  const portPct = rebase(last90port.map(p => p.value));
+  const niftyPct = rebase(alignedNifty);
+
+  const portEnd = portPct[portPct.length - 1] ?? 0;
+  const niftyEnd = niftyPct[niftyPct.length - 1] ?? 0;
+
+  return (
+    <div className="min-w-0 flex-1 px-2">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-slate-400">You vs Nifty · 90d</span>
+        <span>
+          <b style={{ color: '#9cc0ff' }}>{portEnd >= 0 ? '+' : ''}{portEnd.toFixed(1)}%</b>
+          {' · '}
+          <b style={{ color: '#f5c451' }}>{niftyEnd >= 0 ? '+' : ''}{niftyEnd.toFixed(1)}%</b>
+        </span>
+      </div>
+      <MiniSparkline portPct={portPct} niftyPct={niftyPct} />
+      <a
+        href="#portfolio-vs-market"
+        className="mt-1 block text-[11px] text-[#9cc0ff] hover:underline"
+      >
+        Open full comparison ↓
+      </a>
+    </div>
+  );
+}
