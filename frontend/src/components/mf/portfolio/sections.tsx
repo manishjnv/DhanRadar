@@ -351,13 +351,6 @@ function HeroStat({ label, value, accent, hint, tip }: {
   );
 }
 
-/** Plain-language meaning of the confidence band (data-quality descriptor, NOT a verdict — #1/#2 safe). */
-const CONF_MEANING: Record<'high' | 'medium' | 'low', string> = {
-  high: 'Strong data coverage',
-  medium: 'Moderate data coverage',
-  low: 'Limited data coverage',
-};
-
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading, isError, refetch } = usePortfolioSummaryById(portfolioId);
 
@@ -372,6 +365,15 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
   const dayChange = summary?.day_change ?? null;
+  // Day-change % = today's move over yesterday's value (= total_value − day_change). User's own money, DOM-allowed.
+  const dayPct =
+    summary && dayChange !== null && summary.total_value !== dayChange
+      ? (dayChange / (summary.total_value - dayChange)) * 100
+      : null;
+  const dayChangeText =
+    dayChange === null
+      ? '—'
+      : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`;
 
   return (
     <div
@@ -401,46 +403,63 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   <div className="font-sans text-[36px] font-bold leading-none tracking-tight sm:text-[44px]">
                     {fmtFull(summary.total_value)}
                   </div>
-                  <div className="mt-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Returns</div>
-                    <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-[15px] font-semibold text-emerald-300">
-                      {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
+                  <div className="mt-3 flex gap-7">
+                    <div>
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Gain</div>
+                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${summary.gain >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Return</div>
+                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${summary.gain_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {fmtPct(summary.gain_pct)}
+                      </div>
                     </div>
                   </div>
                 </div>
-                {/* Right: data-confidence with plain-language meaning — NO ring/gauge, NO number (#2) */}
+                {/* Right: data completeness — 3-dot meter, NO ring/gauge, NO number (#2) */}
                 <div className="shrink-0 sm:text-right">
                   <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 sm:justify-end">
-                    Data Confidence
+                    Data Completeness
                     {bandTip && <HelpTip tip={bandTip} />}
                   </div>
-                  <div className="mt-1 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: band ? BAND_COLOR[band] : '#94A3B8' }} aria-hidden="true" />
-                    <span className="font-sans text-[17px] font-semibold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8' }}>
-                      {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
+                  <div className="mt-1.5 flex items-center gap-1.5 sm:justify-end">
+                    {([0, 1, 2] as const).map((i) => {
+                      const filled = band === 'high' ? 3 : band === 'medium' ? 2 : band === 'low' ? 1 : 0;
+                      return (
+                        <span
+                          key={i}
+                          className="inline-block h-2.5 w-2.5 rounded-full"
+                          style={{ background: i < filled ? (band ? BAND_COLOR[band] : '#94A3B8') : 'rgba(255,255,255,.25)' }}
+                          aria-hidden="true"
+                        />
+                      );
+                    })}
+                    <span className="ml-1 font-sans text-[14px] font-semibold text-slate-300">
+                      {band === 'high' ? 'Complete' : band === 'medium' ? 'Mostly complete' : band === 'low' ? 'Partial' : 'Not enough data yet'}
                     </span>
                   </div>
-                  <div className="mt-1.5 text-[14px] font-medium text-slate-300">
-                    {band ? CONF_MEANING[band] : 'Not enough data yet'}
-                  </div>
-                  <div className="mt-0.5 text-[13px] text-slate-400">
-                    {summary.funds_scored >= summary.fund_count
-                      ? `All ${summary.fund_count} funds analysed`
-                      : `${summary.funds_scored} of ${summary.fund_count} funds analysed`}
-                  </div>
+                  {summary.funds_scored > 0 && (
+                    <div className="mt-1 text-[13px] text-slate-400 sm:text-right">
+                      {summary.funds_scored >= summary.fund_count
+                        ? `✓ All ${summary.fund_count} funds analysed`
+                        : `✓ ${summary.funds_scored} of ${summary.fund_count} funds analysed`}
+                    </div>
+                  )}
                 </div>
               </div>
-              {/* Bottom: full-width stat row — Day Change · Invested · XIRR (uses the horizontal space) */}
+              {/* Bottom: full-width stat row — Invested · Day Change · Lifetime XIRR */}
               <div className="grid grid-cols-3 gap-4 border-t border-white/10 pt-4 sm:flex sm:justify-between sm:gap-8">
+                <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                 <HeroStat
                   label="Day Change"
-                  value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}`}
+                  value={dayChangeText}
                   accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
                   hint={dayChange === null ? 'Updates daily' : undefined}
                 />
-                <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                 {summary.xirr_pct !== null && (
-                  <HeroStat label="XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" tip={xiirrTip} />
+                  <HeroStat label="Lifetime XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" hint="Since you invested" tip={xiirrTip} />
                 )}
               </div>
             </div>
