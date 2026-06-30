@@ -351,6 +351,13 @@ function HeroStat({ label, value, accent, hint, tip }: {
   );
 }
 
+/** Plain-language meaning of the confidence band (data-quality descriptor, NOT a verdict — #1/#2 safe). */
+const CONF_MEANING: Record<'high' | 'medium' | 'low', string> = {
+  high: 'Strong data coverage',
+  medium: 'Moderate data coverage',
+  low: 'Limited data coverage',
+};
+
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading, isError, refetch } = usePortfolioSummaryById(portfolioId);
 
@@ -382,48 +389,59 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
           skeleton={<Skeleton className="h-40 w-full rounded-xl bg-white/10" />}
         >
           {summary && (
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-              {/* Left: user's own money figures — allowed in DOM (#2 gates only computed DhanRadar scores) */}
-              <div className="flex-1">
-                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Total Portfolio Value
-                  {heroTip && <HelpTip tip={heroTip} />}
+            <div className="flex flex-col gap-6">
+              {/* Top: value + total returns (left) · data-confidence (right) */}
+              <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+                {/* User's own money figures — allowed in DOM (#2 gates only computed DhanRadar scores) */}
+                <div>
+                  <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Total Portfolio Value
+                    {heroTip && <HelpTip tip={heroTip} />}
+                  </div>
+                  <div className="font-sans text-[36px] font-bold leading-none tracking-tight sm:text-[44px]">
+                    {fmtFull(summary.total_value)}
+                  </div>
+                  <div className="mt-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Returns</div>
+                    <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-[15px] font-semibold text-emerald-300">
+                      {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
+                    </div>
+                  </div>
                 </div>
-                <div className="font-sans text-[38px] font-bold leading-none tracking-tight sm:text-[46px]">
-                  {fmtFull(summary.total_value)}
-                </div>
-                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-small font-semibold text-emerald-300">
-                  {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
-                </div>
-                {/* Stat row — Day Change · Invested · XIRR (bigger size, ~one step lighter weight) */}
-                <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-t border-white/10 pt-4">
-                  <HeroStat
-                    label="Day Change"
-                    value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}`}
-                    accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
-                    hint={dayChange === null ? 'Updates daily' : undefined}
-                  />
-                  <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
-                  {summary.xirr_pct !== null && (
-                    <HeroStat label="XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" tip={xiirrTip} />
-                  )}
+                {/* Right: data-confidence with plain-language meaning — NO ring/gauge, NO number (#2) */}
+                <div className="shrink-0 sm:text-right">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 sm:justify-end">
+                    Data Confidence
+                    {bandTip && <HelpTip tip={bandTip} />}
+                  </div>
+                  <div className="mt-1 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: band ? BAND_COLOR[band] : '#94A3B8' }} aria-hidden="true" />
+                    <span className="font-sans text-[17px] font-semibold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8' }}>
+                      {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-[14px] font-medium text-slate-300">
+                    {band ? CONF_MEANING[band] : 'Not enough data yet'}
+                  </div>
+                  <div className="mt-0.5 text-[13px] text-slate-400">
+                    {summary.funds_scored >= summary.fund_count
+                      ? `All ${summary.fund_count} funds analysed`
+                      : `${summary.funds_scored} of ${summary.fund_count} funds analysed`}
+                  </div>
                 </div>
               </div>
-              {/* Right: compact data-confidence badge — NO ring/gauge, NO number (#2) */}
-              <div className="shrink-0 sm:text-right">
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: band ? BAND_COLOR[band] : '#94A3B8' }} aria-hidden="true" />
-                  <span className="font-sans text-[15px] font-semibold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8' }}>
-                    {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex items-center gap-1 text-[12px] font-medium text-slate-300 sm:justify-end">
-                  Data Confidence
-                  {bandTip && <HelpTip tip={bandTip} />}
-                </div>
-                <div className="mt-0.5 text-[11px] text-slate-400">
-                  {summary.fund_count} funds{summary.funds_scored ? ` · ${summary.funds_scored} analysed` : ''}
-                </div>
+              {/* Bottom: full-width stat row — Day Change · Invested · XIRR (uses the horizontal space) */}
+              <div className="grid grid-cols-3 gap-4 border-t border-white/10 pt-4 sm:flex sm:justify-between sm:gap-8">
+                <HeroStat
+                  label="Day Change"
+                  value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}`}
+                  accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
+                  hint={dayChange === null ? 'Updates daily' : undefined}
+                />
+                <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
+                {summary.xirr_pct !== null && (
+                  <HeroStat label="XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" tip={xiirrTip} />
+                )}
               </div>
             </div>
           )}
