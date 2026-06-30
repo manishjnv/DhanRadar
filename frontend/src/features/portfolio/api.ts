@@ -297,3 +297,89 @@ export function usePortfolioRiskAdvanced(portfolioId: string, enabled = true) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Portfolio value series (DataEnvelope) — daily snapshots, M2.2.
+// All values are the user's own ₹ — DOM-allowed (#2-exempt user money).
+// ---------------------------------------------------------------------------
+
+export interface ValueSeriesPoint {
+  /** ISO date string (YYYY-MM-DD) */
+  date: string;
+  /** User's own total portfolio value on this date — allowed in DOM */
+  value: number;
+  /** User's own total invested on this date — allowed in DOM */
+  invested: number;
+}
+
+export interface ValueSeriesPayload {
+  portfolio_id: string;
+  point_count: number;
+  /** Daily data points, ordered ascending by date. Empty on cold-start. */
+  points: ValueSeriesPoint[];
+}
+
+/**
+ * Full daily portfolio-value series. Calls the existing /valuation-series endpoint
+ * with ?days=1095. Forward-only from 2026-07-01 — starts empty and grows daily.
+ * The front-end windows locally for the chart/sparkline.
+ */
+export function usePortfolioValueSeries(portfolioId: string) {
+  return useQuery<DataEnvelope<ValueSeriesPayload>>({
+    queryKey: queryKeys.portfolio_series.valueSeries(portfolioId),
+    queryFn: () =>
+      api.get<DataEnvelope<ValueSeriesPayload>>(
+        `/portfolio/${portfolioId}/valuation-series?days=1095`
+      ),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Nifty 50 benchmark close series (public reference data — no auth required).
+// DOM-allowed: Nifty 50 price closes are public market facts (founder 2026-06-22).
+// Disclosure: price index only — excludes dividends (ADR-0037 part b).
+// ---------------------------------------------------------------------------
+
+export interface NiftyClosePoint {
+  /** ISO date string (YYYY-MM-DD) */
+  close_date: string;
+  /** Nifty 50 price-index closing level on this date — public market fact, DOM-allowed */
+  close_value: number;
+}
+
+export interface NiftyCloseSeriesPayload {
+  benchmark: string;
+  /** "Nifty 50 price index · excludes dividends" */
+  disclosure: string;
+  point_count: number;
+  /** Daily close points ordered ascending by date. Empty before the historical backfill. */
+  points: NiftyClosePoint[];
+}
+
+/**
+ * Nifty 50 price-index daily close series from GET /mf/benchmark/nifty50.
+ * Public endpoint — no auth needed. Optional from/to ISO date range filters.
+ * Empty on cold-start (before the one-time historical backfill runs on deploy).
+ */
+export function useNiftyCloseSeries(params?: { from?: string; to?: string }) {
+  const sp = new URLSearchParams();
+  if (params?.from) sp.set('from', params.from);
+  if (params?.to) sp.set('to', params.to);
+  const qs = sp.toString();
+  return useQuery<NiftyCloseSeriesPayload>({
+    queryKey: queryKeys.benchmark.nifty50(params),
+    queryFn: () =>
+      api.get<NiftyCloseSeriesPayload>(`/mf/benchmark/nifty50${qs ? `?${qs}` : ''}`),
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 10 * 60 * 1000, // closes change only once a day
+  });
+}
