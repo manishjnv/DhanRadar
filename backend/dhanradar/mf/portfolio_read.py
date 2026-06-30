@@ -17,9 +17,11 @@ from dataclasses import dataclass
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.mf.valuation import ValuationPoint
 from dhanradar.models.mf import (
     MfFund,
     MfFundMetrics,
+    MfPortfolioDailyValue,
     MfPortfolioSnapshot,
     MfUserHolding,
     UserFundScore,
@@ -452,4 +454,67 @@ def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
         "top_category_pct": top["weight_pct"] if top else None,
         "fund_count": len(rm.holdings),
         "as_of": rm.as_of,
+    }
+
+
+# --- M2.2: portfolio.valuation_series ----------------------------------------
+
+_MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
+
+
+async def load_portfolio_valuation_series(
+    db: AsyncSession,
+    portfolio_id: str,
+    days: int = 90,
+) -> list[ValuationPoint]:
+    """Read the stored daily valuation series for a portfolio.
+
+    Returns up to ``days`` most-recent points ordered ascending by date.
+    Empty list when no rows exist yet (cold-start; the Celery task fills this).
+    ``days`` is capped at _MAX_VALUATION_DAYS (~3 years).
+    """
+    pid = uuid.UUID(portfolio_id)
+    n = min(max(days, 1), _MAX_VALUATION_DAYS)
+
+    rows = (
+        await db.execute(
+            select(MfPortfolioDailyValue)
+            .where(MfPortfolioDailyValue.portfolio_id == pid)
+            .order_by(MfPortfolioDailyValue.valuation_date.desc())
+            .limit(n)
+        )
+    ).scalars().all()
+
+    # Reverse so result is ascending by date (oldest first).
+    return [
+        ValuationPoint(
+            valuation_date=r.valuation_date,
+            total_value=float(r.total_value),
+            total_invested=float(r.total_invested),
+        )
+        for r in reversed(rows)
+    ]
+
+
+def valuation_series_payload(
+    points: list[ValuationPoint],
+    portfolio_id: str,
+) -> dict:
+    """`portfolio.valuation_series` payload.
+
+    ``points`` are the owner's own calculated numbers (total_value,
+    total_invested) — DOM-allowed, #2-exempt (serialization.py note).
+    No DhanRadar composite score is included.
+    """
+    return {
+        "portfolio_id": portfolio_id,
+        "point_count": len(points),
+        "points": [
+            {
+                "date": p.valuation_date.isoformat(),
+                "value": p.total_value,
+                "invested": p.total_invested,
+            }
+            for p in points
+        ],
     }

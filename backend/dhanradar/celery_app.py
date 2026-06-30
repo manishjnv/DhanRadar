@@ -255,6 +255,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.mf_kite_enrich",
         "schedule": crontab(day_of_week=6, hour=3, minute=0),
     },
+    # M2.2 — daily portfolio valuation series — 04:00 IST (after NAV fetch 23:30 +
+    # daily_portfolio_refresh 01:30).  One upsert per portfolio: total market value
+    # = Σ (units × latest NAV).  Foundation for TRUE Sharpe/σ/drawdown (M2.3, B88).
+    "mf-portfolio-daily-valuations": {
+        "task": "dhanradar.tasks.mf.compute_portfolio_daily_valuations",
+        "schedule": crontab(hour=4, minute=0),
+    },
     # ----- Phase 6 — planned data sources (Admin.md §18 step 6). Each task writes an
     # mf.ingestion_runs row + an mf.source_health row via tasks/ingestion_run.py, so
     # the Ops console flips the source Planned → Healthy on the first successful run.

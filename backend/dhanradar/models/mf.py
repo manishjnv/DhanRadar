@@ -774,3 +774,47 @@ class MfMacroIndicator(Base):
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MfPortfolioDailyValue(Base):
+    """Daily portfolio market-value snapshot (M2.2).
+
+    One row per (portfolio_id, valuation_date) storing the portfolio's total
+    current market value and total invested for that date.  This is the
+    time-series foundation for TRUE portfolio Sharpe/σ/max-drawdown (deferred
+    to M2.3, B88).  Written by the nightly Celery task
+    ``compute_portfolio_daily_valuations`` (04:00 IST) after the NAV refresh
+    and daily_portfolio_refresh complete.
+
+    Non-neg #2: total_value and total_invested are the owner's OWN calculated
+    numbers (DOM-allowed, #2-exempt per serialization.py note).  The DhanRadar
+    composite score is never stored here.
+    """
+
+    __tablename__ = "mf_portfolio_daily_values"
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "valuation_date", name="uq_mf_portfolio_daily_value"),
+        Index("ix_mf_portfolio_daily_values_portfolio_date", "portfolio_id", "valuation_date"),
+        Index("ix_mf_portfolio_daily_values_user", "user_id"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    valuation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    total_value: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
+    total_invested: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
