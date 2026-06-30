@@ -799,20 +799,20 @@ class MfPortfolioDailyValue(Base):
         _SCHEMA,
     )
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
-    )
+    # Composite PK (portfolio_id, valuation_date) — matches the TimescaleDB hypertable
+    # pattern (cf. MfNavHistory) and the actual DDL (migration 0056 has no id column).
     portfolio_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
         nullable=False,
+        primary_key=True,
     )
+    valuation_date: Mapped[date] = mapped_column(Date, nullable=False, primary_key=True)
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("auth.users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    valuation_date: Mapped[date] = mapped_column(Date, nullable=False)
     total_value: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
     total_invested: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
     computed_at: Mapped[datetime] = mapped_column(
