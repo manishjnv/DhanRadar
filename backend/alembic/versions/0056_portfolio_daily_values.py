@@ -13,6 +13,7 @@ Create Date: 2026-06-30
 from __future__ import annotations
 
 from alembic import op
+from dhanradar.db_security import rls_downgrade_statements, rls_statements
 
 revision: str = "0056"
 down_revision: str | None = "0055"
@@ -84,9 +85,16 @@ def upgrade() -> None:
         END $$;
         """
     )
+    # Apply owner-isolation RLS (B81 — mirrors pattern from 0053).
+    _TABLE = "mf.mf_portfolio_daily_values"
+    for stmt in rls_statements(_TABLE):
+        op.execute(stmt)
 
 
 def downgrade() -> None:
+    _TABLE = "mf.mf_portfolio_daily_values"
+    for stmt in rls_downgrade_statements(_TABLE):
+        op.execute(stmt)
     op.execute(
         """
         DROP TABLE IF EXISTS mf.mf_portfolio_daily_values;

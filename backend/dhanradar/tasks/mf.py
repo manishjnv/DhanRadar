@@ -3304,7 +3304,7 @@ async def _compute_portfolio_daily_valuations_async() -> str:
     from sqlalchemy import select, text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from dhanradar.db import async_session_factory
+    from dhanradar.db import admin_task_session
     from dhanradar.mf.valuation import compute_daily_value
     from dhanradar.models.mf import MfPortfolio, MfPortfolioDailyValue, MfUserHolding
 
@@ -3313,15 +3313,15 @@ async def _compute_portfolio_daily_valuations_async() -> str:
     skipped = 0
     errors = 0
 
-    async with async_session_factory() as db:
-        # Fetch all portfolio ids.
+    async with admin_task_session() as db:
+        # Fetch all portfolio ids (BYPASSRLS — spans all users).
         portfolio_rows = (
             await db.execute(select(MfPortfolio.id, MfPortfolio.user_id))
         ).all()
 
     for portfolio_id, user_id in portfolio_rows:
         try:
-            async with async_session_factory() as db:
+            async with admin_task_session() as db:
                 # Holdings for this portfolio.
                 holdings = (
                     await db.execute(

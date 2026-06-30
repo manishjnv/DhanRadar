@@ -46,6 +46,8 @@ PERSONAL_TABLES: tuple[str, ...] = (
     "mf.mf_user_fund_score_history",
     "mf.user_fund_scores",
     "mf.mf_sip_transactions",
+    # M2.2 — daily portfolio valuation series (added 2026-06-30)
+    "mf.mf_portfolio_daily_values",
     # signal / notify / auth / compliance (classified PERSONAL; RLS enforcement = PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",
@@ -75,6 +77,8 @@ RLS_ENFORCED: tuple[str, ...] = (
     "mf.mf_user_fund_score_history",
     "mf.user_fund_scores",
     "mf.mf_sip_transactions",
+    # M2.2 — daily portfolio valuation series (added 2026-06-30)
+    "mf.mf_portfolio_daily_values",
     # signal / notify / auth / compliance (PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",
