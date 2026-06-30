@@ -14,7 +14,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { Input } from '@/components/ui/Input';
-import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
+import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
   GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
@@ -317,11 +317,38 @@ function fmtPct(n: number): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+/** Full Indian-numeral rupee (₹2,95,000) — hero figures only; tables/cards keep the humanized fmtCurrency. */
+function fmtFull(n: number): string {
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
 /** Format an ISO date string (YYYY-MM-DD) as "30 Jun 2026". */
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   const mon = d.toLocaleString('en-US', { month: 'short' });
   return `${d.getDate()} ${mon} ${d.getFullYear()}`;
+}
+
+/** Compact label/value stat used in the hero (Day Change · Invested · XIRR). */
+function HeroStat({ label, value, accent, hint, tip }: {
+  label: string;
+  value: string;
+  accent?: string;
+  hint?: string;
+  tip?: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-slate-400">
+        {label}
+        {tip && <HelpTip tip={tip} />}
+      </div>
+      <div className={`mt-0.5 font-sans text-[20px] font-semibold leading-tight ${accent ?? 'text-white'}`}>
+        {value}
+      </div>
+      {hint && <div className="mt-0.5 text-[10px] text-slate-500">{hint}</div>}
+    </div>
+  );
 }
 
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
@@ -337,6 +364,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const xiirrTip = fieldTooltip('HeroSection', 'xirr');
   const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
+  const dayChange = summary?.day_change ?? null;
 
   return (
     <div
@@ -355,46 +383,47 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
         >
           {summary && (
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-              {/* Left: user's own money figures — allowed in DOM */}
+              {/* Left: user's own money figures — allowed in DOM (#2 gates only computed DhanRadar scores) */}
               <div className="flex-1">
                 <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   Total Portfolio Value
                   {heroTip && <HelpTip tip={heroTip} />}
                 </div>
-                <div className="font-sans text-[38px] font-extrabold leading-none tracking-tight sm:text-[46px]">
-                  {fmtCurrency(summary.total_value)}
+                <div className="font-sans text-[38px] font-bold leading-none tracking-tight sm:text-[46px]">
+                  {fmtFull(summary.total_value)}
                 </div>
-                <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-small font-bold text-emerald-300">
-                  {summary.gain >= 0 ? '+' : ''}{fmtCurrency(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
+                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-1 text-small font-semibold text-emerald-300">
+                  {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))} · {fmtPct(summary.gain_pct)}
                 </div>
-                <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
-                  <span>Invested: <span className="font-bold text-white">{fmtCurrency(summary.total_invested)}</span></span>
+                {/* Stat row — Day Change · Invested · XIRR (bigger size, ~one step lighter weight) */}
+                <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-t border-white/10 pt-4">
+                  <HeroStat
+                    label="Day Change"
+                    value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}`}
+                    accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
+                    hint={dayChange === null ? 'Updates daily' : undefined}
+                  />
+                  <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                   {summary.xirr_pct !== null && (
-                    <span className="inline-flex items-center gap-1">
-                      XIRR: <span className="font-bold text-emerald-300">{fmtPct(summary.xirr_pct)}</span>
-                      {xiirrTip && <HelpTip tip={xiirrTip} />}
-                    </span>
+                    <HeroStat label="XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" tip={xiirrTip} />
                   )}
                 </div>
-                <div className="mt-3 flex flex-wrap gap-4 text-small text-slate-300">
-                  <span>Funds: <span className="font-bold text-white">{summary.fund_count}</span></span>
-                  <span>Scored: <span className="font-bold text-white">{summary.funds_scored}</span></span>
-                </div>
               </div>
-              {/* Right: BandRing (confidence_band) + plain word — NO advisory verdict, NO score */}
-              <div className="text-center">
-                <div className="relative inline-grid place-items-center">
-                  <BandRingFromBand band={band} size={120} stroke={11} />
-                  {/* ponytail: NO inner number — non-neg #2 */}
+              {/* Right: compact data-confidence badge — NO ring/gauge, NO number (#2) */}
+              <div className="shrink-0 sm:text-right">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: band ? BAND_COLOR[band] : '#94A3B8' }} aria-hidden="true" />
+                  <span className="font-sans text-[15px] font-semibold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8' }}>
+                    {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
+                  </span>
                 </div>
-                <div className="mt-2 inline-flex items-center gap-1 font-sans text-[13px] font-bold text-slate-300">
+                <div className="mt-1.5 flex items-center gap-1 text-[12px] font-medium text-slate-300 sm:justify-end">
                   Data Confidence
                   {bandTip && <HelpTip tip={bandTip} />}
                 </div>
-                <div className="mt-1 font-sans font-bold" style={{ color: band ? BAND_COLOR[band] : '#94A3B8', fontSize: 15 }}>
-                  {band ? band.charAt(0).toUpperCase() + band.slice(1) : '—'}
+                <div className="mt-0.5 text-[11px] text-slate-400">
+                  {summary.fund_count} funds{summary.funds_scored ? ` · ${summary.funds_scored} analysed` : ''}
                 </div>
-                <div className="mt-0.5 text-[11px] text-slate-400">{band ? BAND_WORD[band] : 'Not enough data yet'}</div>
               </div>
             </div>
           )}

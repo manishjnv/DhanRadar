@@ -177,15 +177,16 @@ describe('HeroSection', () => {
     expect(screen.queryByText(/48\.33 L/i)).toBeNull();
   });
 
-  it('present => shows total value (user own figure)', () => {
+  it('present => shows total value in full numerals (user own figure)', () => {
     renderHero(SUMMARY_PRESENT);
-    // 4832640 / 100000 = 48.3264 => toFixed(2) = 48.33
-    expect(screen.getByText(/48\.33 L/i)).toBeDefined();
+    // 4832640 => full Indian numeral (no lakh/crore abbreviation)
+    expect(screen.getByText(/48,32,640/)).toBeDefined();
   });
 
   it('present => shows gain and XIRR (user own figures)', () => {
     renderHero(SUMMARY_PRESENT);
-    expect(screen.getByText(/9\.84 L/i)).toBeDefined();
+    // gain = 4832640 - 3848430 = 984210 => "9,84,210"
+    expect(screen.getByText(/9,84,210/)).toBeDefined();
     expect(screen.getByText(/16\.80%/i)).toBeDefined();
   });
 
@@ -201,14 +202,14 @@ describe('HeroSection', () => {
 
   it('empty => EmptyState visible, no money figures', () => {
     renderHero(EMPTY_STATE);
-    expect(screen.queryByText(/48\.33 L/i)).toBeNull();
+    expect(screen.queryByText(/48,32,640/)).toBeNull();
     // EmptyState renders at least one matching element
     expect(screen.getAllByText(/Nothing here yet|Upload/i).length).toBeGreaterThan(0);
   });
 
   it('error => ErrorCard, no money figures', () => {
     renderHero(ERROR_STATE);
-    expect(screen.queryByText(/48\.33 L/i)).toBeNull();
+    expect(screen.queryByText(/48,32,640/)).toBeNull();
   });
 
   it('no advisory verbs, no numeric score in present state', () => {
