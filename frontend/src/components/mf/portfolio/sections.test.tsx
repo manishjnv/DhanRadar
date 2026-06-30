@@ -254,8 +254,8 @@ describe('HoldingsSection', () => {
   it('present => shows educational labels via StatusTag', () => {
     renderHoldings(HOLDINGS_PRESENT);
     // Labels appear in filter bar AND in the table; at least one of each
-    expect(screen.getAllByText('On Track').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('In Form').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('On track').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('In form').length).toBeGreaterThan(0);
   });
 
   it('present => shows user own money figures (current_value, invested)', () => {
