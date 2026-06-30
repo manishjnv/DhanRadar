@@ -15,6 +15,7 @@ import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { Input } from '@/components/ui/Input';
 import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_WORD, BAND_COLOR } from './ui';
+import { StatCard } from '@/components/ui/StatCard';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
   GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
@@ -541,29 +542,36 @@ function ConcentrationPanel({ portfolioId }: { portfolioId: string }) {
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {/* Top fund — user's own weight % */}
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="flex items-center gap-1 text-caption text-ink-muted">
-                  Largest fund
-                  {topFundTip && <HelpTip tip={topFundTip} />}
-                </div>
-                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_fund?.name ?? undefined}>{conc.top_fund?.name ?? '—'}</div>
-                <div className="font-mono text-[15px] font-extrabold text-ink">{conc.top_fund ? `${conc.top_fund.weight_pct}%` : '—'}</div>
-              </div>
+              <StatCard
+                label="Largest fund"
+                tip={topFundTip}
+                numeric={false}
+                value={
+                  <span className="truncate block" title={conc.top_fund?.name ?? undefined}>
+                    {conc.top_fund?.name ?? '—'}
+                  </span>
+                }
+                caption={conc.top_fund ? `${conc.top_fund.weight_pct}%` : '—'}
+              />
               {/* Top AMC — user's own weight % */}
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="flex items-center gap-1 text-caption text-ink-muted">
-                  Biggest fund house
-                  {topAmcTip && <HelpTip tip={topAmcTip} />}
-                </div>
-                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_amc?.name ?? undefined}>{conc.top_amc?.name ?? '—'}</div>
-                <div className="font-mono text-[15px] font-extrabold text-ink">{conc.top_amc ? `${conc.top_amc.weight_pct}%` : '—'}</div>
-              </div>
+              <StatCard
+                label="Biggest fund house"
+                tip={topAmcTip}
+                numeric={false}
+                value={
+                  <span className="truncate block" title={conc.top_amc?.name ?? undefined}>
+                    {conc.top_amc?.name ?? '—'}
+                  </span>
+                }
+                caption={conc.top_amc ? `${conc.top_amc.weight_pct}%` : '—'}
+              />
               {/* Band as descriptor WORD, never a number */}
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="text-caption text-ink-muted">Spread</div>
-                <div className="mt-0.5 font-bold text-ink">{conc.band ? (CONCENTRATION_WORD[conc.band] ?? conc.band) : '—'}</div>
-                <div className="mt-1 text-caption text-ink-secondary">{conc.amc_count} fund houses · {conc.fund_count} funds</div>
-              </div>
+              <StatCard
+                label="Spread"
+                numeric={false}
+                value={conc.band ? (CONCENTRATION_WORD[conc.band] ?? conc.band) : '—'}
+                caption={`${conc.amc_count} fund houses · ${conc.fund_count} funds`}
+              />
             </div>
             {/* by_amc — mini weight bars (user's own %) */}
             {conc.by_amc.length > 0 && (
@@ -1076,19 +1084,22 @@ export function DivSection({ portfolioId }: { portfolioId: string }) {
             {/* Facts — user's own counts and % */}
             <div className="flex flex-1 flex-col gap-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-line bg-surface-2 p-4">
-                  <div className="text-caption text-ink-muted">Fund categories</div>
-                  <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{div.category_count}</div>
-                  <div className="mt-1 text-caption text-ink-secondary">Across {div.fund_count} funds.</div>
-                </div>
-                <div className="rounded-xl border border-line bg-surface-2 p-4">
-                  <div className="flex items-center gap-1 text-caption text-ink-muted">
-                    Largest category
-                    {topCatTip && <HelpTip tip={topCatTip} />}
-                  </div>
-                  <div className="mt-0.5 truncate font-bold text-ink" title={div.top_category ?? undefined}>{div.top_category ?? '—'}</div>
-                  <div className="font-mono text-[15px] font-extrabold text-ink">{div.top_category_pct !== null ? `${div.top_category_pct}%` : '—'}</div>
-                </div>
+                <StatCard
+                  label="Fund categories"
+                  value={div.category_count}
+                  caption={`Across ${div.fund_count} funds.`}
+                />
+                <StatCard
+                  label="Largest category"
+                  tip={topCatTip}
+                  numeric={false}
+                  value={
+                    <span className="truncate block" title={div.top_category ?? undefined}>
+                      {div.top_category ?? '—'}
+                    </span>
+                  }
+                  caption={div.top_category_pct !== null ? `${div.top_category_pct}%` : '—'}
+                />
               </div>
             </div>
           </div>
@@ -1170,27 +1181,25 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
       }
     >
       {adv && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/* Standard ratios — DOM-allowed */}
           {/* B88: a true portfolio Sharpe/Sortino needs the portfolio return series (not built) —
               averaging per-fund ratios is meaningless, so defer rather than show a wrong number. */}
           <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." tip={sharpeTip} />
           <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." tip={sortinoTip} />
-          <div className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="flex items-center gap-1 text-caption text-ink-muted">
-              Rolling 1Y Avg
-              {rollingAvgTip && <HelpTip tip={rollingAvgTip} />}
-            </div>
-            <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_avg_pct, '')}</div>
-            <div className="mt-1 text-caption text-ink-secondary">Average 1-year rolling return.</div>
-          </div>
+          <StatCard
+            label="Rolling 1Y Avg"
+            tip={rollingAvgTip}
+            value={fmtPctRisk(adv.rolling_1y_avg_pct, '')}
+            caption="Average 1-year rolling return."
+          />
           {/* B88: a per-fund hit-rate (% positive windows) doesn't value-aggregate to a portfolio figure
               (depends on correlation/timing) — deferred like Sharpe/Sortino until the valuation series. */}
           <ComingSoonCard label="Positive 1Y Windows" desc="% of 1-year periods with positive returns. Needs your portfolio return history — being built." />
           {/* alpha/beta always null server-side — render as coming soon */}
           <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." tip={alphaTip} />
           <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." tip={betaTip} />
-        </div>
+          </div>
       )}
     </DataState>
   );
@@ -1259,26 +1268,22 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
 
             {/* Standard ratio cards — DOM-allowed (non-neg #2 exempts standard ratios) */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="flex items-center gap-1 text-caption text-ink-muted">
-                  Price Swings
-                  {volatilityTip && <HelpTip tip={volatilityTip} />}
-                </div>
-                <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.volatility_pct)}</div>
-                <div className="mt-1 text-caption text-ink-secondary">Average annualised volatility of your funds (indicative).</div>
-              </div>
+              <StatCard
+                label="Price Swings"
+                tip={volatilityTip}
+                value={fmtPctRisk(risk.volatility_pct)}
+                caption="Average annualised volatility of your funds (indicative)."
+              />
               {/* B88: portfolio drawdown doesn't aggregate linearly (fund falls happen at different times)
                   — needs the portfolio valuation series (not built). Defer, don't show a wrong number. */}
               <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." tip={maxDrawdownTip} />
               {/* recovery_months always null — render as coming soon (NO-SUPPRESS) */}
               <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." tip={recoveryTip} />
-              <div className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="text-caption text-ink-muted">Coverage</div>
-                <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
-                  {risk.funds_with_metrics}/{risk.fund_count} funds
-                </div>
-                <div className="mt-1 text-caption text-ink-secondary">Funds with enough data for risk metrics.</div>
-              </div>
+              <StatCard
+                label="Coverage"
+                value={`${risk.funds_with_metrics}/${risk.fund_count} funds`}
+                caption="Funds with enough data for risk metrics."
+              />
             </div>
           </>
         )}
