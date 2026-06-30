@@ -297,3 +297,43 @@ export function usePortfolioRiskAdvanced(portfolioId: string, enabled = true) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Value-series types (DataEnvelope) — daily portfolio value snapshots, M2.2.
+// All values are the user's own calculated ₹ — DOM-allowed (#2-exempt user money).
+// ---------------------------------------------------------------------------
+
+export interface ValueSeriesPoint {
+  /** ISO date string (YYYY-MM-DD) */
+  date: string;
+  /** User's own total portfolio value on this date — allowed in DOM */
+  value: number;
+  /** User's own total invested on this date — allowed in DOM */
+  invested: number;
+}
+
+export interface ValueSeriesPayload {
+  portfolio_id: string;
+  point_count: number;
+  /** All available daily data points, ordered ascending by date. Empty on cold-start. */
+  points: ValueSeriesPoint[];
+}
+
+/**
+ * Hook for the full daily portfolio-value series (all available rows, no period cap).
+ * Returns an empty `points` array on cold-start (M2.2 data starts 2026-07-01, forward-only).
+ * The front-end windows the data for the chart/sparkline — no `days` param needed.
+ */
+export function usePortfolioValueSeries(portfolioId: string) {
+  return useQuery<DataEnvelope<ValueSeriesPayload>>({
+    queryKey: queryKeys.portfolio.valueSeries(portfolioId),
+    queryFn: () =>
+      api.get<DataEnvelope<ValueSeriesPayload>>(`/portfolio/${portfolioId}/value-series`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}

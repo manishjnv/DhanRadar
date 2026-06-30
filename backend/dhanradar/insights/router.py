@@ -34,6 +34,7 @@ from dhanradar.mf.portfolio_read import (
     concentration_payload,
     diversification_payload,
     holdings_payload,
+    load_day_change,
     load_portfolio_read_model,
     load_portfolio_risk,
     load_portfolio_valuation_series,
@@ -128,9 +129,10 @@ async def portfolio_summary(
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
+    day_change = await load_day_change(db, portfolio_id)
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(rm, portfolio_id),
+        summary_payload(rm, portfolio_id, day_change),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
@@ -289,6 +291,34 @@ async def portfolio_valuation_series(
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     points = await load_portfolio_valuation_series(db, portfolio_id, days=days)
+    return serialize_concept(
+        "portfolio.valuation_series",
+        valuation_series_payload(points, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/value-series")
+async def portfolio_value_series(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """M2.2 `portfolio.valuation_series` — the owner's full daily portfolio value series.
+
+    Returns ALL available data points ordered ascending by date (no period cap — the
+    front-end windows the data for the chart). Each point: {date, value, invested} — the
+    owner's OWN calculated numbers (DOM-allowed, #2-exempt). Empty `points` list on
+    cold-start (no daily valuations computed yet). Anonymous → 401; another user's
+    portfolio → 404.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    # 1095 days ≈ 3 years — the hard cap in load_portfolio_valuation_series; returns all
+    # available rows since M2.2 data is forward-only from 2026-07-01.
+    points = await load_portfolio_valuation_series(db, portfolio_id, days=1095)
     return serialize_concept(
         "portfolio.valuation_series",
         valuation_series_payload(points, portfolio_id),

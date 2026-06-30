@@ -179,10 +179,11 @@ def _portfolio_confidence_band(bands: list[str]) -> str | None:
     return "medium"
 
 
-def summary_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
+def summary_payload(rm: PortfolioReadModel, portfolio_id: str, day_change: float | None = None) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
-    DOM-allowed #2-exempt user numbers) + an overall data-confidence band. NO portfolio composite score
-    and NO invented verdict label (that stays a future portfolio.health concept, rule-table-derived)."""
+    DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
+    NO portfolio composite score and NO invented verdict label (that stays a future portfolio.health concept,
+    rule-table-derived). `day_change` is the owner's OWN daily ₹ move — None until ≥2 valuation rows exist."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
@@ -193,6 +194,7 @@ def summary_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
         "gain": gain,
         "gain_pct": gain_pct,
         "xirr_pct": rm.xirr_pct,
+        "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
         "fund_count": len(rm.holdings),
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
@@ -457,9 +459,31 @@ def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
     }
 
 
-# --- M2.2: portfolio.valuation_series ----------------------------------------
+# --- M2.2: portfolio.valuation_series and day-change -------------------------
 
 _MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
+
+
+async def load_day_change(db: AsyncSession, portfolio_id: str) -> float | None:
+    """Day change = latest total_value − previous total_value from mf_portfolio_daily_values.
+
+    Returns None when fewer than 2 valuation rows exist (cold-start or only one day
+    of data). The difference is the user's OWN calculated change — DOM-allowed (#2-exempt
+    user money). RLS-scoped: the caller must set app.user_id before calling (the router
+    does this via the same session used for _owned_portfolio_id).
+    """
+    pid = uuid.UUID(portfolio_id)
+    rows = (
+        await db.execute(
+            select(MfPortfolioDailyValue.total_value)
+            .where(MfPortfolioDailyValue.portfolio_id == pid)
+            .order_by(MfPortfolioDailyValue.valuation_date.desc())
+            .limit(2)
+        )
+    ).scalars().all()
+    if len(rows) < 2:
+        return None
+    return float(rows[0]) - float(rows[1])
 
 
 async def load_portfolio_valuation_series(
