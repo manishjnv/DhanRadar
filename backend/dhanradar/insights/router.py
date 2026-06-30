@@ -36,9 +36,11 @@ from dhanradar.mf.portfolio_read import (
     holdings_payload,
     load_portfolio_read_model,
     load_portfolio_risk,
+    load_portfolio_valuation_series,
     risk_advanced_payload,
     risk_payload,
     summary_payload,
+    valuation_series_payload,
 )
 from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
@@ -267,3 +269,30 @@ async def portfolio_mood_context(
         return await service.get_mood_context(db, user.user_id, portfolio_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+
+
+@router.get("/portfolio/{portfolio_id}/valuation-series")
+async def portfolio_valuation_series(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = 90,
+) -> dict:
+    """M2.2 `portfolio.valuation_series` — the owner's daily portfolio total value series.
+
+    Returns up to `days` most-recent data points (default 90, max ~3 years = 1095).
+    Each point: {date, value, invested} — the owner's OWN calculated numbers
+    (DOM-allowed, #2-exempt).  Empty `points` list on cold-start (no daily valuations
+    computed yet — the nightly Celery task fills this). Anonymous → 401; another
+    user's portfolio → 404.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    points = await load_portfolio_valuation_series(db, portfolio_id, days=days)
+    return serialize_concept(
+        "portfolio.valuation_series",
+        valuation_series_payload(points, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )

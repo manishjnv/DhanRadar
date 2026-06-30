@@ -3265,3 +3265,134 @@ async def _mf_kite_enrich_pipeline() -> str:
         f" ({len(kite_lookup)} Kite instruments)"
     )
 
+
+# ---------------------------------------------------------------------------
+# M2.2 — daily portfolio valuation series
+# ---------------------------------------------------------------------------
+
+@celery_app.task(
+    name="dhanradar.tasks.mf.compute_portfolio_daily_valuations",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=2,
+)
+def compute_portfolio_daily_valuations(self: Any) -> str:  # type: ignore[override]
+    """Nightly task (04:00 IST) — write one `mf_portfolio_daily_values` row per portfolio.
+
+    For each portfolio that has holdings, fetch the latest available NAV for each
+    ISIN from `mf_nav_history` (the most recent row, which after the 23:30 NAV
+    fetch is today's date), compute total market value, and upsert.
+
+    Idempotent: ON CONFLICT (portfolio_id, valuation_date) DO UPDATE refreshes
+    total_value and total_invested, so a re-run on the same day is safe.
+
+    Runs AFTER:
+      - mf-nav-daily-fetch    (23:30 IST) — fresh NAV available
+      - mf-daily-portfolio-refresh (01:30 IST) — cached reports rebuilt
+
+    DPDP: only portfolio_id + aggregate ₹ totals are written.  No ISIN-level
+    values leave this task.  Log messages use portfolio_id only (not user_id,
+    which is a personal identifier).
+    """
+    return asyncio.run(_compute_portfolio_daily_valuations_async())
+
+
+async def _compute_portfolio_daily_valuations_async() -> str:
+    from sqlalchemy import select, text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import admin_task_session
+    from dhanradar.mf.valuation import compute_daily_value
+    from dhanradar.models.mf import MfPortfolio, MfPortfolioDailyValue, MfUserHolding
+
+    today = date.today()
+    upserted = 0
+    skipped = 0
+    errors = 0
+
+    async with admin_task_session() as db:
+        # Fetch all portfolio ids (BYPASSRLS — spans all users).
+        portfolio_rows = (
+            await db.execute(select(MfPortfolio.id, MfPortfolio.user_id))
+        ).all()
+
+    for portfolio_id, user_id in portfolio_rows:
+        try:
+            async with admin_task_session() as db:
+                # Holdings for this portfolio.
+                holdings = (
+                    await db.execute(
+                        select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
+                        .where(MfUserHolding.portfolio_id == portfolio_id)
+                    )
+                ).all()
+
+                if not holdings:
+                    skipped += 1
+                    continue
+
+                isins = [h.isin for h in holdings]
+
+                # Latest NAV for each ISIN.
+                nav_rows = await db.execute(
+                    text(
+                        "SELECT DISTINCT ON (isin) isin, nav"
+                        " FROM mf.mf_nav_history"
+                        " WHERE isin = ANY(:isins)"
+                        " ORDER BY isin, nav_date DESC"
+                    ),
+                    {"isins": isins},
+                )
+                nav_map: dict[str, float] = {r.isin: float(r.nav) for r in nav_rows}
+
+                total_invested = sum(
+                    float(h.invested_amount or 0) for h in holdings
+                )
+                units_nav_pairs = [
+                    (float(h.units or 0), nav_map.get(h.isin, 0.0))
+                    for h in holdings
+                ]
+
+                point = compute_daily_value(units_nav_pairs, total_invested, today)
+
+                # Upsert: update value + invested if a row for today already exists.
+                stmt = pg_insert(MfPortfolioDailyValue).values(
+                    portfolio_id=portfolio_id,
+                    user_id=user_id,
+                    valuation_date=point.valuation_date,
+                    total_value=point.total_value,
+                    total_invested=point.total_invested,
+                ).on_conflict_do_update(
+                    constraint="uq_mf_portfolio_daily_value",
+                    set_={
+                        "total_value": point.total_value,
+                        "total_invested": point.total_invested,
+                        "computed_at": text("now()"),
+                    },
+                )
+                await db.execute(stmt)
+                await db.commit()
+                upserted += 1
+
+        except Exception:
+            errors += 1
+            logger.exception(
+                "compute_portfolio_daily_valuations: error for portfolio %s", portfolio_id
+            )
+
+    logger.info(
+        "compute_portfolio_daily_valuations complete",
+        date=today.isoformat(),
+        upserted=upserted,
+        skipped=skipped,
+        errors=errors,
+    )
+    return (
+        f"compute_portfolio_daily_valuations {today}: "
+        f"upserted={upserted} skipped={skipped} errors={errors}"
+    )
+
+

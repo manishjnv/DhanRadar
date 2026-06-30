@@ -132,8 +132,8 @@ def test_full_i5_personal_tables_all_enforced():
 
 def test_rls_migrations_table_list_matches_rls_enforced():
     """B83 drift text-assert: the inlined table literals across the RLS migrations (0053 mf.* + 0054
-    signal/notify/auth/compliance) == db_security.RLS_ENFORCED, so a table dropped from the constant
-    but left in a migration (or vice versa) — in EITHER file — fails CI."""
+    signal/notify/auth/compliance + 0056 M2.2) == db_security.RLS_ENFORCED, so a table dropped from
+    the constant but left in a migration (or vice versa) — in ANY file — fails CI."""
     versions = Path(__file__).resolve().parents[2] / "alembic" / "versions"
     schema_alt = "|".join(re.escape(s) for s in APP_SCHEMAS)
     pat = re.compile(rf'"((?:{schema_alt})\.[a-z_]+)"')
@@ -141,6 +141,7 @@ def test_rls_migrations_table_list_matches_rls_enforced():
     for fname in (
         "0053_rls_personal_tables_and_admin_role.py",
         "0054_rls_signal_notify_auth_compliance.py",
+        "0056_portfolio_daily_values.py",
     ):
         found |= set(pat.findall((versions / fname).read_text(encoding="utf-8")))
     assert found == set(RLS_ENFORCED), f"migration vs RLS_ENFORCED drift: {found ^ set(RLS_ENFORCED)}"
