@@ -25,6 +25,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import time
 import zipfile
@@ -3425,14 +3426,13 @@ def _fetch_nifty_closes(
         start=start.isoformat(),
         end=(end + timedelta(days=1)).isoformat(),  # yfinance end is exclusive
         progress=False,
-        auto_adjust=True,
+        auto_adjust=False,  # ^NSEI is the price index; no dividend adjustment needed or wanted
     )
     if raw.empty:
         return []
     close_col = raw["Close"]
     rows: list[tuple[date, float]] = []
     for ts, val in close_col.items():
-        import math
         if math.isnan(float(val)):
             continue
         # yfinance index is a pandas Timestamp; .date() gives a stdlib date.

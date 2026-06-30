@@ -882,6 +882,7 @@ async def benchmark_nifty50(
     db: Annotated[AsyncSession, Depends(get_db)],
     from_date: str | None = Query(None, alias="from", description="ISO date YYYY-MM-DD"),
     to_date: str | None = Query(None, alias="to", description="ISO date YYYY-MM-DD"),
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
 ) -> dict:
     """Public reference endpoint — Nifty 50 price-index daily closes.
 
