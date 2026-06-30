@@ -190,12 +190,12 @@ describe('HeroSection', () => {
     expect(screen.getByText(/16\.80%/i)).toBeDefined();
   });
 
-  it('present => shows confidence band word, not a verdict', () => {
+  it('present => shows data completeness level word, not a verdict', () => {
     renderHero(SUMMARY_PRESENT);
-    // band word rendered
-    expect(screen.getByText('High')).toBeDefined();
-    // Data Confidence label present (may appear multiple times)
-    expect(screen.getAllByText(/Data Confidence/i).length).toBeGreaterThan(0);
+    // high band => "Complete" level word (dot meter, never the band word "High")
+    expect(screen.getByText('Complete')).toBeDefined();
+    // Data Completeness eyebrow present
+    expect(screen.getAllByText(/Data Completeness/i).length).toBeGreaterThan(0);
     // No advisory portfolio verdict
     expect(screen.queryByText(/Healthy Portfolio/i)).toBeNull();
   });
