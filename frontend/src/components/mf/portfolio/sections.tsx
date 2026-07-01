@@ -354,9 +354,12 @@ function HeroStat({ label, value, accent, hint, tip }: {
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading, isError, refetch } = usePortfolioSummaryById(portfolioId);
 
-  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
   const summary = envelope?.data ?? null;
   const reason = envelope?.meta.reason ?? null;
+  // Treat a present-but-empty portfolio (no holdings yet) as 'empty' so the hero shows
+  // the upload CTA instead of crashing on null gain_pct / fmtPct(null).
+  const status = isLoading ? 'loading' : isError ? 'error'
+    : (envelope?.status === 'present' && summary?.fund_count === 0 ? 'empty' : (envelope?.status ?? 'empty'));
 
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
   // ponytail: tips from data accessors only — no hardcoded strings
@@ -412,8 +415,8 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     </div>
                     <div>
                       <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Return</div>
-                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${summary.gain_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {fmtPct(summary.gain_pct)}
+                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${(summary.gain_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {summary.gain_pct !== null ? fmtPct(summary.gain_pct) : '—'}
                       </div>
                     </div>
                   </div>
