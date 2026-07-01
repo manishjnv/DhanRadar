@@ -170,8 +170,8 @@ export interface SummaryPayload {
   total_invested: number;
   /** User's own absolute gain — allowed in DOM */
   gain: number;
-  /** User's own gain % — allowed in DOM */
-  gain_pct: number;
+  /** User's own gain % — allowed in DOM; null when total_invested is 0 (no holdings yet) */
+  gain_pct: number | null;
   /** User's own XIRR — allowed in DOM */
   xirr_pct: number | null;
   /** User's own 1-day value change — allowed in DOM; null until ≥2 daily-valuation rows exist (M2.2) */
