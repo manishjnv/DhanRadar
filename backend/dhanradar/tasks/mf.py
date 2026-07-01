@@ -39,7 +39,7 @@ from structlog.contextvars import bind_contextvars
 from dhanradar.celery_app import celery_app
 from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
-from dhanradar.mf.cas import CasParseError, ParsedHolding, parse_cas
+from dhanradar.mf.cas import CasParseError, ParsedHolding, detect_and_parse
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
@@ -282,7 +282,52 @@ async def _run_pipeline(
     if password is not None:
         await redis.delete(pw_key)
 
-    parsed = parse_cas(path, password)  # raises CasParseError on bad password/format
+    parsed = detect_and_parse(path, password)  # routes to CAS PDF or CAMS TDS parser
+
+    # Resolve CAMS TDS placeholders (isin="CAMS:<product_code>") to real ISINs via
+    # pg_trgm similarity on mf_funds.scheme_name.  Unresolved holdings are kept with
+    # the placeholder ISIN and will score as insufficient_data (honest fail-safe).
+    cams_placeholders = [p for p in parsed if p.isin.startswith("CAMS:")]
+    if cams_placeholders:
+        import asyncio as _aio
+        from dataclasses import replace as _dc_replace
+
+        from sqlalchemy import text as _sa_text
+
+        from dhanradar.db import task_session
+
+        async def _resolve_isins(holdings: list[ParsedHolding]) -> list[ParsedHolding]:
+            resolved: list[ParsedHolding] = []
+            async with task_session() as _db:
+                for h in holdings:
+                    if not h.isin.startswith("CAMS:"):
+                        resolved.append(h)
+                        continue
+                    # Fuzzy match on scheme_name using pg_trgm similarity
+                    row = (await _db.execute(
+                        _sa_text(
+                            "SELECT isin, scheme_name, similarity(scheme_name, :name) AS sim"
+                            " FROM mf.mf_funds"
+                            " ORDER BY similarity(scheme_name, :name) DESC"
+                            " LIMIT 1"
+                        ),
+                        {"name": h.scheme_name},
+                    )).first()
+                    if row and row[2] > 0.25:  # similarity threshold
+                        logger.info(
+                            "cams_isin_resolved: %r -> %s (sim=%.2f)",
+                            h.scheme_name, row[0], row[2],
+                        )
+                        resolved.append(_dc_replace(h, isin=row[0]))
+                    else:
+                        logger.warning(
+                            "cams_isin_unresolved: %r (best sim=%.2f) -- keeping placeholder",
+                            h.scheme_name, row[2] if row else 0.0,
+                        )
+                        resolved.append(h)
+            return resolved
+
+        parsed = _aio.run(_resolve_isins(parsed))
     rengine = RatingEngine()
 
     async with rls_user_session(user_id) as db:

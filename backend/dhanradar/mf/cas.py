@@ -315,6 +315,267 @@ def normalize_folio(folio: str) -> str:
     return _FOLIO_PLAN_SUFFIX.sub("", folio.strip()).strip()
 
 
+# ---------------------------------------------------------------------------
+# CAMS Transaction Details Statement parsers (.txt / .xls / .xlsx)
+#
+# The "Transaction Details Statement" from camsonline.com is a separate product
+# from the CAS PDF.  It contains full transaction history (Purchase/SIP/
+# Redemption/Switch) but no ISIN codes.  The parser returns ParsedHolding
+# objects where `isin` is a PLACEHOLDER of the form "CAMS:<product_code>" —
+# the caller (tasks/mf.py _resolve_cams_txn_isins) is expected to resolve
+# these to real ISINs via the mf_funds master before further processing.
+#
+# Supported formats:
+#   .txt   — tab-separated (CAMS Text option)
+#   .xls   — legacy Excel 97-2003 (CAMS Excel option, requires xlrd)
+#   .xlsx  — modern Excel (requires openpyxl)
+#
+# Column contract (both formats, 14 columns):
+#   MF_NAME, INVESTOR_NAME, PAN, FOLIO_NUMBER, PRODUCT_CODE, SCHEME_NAME,
+#   Type, TRADE_DATE, TRANSACTION_TYPE, DIVIDEND_RATE, AMOUNT, UNITS, PRICE,
+#   BROKER
+# ---------------------------------------------------------------------------
+
+# Map CAMS TRANSACTION_TYPE (normalised, uppercased) → (canonical_txn_type, b65_sign)
+# b65_sign = -1 means negate (statement → investor convention), +1 means keep as-is.
+_CAMS_TXN_MAP: dict[str, tuple[str, int]] = {
+    "PURCHASE": ("purchase", -1),
+    "SIP PURCHASE": ("sip", -1),
+    "PURCHASE SIP": ("sip", -1),
+    "ADDITIONAL PURCHASE": ("purchase", -1),
+    "ADDITIONAL SIP PURCHASE": ("sip", -1),
+    "SWITCH IN": ("switch_in", -1),
+    "SWITCH IN (MERGER)": ("switch_in", -1),
+    "REDEMPTION": ("redemption", 1),
+    "REDEMPTION SIP": ("redemption", 1),
+    "SWITCH OUT": ("switch_out", 1),
+    "SWITCH OUT (MERGER)": ("switch_out", 1),
+    "DIVIDEND PAYOUT": ("dividend_payout", 1),
+    "DIVIDEND REINVESTED": ("dividend_reinvest", 0),
+    "IDCW REINVESTED": ("dividend_reinvest", 0),
+    "REVERSAL": ("reversal", -1),
+}
+
+# Non-financial transaction types to silently skip (admin corrections, etc.)
+_CAMS_ADMIN_KEYWORDS = (
+    "address", "nct ", "nct-", "data updat", "permanent address",
+    "change of bank", "ars", "contact", "mobile", "email", "registered",
+    "cancelled", " cancelled", "invalid", "refund",
+)
+
+
+def _cams_txn_to_parsedtxn(row: dict[str, Any]) -> ParsedTxn | None:
+    """Convert one CAMS Transaction Details row dict to ParsedTxn.
+
+    Returns None for admin/non-cash rows and rows with zero amount.
+    Applies B65 sign normalisation (statement → investor convention).
+    """
+    raw_type = str(row.get("TRANSACTION_TYPE") or "").strip()
+    raw_amount = row.get("AMOUNT")
+    raw_units = row.get("UNITS")
+    raw_price = row.get("PRICE")
+    raw_date = str(row.get("TRADE_DATE") or "").strip()
+
+    # Skip admin/non-cash rows
+    rt_lower = raw_type.lower()
+    if any(kw in rt_lower for kw in _CAMS_ADMIN_KEYWORDS):
+        return None
+
+    try:
+        amount = float(raw_amount) if raw_amount not in (None, "", "0") else 0.0
+        units = float(raw_units) if raw_units not in (None, "", "0") else 0.0
+        price = float(raw_price) if raw_price not in (None, "", "0") else None
+    except (TypeError, ValueError):
+        return None
+
+    if amount == 0.0 and units == 0.0:
+        return None
+
+    # Parse date — CAMS uses DD-MON-YYYY (e.g. 27-FEB-2017)
+    try:
+        d = datetime.strptime(raw_date, "%d-%b-%Y").date()
+    except ValueError:
+        return None
+
+    rt_upper = raw_type.strip().upper()
+    txn_info = _CAMS_TXN_MAP.get(rt_upper)
+    if txn_info is None:
+        # Try prefix match for variants
+        for key, info in _CAMS_TXN_MAP.items():
+            if rt_upper.startswith(key):
+                txn_info = info
+                break
+    if txn_info is None:
+        logger.debug("cams_txn_parser: unknown txn type %r — skipping", raw_type)
+        return None
+
+    canon_type, sign = txn_info
+    if sign == 0:
+        # DIVIDEND_REINVEST — unit-only, no external cashflow; record amount=0
+        return ParsedTxn(
+            when=d, amount=0.0, is_sip=False,
+            txn_type=canon_type, units=units, nav=price,
+        )
+
+    investor_amount = -amount * sign  # B65: negate statement → investor convention
+    is_sip = canon_type == "sip"
+    return ParsedTxn(
+        when=d, amount=investor_amount, is_sip=is_sip,
+        txn_type=canon_type, units=units, nav=price,
+    )
+
+
+def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
+    """Core CAMS TDS parser: list of row dicts → list[ParsedHolding].
+
+    Groups rows by (FOLIO_NUMBER, PRODUCT_CODE) so each distinct folio+scheme
+    becomes one ParsedHolding.  The `isin` field is set to the placeholder
+    "CAMS:<product_code>" — the caller resolves it to a real ISIN.
+    """
+    from collections import defaultdict
+
+    holdings_txns: dict[tuple[str, str], list[ParsedTxn]] = defaultdict(list)
+    holdings_meta: dict[tuple[str, str], dict] = {}
+
+    for row in rows:
+        folio = str(row.get("FOLIO_NUMBER") or "").strip()
+        product = str(row.get("PRODUCT_CODE") or "").strip()
+        scheme_name = str(row.get("SCHEME_NAME") or "").strip()
+        mf_name = str(row.get("MF_NAME") or "").strip()
+
+        key = (folio, product)
+        if key not in holdings_meta:
+            holdings_meta[key] = {
+                "scheme_name": scheme_name,
+                "mf_name": mf_name,
+                "folio": folio,
+                "product": product,
+            }
+
+        txn = _cams_txn_to_parsedtxn(row)
+        if txn is not None:
+            holdings_txns[key].append(txn)
+
+    result: list[ParsedHolding] = []
+    for key, meta in holdings_meta.items():
+        txns = sorted(holdings_txns.get(key, []), key=lambda t: t.when)
+
+        # Compute current units from transaction history
+        current_units = sum(t.units for t in txns if t.units != 0.0)
+        # Net invested = sum of purchase amounts (outflows are negative in investor convention)
+        net_invested = sum(-t.amount for t in txns if t.amount < 0)
+
+        result.append(
+            ParsedHolding(
+                isin=f"CAMS:{meta['product']}",   # placeholder — caller resolves
+                amfi_code=None,
+                scheme_name=_clean_text(meta["scheme_name"]) or meta["product"],
+                folio_number=normalize_folio(meta["folio"]),
+                units=round(current_units, 6),
+                nav=None,
+                value=None,     # unknown without current NAV
+                cost=round(net_invested, 2) if net_invested > 0 else None,
+                as_of_date=None,
+                txns=txns,
+            )
+        )
+
+    return result
+
+
+def parse_cams_txn_text(path: str) -> list[ParsedHolding]:
+    """Parse a CAMS Transaction Details Statement in TAB-SEPARATED TEXT format (.txt).
+
+    This is the "Text" format downloaded from camsonline.com → Statements →
+    Transaction Details Statement.  No password required.
+
+    Returns a list of ParsedHolding with isin="CAMS:<product_code>" placeholders
+    that the caller must resolve to real ISINs before further processing.
+    """
+    import csv
+
+    rows: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            rows.append(dict(row))
+
+    if not rows:
+        raise CasParseError(f"No data rows found in {path}")
+
+    holdings = _rows_to_parsedholdings(rows)
+    logger.info("cams_txn_text: parsed %d holdings from %s", len(holdings), path)
+    return holdings
+
+
+def parse_cams_txn_excel(path: str) -> list[ParsedHolding]:
+    """Parse a CAMS Transaction Details Statement in EXCEL format (.xls or .xlsx).
+
+    Supports:
+      .xls  — Excel 97-2003 (via xlrd, must be installed)
+      .xlsx — Excel 2007+ (via openpyxl, already a dependency)
+
+    Returns ParsedHolding list with isin="CAMS:<product_code>" placeholders.
+    """
+    rows: list[dict[str, Any]] = []
+    ext = path.rsplit(".", 1)[-1].lower()
+
+    if ext == "xls":
+        import xlrd  # xlrd handles legacy .xls; add to requirements if needed
+
+        wb = xlrd.open_workbook(path)
+        ws = wb.sheet_by_index(0)
+        if ws.nrows < 2:
+            raise CasParseError(f"No data rows found in {path}")
+        headers = [str(ws.cell_value(0, c)).strip() for c in range(ws.ncols)]
+        for r in range(1, ws.nrows):
+            row = {}
+            for c, h in enumerate(headers):
+                v = ws.cell_value(r, c)
+                row[h] = v
+            rows.append(row)
+    else:
+        # .xlsx via openpyxl
+        from openpyxl import load_workbook
+
+        wb = load_workbook(path, read_only=True, data_only=True)
+        ws = wb.active
+        row_iter = iter(ws.rows)
+        headers = [str(cell.value).strip() for cell in next(row_iter)]
+        for xrow in row_iter:
+            row = {h: (cell.value if cell.value is not None else "") for h, cell in zip(headers, xrow)}
+            rows.append(row)
+        wb.close()
+
+    if not rows:
+        raise CasParseError(f"No data rows found in {path}")
+
+    holdings = _rows_to_parsedholdings(rows)
+    logger.info("cams_txn_excel: parsed %d holdings from %s", len(holdings), path)
+    return holdings
+
+
+def detect_and_parse(path: str, password: str | None = None) -> list[ParsedHolding]:
+    """Route to the correct parser based on file extension.
+
+    Supported:
+      .pdf        — standard CAS PDF (casparser)
+      .txt        — CAMS Transaction Details Statement (tab-separated text)
+      .xls/.xlsx  — CAMS Transaction Details Statement (Excel)
+    """
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if ext == "pdf":
+        return parse_cas(path, password=password)
+    if ext == "txt":
+        return parse_cams_txn_text(path)
+    if ext in ("xls", "xlsx"):
+        return parse_cams_txn_excel(path)
+    raise CasParseError(
+        f"Unsupported file type '.{ext}'. "
+        "Upload a CAS PDF, a CAMS Transaction Details Statement (.txt or .xls/.xlsx)."
+    )
+
+
 def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
     """Deterministic per-txn fingerprint. casparser exposes NO stable txn id, so source_ref must be
     derived so a re-upload of the same statement reproduces it → ON CONFLICT skip (idempotent). Encodes
