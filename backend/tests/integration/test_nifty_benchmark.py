@@ -19,9 +19,32 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
+
+
+# ---------------------------------------------------------------------------
+# Table isolation — mf_benchmark_daily is a public table, so rows committed
+# by TaskSessionLocal survive the per-test transaction rollback used for other
+# personal-data tables.  Truncate before each test so every PG test starts
+# from an empty table.  The fixture uses its own TaskSessionLocal connection
+# (same as the production task) to stay consistent with the writes-under-test.
+# It swallows connection errors gracefully so the three pure/unit tests
+# (_fetch_nifty_closes_*) still pass in environments without a live Postgres.
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_benchmark():
+    try:
+        from dhanradar.db import task_session
+        async with task_session() as db:
+            await db.execute(text("DELETE FROM mf.mf_benchmark_daily"))
+            await db.commit()
+    except Exception:
+        pass  # DB not available (pure-test environment) — silently skip
+    yield
 
 
 # ---------------------------------------------------------------------------
