@@ -289,7 +289,6 @@ async def _run_pipeline(
     # the placeholder ISIN and will score as insufficient_data (honest fail-safe).
     cams_placeholders = [p for p in parsed if p.isin.startswith("CAMS:")]
     if cams_placeholders:
-        import asyncio as _aio
         from dataclasses import replace as _dc_replace
 
         from sqlalchemy import text as _sa_text
@@ -327,7 +326,7 @@ async def _run_pipeline(
                         resolved.append(h)
             return resolved
 
-        parsed = _aio.run(_resolve_isins(parsed))
+        parsed = await _resolve_isins(parsed)
     rengine = RatingEngine()
 
     async with rls_user_session(user_id) as db:
