@@ -3488,13 +3488,22 @@ async def _upsert_benchmark_rows(
 def nifty_close_daily(self: Any) -> str:  # type: ignore[override]
     """EOD task (23:45 IST) — fetch the latest ^NSEI price-index close and upsert.
 
-    Fetches the last 5 calendar days from Yahoo Finance (to handle weekends/
-    holidays) and upserts the most-recent close row.  Idempotent: re-running
-    on the same day is safe.  Network errors are logged and the task returns a
-    no-op result (never crashes the worker).
+    Sync Celery wrapper; the async core lives in ``_nifty_close_daily_async``
+    (mirrors the M2.2 compute_portfolio_daily_valuations pattern) so tests can
+    ``await _nifty_close_daily_async()`` without hitting the asyncio.run-inside-
+    running-loop error.
+    """
+    return asyncio.run(_nifty_close_daily_async())
 
-    This is on the 640 MB ``batch`` queue — NOT on celery-mood (192 MB, OOM-risk).
-    Do NOT add live yfinance downloads to celery-mood under any circumstances.
+
+async def _nifty_close_daily_async() -> str:
+    """Async core for nifty_close_daily — testable without a running event loop.
+
+    Fetches the last 5 calendar days from Yahoo Finance (to handle weekends/
+    holidays) and upserts the most-recent close row.  Idempotent.  Network
+    errors are logged and the function returns a no-op result.
+
+    Runs on the 640 MB batch queue — do NOT call from celery-mood (192 MB).
     """
     today = date.today()
     start = today - timedelta(days=5)  # catch up across weekends / holidays
@@ -3511,7 +3520,7 @@ def nifty_close_daily(self: Any) -> str:  # type: ignore[override]
     # Keep only the most-recent close (we re-run daily so yesterday's row
     # is already stored from the previous run).
     latest_date, latest_value = max(rows, key=lambda r: r[0])
-    upserted = asyncio.run(_upsert_benchmark_rows([(latest_date, latest_value)]))
+    upserted = await _upsert_benchmark_rows([(latest_date, latest_value)])
     logger.info(
         "nifty_close_daily: close_date=%s close_value=%.2f upserted=%d",
         latest_date, latest_value, upserted,
@@ -3520,18 +3529,22 @@ def nifty_close_daily(self: Any) -> str:  # type: ignore[override]
 
 
 def backfill_nifty_close_series(years: int = 10) -> str:
-    """One-time backfill of ^NSEI daily closes for the last ``years`` years.
+    """One-time backfill of ^NSEI daily closes.  Sync wrapper — calls the async core.
 
-    Call from an admin shell or as a one-off Celery task after the migration
-    deploys.  Safe to re-run (idempotent upsert).  Fetches synchronously via
-    yfinance — run outside the celery-mood worker (use a batch worker or a
-    standalone ``python -c`` invocation).
-
-    Example (KVM4 shell inside the backend container):
+    Example (KVM4 shell):
         python -c "from dhanradar.tasks.mf import backfill_nifty_close_series; print(backfill_nifty_close_series())"
-
     Or via Celery:
         celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
+    """
+    return asyncio.run(_backfill_nifty_close_series_async(years))
+
+
+async def _backfill_nifty_close_series_async(years: int = 10) -> str:
+    """Async core for backfill_nifty_close_series — testable in pytest-asyncio.
+
+    Bulk-upserts ^NSEI daily closes for the last ``years`` years.  Idempotent;
+    safe to re-run.  Fetches synchronously via yfinance then upserts via the
+    async DB session.
     """
     today = date.today()
     start = today - timedelta(days=years * 365)
@@ -3545,7 +3558,7 @@ def backfill_nifty_close_series(years: int = 10) -> str:
     if not rows:
         return "backfill_nifty_close_series: no_data"
 
-    upserted = asyncio.run(_upsert_benchmark_rows(rows))
+    upserted = await _upsert_benchmark_rows(rows)
     logger.info(
         "backfill_nifty_close_series: upserted=%d range=%s..%s",
         upserted, start, today,

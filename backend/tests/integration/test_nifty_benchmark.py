@@ -143,11 +143,11 @@ async def _seed_close(db_session, close_date: date, close_value: float) -> None:
 
 async def test_nifty_close_daily_upserts_row(db_session, async_client):
     """nifty_close_daily inserts today's close into mf_benchmark_daily."""
-    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, nifty_close_daily
+    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, _nifty_close_daily_async
 
     mock_df = _make_yf_df([("2026-07-01", 24_800.00)])
     with _patch_yf(mock_df):
-        result = nifty_close_daily()  # type: ignore[call-arg]
+        result = await _nifty_close_daily_async()
 
     assert "nifty_close_daily: close_date=2026-07-01" in result
 
@@ -166,12 +166,12 @@ async def test_nifty_close_daily_upserts_row(db_session, async_client):
 
 async def test_nifty_close_daily_idempotent(db_session, async_client):
     """Running nifty_close_daily twice updates close_value (ON CONFLICT DO UPDATE)."""
-    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, nifty_close_daily
+    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, _nifty_close_daily_async
 
     for val in (24_700.00, 24_750.25):
         mock_df = _make_yf_df([("2026-07-01", val)])
         with _patch_yf(mock_df):
-            nifty_close_daily()  # type: ignore[call-arg]
+            await _nifty_close_daily_async()
 
     row = (
         await db_session.execute(
@@ -188,10 +188,10 @@ async def test_nifty_close_daily_idempotent(db_session, async_client):
 
 async def test_nifty_close_daily_no_op_on_empty_data(db_session, async_client):
     """nifty_close_daily returns no_data gracefully when yfinance returns empty."""
-    from dhanradar.tasks.mf import nifty_close_daily
+    from dhanradar.tasks.mf import _nifty_close_daily_async
 
     with _patch_yf(_make_empty_df()):
-        result = nifty_close_daily()  # type: ignore[call-arg]
+        result = await _nifty_close_daily_async()
 
     assert "no_data" in result
 
@@ -203,7 +203,7 @@ async def test_nifty_close_daily_no_op_on_empty_data(db_session, async_client):
 
 async def test_backfill_upserts_multiple_rows(db_session, async_client):
     """backfill_nifty_close_series bulk-upserts a range of historical closes."""
-    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, backfill_nifty_close_series
+    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50, _backfill_nifty_close_series_async
 
     rows = [
         ("2026-06-27", 24_100.00),
@@ -212,7 +212,7 @@ async def test_backfill_upserts_multiple_rows(db_session, async_client):
     ]
     mock_df = _make_yf_df(rows)
     with _patch_yf(mock_df):
-        result = backfill_nifty_close_series(years=1)
+        result = await _backfill_nifty_close_series_async(years=1)
 
     assert "upserted=3" in result
 
