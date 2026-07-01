@@ -549,3 +549,181 @@ async def test_portfolio_history_response_has_disclosure_bundle(monkeypatch):
     assert "unified_score" not in d
     assert "xirr_pct" not in d
     assert "total_invested" not in d
+
+
+# ---------------------------------------------------------------------------
+# 5. Regression: monthly rescore must NOT clobber a prior xirr_pct with None
+#    (fix/xirr-clobber-on-rescore — the rescore path uses a single cashflow so
+#    xirr() returns None; without the fix that None overwrites the value
+#    computed at CAS-upload time).
+# ---------------------------------------------------------------------------
+
+
+async def test_monthly_rescore_preserves_prior_xirr_pct(monkeypatch):
+    """When build_snapshot yields xirr_pct=None, _monthly_rescore must carry
+    forward the most-recent persisted xirr_pct instead of writing NULL.
+
+    The rescore builds Holdings with only one cashflow (current_value as of
+    today); XIRR requires ≥2 cashflows so the result is always None in this
+    path.  The fix reads the existing row's xirr_pct and passes it through
+    dataclasses.replace() so persist_portfolio_snapshot receives the real value.
+    """
+    import dhanradar.mf.history as _mf_history_mod
+    import dhanradar.tasks.mf as mf_tasks
+    from dhanradar.mf.snapshot import PortfolioSnapshot
+
+    PRIOR_XIRR = 14.2  # value that should be preserved
+
+    user_id = str(uuid.uuid4())
+    persist_calls: list[dict] = []
+
+    # build_snapshot returns a REAL PortfolioSnapshot with xirr_pct=None so
+    # that dataclasses.replace() in the fix actually works.
+    null_snap = PortfolioSnapshot(
+        total_invested=10_000.0,
+        current_value=11_000.0,
+        xirr_pct=None,
+        category_allocation={},
+        overlap_matrix={},
+    )
+
+    async def _fake_persist(db_arg=None, **kw) -> None:
+        persist_calls.append(kw)
+
+    async def _fake_is_plus(uid: str, db: Any) -> bool:
+        return True
+
+    async def _fake_append(db_arg=None, **kw) -> bool:
+        return True
+
+    async def _fake_prior_label(db_arg=None, *a, **kw):
+        return None
+
+    async def _fake_score_fund(engine, signals):
+        return _make_result(isin=signals.isin)
+
+    async def _fake_load_nav(db, isins, lookback_days=400):
+        return ({i: [(date(2026, 6, 1), 100.0)] for i in isins}, {i: 100.0 for i in isins})
+
+    def _fake_compute_signals(isin, series, **kw):
+        m = MagicMock()
+        m.isin = isin
+        return m
+
+    holding = MagicMock()
+    holding.isin = "INF000REG01"
+    holding.units = 10.0
+    holding.invested_amount = 1000.0
+
+    class _FakeScalars:
+        def __init__(self, items):
+            self._items = items
+
+        def all(self):
+            return self._items
+
+    class _FakeResult:
+        def __init__(self, *, first_val=None, all_val=None, scalar=None):
+            self._first = first_val
+            self._all = all_val
+            self._scalar = scalar
+
+        def first(self):
+            return self._first
+
+        def scalars(self):
+            return _FakeScalars(self._all or [])
+
+        def all(self):
+            return self._all or []
+
+        def scalar_one_or_none(self):
+            return self._scalar
+
+    class _FakeSession:
+        def __init__(self):
+            self._n = 0
+
+        async def execute(self, stmt):
+            self._n += 1
+            if self._n == 1:
+                # portfolio owner/name resolve
+                return _FakeResult(first_val=(user_id, "Test Portfolio"))
+            if self._n == 2:
+                # holdings select
+                return _FakeResult(all_val=[holding])
+            if self._n == 3:
+                # scheme name fetch
+                return _FakeResult(all_val=[(holding.isin, "Test Fund")])
+            # MfPortfolioSnapshot.xirr_pct query — return the prior value.
+            return _FakeResult(scalar=PRIOR_XIRR)
+
+        async def commit(self):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    session_n = {"n": 0}
+
+    class _FakeSessionMaker:
+        def __call__(self):
+            session_n["n"] += 1
+            return _FakeSession()
+
+    monkeypatch.setattr(mf_tasks, "score_fund", _fake_score_fund, raising=True)
+    monkeypatch.setattr(mf_tasks, "_load_nav_series", _fake_load_nav, raising=True)
+    monkeypatch.setattr(mf_tasks, "compute_fund_signals", _fake_compute_signals, raising=True)
+    monkeypatch.setattr(mf_tasks, "build_snapshot", lambda holdings: null_snap, raising=True)
+    monkeypatch.setattr(mf_tasks, "upsert_user_fund_score", AsyncMock(), raising=True)
+    fake_build = AsyncMock(return_value=mf_tasks._EMPTY_COHORT_CONTEXT)
+    monkeypatch.setattr(mf_tasks, "_build_cohort_context", fake_build, raising=True)
+    monkeypatch.setattr(_mf_history_mod, "append_score_history", _fake_append)
+    monkeypatch.setattr(_mf_history_mod, "persist_portfolio_snapshot", _fake_persist)
+    monkeypatch.setattr(_mf_history_mod, "get_prior_label", _fake_prior_label)
+    monkeypatch.setattr("dhanradar.deps.is_plus", _fake_is_plus)
+
+    # The pre-loop query needs to return one Plus portfolio and one owner.
+    class _FakePreloopSession:
+        def __init__(self):
+            self._n = 0
+
+        async def execute(self, stmt):
+            self._n += 1
+            r = MagicMock()
+            if self._n == 1:
+                r.all = lambda: [("pid-reg", "INF000REG01")]
+            else:
+                r.all = lambda: [("pid-reg", user_id)]
+            return r
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    preloop_used = {"done": False}
+
+    class _CombinedSessionMaker:
+        def __call__(self):
+            if not preloop_used["done"]:
+                preloop_used["done"] = True
+                return _FakePreloopSession()
+            return _FakeSession()
+
+    with patch("dhanradar.db.admin_task_session", _CombinedSessionMaker()):
+        with patch("dhanradar.scoring.engine.RatingEngine", MagicMock()):
+            with patch("dhanradar.redis_client.get_redis", lambda: MagicMock()):
+                await mf_tasks._monthly_rescore()
+
+    # The critical assertion: the prior xirr_pct must be preserved.
+    assert persist_calls, "persist_portfolio_snapshot was never called"
+    saved_snap = persist_calls[0]["snap"]
+    assert saved_snap.xirr_pct == PRIOR_XIRR, (
+        f"XIRR was clobbered: expected {PRIOR_XIRR}, got {saved_snap.xirr_pct!r}. "
+        "The monthly rescore must carry forward the prior xirr_pct when it cannot recompute."
+    )

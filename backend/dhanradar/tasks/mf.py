@@ -1621,6 +1621,33 @@ async def _monthly_rescore() -> str:
                     )
 
                 snap = build_snapshot(holdings)
+
+                # The rescore builds Holdings with a single cashflow
+                # (current_value as of today).  xirr() requires ≥2 cashflows, so
+                # snap.xirr_pct is always None here — the transaction ledger that
+                # would supply the purchase/SIP flows is not yet built.
+                # PRESERVE the most recently-computed xirr_pct from the DB rather
+                # than writing NULL and clobbering the value computed at CAS-upload
+                # time.  This is the correct carry-forward until the transaction
+                # ledger exists (Path-B / ADR-0037).
+                if snap.xirr_pct is None:
+                    from dataclasses import replace as _dc_replace
+
+                    from sqlalchemy import select as _select
+
+                    from dhanradar.models.mf import MfPortfolioSnapshot as _MfSnap
+
+                    prior_xirr_row = (
+                        await db.execute(
+                            _select(_MfSnap.xirr_pct)
+                            .where(_MfSnap.portfolio_id == pid)  # type: ignore[arg-type]
+                            .order_by(_MfSnap.snapshot_date.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if prior_xirr_row is not None:
+                        snap = _dc_replace(snap, xirr_pct=float(prior_xirr_row))
+
                 await mf_history.persist_portfolio_snapshot(
                     db,
                     user_id=uid,
