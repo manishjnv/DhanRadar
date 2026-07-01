@@ -123,7 +123,7 @@ export function EmptyHero({
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept="application/pdf,.txt,.xls,.xlsx"
           className="sr-only"
           onChange={(e) => handleFiles(e.target.files)}
         />
@@ -141,8 +141,8 @@ export function EmptyHero({
         >
           <div className="flex flex-col items-center gap-2">
             <span className="text-4xl" aria-hidden="true">📄</span>
-            <p className="text-small font-semibold text-white">Drop your CAS file here</p>
-            <p className="text-caption text-slate-400">PDF · CDSL / NSDL / CAMS</p>
+            <p className="text-small font-semibold text-white">Drop your CAS or statement file here</p>
+            <p className="text-caption text-slate-400">PDF (CAS) · TXT or XLS (CAMS Transaction Details)</p>
             <CTA
               variant="primary"
               className="mt-2"
@@ -157,7 +157,7 @@ export function EmptyHero({
         {(uploadPhase === 'idle' || uploadPhase === 'error') && (
           <div className="w-full max-w-sm flex flex-col gap-1.5" data-testid="password-field-empty-hero">
             <label htmlFor="cas-pdf-password" className="text-small font-medium text-slate-300">
-              PDF password <span className="text-slate-500 font-normal">(optional)</span>
+              Password <span className="text-slate-500 font-normal">(PDF only — optional)</span>
             </label>
             <Input
               id="cas-pdf-password"
@@ -168,7 +168,7 @@ export function EmptyHero({
               autoComplete="off"
               className="border-white/25 bg-white/10 text-white placeholder:text-slate-400 focus:ring-white/40"
             />
-            <p className="text-caption text-slate-500">Your CAS password — usually your PAN, from the statement email.</p>
+            <p className="text-caption text-slate-500">PDF CAS password (usually PAN + date of birth). Not needed for .txt / .xls files.</p>
           </div>
         )}
 

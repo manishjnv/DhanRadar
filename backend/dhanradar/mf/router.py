@@ -287,8 +287,26 @@ async def upload_cas(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
     if len(data) > _MAX_CAS_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
-    if not data.startswith(b"%PDF-"):  # magic-byte check before touching disk
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_pdf")
+
+    # Detect file type — support CAS PDF and CAMS Transaction Details Statement
+    # (.txt tab-separated, .xls, .xlsx).
+    original_name = (file.filename or "").lower()
+    if data.startswith(b"%PDF-"):
+        file_ext = "pdf"
+    elif original_name.endswith(".xlsx"):
+        file_ext = "xlsx"
+    elif original_name.endswith(".xls"):
+        file_ext = "xls"
+    elif original_name.endswith(".txt") or (
+        # txt files: first line should look like the CAMS header (tab-separated ASCII)
+        b"\t" in data[:200] and b"MF_NAME" in data[:200]
+    ):
+        file_ext = "txt"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="unsupported_file_type",
+        )
 
     redis = get_redis()
     source_hash = service.cas_sha256(data)
@@ -312,7 +330,7 @@ async def upload_cas(
     # 6. Persist the raw file for the worker (purged after parse + 24h backstop),
     #    create the job row queued, enqueue, return < 200ms.
     job_id = str(uuid.uuid4())
-    path = os.path.join(_upload_dir(), f"{job_id}.pdf")
+    path = os.path.join(_upload_dir(), f"{job_id}.{file_ext}")
     with open(path, "wb") as fh:
         fh.write(data)
 
