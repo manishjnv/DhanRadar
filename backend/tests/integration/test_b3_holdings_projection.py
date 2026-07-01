@@ -274,9 +274,9 @@ async def test_hard_fail_ledger_error_fails_pipeline(db_session, app_session, mo
     ]
     parsed_result = [_holding(txns, units=80.0, cost=1600.0)]
 
-    # Monkeypatch parse_cas (module-level import in tasks/mf.py)
+    # Monkeypatch detect_and_parse (module-level import in tasks/mf.py)
     monkeypatch.setattr(
-        "dhanradar.tasks.mf.parse_cas",
+        "dhanradar.tasks.mf.detect_and_parse",
         lambda path, pw: parsed_result,
     )
 
