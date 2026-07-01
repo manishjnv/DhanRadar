@@ -67,6 +67,12 @@ function PortfolioView() {
 
   const casUpload = useCasUpload(portfolioId);
 
+  // Auto-switch to dashboard view once an upload completes so the user
+  // sees their data immediately without manually toggling the state.
+  React.useEffect(() => {
+    if (casUpload.phase === 'done') setPageState('dash');
+  }, [casUpload.phase]);
+
   // Updated stamp — set after mount so SSR and client agree (no hydration mismatch).
   const [updatedAt, setUpdatedAt] = React.useState<string | null>(null);
   React.useEffect(() => { setUpdatedAt(formatUpdated(new Date())); }, []);

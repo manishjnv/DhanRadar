@@ -346,11 +346,11 @@ _CAMS_TXN_MAP: dict[str, tuple[str, int]] = {
     "ADDITIONAL SIP PURCHASE": ("sip", -1),
     "SWITCH IN": ("switch_in", -1),
     "SWITCH IN (MERGER)": ("switch_in", -1),
-    "REDEMPTION": ("redemption", 1),
-    "REDEMPTION SIP": ("redemption", 1),
-    "SWITCH OUT": ("switch_out", 1),
-    "SWITCH OUT (MERGER)": ("switch_out", 1),
-    "DIVIDEND PAYOUT": ("dividend_payout", 1),
+    "REDEMPTION": ("redemption", -1),
+    "REDEMPTION SIP": ("redemption", -1),
+    "SWITCH OUT": ("switch_out", -1),
+    "SWITCH OUT (MERGER)": ("switch_out", -1),
+    "DIVIDEND PAYOUT": ("dividend_payout", 1),  # already investor-convention (positive inflow)
     "DIVIDEND REINVESTED": ("dividend_reinvest", 0),
     "IDCW REINVESTED": ("dividend_reinvest", 0),
     "REVERSAL": ("reversal", -1),
@@ -417,7 +417,11 @@ def _cams_txn_to_parsedtxn(row: dict[str, Any]) -> ParsedTxn | None:
             txn_type=canon_type, units=units, nav=price,
         )
 
-    investor_amount = -amount * sign  # B65: negate statement → investor convention
+    # B65: investor convention — purchases negative (outflow), redemptions positive (inflow).
+    # CAMS statement convention: purchases are +amount, redemptions are -amount.
+    # Multiplying by sign (-1 for all cashflow types, +1 only for dividend_payout)
+    # correctly converts: -(+8000) = -8000 for purchase; -(-101) = +101 for redemption.
+    investor_amount = amount * sign
     is_sip = canon_type == "sip"
     return ParsedTxn(
         when=d, amount=investor_amount, is_sip=is_sip,
