@@ -262,6 +262,14 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.compute_portfolio_daily_valuations",
         "schedule": crontab(hour=4, minute=0),
     },
+    # ADR-0037 — Nifty 50 price-index daily close — 23:45 IST (after NSE EOD at ~15:30;
+    # gives Yahoo Finance time to publish the close before midnight).  One upsert into
+    # mf.mf_benchmark_daily for the Portfolio vs Market chart.  Runs on the 640 MB batch
+    # queue — do NOT move to celery-mood (192 MB, OOM risk from live yfinance downloads).
+    "nifty-close-daily": {
+        "task": "dhanradar.tasks.mf.nifty_close_daily",
+        "schedule": crontab(hour=23, minute=45),
+    },
     # ----- Phase 6 — planned data sources (Admin.md §18 step 6). Each task writes an
     # mf.ingestion_runs row + an mf.source_health row via tasks/ingestion_run.py, so
     # the Ops console flips the source Planned → Healthy on the first successful run.

@@ -25,6 +25,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import time
 import zipfile
@@ -3394,5 +3395,187 @@ async def _compute_portfolio_daily_valuations_async() -> str:
         f"compute_portfolio_daily_valuations {today}: "
         f"upserted={upserted} skipped={skipped} errors={errors}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Nifty 50 price-index daily-close series (ADR-0037 — benchmark for chart)
+# ---------------------------------------------------------------------------
+
+#: Benchmark key stored in mf_benchmark_daily.benchmark (ADR-0037 part b).
+BENCHMARK_KEY_NIFTY50 = "nifty50_price"
+
+#: Yahoo Finance ticker for the Nifty 50 price index.
+_NIFTY50_TICKER = "^NSEI"
+
+
+def _fetch_nifty_closes(
+    start: date,
+    end: date,
+) -> list[tuple[date, float]]:
+    """Synchronous yfinance fetch of ^NSEI daily closes in [start, end].
+
+    Returns a list of (close_date, close_value) pairs with NaN rows dropped.
+    Raises on import failure; returns [] on empty data (weekend / holiday range).
+    Kept as a module-level helper so tests can monkeypatch it without touching
+    the Celery task boundary.
+    """
+    import yfinance as yf  # lazy — not loaded at worker startup
+
+    raw = yf.download(
+        _NIFTY50_TICKER,
+        start=start.isoformat(),
+        end=(end + timedelta(days=1)).isoformat(),  # yfinance end is exclusive
+        progress=False,
+        auto_adjust=False,  # ^NSEI is the price index; no dividend adjustment needed or wanted
+    )
+    if raw.empty:
+        return []
+    close_col = raw["Close"]
+    rows: list[tuple[date, float]] = []
+    for ts, val in close_col.items():
+        if math.isnan(float(val)):
+            continue
+        # yfinance index is a pandas Timestamp; .date() gives a stdlib date.
+        rows.append((ts.date(), float(val)))  # type: ignore[union-attr]
+    return rows
+
+
+async def _upsert_benchmark_rows(
+    rows: list[tuple[date, float]],
+    benchmark: str = BENCHMARK_KEY_NIFTY50,
+) -> int:
+    """Bulk-upsert (close_date, close_value) rows into mf_benchmark_daily.
+
+    Returns the number of rows upserted.  Idempotent: ON CONFLICT DO UPDATE
+    refreshes close_value so a re-run is safe.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import task_session
+    from dhanradar.models.mf import MfBenchmarkDaily
+
+    if not rows:
+        return 0
+
+    async with task_session() as db:
+        stmt = (
+            pg_insert(MfBenchmarkDaily)
+            .values(
+                [
+                    {"benchmark": benchmark, "close_date": d, "close_value": v}
+                    for d, v in rows
+                ]
+            )
+            .on_conflict_do_update(
+                constraint="uq_mf_benchmark_daily",
+                set_={"close_value": pg_insert(MfBenchmarkDaily).excluded.close_value},
+            )
+        )
+        await db.execute(stmt)
+        await db.commit()
+    return len(rows)
+
+
+@celery_app.task(
+    name="dhanradar.tasks.mf.nifty_close_daily",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=2,
+)
+def nifty_close_daily(self: Any) -> str:  # type: ignore[override]
+    """EOD task (23:45 IST) — fetch the latest ^NSEI price-index close and upsert.
+
+    Sync Celery wrapper; the async core lives in ``_nifty_close_daily_async``
+    (mirrors the M2.2 compute_portfolio_daily_valuations pattern) so tests can
+    ``await _nifty_close_daily_async()`` without hitting the asyncio.run-inside-
+    running-loop error.
+    """
+    return asyncio.run(_nifty_close_daily_async())
+
+
+async def _nifty_close_daily_async() -> str:
+    """Async core for nifty_close_daily — testable without a running event loop.
+
+    Fetches the last 5 calendar days from Yahoo Finance (to handle weekends/
+    holidays) and upserts the most-recent close row.  Idempotent.  Network
+    errors are logged and the function returns a no-op result.
+
+    Runs on the 640 MB batch queue — do NOT call from celery-mood (192 MB).
+    """
+    today = date.today()
+    start = today - timedelta(days=5)  # catch up across weekends / holidays
+    try:
+        rows = _fetch_nifty_closes(start, today)
+    except Exception:
+        logger.exception("nifty_close_daily: yfinance fetch failed")
+        return "nifty_close_daily: fetch_failed"
+
+    if not rows:
+        logger.warning("nifty_close_daily: no closes returned from yfinance for %s", today)
+        return f"nifty_close_daily: no_data as_of={today}"
+
+    # Keep only the most-recent close (we re-run daily so yesterday's row
+    # is already stored from the previous run).
+    latest_date, latest_value = max(rows, key=lambda r: r[0])
+    upserted = await _upsert_benchmark_rows([(latest_date, latest_value)])
+    logger.info(
+        "nifty_close_daily: close_date=%s close_value=%.2f upserted=%d",
+        latest_date, latest_value, upserted,
+    )
+    return f"nifty_close_daily: close_date={latest_date} close_value={latest_value}"
+
+
+def backfill_nifty_close_series(years: int = 10) -> str:
+    """One-time backfill of ^NSEI daily closes.  Sync wrapper — calls the async core.
+
+    Example (KVM4 shell):
+        python -c "from dhanradar.tasks.mf import backfill_nifty_close_series; print(backfill_nifty_close_series())"
+    Or via Celery:
+        celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
+    """
+    return asyncio.run(_backfill_nifty_close_series_async(years))
+
+
+async def _backfill_nifty_close_series_async(years: int = 10) -> str:
+    """Async core for backfill_nifty_close_series — testable in pytest-asyncio.
+
+    Bulk-upserts ^NSEI daily closes for the last ``years`` years.  Idempotent;
+    safe to re-run.  Fetches synchronously via yfinance then upserts via the
+    async DB session.
+    """
+    today = date.today()
+    start = today - timedelta(days=years * 365)
+    logger.info("backfill_nifty_close_series: start=%s end=%s", start, today)
+    try:
+        rows = _fetch_nifty_closes(start, today)
+    except Exception:
+        logger.exception("backfill_nifty_close_series: yfinance fetch failed")
+        return "backfill_nifty_close_series: fetch_failed"
+
+    if not rows:
+        return "backfill_nifty_close_series: no_data"
+
+    upserted = await _upsert_benchmark_rows(rows)
+    logger.info(
+        "backfill_nifty_close_series: upserted=%d range=%s..%s",
+        upserted, start, today,
+    )
+    return f"backfill_nifty_close_series: upserted={upserted} range={start}..{today}"
+
+
+@celery_app.task(
+    name="dhanradar.tasks.mf.backfill_nifty_close_series_task",
+    bind=False,
+)
+def backfill_nifty_close_series_task(years: int = 10) -> str:
+    """Celery-triggerable wrapper around backfill_nifty_close_series.
+
+    Invoke via the admin ops console or directly:
+        celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
+    """
+    return backfill_nifty_close_series(years=years)
 
 

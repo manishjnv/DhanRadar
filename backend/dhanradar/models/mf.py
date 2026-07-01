@@ -818,3 +818,26 @@ class MfPortfolioDailyValue(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MfBenchmarkDaily(Base):
+    """Daily benchmark close series (public reference/market data — no user_id, no RLS).
+
+    First use: Nifty 50 price index (benchmark='nifty50_price') for the Portfolio vs Market
+    chart (ADR-0037 part b).  Source: Yahoo Finance ^NSEI.  DOM-allowed (public market fact,
+    founder 2026-06-22).  One row per (benchmark, close_date).
+
+    Plain table (NOT a TimescaleDB hypertable) — a single benchmark series with one row/day
+    is too small to justify the hypertable overhead.
+    """
+
+    __tablename__ = "mf_benchmark_daily"
+    __table_args__ = (
+        UniqueConstraint("benchmark", "close_date", name="uq_mf_benchmark_daily"),
+        Index("ix_mf_benchmark_daily_benchmark_date", "benchmark", "close_date"),
+        _SCHEMA,
+    )
+
+    benchmark: Mapped[str] = mapped_column(Text, primary_key=True)
+    close_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    close_value: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
