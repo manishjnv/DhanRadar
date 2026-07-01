@@ -731,7 +731,7 @@ describe('EmptyHero password field', () => {
     renderEmpty({ uploadPhase: 'idle' });
     expect(screen.getByTestId('password-field-empty-hero')).toBeDefined();
     // label present
-    expect(screen.getByLabelText(/PDF password/i)).toBeDefined();
+    expect(screen.getByLabelText(/Password/i)).toBeDefined();
   });
 
   it('password input does NOT render while upload is in flight', () => {
@@ -750,7 +750,7 @@ describe('EmptyHero password field', () => {
     renderEmpty({ uploadPhase: 'idle', onUpload });
 
     // Type a password
-    const pwdInput = screen.getByLabelText(/PDF password/i);
+    const pwdInput = screen.getByLabelText(/Password/i);
     fireEvent.change(pwdInput, { target: { value: 'ABCDE1234F' } });
 
     // Simulate file pick via the hidden input
