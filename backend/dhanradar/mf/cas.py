@@ -97,6 +97,31 @@ class ParsedTxn:
 
 
 @dataclass(frozen=True)
+class ParsedCasIdentity:
+    """Investor identity extracted from a CAS file (best-effort; all fields nullable).
+
+    PAN is validated against the canonical 10-char format before being stored;
+    anything that doesn't match is set to None so downstream callers never receive
+    a malformed PAN. investor_name is trimmed but otherwise kept as-is.
+    """
+
+    pan: str | None           # uppercase, 10-char PAN — None if absent or malformed
+    investor_name: str | None  # as printed in the CAS
+
+
+_PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+
+
+def _parse_pan(raw: str | None) -> str | None:
+    """Normalize and validate a raw PAN string. Returns None if invalid."""
+    if not raw:
+        return None
+    # Strip common prefixes from CAMS TDS format: "PAN NO:BQOPK2200H"
+    pan = re.sub(r"^PAN\s*NO\s*:\s*", "", raw.strip(), flags=re.IGNORECASE).strip().upper()
+    return pan if _PAN_RE.match(pan) else None
+
+
+@dataclass(frozen=True)
 class ParsedHolding:
     isin: str
     amfi_code: str | None
@@ -149,8 +174,8 @@ def parse_cas(
     password: str | None,
     *,
     reader: CasReader | None = None,
-) -> list[ParsedHolding]:
-    """Parse a CAMS/KFintech CAS PDF into normalized holdings.
+) -> tuple[list[ParsedHolding], ParsedCasIdentity]:
+    """Parse a CAMS/KFintech CAS PDF into normalized holdings + investor identity.
 
     Walks `folios[].schemes[]`, keeping only schemes that carry an ISIN (a stock
     CAS / non-MF row has none). Raises CasParseError on any reader failure (e.g.
@@ -287,7 +312,38 @@ def parse_cas(
                     )
                 )
 
-    return holdings
+    return holdings, _extract_pdf_identity(raw)
+
+
+def _extract_pdf_identity(raw: dict) -> ParsedCasIdentity:
+    """Best-effort investor identity from a casparser raw output dict.
+
+    casparser embeds investor info in `investor_info` (name, email, mobile) and
+    the PAN in the first folio's `PAN` / `pan` key or in `investor_info.pan`.
+    All of these are optional depending on the CAS type and casparser version.
+    """
+    info = raw.get("investor_info") or {}
+    raw_pan = (
+        info.get("pan")
+        or info.get("PAN")
+        or next(
+            (f.get("PAN") or f.get("pan") for f in raw.get("folios", []) or []
+             if f.get("PAN") or f.get("pan")),
+            None,
+        )
+    )
+    name = str(info.get("name") or "").strip() or None
+    return ParsedCasIdentity(pan=_parse_pan(raw_pan), investor_name=name)
+
+
+def _extract_cams_tds_identity(rows: list[dict]) -> ParsedCasIdentity:
+    """Extract investor identity from the first data row of a CAMS TDS file."""
+    if not rows:
+        return ParsedCasIdentity(pan=None, investor_name=None)
+    row = rows[0]
+    raw_pan = str(row.get("PAN") or "").strip()
+    name = str(row.get("INVESTOR_NAME") or "").strip() or None
+    return ParsedCasIdentity(pan=_parse_pan(raw_pan), investor_name=name)
 
 
 def _opt_float(v: Any) -> float | None:
@@ -487,7 +543,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
     return result
 
 
-def parse_cams_txn_text(path: str) -> list[ParsedHolding]:
+def parse_cams_txn_text(path: str) -> tuple[list[ParsedHolding], ParsedCasIdentity]:
     """Parse a CAMS Transaction Details Statement in TAB-SEPARATED TEXT format (.txt).
 
     This is the "Text" format downloaded from camsonline.com → Statements →
@@ -507,12 +563,13 @@ def parse_cams_txn_text(path: str) -> list[ParsedHolding]:
     if not rows:
         raise CasParseError(f"No data rows found in {path}")
 
+    identity = _extract_cams_tds_identity(rows)
     holdings = _rows_to_parsedholdings(rows)
     logger.info("cams_txn_text: parsed %d holdings from %s", len(holdings), path)
-    return holdings
+    return holdings, identity
 
 
-def parse_cams_txn_excel(path: str) -> list[ParsedHolding]:
+def parse_cams_txn_excel(path: str) -> tuple[list[ParsedHolding], ParsedCasIdentity]:
     """Parse a CAMS Transaction Details Statement in EXCEL format (.xls or .xlsx).
 
     Supports:
@@ -554,13 +611,14 @@ def parse_cams_txn_excel(path: str) -> list[ParsedHolding]:
     if not rows:
         raise CasParseError(f"No data rows found in {path}")
 
+    identity = _extract_cams_tds_identity(rows)
     holdings = _rows_to_parsedholdings(rows)
     logger.info("cams_txn_excel: parsed %d holdings from %s", len(holdings), path)
-    return holdings
+    return holdings, identity
 
 
-def detect_and_parse(path: str, password: str | None = None) -> list[ParsedHolding]:
-    """Route to the correct parser based on file extension.
+def detect_and_parse(path: str, password: str | None = None) -> tuple[list[ParsedHolding], ParsedCasIdentity]:
+    """Route to the correct parser based on file extension. Returns (holdings, identity).
 
     Supported:
       .pdf        — standard CAS PDF (casparser)
