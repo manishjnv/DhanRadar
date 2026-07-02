@@ -889,3 +889,65 @@ async def _own_portfolio(db: AsyncSession, portfolio_id: str, user_id: str) -> M
     if portfolio is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
     return portfolio
+
+
+# ---------------------------------------------------------------------------
+# Benchmark reference-data endpoint (public — no auth, no RLS)
+# ---------------------------------------------------------------------------
+
+@router.get("/benchmark/nifty50")
+async def benchmark_nifty50(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: str | None = Query(None, alias="from", description="ISO date YYYY-MM-DD"),
+    to_date: str | None = Query(None, alias="to", description="ISO date YYYY-MM-DD"),
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """Public reference endpoint — Nifty 50 price-index daily closes.
+
+    Returns ``[{close_date, close_value}]`` ordered ascending by date.  An
+    optional ``from`` / ``to`` date range (ISO YYYY-MM-DD) filters the results.
+    Empty list when no rows exist yet (pre-backfill cold-start).
+
+    DOM-allowed: Nifty 50 price closes are public market facts (founder 2026-06-22).
+    No auth required.  No RLS (non-personal reference data).
+    Disclosure: price index only — excludes dividends (see ADR-0037 part b).
+    """
+    from datetime import date as _date
+
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.models.mf import MfBenchmarkDaily
+    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50
+
+    stmt = (
+        sa_select(MfBenchmarkDaily.close_date, MfBenchmarkDaily.close_value)
+        .where(MfBenchmarkDaily.benchmark == BENCHMARK_KEY_NIFTY50)
+        .order_by(MfBenchmarkDaily.close_date.asc())
+    )
+
+    if from_date:
+        try:
+            stmt = stmt.where(MfBenchmarkDaily.close_date >= _date.fromisoformat(from_date))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_from_date"
+            )
+    if to_date:
+        try:
+            stmt = stmt.where(MfBenchmarkDaily.close_date <= _date.fromisoformat(to_date))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_to_date"
+            )
+
+    rows = (await db.execute(stmt)).all()
+    points = [
+        {"close_date": r.close_date.isoformat(), "close_value": float(r.close_value)}
+        for r in rows
+    ]
+    return {
+        "benchmark": BENCHMARK_KEY_NIFTY50,
+        "disclosure": "Nifty 50 price index · excludes dividends",
+        "point_count": len(points),
+        "points": points,
+    }

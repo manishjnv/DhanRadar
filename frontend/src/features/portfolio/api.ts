@@ -341,3 +341,47 @@ export function usePortfolioValueSeries(portfolioId: string) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Nifty 50 benchmark close series (public reference data — no auth required).
+// DOM-allowed: Nifty 50 price closes are public market facts.
+// Disclosure: price index only — excludes dividends (ADR-0037 part b).
+// ---------------------------------------------------------------------------
+
+export interface NiftyClosePoint {
+  /** ISO date string (YYYY-MM-DD) */
+  close_date: string;
+  /** Nifty 50 price-index closing level on this date — public market fact, DOM-allowed */
+  close_value: number;
+}
+
+export interface NiftyCloseSeriesPayload {
+  benchmark: string;
+  /** "Nifty 50 price index · excludes dividends" */
+  disclosure: string;
+  point_count: number;
+  /** All available daily close points, ordered ascending by date. Empty on cold-start. */
+  points: NiftyClosePoint[];
+}
+
+/**
+ * Nifty 50 price-index daily close series from GET /mf/benchmark/nifty50.
+ * Public endpoint — no auth needed. Optional from/to ISO date filters.
+ * Empty points on cold-start (before the historical backfill runs on deploy).
+ */
+export function useNiftyCloseSeries(params?: { from?: string; to?: string }) {
+  const searchParams = new URLSearchParams();
+  if (params?.from) searchParams.set('from', params.from);
+  if (params?.to) searchParams.set('to', params.to);
+  const qs = searchParams.toString();
+  return useQuery<NiftyCloseSeriesPayload>({
+    queryKey: queryKeys.benchmark.nifty50(params),
+    queryFn: () =>
+      api.get<NiftyCloseSeriesPayload>(`/mf/benchmark/nifty50${qs ? `?${qs}` : ''}`),
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 10 * 60 * 1000, // closes change only once a day
+  });
+}

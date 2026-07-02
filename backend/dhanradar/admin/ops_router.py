@@ -367,6 +367,12 @@ _BEAT_TASKS: list[dict] = [
         "schedule_display": "Weekly Sun 06:00 IST",
         "cron": {"day_of_week": 0, "hour": 6, "minute": 0},
     },
+    {
+        "beat_key": "nifty-close-daily",
+        "task_name": "dhanradar.tasks.mf.nifty_close_daily",
+        "schedule_display": "Daily 23:45 IST",
+        "cron": {"hour": 23, "minute": 45},
+    },
 ]
 
 # Map beat_key → celery task name for pause/resume/trigger
