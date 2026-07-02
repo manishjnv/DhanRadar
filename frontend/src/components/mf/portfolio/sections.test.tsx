@@ -43,6 +43,8 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioDiversification: vi.fn(),
   usePortfolioRisk: vi.fn(),
   usePortfolioRiskAdvanced: vi.fn(),
+  usePortfolioValueSeries: vi.fn(() => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() })),
+  useNiftyCloseSeries: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
 
 import {
