@@ -3590,12 +3590,18 @@ def _fetch_nifty_closes(
     if raw.empty:
         return []
     close_col = raw["Close"]
+    # Recent yfinance returns MultiIndex columns even for a single ticker, so raw["Close"]
+    # is a 1-column DataFrame (not a Series) and float(val) below would get a Series.
+    # Collapse to the ticker column so each val is a scalar.
+    if hasattr(close_col, "columns"):
+        close_col = close_col.iloc[:, 0]
     rows: list[tuple[date, float]] = []
     for ts, val in close_col.items():
-        if math.isnan(float(val)):
+        fval = float(val)
+        if math.isnan(fval):
             continue
         # yfinance index is a pandas Timestamp; .date() gives a stdlib date.
-        rows.append((ts.date(), float(val)))  # type: ignore[union-attr]
+        rows.append((ts.date(), fval))  # type: ignore[union-attr]
     return rows
 
 

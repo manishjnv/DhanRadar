@@ -142,6 +142,29 @@ def test_fetch_nifty_closes_drops_nan():
     assert result[0] == (date(2026, 6, 30), 24_400.00)
 
 
+def test_fetch_nifty_closes_multiindex_columns():
+    """Regression: recent yfinance returns MultiIndex columns even for a single ticker,
+    so raw['Close'] is a 1-column DataFrame — not a Series. _fetch_nifty_closes must
+    collapse it to the ticker column and still yield scalar (date, float) pairs.
+    Uses a REAL pandas MultiIndex frame (the hand-rolled mock above could not reproduce
+    this shape, which is why the original code passed CI but failed against live yfinance)."""
+    import pandas as pd
+
+    from dhanradar.tasks.mf import _fetch_nifty_closes
+
+    idx = pd.to_datetime(["2026-06-30", "2026-07-01"])
+    df = pd.DataFrame(
+        {("Close", "^NSEI"): [24_500.00, 24_650.50], ("Open", "^NSEI"): [24_400.0, 24_550.0]},
+        index=idx,
+    )
+    df.columns = pd.MultiIndex.from_tuples(df.columns)  # ('Close','^NSEI'), ('Open','^NSEI')
+
+    with _patch_yf(df):
+        result = _fetch_nifty_closes(date(2026, 6, 30), date(2026, 7, 1))
+
+    assert result == [(date(2026, 6, 30), 24_500.00), (date(2026, 7, 1), 24_650.50)]
+
+
 # ---------------------------------------------------------------------------
 # PG helpers
 # ---------------------------------------------------------------------------
