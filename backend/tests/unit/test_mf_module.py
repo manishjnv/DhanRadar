@@ -68,7 +68,7 @@ def _fake_cdsl_cas(_path, _password):
 
 
 def test_parse_cas_walks_folios_and_skips_non_isin():
-    holdings = parse_cas("x.pdf", "pw", reader=_fake_cas)
+    holdings, _ = parse_cas("x.pdf", "pw", reader=_fake_cas)
     assert len(holdings) == 1  # the no-ISIN row was skipped
     h = holdings[0]
     assert h.isin == "INF001" and h.folio_number == "F1"
@@ -98,7 +98,7 @@ def test_parse_cas_normalises_pydantic_model_output():
         def model_dump(self, mode="python"):
             return _fake_cas("x.pdf", "pw")
 
-    holdings = parse_cas("x.pdf", "pw", reader=lambda _p, _pw: _FakeCasData())
+    holdings, _ = parse_cas("x.pdf", "pw", reader=lambda _p, _pw: _FakeCasData())
     assert len(holdings) == 1  # walked the model_dump() output, not crashed
     assert holdings[0].isin == "INF001" and holdings[0].value == 5000.0
 
@@ -106,7 +106,7 @@ def test_parse_cas_normalises_pydantic_model_output():
 def test_parse_cas_handles_cdsl_accounts_structure():
     """casparser 1.1.0 CDSL CAS uses accounts[].mutual_funds[] not folios[].
     parse_cas must walk the accounts path when folios is absent/empty."""
-    holdings = parse_cas("x.pdf", "pw", reader=_fake_cdsl_cas)
+    holdings, _ = parse_cas("x.pdf", "pw", reader=_fake_cdsl_cas)
     assert len(holdings) == 1  # the no-ISIN entry was skipped
     h = holdings[0]
     assert h.isin == "INF846K01K35"
@@ -236,7 +236,7 @@ def test_to_factor_inputs_maps_axes_and_labels():
 
 # --- holdings → snapshot mapping --------------------------------------------
 def test_parsed_to_snapshot_applies_nav_and_builds_cashflows():
-    holdings = parse_cas("x.pdf", None, reader=_fake_cas)
+    holdings, _ = parse_cas("x.pdf", None, reader=_fake_cas)
     snap_holdings = parsed_to_snapshot_holdings(holdings, nav_map={"INF001": 55.0})
     h = snap_holdings[0]
     assert h.current_value == 100.0 * 55.0  # NAV applied (units × latest NAV)
@@ -246,7 +246,7 @@ def test_parsed_to_snapshot_applies_nav_and_builds_cashflows():
 
 
 def test_parsed_to_snapshot_falls_back_to_cas_value_without_nav():
-    holdings = parse_cas("x.pdf", None, reader=_fake_cas)
+    holdings, _ = parse_cas("x.pdf", None, reader=_fake_cas)
     snap_holdings = parsed_to_snapshot_holdings(holdings, nav_map={})  # no NAV feed
     assert snap_holdings[0].current_value == 5000.0  # CAS-reported valuation used
 
@@ -255,7 +255,7 @@ def test_parsed_to_snapshot_fills_category_from_map():
     # Holding category is filled from the mf_funds master so the portfolio
     # category-allocation + per-fund Category column are real (else every holding
     # buckets as "uncategorized" → a meaningless 100% donut).
-    holdings = parse_cas("x.pdf", None, reader=_fake_cas)
+    holdings, _ = parse_cas("x.pdf", None, reader=_fake_cas)
     filled = parsed_to_snapshot_holdings(
         holdings, category_map={"INF001": "Equity Scheme - Small Cap Fund"}
     )
@@ -500,7 +500,7 @@ def test_parse_cas_strips_control_chars_from_scheme_name():
             ]
         }
 
-    holdings = parse_cas("x.pdf", "pw", reader=_reader_with_ctrl)
+    holdings, _ = parse_cas("x.pdf", "pw", reader=_reader_with_ctrl)
     assert len(holdings) == 1
     h = holdings[0]
     assert "\x02" not in h.scheme_name
@@ -523,7 +523,7 @@ def test_b65_statement_purchases_normalize_to_outflows():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     txns = holdings[0].txns
     assert len(txns) == 2
     assert txns[0].amount == -4000.0
@@ -546,7 +546,7 @@ def test_b65_all_purchase_portfolio_xirr_computable():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     # current_value > invested (9000 > 8000) → XIRR should be computable and positive.
     snap_holdings = parsed_to_snapshot_holdings(holdings, nav_map={"INF200": 90.0})
     snap = build_snapshot(snap_holdings)
@@ -568,7 +568,7 @@ def test_b65_redemption_becomes_inflow():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     assert holdings[0].txns[0].amount == 2500.0
 
 
@@ -585,7 +585,7 @@ def test_b65_dividend_payout_kept_as_inflow():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     assert holdings[0].txns[0].amount == 120.0
 
 
@@ -609,7 +609,7 @@ def test_b65_internal_and_tax_rows_excluded():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     txns = holdings[0].txns
     by_type = {t.txn_type: t for t in txns}
     # tax/misc fully excluded; purchase (cashflow) + dividend_reinvest (ledger) survive.
@@ -635,7 +635,7 @@ def test_b65_missing_type_defaults_to_negate():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     assert holdings[0].txns[0].amount == -1000.0
 
 
@@ -660,7 +660,7 @@ def test_b65_enum_like_type_handled():
              ]},
         ]}]}
 
-    holdings = parse_cas("x.pdf", None, reader=_reader)
+    holdings, _ = parse_cas("x.pdf", None, reader=_reader)
     # The getattr(.value) path must resolve PURCHASE → negate → -500.0.
     assert holdings[0].txns[0].amount == -500.0
 
@@ -692,7 +692,7 @@ def test_b65_switch_and_reversal_types_negated():
         ("REVERSAL", -700.0, 700.0),           # cancels its original when in-window
     ]
     for ttype, statement_amount, expected in cases:
-        holdings = parse_cas("x.pdf", None, reader=_b65_single_txn_reader(ttype, statement_amount))
+        holdings, _ = parse_cas("x.pdf", None, reader=_b65_single_txn_reader(ttype, statement_amount))
         assert holdings[0].txns[0].amount == expected, ttype
 
 
@@ -700,5 +700,5 @@ def test_b65_remaining_excluded_types():
     """TDS_TAX / SEGREGATION / UNKNOWN rows carry no usable external cash flow and
     are excluded (completes the _TXN_FLOW_EXCLUDED coverage)."""
     for ttype in ("TDS_TAX", "SEGREGATION", "UNKNOWN"):
-        holdings = parse_cas("x.pdf", None, reader=_b65_single_txn_reader(ttype, 50.0))
+        holdings, _ = parse_cas("x.pdf", None, reader=_b65_single_txn_reader(ttype, 50.0))
         assert holdings[0].txns == [], ttype

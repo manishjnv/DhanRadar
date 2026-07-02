@@ -251,6 +251,66 @@ async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
     return {i: (sc or c) for i, sc, c in rows if (sc or c)}
 
 
+async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
+    """Store investor PAN + name on the user after a CAS upload.
+
+    First upload (investor_pan IS NULL): store both PAN and full_name.
+    Subsequent uploads: validate PAN matches; log a warning if it doesn't.
+    full_name is set only if still NULL (preserves any manually-set name).
+    Uses a separate admin session — runs outside the RLS user session so it
+    can read AND update auth.users without the MF-scope GUC interfering.
+    Fails silently: a storage error must never break the CAS pipeline.
+    """
+    if not identity.pan and not identity.investor_name:
+        return  # nothing to store
+
+    import uuid as _uuid
+
+    from sqlalchemy import select, update
+
+    from dhanradar.db import admin_task_session
+    from dhanradar.models.auth import User
+
+    try:
+        async with admin_task_session() as db:
+            uid = _uuid.UUID(user_id)
+            row = (
+                await db.execute(select(User.investor_pan, User.full_name).where(User.id == uid))
+            ).one_or_none()
+            if row is None:
+                return  # user not found — shouldn't happen, but safe fail
+
+            existing_pan, existing_name = row
+
+            if existing_pan and identity.pan and existing_pan != identity.pan:
+                # PAN mismatch — log prominently; do NOT overwrite (the stored PAN
+                # is the authoritative one from the user's own first upload).
+                _slog.warning(
+                    "cas.identity.pan_mismatch",
+                    user_ref=hash_user_ref(user_id),
+                    stored_pan_prefix=existing_pan[:5],   # first 5 chars only (DPDP log discipline)
+                    new_pan_prefix=identity.pan[:5],
+                )
+                return  # don't update anything on a mismatch
+
+            update_vals: dict[str, Any] = {}
+            if not existing_pan and identity.pan:
+                update_vals["investor_pan"] = identity.pan
+            if not existing_name and identity.investor_name:
+                update_vals["full_name"] = identity.investor_name
+
+            if update_vals:
+                await db.execute(update(User).where(User.id == uid).values(**update_vals))
+                await db.commit()
+                _slog.info(
+                    "cas.identity.stored",
+                    user_ref=hash_user_ref(user_id),
+                    fields=list(update_vals.keys()),
+                )
+    except Exception:  # noqa: BLE001 — identity storage must never break the CAS pipeline
+        logger.exception("cas.identity: storage failed for user_id=%s (non-fatal)", user_id)
+
+
 async def _run_pipeline(
     job_id: str, path: str, user_id: str, portfolio_id: str,
     request_id: str | None = None,
@@ -282,7 +342,11 @@ async def _run_pipeline(
     if password is not None:
         await redis.delete(pw_key)
 
-    parsed = detect_and_parse(path, password)  # routes to CAS PDF or CAMS TDS parser
+    parsed, identity = detect_and_parse(path, password)  # routes to CAS PDF or CAMS TDS parser
+
+    # Store investor identity on the user (first upload sets it; subsequent uploads
+    # validate against it so a wrong-investor CAS is caught early).
+    await _store_or_validate_identity(user_id, identity)
 
     # Resolve CAMS TDS placeholders (isin="CAMS:<product_code>") to real ISINs via
     # pg_trgm similarity on mf_funds.scheme_name.  Unresolved holdings are kept with

@@ -119,6 +119,15 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Investor identity — populated from the user's first CAS upload (migration 0057).
+    # investor_pan: PAN extracted from the CAS (plain text; encryption at rest is a
+    #   future hardening step, same TODO as totp_secret). Never overwritten once set —
+    #   a subsequent upload with a different PAN triggers a mismatch warning.
+    # full_name: investor name as printed in the CAS (replaces the email-prefix
+    #   workaround used by admin/ops_router for display_name).
+    investor_pan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Set to the current server time on every genuine login success (password,
     # TOTP, email-OTP, Google SSO).  NOT updated on token refresh.
     # NULL for users who have never logged in since migration 0044.
