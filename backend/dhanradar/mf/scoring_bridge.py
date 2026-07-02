@@ -93,6 +93,8 @@ async def upsert_user_fund_score(
     user_id: str,
     result: ScoringResult,
     portfolio_id: Any,
+    *,
+    commit: bool = True,
 ) -> None:
     """Persist the engine result into mf.user_fund_scores (server-side; the
     unified_score is tier-gated and never serialized to a client)."""
@@ -124,4 +126,5 @@ async def upsert_user_fund_score(
         },
     )
     await db.execute(stmt)
-    await db.commit()
+    if commit:
+        await db.commit()
