@@ -9,8 +9,8 @@ Both are nullable; NULL means the user has not yet uploaded a CAS that contained
 Populated by the CAS pipeline on first upload; never overwritten once set (so a later
 upload with a different PAN is flagged as a mismatch rather than silently replaced).
 
-Revision ID: 0057
-Revises: 0056
+Revision ID: 0058
+Revises: 0057
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0057"
-down_revision = "0056"
+revision = "0058"
+down_revision = "0057"
 branch_labels = None
 depends_on = None
 
