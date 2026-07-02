@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from dhanradar.db_security import set_rls_user
-from dhanradar.mf.cas import ParsedHolding, ParsedTxn, build_cas_ledger_rows
+from dhanradar.mf.cas import ParsedCasIdentity, ParsedHolding, ParsedTxn, build_cas_ledger_rows
 from dhanradar.mf.ledger import append_transactions
 from dhanradar.mf.projection import ENGINE_VERSION, project_holdings_from_ledger
 from dhanradar.models.auth import User
@@ -274,10 +274,12 @@ async def test_hard_fail_ledger_error_fails_pipeline(db_session, app_session, mo
     ]
     parsed_result = [_holding(txns, units=80.0, cost=1600.0)]
 
-    # Monkeypatch detect_and_parse (module-level import in tasks/mf.py)
+    # Monkeypatch detect_and_parse (module-level import in tasks/mf.py).
+    # Contract returns (parsed, identity) since the investor-identity change; identity=None
+    # here (this test exercises the ledger hard-fail path, not identity capture).
     monkeypatch.setattr(
         "dhanradar.tasks.mf.detect_and_parse",
-        lambda path, pw: parsed_result,
+        lambda path, pw: (parsed_result, ParsedCasIdentity(pan=None, investor_name=None)),
     )
 
     # Monkeypatch append_transactions to raise — the ledger write boom propagates
