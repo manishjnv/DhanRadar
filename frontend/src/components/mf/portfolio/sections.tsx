@@ -37,6 +37,7 @@ import {
   usePortfolioAllocation,
   usePortfolioConcentration,
   usePortfolioDiversification,
+  usePortfolioValueSeries,
   type Holding,
 } from '@/features/portfolio/api';
 
@@ -351,32 +352,75 @@ function HeroStat({ label, value, accent, hint, tip }: {
   );
 }
 
+// ── Hero mini sparkline chart ─────────────────────────────────────────────
+function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
+  const { data: envelope, isLoading } = usePortfolioValueSeries(portfolioId);
+  const points = envelope?.data?.points ?? [];
+  // Window to last 90 days
+  const recent = points.slice(-90);
+
+  if (isLoading) return <Skeleton className="h-full w-full rounded-xl bg-white/10" />;
+
+  if (recent.length < 2) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1 text-center px-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">YOU VS NIFTY · 90D</div>
+        <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
+          Chart builds as daily data accumulates.<br />
+          <span className="text-slate-600">Updates each trading day at 4 AM.</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Build SVG sparkline from real portfolio value series
+  const W = 320; const H = 80;
+  const vals = recent.map(p => p.value);
+  const lo = Math.min(...vals); const hi = Math.max(...vals);
+  const range = hi - lo || 1;
+  const toX = (i: number) => (i / (recent.length - 1)) * W;
+  const toY = (v: number) => H - ((v - lo) / range) * (H - 8) - 4;
+  const path = recent.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(1)} ${toY(p.value).toFixed(1)}`).join(' ');
+  const pct90d = recent.length >= 2 ? ((recent[recent.length - 1].value / recent[0].value - 1) * 100) : null;
+
+  return (
+    <div className="flex h-full flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOU VS NIFTY · 90D</span>
+        {pct90d !== null && (
+          <span className={`text-[11px] font-bold ${pct90d >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+            YOU {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%
+          </span>
+        )}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
+        <path d={path} fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <button type="button" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+        Open full comparison ↓
+      </button>
+    </div>
+  );
+}
+
 export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading, isError, refetch } = usePortfolioSummaryById(portfolioId);
 
   const summary = envelope?.data ?? null;
   const reason = envelope?.meta.reason ?? null;
-  // Treat a present-but-empty portfolio (no holdings yet) as 'empty' so the hero shows
-  // the upload CTA instead of crashing on null gain_pct / fmtPct(null).
   const status = isLoading ? 'loading' : isError ? 'error'
     : (envelope?.status === 'present' && summary?.fund_count === 0 ? 'empty' : (envelope?.status ?? 'empty'));
 
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
-  // ponytail: tips from data accessors only — no hardcoded strings
   const heroTip = sectionTooltip('HeroSection');
   const xiirrTip = fieldTooltip('HeroSection', 'xirr');
   const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
   const dayChange = summary?.day_change ?? null;
-  // Day-change % = today's move over yesterday's value (= total_value − day_change). User's own money, DOM-allowed.
   const dayPct =
     summary && dayChange !== null && summary.total_value !== dayChange
       ? (dayChange / (summary.total_value - dayChange)) * 100
       : null;
-  const dayChangeText =
-    dayChange === null
-      ? '—'
-      : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`;
 
   return (
     <div
@@ -391,14 +435,14 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
           reason={reason}
           emptyCopy="Upload your CAS to see your portfolio summary."
           onRetry={() => refetch()}
-          skeleton={<Skeleton className="h-40 w-full rounded-xl bg-white/10" />}
+          skeleton={<Skeleton className="h-48 w-full rounded-xl bg-white/10" />}
         >
           {summary && (
             <div className="flex flex-col gap-6">
-              {/* Top: value + total returns (left) · data-confidence (right) */}
-              <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-                {/* User's own money figures — allowed in DOM (#2 gates only computed DhanRadar scores) */}
-                <div>
+              {/* Top row: value+gain | chart | completeness */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[auto_1fr_auto] lg:items-start">
+                {/* Left: value + gain/return */}
+                <div className="shrink-0">
                   <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                     Total Portfolio Value
                     {heroTip && <HelpTip tip={heroTip} />}
@@ -421,13 +465,19 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     </div>
                   </div>
                 </div>
-                {/* Right: data completeness — 3-dot meter, NO ring/gauge, NO number (#2) */}
-                <div className="shrink-0 sm:text-right">
-                  <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 sm:justify-end">
+
+                {/* Centre: mini comparison chart */}
+                <div className="hidden min-h-[100px] lg:flex">
+                  <HeroMiniChart portfolioId={portfolioId} />
+                </div>
+
+                {/* Right: data completeness */}
+                <div className="shrink-0 lg:text-right">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 lg:justify-end">
                     Data Completeness
                     {bandTip && <HelpTip tip={bandTip} />}
                   </div>
-                  <div className="mt-1.5 flex items-center gap-1.5 sm:justify-end">
+                  <div className="mt-1.5 flex items-center gap-1.5 lg:justify-end">
                     {([0, 1, 2] as const).map((i) => {
                       const filled = band === 'high' ? 3 : band === 'medium' ? 2 : band === 'low' ? 1 : 0;
                       return (
@@ -444,7 +494,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     </span>
                   </div>
                   {summary.funds_scored > 0 && (
-                    <div className="mt-1 text-[13px] text-slate-400 sm:text-right">
+                    <div className="mt-1 text-[13px] text-slate-400 lg:text-right">
                       {summary.funds_scored >= summary.fund_count
                         ? `✓ All ${summary.fund_count} funds analysed`
                         : `✓ ${summary.funds_scored} of ${summary.fund_count} funds analysed`}
@@ -452,17 +502,24 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   )}
                 </div>
               </div>
-              {/* Bottom: full-width stat row — Invested · Day Change · Lifetime XIRR */}
-              <div className="grid grid-cols-3 gap-4 border-t border-white/10 pt-4 sm:flex sm:justify-between sm:gap-8">
+
+              {/* Bottom stat row — Invested · Day Change · Lifetime XIRR */}
+              <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4 sm:flex sm:justify-between sm:gap-8">
                 <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                 <HeroStat
                   label="Day Change"
-                  value={dayChangeText}
+                  value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`}
                   accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
                   hint={dayChange === null ? 'Updates daily' : undefined}
                 />
                 {summary.xirr_pct !== null && (
-                  <HeroStat label="Lifetime XIRR" value={fmtPct(summary.xirr_pct)} accent="text-emerald-300" hint="Since you invested" tip={xiirrTip} />
+                  <HeroStat
+                    label="Lifetime XIRR"
+                    value={fmtPct(summary.xirr_pct)}
+                    accent={summary.xirr_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}
+                    hint="Since you invested"
+                    tip={xiirrTip}
+                  />
                 )}
               </div>
             </div>
