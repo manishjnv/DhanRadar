@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import {
   EmptyHero, BenefitsGrid, AutoSyncBanner,
-  HeroSection, HealthSection, ActionSection, DmmiSection, AllocSection,
+  HeroSection, VsMarketSection, HealthSection, ActionSection, DmmiSection, AllocSection,
   GoalSection, PerfSection, HoldingsSection, TopPerfSection, UnderReviewSection,
   OverlapSection, DivSection, RiskSection, CostSection, AmcSection,
   TimelineSection, RecSection, ProjSection, OpportunitiesSection,
@@ -155,6 +155,9 @@ function PortfolioView() {
 
           {/* S1 Hero */}
           <HeroSection portfolioId={portfolioId} />
+
+          {/* S1b Portfolio vs Market — full You-vs-Nifty comparison (hero mini-chart links here) */}
+          <VsMarketSection portfolioId={portfolioId} />
 
           {/* S01 Portfolio Health */}
           <section>

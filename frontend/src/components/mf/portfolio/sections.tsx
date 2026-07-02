@@ -38,6 +38,7 @@ import {
   usePortfolioConcentration,
   usePortfolioDiversification,
   usePortfolioValueSeries,
+  useNiftyCloseSeries,
   type Holding,
 } from '@/features/portfolio/api';
 
@@ -369,6 +370,9 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
           Chart builds as daily data accumulates.<br />
           <span className="text-slate-600">Updates each trading day at 4 AM.</span>
         </div>
+        <a href="#portfolio-vs-market" className="mt-2 text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+          Compare with Nifty ↓
+        </a>
       </div>
     );
   }
@@ -396,6 +400,9 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
         <path d={path} fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
+      <a href="#portfolio-vs-market" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
+        Compare with Nifty ↓
+      </a>
     </div>
   );
 }
@@ -519,6 +526,192 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   />
                 )}
               </div>
+            </div>
+          )}
+        </DataState>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S1b — PORTFOLIO vs MARKET (You vs Nifty 50 — % return, DOM-allowed benchmark)
+// Both series are the user's OWN % (portfolio) + public Nifty 50 price closes
+// (public market fact, DOM-allowed). No DhanRadar composite score. Educational
+// benchmark comparison only — no advisory verbs (non-neg #1/#2). Nifty is the
+// PRICE index (excludes dividends) — disclosed in the footer (non-neg #9).
+// ═══════════════════════════════════════════════════════════════════════════
+
+const VS_PERIODS = [
+  { k: '1M', days: 30 },
+  { k: '3M', days: 90 },
+  { k: '6M', days: 180 },
+  { k: '1Y', days: 365 },
+  { k: '3Y', days: 1095 },
+  { k: 'ALL', days: 100_000 },
+] as const;
+
+const DAY_MS = 86_400_000;
+const toEpoch = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime();
+
+/** Rebase a windowed raw series to % return from its first in-window point. */
+function rebasePct(pts: { t: number; v: number }[]): { t: number; pct: number }[] {
+  if (pts.length === 0) return [];
+  const base = pts[0].v;
+  if (base === 0) return pts.map((p) => ({ t: p.t, pct: 0 }));
+  return pts.map((p) => ({ t: p.t, pct: (p.v / base - 1) * 100 }));
+}
+
+/** Two-line % chart: You (blue) vs Nifty (amber), zero baseline dashed. Points placed by DATE
+ *  (not index) so the daily-portfolio vs trading-day-Nifty date mismatch resolves naturally. */
+function VsMarketChart({
+  you, nifty, t0, t1,
+}: {
+  you: { t: number; pct: number }[];
+  nifty: { t: number; pct: number }[];
+  t0: number;
+  t1: number;
+}) {
+  const W = 680, H = 190, mT = 14, mB = 12, mL = 4, mR = 6;
+  const span = t1 - t0 || 1;
+  const xs = (t: number) => mL + ((t - t0) / span) * (W - mL - mR);
+  const all = [...you.map((p) => p.pct), ...nifty.map((p) => p.pct), 0];
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.16 || 1;
+  const ys = (pct: number) => mT + (1 - (pct - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - mT - mB);
+  const toPath = (a: { t: number; pct: number }[]) =>
+    a.map((p, i) => `${i ? 'L' : 'M'}${xs(p.t).toFixed(1)},${ys(p.pct).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 150 }} preserveAspectRatio="none" aria-hidden="true">
+      <line x1={mL} y1={ys(0).toFixed(1)} x2={W - mR} y2={ys(0).toFixed(1)} stroke="rgba(255,255,255,.18)" strokeDasharray="3 4" />
+      {nifty.length > 1 && <path d={toPath(nifty)} fill="none" stroke="#F5C451" strokeWidth="2" />}
+      {you.length > 1 && <path d={toPath(you)} fill="none" stroke="#5B8CFF" strokeWidth="2.5" />}
+    </svg>
+  );
+}
+
+export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
+  const { data: pfEnv, isLoading: pfLoading, isError: pfError, refetch } = usePortfolioValueSeries(portfolioId);
+  const { data: nfData, isLoading: nfLoading } = useNiftyCloseSeries();
+  const [periodIdx, setPeriodIdx] = React.useState(2); // default 6M
+
+  const pfPoints = React.useMemo(() => pfEnv?.data?.points ?? [], [pfEnv]);
+  const nfPoints = React.useMemo(() => nfData?.points ?? [], [nfData]);
+
+  // Build the aligned %-return series for the selected period. `you` is empty until ≥2 daily
+  // portfolio rows exist (forward-only cold-start); `nifty` shows as soon as the backfill lands.
+  const model = React.useMemo(() => {
+    const pfRaw = pfPoints.map((p) => ({ t: toEpoch(p.date), v: p.value }));
+    const nfRaw = nfPoints.map((p) => ({ t: toEpoch(p.close_date), v: p.close_value }));
+    const hasPf = pfRaw.length >= 2;
+    const lastT = Math.max(
+      hasPf ? pfRaw[pfRaw.length - 1].t : 0,
+      nfRaw.length ? nfRaw[nfRaw.length - 1].t : 0,
+    );
+    if (!lastT) return null;
+    const startCap = lastT - VS_PERIODS[periodIdx].days * DAY_MS;
+    const winPf = pfRaw.filter((p) => p.t >= startCap);
+    // Anchor both lines to the SAME window start for a fair head-to-head when portfolio data exists;
+    // else anchor to the period cap (Nifty-only teaser during cold-start).
+    // ponytail: baselines align to within one trading day (portfolio is daily incl. weekends, Nifty
+    // is trading-days) — exact alignment would need a shared trading-day grid; fine at this resolution.
+    const t0 = winPf.length >= 2 ? winPf[0].t : startCap;
+    const winNf = nfRaw.filter((p) => p.t >= t0 && p.t <= lastT);
+    const you = winPf.length >= 2 ? rebasePct(winPf) : [];
+    const nifty = winNf.length >= 2 ? rebasePct(winNf) : [];
+    if (you.length < 2 && nifty.length < 2) return null;
+    return {
+      t0, t1: lastT, you, nifty,
+      youPct: you.length ? you[you.length - 1].pct : null,
+      nfPct: nifty.length ? nifty[nifty.length - 1].pct : null,
+    };
+  }, [pfPoints, nfPoints, periodIdx]);
+
+  const status = pfLoading || nfLoading ? 'loading'
+    : pfError ? 'error'
+    : (pfEnv?.status ?? 'empty');
+  const disclosure = nfData?.disclosure ?? 'Nifty 50 price index · excludes dividends';
+  const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
+  const bothLines = !!model && model.you.length >= 2 && model.nifty.length >= 2;
+
+  return (
+    <div id="portfolio-vs-market" className="relative overflow-hidden rounded-[24px] p-6 text-white shadow-lg sm:p-7" style={{ background: heroGradient }}>
+      <div className="pointer-events-none absolute -right-12 -top-16 h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.22),transparent 70%)' }} aria-hidden="true" />
+      <div className="pointer-events-none absolute -bottom-28 left-[30%] h-64 w-64 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.26),transparent 70%)' }} aria-hidden="true" />
+      <div className="relative z-[2]">
+        <DataState
+          status={status}
+          emptyCopy="Upload your CAS to compare your portfolio with the market."
+          onRetry={() => refetch()}
+          skeleton={<Skeleton className="h-56 w-full rounded-xl bg-white/10" />}
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="font-sans text-[16px] font-semibold">Portfolio vs Market</div>
+              <div className="mt-0.5 text-[11px] text-slate-400">{VS_PERIODS[periodIdx].k} · % return</div>
+            </div>
+          </div>
+
+          {model ? (
+            <>
+              {/* Headline chips — You vs Nifty */}
+              <div className="mt-3 flex items-stretch">
+                <div className="flex-1 rounded-l-xl bg-[#5B8CFF]/[.16] px-3 py-2">
+                  <div className="text-[11px] font-semibold text-[#9cc0ff]">Your Portfolio</div>
+                  <div
+                    className="text-[18px] font-bold tabular-nums"
+                    style={{ color: model.youPct == null ? '#94a3b8' : model.youPct >= 0 ? '#6ee7b7' : '#fca5a5' }}
+                  >
+                    {model.youPct == null ? '—' : fmtPct(model.youPct)}
+                  </div>
+                </div>
+                <div className="self-center rounded-full border border-white/15 bg-[#0B1F3A] px-1.5 py-0.5 text-[9px] font-bold text-slate-400" style={{ margin: '0 -9px', zIndex: 3 }}>VS</div>
+                <div className="flex-1 rounded-r-xl bg-[#F5C451]/[.13] px-3 py-2 text-right">
+                  <div className="text-[11px] font-semibold text-[#f5c451]">Nifty 50</div>
+                  <div className="text-[18px] font-bold tabular-nums text-[#ffe39a]">
+                    {model.nfPct == null ? '—' : fmtPct(model.nfPct)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <VsMarketChart you={model.you} nifty={model.nifty} t0={model.t0} t1={model.t1} />
+              </div>
+
+              {/* Factual delta line (educational — no advisory verb) */}
+              {bothLines && model.youPct != null && model.nfPct != null && (
+                <div className="mt-1 text-[12px] font-semibold" style={{ color: model.youPct - model.nfPct >= 0 ? '#6ee7b7' : '#fca5a5' }}>
+                  {model.youPct - model.nfPct >= 0 ? 'Ahead of' : 'Behind'} Nifty by {Math.abs(model.youPct - model.nfPct).toFixed(2)}% over this period
+                </div>
+              )}
+              {!bothLines && (
+                <div className="mt-1 text-[11px] text-slate-400">
+                  Your line appears once ≥2 days of portfolio data accumulate (updates 4 AM). Meanwhile — Nifty 50.
+                </div>
+              )}
+
+              {/* Period pills */}
+              <div className="mt-3 flex gap-1 rounded-xl bg-white/[.06] p-1">
+                {VS_PERIODS.map((p, i) => (
+                  <button
+                    key={p.k}
+                    type="button"
+                    onClick={() => setPeriodIdx(i)}
+                    className={`flex-1 rounded-lg py-1 text-[12px] font-semibold transition-colors focus-visible:outline-none ${i === periodIdx ? 'bg-royal text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    {p.k}
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-2 text-[10px] text-slate-500">
+                vs {disclosure} · comparison builds as daily history accrues · for education, not advice
+              </p>
+            </>
+          ) : (
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/[.04] px-4 py-6 text-center text-[12px] text-slate-400">
+              Your You-vs-Nifty comparison builds as your portfolio and market data accumulate.<br />
+              <span className="text-[10px] text-slate-500">Updates each trading day at 4 AM.</span>
             </div>
           )}
         </DataState>

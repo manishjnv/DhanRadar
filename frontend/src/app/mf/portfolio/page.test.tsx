@@ -49,6 +49,7 @@ vi.mock('@/components/mf/portfolio/sections', () => ({
   BenefitsGrid: () => <div />,
   AutoSyncBanner: () => <div />,
   HeroSection: () => <div />,
+  VsMarketSection: () => <div />,
   HealthSection: () => <div />,
   ActionSection: () => <div />,
   DmmiSection: () => <div />,
