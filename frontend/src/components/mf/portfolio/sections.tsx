@@ -364,7 +364,7 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
   if (recent.length < 2) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 text-center px-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">YOU VS NIFTY · 90D</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">YOUR VALUE · 90D</div>
         <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
           Chart builds as daily data accumulates.<br />
           <span className="text-slate-600">Updates each trading day at 4 AM.</span>
@@ -386,19 +386,16 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
   return (
     <div className="flex h-full flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOU VS NIFTY · 90D</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR VALUE · 90D</span>
         {pct90d !== null && (
           <span className={`text-[11px] font-bold ${pct90d >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            YOU {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%
+            {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%
           </span>
         )}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
         <path d={path} fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
-      <button type="button" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
-        Open full comparison ↓
-      </button>
     </div>
   );
 }
