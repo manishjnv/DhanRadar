@@ -295,38 +295,38 @@ async def _run_pipeline(
 
         from dhanradar.db import task_session
 
-        async def _resolve_isins(holdings: list[ParsedHolding]) -> list[ParsedHolding]:
-            resolved: list[ParsedHolding] = []
-            async with task_session() as _db:
-                for h in holdings:
-                    if not h.isin.startswith("CAMS:"):
-                        resolved.append(h)
-                        continue
-                    # Fuzzy match on scheme_name using pg_trgm similarity
-                    row = (await _db.execute(
-                        _sa_text(
-                            "SELECT isin, scheme_name, similarity(scheme_name, :name) AS sim"
-                            " FROM mf.mf_funds"
-                            " ORDER BY similarity(scheme_name, :name) DESC"
-                            " LIMIT 1"
-                        ),
-                        {"name": h.scheme_name},
-                    )).first()
-                    if row and row[2] > 0.25:  # similarity threshold
-                        logger.info(
-                            "cams_isin_resolved: %r -> %s (sim=%.2f)",
-                            h.scheme_name, row[0], row[2],
-                        )
-                        resolved.append(_dc_replace(h, isin=row[0]))
-                    else:
-                        logger.warning(
-                            "cams_isin_unresolved: %r (best sim=%.2f) -- keeping placeholder",
-                            h.scheme_name, row[2] if row else 0.0,
-                        )
-                        resolved.append(h)
-            return resolved
+        # Batch all CAMS-placeholder names into a single unnest query instead of N serial
+        # round trips. One query → one DB round-trip regardless of portfolio size.
+        names = [h.scheme_name for h in cams_placeholders]
+        async with task_session() as _db:
+            rows = (await _db.execute(
+                _sa_text("""
+                    SELECT DISTINCT ON (n.idx)
+                        (n.idx - 1)::int AS idx,
+                        f.isin,
+                        similarity(f.scheme_name, n.name) AS sim
+                    FROM unnest(:names::text[]) WITH ORDINALITY AS n(name, idx),
+                         mf.mf_funds f
+                    WHERE similarity(f.scheme_name, n.name) > 0.25
+                    ORDER BY n.idx, sim DESC
+                """),
+                {"names": names},
+            )).all()
 
-        parsed = await _resolve_isins(parsed)
+        best_match: dict[int, tuple[str, float]] = {r.idx: (r.isin, float(r.sim)) for r in rows}
+        resolved_map: dict[str, str] = {}  # placeholder isin → real isin
+        for i, h in enumerate(cams_placeholders):
+            if i in best_match:
+                real_isin, sim = best_match[i]
+                logger.info("cams_isin_resolved: %r -> %s (sim=%.2f)", h.scheme_name, real_isin, sim)
+                resolved_map[h.isin] = real_isin
+            else:
+                logger.warning("cams_isin_unresolved: %r (best sim < 0.25) -- keeping placeholder", h.scheme_name)
+        if resolved_map:
+            parsed = [
+                _dc_replace(p, isin=resolved_map[p.isin]) if p.isin in resolved_map else p
+                for p in parsed
+            ]
     rengine = RatingEngine()
 
     async with rls_user_session(user_id) as db:
@@ -396,18 +396,27 @@ async def _run_pipeline(
 
         plus = await is_plus(user_id, db)
 
-        # Load each holding's NAV history (mf schema, read-only) so the engine
-        # scores on real momentum/risk signals derived from NAV, and the snapshot
-        # values on the latest NAV (B29). A holding with no NAV history yields no
-        # axes → the engine refuses with insufficient_data (honest fail-safe).
-        nav_series, latest_nav = await _load_nav_series(db, [p.isin for p in parsed])
-        # Peer-cohort benchmark (B58): category-relative label inputs so the rule
-        # table can emit in_form/off_track, not only on_track/insufficient_data.
-        cohort = await _compute_cohort(db, [p.isin for p in parsed])
-        # Resolve each holding's AMFI category from the master so the snapshot's
-        # category-allocation and the per-fund Category column are real (else every
-        # holding buckets as "uncategorized" → a meaningless 100% donut).
-        category_map = await _fetch_fund_categories(db, [p.isin for p in parsed])
+        # Run NAV history, peer-cohort, and category reads concurrently — all three
+        # are independent reads on public MF data (no user-personal data, no RLS).
+        # Each opens its own task_session so asyncio.gather can interleave them safely.
+        isins_to_score = [p.isin for p in parsed]
+        from dhanradar.db import task_session as _task_session
+
+        async def _par_nav() -> tuple[dict, dict]:
+            async with _task_session() as _db:
+                return await _load_nav_series(_db, isins_to_score)
+
+        async def _par_cohort() -> dict:
+            async with _task_session() as _db:
+                return await _compute_cohort(_db, isins_to_score)
+
+        async def _par_cats() -> dict:
+            async with _task_session() as _db:
+                return await _fetch_fund_categories(_db, isins_to_score)
+
+        (nav_series, latest_nav), cohort, category_map = await asyncio.gather(
+            _par_nav(), _par_cohort(), _par_cats()
+        )
 
         snapshot_holdings = parsed_to_snapshot_holdings(
             parsed, nav_map=latest_nav, category_map=category_map, invested_map=invested_map
@@ -426,6 +435,13 @@ async def _run_pipeline(
         from dhanradar.compliance import service as compliance_service
 
         funds_payload: list[dict] = []
+        today = date.today()
+        # Fetch prior labels for all funds in one query before the loop writes new ones.
+        # get_prior_label filters snapshot_date < today, so we can read all at once.
+        prior_labels: dict[str, str | None] = {
+            p.isin: await mf_history.get_prior_label(db, portfolio_id, p.isin, today)
+            for p in parsed
+        }
         for p in parsed:
             # Signals are computed from the fund's own NAV series (momentum/risk);
             # fundamentals-backed axes stay None → partial_coverage (≤ medium).
@@ -434,13 +450,8 @@ async def _run_pipeline(
                 p.isin, nav_series.get(p.isin, []), category_relative=cohort.get(p.isin)
             )
             result = await score_fund(rengine, signals)
-            await upsert_user_fund_score(db, user_id, result, portfolio_id)
-            # Fetch the previous label BEFORE writing today's row (snapshot_date <
-            # today is the filter, so today's row is excluded either way).
-            # None on first upload — delta arrow is suppressed in the frontend.
-            previous_label_val = await mf_history.get_prior_label(
-                db, portfolio_id, p.isin, date.today()
-            )
+            # commit=False: accumulate all fund score + history writes; one commit at end.
+            await upsert_user_fund_score(db, user_id, result, portfolio_id, commit=False)
             # Write label history for ALL users (not just Plus) so the delta feature
             # (Feature 3: ↑/↓ arrow on the report) works for free users too.
             # The full history READ endpoint stays Plus-gated (router.py).
@@ -448,9 +459,10 @@ async def _run_pipeline(
                 db,
                 user_id=user_id,
                 result=result,
-                snapshot_date=date.today(),
+                snapshot_date=today,
                 source="cas_upload",
                 portfolio_id=portfolio_id,
+                commit=False,
             )
             # B26 — persist (label, model_used, disclaimer_version) for this served
             # label at GENERATION (once, with full provenance). Fire-and-forget: a
@@ -478,9 +490,11 @@ async def _run_pipeline(
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
                 "contributing_signals": result.contributing_signals,
                 "contradicting_signals": result.contradicting_signals,
-                "previous_label": previous_label_val,
+                "previous_label": prior_labels.get(p.isin),
                 "confidence_factors": dict(result.confidence_factors),
             })
+        # Commit all fund scores + history rows in one transaction.
+        await db.commit()
 
         # Plus-only: persist the portfolio-level snapshot (numbers stay server-side).
         if plus:
@@ -513,12 +527,19 @@ async def _run_pipeline(
             from dhanradar.mf.commentary import generate_commentary, is_commentary_entitled
 
             if await is_commentary_entitled(user_id, db):
-                report_payload["commentary"] = await generate_commentary(
-                    OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
-                    request_id=request_id,
+                # Cap AI commentary at 12 s — prevents a slow model from blocking the whole pipeline.
+                report_payload["commentary"] = await asyncio.wait_for(
+                    generate_commentary(
+                        OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
+                        request_id=request_id,
+                    ),
+                    timeout=12.0,
                 )
             else:
                 report_payload["commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
+        except asyncio.TimeoutError:
+            logger.warning("AI commentary timed out after 12 s job=%s", job_id)
+            report_payload["commentary"] = {"state": "unavailable", "reason": "timeout"}
         except Exception:  # noqa: BLE001 — commentary is best-effort; report still completes
             logger.exception("AI commentary failed job=%s", job_id)
             report_payload["commentary"] = {"state": "unavailable", "reason": "internal_error"}
