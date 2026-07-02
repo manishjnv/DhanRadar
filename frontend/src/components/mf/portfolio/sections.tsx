@@ -408,9 +408,9 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   </div>
                   <div className="mt-3 flex gap-7">
                     <div>
-                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Gain</div>
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">{summary.gain >= 0 ? 'Total Gain' : 'Total Loss'}</div>
                       <div className={`mt-0.5 font-sans text-[15px] font-semibold ${summary.gain >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {summary.gain >= 0 ? '+' : ''}{fmtFull(Math.abs(summary.gain))}
+                        {summary.gain >= 0 ? '+' : '−'}{fmtFull(Math.abs(summary.gain))}
                       </div>
                     </div>
                     <div>
