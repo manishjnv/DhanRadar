@@ -30,6 +30,7 @@ async def append_score_history(
     snapshot_date: date,
     source: str,
     portfolio_id: str | UUID,
+    commit: bool = True,
 ) -> bool:
     """INSERT a label-only history row for one fund.
 
@@ -58,7 +59,8 @@ async def append_score_history(
         .on_conflict_do_nothing(constraint="uq_mf_score_history")
     )
     result_proxy = await db.execute(stmt)
-    await db.commit()
+    if commit:
+        await db.commit()
     return result_proxy.rowcount == 1
 
 
