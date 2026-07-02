@@ -292,12 +292,15 @@ async def _run_pipeline(
     if cams_placeholders:
         from dataclasses import replace as _dc_replace
 
-        from sqlalchemy import text as _sa_text
+        from sqlalchemy import String, bindparam, text as _sa_text
+        from sqlalchemy.dialects.postgresql import ARRAY
 
         from dhanradar.db import task_session
 
         # Batch all CAMS-placeholder names into a single unnest query instead of N serial
         # round trips. One query → one DB round-trip regardless of portfolio size.
+        # bindparam with ARRAY(String) so asyncpg infers the correct pg array type
+        # without the ::text[] cast syntax that confuses asyncpg's parameter parser.
         names = [h.scheme_name for h in cams_placeholders]
         async with task_session() as _db:
             rows = (await _db.execute(
@@ -306,11 +309,11 @@ async def _run_pipeline(
                         (n.idx - 1)::int AS idx,
                         f.isin,
                         similarity(f.scheme_name, n.name) AS sim
-                    FROM unnest(:names::text[]) WITH ORDINALITY AS n(name, idx),
+                    FROM unnest(:names) WITH ORDINALITY AS n(name, idx),
                          mf.mf_funds f
                     WHERE similarity(f.scheme_name, n.name) > 0.25
                     ORDER BY n.idx, sim DESC
-                """),
+                """).bindparams(bindparam("names", type_=ARRAY(String))),
                 {"names": names},
             )).all()
 
