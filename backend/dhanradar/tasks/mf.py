@@ -47,6 +47,7 @@ from dhanradar.mf.cas import (
     detect_and_parse,
     filter_foreign_pan_folios,
     normalize_folio,
+    parser_version_for,
 )
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
@@ -567,7 +568,12 @@ async def _run_pipeline(
         # re-acquire the SAME lock at the start of their own write transaction.
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
 
-        ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
+        # Format-specific parser_version: the ledger's natural-key dedup scopes itself to
+        # CROSS-format matches only (same-format rows can be legitimate same-day twins).
+        ledger_rows = build_cas_ledger_rows(
+            parsed, user_id=user_id, portfolio_id=portfolio_id,
+            parser_version=parser_version_for(path),
+        )
         ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
         await db.commit()
         _slog.info(

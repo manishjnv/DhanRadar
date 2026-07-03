@@ -16,6 +16,7 @@ applies exactly what the migration installs (ORM `create_all` does not create tr
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlalchemy import text
@@ -78,6 +79,18 @@ async def allow_ledger_purge(db: Any) -> None:
 #: transaction re-ingested from a second format/rail.
 _NaturalKey = tuple[str, str, Any, str, float, float]
 
+_TRAILING_VERSION = re.compile(r"-\d+$")
+
+
+def _format_family(parser_version: str | None) -> str:
+    """The format family of a parser_version — the version string minus its trailing '-<n>' bump:
+    'cas-pdf-1' → 'cas-pdf', 'cas-tds-txt-1' → 'cas-tds-txt', legacy 'cas-1' → 'cas', None → ''.
+    Two rows are dedup-comparable on the natural key ONLY when their families differ (a same-family
+    natural-key match can be a legitimate same-day twin; a cross-family one cannot). Legacy/None
+    families differ from every specific family → old rows stay dedup-eligible vs any new upload
+    (conservative — their format is unknown)."""
+    return _TRAILING_VERSION.sub("", parser_version or "")
+
 
 def _natural_key(
     instrument_id: str, folio_number: str, txn_date: Any, txn_type: str, units: Any, amount: Any
@@ -85,7 +98,8 @@ def _natural_key(
     """Rounding-bucket natural key: units to 3 decimals (~±0.001 tolerance), amount to the nearest
     rupee (~±1 tolerance) — exact match after rounding, per spec (no epsilon-neighbourhood search).
     `folio_number` is expected ALREADY CANONICAL (normalize_folio) — every ledger-row producer must
-    normalize before this point, so this function does not re-normalize."""
+    normalize before this point (migration 0061 backfilled pre-existing rows), so this function
+    does not re-normalize."""
     return (
         instrument_id,
         folio_number,
@@ -101,13 +115,19 @@ async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int,
     uq_portfolio_txn DO NOTHING` — so re-ingesting the same txns is a no-op (diff-and-append, §22);
     only genuinely-new rows land. Returns (inserted, skipped).
 
-    Second-stage natural-key dedup (§39.3, adapted — the 2026-07-04 cross-format incident): BEFORE
-    the INSERT, any candidate row that matches an EXISTING row of this portfolio on
-    `(instrument_id, folio_number, txn_date, txn_type, round(units,3), round(amount))` is dropped —
-    regardless of `source_ref` — so the same real-world transaction re-ingested under a different
-    content-hash fingerprint (a different format's folio spacing, or a future second source rail)
-    still collides to ONE row. Logged as `ledger.cross_format_skipped`. The ON CONFLICT path below
-    stays as the final (cheaper, exact-hash) safety net for genuine re-ingests of the same source.
+    Second-stage natural-key dedup (§39.3, adapted — the 2026-07-04 cross-format incident), scoped
+    to CROSS-FORMAT matches only: before the INSERT, a candidate row is dropped when it matches an
+    EXISTING row of this portfolio on `(instrument_id, folio_number, txn_date, txn_type,
+    round(units,3), round(amount))` AND that row's parser_version format family differs from the
+    incoming batch's — the same real transaction re-printed by a second format/rail merges to ONE
+    row, while a SAME-family natural-key match is left alone (it can be a legitimate same-day twin;
+    the statement that printed both is authoritative). No within-batch dedup for the same reason —
+    one statement's rows are authoritative, and truly identical rows already collapse via the
+    exact-hash source_ref (documented accepted behaviour). Accepted residual: cross-format twins
+    with identical rounded values still merge to one row — the statements themselves cannot
+    distinguish them, and the checkpoint reconciliation flags the resulting units undercount.
+    Logged as `ledger.cross_format_skipped`. The ON CONFLICT path below stays as the final
+    (cheaper, exact-hash) safety net for genuine re-ingests of the same source.
 
     Runs on the CALLER's session — the CAS pipeline's `rls_user_session`, so RLS WITH CHECK enforces
     each row's `user_id` == the GUC owner: a row for any other user is REJECTED by the policy (the row
@@ -123,8 +143,10 @@ async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int,
 
     from dhanradar.models.mf import MfPortfolioTransaction
 
-    # All rows in one call belong to the same portfolio (one CAS upload / one sync batch).
+    # All rows in one call belong to the same portfolio + parser (one CAS upload / one sync batch).
     portfolio_id = rows[0]["portfolio_id"]
+    batch_family = _format_family(rows[0].get("parser_version"))
+    batch_instruments = {row["instrument_id"] for row in rows}
     existing = (
         await db.execute(
             select(
@@ -134,16 +156,22 @@ async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int,
                 MfPortfolioTransaction.txn_type,
                 MfPortfolioTransaction.units,
                 MfPortfolioTransaction.amount,
-            ).where(MfPortfolioTransaction.portfolio_id == portfolio_id)
+                MfPortfolioTransaction.parser_version,
+            ).where(
+                MfPortfolioTransaction.portfolio_id == portfolio_id,
+                MfPortfolioTransaction.instrument_id.in_(batch_instruments),
+            )
         )
     ).all()
+    # Only rows from a DIFFERENT format family are natural-key comparable (same-family matches can
+    # be genuine same-day twins — those are the exact-hash constraint's job, not this filter's).
     existing_keys = {
         _natural_key(r.instrument_id, r.folio_number, r.txn_date, r.txn_type, r.units, r.amount)
         for r in existing
+        if _format_family(r.parser_version) != batch_family
     }
 
     candidate_rows: list[dict[str, Any]] = []
-    seen_in_batch: set[_NaturalKey] = set()
     cross_format_skipped = 0
     for row in rows:
         key = _natural_key(
@@ -154,10 +182,9 @@ async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int,
             row["units"],
             row["amount"],
         )
-        if key in existing_keys or key in seen_in_batch:
+        if key in existing_keys:
             cross_format_skipped += 1
             continue
-        seen_in_batch.add(key)
         candidate_rows.append(row)
 
     if cross_format_skipped:

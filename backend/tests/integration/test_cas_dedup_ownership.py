@@ -8,10 +8,12 @@ DIFFERENT investor's folios (a household member sharing one RTA email) which wer
 this portfolio wholesale.
 
 Pure tests (no PG): folio normalization across format variants (see also test_b2_cas_ledger.py),
-the ledger's rounding-bucket natural key, and the ownership filter. PG tests (live-PG CI): second-
-stage natural-key dedup at append (independent of the source_ref hash), a mixed batch where only
-genuinely-new rows land, and the ownership guard's real DB footprint (mirrors _run_pipeline's own
-call order: filter -> build -> append -> project -> checkpoint).
+the ledger's rounding-bucket natural key + format-family derivation, the ownership filter, and the
+identity-PAN unanimity rule. PG tests (live-PG CI): second-stage natural-key dedup at append
+(cross-format-family only — independent of the source_ref hash), a mixed batch where only
+genuinely-new rows land, same-family same-day twins BOTH landing (the dedup must never eat a
+legitimate twin), and the ownership guard's real DB footprint (mirrors _run_pipeline's own call
+order: filter -> build -> append -> project -> checkpoint).
 """
 
 from __future__ import annotations
@@ -28,8 +30,10 @@ from dhanradar.mf.cas import (
     ParsedTxn,
     build_cas_ledger_rows,
     filter_foreign_pan_folios,
+    parse_cas,
+    parser_version_for,
 )
-from dhanradar.mf.ledger import _natural_key, append_transactions
+from dhanradar.mf.ledger import _format_family, _natural_key, append_transactions
 from dhanradar.models.auth import User
 
 pytestmark = pytest.mark.integration
@@ -94,6 +98,77 @@ def test_natural_key_rounding_bucket_tolerance():
     assert different_folio != baseline
 
 
+def test_format_family_derivation():
+    """parser_version → format family: the trailing '-<n>' version bump strips; legacy 'cas-1'
+    (pre-split rows) and None each land in a family distinct from every specific one, so old rows
+    stay dedup-eligible vs any new upload (conservative). parser_version_for maps extensions."""
+    assert _format_family("cas-pdf-1") == "cas-pdf"
+    assert _format_family("cas-tds-txt-1") == "cas-tds-txt"
+    assert _format_family("cas-tds-xls-1") == "cas-tds-xls"
+    assert _format_family("cas-1") == "cas"
+    assert _format_family(None) == ""
+    assert _format_family("cas-pdf-1") != _format_family("cas-tds-txt-1")
+    # .txt and .xls TDS exports are DIFFERENT format families (their byte-identical content
+    # already collides via the exact-hash source_ref; the family split matters for the
+    # natural-key layer only).
+    assert _format_family(parser_version_for("a.txt")) != _format_family(
+        parser_version_for("a.xls")
+    )
+    assert parser_version_for("a.pdf") == "cas-pdf-1"
+    assert parser_version_for("weird.bin") == "cas-1"
+
+
+# ---------------------------------------------------------------------------
+# Pure — identity PAN unanimity (BLOCKER: first-folio fallback could invert ownership)
+# ---------------------------------------------------------------------------
+
+
+def test_identity_pan_ambiguous_folio_pans_stores_none():
+    """No investor_info PAN + folios carrying DIFFERENT PANs (a consolidated household statement):
+    the identity PAN must be None — an arbitrary first folio's PAN must never become the stored
+    authoritative investor_pan (it could be the OTHER investor's, inverting the ownership guard).
+    With pan=None nothing is excluded either (the guard fails open per the no-PAN rule)."""
+    raw = {
+        "investor_info": {"name": "Someone"},
+        "folios": [
+            {"folio": "1/1", "PAN": "ABCDE1234F", "schemes": []},
+            {"folio": "2/1", "PAN": "ZZZZZ9999Z", "schemes": []},
+        ],
+    }
+    holdings, identity = parse_cas("p.pdf", None, reader=lambda p, pw: raw)
+    assert identity.pan is None
+    # fails-open: with no owner PAN the filter excludes nothing
+    owned, foreign = filter_foreign_pan_folios(
+        [_mini_holding("INF_A", folio_pan="ABCDE1234F")], identity.pan
+    )
+    assert foreign == []
+
+
+def test_identity_pan_unanimous_folio_pans_stored():
+    """No investor_info PAN but every folio-level PAN (incl. a CDSL account) agrees → unanimity,
+    the shared PAN IS the identity and the ownership guard stays active."""
+    raw = {
+        "investor_info": {},
+        "folios": [
+            {"folio": "1/1", "PAN": "ABCDE1234F", "schemes": []},
+            {"folio": "2/1", "pan": "ABCDE1234F", "schemes": []},
+        ],
+        "accounts": [{"PAN": "ABCDE1234F", "mutual_funds": []}],
+    }
+    holdings, identity = parse_cas("p.pdf", None, reader=lambda p, pw: raw)
+    assert identity.pan == "ABCDE1234F"
+
+
+def test_identity_pan_investor_info_wins_over_folios():
+    """investor_info.pan, when present and valid, is authoritative regardless of folio PANs."""
+    raw = {
+        "investor_info": {"pan": "ABCDE1234F"},
+        "folios": [{"folio": "1/1", "PAN": "ZZZZZ9999Z", "schemes": []}],
+    }
+    holdings, identity = parse_cas("p.pdf", None, reader=lambda p, pw: raw)
+    assert identity.pan == "ABCDE1234F"
+
+
 # ---------------------------------------------------------------------------
 # Pure — per-folio ownership filter
 # ---------------------------------------------------------------------------
@@ -147,13 +222,16 @@ async def test_cross_format_natural_key_dedup(db_session, app_session):
     )
 
     await set_rls_user(app_session, uid)
-    rows1 = build_cas_ledger_rows([hold_a], user_id=uid, portfolio_id=pid)
+    rows1 = build_cas_ledger_rows(
+        [hold_a], user_id=uid, portfolio_id=pid, parser_version="cas-tds-txt-1"
+    )
     ins1, skip1 = await append_transactions(app_session, rows1)
     await app_session.commit()
     assert (ins1, skip1) == (1, 0)
 
-    # A "different format" re-issue: same real txn, folio printed with an internal space, amount/
-    # units off by sub-tolerance rounding noise — changes source_ref but must still natural-key-collide.
+    # A DIFFERENT-format re-issue (PDF vs the TDS above): same real txn, folio printed with an
+    # internal space, amount/units off by sub-tolerance rounding noise — changes source_ref but
+    # must still natural-key-collide because the format families differ.
     txn_b = ParsedTxn(
         when=date(2026, 1, 5), amount=-1000.49, is_sip=True, txn_type="sip", units=50.0004, nav=20.0
     )
@@ -169,7 +247,9 @@ async def test_cross_format_natural_key_dedup(db_session, app_session):
         as_of_date=None,
         txns=[txn_b],
     )
-    rows2 = build_cas_ledger_rows([hold_b], user_id=uid, portfolio_id=pid)
+    rows2 = build_cas_ledger_rows(
+        [hold_b], user_id=uid, portfolio_id=pid, parser_version="cas-pdf-1"
+    )
     assert rows2[0]["source_ref"] != rows1[0]["source_ref"], (
         "sanity: different exact amount/units -> different hash"
     )
@@ -212,7 +292,9 @@ async def test_mixed_batch_only_new_rows_land(db_session, app_session):
         txns=[txn1],
     )
     await set_rls_user(app_session, uid)
-    rows1 = build_cas_ledger_rows([hold1], user_id=uid, portfolio_id=pid)
+    rows1 = build_cas_ledger_rows(
+        [hold1], user_id=uid, portfolio_id=pid, parser_version="cas-tds-txt-1"
+    )
     await append_transactions(app_session, rows1)
     await app_session.commit()
 
@@ -241,12 +323,68 @@ async def test_mixed_batch_only_new_rows_land(db_session, app_session):
     )
 
     await set_rls_user(app_session, uid)
-    rows2 = build_cas_ledger_rows([hold2], user_id=uid, portfolio_id=pid)
+    rows2 = build_cas_ledger_rows(
+        [hold2], user_id=uid, portfolio_id=pid, parser_version="cas-pdf-1"
+    )
     ins2, skip2 = await append_transactions(app_session, rows2)
     await app_session.commit()
     assert (ins2, skip2) == (1, 1), (
         "only the genuinely-new txn lands; the cross-format re-issue is skipped"
     )
+
+    await set_rls_user(app_session, uid)
+    n = await app_session.scalar(
+        text("SELECT count(*) FROM mf.portfolio_transactions WHERE portfolio_id = :p"), {"p": pid}
+    )
+    assert n == 2
+    await app_session.rollback()
+
+
+async def test_same_family_same_day_twins_both_land(db_session, app_session):
+    """Two DISTINCT same-day same-rounded-amount same-units SIPs printed by ONE statement (a
+    genuine twin pair — e.g. two ₹1000 SIPs into the same fund on the 5th) must BOTH land: the
+    statement that printed both is authoritative, so neither within-batch natural-key dedup nor a
+    same-family match against earlier rows may eat one. (Truly identical twins — every exact field
+    equal — still collapse via the exact-hash source_ref: documented accepted behaviour.)"""
+    uid = await _seed_user(db_session, "dedup-twins@test.dev")
+    pid = await _seed_portfolio(db_session, uid)
+
+    # Distinct at exact precision (different paise), identical at natural-key rounding — the
+    # natural keys collide but the source_refs differ.
+    twin_a = ParsedTxn(
+        when=date(2026, 1, 5), amount=-999.60, is_sip=True, txn_type="sip", units=50.0, nav=20.0
+    )
+    twin_b = ParsedTxn(
+        when=date(2026, 1, 5), amount=-1000.40, is_sip=True, txn_type="sip", units=50.0, nav=20.0
+    )
+    hold = ParsedHolding(
+        isin="INF_TWINS",
+        amfi_code=None,
+        scheme_name="X",
+        folio_number="4444/73",
+        units=100.0,
+        nav=20.0,
+        value=2000.0,
+        cost=2000.0,
+        as_of_date=None,
+        txns=[twin_a, twin_b],
+    )
+
+    await set_rls_user(app_session, uid)
+    rows = build_cas_ledger_rows(
+        [hold], user_id=uid, portfolio_id=pid, parser_version="cas-tds-txt-1"
+    )
+    assert rows[0]["source_ref"] != rows[1]["source_ref"], "sanity: twins hash distinctly"
+    ins, skip = await append_transactions(app_session, rows)
+    await app_session.commit()
+    assert (ins, skip) == (2, 0), "genuine same-day twins from ONE statement must BOTH land"
+
+    # Same-family re-upload of the same statement: exact-hash idempotency, not the natural key,
+    # is what skips them — still (0, 2), and the ledger still holds exactly the two twins.
+    await set_rls_user(app_session, uid)
+    ins2, skip2 = await append_transactions(app_session, rows)
+    await app_session.commit()
+    assert (ins2, skip2) == (0, 2)
 
     await set_rls_user(app_session, uid)
     n = await app_session.scalar(
