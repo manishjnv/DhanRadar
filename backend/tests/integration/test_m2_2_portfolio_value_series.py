@@ -256,3 +256,58 @@ async def test_summary_day_change_latest_minus_previous(db_session, rls_async_cl
     d = r.json()["data"]
     # latest (1045) − previous (1020) = 25, NOT latest − oldest
     assert d["day_change"] == pytest.approx(25.0, abs=0.01)
+
+
+async def test_summary_day_change_flow_adjusted(db_session, rls_async_client):
+    """A flow day (SIP purchase) must not read as a gain: the invested delta is
+    subtracted — ₹500 bought + ₹50 market move → day_change=50, not 550 (RCA 2026-07-02)."""
+    from dhanradar.auth.security import create_access_token
+    from tests.conftest import make_auth_headers
+
+    uid = await _seed_user(db_session, "vs-flow@test.dev")
+    pid = await _seed_portfolio(db_session, uid)
+    await _seed_daily_values(db_session, pid, uid, [
+        (date(2026, 7, 1), 1000.0, 900.0),
+        (date(2026, 7, 2), 1550.0, 1400.0),  # +500 invested, +550 value → real move +50
+    ])
+    token, _ = create_access_token(uid)
+
+    r = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/summary", headers=make_auth_headers(access_token=token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["day_change"] == pytest.approx(50.0, abs=0.01)
+    # pct from the SAME two rows: 50 / 1000 = 5%
+    assert d["day_change_pct"] == pytest.approx(5.0, abs=0.01)
+
+
+async def test_reset_valuation_series_restarts_series(db_session):
+    """CAS re-upload reset (_reset_valuation_series): stale rows from the OLD holdings
+    composition are deleted and ONE fresh row is seeded from the current holdings ×
+    latest NAV — so day-change/charts never span two different portfolios."""
+    from dhanradar.tasks.mf import _reset_valuation_series
+
+    uid = await _seed_user(db_session, "vs-reset@test.dev")
+    pid = await _seed_portfolio(db_session, uid)  # 5 units × latest NAV 200 = 1000, invested 900
+    await _seed_daily_values(db_session, pid, uid, [
+        (date(2026, 7, 1), 286_566.0, 147_000.0),  # stale demo-composition row
+        (date(2026, 7, 2), 41_010.0, 52_674.0),
+    ])
+
+    await _reset_valuation_series(db_session, uid, pid)
+
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT valuation_date, total_value, total_invested"
+                " FROM mf.mf_portfolio_daily_values WHERE portfolio_id = :p"
+                " ORDER BY valuation_date"
+            ),
+            {"p": pid},
+        )
+    ).all()
+    assert len(rows) == 1, "series must restart with exactly today's row"
+    assert rows[0].valuation_date == date.today()
+    assert float(rows[0].total_value) == pytest.approx(1000.0, abs=0.01)
+    assert float(rows[0].total_invested) == pytest.approx(900.0, abs=0.01)

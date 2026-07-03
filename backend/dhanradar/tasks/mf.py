@@ -312,6 +312,60 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
         logger.exception("cas.identity: storage failed for user_id=%s (non-fatal)", user_id)
 
 
+async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> None:
+    """Restart the daily-valuation series after a CAS (re-)upload rewrites the holdings.
+
+    A re-upload can REPLACE the portfolio's composition, so the stored series — and the
+    day-change derived from its last two rows — describes a portfolio that no longer
+    exists (RCA 2026-07-02: demo→real re-upload rendered a −85% "day change"). Delete
+    the portfolio's rows and seed today's row from the just-written holdings + latest
+    NAVs (same computation as compute_portfolio_daily_valuations; the 04:00 task
+    idempotently re-upserts today's row later). Runs in the pipeline's owner-RLS
+    session — mf_portfolio_daily_values carries the owner's user_id (0056 RLS).
+    """
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select as sa_select
+    from sqlalchemy import text as sa_text
+
+    from dhanradar.mf.valuation import compute_daily_value
+    from dhanradar.models.mf import MfPortfolioDailyValue, MfUserHolding
+
+    holdings = (
+        await db.execute(
+            sa_select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
+            .where(MfUserHolding.portfolio_id == portfolio_id)
+        )
+    ).all()
+    await db.execute(
+        sa_delete(MfPortfolioDailyValue).where(MfPortfolioDailyValue.portfolio_id == portfolio_id)
+    )
+    if holdings:
+        isins = [h.isin for h in holdings]
+        nav_rows = await db.execute(
+            sa_text(
+                "SELECT DISTINCT ON (isin) isin, nav FROM mf.mf_nav_history"
+                " WHERE isin = ANY(:isins) ORDER BY isin, nav_date DESC"
+            ),
+            {"isins": isins},
+        )
+        nav_map = {r.isin: float(r.nav) for r in nav_rows}
+        point = compute_daily_value(
+            [(float(h.units or 0), nav_map.get(h.isin, 0.0)) for h in holdings],
+            sum(float(h.invested_amount or 0) for h in holdings),
+            date.today(),
+        )
+        db.add(
+            MfPortfolioDailyValue(
+                portfolio_id=portfolio_id,
+                user_id=user_id,
+                valuation_date=point.valuation_date,
+                total_value=point.total_value,
+                total_invested=point.total_invested,
+            )
+        )
+    await db.commit()
+
+
 async def _run_pipeline(
     job_id: str, path: str, user_id: str, portfolio_id: str,
     request_id: str | None = None,
@@ -356,7 +410,8 @@ async def _run_pipeline(
     if cams_placeholders:
         from dataclasses import replace as _dc_replace
 
-        from sqlalchemy import String, bindparam, text as _sa_text
+        from sqlalchemy import String, bindparam
+        from sqlalchemy import text as _sa_text
         from sqlalchemy.dialects.postgresql import ARRAY
 
         from dhanradar.db import task_session
@@ -457,6 +512,14 @@ async def _run_pipeline(
             update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="scoring", progress_pct=70)
         )
         await db.commit()
+
+        # The (re-)upload may have replaced the holdings composition — restart the daily
+        # valuation series so day-change/charts never span two different portfolios
+        # (RCA 2026-07-02). Non-fatal: a reset failure must never break the upload.
+        try:
+            await _reset_valuation_series(db, user_id, portfolio_id)
+        except Exception:  # noqa: BLE001
+            _slog.warning("mf.valuation_series.reset_failed", job_id=job_id, exc_info=True)
 
         # Resolve Plus status once — controls whether history rows are written.
         from dhanradar.deps import is_plus
@@ -605,7 +668,7 @@ async def _run_pipeline(
                 )
             else:
                 report_payload["commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("AI commentary timed out after 12 s job=%s", job_id)
             report_payload["commentary"] = {"state": "unavailable", "reason": "timeout"}
         except Exception:  # noqa: BLE001 — commentary is best-effort; report still completes

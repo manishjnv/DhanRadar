@@ -129,10 +129,10 @@ async def portfolio_summary(
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
-    day_change = await load_day_change(db, portfolio_id)
+    dc = await load_day_change(db, portfolio_id)  # (flow-adjusted ₹, pct) or None
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(rm, portfolio_id, day_change),
+        summary_payload(rm, portfolio_id, dc[0] if dc else None, dc[1] if dc else None),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

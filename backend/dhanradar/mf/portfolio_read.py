@@ -179,11 +179,18 @@ def _portfolio_confidence_band(bands: list[str]) -> str | None:
     return "medium"
 
 
-def summary_payload(rm: PortfolioReadModel, portfolio_id: str, day_change: float | None = None) -> dict:
+def summary_payload(
+    rm: PortfolioReadModel,
+    portfolio_id: str,
+    day_change: float | None = None,
+    day_change_pct: float | None = None,
+) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
     NO portfolio composite score and NO invented verdict label (that stays a future portfolio.health concept,
-    rule-table-derived). `day_change` is the owner's OWN daily ₹ move — None until ≥2 valuation rows exist."""
+    rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN flow-adjusted daily move —
+    None until ≥2 valuation rows exist. The pct is computed server-side from the SAME two valuation
+    rows as the ₹ change (the live summary total is a different base — don't recompute client-side)."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
@@ -195,6 +202,7 @@ def summary_payload(rm: PortfolioReadModel, portfolio_id: str, day_change: float
         "gain_pct": gain_pct,
         "xirr_pct": rm.xirr_pct,
         "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
+        "day_change_pct": day_change_pct,  # same two rows as day_change; None with it
         "fund_count": len(rm.holdings),
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
@@ -464,26 +472,33 @@ def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
 _MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
 
 
-async def load_day_change(db: AsyncSession, portfolio_id: str) -> float | None:
-    """Day change = latest total_value − previous total_value from mf_portfolio_daily_values.
+async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, float | None] | None:
+    """Flow-adjusted day change from the two most-recent mf_portfolio_daily_values rows.
 
-    Returns None when fewer than 2 valuation rows exist (cold-start or only one day
-    of data). The difference is the user's OWN calculated change — DOM-allowed (#2-exempt
-    user money). RLS-scoped: the caller must set app.user_id before calling (the router
+    change = (V_t − V_{t−1}) − (I_t − I_{t−1}): subtracting the invested delta keeps a
+    SIP purchase / partial redemption day from reading as a one-day gain or loss (RCA
+    2026-07-02 — the raw latest−previous rendered a re-upload composition change as a
+    −85% "day change"). Returns (change, pct) with pct = change / previous value × 100
+    (None when the previous value is 0); None when fewer than 2 rows exist (cold-start).
+    Both numbers are the user's OWN calculated change — DOM-allowed (#2-exempt user
+    money). RLS-scoped: the caller must set app.user_id before calling (the router
     does this via the same session used for _owned_portfolio_id).
     """
     pid = uuid.UUID(portfolio_id)
     rows = (
         await db.execute(
-            select(MfPortfolioDailyValue.total_value)
+            select(MfPortfolioDailyValue.total_value, MfPortfolioDailyValue.total_invested)
             .where(MfPortfolioDailyValue.portfolio_id == pid)
             .order_by(MfPortfolioDailyValue.valuation_date.desc())
             .limit(2)
         )
-    ).scalars().all()
+    ).all()
     if len(rows) < 2:
         return None
-    return float(rows[0]) - float(rows[1])
+    (v_t, i_t), (v_p, i_p) = rows[0], rows[1]
+    change = (float(v_t) - float(v_p)) - (float(i_t) - float(i_p))
+    pct = (change / float(v_p) * 100.0) if float(v_p) else None
+    return change, pct
 
 
 async def load_portfolio_valuation_series(
