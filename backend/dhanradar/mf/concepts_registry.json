@@ -23,7 +23,7 @@
       "access_tier": "free",
       "content_class": "CALCULATED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "holdings.pnl": {
       "visibility_class": "educational",

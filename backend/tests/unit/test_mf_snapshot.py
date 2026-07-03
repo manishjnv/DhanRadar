@@ -18,6 +18,7 @@ from dhanradar.mf.snapshot import (
     build_snapshot,
     category_allocation,
     overlap_matrix,
+    windowed_xirr,
     xirr,
 )
 
@@ -269,3 +270,52 @@ def test_build_snapshot_xirr_none_no_cashflows():
     h1 = _holding("F1", 10_000, 12_000)
     snap = build_snapshot([h1])
     assert snap.xirr_pct is None
+
+
+# ---------------------------------------------------------------------------
+# windowed_xirr (M2.3) — golden vector: consistent with xirr() on the SAME
+# three legs (pseudo-purchase, real mid-window flow, pseudo-terminal inflow).
+# ---------------------------------------------------------------------------
+
+def test_windowed_xirr_matches_xirr_on_same_cashflows():
+    start_date = _date("2024-01-01")
+    end_date = _date("2025-01-01")  # exactly 365 days later
+    mid_flow = CashFlow(when=_date("2024-07-02"), amount=-500.0)  # a real purchase mid-window
+
+    result = windowed_xirr(
+        start_value=1000.0, start_date=start_date, flows=[mid_flow],
+        end_value=1650.0, end_date=end_date,
+    )
+    # windowed_xirr is DEFINED as xirr() over [pseudo-purchase, real flows..., pseudo-terminal] —
+    # assembling the identical three-leg list by hand must give the identical answer.
+    expected = xirr([
+        CashFlow(when=start_date, amount=-1000.0),
+        mid_flow,
+        CashFlow(when=end_date, amount=1650.0),
+    ])
+    assert result is not None and expected is not None
+    assert result == pytest.approx(expected, abs=1e-9)
+    # Sanity: a real positive return (put in 1500 total, got back 1650) — not a fabricated number.
+    assert result > 0.0
+
+
+def test_windowed_xirr_no_flows_is_plain_two_leg_return():
+    # No real flows inside the window → a plain start→end round trip, exact 365-day math.
+    result = windowed_xirr(
+        start_value=100_000.0, start_date=_date("2024-01-01"), flows=[],
+        end_value=112_000.0, end_date=_date("2025-01-01"),
+    )
+    assert result is not None
+    assert abs(result - 12.0) < 0.1, f"Expected ≈12.0 %, got {result}"
+
+
+def test_windowed_xirr_none_when_start_value_zero_or_negative():
+    assert windowed_xirr(0.0, _date("2024-01-01"), [], 1000.0, _date("2025-01-01")) is None
+    assert windowed_xirr(-500.0, _date("2024-01-01"), [], 1000.0, _date("2025-01-01")) is None
+
+
+def test_windowed_xirr_none_when_end_date_not_after_start_date():
+    same_day = _date("2024-06-01")
+    assert windowed_xirr(1000.0, same_day, [], 1100.0, same_day) is None
+    # Reversed dates
+    assert windowed_xirr(1000.0, _date("2024-06-01"), [], 1100.0, _date("2024-01-01")) is None
