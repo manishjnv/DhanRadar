@@ -6,6 +6,8 @@ Covers:
   * PG:   GET /summary → day_change present when 2+ valuation rows; None with <2.
   * PG:   GET /value-series → returns ASC rows for the owner; empty list cold-start.
   * PG:   RLS — another user gets 404 on /summary and /value-series; anon gets 401.
+  * PG:   day_change date-anchor (2026-07-04) — a fund whose latest NAV date is behind the
+          portfolio's freshest date is excluded, not blended in; day_change_as_of names the anchor.
 
 Mirrors test_c1_c2_portfolio_concepts.py (the proven C-wave pattern).
 """
@@ -20,6 +22,7 @@ from sqlalchemy import text
 from dhanradar.mf.portfolio_read import (
     EnrichedHolding,
     PortfolioReadModel,
+    _day_change_anchor,
     summary_payload,
 )
 from dhanradar.models.auth import User
@@ -107,6 +110,36 @@ def test_summary_payload_day_change_no_forbidden_keys():
     """day_change does not introduce any forbidden score keys."""
     p = summary_payload(_rm(), "pid-1", day_change=999.0)
     assert _all_keys(p) & _FORBIDDEN == set()
+
+
+def test_summary_payload_day_change_as_of_passthrough():
+    p = summary_payload(_rm(), "pid-1", day_change=50.0, day_change_as_of="2026-07-01")
+    assert p["day_change_as_of"] == "2026-07-01"
+    assert _all_keys(p) & _FORBIDDEN == set()
+
+
+# ---------------------------------------------------------------------------
+# Pure: _day_change_anchor — the date-anchor safeguard (2026-07-04)
+# ---------------------------------------------------------------------------
+
+
+def test_day_change_anchor_picks_the_max_latest_date_across_isins():
+    """Anchor = the freshest of every covered ISIN's own latest nav_date, not the oldest."""
+    d1, d2, d3 = date(2026, 6, 29), date(2026, 6, 30), date(2026, 7, 1)
+    navs_by_isin = {
+        "FRESH": [(d3, 110.0), (d2, 100.0)],
+        "STALE": [(d2, 55.0), (d1, 50.0)],
+    }
+    assert _day_change_anchor(navs_by_isin) == d3
+
+
+def test_day_change_anchor_single_isin_is_its_own_latest():
+    d2 = date(2026, 6, 30)
+    assert _day_change_anchor({"A": [(d2, 100.0)]}) == d2
+
+
+def test_day_change_anchor_empty_is_none():
+    assert _day_change_anchor({}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +342,101 @@ async def test_summary_day_change_immune_to_flow(db_session, rls_async_client):
     # Same 5 x (210 - 200) = 50 as test_summary_day_change_two_nav_dates — invested never entered it.
     assert d["day_change"] == pytest.approx(50.0, abs=0.01)
     assert d["day_change_pct"] == pytest.approx(5.0, abs=0.01)
+
+
+async def test_summary_day_change_anchors_to_freshest_date_excludes_stale_fund(
+    db_session, rls_async_client
+):
+    """Date-anchor safeguard (2026-07-04, founder-reported): AMFI stages NAV ingest around 23:30 IST,
+    so one fund can reach a new NAV date before another. A "stale" fund here has its OWN 2 most-recent
+    NAV dates, but BOTH predate the portfolio's freshest date — it must be excluded from day_change
+    (not blended in against a different trading day), same as the existing <2-dates rule. Proves the
+    anchor by amount: including the stale fund's move would give 125, not the correct 100."""
+    from dhanradar.auth.security import create_access_token
+    from tests.conftest import make_auth_headers
+
+    uid = await _seed_user(db_session, "vs-anchor@test.dev")
+    pid = (
+        await db_session.execute(
+            text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'Anchor') RETURNING id"),
+            {"u": uid},
+        )
+    ).scalar_one()
+
+    fresh_isin, stale_isin = "INFTESTDCANCA", "INFTESTDCANCB"
+    for isin, name in ((fresh_isin, "Fresh Fund"), (stale_isin, "Stale Fund")):
+        await db_session.execute(
+            text(
+                "INSERT INTO mf.mf_funds (isin, scheme_name, category, sebi_category, is_segregated)"
+                " VALUES (:i, :n, 'Equity', 'Large Cap Fund', false) ON CONFLICT (isin) DO NOTHING"
+            ),
+            {"i": isin, "n": name},
+        )
+    # Fresh fund: latest NAV lands 2026-07-01 (after an earlier 2026-06-30 row).
+    for d, nav in ((date(2026, 6, 30), 100.0), (date(2026, 7, 1), 110.0)):
+        await db_session.execute(
+            text(
+                "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, :n)"
+                " ON CONFLICT (isin, nav_date) DO NOTHING"
+            ),
+            {"i": fresh_isin, "d": d, "n": nav},
+        )
+    # Stale fund: 2 NAV dates of its own, but BOTH behind the fresh fund's latest date.
+    for d, nav in ((date(2026, 6, 28), 50.0), (date(2026, 6, 29), 55.0)):
+        await db_session.execute(
+            text(
+                "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, :n)"
+                " ON CONFLICT (isin, nav_date) DO NOTHING"
+            ),
+            {"i": stale_isin, "d": d, "n": nav},
+        )
+    for isin, avg_nav in ((fresh_isin, 90.0), (stale_isin, 48.0)):
+        await db_session.execute(
+            text(
+                "INSERT INTO mf.mf_user_holdings (user_id, portfolio_id, isin, folio_number, units,"
+                " invested_amount, avg_cost_nav, source, as_of_date)"
+                " VALUES (:u, :p, :i, '1', 10.0, 900.0, :nav, 'cas', :d)"
+            ),
+            {"u": uid, "p": str(pid), "i": isin, "nav": avg_nav, "d": date(2026, 6, 30)},
+        )
+    await db_session.commit()
+    token, _ = create_access_token(uid)
+
+    r = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/summary", headers=make_auth_headers(access_token=token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    # Only the fresh fund contributes: 10 x (110 - 100) = 100. If the stale fund's
+    # 10 x (55 - 50) = 50 leaked in, this would be 150 — a two-day blend.
+    assert d["day_change"] == pytest.approx(100.0, abs=0.01)
+    assert d["day_change_as_of"] == "2026-07-01"
+
+    r2 = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/holdings", headers=make_auth_headers(access_token=token)
+    )
+    assert r2.status_code == 200, r2.text
+    by_isin = {h["isin"]: h for h in r2.json()["data"]["holdings"]}
+    assert by_isin[fresh_isin]["day_change"] == pytest.approx(100.0, abs=0.01)
+    assert by_isin[stale_isin]["day_change"] is None  # its own latest date is behind the anchor
+
+
+async def test_summary_day_change_as_of_null_when_day_change_none(db_session, rls_async_client):
+    """day_change_as_of stays None alongside day_change on the <2-NAV-dates cold start."""
+    from dhanradar.auth.security import create_access_token
+    from tests.conftest import make_auth_headers
+
+    uid = await _seed_user(db_session, "vs-anchor-cold@test.dev")
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDCANCC")
+    token, _ = create_access_token(uid)
+
+    r = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/summary", headers=make_auth_headers(access_token=token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["day_change"] is None
+    assert d["day_change_as_of"] is None
 
 
 async def test_reset_valuation_series_restarts_series(db_session):

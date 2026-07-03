@@ -217,6 +217,7 @@ def summary_payload(
     xirr_pct: float | None = None,
     wt_avg_days: int | None = None,
     reinvested_cost: float = 0.0,
+    day_change_as_of: str | None = None,
 ) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
@@ -234,10 +235,15 @@ def summary_payload(
     (out-of-pocket cash, B86) + `reinvested_cost` (Σ units × nav_or_price over active dividend_reinvest
     rows — CAMS counts a reinvested payout as cost, our net-invested doesn't) — the CAMS-comparable "Cost
     value". `gain_vs_cost`/`gain_vs_cost_pct` are the value-vs-that-cost pair (None pct when cost_value is
-    0); `gain`/`gain_pct`/`total_invested` stay the ORIGINAL cash-basis figures (the money-view chart's
-    basis) — both bases coexist by design, never conflated. `wt_avg_days` (CAMS "Wt.Avg.Days") is the
-    caller's `portfolio_wt_avg_days` result — a capital-weighted average holding period in days, None when
-    no active holding has remaining cost."""
+    0); `gain`/`gain_pct`/`total_invested` stay the ORIGINAL cash-basis figures — both bases coexist by
+    design, never conflated. The hero mini-chart's chip row now renders these SAME live numbers (no
+    longer the stored daily-series' last point — one card, one truth, founder-reported 2026-07-03).
+    `wt_avg_days` (CAMS "Wt.Avg.Days") is the caller's `portfolio_wt_avg_days` result — a capital-weighted
+    average holding period in days, None when no active holding has remaining cost. `day_change_as_of`
+    is `load_day_change`'s anchor `nav_date` (ISO string) — the single calendar date `day_change`/
+    `day_change_pct` are actually as-of (§ AMFI stages NAV ingest ~23:30 IST; different funds' latest
+    NAV can land on different days, so this tells the client which day "today's gain" really covers).
+    None whenever day_change itself is None."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     cost_value = rm.total_invested + reinvested_cost
@@ -259,6 +265,7 @@ def summary_payload(
         "wt_avg_days": wt_avg_days,  # CAMS "Wt.Avg.Days" — capital-weighted avg holding period
         "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
         "day_change_pct": day_change_pct,  # same two rows as day_change; None with it
+        "day_change_as_of": day_change_as_of,  # ISO date the anchor above covers; None with day_change
         "fund_count": len(rm.holdings),
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
@@ -593,12 +600,15 @@ _MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
 
 async def _active_holdings_nav_pairs(
     db: AsyncSession, portfolio_id: str
-) -> tuple[list[tuple[str, float]], dict[str, list[float]]] | None:
+) -> tuple[list[tuple[str, float]], dict[str, list[tuple[datetime.date, float]]]] | None:
     """Shared plumbing for `load_day_change` / `load_holdings_day_change`: the portfolio's ACTIVE
-    (`units > 0`) holdings + each ISIN's two most-recent NAV dates, bounded to the last 30 days (keeps
-    the window function on recent, uncompressed Timescale chunks — this is a hot request-path read; a
-    fund with no NAV in 30 days is honestly excluded, not scanned for). Returns
-    `(holdings, navs_by_isin)`, or None when the portfolio has no active holdings at all."""
+    (`units > 0`) holdings + each ISIN's two most-recent (nav_date, nav) pairs — latest first, bounded
+    to the last 30 days (keeps the window function on recent, uncompressed Timescale chunks — this is
+    a hot request-path read; a fund with no NAV in 30 days is honestly excluded, not scanned for).
+    `nav_date` is returned (not just `nav`) so a caller can tell which calendar day each fund's NAVs
+    actually belong to — needed to anchor "today's gain" to a single date (§ AMFI staggers NAV ingest
+    around 23:30 IST, so different funds can update at different times; see `_day_change_anchor`).
+    Returns `(holdings, navs_by_isin)`, or None when the portfolio has no active holdings at all."""
     pid = uuid.UUID(portfolio_id)
     holdings = (
         await db.execute(
@@ -611,12 +621,12 @@ async def _active_holdings_nav_pairs(
         return None
 
     isins = [h.isin for h in holdings]
-    # ONE batched query for every holding's two most-recent NAV dates (never per-ISIN, never per-day).
+    # ONE batched query for every holding's two most-recent (nav_date, nav) pairs (never per-ISIN).
     nav_rows = (
         await db.execute(
             text(
-                "SELECT isin, nav FROM ("
-                "  SELECT isin, nav, "
+                "SELECT isin, nav_date, nav FROM ("
+                "  SELECT isin, nav_date, nav, "
                 "         ROW_NUMBER() OVER (PARTITION BY isin ORDER BY nav_date DESC) AS rn"
                 "  FROM mf.mf_nav_history WHERE isin = ANY(:isins)"
                 "    AND nav_date >= CURRENT_DATE - INTERVAL '30 days'"
@@ -625,13 +635,29 @@ async def _active_holdings_nav_pairs(
             {"isins": isins},
         )
     ).all()
-    navs_by_isin: dict[str, list[float]] = {}
+    navs_by_isin: dict[str, list[tuple[datetime.date, float]]] = {}
     for r in nav_rows:
-        navs_by_isin.setdefault(r.isin, []).append(float(r.nav))
+        navs_by_isin.setdefault(r.isin, []).append((r.nav_date, float(r.nav)))
     return [(h.isin, float(h.units or 0)) for h in holdings], navs_by_isin
 
 
-async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, float | None] | None:
+def _day_change_anchor(
+    navs_by_isin: dict[str, list[tuple[datetime.date, float]]],
+) -> datetime.date | None:
+    """The date-anchor safeguard (founder-reported 2026-07-03): AMFI stages NAV ingest around
+    23:30 IST, so during that window different funds' `mf_nav_history` latest row can land on
+    different calendar dates. The anchor is the MAX latest `nav_date` across every ISIN that has
+    at least one NAV row in the 30-day window; only a fund whose OWN latest date equals the anchor
+    may contribute two-most-recent NAVs to a day-change figure — a fund still one NAV behind is
+    honestly excluded rather than blended with a different fund's different day (the exact two-day
+    blend this anchor exists to prevent). None when no ISIN has any NAV row at all."""
+    dates = [navs[0][0] for navs in navs_by_isin.values() if navs]
+    return max(dates) if dates else None
+
+
+async def load_day_change(
+    db: AsyncSession, portfolio_id: str
+) -> tuple[float, float | None, datetime.date] | None:
     """Bottom-up day change (§39.1/§39.5) — Σ units × (NAV_latest − NAV_prev) over the portfolio's
     CURRENT holdings, using the two most-recent NAV dates per ISIN from mf_nav_history. This is the
     RTA/consumer-app method: it reads only today's holdings + NAV history, never a stored valuation
@@ -641,59 +667,76 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
     old flow-adjustment patch it replaces is retired, §39.5). Also removes the "2 rows needed" cold
     start: it works from day one, as soon as 2 NAV dates exist for at least one holding.
 
+    Date-anchored (2026-07-04, founder-reported): AMFI's nightly ingest lands different funds' NAVs
+    at different times around 23:30 IST, so the per-ISIN "two most recent dates" can point at two
+    DIFFERENT calendar days for two different funds during that window. `_day_change_anchor` picks the
+    single latest date any covered ISIN has reached; only a fund whose own latest NAV date equals that
+    anchor contributes — a fund still one day behind is excluded (same honest-skip shape as the <2-dates
+    rule below), so "today's gain" never silently blends two different trading days.
+
     pct = change / Σ(units × NAV_prev) × 100 (None when that denominator is 0). Returns None when the
-    portfolio has no holdings, or when EVERY holding has fewer than 2 NAV dates (a holding with <2 NAV
-    dates simply doesn't contribute — partial coverage across holdings is fine). Both numbers are the
-    user's OWN calculated change — DOM-allowed (#2-exempt user money). RLS-scoped: the caller must set
-    app.user_id before calling (the router does this via the same session used for _owned_portfolio_id).
-    Active positions only (`units > 0`) — a zero-unit (fully-redeemed) row contributes 0 to the change
-    anyway, so filtering it out just skips a useless NAV lookup. Shares its SQL + pairing logic with
-    `load_holdings_day_change` via `_active_holdings_nav_pairs` (CAMS-parity, per-fund today's G/L).
+    portfolio has no holdings, or when EVERY holding has fewer than 2 NAV dates / isn't at the anchor
+    date (partial coverage across holdings is fine — only funds AT the anchor contribute). Both ₹
+    numbers are the user's OWN calculated change — DOM-allowed (#2-exempt user money); the 3rd tuple
+    element is the anchor `nav_date` itself (an "as of" display fact, not a score). RLS-scoped: the
+    caller must set app.user_id before calling (the router does this via the same session used for
+    _owned_portfolio_id). Active positions only (`units > 0`) — a zero-unit (fully-redeemed) row
+    contributes 0 to the change anyway, so filtering it out just skips a useless NAV lookup. Shares its
+    SQL + pairing logic with `load_holdings_day_change` via `_active_holdings_nav_pairs` (CAMS-parity,
+    per-fund today's G/L).
     """
     pair = await _active_holdings_nav_pairs(db, portfolio_id)
     if pair is None:
         return None
     holdings, navs_by_isin = pair
+    anchor = _day_change_anchor(navs_by_isin)
+    if anchor is None:
+        return None
 
     change = 0.0
     prev_value = 0.0
     covered = False
     for isin, units in holdings:
         navs = navs_by_isin.get(isin)
-        if not navs or len(navs) < 2:
-            continue  # <2 NAV dates for this ISIN — honestly excluded, not fabricated
-        nav_latest, nav_prev = navs[0], navs[1]
+        if not navs or len(navs) < 2 or navs[0][0] != anchor:
+            continue  # <2 NAV dates, or this fund hasn't reached the anchor date yet — honest skip
+        nav_latest, nav_prev = navs[0][1], navs[1][1]
         change += units * (nav_latest - nav_prev)
         prev_value += units * nav_prev
         covered = True
     if not covered:
         return None
     pct = (change / prev_value * 100.0) if prev_value else None
-    return change, pct
+    return change, pct, anchor
 
 
 async def load_holdings_day_change(
     db: AsyncSession, portfolio_id: str
 ) -> dict[str, tuple[float, float | None]]:
-    """Per-holding today's G/L (CAMS-parity) — the SAME bounded two-latest-NAV window as
-    `load_day_change` (shared via `_active_holdings_nav_pairs`), split per ISIN instead of summed:
-    `{isin: (₹ change, pct)}`. pct is None when the previous-NAV value is 0. A holding with fewer than
-    2 NAV dates in the last 30 days is simply absent from the dict (honest partial coverage, matching
-    `load_day_change`'s per-holding skip). A portfolio can't hold the same ISIN active in two folios
-    today (B94/#441 dedup); if it ever does, whichever folio's row is processed last wins the dict
-    entry and the client (which keys the holdings table off ISIN) applies that same value to both rows.
+    """Per-holding today's G/L (CAMS-parity) — the SAME bounded two-latest-NAV window AND the SAME
+    date-anchor filter as `load_day_change` (shared via `_active_holdings_nav_pairs` /
+    `_day_change_anchor`), split per ISIN instead of summed: `{isin: (₹ change, pct)}`. pct is None
+    when the previous-NAV value is 0. A holding with fewer than 2 NAV dates in the last 30 days, OR
+    whose own latest NAV date is behind the portfolio's anchor date (AMFI's staggered ~23:30 IST
+    ingest — see `load_day_change`), is simply absent from the dict (honest partial coverage). A
+    portfolio can't hold the same ISIN active in two folios today (B94/#441 dedup); if it ever does,
+    whichever folio's row is processed last wins the dict entry and the client (which keys the
+    holdings table off ISIN) applies that same value to both rows.
     """
     pair = await _active_holdings_nav_pairs(db, portfolio_id)
     if pair is None:
         return {}
     holdings, navs_by_isin = pair
+    anchor = _day_change_anchor(navs_by_isin)
+    if anchor is None:
+        return {}
 
     result: dict[str, tuple[float, float | None]] = {}
     for isin, units in holdings:
         navs = navs_by_isin.get(isin)
-        if not navs or len(navs) < 2:
+        if not navs or len(navs) < 2 or navs[0][0] != anchor:
             continue
-        nav_latest, nav_prev = navs[0], navs[1]
+        nav_latest, nav_prev = navs[0][1], navs[1][1]
         change = units * (nav_latest - nav_prev)
         prev_value = units * nav_prev
         pct = (change / prev_value * 100.0) if prev_value else None
