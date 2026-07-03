@@ -82,7 +82,30 @@ _CANON_TXN_TYPE = {
 }
 
 #: Bump when the CAS parse/normalization changes — stamped on every ledger row for I11 replay (B82).
+#: Kept as the FALLBACK for callers that don't know the source format; rows written before the
+#: format-family split (2026-07-04) all carry this value.
 PARSER_VERSION = "cas-1"
+
+#: Format-family parser versions (2026-07-04, cross-format dedup): the ledger's second-stage
+#: natural-key dedup only fires ACROSS format families (same-family rows can be legitimate
+#: same-day twins; a different format re-printing the same real transaction cannot be a twin).
+#: The family is the version string minus its trailing "-<n>" (ledger._format_family).
+PARSER_VERSION_BY_EXT = {
+    "pdf": "cas-pdf-1",
+    "txt": "cas-tds-txt-1",
+    "xls": "cas-tds-xls-1",
+    "xlsx": "cas-tds-xls-1",
+}
+
+
+def parser_version_for(path: str) -> str:
+    """Format-specific parser_version for the file `detect_and_parse` would route — stamped on the
+    ledger rows so the natural-key dedup can scope itself to cross-format matches only. Unknown
+    extension falls back to the generic PARSER_VERSION (family 'cas' — differs from every specific
+    family, so legacy/unknown rows stay dedup-eligible against any new upload, the conservative
+    direction)."""
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return PARSER_VERSION_BY_EXT.get(ext, PARSER_VERSION)
 
 
 class CasParseError(Exception):
@@ -171,6 +194,12 @@ class ParsedHolding:
     cost: float | None
     as_of_date: date | None
     txns: list[ParsedTxn]
+    # Per-folio PAN, when the source exposes one (casparser PDF folios, CAMS TDS rows carry a PAN
+    # column) — the per-folio ownership guard (family-merge incident 2026-07-04: a consolidated PDF
+    # can carry a DIFFERENT investor's folios, e.g. a household member sharing one RTA email)
+    # compares this to the portfolio owner's stored PAN and excludes a folio whose PAN doesn't
+    # match. None when the source has no per-folio PAN (assumed the owner's — status quo).
+    folio_pan: str | None = None
 
 
 def _default_reader(path: str, password: str | None) -> Any:  # pragma: no cover
@@ -244,6 +273,8 @@ def parse_cas(
     excluded_txns = 0
     for folio in raw.get("folios", []) or []:
         folio_no = str(folio.get("folio") or "")
+        # Per-folio PAN (family-merge guard) — casparser exposes it on the folio dict itself.
+        folio_pan = _parse_pan(folio.get("PAN") or folio.get("pan"))
         for scheme in folio.get("schemes", []) or []:
             isin = (scheme.get("isin") or "").strip()
             if not isin:
@@ -293,6 +324,7 @@ def parse_cas(
                     cost=_opt_float(valuation.get("cost")),
                     as_of_date=_to_date(valuation.get("date")),
                     txns=txns,
+                    folio_pan=folio_pan,
                 )
             )
 
@@ -310,6 +342,10 @@ def parse_cas(
             mf_list = account.get("mutual_funds", []) if isinstance(account, dict) else []
             if not isinstance(mf_list, list):
                 continue
+            account_pan = (
+                _parse_pan(account.get("PAN") or account.get("pan"))
+                if isinstance(account, dict) else None
+            )
             for entry in mf_list:
                 if not isinstance(entry, dict):
                     continue
@@ -347,6 +383,7 @@ def parse_cas(
                         cost=_opt_float(entry.get("total_cost")),
                         as_of_date=None,  # CDSL CAS has no per-holding date field
                         txns=[],  # CDSL CAS has no transaction history
+                        folio_pan=account_pan,
                     )
                 )
 
@@ -374,29 +411,45 @@ def _parse_stmt_date(s: str | None) -> date | None:
 def _extract_pdf_identity(raw: dict) -> ParsedCasIdentity:
     """Best-effort investor identity from a casparser raw output dict.
 
-    casparser embeds investor info in `investor_info` (name, email, mobile) and
-    the PAN in the first folio's `PAN` / `pan` key or in `investor_info.pan`.
-    All of these are optional depending on the CAS type and casparser version.
+    PAN rule (2026-07-04, family-merge incident): `investor_info.pan` when present and valid;
+    otherwise fall back to folio-level PANs (folios[].PAN + CDSL accounts[].PAN) ONLY when every
+    PAN present in the statement is the SAME one (unanimity). A consolidated statement can carry
+    folios of SEVERAL investors — under the old first-folio fallback an arbitrary household
+    member's PAN could become the uploader's stored authoritative `investor_pan` and INVERT the
+    per-folio ownership guard. Ambiguous (>1 distinct PAN, no investor_info PAN) → pan=None:
+    identity storage skips the PAN and the ownership guard fails open per the existing no-PAN
+    rule (logged `cas.identity.ambiguous_pan`, counts only — no PAN values).
 
     §39.4: also extracts the statement-period header (`statement_period.from`/`.to` — pydantic
     model_dump uses the field name `from_`, so both spellings are checked defensively).
     """
     info = raw.get("investor_info") or {}
-    raw_pan = (
-        info.get("pan")
-        or info.get("PAN")
-        or next(
-            (f.get("PAN") or f.get("pan") for f in raw.get("folios", []) or []
-             if f.get("PAN") or f.get("pan")),
-            None,
-        )
-    )
+    pan = _parse_pan(info.get("pan") or info.get("PAN"))
+    if pan is None:
+        folio_pans = {
+            p
+            for f in raw.get("folios", []) or []
+            if (p := _parse_pan(f.get("PAN") or f.get("pan")))
+        }
+        for account in raw.get("accounts", []) or []:
+            if isinstance(account, dict):
+                p = _parse_pan(account.get("PAN") or account.get("pan"))
+                if p:
+                    folio_pans.add(p)
+        if len(folio_pans) == 1:
+            pan = next(iter(folio_pans))
+        elif len(folio_pans) > 1:
+            logger.warning(
+                "cas.identity.ambiguous_pan: %d distinct folio-level PANs and no investor_info"
+                " PAN -- storing none (ownership guard fails open)",
+                len(folio_pans),
+            )
     name = str(info.get("name") or "").strip() or None
     sp = raw.get("statement_period") or {}
     stmt_from = _parse_stmt_date(sp.get("from_") or sp.get("from"))
     stmt_to = _parse_stmt_date(sp.get("to"))
     return ParsedCasIdentity(
-        pan=_parse_pan(raw_pan), investor_name=name, stmt_from=stmt_from, stmt_to=stmt_to
+        pan=pan, investor_name=name, stmt_from=stmt_from, stmt_to=stmt_to
     )
 
 
@@ -423,16 +476,23 @@ def _opt_float(v: Any) -> float | None:
 # Ledger row construction (B2) — CAS holdings → canonical append-only ledger rows
 # ---------------------------------------------------------------------------
 
-_FOLIO_PLAN_SUFFIX = re.compile(r"\s*/\s*0+\s*$")
+_FOLIO_PLAN_SUFFIX = re.compile(r"/0+$")
 
 
 def normalize_folio(folio: str) -> str:
-    """Canonical folio for ledger/holdings agreement (B82): trim whitespace and strip a trailing `/0`
-    plan suffix CAMS appends (e.g. `12345/0` → `12345`). Conservative — only a slash-zeros tail is
-    removed, never digits from the folio body."""
+    """Canonical folio for ledger/holdings agreement across EVERY source format (B82, hardened
+    2026-07-04 after the cross-format dedup incident): strip ALL whitespace — not just
+    leading/trailing — since one format prints "33375865/ 73" (internal space) and another prints
+    "33375865/73" for the SAME real folio; then uppercase (a folio suffix letter can be cased
+    differently across exports); then strip a trailing `/0` plan suffix CAMS appends (e.g.
+    `12345/0` -> `12345`). Conservative — only a slash-zeros tail is removed, never digits from the
+    folio body. EVERY seam that keys on folio (source_ref fingerprint, the ledger row itself, the
+    holdings projection + write, statement checkpoints) MUST call this so the same real-world folio
+    collides to one key regardless of which format printed it."""
     if not folio:
         return ""
-    return _FOLIO_PLAN_SUFFIX.sub("", folio.strip()).strip()
+    no_ws = re.sub(r"\s+", "", folio).upper()
+    return _FOLIO_PLAN_SUFFIX.sub("", no_ws)
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +626,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
         product = str(row.get("PRODUCT_CODE") or "").strip()
         scheme_name = str(row.get("SCHEME_NAME") or "").strip()
         mf_name = str(row.get("MF_NAME") or "").strip()
+        pan = str(row.get("PAN") or "").strip()
 
         key = (folio, product)
         if key not in holdings_meta:
@@ -574,6 +635,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
                 "mf_name": mf_name,
                 "folio": folio,
                 "product": product,
+                "pan": pan,
             }
 
         txn = _cams_txn_to_parsedtxn(row)
@@ -601,6 +663,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
                 cost=round(net_invested, 2) if net_invested > 0 else None,
                 as_of_date=None,
                 txns=txns,
+                folio_pan=_parse_pan(meta.get("pan")),
             )
         )
 
@@ -909,23 +972,61 @@ async def resolve_cams_isins(db: AsyncSession, holdings: list[ParsedHolding]) ->
     return resolved
 
 
+def filter_foreign_pan_folios(
+    parsed: list[ParsedHolding], owner_pan: str | None
+) -> tuple[list[ParsedHolding], list[ParsedHolding]]:
+    """Per-folio ownership guard (family-merge incident 2026-07-04): split parsed holdings into
+    (owned, foreign) against the portfolio owner's authoritative stored PAN. A consolidated
+    statement can carry a DIFFERENT investor's folios (e.g. a household member sharing one RTA
+    email) — a folio whose OWN PAN (when the source exposed one) disagrees with `owner_pan` is
+    foreign and must be excluded from the upload entirely (no ledger rows, no holdings, no
+    checkpoints). A folio with no PAN info is assumed the owner's (status quo — e.g. CAMS TDS
+    exports that predate this field, or CDSL account-level holdings). No `owner_pan` at all (the
+    uploader has no PAN on file yet and this CAS carried none either) → nothing to compare
+    against, so everything passes through unfiltered."""
+    if not owner_pan:
+        return list(parsed), []
+    owned = [p for p in parsed if not (p.folio_pan and p.folio_pan != owner_pan)]
+    foreign = [p for p in parsed if (p.folio_pan and p.folio_pan != owner_pan)]
+    return owned, foreign
+
+
+def cas_txn_fingerprint(
+    isin: str, folio_norm: str, date_iso: str, txn_type: str, amount: float, units: float
+) -> str:
+    """The deterministic CAS source_ref recipe as a pure string function — the SINGLE
+    implementation, shared by `_cas_source_ref` (parse path) and migration 0061 (the folio
+    canonicalization backfill recomputes refs for existing rows with this exact function, so the
+    two can never drift). `amount`/`units` accept float or Decimal — both format identically under
+    the fixed-precision specs."""
+    import hashlib
+
+    raw = f"{isin}|{folio_norm}|{date_iso}|{txn_type}|{amount:.2f}|{units:.4f}"
+    return "cas:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
 def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
     """Deterministic per-txn fingerprint. casparser exposes NO stable txn id, so source_ref must be
     derived so a re-upload of the same statement reproduces it → ON CONFLICT skip (idempotent). Encodes
     units, so two same-amount/different-units txns don't collide. A genuine duplicate (every field
     identical) is indistinguishable in a CAS and de-dups to one row — accepted, best-effort."""
-    import hashlib
-
-    raw = f"{isin}|{folio_norm}|{t.when.isoformat()}|{t.txn_type}|{t.amount:.2f}|{t.units:.4f}"
-    return "cas:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return cas_txn_fingerprint(isin, folio_norm, t.when.isoformat(), t.txn_type, t.amount, t.units)
 
 
 def build_cas_ledger_rows(
-    parsed: list[ParsedHolding], *, user_id: str, portfolio_id: str
+    parsed: list[ParsedHolding],
+    *,
+    user_id: str,
+    portfolio_id: str,
+    parser_version: str = PARSER_VERSION,
 ) -> list[dict[str, Any]]:
     """Map parsed CAS holdings → canonical append-only ledger rows (mf.portfolio_transactions), reusing
     the B65 signed `amount` from parse_cas (never raw casparser amounts). `user_id` is the AUTHENTICATED
     uploader (task arg) — a ParsedHolding carries NO user_id, so a row can never be owned by the file.
+
+    `parser_version` should be the format-specific value from `parser_version_for(path)` — the
+    ledger's natural-key dedup uses its format family to match only ACROSS formats (§39.3 adapted);
+    the generic default keeps old callers/tests working (family 'cas', dedup-eligible vs everything).
 
     v1 ingests the cashflow txns parse_cas surfaces; dividend_reinvest/bonus/split/tax are not yet in
     the ledger — B3's holdings replay-parity vs mf_user_holdings will surface any units gap and drive
@@ -952,7 +1053,7 @@ def build_cas_ledger_rows(
                     "amount": t.amount,
                     "source": "cas",
                     "source_ref": _cas_source_ref(p.isin, folio_norm, t),
-                    "parser_version": PARSER_VERSION,
+                    "parser_version": parser_version,
                 }
             )
     return rows

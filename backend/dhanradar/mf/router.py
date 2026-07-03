@@ -392,6 +392,8 @@ async def cas_status(
         status=job.status,
         progress_pct=job.progress_pct,
         error_message=job.error_message,
+        excluded_folios=job.excluded_folios,
+        excluded_folios_code=("other_investor_folios_excluded" if job.excluded_folios else None),
     )
 
 

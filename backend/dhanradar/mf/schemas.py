@@ -51,6 +51,12 @@ class CasJobStatus(BaseModel):
     status: str  # queued | parsing | scoring | done | failed
     progress_pct: int
     error_message: str | None = None
+    # Per-folio ownership guard (2026-07-04): count of folios excluded because their OWN PAN
+    # disagreed with the uploader's stored PAN (family-merge protection). 0 in the common case.
+    excluded_folios: int = 0
+    # Machine code the FE maps to plain-language copy (e.g. "N folios belong to another
+    # investor — family accounts are coming soon"); None when excluded_folios == 0.
+    excluded_folios_code: str | None = None
 
 
 class FundReportItem(BaseModel):

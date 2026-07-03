@@ -355,6 +355,10 @@ class MfCasJob(Base):
     # Transaction-Details .txt/.xls) or the PDF parser couldn't find one.
     stmt_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     stmt_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Per-folio ownership guard (2026-07-04, family-merge incident): folios excluded from this
+    # upload because their OWN PAN disagreed with the uploader's stored investor_pan. 0 when no
+    # folio carried a conflicting PAN (the common case). Surfaced on CasJobStatus for the FE.
+    excluded_folios: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
 
 class MfPortfolioStatementCheckpoint(Base):

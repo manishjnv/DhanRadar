@@ -40,7 +40,15 @@ from structlog.contextvars import bind_contextvars
 from dhanradar.celery_app import celery_app
 from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
-from dhanradar.mf.cas import CasParseError, ParsedHolding, classify_cas_failure, detect_and_parse
+from dhanradar.mf.cas import (
+    CasParseError,
+    ParsedHolding,
+    classify_cas_failure,
+    detect_and_parse,
+    filter_foreign_pan_folios,
+    normalize_folio,
+    parser_version_for,
+)
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
@@ -116,7 +124,10 @@ def parsed_to_snapshot_holdings(
         current_value = (p.units * nav) if (nav is not None) else (p.value or 0.0)
         # B86: one invested definition — the ledger net-invested written to the holdings table; the CAS
         # cost is the fallback only for holdings the ledger can't fully reconstruct (matches the table).
-        invested = invested_map.get((p.isin, p.folio_number), p.cost if p.cost is not None else 0.0)
+        # invested_map is keyed by the CANONICAL folio (B82 hardening) — normalize the lookup key too.
+        invested = invested_map.get(
+            (p.isin, normalize_folio(p.folio_number)), p.cost if p.cost is not None else 0.0
+        )
         cashflows = [CashFlow(when=t.when, amount=t.amount) for t in p.txns if t.amount]
         if current_value:
             cashflows.append(CashFlow(when=p.as_of_date or date.today(), amount=current_value))
@@ -254,19 +265,20 @@ async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
     return {i: (sc or c) for i, sc, c in rows if (sc or c)}
 
 
-async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
-    """Store investor PAN + name on the user after a CAS upload.
+async def _store_or_validate_identity(user_id: str, identity: Any) -> str | None:
+    """Store investor PAN + name on the user after a CAS upload; returns the user's AUTHORITATIVE
+    `investor_pan` after this call (existing value if unchanged, freshly stored on a first upload,
+    or the pre-existing value on a mismatch — never overwritten). The caller uses this return value
+    for the per-folio ownership guard (family-merge protection, 2026-07-04): a folio-level PAN that
+    disagrees with this authoritative PAN gets excluded from the upload entirely.
 
     First upload (investor_pan IS NULL): store both PAN and full_name.
     Subsequent uploads: validate PAN matches; log a warning if it doesn't.
     full_name is set only if still NULL (preserves any manually-set name).
     Uses a separate admin session — runs outside the RLS user session so it
     can read AND update auth.users without the MF-scope GUC interfering.
-    Fails silently: a storage error must never break the CAS pipeline.
+    Fails silently: a storage error must never break the CAS pipeline (returns None).
     """
-    if not identity.pan and not identity.investor_name:
-        return  # nothing to store
-
     import uuid as _uuid
 
     from sqlalchemy import select, update
@@ -281,9 +293,12 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
                 await db.execute(select(User.investor_pan, User.full_name).where(User.id == uid))
             ).one_or_none()
             if row is None:
-                return  # user not found — shouldn't happen, but safe fail
+                return None  # user not found — shouldn't happen, but safe fail
 
             existing_pan, existing_name = row
+
+            if not identity.pan and not identity.investor_name:
+                return existing_pan  # nothing new to store; existing PAN (if any) still governs
 
             if existing_pan and identity.pan and existing_pan != identity.pan:
                 # PAN mismatch — log prominently; do NOT overwrite (the stored PAN
@@ -294,7 +309,7 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
                     stored_pan_prefix=existing_pan[:5],   # first 5 chars only (DPDP log discipline)
                     new_pan_prefix=identity.pan[:5],
                 )
-                return  # don't update anything on a mismatch
+                return existing_pan  # don't update anything on a mismatch; existing PAN still governs
 
             update_vals: dict[str, Any] = {}
             if not existing_pan and identity.pan:
@@ -310,8 +325,10 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
                     user_ref=hash_user_ref(user_id),
                     fields=list(update_vals.keys()),
                 )
+            return update_vals.get("investor_pan", existing_pan)
     except Exception:  # noqa: BLE001 — identity storage must never break the CAS pipeline
         logger.exception("cas.identity: storage failed for user_id=%s (non-fatal)", user_id)
+        return None
 
 
 #: Cap the replay window at ~3 years — mirrors portfolio_read._MAX_VALUATION_DAYS (kept as a
@@ -477,8 +494,26 @@ async def _run_pipeline(
     parsed, identity = detect_and_parse(path, password)  # routes to CAS PDF or CAMS TDS parser
 
     # Store investor identity on the user (first upload sets it; subsequent uploads
-    # validate against it so a wrong-investor CAS is caught early).
-    await _store_or_validate_identity(user_id, identity)
+    # validate against it so a wrong-investor CAS is caught early). Returns the user's
+    # AUTHORITATIVE PAN (post-store) for the per-folio ownership guard below.
+    user_pan = await _store_or_validate_identity(user_id, identity)
+
+    # Per-folio ownership guard (family-merge incident 2026-07-04): a consolidated statement can
+    # carry a DIFFERENT investor's folios (e.g. a household member sharing one RTA email) — a
+    # folio whose OWN PAN is present and disagrees with the uploader's authoritative PAN is
+    # excluded ENTIRELY, before it can produce a single ledger row, holding, or checkpoint. A folio
+    # with no PAN info (CAMS TDS predates this on some exports; CDSL account-level rows) is assumed
+    # the owner's — status quo. No stored PAN yet (a first-ever upload whose CAS itself carried no
+    # identity at all) → nothing to compare against, so nothing is excluded.
+    owned_holdings, foreign_holdings = filter_foreign_pan_folios(parsed, user_pan)
+    excluded_folios = len(foreign_holdings)
+    if foreign_holdings:
+        _slog.warning(
+            "cas.ownership.folio_excluded",
+            excluded_count=excluded_folios,
+            folios=[normalize_folio(p.folio_number) for p in foreign_holdings],
+        )
+    parsed = owned_holdings
 
     # Resolve CAMS TDS placeholders (isin="CAMS:<product_code>") to real ISINs via the
     # B94-hardened resolver (AMC token gate + similarity floor/ambiguity margin +
@@ -510,6 +545,7 @@ async def _run_pipeline(
             .values(
                 status="parsing", progress_pct=40,
                 stmt_from=identity.stmt_from, stmt_to=identity.stmt_to,
+                excluded_folios=excluded_folios,
             )
         )
         await db.commit()
@@ -532,7 +568,12 @@ async def _run_pipeline(
         # re-acquire the SAME lock at the start of their own write transaction.
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
 
-        ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
+        # Format-specific parser_version: the ledger's natural-key dedup scopes itself to
+        # CROSS-format matches only (same-format rows can be legitimate same-day twins).
+        ledger_rows = build_cas_ledger_rows(
+            parsed, user_id=user_id, portfolio_id=portfolio_id,
+            parser_version=parser_version_for(path),
+        )
         ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
         await db.commit()
         _slog.info(
@@ -682,7 +723,7 @@ async def _run_pipeline(
                 "idcw_frequency": parse_idcw_frequency(p.scheme_name),
                 "category": category_map.get(p.isin),
                 "units": p.units,
-                "invested_amount": invested_map.get((p.isin, p.folio_number), p.cost),
+                "invested_amount": invested_map.get((p.isin, normalize_folio(p.folio_number)), p.cost),
                 "current_value": p.value,
                 "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
                 "contributing_signals": result.contributing_signals,
@@ -776,25 +817,25 @@ async def _project_and_write_holdings(
 
     Runs under the caller's rls_user_session → RLS scopes the ledger read and WITH-CHECK scopes the
     holding write to the uploader (user_id is the uploader, never the file). avg_cost_nav stays the
-    CAS-reported per-holding NAV (market context, not a ledger fact). The holding folio stays RAW
-    (unchanged uq_mf_holding); the projection is looked up by the ledger's NORMALIZED folio. (Folio
-    double-map: if one scheme appears under two raw folios that normalize to the same key, the ledger
-    dedups but the holding upsert keeps two raw rows — a bounded, pre-existing B82 hazard, not B3.)
+    CAS-reported per-holding NAV (market context, not a ledger fact). The holding folio is written
+    CANONICAL (normalize_folio, B82 hardened 2026-07-04) — matching the ledger's own normalized
+    folio — so the SAME real folio printed with different spacing/case across two source formats
+    always collides to ONE `uq_mf_holding` row and ONE key for XIRR/day-change joins downstream,
+    closing the double-map hazard a raw-folio write used to leave open.
 
     SAFETY: if a holding HAS ledger txns but Σ units != the AMC close balance (an un-captured txn type
     or a deduped identical txn), the AMC close is authoritative → fall back to the parsed snapshot and
     warn, rather than ship wrong units. So the cutover can never regress units below today's behaviour;
     it only upgrades to ledger-derived values where the ledger fully reconstructs the position.
 
-    Returns (invested_map, projected) — `projected` is exposed so the caller can persist statement
-    checkpoints (§39.4) without re-querying the ledger a second time."""
+    Returns (invested_map, projected) — both keyed by (isin, CANONICAL folio); `projected` is exposed
+    so the caller can persist statement checkpoints (§39.4) without re-querying the ledger again."""
     import uuid as _uuid
     from decimal import Decimal
 
     from sqlalchemy import func, select, text
     from sqlalchemy.dialects.postgresql import insert
 
-    from dhanradar.mf.cas import normalize_folio
     from dhanradar.mf.projection import (
         ENGINE_VERSION,
         UNITS_GAP_TOLERANCE,
@@ -821,13 +862,14 @@ async def _project_and_write_holdings(
     ).mappings().all()
     projected = project_holdings_from_ledger(ledger_rows)
 
-    # B86: the FINAL invested written per (isin, raw folio) — net-invested where the ledger fully
-    # reconstructs the holding, else the AMC-cost fallback — returned so the fresh report/snapshot use
-    # the SAME invested as the holdings table (one invested definition everywhere).
+    # B86: the FINAL invested written per (isin, CANONICAL folio) — net-invested where the ledger
+    # fully reconstructs the holding, else the AMC-cost fallback — returned so the fresh
+    # report/snapshot use the SAME invested as the holdings table (one invested definition everywhere).
     invested_map: dict[tuple[str, str], float] = {}
     projected_n = 0
     for p in parsed:
-        proj = projected.get((p.isin, normalize_folio(p.folio_number)))
+        folio_norm = normalize_folio(p.folio_number)
+        proj = projected.get((p.isin, folio_norm))
         if proj is not None and abs(proj["units"] - Decimal(str(p.units))) <= UNITS_GAP_TOLERANCE:
             # Ledger COMPLETE for this holding (Σ units == the AMC close balance) → use the projection.
             units, invested, as_of = proj["units"], proj["invested_amount"], proj["as_of"]
@@ -841,14 +883,14 @@ async def _project_and_write_holdings(
                 _slog.warning(
                     "mf.holdings.units_gap",
                     isin=p.isin,
-                    folio=p.folio_number,
+                    folio=folio_norm,
                     projected=str(proj["units"]),
                     cas_close=p.units,
                 )
             units, invested, as_of = p.units, p.cost, p.as_of_date
         stmt = insert(MfUserHolding).values(
             user_id=user_id, portfolio_id=portfolio_id, isin=p.isin,
-            folio_number=p.folio_number, units=units,
+            folio_number=folio_norm, units=units,
             avg_cost_nav=p.nav, invested_amount=invested, source="cas", as_of_date=as_of,
         ).on_conflict_do_update(
             constraint="uq_mf_holding",
@@ -858,7 +900,7 @@ async def _project_and_write_holdings(
         await db.execute(stmt)
         # float for the report/snapshot; 0.0 for a None-cost holding (every reader coerces
         # invested_amount or 0 → 0.0, so the report stays consistent with the table). Never float(None).
-        invested_map[(p.isin, p.folio_number)] = float(invested) if invested is not None else 0.0
+        invested_map[(p.isin, folio_norm)] = float(invested) if invested is not None else 0.0
     _slog.info(
         "mf.holdings.projected", projected=projected_n, total=len(parsed), engine=ENGINE_VERSION
     )
@@ -879,36 +921,55 @@ async def _write_statement_checkpoints(
     (I12) — a disagreement (S10) is flagged `reconciliation_status='mismatch'` and logged, nothing is
     corrected or overwritten. Also the only data source in HOLDINGS_ONLY state (S3: a txn-less CDSL /
     summary CAS has no `projected` entry at all, so every checkpoint there is trivially 'ok' — there is
-    nothing in the ledger to disagree with).
+    nothing in the ledger to disagree with). `folio_number` is written CANONICAL (normalize_folio,
+    B82 hardened 2026-07-04) so this table's own folio key agrees with the ledger and the holdings row.
+
+    Also the cheap post-append reconciliation tripwire: when the ledger's replayed units EXCEED what
+    THIS statement states for a folio it covers (the opposite direction from a generic mismatch — the
+    ledger has MORE than the RTA says it should), that specifically smells like duplicate/double-counted
+    rows (the 2026-07-04 incident's symptom) rather than an under-captured txn type, so it gets its own
+    `ledger.inflation_suspected` warning alongside the ordinary mismatch flag.
 
     Runs on the caller's rls_user_session db (same owner-scoped write as the holdings upsert); commits
     are the caller's responsibility (mirrors the sip_rows add_all pattern above)."""
     from decimal import Decimal
 
-    from dhanradar.mf.cas import normalize_folio
     from dhanradar.mf.projection import UNITS_GAP_TOLERANCE
     from dhanradar.models.mf import MfPortfolioStatementCheckpoint
 
     rows: list[MfPortfolioStatementCheckpoint] = []
     for p in parsed:
-        proj = projected.get((p.isin, normalize_folio(p.folio_number)))
+        folio_norm = normalize_folio(p.folio_number)
+        proj = projected.get((p.isin, folio_norm))
         status = "ok"
-        if proj is not None and abs(proj["units"] - Decimal(str(p.units))) > UNITS_GAP_TOLERANCE:
-            status = "mismatch"
-            _slog.warning(
-                "mf.checkpoint.reconciliation_mismatch",
-                isin=p.isin,
-                folio=p.folio_number,
-                stated_units=p.units,
-                ledger_units=str(proj["units"]),
-            )
+        if proj is not None:
+            gap = proj["units"] - Decimal(str(p.units))
+            if abs(gap) > UNITS_GAP_TOLERANCE:
+                status = "mismatch"
+                _slog.warning(
+                    "mf.checkpoint.reconciliation_mismatch",
+                    isin=p.isin,
+                    folio=folio_norm,
+                    stated_units=p.units,
+                    ledger_units=str(proj["units"]),
+                )
+            if gap > UNITS_GAP_TOLERANCE:
+                # Ledger units > what THIS statement states for a folio it covers — possible
+                # duplicate/double-counted rows (cross-format dedup miss), not a units gap.
+                _slog.warning(
+                    "ledger.inflation_suspected",
+                    isin=p.isin,
+                    folio=folio_norm,
+                    ledger_units=str(proj["units"]),
+                    stated_units=p.units,
+                )
         rows.append(
             MfPortfolioStatementCheckpoint(
                 user_id=user_id,
                 portfolio_id=portfolio_id,
                 upload_ref=upload_ref,
                 instrument_id=p.isin,
-                folio_number=p.folio_number,
+                folio_number=folio_norm,
                 stated_units=p.units,
                 stated_cost=p.cost,
                 stmt_date=p.as_of_date,
