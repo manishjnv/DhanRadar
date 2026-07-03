@@ -87,32 +87,46 @@ def compute_daily_value(
 
 def _dated_flow_adjusted_returns(
     rows: list[ValuationPoint],
+    flows_by_date: Mapping[datetime.date, float] | None = None,
 ) -> list[tuple[datetime.date, float]]:
     """Day-over-day return per row, paired with its date (single source of truth for
-    ``flow_adjusted_daily_returns`` and the wealth-index builder below)."""
+    ``flow_adjusted_daily_returns`` and the wealth-index builder below).
+
+    ``flows_by_date`` (2026-07-03 fix): the ledger's REAL net cash flow per date
+    (money into the portfolio positive = Σ(−amount) over every non-zero B65 row —
+    dividend payouts included, same basis as XIRR). Preferred when the caller has
+    the ledger: the invested-delta fallback only tracks CAPITAL types, so a
+    dividend payout day would otherwise read as a fake loss."""
     out: list[tuple[datetime.date, float]] = []
     for prev, cur in zip(rows, rows[1:]):
         if prev.total_value <= 0:
             continue  # can't divide by a non-positive base — honestly skipped
-        flow = cur.total_invested - prev.total_invested
+        if flows_by_date is not None:
+            flow = flows_by_date.get(cur.valuation_date, 0.0)
+        else:
+            flow = cur.total_invested - prev.total_invested
         r = (cur.total_value - prev.total_value - flow) / prev.total_value
         out.append((cur.valuation_date, r))
     return out
 
 
-def flow_adjusted_daily_returns(rows: list[ValuationPoint]) -> list[float]:
+def flow_adjusted_daily_returns(
+    rows: list[ValuationPoint],
+    flows_by_date: Mapping[datetime.date, float] | None = None,
+) -> list[float]:
     """Day-over-day portfolio returns, adjusted for capital flows (M2.3, B88).
 
-    r_t = (V_t − V_{t-1} − (I_t − I_{t-1})) / V_{t-1}
+    r_t = (V_t − V_{t-1} − F_t) / V_{t-1}
 
-    Subtracting the invested-delta (I_t − I_{t-1}) keeps a SIP/lump-sum purchase
-    day from reading as a fake positive return — the same lesson as the
-    day-change RCA (2026-07-02): a capital inflow is not a market move. Pairs
-    where V_{t-1} <= 0 are skipped (can't divide by a non-positive base).
-    ``rows`` must be ordered ascending by date (load_portfolio_valuation_series's
-    contract).
+    F_t is the day's net external cash flow — from ``flows_by_date`` (the ledger's
+    per-date Σ(−amount), payouts included) when provided, else the invested-delta
+    (I_t − I_{t-1}) fallback. Subtracting it keeps a SIP/lump-sum purchase day from
+    reading as a fake positive return — the same lesson as the day-change RCA
+    (2026-07-02): a capital inflow is not a market move. Pairs where V_{t-1} <= 0
+    are skipped (can't divide by a non-positive base). ``rows`` must be ordered
+    ascending by date (load_portfolio_valuation_series's contract).
     """
-    return [r for _, r in _dated_flow_adjusted_returns(rows)]
+    return [r for _, r in _dated_flow_adjusted_returns(rows, flows_by_date)]
 
 
 def wealth_index(
@@ -184,17 +198,39 @@ def replay_valuation_series(
     for EVERY date in [from_date, to_date], never diffed against a stale snapshot.
 
     ``ledger_rows`` — any iterable of mappings with instrument_id/units/amount/txn_type/txn_date
-    (a DB row mapping or plain dict — same shape `projection.project_holdings_from_ledger` reads).
+    (+ optional nav_or_price) — same shape `projection.project_holdings_from_ledger` reads.
     ``nav_by_isin_date`` — isin -> ASCENDING list of (nav_date, nav); the caller batches ONE query
-    for every ISIN x the whole window (never per-day, never per-ISIN). A date with no NAV yet for
-    an isin contributes nothing (honest, not fabricated); once a NAV exists it carries forward
-    (last known value) through any gap — a weekend, a holiday, a missed fetch.
+    for every ISIN x the whole window (never per-day, never per-ISIN). Once a price exists for an
+    isin it carries forward (last known value) through any gap — a weekend, a holiday, a missed
+    fetch.
+
+    **Synthetic price seeding (2026-07-03 fix):** each txn's own ``nav_or_price`` is merged into
+    the price series as a fallback point at its txn_date (a REAL NAV on the same date wins). This
+    is the fix for the +212% RCA: a fund whose NAV history starts LATER than its transactions
+    (INF740KA1XH4 — 7 months of SIPs valued at zero, then all priced at once the day NAV coverage
+    began) is now valued at its actual transaction price until market data exists — value tracks
+    the real money, no cliff, and the flow-adjusted returns over that stretch are ~0 instead of a
+    fake crash.
 
     Pure + deterministic; Decimal internally (authoritative rupee math, plan §13), float at the
     ValuationPoint boundary (matches compute_daily_value's existing contract)."""
     from dhanradar.mf.projection import _CAPITAL_FLOW_TYPES
 
     txns = sorted(ledger_rows, key=lambda r: r["txn_date"])
+
+    # Merge real NAVs with synthetic per-txn price points; real wins on a date collision.
+    price_map: dict[str, dict[datetime.date, float]] = {}
+    for t in txns:
+        p = t.get("nav_or_price")  # absent key (older callers/tests) → None → no synthetic point
+        if p is not None and float(p) > 0:
+            price_map.setdefault(t["instrument_id"], {})[t["txn_date"]] = float(p)
+    for isin, navs in nav_by_isin_date.items():
+        dates = price_map.setdefault(isin, {})
+        for nd, nav in navs:
+            dates[nd] = float(nav)  # real NAV overwrites any synthetic point on the same date
+    merged_prices: dict[str, list[tuple[datetime.date, float]]] = {
+        isin: sorted(dates.items()) for isin, dates in price_map.items()
+    }
     units_by_isin: dict[str, Decimal] = {}
     last_nav: dict[str, Decimal] = {}
     nav_ptr: dict[str, int] = {}
@@ -217,7 +253,7 @@ def replay_valuation_series(
 
         total_value = Decimal(0)
         for isin, units in units_by_isin.items():
-            navs = nav_by_isin_date.get(isin)
+            navs = merged_prices.get(isin)
             if navs:
                 idx = nav_ptr.get(isin, 0)
                 while idx + 1 < len(navs) and navs[idx + 1][0] <= d:

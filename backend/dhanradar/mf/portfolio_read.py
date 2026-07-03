@@ -324,7 +324,23 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
 
     series = await load_portfolio_valuation_series(db, portfolio_id, days=_MAX_VALUATION_DAYS)
     if len(series) >= _MIN_TRUE_RISK_ROWS:
-        dated_returns = _dated_flow_adjusted_returns(series)
+        # Real per-date net cash flow from the ledger (money in positive = Σ(−amount), every
+        # non-zero row — payouts included, same basis as XIRR). Preferred over the invested-delta
+        # fallback: invested only tracks CAPITAL types, so a dividend-payout day would read as a
+        # fake loss. Empty ledger → None → the invested-delta fallback (equivalent there).
+        pid_r = uuid.UUID(portfolio_id)
+        flow_rows = (
+            await db.execute(
+                select(MfPortfolioTransaction.txn_date, func.sum(-MfPortfolioTransaction.amount))
+                .where(
+                    MfPortfolioTransaction.portfolio_id == pid_r,
+                    MfPortfolioTransaction.amount != 0,
+                )
+                .group_by(MfPortfolioTransaction.txn_date)
+            )
+        ).all()
+        flows_by_date = {r[0]: float(r[1]) for r in flow_rows} or None
+        dated_returns = _dated_flow_adjusted_returns(series, flows_by_date)
         wealth = wealth_index(dated_returns)
         # min_points=1: the product-level gate is `_MIN_TRUE_RISK_ROWS` above; risk_adjusted_stats's
         # own internal n<2 floor still applies. periods_per_year=365: the series is genuinely
