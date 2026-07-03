@@ -370,7 +370,7 @@ async def _run_pipeline(
     job_id: str, path: str, user_id: str, portfolio_id: str,
     request_id: str | None = None,
 ) -> str:
-    from sqlalchemy import update
+    from sqlalchemy import text, update
 
     # B81 PR-2: CAS writes the uploader's personal tables (cas_job/holdings/sip/scores/history/
     # snapshot), so it runs RLS WITH-CHECK enforced AS THE OWNER, not on the bypass admin engine.
@@ -457,7 +457,12 @@ async def _run_pipeline(
         # MfCasJob UPDATE matches the row (without it the policy denies it and the UPDATE no-ops) and
         # every holdings/sip/score/snapshot write is RLS WITH-CHECK enforced for this owner.
         await db.execute(
-            update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="parsing", progress_pct=40)
+            update(MfCasJob)
+            .where(MfCasJob.job_id == job_id)
+            .values(
+                status="parsing", progress_pct=40,
+                stmt_from=identity.stmt_from, stmt_to=identity.stmt_to,
+            )
         )
         await db.commit()
 
@@ -469,6 +474,15 @@ async def _run_pipeline(
         # handler marks it failed + purges) rather than completing with stale holdings.
         from dhanradar.mf.cas import build_cas_ledger_rows
         from dhanradar.mf.ledger import append_transactions
+
+        # S20 (§39.4): serialize every writer of THIS portfolio (double-click upload, upload racing
+        # the 04:00 valuation task, a future sync) — first statement of the write transaction so a
+        # concurrent racer blocks here rather than corrupting the append/project step. xact-scoped:
+        # released at this transaction's commit/rollback (NullPool hands the next transaction a fresh
+        # connection anyway, mirroring why rls_user_session re-applies its GUC per-transaction too) —
+        # _project_and_write_holdings and the nightly compute_portfolio_daily_valuations task each
+        # re-acquire the SAME lock at the start of their own write transaction.
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
 
         ledger_rows = build_cas_ledger_rows(parsed, user_id=user_id, portfolio_id=portfolio_id)
         ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
@@ -484,7 +498,11 @@ async def _run_pipeline(
         # B3: holdings are now a PROJECTION of the ledger (units + net-invested), not a direct copy of
         # the parsed file. B86: capture the net-invested map so the fresh report/snapshot use the SAME
         # invested as the holdings table (one invested definition everywhere).
-        invested_map = await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
+        invested_map, projected = await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
+
+        # §39.4 — persist this upload's statement-checkpoint evidence (stated vs ledger units).
+        # Never mutates the ledger (I12); a mismatch is flagged + logged, not corrected.
+        await _write_statement_checkpoints(db, user_id, portfolio_id, job_id, parsed, projected)
 
         # Persist SIP transactions so get_sip_day() can infer the user's SIP date
         from dhanradar.models.mf import MfSipTransaction
@@ -699,7 +717,7 @@ async def _run_pipeline(
 
 async def _project_and_write_holdings(
     db: Any, user_id: str, parsed: list[ParsedHolding], portfolio_id: str
-) -> dict[tuple[str, str], float]:
+) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], dict[str, Any]]]:
     """B3 cutover: holdings are a PROJECTION of the ledger, not a direct copy of the parsed file.
 
     Read the portfolio's full ledger (just appended), project current holdings (units = Σ unit deltas;
@@ -718,11 +736,14 @@ async def _project_and_write_holdings(
     SAFETY: if a holding HAS ledger txns but Σ units != the AMC close balance (an un-captured txn type
     or a deduped identical txn), the AMC close is authoritative → fall back to the parsed snapshot and
     warn, rather than ship wrong units. So the cutover can never regress units below today's behaviour;
-    it only upgrades to ledger-derived values where the ledger fully reconstructs the position."""
+    it only upgrades to ledger-derived values where the ledger fully reconstructs the position.
+
+    Returns (invested_map, projected) — `projected` is exposed so the caller can persist statement
+    checkpoints (§39.4) without re-querying the ledger a second time."""
     import uuid as _uuid
     from decimal import Decimal
 
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, text
     from sqlalchemy.dialects.postgresql import insert
 
     from dhanradar.mf.cas import normalize_folio
@@ -732,6 +753,10 @@ async def _project_and_write_holdings(
         project_holdings_from_ledger,
     )
     from dhanradar.models.mf import MfPortfolioTransaction, MfUserHolding
+
+    # S20 (§39.4): re-acquire the per-portfolio lock — this is a NEW transaction (NullPool hands out a
+    # fresh connection per commit), so the lock taken before the ledger append does not carry over here.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
 
     pid = _uuid.UUID(portfolio_id)
     ledger_rows = (
@@ -790,7 +815,61 @@ async def _project_and_write_holdings(
         "mf.holdings.projected", projected=projected_n, total=len(parsed), engine=ENGINE_VERSION
     )
     await db.commit()
-    return invested_map
+    return invested_map, projected
+
+
+async def _write_statement_checkpoints(
+    db: Any,
+    user_id: str,
+    portfolio_id: str,
+    upload_ref: str,
+    parsed: list[ParsedHolding],
+    projected: dict[tuple[str, str], dict[str, Any]],
+) -> None:
+    """§39.4 — persist ONE checkpoint row per parsed holding: the statement's stated units/cost vs the
+    ledger's replayed units for that (instrument, folio). This is evidence, never a ledger mutation
+    (I12) — a disagreement (S10) is flagged `reconciliation_status='mismatch'` and logged, nothing is
+    corrected or overwritten. Also the only data source in HOLDINGS_ONLY state (S3: a txn-less CDSL /
+    summary CAS has no `projected` entry at all, so every checkpoint there is trivially 'ok' — there is
+    nothing in the ledger to disagree with).
+
+    Runs on the caller's rls_user_session db (same owner-scoped write as the holdings upsert); commits
+    are the caller's responsibility (mirrors the sip_rows add_all pattern above)."""
+    from decimal import Decimal
+
+    from dhanradar.mf.cas import normalize_folio
+    from dhanradar.mf.projection import UNITS_GAP_TOLERANCE
+    from dhanradar.models.mf import MfPortfolioStatementCheckpoint
+
+    rows: list[MfPortfolioStatementCheckpoint] = []
+    for p in parsed:
+        proj = projected.get((p.isin, normalize_folio(p.folio_number)))
+        status = "ok"
+        if proj is not None and abs(proj["units"] - Decimal(str(p.units))) > UNITS_GAP_TOLERANCE:
+            status = "mismatch"
+            _slog.warning(
+                "mf.checkpoint.reconciliation_mismatch",
+                isin=p.isin,
+                folio=p.folio_number,
+                stated_units=p.units,
+                ledger_units=str(proj["units"]),
+            )
+        rows.append(
+            MfPortfolioStatementCheckpoint(
+                user_id=user_id,
+                portfolio_id=portfolio_id,
+                upload_ref=upload_ref,
+                instrument_id=p.isin,
+                folio_number=p.folio_number,
+                stated_units=p.units,
+                stated_cost=p.cost,
+                stmt_date=p.as_of_date,
+                reconciliation_status=status,
+            )
+        )
+    if rows:
+        db.add_all(rows)
+        await db.flush()
 
 
 async def _load_nav_series(
@@ -3545,6 +3624,12 @@ async def _compute_portfolio_daily_valuations_async() -> str:
     for portfolio_id, user_id in portfolio_rows:
         try:
             async with admin_task_session() as db:
+                # S20 (§39.4): same per-portfolio lock the CAS pipeline takes before its write
+                # transaction — serializes this nightly upsert against a concurrent upload.
+                await db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": str(portfolio_id)}
+                )
+
                 # Holdings for this portfolio.
                 holdings = (
                     await db.execute(

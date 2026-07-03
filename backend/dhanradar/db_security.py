@@ -48,6 +48,8 @@ PERSONAL_TABLES: tuple[str, ...] = (
     "mf.mf_sip_transactions",
     # M2.2 — daily portfolio valuation series (added 2026-06-30)
     "mf.mf_portfolio_daily_values",
+    # §39.4 — per-upload statement checkpoints (added 2026-07-03)
+    "mf.portfolio_statement_checkpoints",
     # signal / notify / auth / compliance (classified PERSONAL; RLS enforcement = PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",
@@ -79,6 +81,8 @@ RLS_ENFORCED: tuple[str, ...] = (
     "mf.mf_sip_transactions",
     # M2.2 — daily portfolio valuation series (added 2026-06-30)
     "mf.mf_portfolio_daily_values",
+    # §39.4 — per-upload statement checkpoints (added 2026-07-03)
+    "mf.portfolio_statement_checkpoints",
     # signal / notify / auth / compliance (PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",
