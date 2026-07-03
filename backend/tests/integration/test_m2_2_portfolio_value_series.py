@@ -385,8 +385,10 @@ async def test_reset_valuation_series_replays_full_ledger_window(db_session):
     assert len(rows) > 1, "ledger-covered replay must produce more than a single seeded row"
     assert rows[0].valuation_date == date(2026, 6, 28)
     by_date = {r.valuation_date: r for r in rows}
-    # 2026-06-28: no NAV known yet (first NAV is 2026-06-29) -> value 0, invested still 900.
-    assert float(by_date[date(2026, 6, 28)].total_value) == pytest.approx(0.0, abs=0.01)
+    # 2026-06-28: no REAL NAV yet (first is 2026-06-29) — the purchase's own nav_or_price (180)
+    # seeds a synthetic price point (+212% RCA fix), so day one is valued at 5 x 180 = 900,
+    # never a zero-valued stretch while invested counts the cash.
+    assert float(by_date[date(2026, 6, 28)].total_value) == pytest.approx(900.0, abs=0.01)
     assert float(by_date[date(2026, 6, 28)].total_invested) == pytest.approx(900.0, abs=0.01)
     # 2026-06-29: NAV 195 lands -> 5 x 195 = 975.
     assert float(by_date[date(2026, 6, 29)].total_value) == pytest.approx(975.0, abs=0.01)
