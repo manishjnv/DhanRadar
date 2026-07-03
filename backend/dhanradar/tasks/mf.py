@@ -356,6 +356,9 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
                 MfPortfolioTransaction.amount,
                 MfPortfolioTransaction.txn_type,
                 MfPortfolioTransaction.txn_date,
+                # nav_or_price feeds the replay's synthetic price seeding (the +212% RCA fix:
+                # units are valued at their txn price until real NAV coverage begins).
+                MfPortfolioTransaction.nav_or_price,
             ).where(MfPortfolioTransaction.portfolio_id == portfolio_id)
         )
     ).mappings().all()

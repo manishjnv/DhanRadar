@@ -29,7 +29,9 @@ def _vp(d: datetime.date, value: float, invested: float) -> ValuationPoint:
 class TestComputeDailyValue:
     def test_single_holding(self) -> None:
         """100 units × NAV 250.00 = 25,000.00"""
-        point = compute_daily_value([(100.0, 250.0)], total_invested=20_000.0, valuation_date=_TODAY)
+        point = compute_daily_value(
+            [(100.0, 250.0)], total_invested=20_000.0, valuation_date=_TODAY
+        )
         assert point.total_value == 25_000.0
         assert point.total_invested == 20_000.0
         assert point.valuation_date == _TODAY
@@ -43,12 +45,16 @@ class TestComputeDailyValue:
 
     def test_zero_units_skipped(self) -> None:
         """A holding with 0 units contributes nothing."""
-        point = compute_daily_value([(0.0, 500.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY)
+        point = compute_daily_value(
+            [(0.0, 500.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY
+        )
         assert point.total_value == pytest.approx(1_000.0, abs=0.01)
 
     def test_zero_nav_skipped(self) -> None:
         """A holding with 0 (or missing) NAV contributes nothing."""
-        point = compute_daily_value([(10.0, 0.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY)
+        point = compute_daily_value(
+            [(10.0, 0.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY
+        )
         assert point.total_value == pytest.approx(1_000.0, abs=0.01)
 
     def test_empty_holdings(self) -> None:
@@ -73,7 +79,9 @@ class TestComputeDailyValue:
 
     def test_negative_nav_skipped(self) -> None:
         """Negative NAV (bad data) is skipped — guard on nav > 0."""
-        point = compute_daily_value([(-1.0, 100.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY)
+        point = compute_daily_value(
+            [(-1.0, 100.0), (10.0, 100.0)], total_invested=1_000.0, valuation_date=_TODAY
+        )
         # units=-1 → skipped (units > 0 check fails)
         assert point.total_value == pytest.approx(1_000.0, abs=0.01)
 
@@ -89,8 +97,11 @@ class TestReplayValuationSeries:
         zero value before it, units x NAV from that date forward."""
         ledger_rows = [
             {
-                "instrument_id": "INF1", "units": 10.0, "amount": -1000.0,
-                "txn_type": "purchase", "txn_date": datetime.date(2026, 1, 3),
+                "instrument_id": "INF1",
+                "units": 10.0,
+                "amount": -1000.0,
+                "txn_type": "purchase",
+                "txn_date": datetime.date(2026, 1, 3),
             },
         ]
         nav_by_isin = {
@@ -111,12 +122,17 @@ class TestReplayValuationSeries:
         Monday's own NAV lands."""
         ledger_rows = [
             {
-                "instrument_id": "INF1", "units": 10.0, "amount": -1000.0,
-                "txn_type": "purchase", "txn_date": datetime.date(2026, 1, 1),
+                "instrument_id": "INF1",
+                "units": 10.0,
+                "amount": -1000.0,
+                "txn_type": "purchase",
+                "txn_date": datetime.date(2026, 1, 1),
             },
         ]
         # Fri Jan-2 = 100, Mon Jan-5 = 110; no Sat/Sun rows.
-        nav_by_isin = {"INF1": [(datetime.date(2026, 1, 2), 100.0), (datetime.date(2026, 1, 5), 110.0)]}
+        nav_by_isin = {
+            "INF1": [(datetime.date(2026, 1, 2), 100.0), (datetime.date(2026, 1, 5), 110.0)]
+        }
         points = replay_valuation_series(
             ledger_rows, nav_by_isin, datetime.date(2026, 1, 2), datetime.date(2026, 1, 5)
         )
@@ -124,14 +140,19 @@ class TestReplayValuationSeries:
         assert by_date[datetime.date(2026, 1, 2)].total_value == pytest.approx(1000.0)  # Fri
         assert by_date[datetime.date(2026, 1, 3)].total_value == pytest.approx(1000.0)  # Sat carry
         assert by_date[datetime.date(2026, 1, 4)].total_value == pytest.approx(1000.0)  # Sun carry
-        assert by_date[datetime.date(2026, 1, 5)].total_value == pytest.approx(1100.0)  # Mon's own NAV
+        assert by_date[datetime.date(2026, 1, 5)].total_value == pytest.approx(
+            1100.0
+        )  # Mon's own NAV
 
     def test_no_nav_yet_contributes_zero(self) -> None:
         """A date before the ISIN's first known NAV contributes nothing (honest, not fabricated)."""
         ledger_rows = [
             {
-                "instrument_id": "INF1", "units": 10.0, "amount": -1000.0,
-                "txn_type": "purchase", "txn_date": datetime.date(2026, 1, 1),
+                "instrument_id": "INF1",
+                "units": 10.0,
+                "amount": -1000.0,
+                "txn_type": "purchase",
+                "txn_date": datetime.date(2026, 1, 1),
             },
         ]
         nav_by_isin = {"INF1": [(datetime.date(2026, 1, 10), 100.0)]}
@@ -154,12 +175,18 @@ class TestReplayValuationSeries:
         """A later redemption reduces both units-held (so value drops) and net-invested."""
         ledger_rows = [
             {
-                "instrument_id": "INF1", "units": 100.0, "amount": -2000.0,
-                "txn_type": "purchase", "txn_date": datetime.date(2026, 1, 1),
+                "instrument_id": "INF1",
+                "units": 100.0,
+                "amount": -2000.0,
+                "txn_type": "purchase",
+                "txn_date": datetime.date(2026, 1, 1),
             },
             {
-                "instrument_id": "INF1", "units": -20.0, "amount": 500.0,
-                "txn_type": "redemption", "txn_date": datetime.date(2026, 1, 3),
+                "instrument_id": "INF1",
+                "units": -20.0,
+                "amount": 500.0,
+                "txn_type": "redemption",
+                "txn_date": datetime.date(2026, 1, 3),
             },
         ]
         nav_by_isin = {"INF1": [(datetime.date(2026, 1, 1), 20.0)]}
@@ -169,7 +196,9 @@ class TestReplayValuationSeries:
         by_date = {p.valuation_date: p for p in points}
         assert by_date[datetime.date(2026, 1, 2)].total_value == pytest.approx(2000.0)  # 100 x 20
         assert by_date[datetime.date(2026, 1, 3)].total_value == pytest.approx(1600.0)  # 80 x 20
-        assert by_date[datetime.date(2026, 1, 3)].total_invested == pytest.approx(1500.0)  # 2000-500
+        assert by_date[datetime.date(2026, 1, 3)].total_invested == pytest.approx(
+            1500.0
+        )  # 2000-500
 
 
 # ---------------------------------------------------------------------------
@@ -285,3 +314,116 @@ class TestMaxDrawdownAndRecovery:
         max_dd, recovery_months = max_drawdown_and_recovery(points)
         assert max_dd == pytest.approx(30.0)
         assert recovery_months is None  # never reclaims 100 by series end
+
+
+class TestSyntheticPriceSeeding:
+    """2026-07-03 +212% RCA: a fund whose NAV history starts AFTER its transactions
+    (INF740KA1XH4 — months of SIPs valued at zero, then all priced at once) must be
+    valued at its transaction price until real NAV coverage begins."""
+
+    def test_units_valued_at_txn_price_before_nav_coverage(self) -> None:
+        d = datetime.date
+        ledger_rows = [
+            {
+                "instrument_id": "INF_GAP",
+                "units": 500.0,
+                "amount": -5000.0,
+                "txn_type": "sip",
+                "txn_date": d(2026, 1, 5),
+                "nav_or_price": 10.0,
+            },
+            {
+                "instrument_id": "INF_GAP",
+                "units": 500.0,
+                "amount": -5000.0,
+                "txn_type": "sip",
+                "txn_date": d(2026, 2, 5),
+                "nav_or_price": 10.0,
+            },
+        ]
+        # Real NAV coverage only begins 2026-03-20 — AFTER both SIPs.
+        nav_by_isin = {"INF_GAP": [(d(2026, 3, 20), 10.5)]}
+        points = replay_valuation_series(ledger_rows, nav_by_isin, d(2026, 1, 5), d(2026, 3, 25))
+        by_date = {p.valuation_date: p for p in points}
+
+        # Valued at txn price from day one — never a zero-valued stretch.
+        assert by_date[d(2026, 1, 5)].total_value == pytest.approx(5000.0)  # 500 x 10
+        assert by_date[d(2026, 2, 5)].total_value == pytest.approx(10000.0)  # 1000 x 10
+        # NAV-coverage day is a modest repricing (10 -> 10.5), NOT a 0 -> 10500 cliff.
+        assert by_date[d(2026, 3, 20)].total_value == pytest.approx(10500.0)  # 1000 x 10.5
+
+        # Flow-adjusted returns over the whole stretch never spike: SIP days are ~0
+        # (value steps WITH invested) and the repricing day is the only real move (+5%).
+        rets = flow_adjusted_daily_returns(points)
+        assert max(abs(r) for r in rets) == pytest.approx(0.05, abs=0.001)
+
+    def test_real_nav_wins_over_synthetic_on_same_date(self) -> None:
+        d = datetime.date
+        ledger_rows = [
+            {
+                "instrument_id": "INF1",
+                "units": 10.0,
+                "amount": -100.0,
+                "txn_type": "purchase",
+                "txn_date": d(2026, 1, 2),
+                "nav_or_price": 10.0,
+            },
+        ]
+        nav_by_isin = {"INF1": [(d(2026, 1, 2), 11.0)]}  # real NAV, same date as the txn
+        points = replay_valuation_series(ledger_rows, nav_by_isin, d(2026, 1, 2), d(2026, 1, 2))
+        assert points[0].total_value == pytest.approx(110.0)  # real 11, not synthetic 10
+
+    def test_rows_without_nav_or_price_key_still_replay(self) -> None:
+        """Older callers/tests pass ledger mappings without nav_or_price — .get(None) path."""
+        d = datetime.date
+        ledger_rows = [
+            {
+                "instrument_id": "INF1",
+                "units": 10.0,
+                "amount": -1000.0,
+                "txn_type": "purchase",
+                "txn_date": d(2026, 1, 3),
+            },
+        ]
+        nav_by_isin = {"INF1": [(d(2026, 1, 1), 100.0)]}
+        points = replay_valuation_series(ledger_rows, nav_by_isin, d(2026, 1, 1), d(2026, 1, 3))
+        assert points[-1].total_value == pytest.approx(1000.0)
+
+
+class TestLedgerFlowsForReturns:
+    """2026-07-03: returns must use the ledger's REAL per-date cash flows when available —
+    the invested-delta fallback misses non-capital flows (a dividend payout day would
+    otherwise read as a fake loss)."""
+
+    def test_payout_day_is_not_a_loss_with_ledger_flows(self) -> None:
+        d0 = datetime.date(2026, 1, 1)
+        rows = [
+            ValuationPoint(valuation_date=d0, total_value=10000.0, total_invested=10000.0),
+            # Next day: fund pays out 200 cash — value drops 200, invested unchanged
+            # (dividend_payout is not a capital type).
+            ValuationPoint(
+                valuation_date=d0 + datetime.timedelta(days=1),
+                total_value=9800.0,
+                total_invested=10000.0,
+            ),
+        ]
+        # Without ledger flows: the payout reads as a fake -2% "loss".
+        assert flow_adjusted_daily_returns(rows)[0] == pytest.approx(-0.02)
+        # With ledger flows (payout = 200 cash OUT of the portfolio -> flow -200): ~0.
+        flows = {d0 + datetime.timedelta(days=1): -200.0}
+        assert flow_adjusted_daily_returns(rows, flows)[0] == pytest.approx(0.0)
+
+    def test_purchase_day_matches_invested_delta_fallback(self) -> None:
+        """For plain capital flows the two bases agree — the fallback stays valid."""
+        d0 = datetime.date(2026, 1, 1)
+        rows = [
+            ValuationPoint(valuation_date=d0, total_value=10000.0, total_invested=10000.0),
+            ValuationPoint(
+                valuation_date=d0 + datetime.timedelta(days=1),
+                total_value=15100.0,  # +5000 purchase and +100 market move
+                total_invested=15000.0,
+            ),
+        ]
+        flows = {d0 + datetime.timedelta(days=1): 5000.0}
+        assert flow_adjusted_daily_returns(rows)[0] == pytest.approx(0.01)
+        assert flow_adjusted_daily_returns(rows, flows)[0] == pytest.approx(0.01)
