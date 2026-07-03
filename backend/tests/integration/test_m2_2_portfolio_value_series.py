@@ -123,7 +123,13 @@ async def _seed_user(db_session, email: str) -> str:
     return uid
 
 
-async def _seed_portfolio(db_session, uid: str) -> str:
+async def _seed_portfolio(db_session, uid: str, isin: str = "INF209K01QP2") -> str:
+    """Seed a portfolio with one holding (5 units, invested 900, NAV 200 @ 2026-06-30).
+
+    Each test MUST pass its own unique `isin`: mf_nav_history is shared across tests in the
+    session-scoped DB and seeded with ON CONFLICT DO NOTHING, so a reused ISIN accumulates NAV
+    dates from earlier tests and silently changes what "two most-recent NAVs" means (the exact
+    cross-test contamination that broke the bottom-up day-change tests in CI)."""
     pid = (
         await db_session.execute(
             text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'VS') RETURNING id"),
@@ -134,24 +140,25 @@ async def _seed_portfolio(db_session, uid: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_funds (isin, scheme_name, category, sebi_category, is_segregated)"
-            " VALUES ('INF209K01QP2', 'HDFC Top 100 Fund', 'Equity', 'Large Cap Fund', false)"
+            " VALUES (:i, 'HDFC Top 100 Fund', 'Equity', 'Large Cap Fund', false)"
             " ON CONFLICT (isin) DO NOTHING"
-        )
+        ),
+        {"i": isin},
     )
     await db_session.execute(
         text(
-            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES ('INF209K01QP2', :d, 200.0)"
+            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 200.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"d": date(2026, 6, 30)},
+        {"i": isin, "d": date(2026, 6, 30)},
     )
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_user_holdings (user_id, portfolio_id, isin, folio_number, units,"
             " invested_amount, avg_cost_nav, source, as_of_date)"
-            " VALUES (:u, :p, 'INF209K01QP2', '999', 5.0, 900.0, 180.0, 'cas', :d)"
+            " VALUES (:u, :p, :i, '999', 5.0, 900.0, 180.0, 'cas', :d)"
         ),
-        {"u": uid, "p": str(pid), "d": date(2026, 6, 30)},
+        {"u": uid, "p": str(pid), "i": isin, "d": date(2026, 6, 30)},
     )
     await db_session.commit()
     return str(pid)
@@ -196,7 +203,7 @@ async def test_summary_day_change_none_cold_start(db_session, rls_async_client):
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-cold@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC001")
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -238,8 +245,8 @@ async def test_summary_day_change_two_nav_dates(db_session, rls_async_client):
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-two@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # 5 units, NAV 200.0 @ 2026-06-30
-    await _seed_nav(db_session, "INF209K01QP2", date(2026, 7, 1), 210.0)
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC002")  # 5 units, NAV 200.0 @ 2026-06-30
+    await _seed_nav(db_session, "INFTESTDC002", date(2026, 7, 1), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -259,9 +266,9 @@ async def test_summary_day_change_latest_minus_previous(db_session, rls_async_cl
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-three@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # NAV 200.0 @ 2026-06-30 (oldest)
-    await _seed_nav(db_session, "INF209K01QP2", date(2026, 7, 1), 204.0)   # previous
-    await _seed_nav(db_session, "INF209K01QP2", date(2026, 7, 2), 209.0)  # latest
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC003")  # NAV 200.0 @ 2026-06-30 (oldest)
+    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 1), 204.0)  # previous
+    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 2), 209.0)  # latest
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -281,17 +288,17 @@ async def test_summary_day_change_immune_to_flow(db_session, rls_async_client):
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-flow@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # 5 units, NAV 200.0 @ 2026-06-30
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC004")  # 5 units, NAV 200.0 @ 2026-06-30
     # Simulate a same-day flow: invested_amount jumps far out of proportion to the NAV move.
     await db_session.execute(
         text(
             "UPDATE mf.mf_user_holdings SET invested_amount = 50000.0"
-            " WHERE portfolio_id = :p AND isin = 'INF209K01QP2'"
+            " WHERE portfolio_id = :p AND isin = 'INFTESTDC004'"
         ),
         {"p": pid},
     )
     await db_session.commit()
-    await _seed_nav(db_session, "INF209K01QP2", date(2026, 7, 1), 210.0)
+    await _seed_nav(db_session, "INFTESTDC004", date(2026, 7, 1), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -311,7 +318,8 @@ async def test_reset_valuation_series_restarts_series(db_session):
     from dhanradar.tasks.mf import _reset_valuation_series
 
     uid = await _seed_user(db_session, "vs-reset@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # 5 units × latest NAV 200 = 1000, invested 900
+    # 5 units × latest NAV 200 = 1000, invested 900
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC005")
     await _seed_daily_values(db_session, pid, uid, [
         (date(2026, 7, 1), 286_566.0, 147_000.0),  # stale demo-composition row
         (date(2026, 7, 2), 41_010.0, 52_674.0),
@@ -343,7 +351,8 @@ async def test_reset_valuation_series_replays_full_ledger_window(db_session):
     from dhanradar.tasks.mf import _reset_valuation_series
 
     uid = await _seed_user(db_session, "vs-replay@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # holding: 5 units INF209K01QP2, NAV 200 @ 2026-06-30
+    # holding: 5 units, NAV 200 @ 2026-06-30
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC006")
 
     # A ledger purchase a couple of days before the seeded NAV date, plus a second (earlier) NAV
     # date, so the replay window spans more than just today.
@@ -352,13 +361,13 @@ async def test_reset_valuation_series_replays_full_ledger_window(db_session):
             "INSERT INTO mf.portfolio_transactions"
             " (portfolio_id, user_id, asset_class, instrument_id, folio_number, txn_type,"
             "  txn_date, units, nav_or_price, amount, source, source_ref, parser_version)"
-            " VALUES (:p, :u, 'mf', 'INF209K01QP2', '999', 'purchase',"
+            " VALUES (:p, :u, 'mf', 'INFTESTDC006', '999', 'purchase',"
             "  :d, 5.0, 180.0, -900.0, 'cas', 'test-replay-ref', 'cas-1')"
         ),
         {"p": pid, "u": uid, "d": date(2026, 6, 28)},
     )
     await db_session.commit()
-    await _seed_nav(db_session, "INF209K01QP2", date(2026, 6, 29), 195.0)
+    await _seed_nav(db_session, "INFTESTDC006", date(2026, 6, 29), 195.0)
 
     await _reset_valuation_series(db_session, uid, pid)
 

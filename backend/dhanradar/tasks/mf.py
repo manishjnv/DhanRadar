@@ -384,11 +384,17 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
 
         points = replay_valuation_series(ledger_rows, nav_by_isin, from_date, today)
         if points:
+            # UUID-typed ids are REQUIRED here: add_all uses SQLAlchemy insertmanyvalues, whose
+            # sentinel matching needs the Python value to equal the driver's returned type
+            # exactly — a str portfolio_id raises "Can't match sentinel values in result set".
+            from uuid import UUID as _UUID
+
+            pid_u, uid_u = _UUID(portfolio_id), _UUID(user_id)
             db.add_all(
                 [
                     MfPortfolioDailyValue(
-                        portfolio_id=portfolio_id,
-                        user_id=user_id,
+                        portfolio_id=pid_u,
+                        user_id=uid_u,
                         valuation_date=p.valuation_date,
                         total_value=p.total_value,
                         total_invested=p.total_invested,
