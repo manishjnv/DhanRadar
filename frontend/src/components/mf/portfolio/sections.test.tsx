@@ -114,6 +114,8 @@ const HOLDINGS_PRESENT = {
         confidence_band: 'high' as const,
         as_of: '2026-06-25T00:00:00Z',
         xirr_pct: 12.34,
+        day_change: 1500.0,
+        day_change_pct: 0.68,
       },
       {
         isin: 'INF200K01QN7',
@@ -128,6 +130,8 @@ const HOLDINGS_PRESENT = {
         confidence_band: 'medium' as const,
         as_of: '2026-06-25T00:00:00Z',
         xirr_pct: null,
+        day_change: null,
+        day_change_pct: null,
       },
     ],
   },
@@ -258,9 +262,9 @@ describe('HeroSection', () => {
       ...SUMMARY_PRESENT,
       data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: 11.2, xirr_1y_window_days: 200 },
     } as any);
-    // A shrunk window must never be mislabeled "1Y" — Lifetime XIRR still renders.
+    // A shrunk window must never be mislabeled "1Y" — the (renamed) XIRR chip still renders.
     expect(screen.queryByText('1Y XIRR')).toBeNull();
-    expect(screen.getByText('Lifetime XIRR')).toBeDefined();
+    expect(screen.getByText('XIRR')).toBeDefined();
   });
 
   it('present => omits 1Y XIRR chip when xirr_1y_pct is null', () => {
@@ -293,6 +297,70 @@ describe('HeroSection', () => {
     expect(container.querySelector('path[stroke="#F5C451"]')).toBeNull();
     expect(screen.queryByText(/YOU VS NIFTY/i)).toBeNull();
     expect(screen.queryByText(/^NIFTY /i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeroSection — CAMS-parity chips (cost_value Invested, renamed XIRR, Avg Days)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — CAMS-parity chips', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  const FULL_FIXTURE = {
+    ...SUMMARY_PRESENT,
+    data: {
+      ...SUMMARY_PRESENT.data,
+      cost_value: 4_000_000,
+      gain_vs_cost: 832_640,
+      gain_vs_cost_pct: 20.8,
+      xirr_1y_pct: 11.2,
+      xirr_1y_window_days: 365,
+      wt_avg_days: 347,
+    },
+  };
+
+  it('renders all 5 chips (Invested, Day Change, 1Y XIRR, XIRR, Avg Days) from a full fixture', () => {
+    renderHero(FULL_FIXTURE);
+    expect(screen.getByText('Invested')).toBeDefined();
+    expect(screen.getByText('Day Change')).toBeDefined();
+    expect(screen.getByText('1Y XIRR')).toBeDefined();
+    expect(screen.getByText('XIRR')).toBeDefined();
+    expect(screen.getByText('Avg Days')).toBeDefined();
+  });
+
+  it('Invested chip shows cost_value (incl. reinvested payouts), not cash-basis total_invested', () => {
+    renderHero(FULL_FIXTURE);
+    // cost_value 4,000,000 => "40,00,000"; distinct from total_invested 3,848,430 => "38,48,430"
+    expect(screen.getByText(/40,00,000/)).toBeDefined();
+    expect(screen.queryByText(/38,48,430/)).toBeNull();
+  });
+
+  it('Invested chip falls back to total_invested when cost_value is absent', () => {
+    const { cost_value: _drop, ...rest } = FULL_FIXTURE.data;
+    renderHero({ ...FULL_FIXTURE, data: rest });
+    expect(screen.getByText(/38,48,430/)).toBeDefined();
+  });
+
+  it('Avg Days chip shows wt_avg_days', () => {
+    renderHero(FULL_FIXTURE);
+    expect(screen.getByText('347')).toBeDefined();
+  });
+
+  it('omits Avg Days chip when wt_avg_days is null', () => {
+    renderHero({ ...FULL_FIXTURE, data: { ...FULL_FIXTURE.data, wt_avg_days: null } });
+    expect(screen.queryByText('Avg Days')).toBeNull();
   });
 });
 
@@ -419,6 +487,16 @@ describe('HoldingsSection', () => {
     // First holding has xirr_pct: 12.34 => "+12.34%"
     expect(screen.getByText(/\+12\.34%/)).toBeDefined();
     // Second holding has xirr_pct: null => rendered as a dash, column never hidden
+    const dashCells = screen.getAllByText('—');
+    expect(dashCells.length).toBeGreaterThan(0);
+  });
+
+  it('present => shows the Today column (per-holding day_change), value and a dash on null', () => {
+    renderHoldings(HOLDINGS_PRESENT);
+    expect(screen.getByText('Today')).toBeDefined();
+    // First holding has day_change: 1500.0 => "+₹1,500" (humanized fmtCurrency, en-IN grouping)
+    expect(screen.getByText(/\+₹1,500/)).toBeDefined();
+    // Second holding has day_change: null => rendered as a dash, column never hidden
     const dashCells = screen.getAllByText('—');
     expect(dashCells.length).toBeGreaterThan(0);
   });

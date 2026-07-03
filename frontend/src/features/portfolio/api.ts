@@ -153,6 +153,10 @@ export interface Holding {
   as_of: string | null;
   /** User's own per-fund XIRR (M2.3, ledger-derived) — allowed in DOM; null when the ledger has no history for this holding (honest, never fabricated) */
   xirr_pct?: number | null;
+  /** User's own today's ₹ move for this fund (CAMS-parity) — allowed in DOM; null until 2 recent NAV dates exist */
+  day_change?: number | null;
+  /** Day change % from the SAME NAV pair as day_change; null with it */
+  day_change_pct?: number | null;
 }
 
 export interface HoldingsPayload {
@@ -174,7 +178,13 @@ export interface SummaryPayload {
   gain: number;
   /** User's own gain % — allowed in DOM; null when total_invested is 0 (no holdings yet) */
   gain_pct: number | null;
-  /** User's own XIRR — allowed in DOM */
+  /** CAMS-comparable "Cost value" = total_invested + reinvested-IDCW cost — allowed in DOM */
+  cost_value?: number;
+  /** User's own gain vs cost_value (instead of cash-basis total_invested) — allowed in DOM */
+  gain_vs_cost?: number;
+  /** gain_vs_cost as a %; null when cost_value is 0 */
+  gain_vs_cost_pct?: number | null;
+  /** User's own ledger-based lifetime XIRR (CAMS-parity) — over ACTIVE holdings only; allowed in DOM */
   xirr_pct: number | null;
   /** User's own windowed (~1-year) XIRR (M2.3) — allowed in DOM; null on cold-start or a too-short window */
   xirr_1y_pct?: number | null;
@@ -184,6 +194,8 @@ export interface SummaryPayload {
   day_change?: number | null;
   /** Day change % from the SAME NAV pairs as day_change — never recomputed client-side */
   day_change_pct?: number | null;
+  /** CAMS "Wt.Avg.Days" — capital-weighted average holding period in days; null when no active cost remains */
+  wt_avg_days?: number | null;
   fund_count: number;
   funds_scored: number;
   /** Data-confidence band for the portfolio as a whole — a data-quality descriptor, NOT a verdict */

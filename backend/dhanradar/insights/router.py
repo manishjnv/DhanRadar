@@ -18,6 +18,7 @@ No advisory verbs in any response copy. Disclosure bundle on every response (non
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated
 
@@ -34,14 +35,19 @@ from dhanradar.mf.portfolio_read import (
     concentration_payload,
     diversification_payload,
     holdings_payload,
+    load_active_holding_flows,
     load_day_change,
     load_first_investment_date,
+    load_holdings_day_change,
     load_holdings_xirr,
     load_ledger_flows_by_date,
     load_portfolio_read_model,
     load_portfolio_risk,
     load_portfolio_valuation_series,
+    load_portfolio_xirr,
     load_windowed_xirr,
+    portfolio_wt_avg_days,
+    reinvested_dividend_cost,
     risk_advanced_payload,
     risk_payload,
     summary_payload,
@@ -107,17 +113,19 @@ async def portfolio_holdings(
     and served THROUGH the serialization boundary (§10 layer 8). Each fund carries its educational label +
     confidence band (DOM-allowed) — NEVER the unified_score (hand-built payload + the A3 #2 scrub backstop).
     `invested_amount` is ledger net-invested (B86). `xirr_pct` per holding is M2.3's per-fund XIRR (None
-    when the ledger has no history for it — honest, never fabricated). Anonymous → 401; another user's
-    portfolio → 404.
+    when the ledger has no history for it — honest, never fabricated). `day_change`/`day_change_pct`
+    (CAMS-parity) are the per-fund today's ₹/% move (`load_holdings_day_change`) — None until 2 recent
+    NAV dates exist for that ISIN. Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     current_values = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
     xirr_map = await load_holdings_xirr(db, portfolio_id, current_values)
+    day_change_map = await load_holdings_day_change(db, portfolio_id)
     return serialize_concept(
         "holdings.list",
-        holdings_payload(rm, portfolio_id, xirr_map),
+        holdings_payload(rm, portfolio_id, xirr_map, day_change_map),
         RequestCtx(tier=user.tier),
         source="cas",
         engine_version=ENGINE_VERSION,
@@ -134,16 +142,37 @@ async def portfolio_summary(
     overall data-confidence band, served THROUGH the boundary. HAND-BUILT: no portfolio composite score and
     no invented verdict label (#1/#2). `total_invested` is ledger net-invested (B86). `xirr_1y_pct` +
     `xirr_1y_window_days` are M2.3's windowed XIRR (None on cold-start or a too-short window — the client
-    only labels it "1Y" when the window is >= 360 days). 401/404 as above.
+    only labels it "1Y" when the window is >= 360 days).
+
+    CAMS-parity (2026-07-03): `xirr_pct` is now `load_portfolio_xirr` — ledger-based, over the ACTIVE
+    holdings' full flow history + live value (replaces the stale upload-time snapshot number). `cost_value`/
+    `gain_vs_cost`/`gain_vs_cost_pct` and `wt_avg_days` come from ONE shared active-holdings ledger read
+    (`load_active_holding_flows`) feeding `reinvested_dividend_cost` + `portfolio_wt_avg_days`. 401/404 as
+    above.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
+    active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
     dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct) or None
     xirr_1y = await load_windowed_xirr(db, portfolio_id, rm.total_value)
+    xirr_pct = await load_portfolio_xirr(db, portfolio_id, rm.total_value, active_keys)
+    active_flows = await load_active_holding_flows(db, portfolio_id, active_keys)
+    today = datetime.date.today()
+    wt_avg_days = portfolio_wt_avg_days(active_flows, today)
+    reinvested_cost = reinvested_dividend_cost(active_flows)
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(rm, portfolio_id, dc[0] if dc else None, dc[1] if dc else None, xirr_1y),
+        summary_payload(
+            rm,
+            portfolio_id,
+            dc[0] if dc else None,
+            dc[1] if dc else None,
+            xirr_1y,
+            xirr_pct=xirr_pct,
+            wt_avg_days=wt_avg_days,
+            reinvested_cost=reinvested_cost,
+        ),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

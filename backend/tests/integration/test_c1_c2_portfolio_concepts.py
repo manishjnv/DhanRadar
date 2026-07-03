@@ -78,14 +78,18 @@ def test_holdings_payload_safe_fields_no_score():
 def test_summary_payload_facts_band_no_score():
     rm = PortfolioReadModel(
         holdings=[_holding(confidence_band="high"), _holding(isin="INF2", confidence_band="medium")],
-        total_invested=2000.0, total_value=2600.0, xirr_pct=21.0, as_of="2026-03-31",
+        total_invested=2000.0, total_value=2600.0, xirr_pct=None, as_of="2026-03-31",
     )
-    p = summary_payload(rm, "pid-1")
+    # xirr_pct is now passed in explicitly (CAMS-parity: the ledger-based number, not rm.xirr_pct —
+    # the stale upload-time snapshot the summary no longer reads).
+    p = summary_payload(rm, "pid-1", xirr_pct=21.0)
     assert "unified_score" not in _all_keys(p) and "score" not in _all_keys(p)
     assert p["total_value"] == 2600.0 and p["total_invested"] == 2000.0
     assert p["gain"] == 600.0 and round(p["gain_pct"], 1) == 30.0
     assert p["xirr_pct"] == 21.0 and p["fund_count"] == 2 and p["funds_scored"] == 2
     assert p["confidence_band"] == "medium"  # high + medium → medium (conservative aggregate)
+    assert p["cost_value"] == 2000.0  # no reinvested cost passed → equals total_invested
+    assert p["wt_avg_days"] is None  # not passed → default None
 
 
 def test_confidence_band_rule():
