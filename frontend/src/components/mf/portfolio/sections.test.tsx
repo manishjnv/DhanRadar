@@ -371,6 +371,24 @@ const RISK_PRESENT = {
 
 const RISK_EMPTY = { status: 'empty' as const, data: null, meta: { ...RISK_META, reason: 'empty' as const } };
 
+// M2.3 (resolves B88) — the portfolio's own daily valuation series is long enough: real numbers,
+// not the coming-soon deferral above.
+const RISK_TRUE_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'port-1',
+    risk_band: 'moderate' as const,
+    risk_band_basis: 'portfolio return series',
+    volatility_pct: 16.2,
+    max_drawdown_pct: 22.5,
+    recovery_months: 4,
+    fund_count: 6,
+    funds_with_metrics: 5,
+    as_of: '2026-06-28',
+  },
+  meta: RISK_META,
+};
+
 const ADV_PRESENT = {
   status: 'present' as const,
   data: {
@@ -379,6 +397,21 @@ const ADV_PRESENT = {
     sortino_ratio: null, // B88: deferred
     rolling_1y_avg_pct: 17.8,
     rolling_1y_pct_positive: null, // B88: deferred (per-fund hit-rate doesn't aggregate)
+    alpha: null,
+    beta: null,
+    as_of: '2026-06-28',
+  },
+  meta: RISK_META,
+};
+
+const ADV_TRUE_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'port-1',
+    sharpe_ratio: 0.85,
+    sortino_ratio: 1.1,
+    rolling_1y_avg_pct: 17.8,
+    rolling_1y_pct_positive: 72.0,
     alpha: null,
     beta: null,
     as_of: '2026-06-28',
@@ -399,7 +432,11 @@ describe('RiskSection', () => {
 
   function renderRisk(
     riskEnvelope: any,
-    advOverride: { data?: typeof ADV_PRESENT; isError?: boolean; error?: Error | null } = {},
+    advOverride: {
+      data?: typeof ADV_PRESENT | typeof ADV_TRUE_PRESENT;
+      isError?: boolean;
+      error?: Error | null;
+    } = {},
   ) {
     const riskMock = vi.mocked(usePortfolioRisk);
     const advMock = vi.mocked(usePortfolioRiskAdvanced);
@@ -519,6 +556,34 @@ describe('RiskSection', () => {
     expect(screen.getByText('Beta')).toBeDefined();
     // coming soon now covers Sharpe + Sortino (B88) + Alpha + Beta
     expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(4);
+  });
+
+  // ── M2.3 (resolves B88): true portfolio return series → real values, not coming-soon ────
+
+  it('present with true series basis => real Biggest Fall + Recovery Time render, not coming-soon', () => {
+    renderRisk(RISK_TRUE_PRESENT);
+    expect(screen.getByText(/Indicative — based on portfolio return series/i)).toBeDefined();
+    // exact strings — a regex would also partial-match the description copy ("...biggest fall.")
+    expect(screen.getByText('Biggest Fall')).toBeDefined();
+    expect(screen.getByText('-22.5%')).toBeDefined();
+    expect(screen.getByText('Recovery Time')).toBeDefined();
+    expect(screen.getByText('4 months')).toBeDefined();
+    // no "coming soon" left for these two fields now that the series is long enough
+    expect(screen.queryAllByText('— Coming soon').length).toBe(0);
+  });
+
+  it('advanced panel with true series basis => real Sharpe/Sortino/Positive-1Y-Windows render', async () => {
+    renderRisk(RISK_TRUE_PRESENT, { data: ADV_TRUE_PRESENT });
+    const advBtn = screen.getByRole('button', { name: /Advanced Risk Metrics/i });
+    fireEvent.click(advBtn);
+    expect(screen.getByText('Sharpe Ratio')).toBeDefined();
+    expect(screen.getByText('0.85')).toBeDefined();
+    expect(screen.getByText('Sortino Ratio')).toBeDefined();
+    expect(screen.getByText('1.10')).toBeDefined();
+    expect(screen.getByText('Positive 1Y Windows')).toBeDefined();
+    expect(screen.getByText('72.0%')).toBeDefined();
+    // Alpha/Beta remain coming-soon (out of scope, ADR-0033b) — the only 2 left
+    expect(screen.getAllByText('— Coming soon').length).toBe(2);
   });
 });
 

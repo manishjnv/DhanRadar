@@ -487,3 +487,45 @@ class TestCategoryPercentiles:
         result = category_percentiles([99.0], min_count=1)
         assert result is not None
         assert result["p50"] == pytest.approx(99.0)
+
+
+# ---------------------------------------------------------------------------
+# 8. min_points / periods_per_year override (M2.3 — portfolio true-risk path)
+# ---------------------------------------------------------------------------
+
+class TestMinPointsAndPeriodsPerYearOverride:
+    """M2.3's portfolio path calls risk_adjusted_stats(min_points=1, periods_per_year=365) on the
+    portfolio's own wealth index. Fund-NAV callers (tasks/mf.py) pass NEITHER kwarg and must keep
+    today's exact 252-point / business-daily behaviour — pinned by both halves below."""
+
+    def test_default_call_still_gates_at_252(self):
+        """90 points, NO override kwargs → still all-None (fund-NAV callers untouched)."""
+        pts = _make_series(90, [0.001, -0.0003])
+        rs = risk_adjusted_stats(pts, risk_free_annual=_RF)
+        assert rs.volatility_pct is None
+
+    def test_min_points_override_unlocks_a_shorter_series(self):
+        """The SAME 90-point series, with min_points=90 → computes (the M2.3 portfolio path)."""
+        pts = _make_series(90, [0.001, -0.0003])
+        rs = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90)
+        assert rs.volatility_pct is not None
+        assert rs.sharpe_ratio is not None
+
+    def test_periods_per_year_override_scales_annualised_vol(self):
+        """Same series, only periods_per_year differs → the vol ratio is exactly √(365/252)."""
+        pts = _make_series(90, [0.001, -0.0003])
+        rs_252 = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90, periods_per_year=252)
+        rs_365 = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90, periods_per_year=365)
+        assert rs_252.volatility_pct is not None and rs_365.volatility_pct is not None
+        ratio = rs_365.volatility_pct / rs_252.volatility_pct
+        assert ratio == pytest.approx(math.sqrt(365.0 / 252.0), rel=1e-9)
+
+    def test_sortino_denominator_also_tracks_the_override(self):
+        """Regression guard: the Sortino downside-deviation annualisation must scale with
+        periods_per_year too — a bug fixed during review left it hardcoded at √252, which would
+        silently mismatch vol's cadence whenever periods_per_year is overridden."""
+        pts = _make_series(90, [0.002, -0.01])  # asymmetric → downside dev != symmetric stdev
+        rs_252 = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90, periods_per_year=252)
+        rs_365 = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90, periods_per_year=365)
+        assert rs_252.sortino_ratio is not None and rs_365.sortino_ratio is not None
+        assert rs_252.sortino_ratio != pytest.approx(rs_365.sortino_ratio)

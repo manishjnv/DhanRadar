@@ -85,6 +85,91 @@ def compute_daily_value(
     )
 
 
+def _dated_flow_adjusted_returns(
+    rows: list[ValuationPoint],
+) -> list[tuple[datetime.date, float]]:
+    """Day-over-day return per row, paired with its date (single source of truth for
+    ``flow_adjusted_daily_returns`` and the wealth-index builder below)."""
+    out: list[tuple[datetime.date, float]] = []
+    for prev, cur in zip(rows, rows[1:]):
+        if prev.total_value <= 0:
+            continue  # can't divide by a non-positive base — honestly skipped
+        flow = cur.total_invested - prev.total_invested
+        r = (cur.total_value - prev.total_value - flow) / prev.total_value
+        out.append((cur.valuation_date, r))
+    return out
+
+
+def flow_adjusted_daily_returns(rows: list[ValuationPoint]) -> list[float]:
+    """Day-over-day portfolio returns, adjusted for capital flows (M2.3, B88).
+
+    r_t = (V_t − V_{t-1} − (I_t − I_{t-1})) / V_{t-1}
+
+    Subtracting the invested-delta (I_t − I_{t-1}) keeps a SIP/lump-sum purchase
+    day from reading as a fake positive return — the same lesson as the
+    day-change RCA (2026-07-02): a capital inflow is not a market move. Pairs
+    where V_{t-1} <= 0 are skipped (can't divide by a non-positive base).
+    ``rows`` must be ordered ascending by date (load_portfolio_valuation_series's
+    contract).
+    """
+    return [r for _, r in _dated_flow_adjusted_returns(rows)]
+
+
+def wealth_index(
+    dated_returns: list[tuple[datetime.date, float]], base: float = 100.0
+) -> list[tuple[datetime.date, float]]:
+    """Cumulative-product wealth curve Π(1+r_t), seeded at ``base``.
+
+    NAV-shaped output ``(date, value)`` — feeds ``risk.risk_adjusted_stats``
+    (Sharpe/Sortino/vol/rolling-1Y) and ``max_drawdown_and_recovery`` below with
+    the SAME series, so every M2.3 true-risk figure derives from one curve.
+    """
+    out: list[tuple[datetime.date, float]] = []
+    value = base
+    for d, r in dated_returns:
+        value *= 1.0 + r
+        out.append((d, value))
+    return out
+
+
+def max_drawdown_and_recovery(
+    points: list[tuple[datetime.date, float]],
+) -> tuple[float | None, int | None]:
+    """Peak-to-trough decline (%) + recovery time (whole months) from a wealth-index series.
+
+    Walks the series once tracking the running peak; whenever a NEW deepest
+    drawdown is found, remembers the peak value that preceded it. Recovery is
+    then the gap from that trough to the first LATER point that reclaims the
+    peak value (day-count ÷ 30.44, rounded) — ``None`` when the series ends
+    still underwater (not yet recovered). Returns ``(None, None)`` for an empty
+    series and ``(0.0, None)`` for a series that never draws down (monotonic).
+    """
+    if not points:
+        return None, None
+    peak_value = points[0][1]
+    max_dd = 0.0
+    dd_peak_value = peak_value
+    dd_trough_date: datetime.date | None = None
+    for d, v in points:
+        if v > peak_value:
+            peak_value = v
+        if peak_value > 0:
+            dd = (peak_value - v) / peak_value * 100.0
+            if dd > max_dd:
+                max_dd = dd
+                dd_peak_value = peak_value
+                dd_trough_date = d
+    if dd_trough_date is None:
+        return 0.0, None
+
+    recovery_months: int | None = None
+    for d, v in points:
+        if d > dd_trough_date and v >= dd_peak_value:
+            recovery_months = round((d - dd_trough_date).days / 30.44)
+            break
+    return round(max_dd, 2), recovery_months
+
+
 def replay_valuation_series(
     ledger_rows: Iterable[Mapping[str, Any]],
     nav_by_isin_date: Mapping[str, list[tuple[datetime.date, float]]],

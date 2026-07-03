@@ -229,20 +229,23 @@ export function usePortfolioSummaryById(portfolioId: string) {
 /**
  * Standard risk payload returned by GET /portfolio/{id}/risk.
  * `risk_band` is a factual descriptor ("moderate" / "high") — never an advisory verb.
- * `recovery_months` is always null server-side (feature not built yet).
+ * M2.3 (resolves B88): `risk_band_basis` names which series volatility_pct/max_drawdown_pct/
+ * recovery_months actually come from — "portfolio return series" (true, real numbers) once the
+ * portfolio's own daily valuation series is long enough, else "average fund volatility" (the
+ * original fallback, with max_drawdown_pct/recovery_months honestly null → "coming soon").
  */
 export interface RiskPayload {
   portfolio_id: string;
-  /** Risk band — INDICATIVE factual descriptor (from avg fund volatility, B88), never advisory verb */
+  /** Risk band — factual descriptor; basis (true series or indicative fallback) is in risk_band_basis */
   risk_band: 'low' | 'moderate' | 'high' | 'very_high' | null;
-  /** What the indicative band is based on, e.g. "average fund volatility" (B88) */
+  /** Which series risk_band/volatility_pct/max_drawdown_pct are based on (M2.3) */
   risk_band_basis: string | null;
-  /** Average annualised volatility of the funds — indicative, not the true portfolio σ (B88) */
+  /** Annualised volatility — the TRUE portfolio σ once the series is long enough, else the avg fund proxy */
   volatility_pct: number | null;
-  /** Deferred (B88) — portfolio drawdown needs the valuation series; null → "coming soon" */
+  /** Peak-to-trough decline % — real once the series is long enough, else null ("coming soon") */
   max_drawdown_pct: number | null;
-  /** Always null server-side — render as "coming soon" */
-  recovery_months: null;
+  /** Months to recover from the biggest fall — real once the series is long enough, else null */
+  recovery_months: number | null;
   fund_count: number;
   funds_with_metrics: number;
   as_of: string | null;
@@ -251,17 +254,19 @@ export interface RiskPayload {
 /**
  * Advanced risk payload returned by GET /portfolio/{id}/risk?advanced=true.
  * Requires Plus tier; free users get HTTP 402.
- * `alpha`/`beta` are always null server-side (not built yet).
+ * M2.3 (resolves B88): sharpe_ratio/sortino_ratio/rolling_1y_pct_positive are real once the
+ * portfolio's own daily valuation series is long enough (see RiskPayload.risk_band_basis on the
+ * sibling free endpoint); otherwise null. `alpha`/`beta` are always null server-side (not built yet).
  */
 export interface RiskAdvancedPayload {
   portfolio_id: string;
-  /** Standard Sharpe ratio — DOM-allowed */
+  /** Standard Sharpe ratio — DOM-allowed; real once the series is long enough (M2.3) */
   sharpe_ratio: number | null;
-  /** Standard Sortino ratio — DOM-allowed */
+  /** Standard Sortino ratio — DOM-allowed; real once the series is long enough (M2.3) */
   sortino_ratio: number | null;
   /** Rolling 1-year average return % — DOM-allowed */
   rolling_1y_avg_pct: number | null;
-  /** % of rolling 1Y windows that were positive — DOM-allowed */
+  /** % of rolling 1Y windows that were positive — real once the series is long enough (M2.3) */
   rolling_1y_pct_positive: number | null;
   /** Always null server-side */
   alpha: null;
