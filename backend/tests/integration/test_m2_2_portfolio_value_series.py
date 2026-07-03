@@ -12,7 +12,7 @@ Mirrors test_c1_c2_portfolio_concepts.py (the proven C-wave pattern).
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from sqlalchemy import text
@@ -123,7 +123,13 @@ async def _seed_user(db_session, email: str) -> str:
     return uid
 
 
-async def _seed_portfolio(db_session, uid: str) -> str:
+async def _seed_portfolio(db_session, uid: str, isin: str = "INF209K01QP2") -> str:
+    """Seed a portfolio with one holding (5 units, invested 900, NAV 200 @ 2026-06-30).
+
+    Each test MUST pass its own unique `isin`: mf_nav_history is shared across tests in the
+    session-scoped DB and seeded with ON CONFLICT DO NOTHING, so a reused ISIN accumulates NAV
+    dates from earlier tests and silently changes what "two most-recent NAVs" means (the exact
+    cross-test contamination that broke the bottom-up day-change tests in CI)."""
     pid = (
         await db_session.execute(
             text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'VS') RETURNING id"),
@@ -134,24 +140,25 @@ async def _seed_portfolio(db_session, uid: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_funds (isin, scheme_name, category, sebi_category, is_segregated)"
-            " VALUES ('INF209K01QP2', 'HDFC Top 100 Fund', 'Equity', 'Large Cap Fund', false)"
+            " VALUES (:i, 'HDFC Top 100 Fund', 'Equity', 'Large Cap Fund', false)"
             " ON CONFLICT (isin) DO NOTHING"
-        )
+        ),
+        {"i": isin},
     )
     await db_session.execute(
         text(
-            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES ('INF209K01QP2', :d, 200.0)"
+            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 200.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"d": date(2026, 6, 30)},
+        {"i": isin, "d": date(2026, 6, 30)},
     )
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_user_holdings (user_id, portfolio_id, isin, folio_number, units,"
             " invested_amount, avg_cost_nav, source, as_of_date)"
-            " VALUES (:u, :p, 'INF209K01QP2', '999', 5.0, 900.0, 180.0, 'cas', :d)"
+            " VALUES (:u, :p, :i, '999', 5.0, 900.0, 180.0, 'cas', :d)"
         ),
-        {"u": uid, "p": str(pid), "d": date(2026, 6, 30)},
+        {"u": uid, "p": str(pid), "i": isin, "d": date(2026, 6, 30)},
     )
     await db_session.commit()
     return str(pid)
@@ -172,18 +179,31 @@ async def _seed_daily_values(db_session, pid: str, uid: str, rows: list[tuple[da
     await db_session.commit()
 
 
+async def _seed_nav(db_session, isin: str, nav_date: date, nav: float) -> None:
+    """Insert one extra mf_nav_history row (bottom-up day-change needs >=2 NAV dates per ISIN)."""
+    await db_session.execute(
+        text(
+            "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, :n)"
+            " ON CONFLICT (isin, nav_date) DO NOTHING"
+        ),
+        {"i": isin, "d": nav_date, "n": nav},
+    )
+    await db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # PG: GET /summary — day_change field
 # ---------------------------------------------------------------------------
 
 
 async def test_summary_day_change_none_cold_start(db_session, rls_async_client):
-    """day_change is None when no valuation rows exist."""
+    """day_change is None when the holding's ISIN has fewer than 2 NAV dates (bottom-up
+    method, §39.5) — _seed_portfolio ingests exactly ONE NAV row, so there's nothing to diff yet."""
     from dhanradar.auth.security import create_access_token
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-cold@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC001")
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -194,14 +214,20 @@ async def test_summary_day_change_none_cold_start(db_session, rls_async_client):
     assert d["day_change"] is None
 
 
-async def test_summary_day_change_none_single_row(db_session, rls_async_client):
-    """day_change is None when only one valuation row exists."""
+async def test_summary_day_change_none_no_holdings(db_session, rls_async_client):
+    """day_change is None when the portfolio has no holdings at all (a bare, empty portfolio —
+    the other new edge case the bottom-up contract explicitly returns None for)."""
     from dhanradar.auth.security import create_access_token
     from tests.conftest import make_auth_headers
 
-    uid = await _seed_user(db_session, "vs-one@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
-    await _seed_daily_values(db_session, pid, uid, [(date(2026, 7, 1), 1000.0, 900.0)])
+    uid = await _seed_user(db_session, "vs-noholdings@test.dev")
+    pid = (
+        await db_session.execute(
+            text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'Empty') RETURNING id"),
+            {"u": uid},
+        )
+    ).scalar_one()
+    await db_session.commit()
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -212,17 +238,15 @@ async def test_summary_day_change_none_single_row(db_session, rls_async_client):
     assert d["day_change"] is None
 
 
-async def test_summary_day_change_two_rows(db_session, rls_async_client):
-    """day_change = latest − previous when ≥2 rows exist; positive and negative both work."""
+async def test_summary_day_change_two_nav_dates(db_session, rls_async_client):
+    """day_change = units x (NAV_latest - NAV_prev) once a SECOND NAV date exists for the
+    holding's ISIN (bottom-up method, §39.5) — no mf_portfolio_daily_values row needed at all."""
     from dhanradar.auth.security import create_access_token
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-two@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
-    await _seed_daily_values(db_session, pid, uid, [
-        (date(2026, 7, 1), 1000.0, 900.0),
-        (date(2026, 7, 2), 1050.0, 900.0),
-    ])
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC002")  # 5 units, NAV 200.0 @ 2026-06-30
+    await _seed_nav(db_session, "INFTESTDC002", date(2026, 7, 1), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -230,23 +254,21 @@ async def test_summary_day_change_two_rows(db_session, rls_async_client):
     )
     assert r.status_code == 200, r.text
     d = r.json()["data"]
-    # latest (1050) − previous (1000) = 50
+    # 5 x (210 - 200) = 50
     assert d["day_change"] == pytest.approx(50.0, abs=0.01)
+    # pct = 50 / (5 x 200) x 100 = 5%
+    assert d["day_change_pct"] == pytest.approx(5.0, abs=0.01)
 
 
 async def test_summary_day_change_latest_minus_previous(db_session, rls_async_client):
-    """With 3+ rows, day_change uses the TWO most-recent valuation_date rows."""
+    """With 3+ NAV dates, day_change uses the TWO most-recent — NOT latest vs oldest."""
     from dhanradar.auth.security import create_access_token
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-three@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
-    today = date(2026, 7, 3)
-    await _seed_daily_values(db_session, pid, uid, [
-        (today - timedelta(days=2), 980.0, 900.0),
-        (today - timedelta(days=1), 1020.0, 900.0),  # previous
-        (today, 1045.0, 900.0),                       # latest
-    ])
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC003")  # NAV 200.0 @ 2026-06-30 (oldest)
+    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 1), 204.0)  # previous
+    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 2), 209.0)  # latest
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -254,22 +276,29 @@ async def test_summary_day_change_latest_minus_previous(db_session, rls_async_cl
     )
     assert r.status_code == 200, r.text
     d = r.json()["data"]
-    # latest (1045) − previous (1020) = 25, NOT latest − oldest
+    # 5 x (209 - 204) = 25, NOT 5 x (209 - 200) = 45 (latest vs oldest would be wrong)
     assert d["day_change"] == pytest.approx(25.0, abs=0.01)
 
 
-async def test_summary_day_change_flow_adjusted(db_session, rls_async_client):
-    """A flow day (SIP purchase) must not read as a gain: the invested delta is
-    subtracted — ₹500 bought + ₹50 market move → day_change=50, not 550 (RCA 2026-07-02)."""
+async def test_summary_day_change_immune_to_flow(db_session, rls_async_client):
+    """§39.5 — the bottom-up formula never reads `invested` at all, so a same-day flow (a SIP
+    purchase, a partial redemption) can never distort it. Retires the old flow-adjustment patch
+    (RCA 2026-07-02): a huge invested_amount is seeded here and has ZERO effect on the result."""
     from dhanradar.auth.security import create_access_token
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-flow@test.dev")
-    pid = await _seed_portfolio(db_session, uid)
-    await _seed_daily_values(db_session, pid, uid, [
-        (date(2026, 7, 1), 1000.0, 900.0),
-        (date(2026, 7, 2), 1550.0, 1400.0),  # +500 invested, +550 value → real move +50
-    ])
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC004")  # 5 units, NAV 200.0 @ 2026-06-30
+    # Simulate a same-day flow: invested_amount jumps far out of proportion to the NAV move.
+    await db_session.execute(
+        text(
+            "UPDATE mf.mf_user_holdings SET invested_amount = 50000.0"
+            " WHERE portfolio_id = :p AND isin = 'INFTESTDC004'"
+        ),
+        {"p": pid},
+    )
+    await db_session.commit()
+    await _seed_nav(db_session, "INFTESTDC004", date(2026, 7, 1), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -277,8 +306,8 @@ async def test_summary_day_change_flow_adjusted(db_session, rls_async_client):
     )
     assert r.status_code == 200, r.text
     d = r.json()["data"]
+    # Same 5 x (210 - 200) = 50 as test_summary_day_change_two_nav_dates — invested never entered it.
     assert d["day_change"] == pytest.approx(50.0, abs=0.01)
-    # pct from the SAME two rows: 50 / 1000 = 5%
     assert d["day_change_pct"] == pytest.approx(5.0, abs=0.01)
 
 
@@ -289,7 +318,8 @@ async def test_reset_valuation_series_restarts_series(db_session):
     from dhanradar.tasks.mf import _reset_valuation_series
 
     uid = await _seed_user(db_session, "vs-reset@test.dev")
-    pid = await _seed_portfolio(db_session, uid)  # 5 units × latest NAV 200 = 1000, invested 900
+    # 5 units × latest NAV 200 = 1000, invested 900
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC005")
     await _seed_daily_values(db_session, pid, uid, [
         (date(2026, 7, 1), 286_566.0, 147_000.0),  # stale demo-composition row
         (date(2026, 7, 2), 41_010.0, 52_674.0),
@@ -311,3 +341,54 @@ async def test_reset_valuation_series_restarts_series(db_session):
     assert rows[0].valuation_date == date.today()
     assert float(rows[0].total_value) == pytest.approx(1000.0, abs=0.01)
     assert float(rows[0].total_invested) == pytest.approx(900.0, abs=0.01)
+
+
+async def test_reset_valuation_series_replays_full_ledger_window(db_session):
+    """§39.5 — when the portfolio's ledger is non-empty (S2/S8/S11), _reset_valuation_series
+    REPLAYS the whole ledger-covered window instead of seeding a single today-only row. Proves
+    the wiring actually calls replay_valuation_series, not just the empty-ledger fallback the
+    test above exercises."""
+    from dhanradar.tasks.mf import _reset_valuation_series
+
+    uid = await _seed_user(db_session, "vs-replay@test.dev")
+    # holding: 5 units, NAV 200 @ 2026-06-30
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC006")
+
+    # A ledger purchase a couple of days before the seeded NAV date, plus a second (earlier) NAV
+    # date, so the replay window spans more than just today.
+    await db_session.execute(
+        text(
+            "INSERT INTO mf.portfolio_transactions"
+            " (portfolio_id, user_id, asset_class, instrument_id, folio_number, txn_type,"
+            "  txn_date, units, nav_or_price, amount, source, source_ref, parser_version)"
+            " VALUES (:p, :u, 'mf', 'INFTESTDC006', '999', 'purchase',"
+            "  :d, 5.0, 180.0, -900.0, 'cas', 'test-replay-ref', 'cas-1')"
+        ),
+        {"p": pid, "u": uid, "d": date(2026, 6, 28)},
+    )
+    await db_session.commit()
+    await _seed_nav(db_session, "INFTESTDC006", date(2026, 6, 29), 195.0)
+
+    await _reset_valuation_series(db_session, uid, pid)
+
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT valuation_date, total_value, total_invested"
+                " FROM mf.mf_portfolio_daily_values WHERE portfolio_id = :p"
+                " ORDER BY valuation_date"
+            ),
+            {"p": pid},
+        )
+    ).all()
+    # Window spans 2026-06-28 (earliest txn) -> today, so MANY rows, not just one.
+    assert len(rows) > 1, "ledger-covered replay must produce more than a single seeded row"
+    assert rows[0].valuation_date == date(2026, 6, 28)
+    by_date = {r.valuation_date: r for r in rows}
+    # 2026-06-28: no NAV known yet (first NAV is 2026-06-29) -> value 0, invested still 900.
+    assert float(by_date[date(2026, 6, 28)].total_value) == pytest.approx(0.0, abs=0.01)
+    assert float(by_date[date(2026, 6, 28)].total_invested) == pytest.approx(900.0, abs=0.01)
+    # 2026-06-29: NAV 195 lands -> 5 x 195 = 975.
+    assert float(by_date[date(2026, 6, 29)].total_value) == pytest.approx(975.0, abs=0.01)
+    # 2026-06-30 onward: NAV 200 carries forward -> 5 x 200 = 1000.
+    assert float(by_date[date(2026, 6, 30)].total_value) == pytest.approx(1000.0, abs=0.01)

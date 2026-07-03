@@ -312,57 +312,129 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> None:
         logger.exception("cas.identity: storage failed for user_id=%s (non-fatal)", user_id)
 
 
-async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> None:
-    """Restart the daily-valuation series after a CAS (re-)upload rewrites the holdings.
+#: Cap the replay window at ~3 years — mirrors portfolio_read._MAX_VALUATION_DAYS (kept as a
+#: separate local constant; tasks/mf.py does not import from the read-model module).
+_MAX_REPLAY_DAYS = 1095
 
-    A re-upload can REPLACE the portfolio's composition, so the stored series — and the
-    day-change derived from its last two rows — describes a portfolio that no longer
-    exists (RCA 2026-07-02: demo→real re-upload rendered a −85% "day change"). Delete
-    the portfolio's rows and seed today's row from the just-written holdings + latest
-    NAVs (same computation as compute_portfolio_daily_valuations; the 04:00 task
-    idempotently re-upserts today's row later). Runs in the pipeline's owner-RLS
-    session — mf_portfolio_daily_values carries the owner's user_id (0056 RLS).
+
+async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> None:
+    """Rebuild the daily-valuation series after a CAS (re-)upload (§39.5 — retires the old
+    delete-and-reseed-today patch; a composition change is just more ledger rows, and the FULL
+    replay stays continuous and TRUE across it — no more "series restarts" on every upload).
+
+    Ledger non-empty (S2/S8/S11 — detailed CAS, superset/subset re-upload, full composition
+    change): delete the stored rows, then REPLAY the whole ledger-covered window (earliest
+    txn_date → today, capped at _MAX_REPLAY_DAYS) against a single batched NAV query. Ledger
+    EMPTY for this portfolio (S3 — CDSL/summary CAS, no transaction section at all): keep the
+    existing forward-only fallback — seed exactly today's row from the just-written holdings +
+    latest NAVs (the 04:00 task idempotently re-upserts today's row later either way).
+
+    Runs in the pipeline's owner-RLS session — mf_portfolio_daily_values carries the owner's
+    user_id (0056 RLS).
     """
     from sqlalchemy import delete as sa_delete
     from sqlalchemy import select as sa_select
     from sqlalchemy import text as sa_text
 
-    from dhanradar.mf.valuation import compute_daily_value
-    from dhanradar.models.mf import MfPortfolioDailyValue, MfUserHolding
+    from dhanradar.mf.valuation import compute_daily_value, replay_valuation_series
+    from dhanradar.models.mf import MfPortfolioDailyValue, MfPortfolioTransaction, MfUserHolding
 
-    holdings = (
-        await db.execute(
-            sa_select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
-            .where(MfUserHolding.portfolio_id == portfolio_id)
-        )
-    ).all()
+    # S20: same per-portfolio lock the ledger-append transaction takes — this function now does a
+    # real delete + bulk rebuild of mf_portfolio_daily_values, the SAME table the nightly
+    # compute_portfolio_daily_valuations task writes, so it needs the same serialization.
+    await db.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
+
     await db.execute(
         sa_delete(MfPortfolioDailyValue).where(MfPortfolioDailyValue.portfolio_id == portfolio_id)
     )
-    if holdings:
-        isins = [h.isin for h in holdings]
+
+    ledger_rows = (
+        await db.execute(
+            sa_select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.units,
+                MfPortfolioTransaction.amount,
+                MfPortfolioTransaction.txn_type,
+                MfPortfolioTransaction.txn_date,
+            ).where(MfPortfolioTransaction.portfolio_id == portfolio_id)
+        )
+    ).mappings().all()
+
+    if ledger_rows:
+        today = date.today()
+        earliest = min(r["txn_date"] for r in ledger_rows)
+        from_date = max(earliest, today - timedelta(days=_MAX_REPLAY_DAYS))
+        isins = sorted({r["instrument_id"] for r in ledger_rows})
+
+        # ONE batched query for every ISIN x the whole window (never per-day, never per-ISIN).
         nav_rows = await db.execute(
             sa_text(
-                "SELECT DISTINCT ON (isin) isin, nav FROM mf.mf_nav_history"
-                " WHERE isin = ANY(:isins) ORDER BY isin, nav_date DESC"
+                "SELECT isin, nav_date, nav FROM mf.mf_nav_history"
+                " WHERE isin = ANY(:isins) AND nav_date >= :from_date AND nav_date <= :to_date"
+                " ORDER BY isin, nav_date"
             ),
-            {"isins": isins},
+            # Fetch NAVs from 7 days BEFORE the replay window so carry-forward is seeded at
+            # from_date (the NAV in effect on day 1 was usually published a day or two earlier —
+            # weekend/holiday). replay_valuation_series applies any nav_date <= d correctly.
+            {"isins": isins, "from_date": from_date - timedelta(days=7), "to_date": today},
         )
-        nav_map = {r.isin: float(r.nav) for r in nav_rows}
-        point = compute_daily_value(
-            [(float(h.units or 0), nav_map.get(h.isin, 0.0)) for h in holdings],
-            sum(float(h.invested_amount or 0) for h in holdings),
-            date.today(),
-        )
-        db.add(
-            MfPortfolioDailyValue(
-                portfolio_id=portfolio_id,
-                user_id=user_id,
-                valuation_date=point.valuation_date,
-                total_value=point.total_value,
-                total_invested=point.total_invested,
+        nav_by_isin: dict[str, list[tuple[date, float]]] = {}
+        for r in nav_rows:
+            nav_by_isin.setdefault(r.isin, []).append((r.nav_date, float(r.nav)))
+
+        points = replay_valuation_series(ledger_rows, nav_by_isin, from_date, today)
+        if points:
+            # UUID-typed ids are REQUIRED here: add_all uses SQLAlchemy insertmanyvalues, whose
+            # sentinel matching needs the Python value to equal the driver's returned type
+            # exactly — a str portfolio_id raises "Can't match sentinel values in result set".
+            from uuid import UUID as _UUID
+
+            pid_u, uid_u = _UUID(portfolio_id), _UUID(user_id)
+            db.add_all(
+                [
+                    MfPortfolioDailyValue(
+                        portfolio_id=pid_u,
+                        user_id=uid_u,
+                        valuation_date=p.valuation_date,
+                        total_value=p.total_value,
+                        total_invested=p.total_invested,
+                    )
+                    for p in points
+                ]
             )
-        )
+    else:
+        # No ledger for this portfolio (S3 — txn-less CDSL/summary CAS): forward-only fallback,
+        # unchanged from the pre-replay behaviour — seed exactly today's row.
+        holdings = (
+            await db.execute(
+                sa_select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
+                .where(MfUserHolding.portfolio_id == portfolio_id)
+            )
+        ).all()
+        if holdings:
+            isins = [h.isin for h in holdings]
+            nav_rows = await db.execute(
+                sa_text(
+                    "SELECT DISTINCT ON (isin) isin, nav FROM mf.mf_nav_history"
+                    " WHERE isin = ANY(:isins) ORDER BY isin, nav_date DESC"
+                ),
+                {"isins": isins},
+            )
+            nav_map = {r.isin: float(r.nav) for r in nav_rows}
+            point = compute_daily_value(
+                [(float(h.units or 0), nav_map.get(h.isin, 0.0)) for h in holdings],
+                sum(float(h.invested_amount or 0) for h in holdings),
+                date.today(),
+            )
+            db.add(
+                MfPortfolioDailyValue(
+                    portfolio_id=portfolio_id,
+                    user_id=user_id,
+                    valuation_date=point.valuation_date,
+                    total_value=point.total_value,
+                    total_invested=point.total_invested,
+                )
+            )
     await db.commit()
 
 

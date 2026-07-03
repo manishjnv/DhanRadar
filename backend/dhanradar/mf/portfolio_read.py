@@ -188,9 +188,10 @@ def summary_payload(
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
     NO portfolio composite score and NO invented verdict label (that stays a future portfolio.health concept,
-    rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN flow-adjusted daily move —
-    None until ≥2 valuation rows exist. The pct is computed server-side from the SAME two valuation
-    rows as the ₹ change (the live summary total is a different base — don't recompute client-side)."""
+    rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN bottom-up daily move
+    (Σ units × ΔNAV from load_day_change, §39.1) — None when no holding has 2 NAV dates yet. The pct
+    is computed server-side from the SAME NAV pairs as the ₹ change (the live summary total is a
+    different base — don't recompute client-side)."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
@@ -473,31 +474,66 @@ _MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
 
 
 async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, float | None] | None:
-    """Flow-adjusted day change from the two most-recent mf_portfolio_daily_values rows.
+    """Bottom-up day change (§39.1/§39.5) — Σ units × (NAV_latest − NAV_prev) over the portfolio's
+    CURRENT holdings, using the two most-recent NAV dates per ISIN from mf_nav_history. This is the
+    RTA/consumer-app method: it reads only today's holdings + NAV history, never a stored valuation
+    snapshot, so it is immune BY CONSTRUCTION to a re-upload composition change (the RCA 2026-07-02
+    −85% incident — the OLD 2-row-snapshot method compared two different portfolios) and to a same-day
+    flow (a SIP purchase never distorts it, because `invested` never enters the formula at all — the
+    old flow-adjustment patch it replaces is retired, §39.5). Also removes the "2 rows needed" cold
+    start: it works from day one, as soon as 2 NAV dates exist for at least one holding.
 
-    change = (V_t − V_{t−1}) − (I_t − I_{t−1}): subtracting the invested delta keeps a
-    SIP purchase / partial redemption day from reading as a one-day gain or loss (RCA
-    2026-07-02 — the raw latest−previous rendered a re-upload composition change as a
-    −85% "day change"). Returns (change, pct) with pct = change / previous value × 100
-    (None when the previous value is 0); None when fewer than 2 rows exist (cold-start).
-    Both numbers are the user's OWN calculated change — DOM-allowed (#2-exempt user
-    money). RLS-scoped: the caller must set app.user_id before calling (the router
-    does this via the same session used for _owned_portfolio_id).
+    pct = change / Σ(units × NAV_prev) × 100 (None when that denominator is 0). Returns None when the
+    portfolio has no holdings, or when EVERY holding has fewer than 2 NAV dates (a holding with <2 NAV
+    dates simply doesn't contribute — partial coverage across holdings is fine). Both numbers are the
+    user's OWN calculated change — DOM-allowed (#2-exempt user money). RLS-scoped: the caller must set
+    app.user_id before calling (the router does this via the same session used for _owned_portfolio_id).
     """
     pid = uuid.UUID(portfolio_id)
-    rows = (
+    holdings = (
         await db.execute(
-            select(MfPortfolioDailyValue.total_value, MfPortfolioDailyValue.total_invested)
-            .where(MfPortfolioDailyValue.portfolio_id == pid)
-            .order_by(MfPortfolioDailyValue.valuation_date.desc())
-            .limit(2)
+            select(MfUserHolding.isin, MfUserHolding.units).where(MfUserHolding.portfolio_id == pid)
         )
     ).all()
-    if len(rows) < 2:
+    if not holdings:
         return None
-    (v_t, i_t), (v_p, i_p) = rows[0], rows[1]
-    change = (float(v_t) - float(v_p)) - (float(i_t) - float(i_p))
-    pct = (change / float(v_p) * 100.0) if float(v_p) else None
+
+    isins = [h.isin for h in holdings]
+    # ONE batched query for every holding's two most-recent NAV dates (never per-ISIN, never per-day).
+    # The 30-day bound keeps the window function on recent (uncompressed) Timescale chunks — this is
+    # a hot request-path read; a fund with no NAV in 30 days is honestly excluded, not scanned for.
+    nav_rows = (
+        await db.execute(
+            text(
+                "SELECT isin, nav FROM ("
+                "  SELECT isin, nav, "
+                "         ROW_NUMBER() OVER (PARTITION BY isin ORDER BY nav_date DESC) AS rn"
+                "  FROM mf.mf_nav_history WHERE isin = ANY(:isins)"
+                "    AND nav_date >= CURRENT_DATE - INTERVAL '30 days'"
+                ") ranked WHERE rn <= 2 ORDER BY isin, rn"
+            ),
+            {"isins": isins},
+        )
+    ).all()
+    navs_by_isin: dict[str, list[float]] = {}
+    for r in nav_rows:
+        navs_by_isin.setdefault(r.isin, []).append(float(r.nav))
+
+    change = 0.0
+    prev_value = 0.0
+    covered = False
+    for h in holdings:
+        pair = navs_by_isin.get(h.isin)
+        if not pair or len(pair) < 2:
+            continue  # <2 NAV dates for this ISIN — honestly excluded, not fabricated
+        nav_latest, nav_prev = pair[0], pair[1]
+        units = float(h.units or 0)
+        change += units * (nav_latest - nav_prev)
+        prev_value += units * nav_prev
+        covered = True
+    if not covered:
+        return None
+    pct = (change / prev_value * 100.0) if prev_value else None
     return change, pct
 
 
