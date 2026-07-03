@@ -54,13 +54,15 @@ def upgrade() -> None:
             ON mf.portfolio_statement_checkpoints (portfolio_id, instrument_id, folio_number);
         """
     )
-    # Grant the app role read/write access (mirrors 0056).
+    # Grant the app role access. Least-priv (B80): checkpoints are append-only evidence —
+    # the sole writer (_write_statement_checkpoints) INSERTs rows with their final status;
+    # there is no UPDATE path, so no UPDATE grant.
     op.execute(
         """
         DO $$
         BEGIN
             IF to_regrole('dhanradar_app') IS NOT NULL THEN
-                GRANT SELECT, INSERT, UPDATE ON mf.portfolio_statement_checkpoints
+                GRANT SELECT, INSERT ON mf.portfolio_statement_checkpoints
                     TO dhanradar_app;
             END IF;
         END $$;
