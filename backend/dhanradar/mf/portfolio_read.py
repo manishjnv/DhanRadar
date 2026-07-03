@@ -160,12 +160,16 @@ def holdings_payload(
     rm: PortfolioReadModel,
     portfolio_id: str,
     xirr_map: dict[tuple[str, str], float | None] | None = None,
+    day_change_map: dict[str, tuple[float, float | None]] | None = None,
 ) -> dict:
     """C1 `holdings.list` payload — explicit safe fields only; no score. label/band are the educational
     outputs the client renders as StatusTag/BandRing. `xirr_map` (M2.3, keyed by isin+folio_number) is
     the per-holding XIRR from `load_holdings_xirr`; None (honest) for a holding it doesn't cover — the
-    user's OWN return, DOM-allowed (#2-exempt)."""
+    user's OWN return, DOM-allowed (#2-exempt). `day_change_map` (CAMS-parity, keyed by isin, from
+    `load_holdings_day_change`) is the per-fund today's ₹ move + pct — None/None for a holding with
+    fewer than 2 recent NAV dates (honest, matches the portfolio-level `day_change` contract)."""
     xirr_map = xirr_map or {}
+    day_change_map = day_change_map or {}
     return {
         "portfolio_id": portfolio_id,
         "holdings": [
@@ -182,6 +186,8 @@ def holdings_payload(
                 "confidence_band": h.confidence_band,
                 "as_of": h.as_of,
                 "xirr_pct": xirr_map.get((h.isin, h.folio_number)),  # M2.3 — None when no ledger history
+                "day_change": day_change_map.get(h.isin, (None, None))[0],
+                "day_change_pct": day_change_map.get(h.isin, (None, None))[1],
             }
             for h in rm.holdings
         ],
@@ -208,6 +214,9 @@ def summary_payload(
     day_change: float | None = None,
     day_change_pct: float | None = None,
     xirr_1y: tuple[float, int] | None = None,
+    xirr_pct: float | None = None,
+    wt_avg_days: int | None = None,
+    reinvested_cost: float = 0.0,
 ) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
@@ -217,19 +226,37 @@ def summary_payload(
     is computed server-side from the SAME NAV pairs as the ₹ change (the live summary total is a
     different base — don't recompute client-side). `xirr_1y` is `load_windowed_xirr`'s (pct, actual_days)
     (M2.3) — None on cold-start or a too-short window; `xirr_1y_window_days` lets the client refuse to
-    label a shrunk window "1Y" (§ FE: only render when >= 360 days)."""
+    label a shrunk window "1Y" (§ FE: only render when >= 360 days).
+
+    CAMS-parity (2026-07-03): `xirr_pct` is now the caller's ledger-based `load_portfolio_xirr` result
+    (over the ACTIVE holdings' full flow history + live value) — NOT `rm.xirr_pct` (the stale upload-time
+    snapshot number this replaces; that field is no longer read here). `cost_value` = `total_invested`
+    (out-of-pocket cash, B86) + `reinvested_cost` (Σ units × nav_or_price over active dividend_reinvest
+    rows — CAMS counts a reinvested payout as cost, our net-invested doesn't) — the CAMS-comparable "Cost
+    value". `gain_vs_cost`/`gain_vs_cost_pct` are the value-vs-that-cost pair (None pct when cost_value is
+    0); `gain`/`gain_pct`/`total_invested` stay the ORIGINAL cash-basis figures (the money-view chart's
+    basis) — both bases coexist by design, never conflated. `wt_avg_days` (CAMS "Wt.Avg.Days") is the
+    caller's `portfolio_wt_avg_days` result — a capital-weighted average holding period in days, None when
+    no active holding has remaining cost."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
+    cost_value = rm.total_invested + reinvested_cost
+    gain_vs_cost = rm.total_value - cost_value
+    gain_vs_cost_pct = (gain_vs_cost / cost_value * 100.0) if cost_value else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
     return {
         "portfolio_id": portfolio_id,
         "total_value": rm.total_value,
-        "total_invested": rm.total_invested,  # net-invested (B86)
+        "total_invested": rm.total_invested,  # net-invested cash basis (B86) — unchanged
+        "cost_value": cost_value,  # CAMS-comparable: cash invested + reinvested payout cost
         "gain": gain,
         "gain_pct": gain_pct,
-        "xirr_pct": rm.xirr_pct,
+        "gain_vs_cost": gain_vs_cost,
+        "gain_vs_cost_pct": gain_vs_cost_pct,
+        "xirr_pct": xirr_pct,  # ledger-based, active-holdings-only (load_portfolio_xirr) — CAMS-parity
         "xirr_1y_pct": xirr_1y[0] if xirr_1y else None,  # M2.3 — windowed XIRR, DOM-allowed (#2-exempt)
         "xirr_1y_window_days": xirr_1y[1] if xirr_1y else None,  # actual days covered (may be < 365)
+        "wt_avg_days": wt_avg_days,  # CAMS "Wt.Avg.Days" — capital-weighted avg holding period
         "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
         "day_change_pct": day_change_pct,  # same two rows as day_change; None with it
         "fund_count": len(rm.holdings),
@@ -564,24 +591,14 @@ def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
 _MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
 
 
-async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, float | None] | None:
-    """Bottom-up day change (§39.1/§39.5) — Σ units × (NAV_latest − NAV_prev) over the portfolio's
-    CURRENT holdings, using the two most-recent NAV dates per ISIN from mf_nav_history. This is the
-    RTA/consumer-app method: it reads only today's holdings + NAV history, never a stored valuation
-    snapshot, so it is immune BY CONSTRUCTION to a re-upload composition change (the RCA 2026-07-02
-    −85% incident — the OLD 2-row-snapshot method compared two different portfolios) and to a same-day
-    flow (a SIP purchase never distorts it, because `invested` never enters the formula at all — the
-    old flow-adjustment patch it replaces is retired, §39.5). Also removes the "2 rows needed" cold
-    start: it works from day one, as soon as 2 NAV dates exist for at least one holding.
-
-    pct = change / Σ(units × NAV_prev) × 100 (None when that denominator is 0). Returns None when the
-    portfolio has no holdings, or when EVERY holding has fewer than 2 NAV dates (a holding with <2 NAV
-    dates simply doesn't contribute — partial coverage across holdings is fine). Both numbers are the
-    user's OWN calculated change — DOM-allowed (#2-exempt user money). RLS-scoped: the caller must set
-    app.user_id before calling (the router does this via the same session used for _owned_portfolio_id).
-    Active positions only (`units > 0`) — a zero-unit (fully-redeemed) row contributes 0 to the change
-    anyway, so filtering it out just skips a useless NAV lookup.
-    """
+async def _active_holdings_nav_pairs(
+    db: AsyncSession, portfolio_id: str
+) -> tuple[list[tuple[str, float]], dict[str, list[float]]] | None:
+    """Shared plumbing for `load_day_change` / `load_holdings_day_change`: the portfolio's ACTIVE
+    (`units > 0`) holdings + each ISIN's two most-recent NAV dates, bounded to the last 30 days (keeps
+    the window function on recent, uncompressed Timescale chunks — this is a hot request-path read; a
+    fund with no NAV in 30 days is honestly excluded, not scanned for). Returns
+    `(holdings, navs_by_isin)`, or None when the portfolio has no active holdings at all."""
     pid = uuid.UUID(portfolio_id)
     holdings = (
         await db.execute(
@@ -595,8 +612,6 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
 
     isins = [h.isin for h in holdings]
     # ONE batched query for every holding's two most-recent NAV dates (never per-ISIN, never per-day).
-    # The 30-day bound keeps the window function on recent (uncompressed) Timescale chunks — this is
-    # a hot request-path read; a fund with no NAV in 30 days is honestly excluded, not scanned for.
     nav_rows = (
         await db.execute(
             text(
@@ -613,16 +628,41 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
     navs_by_isin: dict[str, list[float]] = {}
     for r in nav_rows:
         navs_by_isin.setdefault(r.isin, []).append(float(r.nav))
+    return [(h.isin, float(h.units or 0)) for h in holdings], navs_by_isin
+
+
+async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, float | None] | None:
+    """Bottom-up day change (§39.1/§39.5) — Σ units × (NAV_latest − NAV_prev) over the portfolio's
+    CURRENT holdings, using the two most-recent NAV dates per ISIN from mf_nav_history. This is the
+    RTA/consumer-app method: it reads only today's holdings + NAV history, never a stored valuation
+    snapshot, so it is immune BY CONSTRUCTION to a re-upload composition change (the RCA 2026-07-02
+    −85% incident — the OLD 2-row-snapshot method compared two different portfolios) and to a same-day
+    flow (a SIP purchase never distorts it, because `invested` never enters the formula at all — the
+    old flow-adjustment patch it replaces is retired, §39.5). Also removes the "2 rows needed" cold
+    start: it works from day one, as soon as 2 NAV dates exist for at least one holding.
+
+    pct = change / Σ(units × NAV_prev) × 100 (None when that denominator is 0). Returns None when the
+    portfolio has no holdings, or when EVERY holding has fewer than 2 NAV dates (a holding with <2 NAV
+    dates simply doesn't contribute — partial coverage across holdings is fine). Both numbers are the
+    user's OWN calculated change — DOM-allowed (#2-exempt user money). RLS-scoped: the caller must set
+    app.user_id before calling (the router does this via the same session used for _owned_portfolio_id).
+    Active positions only (`units > 0`) — a zero-unit (fully-redeemed) row contributes 0 to the change
+    anyway, so filtering it out just skips a useless NAV lookup. Shares its SQL + pairing logic with
+    `load_holdings_day_change` via `_active_holdings_nav_pairs` (CAMS-parity, per-fund today's G/L).
+    """
+    pair = await _active_holdings_nav_pairs(db, portfolio_id)
+    if pair is None:
+        return None
+    holdings, navs_by_isin = pair
 
     change = 0.0
     prev_value = 0.0
     covered = False
-    for h in holdings:
-        pair = navs_by_isin.get(h.isin)
-        if not pair or len(pair) < 2:
+    for isin, units in holdings:
+        navs = navs_by_isin.get(isin)
+        if not navs or len(navs) < 2:
             continue  # <2 NAV dates for this ISIN — honestly excluded, not fabricated
-        nav_latest, nav_prev = pair[0], pair[1]
-        units = float(h.units or 0)
+        nav_latest, nav_prev = navs[0], navs[1]
         change += units * (nav_latest - nav_prev)
         prev_value += units * nav_prev
         covered = True
@@ -630,6 +670,35 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
         return None
     pct = (change / prev_value * 100.0) if prev_value else None
     return change, pct
+
+
+async def load_holdings_day_change(
+    db: AsyncSession, portfolio_id: str
+) -> dict[str, tuple[float, float | None]]:
+    """Per-holding today's G/L (CAMS-parity) — the SAME bounded two-latest-NAV window as
+    `load_day_change` (shared via `_active_holdings_nav_pairs`), split per ISIN instead of summed:
+    `{isin: (₹ change, pct)}`. pct is None when the previous-NAV value is 0. A holding with fewer than
+    2 NAV dates in the last 30 days is simply absent from the dict (honest partial coverage, matching
+    `load_day_change`'s per-holding skip). A portfolio can't hold the same ISIN active in two folios
+    today (B94/#441 dedup); if it ever does, whichever folio's row is processed last wins the dict
+    entry and the client (which keys the holdings table off ISIN) applies that same value to both rows.
+    """
+    pair = await _active_holdings_nav_pairs(db, portfolio_id)
+    if pair is None:
+        return {}
+    holdings, navs_by_isin = pair
+
+    result: dict[str, tuple[float, float | None]] = {}
+    for isin, units in holdings:
+        navs = navs_by_isin.get(isin)
+        if not navs or len(navs) < 2:
+            continue
+        nav_latest, nav_prev = navs[0], navs[1]
+        change = units * (nav_latest - nav_prev)
+        prev_value = units * nav_prev
+        pct = (change / prev_value * 100.0) if prev_value else None
+        result[isin] = (change, pct)
+    return result
 
 
 # --- M2.3: windowed (e.g. 1Y) XIRR + per-holding XIRR — unblocked by the transaction ledger --------
@@ -756,6 +825,194 @@ async def load_holdings_xirr(
             continue
         result[key] = xirr([*flows, CashFlow(when=today, amount=current_value)])
     return result
+
+
+# --- CAMS-parity: ledger-based lifetime XIRR / Wt.Avg.Days / dual cost basis (2026-07-03) ----------
+#
+# CAMS ("Consolidated Account Statement", the RTA app most investors already reconcile against)
+# computes these three over the CURRENT (active) folios' full ledger history, not the whole ledger —
+# a closed (fully-redeemed) position's flows are excluded. `active_keys` is always
+# `{(h.isin, h.folio_number) for h in rm.holdings}` from an already `units > 0`-filtered
+# `PortfolioReadModel` (`load_portfolio_read_model`), so "active" here means exactly what it means
+# everywhere else in this module.
+
+#: One (instrument_id, folio_number) -> its ledger rows as (txn_date, amount, txn_type, units,
+#: nav_or_price) — the shared shape `load_active_holding_flows` returns and `portfolio_wt_avg_days`/
+#: `reinvested_dividend_cost` consume.
+_GroupedFlows = dict[tuple[str, str], list[tuple[datetime.date, float, str, float, float | None]]]
+
+
+async def load_portfolio_xirr(
+    db: AsyncSession,
+    portfolio_id: str,
+    end_value: float,
+    active_keys: set[tuple[str, str]],
+) -> float | None:
+    """Ledger-based lifetime XIRR (CAMS-parity) — replaces the stale upload-time snapshot number the
+    summary used to surface (`rm.xirr_pct`, frozen at whatever the last CAS import computed, e.g. the
+    founder-reported −29.25% vs CAMS's live 8.68%). Flows = every non-zero-amount ledger row whose
+    `(instrument_id, folio_number)` is one of the portfolio's ACTIVE holdings (`active_keys`) — a
+    closed position's flow history is EXCLUDED (the CAMS-comparable basis; reopening it is a future
+    'closed positions' feature, not this one). `dividend_reinvest` rows carry `amount=0` so the
+    non-zero filter already drops them — correct, they're an internal unit bump, not external cash.
+    + a pseudo-terminal inflow of `end_value` (the caller's already-computed live total) dated today.
+    Reuses `xirr()` — no new root-finder. None when there are no active flows or the solver can't
+    find a root."""
+    if not active_keys:
+        return None
+    pid = uuid.UUID(portfolio_id)
+    rows = (
+        await db.execute(
+            select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.folio_number,
+                MfPortfolioTransaction.txn_date,
+                MfPortfolioTransaction.amount,
+            ).where(
+                MfPortfolioTransaction.portfolio_id == pid,
+                MfPortfolioTransaction.amount != 0,
+            )
+        )
+    ).all()
+    flows = [
+        CashFlow(when=r.txn_date, amount=float(r.amount))
+        for r in rows
+        if (r.instrument_id, r.folio_number) in active_keys
+    ]
+    if not flows:
+        return None
+    today = datetime.date.today()
+    return xirr([*flows, CashFlow(when=today, amount=end_value)])
+
+
+async def load_active_holding_flows(
+    db: AsyncSession,
+    portfolio_id: str,
+    active_keys: set[tuple[str, str]],
+) -> _GroupedFlows:
+    """One query for the Wt.Avg.Days + dual-cost-basis pair (CAMS-parity) — every ledger row
+    belonging to the portfolio's ACTIVE holdings (`active_keys`), grouped by
+    `(instrument_id, folio_number)`. Each row is `(txn_date, amount, txn_type, units, nav_or_price)`.
+    Feeds `portfolio_wt_avg_days` (per-holding FIFO, summed before dividing) and
+    `reinvested_dividend_cost` (Σ units × nav_or_price over `dividend_reinvest` rows) — both need the
+    SAME active-holdings slice, one DB round trip. A closed (fully-redeemed) position's rows are
+    excluded (its key isn't in `active_keys`) — that history stays in the ledger for a future
+    closed-positions view."""
+    if not active_keys:
+        return {}
+    pid = uuid.UUID(portfolio_id)
+    rows = (
+        await db.execute(
+            select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.folio_number,
+                MfPortfolioTransaction.txn_date,
+                MfPortfolioTransaction.amount,
+                MfPortfolioTransaction.txn_type,
+                MfPortfolioTransaction.units,
+                MfPortfolioTransaction.nav_or_price,
+            ).where(MfPortfolioTransaction.portfolio_id == pid)
+        )
+    ).all()
+    grouped: _GroupedFlows = {}
+    for r in rows:
+        key = (r.instrument_id, r.folio_number)
+        if key not in active_keys:
+            continue
+        grouped.setdefault(key, []).append(
+            (
+                r.txn_date,
+                float(r.amount),
+                r.txn_type,
+                float(r.units),
+                float(r.nav_or_price) if r.nav_or_price is not None else None,
+            )
+        )
+    return grouped
+
+
+def _fifo_remaining_cost_and_weighted_age(
+    flows: list[tuple[datetime.date, float, str]], today: datetime.date
+) -> tuple[float, float]:
+    """FIFO lot walk — the shared innards of `weighted_avg_holding_days`, for ONE (instrument, folio)'s
+    chronological ledger flows: a purchase (`amount < 0`) opens a lot costed at `-amount` on
+    `txn_date`; a redemption (`amount > 0`) consumes the OLDEST lots' remaining cost first (partial
+    consumption splits a lot); a `dividend_reinvest` row (`amount == 0`) is skipped — it changes
+    units, not cost (B65).
+
+    Returns `(Σ remaining_lot_cost, Σ remaining_lot_cost × age_days)` — the RAW pair, so a caller
+    combining several holdings' lots into one portfolio figure sums these BEFORE dividing (dividing
+    per-holding first and averaging the per-holding results would double-round and mis-weight small
+    holdings against large ones — see `portfolio_wt_avg_days`)."""
+    lots: list[tuple[float, datetime.date]] = []  # (remaining_cost, purchase_date), oldest-first
+    for txn_date, amount, _txn_type in sorted(flows, key=lambda f: f[0]):
+        if amount < 0:
+            lots.append((-amount, txn_date))
+        elif amount > 0:
+            remaining = amount
+            kept: list[tuple[float, datetime.date]] = []
+            for cost, dt in lots:
+                if remaining > 0:
+                    consume = min(cost, remaining)
+                    cost -= consume
+                    remaining -= consume
+                if cost > 0:
+                    kept.append((cost, dt))
+            lots = kept
+        # amount == 0 (dividend_reinvest) — no cost / no lot effect.
+    cost_sum = sum(c for c, _ in lots)
+    weighted_sum = sum(c * (today - d).days for c, d in lots)
+    return cost_sum, weighted_sum
+
+
+def weighted_avg_holding_days(
+    flows: list[tuple[datetime.date, float, str]], today: datetime.date
+) -> int | None:
+    """Capital-weighted average holding period in days (CAMS "Wt.Avg.Days") for one (instrument,
+    folio)'s ledger flows — greedy FIFO lot accounting (`_fifo_remaining_cost_and_weighted_age`).
+    Result = `round(Σ(remaining_lot_cost × age_days) / Σ(remaining_lot_cost))`; None when no cost
+    remains (fully redeemed / empty input). For a MULTI-holding PORTFOLIO total, don't average this
+    function's per-holding output across holdings — sum `_fifo_remaining_cost_and_weighted_age`'s raw
+    pair first (`portfolio_wt_avg_days` does exactly that)."""
+    cost_sum, weighted_sum = _fifo_remaining_cost_and_weighted_age(flows, today)
+    if cost_sum <= 0:
+        return None
+    return round(weighted_sum / cost_sum)
+
+
+def portfolio_wt_avg_days(
+    grouped_flows: _GroupedFlows,
+    today: datetime.date,
+) -> int | None:
+    """Portfolio-wide Wt.Avg.Days (CAMS-parity) — runs the FIFO lot walk PER `(instrument, folio)`
+    group (a redemption in one holding must never consume another holding's purchase lots — the
+    reason this can't just flatten every active flow into one list), then sums every group's raw
+    `(remaining_cost, weighted_age)` pair BEFORE dividing once — a holding-level round-then-average
+    would double-round and mis-weight small holdings against large ones. None when no active holding
+    has any remaining cost (a fresh or fully-redeemed-active-set portfolio — shouldn't normally
+    happen since 'active' already means units > 0, but stays honest rather than dividing by zero)."""
+    cost_total = weighted_total = 0.0
+    for flows in grouped_flows.values():
+        three_tuples = [(f[0], f[1], f[2]) for f in flows]
+        cost, weighted = _fifo_remaining_cost_and_weighted_age(three_tuples, today)
+        cost_total += cost
+        weighted_total += weighted
+    return round(weighted_total / cost_total) if cost_total > 0 else None
+
+
+def reinvested_dividend_cost(
+    grouped_flows: _GroupedFlows,
+) -> float:
+    """CAMS "Cost value" add-on — Σ units × nav_or_price over the active holdings' `dividend_reinvest`
+    rows (their ledger `amount` is 0 — units-only, cas.py — so this is the only place that cost is
+    recovered). A row with a null/zero `nav_or_price` contributes 0 (graceful, never fabricated) —
+    e.g. an older CAS statement that didn't print a reinvestment NAV."""
+    total = 0.0
+    for flows in grouped_flows.values():
+        for _txn_date, _amount, txn_type, units, nav_or_price in flows:
+            if txn_type == "dividend_reinvest" and nav_or_price:
+                total += units * nav_or_price
+    return total
 
 
 async def load_portfolio_valuation_series(
