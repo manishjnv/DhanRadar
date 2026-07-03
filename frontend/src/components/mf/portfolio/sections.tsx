@@ -356,6 +356,7 @@ function HeroStat({ label, value, accent, hint, tip }: {
 // ── Hero mini sparkline chart ─────────────────────────────────────────────
 function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading } = usePortfolioValueSeries(portfolioId);
+  const { data: nifty } = useNiftyCloseSeries(); // shared cache with VsMarketSection (same query key)
   const points = envelope?.data?.points ?? [];
   // Window to last 90 days
   const recent = points.slice(-90);
@@ -377,31 +378,62 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
     );
   }
 
-  // Build SVG sparkline from real portfolio value series
+  // Two-line chart on one ₹ axis: You (blue) as-is, Nifty (amber) INDEXED to your
+  // window-start value — same shape comparison the % rebase gives, without a 2nd axis.
+  // Series colors match Section 2 (You=blue #5B8CFF, Nifty=amber #F5C451).
   const W = 320; const H = 80;
-  const vals = recent.map(p => p.value);
-  const lo = Math.min(...vals); const hi = Math.max(...vals);
+  const t0 = toEpoch(recent[0].date);
+  const t1 = toEpoch(recent[recent.length - 1].date);
+  const span = t1 - t0 || 1;
+  const you = recent.map(p => ({ t: toEpoch(p.date), v: p.value }));
+  const nfWin = (nifty?.points ?? []).filter(p => { const t = toEpoch(p.close_date); return t >= t0 && t <= t1; });
+  const startVal = recent[0].value;
+  const nf = nfWin.length >= 2
+    ? nfWin.map(p => ({ t: toEpoch(p.close_date), v: startVal * (p.close_value / nfWin[0].close_value) }))
+    : [];
+  const hasNifty = nf.length >= 2;
+
+  const all = [...you.map(p => p.v), ...nf.map(p => p.v)];
+  const lo = Math.min(...all); const hi = Math.max(...all);
   const range = hi - lo || 1;
-  const toX = (i: number) => (i / (recent.length - 1)) * W;
+  const toX = (t: number) => ((t - t0) / span) * W;
   const toY = (v: number) => H - ((v - lo) / range) * (H - 8) - 4;
-  const path = recent.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(1)} ${toY(p.value).toFixed(1)}`).join(' ');
-  const pct90d = recent.length >= 2 ? ((recent[recent.length - 1].value / recent[0].value - 1) * 100) : null;
+  const line = (a: { t: number; v: number }[]) =>
+    a.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' ');
+  const youPath = line(you);
+  const areaPath = `${youPath} L ${toX(you[you.length - 1].t).toFixed(1)} ${H} L ${toX(you[0].t).toFixed(1)} ${H} Z`;
+  const pct90d = (recent[recent.length - 1].value / recent[0].value - 1) * 100;
+  const nfPct = hasNifty ? (nfWin[nfWin.length - 1].close_value / nfWin[0].close_value - 1) * 100 : null;
 
   return (
     <div className="flex h-full flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR VALUE · 90D</span>
-        {pct90d !== null && (
-          <span className={`text-[11px] font-bold ${pct90d >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%
-          </span>
-        )}
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          {hasNifty ? 'YOU VS NIFTY · 90D' : 'YOUR VALUE · 90D'}
+        </span>
+        <span className="text-[11px] font-bold tabular-nums">
+          <span style={{ color: '#9CC0FF' }}>YOU {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%</span>
+          {nfPct !== null && (
+            <>
+              <span className="font-normal text-slate-500"> · </span>
+              <span style={{ color: '#F5C451' }}>NIFTY {nfPct >= 0 ? '+' : ''}{nfPct.toFixed(1)}%</span>
+            </>
+          )}
+        </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
-        <path d={path} fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <defs>
+          <linearGradient id="heroYouFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#5B8CFF" stopOpacity=".35" />
+            <stop offset="1" stopColor="#5B8CFF" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#heroYouFill)" />
+        {hasNifty && <path d={line(nf)} fill="none" stroke="#F5C451" strokeWidth="1.6" />}
+        <path d={youPath} fill="none" stroke="#5B8CFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <a href="#portfolio-vs-market" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
-        Compare with Nifty ↓
+        Open full comparison ↓
       </a>
     </div>
   );
@@ -421,9 +453,15 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
   const dayChange = summary?.day_change ?? null;
-  const dayPct =
-    summary && dayChange !== null && summary.total_value !== dayChange
-      ? (dayChange / (summary.total_value - dayChange)) * 100
+  // Server-computed from the SAME two valuation rows as day_change (a client recompute
+  // against the live summary total uses a different base — RCA 2026-07-02).
+  const dayPct = summary?.day_change_pct ?? null;
+  // "Nifty +x% today" hint — last two benchmark closes (shared query cache).
+  const { data: niftyData } = useNiftyCloseSeries();
+  const nfPts = niftyData?.points ?? [];
+  const niftyToday =
+    nfPts.length >= 2
+      ? (nfPts[nfPts.length - 1].close_value / nfPts[nfPts.length - 2].close_value - 1) * 100
       : null;
 
   return (
@@ -512,9 +550,15 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                 <HeroStat
                   label="Day Change"
-                  value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : ''}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`}
+                  value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : '−'}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`}
                   accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
-                  hint={dayChange === null ? 'Updates daily' : undefined}
+                  hint={
+                    dayChange === null
+                      ? 'Updates daily'
+                      : niftyToday !== null
+                        ? `Nifty ${niftyToday >= 0 ? '+' : '−'}${Math.abs(niftyToday).toFixed(2)}% today`
+                        : undefined
+                  }
                 />
                 {summary.xirr_pct !== null && (
                   <HeroStat
@@ -563,7 +607,8 @@ function rebasePct(pts: { t: number; v: number }[]): { t: number; pct: number }[
 }
 
 /** Two-line % chart: You (blue) vs Nifty (amber), zero baseline dashed. Points placed by DATE
- *  (not index) so the daily-portfolio vs trading-day-Nifty date mismatch resolves naturally. */
+ *  (not index) so the daily-portfolio vs trading-day-Nifty date mismatch resolves naturally.
+ *  Hover / touch shows a crosshair + per-date tooltip (You %, Nifty %, diff). */
 function VsMarketChart({
   you, nifty, t0, t1,
 }: {
@@ -572,6 +617,7 @@ function VsMarketChart({
   t0: number;
   t1: number;
 }) {
+  const [frac, setFrac] = React.useState<number | null>(null);
   const W = 680, H = 190, mT = 14, mB = 12, mL = 4, mR = 6;
   const span = t1 - t0 || 1;
   const xs = (t: number) => mL + ((t - t0) / span) * (W - mL - mR);
@@ -581,12 +627,78 @@ function VsMarketChart({
   const ys = (pct: number) => mT + (1 - (pct - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - mT - mB);
   const toPath = (a: { t: number; pct: number }[]) =>
     a.map((p, i) => `${i ? 'L' : 'M'}${xs(p.t).toFixed(1)},${ys(p.pct).toFixed(1)}`).join(' ');
+
+  const nearest = (a: { t: number; pct: number }[], t: number) =>
+    a.length ? a.reduce((b, p) => (Math.abs(p.t - t) < Math.abs(b.t - t) ? p : b)) : null;
+  const hoverT = frac !== null ? t0 + frac * span : null;
+  const hy = hoverT !== null ? nearest(you, hoverT) : null;
+  const hn = hoverT !== null ? nearest(nifty, hoverT) : null;
+  const shownT = hy?.t ?? hn?.t ?? hoverT;
+
+  const setFromClientX = (clientX: number, el: Element) => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0) setFrac(Math.max(0, Math.min(1, (clientX - r.left) / r.width)));
+  };
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 150 }} preserveAspectRatio="none" aria-hidden="true">
-      <line x1={mL} y1={ys(0).toFixed(1)} x2={W - mR} y2={ys(0).toFixed(1)} stroke="rgba(255,255,255,.18)" strokeDasharray="3 4" />
-      {nifty.length > 1 && <path d={toPath(nifty)} fill="none" stroke="#F5C451" strokeWidth="2" />}
-      {you.length > 1 && <path d={toPath(you)} fill="none" stroke="#5B8CFF" strokeWidth="2.5" />}
-    </svg>
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full cursor-crosshair"
+        style={{ height: 150 }}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Your portfolio versus Nifty 50, percent return over the selected period"
+        onMouseMove={(e) => setFromClientX(e.clientX, e.currentTarget)}
+        onMouseLeave={() => setFrac(null)}
+        onTouchStart={(e) => setFromClientX(e.touches[0].clientX, e.currentTarget)}
+        onTouchMove={(e) => setFromClientX(e.touches[0].clientX, e.currentTarget)}
+        onTouchEnd={() => setFrac(null)}
+      >
+        <line x1={mL} y1={ys(0).toFixed(1)} x2={W - mR} y2={ys(0).toFixed(1)} stroke="rgba(255,255,255,.18)" strokeDasharray="3 4" />
+        {nifty.length > 1 && <path d={toPath(nifty)} fill="none" stroke="#F5C451" strokeWidth="2" />}
+        {you.length > 1 && <path d={toPath(you)} fill="none" stroke="#5B8CFF" strokeWidth="2.5" />}
+        {hoverT !== null && shownT !== null && (
+          <>
+            <line x1={xs(shownT)} y1={mT} x2={xs(shownT)} y2={H - mB} stroke="rgba(255,255,255,.35)" />
+            {hy && <circle cx={xs(hy.t)} cy={ys(hy.pct)} r="4" fill="#5B8CFF" stroke="#0B1F3A" strokeWidth="1.5" />}
+            {hn && <circle cx={xs(hn.t)} cy={ys(hn.pct)} r="4" fill="#F5C451" stroke="#0B1F3A" strokeWidth="1.5" />}
+          </>
+        )}
+      </svg>
+      {frac !== null && (hy || hn) && (
+        <div
+          className="pointer-events-none absolute top-1 z-10 min-w-[150px] rounded-xl border border-white/10 bg-[#081226]/95 px-3 py-2 shadow-xl"
+          style={frac < 0.6
+            ? { left: `calc(${(frac * 100).toFixed(1)}% + 14px)` }
+            : { right: `calc(${((1 - frac) * 100).toFixed(1)}% + 14px)` }}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-slate-400">
+            {shownT !== null ? fmtDate(new Date(shownT).toISOString().slice(0, 10)) : ''}
+          </div>
+          {hy && (
+            <div className="mt-1 flex items-center justify-between gap-4 text-[12px] text-slate-100">
+              <span style={{ color: '#9CC0FF' }}>You</span>
+              <b className="tabular-nums">{fmtPct(hy.pct)}</b>
+            </div>
+          )}
+          {hn && (
+            <div className="flex items-center justify-between gap-4 text-[12px] text-slate-100">
+              <span style={{ color: '#F5C451' }}>Nifty</span>
+              <b className="tabular-nums">{fmtPct(hn.pct)}</b>
+            </div>
+          )}
+          {hy && hn && (
+            <div
+              className="mt-1 border-t border-white/10 pt-1 text-[11px] font-semibold"
+              style={{ color: hy.pct - hn.pct >= 0 ? '#6EE7B7' : '#FCA5A5' }}
+            >
+              {hy.pct - hn.pct >= 0 ? '+' : ''}{(hy.pct - hn.pct).toFixed(2)}% vs Nifty
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -624,6 +736,9 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
       t0, t1: lastT, you, nifty,
       youPct: you.length ? you[you.length - 1].pct : null,
       nfPct: nifty.length ? nifty[nifty.length - 1].pct : null,
+      // ₹ anchors for the chips: your value at window start/end (user's own money, DOM-allowed)
+      youStartValue: winPf.length >= 2 ? winPf[0].v : null,
+      youEndValue: winPf.length >= 2 ? winPf[winPf.length - 1].v : null,
     };
   }, [pfPoints, nfPoints, periodIdx]);
 
@@ -633,6 +748,18 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
   const disclosure = nfData?.disclosure ?? 'Nifty 50 price index · excludes dividends';
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
   const bothLines = !!model && model.you.length >= 2 && model.nifty.length >= 2;
+  // Honest window disclosure: with a young forward-only series, "1Y"/"ALL" really spans
+  // only the days tracked so far — say so instead of implying a full-period comparison.
+  const spanDays = model ? Math.max(1, Math.round((model.t1 - model.t0) / DAY_MS)) + 1 : null;
+  const windowTruncated =
+    !!model && model.you.length >= 2 && spanDays !== null && spanDays < VS_PERIODS[periodIdx].days;
+  const tickLabel = (t: number) => {
+    const d = new Date(t);
+    const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    return spanDays !== null && spanDays <= 120
+      ? `${d.getUTCDate()} ${mon}`
+      : `${mon} '${String(d.getUTCFullYear()).slice(2)}`;
+  };
 
   return (
     <div id="portfolio-vs-market" className="relative overflow-hidden rounded-[24px] p-6 text-white shadow-lg sm:p-7" style={{ background: heroGradient }}>
@@ -647,23 +774,39 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
         >
           <div className="flex items-start justify-between">
             <div>
-              <div className="font-sans text-[16px] font-semibold">Portfolio vs Market</div>
-              <div className="mt-0.5 text-[11px] text-slate-400">{VS_PERIODS[periodIdx].k} · % return</div>
+              <div className="flex items-center gap-1.5 font-sans text-[16px] font-semibold">
+                Portfolio vs Market
+                {sectionTooltip('VsMarketSection') && <HelpTip tip={sectionTooltip('VsMarketSection')!} />}
+              </div>
+              <div className="mt-0.5 text-[11px] text-slate-400">
+                {VS_PERIODS[periodIdx].k} · % return
+                {windowTruncated && <span className="text-slate-500"> · {spanDays} days of data so far</span>}
+              </div>
             </div>
           </div>
 
           {model ? (
             <>
-              {/* Headline chips — You vs Nifty */}
+              {/* Headline chips — You vs Nifty. The You chip colors by AHEAD/BEHIND Nifty
+                  (a factual comparison, like the delta line below), not by own sign. */}
               <div className="mt-3 flex items-stretch">
                 <div className="flex-1 rounded-l-xl bg-[#5B8CFF]/[.16] px-3 py-2">
                   <div className="text-[11px] font-semibold text-[#9cc0ff]">Your Portfolio</div>
                   <div
                     className="text-[18px] font-bold tabular-nums"
-                    style={{ color: model.youPct == null ? '#94a3b8' : model.youPct >= 0 ? '#6ee7b7' : '#fca5a5' }}
+                    style={{
+                      color: model.youPct == null ? '#94a3b8'
+                        : bothLines && model.nfPct != null
+                          ? (model.youPct >= model.nfPct ? '#6ee7b7' : '#fca5a5')
+                          : (model.youPct >= 0 ? '#6ee7b7' : '#fca5a5'),
+                    }}
                   >
-                    {model.youPct == null ? '—' : fmtPct(model.youPct)}
+                    {model.youPct == null ? '—'
+                      : `${bothLines && model.nfPct != null ? (model.youPct >= model.nfPct ? '▲ ' : '▼ ') : ''}${fmtPct(model.youPct)}`}
                   </div>
+                  {model.youEndValue != null && (
+                    <div className="text-[10px] tabular-nums text-slate-400">{fmtFull(model.youEndValue)}</div>
+                  )}
                 </div>
                 <div className="self-center rounded-full border border-white/15 bg-[#0B1F3A] px-1.5 py-0.5 text-[9px] font-bold text-slate-400" style={{ margin: '0 -9px', zIndex: 3 }}>VS</div>
                 <div className="flex-1 rounded-r-xl bg-[#F5C451]/[.13] px-3 py-2 text-right">
@@ -671,11 +814,23 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
                   <div className="text-[18px] font-bold tabular-nums text-[#ffe39a]">
                     {model.nfPct == null ? '—' : fmtPct(model.nfPct)}
                   </div>
+                  {model.youStartValue != null && model.nfPct != null && (
+                    <div className="text-[10px] tabular-nums text-slate-400">
+                      {fmtFull(model.youStartValue * (1 + model.nfPct / 100))} if in Nifty
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="mt-2">
                 <VsMarketChart you={model.you} nifty={model.nifty} t0={model.t0} t1={model.t1} />
+              </div>
+
+              {/* Date axis — 5 ticks across the actual window */}
+              <div className="flex justify-between text-[10px] text-slate-500">
+                {[0, 1, 2, 3, 4].map((f) => (
+                  <span key={f}>{tickLabel(model.t0 + (f / 4) * (model.t1 - model.t0))}</span>
+                ))}
               </div>
 
               {/* Factual delta line (educational — no advisory verb) */}
