@@ -208,6 +208,18 @@ def test_summary_payload_cost_value_defaults_to_total_invested_when_no_reinvest(
     assert p["xirr_pct"] is None  # no longer falls back to rm.xirr_pct
 
 
+def test_summary_payload_investor_name_passthrough_and_no_pan():
+    p = summary_payload(_rm(), "pid-1", investor_name="Manish Kumar")
+    assert p["investor_name"] == "Manish Kumar"
+    assert "investor_pan" not in p
+    assert _all_keys(p) & _FORBIDDEN == set()
+
+
+def test_summary_payload_investor_name_defaults_to_none():
+    p = summary_payload(_rm(), "pid-1")
+    assert p["investor_name"] is None
+
+
 def test_summary_payload_gain_vs_cost_pct_none_when_cost_value_zero():
     p = summary_payload(_rm(holdings=[], total_invested=0.0, total_value=0.0), "pid-1")
     assert p["cost_value"] == 0.0
@@ -488,6 +500,47 @@ async def test_holdings_endpoint_day_change_none_before_two_nav_dates(db_session
     holdings = r.json()["data"]["holdings"]
     assert len(holdings) == 1 and holdings[0]["isin"] == active_isin
     assert holdings[0]["day_change"] is None and holdings[0]["day_change_pct"] is None
+
+
+async def test_summary_endpoint_serves_investor_name_never_pan(db_session, rls_async_client):
+    """Hero polish (2026-07-04): the summary payload carries the owner's own investor_name
+    (CAS-captured full_name) but NEVER investor_pan — own name to own session is DPDP-fine,
+    the PAN is not."""
+    from dhanradar.auth.security import create_access_token
+    from tests.conftest import make_auth_headers
+
+    uid = await _seed_user(db_session, "cams-ep-investor-name@test.dev")
+    pid, _active_isin, _closed_isin = await _seed_cams_portfolio(db_session, uid, "X007")
+    await db_session.execute(
+        text("UPDATE auth.users SET full_name = :n, investor_pan = :p WHERE id = :u"),
+        {"n": "Manish Kumar", "p": "ABCDE1234F", "u": uid},
+    )
+    await db_session.commit()
+    token, _ = create_access_token(uid)
+
+    r = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/summary", headers=make_auth_headers(access_token=token)
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    assert d["investor_name"] == "Manish Kumar"
+    assert "investor_pan" not in d
+    assert "ABCDE1234F" not in r.text
+
+
+async def test_summary_endpoint_investor_name_null_when_not_captured(db_session, rls_async_client):
+    from dhanradar.auth.security import create_access_token
+    from tests.conftest import make_auth_headers
+
+    uid = await _seed_user(db_session, "cams-ep-investor-name-null@test.dev")
+    pid, _active_isin, _closed_isin = await _seed_cams_portfolio(db_session, uid, "X008")
+    token, _ = create_access_token(uid)
+
+    r = await rls_async_client.get(
+        f"/api/v1/portfolio/{pid}/summary", headers=make_auth_headers(access_token=token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["investor_name"] is None
 
 
 async def test_holdings_endpoint_day_change_present_once_two_nav_dates_exist(

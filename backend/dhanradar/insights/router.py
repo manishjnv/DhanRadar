@@ -55,6 +55,7 @@ from dhanradar.mf.portfolio_read import (
 )
 from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
+from dhanradar.models.auth import User
 from dhanradar.models.mf import MfPortfolio
 
 router = APIRouter(tags=["portfolio-intelligence"])
@@ -164,6 +165,11 @@ async def portfolio_summary(
     today = datetime.date.today()
     wt_avg_days = portfolio_wt_avg_days(active_flows, today)
     reinvested_cost = reinvested_dividend_cost(active_flows)
+    # Owner's own CAS-captured name (hero polish, 2026-07-04) — their own name to their own
+    # session, DPDP-fine. Never their investor_pan (not selected here at all).
+    investor_name = await db.scalar(
+        select(User.full_name).where(User.id == uuid.UUID(user.user_id))
+    )
     return serialize_concept(
         "portfolio.summary",
         summary_payload(
@@ -176,6 +182,7 @@ async def portfolio_summary(
             wt_avg_days=wt_avg_days,
             reinvested_cost=reinvested_cost,
             day_change_as_of=dc[2].isoformat() if dc else None,
+            investor_name=investor_name,
         ),
         RequestCtx(tier=user.tier),
         source="computed",

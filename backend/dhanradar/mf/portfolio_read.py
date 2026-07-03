@@ -218,6 +218,7 @@ def summary_payload(
     wt_avg_days: int | None = None,
     reinvested_cost: float = 0.0,
     day_change_as_of: str | None = None,
+    investor_name: str | None = None,
 ) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
@@ -243,7 +244,10 @@ def summary_payload(
     is `load_day_change`'s anchor `nav_date` (ISO string) — the single calendar date `day_change`/
     `day_change_pct` are actually as-of (§ AMFI stages NAV ingest ~23:30 IST; different funds' latest
     NAV can land on different days, so this tells the client which day "today's gain" really covers).
-    None whenever day_change itself is None."""
+    None whenever day_change itself is None. `investor_name` (2026-07-04, founder-reported hero
+    polish) is the caller's already-loaded `auth.users.full_name` for the OWNER's own session
+    (DPDP-fine, own name to own session) — None until a CAS upload has captured it
+    (`_store_or_validate_identity`). Their `investor_pan` is NEVER passed in or serialized here."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     cost_value = rm.total_invested + reinvested_cost
@@ -270,6 +274,7 @@ def summary_payload(
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
         "as_of": rm.as_of,
+        "investor_name": investor_name,  # owner's own CAS-captured name, DPDP-fine; PAN never included
     }
 
 

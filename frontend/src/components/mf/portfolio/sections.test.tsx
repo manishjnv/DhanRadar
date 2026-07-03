@@ -404,6 +404,87 @@ describe('HeroSection — CAMS-parity chips', () => {
 });
 
 // ---------------------------------------------------------------------------
+// HeroSection — owner-name pill (hero polish, 2026-07-04)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — owner-name pill', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  it('renders the owner name, uppercased (CAMS style), when investor_name is present', () => {
+    renderHero({ ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, investor_name: 'Manish Kumar' } });
+    expect(screen.getByTestId('hero-owner-pill').textContent).toBe('MANISH KUMAR');
+  });
+
+  it('renders nothing when investor_name is null', () => {
+    renderHero({ ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, investor_name: null } });
+    expect(screen.queryByTestId('hero-owner-pill')).toBeNull();
+  });
+
+  it('renders nothing when investor_name is absent from the payload', () => {
+    renderHero(SUMMARY_PRESENT);
+    expect(screen.queryByTestId('hero-owner-pill')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeroSection — one P&L% story (hero polish, 2026-07-04)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — one P&L% story', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  const COST_FIXTURE = {
+    ...SUMMARY_PRESENT,
+    data: {
+      ...SUMMARY_PRESENT.data,
+      cost_value: 4_000_000,
+      gain_vs_cost: 832_640,
+      gain_vs_cost_pct: 20.8,
+    },
+  };
+
+  it('Total Gain/Total Return use the cost-basis figure, matching the mini-chart P&L chip', () => {
+    renderHero(COST_FIXTURE);
+    const text = document.body.textContent ?? '';
+    // gain_vs_cost 832,640 -> "8,32,640" (full numeral, hero style); gain_vs_cost_pct 20.80%.
+    expect(text).toMatch(/8,32,640/);
+    expect(text).toMatch(/20\.80%/);
+    // The cash-basis gain (984,210 / 25.60%) must NEVER appear anywhere in the hero — one story.
+    expect(text).not.toMatch(/9,84,210/);
+    expect(text).not.toMatch(/25\.60%/);
+  });
+
+  it('falls back to the cash-basis gain/gain_pct when cost_value is absent (unchanged behaviour)', () => {
+    renderHero(SUMMARY_PRESENT);
+    const text = document.body.textContent ?? '';
+    expect(text).toMatch(/9,84,210/);
+    expect(text).toMatch(/25\.60%/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HeroSection — hint styling + date-anchored Day Change (2026-07-04)
 // ---------------------------------------------------------------------------
 
@@ -971,6 +1052,33 @@ const CONC_PRESENT = {
 
 const CONC_EMPTY = { status: 'empty' as const, data: null, meta: { ...EMPTY_META, reason: 'empty' as const } };
 
+// "By AMC" allocation + a full-legal-name concentration fixture — proves the hero-polish
+// shortAmcName strip (founder-reported 2026-07-04) reaches every live AMC surface.
+const ALLOC_PRESENT_AMC = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    by: 'amc',
+    buckets: [
+      { bucket: 'HDFC Asset Management Company Limited', value: 250_000, weight_pct: 52.3 },
+      { bucket: 'DSP Investment Managers', value: 150_000, weight_pct: 31.4 },
+    ],
+    total_value: 400_000,
+    fund_count: 6,
+    as_of: '2026-06-28',
+  },
+  meta: EMPTY_META,
+};
+
+const CONC_PRESENT_LONG_AMC = {
+  ...CONC_PRESENT,
+  data: {
+    ...CONC_PRESENT.data,
+    top_amc: { name: 'ICICI Prudential Asset Management Company Ltd', weight_pct: 41.0 },
+    by_amc: [{ name: 'ICICI Prudential Asset Management Company Ltd', weight_pct: 41.0 }],
+  },
+};
+
 describe('AllocSection', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -1040,6 +1148,23 @@ describe('AllocSection', () => {
     assertNoNumericScore(text);
     // no "ideal"/"recommended" allocation comparison (implies advice)
     expect(text).not.toMatch(/ideal|recommended/i);
+  });
+
+  // Hero polish (founder-reported 2026-07-04): AMC/fund-house text shortens to the
+  // recognizable brand wherever it renders on the portfolio page.
+  it('"By AMC" view => shortens a full legal AMC bucket name to its bare brand', () => {
+    renderAlloc(ALLOC_PRESENT_AMC, CONC_EMPTY);
+    fireEvent.click(screen.getByRole('button', { name: /By AMC/i }));
+    expect(screen.getAllByText('HDFC').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('DSP').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Asset Management Company Limited/)).toBeNull();
+    expect(screen.queryByText(/Investment Managers/)).toBeNull();
+  });
+
+  it('concentration sub-panel shortens a full legal AMC name (top_amc + by_amc)', () => {
+    renderAlloc(ALLOC_PRESENT, CONC_PRESENT_LONG_AMC);
+    expect(screen.getAllByText('ICICI Prudential').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Asset Management Company Ltd/)).toBeNull();
   });
 });
 

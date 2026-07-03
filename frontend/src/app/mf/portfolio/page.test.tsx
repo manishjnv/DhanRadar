@@ -164,7 +164,9 @@ describe('Header toolbar (dash view)', () => {
 describe('Upload FAB is the sole upload affordance', () => {
   it('renders the FAB with aria-label Upload CAS', () => {
     renderPage();
-    expect(screen.getByRole('button', { name: /Upload CAS/i })).toBeDefined();
+    // The state-toggle tab is ALSO labelled "Upload CAS" (founder-reported 2026-07-04) — scope
+    // to the FAB itself (data-testid) rather than a name match that now matches both.
+    expect(screen.getByTestId('upload-fab').getAttribute('aria-label')).toBe('Upload CAS');
   });
 
   it('no old 5-button sticky bar (⬆ Upload Latest CAS not in DOM)', () => {
@@ -291,7 +293,18 @@ describe('Closing the popover', () => {
   });
 });
 
-// 9. Breadcrumb "Updated" stamp formatter — dd Mmm, H:00 am/pm (hour-rounded, no year).
+// 9. State-toggle tab label (founder-reported 2026-07-04): "Upload CAS", not the internal "Empty".
+describe('State-toggle tab label', () => {
+  it('labels the empty-state tab "Upload CAS", not "Empty"', () => {
+    renderPage();
+    expect(screen.queryByRole('button', { name: 'Empty' })).toBeNull();
+    // Two "Upload CAS" affordances now co-exist in the default dash view: the state tab
+    // (this fix) + the persistent FAB (pre-existing, aria-label="Upload CAS") — both, not one.
+    expect(screen.getAllByRole('button', { name: 'Upload CAS' }).length).toBe(2);
+  });
+});
+
+// 10. Breadcrumb "Updated" stamp formatter — dd Mmm, H:00 am/pm (hour-rounded, no year).
 describe('formatUpdated', () => {
   it('formats PM, pads the day, and zeroes the minutes', () => {
     // 28 Jun 2026, 21:43 → 9:00 pm (12h conversion + minute rounding)
