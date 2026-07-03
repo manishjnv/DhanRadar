@@ -28,7 +28,7 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { PasswordInput } from '@/components/ui/Input';
 import {
   EmptyHero, BenefitsGrid, AutoSyncBanner,
   HeroSection, VsMarketSection, HealthSection, ActionSection, DmmiSection, AllocSection,
@@ -122,8 +122,8 @@ function PortfolioView() {
             uploadProgress={casUpload.progressPct}
             uploadStatusLabel={casUpload.statusLabel}
             uploadError={casUpload.errorMessage}
+            uploadErrorCode={casUpload.errorCode}
             estimatedSeconds={casUpload.estimatedSeconds}
-            onRetryWithPassword={(file, pwd) => casUpload.start(file, pwd)}
           />
           <section className="mt-2">
             <SectionHeader title="What you'll unlock" />
@@ -395,15 +395,13 @@ function UploadFAB({ casUpload }: UploadFABProps) {
                 <label htmlFor="fab-cas-pdf-password" className="text-small font-medium text-ink">
                   PDF password <span className="text-ink-muted font-normal">(optional)</span>
                 </label>
-                <Input
+                <PasswordInput
                   id="fab-cas-pdf-password"
-                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Usually your PAN"
                   autoComplete="off"
                 />
-                <p className="text-caption text-ink-muted">Your CAS password — usually your PAN, from the statement email.</p>
               </div>
             )}
 
@@ -438,8 +436,11 @@ function UploadFAB({ casUpload }: UploadFABProps) {
                   </p>
                 )}
                 {phase === 'error' && (
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
                     <p className="text-small text-red-600">{errorMessage || 'Upload failed — please try again.'}</p>
+                    {casUpload.errorCode && (
+                      <p className="font-mono text-[10px] text-ink-faint">code: {casUpload.errorCode}</p>
+                    )}
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}

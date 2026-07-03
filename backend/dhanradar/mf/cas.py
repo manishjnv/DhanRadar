@@ -89,6 +89,34 @@ class CasParseError(Exception):
     """The CAS could not be parsed (bad password, corrupt, or unsupported format)."""
 
 
+#: Message substrings that mean "we understood you gave us a file, but couldn't read it"
+#: (corrupt PDF, empty statement, unsupported extension) — as opposed to a wrong password.
+#: Matched against str(exc): every raise site above preserves either the underlying
+#: casparser exception's CLASS NAME (parse_cas's `except Exception` handler) or one of
+#: these literal phrases (the txt/xls/unsupported-type raises further down this file).
+_UNREADABLE_MARKERS = (
+    "CASParseError", "HeaderParseError", "CASIntegrityError", "IncompleteCASError",
+    "Unsupported file type", "No data rows found",
+)
+
+
+def classify_cas_failure(exc: CasParseError) -> str:
+    """Map a CasParseError to a closed, machine-readable code for `MfCasJob.error_message`.
+
+    The frontend translates the code to plain-language copy — the raw exception text is
+    NEVER served to the client (it can carry PDF-library internals, and for a generic
+    reader failure could even echo the attempted password). incorrect_password /
+    unreadable_file are diagnosed from the class name/phrase cas.py preserves in the
+    message; anything unrecognised falls back to the generic parse_failed code.
+    """
+    msg = str(exc)
+    if "IncorrectPasswordError" in msg:
+        return "incorrect_password"
+    if any(marker in msg for marker in _UNREADABLE_MARKERS):
+        return "unreadable_file"
+    return "parse_failed"
+
+
 @dataclass(frozen=True)
 class ParsedTxn:
     when: date

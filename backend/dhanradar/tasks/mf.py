@@ -40,7 +40,7 @@ from structlog.contextvars import bind_contextvars
 from dhanradar.celery_app import celery_app
 from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
-from dhanradar.mf.cas import CasParseError, ParsedHolding, detect_and_parse
+from dhanradar.mf.cas import CasParseError, ParsedHolding, classify_cas_failure, detect_and_parse
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
@@ -220,10 +220,12 @@ def parse_cas_job(
         # CAS password is never part of these messages. Without this, every CAS
         # failure is an undiagnosable opaque "parse_failed".
         logger.warning("CAS parse failed job=%s reason=%s", job_id, exc)
-        # error_message is served to the client (CasJobStatus) — keep it OPAQUE:
-        # only the fixed code, NEVER exc / str(exc).
-        asyncio.run(_mark_failed(job_id, "parse_failed"))
-        return "failed: parse_failed"
+        # error_message is served to the client (CasJobStatus) — keep it OPAQUE: a fixed,
+        # closed-enum code derived from the exception CLASS (classify_cas_failure), NEVER
+        # exc / str(exc) verbatim. The FE maps the code to plain-language copy.
+        code = classify_cas_failure(exc)
+        asyncio.run(_mark_failed(job_id, code))
+        return f"failed: {code}"
     except Exception:  # noqa: BLE001 — record opaque code + purge, never leak detail
         logger.exception("CAS pipeline error job=%s", job_id)
         asyncio.run(_mark_failed(job_id, "internal_error"))
