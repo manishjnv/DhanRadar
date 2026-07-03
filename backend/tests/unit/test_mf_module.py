@@ -13,7 +13,7 @@ import enum
 from dataclasses import fields
 from datetime import date
 
-from dhanradar.mf.cas import parse_cas
+from dhanradar.mf.cas import CasParseError, classify_cas_failure, parse_cas
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
 from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
@@ -87,6 +87,39 @@ def test_parse_cas_failure_raises():
 
     with pytest.raises(CasParseError):
         parse_cas("x.pdf", "wrong", reader=_boom)
+
+
+def test_parse_cas_wrong_password_classifies_as_incorrect_password():
+    """A casparser IncorrectPasswordError (the founder-reported prod case, 2026-07-03)
+    must classify to 'incorrect_password' — never the opaque 'parse_failed' catch-all —
+    so the FE can show a specific, actionable message instead of a raw code."""
+    import pytest
+    from casparser.exceptions import IncorrectPasswordError
+
+    def _wrong_password(_p, _pw):
+        raise IncorrectPasswordError("Incorrect PDF password!")
+
+    with pytest.raises(CasParseError) as exc_info:
+        parse_cas("x.pdf", "wrong", reader=_wrong_password)
+    assert classify_cas_failure(exc_info.value) == "incorrect_password"
+
+
+def test_classify_cas_failure_unreadable_file():
+    """Corrupt/wrong-format failures (unsupported extension, empty statement, a raw
+    casparser CASParseError) classify to 'unreadable_file', distinct from a wrong password."""
+    assert classify_cas_failure(
+        CasParseError("Unsupported file type '.docx'. Upload a CAS PDF.")
+    ) == "unreadable_file"
+    assert classify_cas_failure(CasParseError("No data rows found in x.txt")) == "unreadable_file"
+    assert classify_cas_failure(
+        CasParseError("CASParseError: Unhandled error while opening PDF: bad")
+    ) == "unreadable_file"
+
+
+def test_classify_cas_failure_falls_back_to_parse_failed():
+    """An unrecognised failure mode keeps the generic 'parse_failed' fallback — the FE's
+    catch-all copy — rather than guessing."""
+    assert classify_cas_failure(CasParseError("TypeError: something odd")) == "parse_failed"
 
 
 def test_parse_cas_normalises_pydantic_model_output():

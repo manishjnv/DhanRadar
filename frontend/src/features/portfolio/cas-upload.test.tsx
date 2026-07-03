@@ -32,8 +32,38 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 });
 
 // Import AFTER vi.mock hoisting
-import { useCasUpload } from '@/features/mf/cas-upload';
+import { useCasUpload, casErrorCopy } from '@/features/mf/cas-upload';
 import { useUploadCas, useCasStatus } from '@/features/mf/api';
+
+// ---------------------------------------------------------------------------
+// casErrorCopy — machine code → plain-language copy (all known codes + fallback)
+// ---------------------------------------------------------------------------
+
+describe('casErrorCopy', () => {
+  it('maps incorrect_password to a PAN+DOB hint', () => {
+    expect(casErrorCopy('incorrect_password')).toMatch(/password/i);
+    expect(casErrorCopy('incorrect_password')).toMatch(/PAN/);
+  });
+
+  it('maps unreadable_file to a format/source hint', () => {
+    expect(casErrorCopy('unreadable_file')).toMatch(/couldn't read this file/i);
+  });
+
+  it('maps stuck_timeout to the taking-longer-than-expected copy', () => {
+    expect(casErrorCopy('stuck_timeout')).toMatch(/taking longer/i);
+  });
+
+  it('maps parse_failed to the generic try-again copy', () => {
+    expect(casErrorCopy('parse_failed')).toMatch(/went wrong/i);
+  });
+
+  it('falls back to the generic copy for an unrecognised or null/undefined code', () => {
+    const generic = casErrorCopy('parse_failed');
+    expect(casErrorCopy('some_future_code')).toBe(generic);
+    expect(casErrorCopy(null)).toBe(generic);
+    expect(casErrorCopy(undefined)).toBe(generic);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

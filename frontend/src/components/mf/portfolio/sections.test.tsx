@@ -465,6 +465,63 @@ describe('HeroSection — hint styling + day_change_as_of', () => {
 });
 
 // ---------------------------------------------------------------------------
+// HeroSection — "Data as of" freshness line (founder-requested, 2026-07-03)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — freshness line', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  it('renders "Data as of <date> · NAV updates nightly" from day_change_as_of', () => {
+    renderHero({ ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, day_change_as_of: '2026-07-03' } });
+    expect(screen.getByText(/Data as of 3 Jul 2026 · NAV updates nightly/)).toBeDefined();
+  });
+
+  it('falls back to summary.as_of when day_change_as_of is absent', () => {
+    renderHero(SUMMARY_PRESENT); // as_of = '2026-06-25T00:00:00Z', no day_change_as_of on this fixture
+    expect(screen.getByText(/Data as of 25 Jun 2026 · NAV updates nightly/)).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeroMiniChart — responsive width (founder-reported 2026-07-03: chart hugged
+// the left with dead space right; the flex-item wrapper needs w-full to
+// actually stretch to its grid column, not just the svg's own viewBox/w-full).
+// ---------------------------------------------------------------------------
+
+describe('HeroMiniChart — responsive width', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('svg and its wrapper are full-width (no fixed-width dead space)', () => {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: SUMMARY_PRESENT, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: VALUE_SERIES_PRESENT, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+
+    const { container } = render(<HeroSection portfolioId="pid" />, { wrapper });
+    const svg = container.querySelector('svg');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute('class')).toMatch(/w-full/);
+    // The svg's immediate wrapper (HeroMiniChart's root) must also stretch —
+    // w-full on the svg alone is a no-op if its parent shrinks to content.
+    expect(svg?.parentElement?.className).toMatch(/w-full/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildPeriodPills / defaultPillKey — pure helper (PR-C §3, adaptive pill ladder)
 // ---------------------------------------------------------------------------
 
@@ -1098,6 +1155,24 @@ describe('EmptyHero upload phases', () => {
     expect(screen.getByRole('button', { name: /try again/i })).toBeDefined();
   });
 
+  // Founder-reported (2026-07-03): the raw machine code ('parse_failed') used to be shown
+  // directly as the error message. It must now render as small/muted support text only,
+  // never as the primary message.
+  it('uploadPhase=error: shows the friendly message plus the raw code subtly for support', () => {
+    renderEmpty({
+      uploadPhase: 'error',
+      uploadError: "That password doesn't match this PDF. CAS passwords are usually your PAN in capital letters plus date of birth.",
+      uploadErrorCode: 'incorrect_password',
+    });
+    expect(screen.getByText(/doesn't match this PDF/i)).toBeDefined();
+    expect(screen.getByText('code: incorrect_password')).toBeDefined();
+  });
+
+  it('uploadPhase=error: omits the code line when no uploadErrorCode is given', () => {
+    renderEmpty({ uploadPhase: 'error', uploadError: 'Upload failed — please try again.' });
+    expect(screen.queryByText(/^code:/)).toBeNull();
+  });
+
   // idle phase: no status block
   it('uploadPhase=idle (default): no status block shown', () => {
     renderEmpty({ uploadPhase: 'idle' });
@@ -1122,13 +1197,27 @@ describe('EmptyHero password field', () => {
   it('renders the password input in idle state', () => {
     renderEmpty({ uploadPhase: 'idle' });
     expect(screen.getByTestId('password-field-empty-hero')).toBeDefined();
-    // label present
-    expect(screen.getByLabelText(/Password/i)).toBeDefined();
+    // label present (selector: 'input' disambiguates from the eye-toggle button, whose
+    // own aria-label — "Show password" — also matches a bare /Password/i regex)
+    expect(screen.getByLabelText(/Password/i, { selector: 'input' })).toBeDefined();
   });
 
   it('password input does NOT render while upload is in flight', () => {
     renderEmpty({ uploadPhase: 'uploading' });
     expect(screen.queryByTestId('password-field-empty-hero')).toBeNull();
+  });
+
+  // Founder-reported (2026-07-03): no show/hide toggle on the CAS password field.
+  it('password field has a show/hide (eye) toggle that flips the input type', () => {
+    renderEmpty({ uploadPhase: 'idle' });
+    const pwdInput = screen.getByLabelText(/Password/i, { selector: 'input' }) as HTMLInputElement;
+    expect(pwdInput.type).toBe('password');
+
+    fireEvent.click(screen.getByRole('button', { name: /show password/i }));
+    expect(pwdInput.type).toBe('text');
+
+    fireEvent.click(screen.getByRole('button', { name: /hide password/i }));
+    expect(pwdInput.type).toBe('password');
   });
 
   it('password input re-shown after error (parse_failed / wrong password)', () => {
@@ -1142,7 +1231,7 @@ describe('EmptyHero password field', () => {
     renderEmpty({ uploadPhase: 'idle', onUpload });
 
     // Type a password
-    const pwdInput = screen.getByLabelText(/Password/i);
+    const pwdInput = screen.getByLabelText(/Password/i, { selector: 'input' });
     fireEvent.change(pwdInput, { target: { value: 'ABCDE1234F' } });
 
     // Simulate file pick via the hidden input

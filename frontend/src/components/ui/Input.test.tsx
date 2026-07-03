@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { Input, Field } from './Input';
+import { Input, Field, PasswordInput } from './Input';
 
 describe('Input', () => {
   it('renders an input element', () => {
@@ -22,6 +22,33 @@ describe('Input', () => {
   it('is disabled when disabled prop is set', () => {
     render(<Input data-testid="inp" disabled />);
     expect(screen.getByTestId('inp')).toBeDisabled();
+  });
+});
+
+describe('PasswordInput', () => {
+  it('starts masked (type=password)', () => {
+    render(<PasswordInput data-testid="pwd" />);
+    expect(screen.getByTestId('pwd')).toHaveAttribute('type', 'password');
+  });
+
+  it('toggling the eye button flips the input to type=text and back', () => {
+    render(<PasswordInput data-testid="pwd" />);
+    const input = screen.getByTestId('pwd');
+    const toggle = screen.getByRole('button', { name: /show password/i });
+
+    fireEvent.click(toggle);
+    expect(input).toHaveAttribute('type', 'text');
+    expect(screen.getByRole('button', { name: /hide password/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /hide password/i }));
+    expect(input).toHaveAttribute('type', 'password');
+  });
+
+  it('forwards value/onChange like a normal Input', () => {
+    render(<PasswordInput data-testid="pwd" defaultValue="" />);
+    const input = screen.getByTestId('pwd') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'ABCDE1234F' } });
+    expect(input.value).toBe('ABCDE1234F');
   });
 });
 

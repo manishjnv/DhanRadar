@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,41 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   },
 );
 Input.displayName = 'Input';
+
+// ---------------------------------------------------------------------------
+// PasswordInput — Input with a show/hide (eye) toggle. No new dependency:
+// lucide-react is already used throughout the app for icons.
+// `toggleClassName` lets a caller on a non-default background (e.g. the dark
+// hero gradient) recolor the toggle button; default suits a normal surface.
+// ---------------------------------------------------------------------------
+
+export interface PasswordInputProps extends Omit<InputProps, 'type'> {
+  toggleClassName?: string;
+}
+
+export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputProps>(
+  ({ className, toggleClassName, ...props }, ref) => {
+    const [visible, setVisible] = React.useState(false);
+    return (
+      <div className="relative">
+        <Input ref={ref} type={visible ? 'text' : 'password'} className={cn('pr-9', className)} {...props} />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          className={cn(
+            'absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-muted hover:text-ink',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+            toggleClassName,
+          )}
+        >
+          {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+        </button>
+      </div>
+    );
+  },
+);
+PasswordInput.displayName = 'PasswordInput';
 
 // ---------------------------------------------------------------------------
 // Field — label + input + error wrapper. Wires htmlFor/id and the

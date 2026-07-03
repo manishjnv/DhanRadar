@@ -13,7 +13,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
-import { Input } from '@/components/ui/Input';
+import { Input, PasswordInput } from '@/components/ui/Input';
 import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
@@ -63,8 +63,9 @@ interface EmptyHeroProps {
   uploadProgress?: number;
   uploadStatusLabel?: string;
   uploadError?: string | null;
+  /** Raw machine failure code (e.g. 'incorrect_password') — shown small + muted for support. */
+  uploadErrorCode?: string | null;
   estimatedSeconds?: number | null;
-  onRetryWithPassword?: (file: File, password: string) => void;
 }
 
 export function EmptyHero({
@@ -74,8 +75,8 @@ export function EmptyHero({
   uploadProgress = 0,
   uploadStatusLabel = '',
   uploadError = null,
+  uploadErrorCode = null,
   estimatedSeconds = null,
-  onRetryWithPassword,
 }: EmptyHeroProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const lastFileRef = React.useRef<File | null>(null);
@@ -98,27 +99,22 @@ export function EmptyHero({
     handleFiles(e.dataTransfer.files);
   }
 
-  const showPasswordPrompt =
-    uploadPhase === 'error' &&
-    uploadError &&
-    /password|encrypt|protect/i.test(uploadError);
-
   return (
     <div
-      className="relative overflow-hidden rounded-[24px] p-8 text-white shadow-lg sm:p-10"
+      className="relative overflow-hidden rounded-[24px] p-6 text-white shadow-lg sm:p-8"
       style={{ background: 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)' }}
     >
       <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.28),transparent 70%)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute -bottom-32 left-[32%] h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.3),transparent 70%)' }} aria-hidden="true" />
-      <div className="relative z-[2] flex flex-col items-center gap-5 text-center">
+      <div className="relative z-[2] flex flex-col items-center gap-4 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-caption font-semibold text-slate-300">
           <span aria-hidden="true">📂</span> Upload your CAS to get started
         </span>
-        <h1 className="font-sans text-[28px] font-extrabold leading-[1.05] tracking-[-0.03em] sm:text-[36px]">
+        <h1 className="font-sans text-[26px] font-extrabold leading-[1.05] tracking-[-0.03em] sm:text-[32px]">
           Your Portfolio Command Center
         </h1>
-        <p className="max-w-[560px] text-small leading-relaxed text-slate-300 sm:text-body">
-          Get a complete picture of your mutual fund portfolio — health score, overlap analysis, goal tracking, risk breakdown, and plain-English recommendations — in one place.
+        <p className="max-w-[520px] text-small leading-snug text-slate-300">
+          A complete picture of your mutual fund portfolio — health, overlap, goals, risk, and plain-English guidance — in one place.
         </p>
 
         {/* Hidden file input */}
@@ -135,19 +131,19 @@ export function EmptyHero({
           role={onUpload ? 'button' : undefined}
           tabIndex={onUpload ? 0 : undefined}
           aria-label={onUpload ? 'Click or drop a CAS file here to upload' : undefined}
-          className="w-full max-w-sm rounded-2xl border-2 border-dashed border-white/30 bg-white/[0.04] p-8 transition-colors hover:border-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          className="w-full max-w-sm rounded-2xl border-2 border-dashed border-white/30 bg-white/[0.04] p-5 transition-colors hover:border-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
           onClick={() => onUpload && fileInputRef.current?.click()}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUpload && fileInputRef.current?.click(); } }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-4xl" aria-hidden="true">📄</span>
+          <div className="flex flex-col items-center gap-1.5">
+            <span className="text-3xl" aria-hidden="true">📄</span>
             <p className="text-small font-semibold text-white">Drop your CAS or statement file here</p>
             <p className="text-caption text-slate-400">PDF (CAS) · TXT or XLS (CAMS Transaction Details)</p>
             <CTA
               variant="primary"
-              className="mt-2"
+              className="mt-1.5"
               onClick={(e: React.MouseEvent) => { e.stopPropagation(); onUpload && fileInputRef.current?.click(); }}
             >
               Choose File
@@ -155,28 +151,28 @@ export function EmptyHero({
           </div>
         </div>
 
-        {/* Optional PDF password — shown when not mid-flight so the user can enter before upload */}
+        {/* Optional PDF password — shown when not mid-flight so the user can enter (or correct) it.
+            One field, always visible in idle/error — the "Try again" retry below reuses its value. */}
         {(uploadPhase === 'idle' || uploadPhase === 'error') && (
-          <div className="w-full max-w-sm flex flex-col gap-1.5" data-testid="password-field-empty-hero">
+          <div className="w-full max-w-sm flex flex-col gap-1" data-testid="password-field-empty-hero">
             <label htmlFor="cas-pdf-password" className="text-small font-medium text-slate-300">
               Password <span className="text-slate-500 font-normal">(PDF only — optional)</span>
             </label>
-            <Input
+            <PasswordInput
               id="cas-pdf-password"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="e.g. PAN followed by date of birth"
               autoComplete="off"
               className="border-white/25 bg-white/10 text-white placeholder:text-slate-400 focus:ring-white/40"
+              toggleClassName="text-slate-400 hover:text-white"
             />
-            <p className="text-caption text-slate-500">PDF CAS password (usually PAN + date of birth). Not needed for .txt / .xls files.</p>
           </div>
         )}
 
         {/* Upload status block — always rendered when not idle (NO-SUPPRESS) */}
         {uploadPhase !== 'idle' && (
-          <div className="w-full max-w-sm rounded-xl border border-white/20 bg-white/[0.07] p-4 text-left" data-testid="upload-status">
+          <div className="w-full max-w-sm rounded-xl border border-white/20 bg-white/[0.07] p-3 text-left" data-testid="upload-status">
             {uploadPhase === 'uploading' && (
               <div className="flex items-center gap-2 text-small font-semibold text-white">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
@@ -210,39 +206,18 @@ export function EmptyHero({
             )}
 
             {uploadPhase === 'error' && (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <p className="text-small text-red-300">{uploadError || 'Upload failed — please try again.'}</p>
-                {showPasswordPrompt && onRetryWithPassword ? (
-                  <div className="flex flex-col gap-2">
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Enter CAS password (PAN + DOB)"
-                      className="w-full rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-small text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-white/40"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (lastFileRef.current && password) {
-                          onRetryWithPassword(lastFileRef.current, password);
-                          setPassword('');
-                        }
-                      }}
-                      className="rounded-lg bg-white/20 px-4 py-2 text-small font-semibold text-white hover:bg-white/30 focus-visible:outline-none"
-                    >
-                      Retry with password
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => lastFileRef.current && onUpload?.(lastFileRef.current)}
-                    className="self-start rounded-lg bg-white/20 px-4 py-2 text-small font-semibold text-white hover:bg-white/30 focus-visible:outline-none"
-                  >
-                    Try again
-                  </button>
+                {uploadErrorCode && (
+                  <p className="font-mono text-[10px] text-slate-500">code: {uploadErrorCode}</p>
                 )}
+                <button
+                  type="button"
+                  onClick={() => lastFileRef.current && onUpload?.(lastFileRef.current, password || undefined)}
+                  className="self-start rounded-lg bg-white/20 px-4 py-2 text-small font-semibold text-white hover:bg-white/30 focus-visible:outline-none"
+                >
+                  Try again
+                </button>
               </div>
             )}
           </div>
@@ -449,7 +424,7 @@ function HeroMiniChart({ portfolioId, invested, value, gain, gainPct }: {
     `L ${[...investedSteps].reverse().map(p => `${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' L ')} Z`;
 
   return (
-    <div className="flex h-full flex-col gap-1.5">
+    <div className="flex h-full w-full min-w-0 flex-col gap-1.5">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR MONEY · 90D</span>
       </div>
@@ -659,6 +634,15 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   />
                 )}
               </div>
+
+              {/* Freshness line — founder-requested (2026-07-03): a visible "data as of" stamp so
+                  customers know how current the numbers are. Falls back to the summary's own as_of
+                  when day_change_as_of hasn't been computed yet (e.g. a fund still one day behind). */}
+              {(dayChangeAsOf || summary.as_of) && (
+                <p className="text-[11px] text-slate-400">
+                  Data as of {fmtDate((dayChangeAsOf || summary.as_of) as string)} · NAV updates nightly
+                </p>
+              )}
             </div>
           )}
         </DataState>
