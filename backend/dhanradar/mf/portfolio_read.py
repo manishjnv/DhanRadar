@@ -18,8 +18,15 @@ from dataclasses import dataclass
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.config import settings
+from dhanradar.mf.risk import risk_adjusted_stats
 from dhanradar.mf.snapshot import CashFlow, windowed_xirr, xirr
-from dhanradar.mf.valuation import ValuationPoint
+from dhanradar.mf.valuation import (
+    ValuationPoint,
+    _dated_flow_adjusted_returns,
+    max_drawdown_and_recovery,
+    wealth_index,
+)
 from dhanradar.models.mf import (
     MfFund,
     MfFundMetrics,
@@ -227,11 +234,13 @@ def summary_payload(
     }
 
 
-# --- C3: portfolio risk (value-weighted aggregate of the per-fund mf_fund_metrics) ----------------
+# --- C3: portfolio risk (M2.3 true series once long enough, else the per-fund fallback) -----------
 
 # Annualised-volatility (%) thresholds → a factual risk band (a standard-measure descriptor, NOT a verdict
 # and NOT a composite score). Tuned to typical Indian-MF category vols (debt ~2-5, hybrid ~6-10,
-# large-cap ~12-16, mid/small ~18-24+).
+# large-cap ~12-16, mid/small ~18-24+). Applied unchanged to volatility_pct regardless of source
+# (the true portfolio series or the value-weighted fallback) — same σ scale; `risk_band_basis`
+# says which one it is.
 _VOL_BANDS = ((8.0, "low"), (14.0, "moderate"), (22.0, "high"))
 
 
@@ -246,6 +255,14 @@ class PortfolioRisk:
     fund_count: int
     funds_with_metrics: int
     as_of: str | None
+    # M2.3 (resolves B88) — both default so existing PortfolioRisk(**kw) call sites (tests
+    # built before M2.3) keep constructing a valid fallback-shaped instance unmodified.
+    # recovery_months: months from the wealth index's deepest trough back to its prior peak.
+    recovery_months: int | None = None
+    # risk_band_basis: which series volatility_pct/risk_band are actually based on —
+    # "portfolio return series" (true, >= _MIN_TRUE_RISK_ROWS daily rows) or the honest
+    # fallback "average fund volatility" (value-weighted per-fund proxy, upper-bound).
+    risk_band_basis: str = "average fund volatility"
 
 
 def _vol_band(vol_pct: float | None) -> str | None:
@@ -258,13 +275,26 @@ def _vol_band(vol_pct: float | None) -> str | None:
     return "very_high"
 
 
+# ~3 months of daily rows; below this, keep the honest weighted-avg fallback
+_MIN_TRUE_RISK_ROWS = 90
+
+
 async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioRisk:
-    """Portfolio-level risk = the **value-weighted** aggregate of the per-fund precomputed STANDARD ratios
-    (`mf_fund_metrics`, refreshed nightly), weighted by each holding's current value. Only standard ratios
-    (Sharpe/Sortino/volatility/max-drawdown/rolling) — NEVER the DhanRadar composite (it isn't in this table
-    and is never selected). Funds missing a metric are skipped for that metric (weights renormalise over the
-    funds that have it). True portfolio beta/alpha need a portfolio+benchmark return series (not built yet) —
-    the payloads return None for those (the client renders 'coming soon')."""
+    """Portfolio-level risk (C3, M2.3 — resolves B88's deferral).
+
+    When the portfolio's OWN daily valuation series (`mf_portfolio_daily_values`, M2.2) has at
+    least `_MIN_TRUE_RISK_ROWS` rows: volatility/Sharpe/Sortino/rolling come from
+    `risk.risk_adjusted_stats` run on the flow-adjusted return series's wealth index (a real
+    portfolio σ, not the value-weighted upper-bound proxy), and max-drawdown/recovery come from
+    that same wealth index — `risk_band_basis` = "portfolio return series".
+
+    Below that row count (a young portfolio) — the ORIGINAL, unchanged fallback: the
+    **value-weighted** aggregate of the per-fund precomputed STANDARD ratios (`mf_fund_metrics`,
+    refreshed nightly), weighted by each holding's current value; Sharpe/Sortino/max-drawdown stay
+    None because averaging per-fund RATIOS isn't the portfolio ratio and drawdown doesn't aggregate
+    linearly — `risk_band_basis` = "average fund volatility". Either way: only standard ratios,
+    NEVER the DhanRadar composite. True alpha/beta still need a benchmark return series (ADR-0033b,
+    out of scope here) — the payloads return None for those (the client renders 'coming soon')."""
     rm = await load_portfolio_read_model(db, portfolio_id)
     isins = [h.isin for h in rm.holdings]
     metrics: dict[str, MfFundMetrics] = {}
@@ -289,42 +319,77 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
                 den += h.current_value
         return (num / den) if den > 0 else None
 
+    fund_count = len(rm.holdings)
+    funds_with_metrics = sum(1 for h in rm.holdings if h.isin in metrics)
+
+    series = await load_portfolio_valuation_series(db, portfolio_id, days=_MAX_VALUATION_DAYS)
+    if len(series) >= _MIN_TRUE_RISK_ROWS:
+        dated_returns = _dated_flow_adjusted_returns(series)
+        wealth = wealth_index(dated_returns)
+        # min_points=1: the product-level gate is `_MIN_TRUE_RISK_ROWS` above; risk_adjusted_stats's
+        # own internal n<2 floor still applies. periods_per_year=365: the series is genuinely
+        # calendar-daily (a weekend row carries its NAV forward — a real zero return, not a gap).
+        stats = risk_adjusted_stats(
+            wealth,
+            risk_free_annual=settings.RISK_FREE_RATE_ANNUAL,
+            min_points=1,
+            periods_per_year=365,
+        )
+        max_dd, recovery_months = max_drawdown_and_recovery(wealth)
+        return PortfolioRisk(
+            volatility_pct=stats.volatility_pct,
+            max_drawdown_pct=max_dd,
+            sharpe_ratio=stats.sharpe_ratio,
+            sortino_ratio=stats.sortino_ratio,
+            rolling_1y_avg_pct=stats.rolling_1y_avg_pct,
+            rolling_1y_pct_positive=stats.rolling_1y_pct_positive,
+            fund_count=fund_count,
+            funds_with_metrics=funds_with_metrics,
+            as_of=rm.as_of,
+            recovery_months=recovery_months,
+            risk_band_basis="portfolio return series",
+        )
+
     return PortfolioRisk(
-        # B88: volatility drives the INDICATIVE band only — value-weighted σ (Σwσ) OVERSTATES the true
-        # portfolio σ = √(w'Σw) (ignores correlation<1), so it is an upper-bound proxy, relabelled
-        # indicative in the payload, never presented as the precise portfolio σ.
+        # Value-weighted σ (Σwσ) OVERSTATES the true portfolio σ = √(w'Σw) (ignores
+        # correlation < 1), so it is an upper-bound proxy, relabelled indicative in the payload.
         volatility_pct=weighted("volatility_pct"),
-        # B88 (DEFER): Sharpe/Sortino are RATIOS (a value-weighted average of fund ratios ≠ the portfolio
-        # ratio) and max-drawdown does not aggregate linearly (fund drawdowns occur at different times).
-        # A true portfolio Sharpe/Sortino/drawdown needs the portfolio RETURN/VALUATION series (not built)
-        # — the same series alpha/beta/recovery already wait for. Don't ship a wrong number → None.
+        # Sharpe/Sortino are RATIOS (a value-weighted average of fund ratios is NOT the portfolio
+        # ratio) and max-drawdown does not aggregate linearly (fund drawdowns occur at different
+        # times) — don't ship a wrong number → None until the series above is long enough.
         max_drawdown_pct=None,
         sharpe_ratio=None,
         sortino_ratio=None,
-        # Rolling RETURNS aggregate by weight (Σw·r is exact for returns) → the weighted rolling AVERAGE is
-        # a defensible estimate and is kept. rolling_1y_pct_positive is a per-fund hit-RATE (not a return);
-        # value-weighting it is the SAME defect class as Sharpe/σ (the portfolio's % positive depends on
-        # correlation/timing), so it is DEFERRED too (B88 / adversarial follow-up).
+        # Rolling RETURNS aggregate by weight (Σw·r is exact for returns) → the weighted rolling
+        # AVERAGE is a defensible estimate and is kept. rolling_1y_pct_positive is a per-fund
+        # hit-RATE (not a return); value-weighting it is the SAME defect class as Sharpe/σ (the
+        # portfolio's % positive depends on correlation/timing), so it stays None in the fallback
+        # (the true series gives the real one above).
         rolling_1y_avg_pct=weighted("rolling_1y_avg_pct"),
         rolling_1y_pct_positive=None,
-        fund_count=len(rm.holdings),
-        funds_with_metrics=sum(1 for h in rm.holdings if h.isin in metrics),
+        fund_count=fund_count,
+        funds_with_metrics=funds_with_metrics,
         as_of=rm.as_of,
+        risk_band_basis="average fund volatility",
     )
 
 
 def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
-    """C3 free `portfolio.risk` — an INDICATIVE risk band derived from the value-weighted AVERAGE fund
-    volatility (`risk_band_basis`), plus that average. The band is an upper-bound proxy, not the true
-    portfolio σ (B88) — labelled indicative. `max_drawdown_pct` is deferred (it doesn't aggregate) and
-    `recovery_months` needs the daily-valuation series → both None ('coming soon')."""
+    """C3 free `portfolio.risk` — a risk band + volatility + max-drawdown/recovery, with
+    `risk_band_basis` naming which series they're actually based on. M2.3 (resolves B88): once the
+    portfolio's own daily valuation series is long enough (`load_portfolio_risk`), these are the
+    TRUE portfolio figures (`risk_band_basis` = "portfolio return series"); below that row count
+    they fall back to the value-weighted AVERAGE fund volatility (an upper-bound proxy,
+    `risk_band_basis` = "average fund volatility") with `max_drawdown_pct`/`recovery_months`
+    honestly None (the client renders 'coming soon'). `_vol_band` applies the SAME thresholds
+    either way — a band over volatility_pct, basis-agnostic."""
     return {
         "portfolio_id": portfolio_id,
         "risk_band": _vol_band(r.volatility_pct),
-        "risk_band_basis": "average fund volatility",  # B88: indicative — NOT the true portfolio σ
+        "risk_band_basis": r.risk_band_basis,
         "volatility_pct": r.volatility_pct,
-        "max_drawdown_pct": r.max_drawdown_pct,  # None — deferred to the valuation-series wave (B88)
-        "recovery_months": None,
+        "max_drawdown_pct": r.max_drawdown_pct,
+        "recovery_months": r.recovery_months,
         "fund_count": r.fund_count,
         "funds_with_metrics": r.funds_with_metrics,
         "as_of": r.as_of,
@@ -332,13 +397,17 @@ def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
 
 
 def risk_advanced_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
-    """C3 plus `portfolio.risk_advanced` — the rolling-return stats (returns aggregate by weight, so the
-    value-weighted rolling average is defensible). Sharpe/Sortino (ratios — B88) and alpha/beta need the
-    portfolio valuation/benchmark series (not built) → None ('coming soon'). Still no DhanRadar composite."""
+    """C3 plus `portfolio.risk_advanced` — Sharpe/Sortino/rolling-return stats. M2.3 (resolves
+    B88): Sharpe/Sortino/rolling_1y_pct_positive are the TRUE portfolio figures once the valuation
+    series is long enough (see `load_portfolio_risk`'s `risk_band_basis`); below that they're
+    honestly None (rolling_1y_avg_pct still comes from the value-weighted fallback — returns
+    aggregate by weight, so that average stays defensible even pre-series). alpha/beta need a
+    benchmark return series (ADR-0033b, out of scope) → still None ('coming soon'). No DhanRadar
+    composite, ever."""
     return {
         "portfolio_id": portfolio_id,
-        "sharpe_ratio": r.sharpe_ratio,  # None — deferred (B88)
-        "sortino_ratio": r.sortino_ratio,  # None — deferred (B88)
+        "sharpe_ratio": r.sharpe_ratio,
+        "sortino_ratio": r.sortino_ratio,
         "rolling_1y_avg_pct": r.rolling_1y_avg_pct,
         "rolling_1y_pct_positive": r.rolling_1y_pct_positive,
         "alpha": None,

@@ -27,6 +27,12 @@ Mathematics conventions (documented once here; unit tests pin exact values):
   Minimum points        : _MIN_NAV_POINTS = 252  (< 1 trading year → refuse,
                           return all-None; a garbage ratio on sparse data is worse
                           than no ratio).
+
+  M2.3 override         : ``risk_adjusted_stats(min_points=..., periods_per_year=...)``
+                          lets a DIFFERENT-cadence series (the portfolio's own daily
+                          valuation series, mf.valuation — genuinely calendar-daily,
+                          365/yr) reuse this exact Sharpe/Sortino/vol math without
+                          inheriting the fund-NAV 252-point / business-daily defaults.
 """
 
 from __future__ import annotations
@@ -91,12 +97,24 @@ def risk_adjusted_stats(
     points: list[tuple[datetime.date, float]],
     *,
     risk_free_annual: float,
+    min_points: int = _MIN_NAV_POINTS,
+    periods_per_year: int = _PERIODS_PER_YEAR,
 ) -> RiskStats:
     """Compute Sharpe, Sortino, annualised vol, and rolling-1Y stats.
 
     ``risk_free_annual`` is an annual rate as a FRACTION (e.g. 0.065 = 6.5 %).
     Returns RiskStats with all-None fields when there are fewer than
-    _MIN_NAV_POINTS distinct NAV points.
+    ``min_points`` distinct points (default ``_MIN_NAV_POINTS`` = 252, the
+    fund-NAV convention).
+
+    ``min_points``/``periods_per_year`` are overridable (M2.3) for a
+    DIFFERENT input cadence — e.g. the portfolio's own daily valuation series
+    (`mf.valuation`) is genuinely calendar-daily (a weekend row carries the
+    prior value forward — a real, not fabricated, zero return), so it
+    annualises on 365 periods/year and applies its own product-level minimum
+    (portfolio_read._MIN_TRUE_RISK_ROWS), not the fund-NAV 252/business-daily
+    convention. Fund-NAV call sites (tasks/mf.py) pass neither kwarg and keep
+    today's exact behaviour.
     """
     pts = _sorted_unique(points)
     _none = RiskStats(
@@ -108,7 +126,7 @@ def risk_adjusted_stats(
         rolling_1y_max_pct=None,
         rolling_1y_pct_positive=None,
     )
-    if len(pts) < _MIN_NAV_POINTS:
+    if len(pts) < min_points:
         return _none
 
     # Periodic returns as FRACTIONS (signals._periodic_returns returns %, so ÷ 100).
@@ -123,14 +141,14 @@ def risk_adjusted_stats(
     # pair; annualise over the number of PERIODS, which is n).
     p_first = pts[0][1]
     p_last = pts[-1][1]
-    ann_ret = (p_last / p_first) ** (_PERIODS_PER_YEAR / n) - 1.0
+    ann_ret = (p_last / p_first) ** (periods_per_year / n) - 1.0
 
     # Annualised volatility — SAMPLE stdev (ddof=1) per financial convention.
-    # vol_annual = stdev_period × √252
+    # vol_annual = stdev_period × √periods_per_year
     if n < 2:
         # Cannot compute sample stdev with < 2 observations.
         return _none
-    vol = statistics.stdev(rets) * math.sqrt(_PERIODS_PER_YEAR)   # fraction
+    vol = statistics.stdev(rets) * math.sqrt(periods_per_year)   # fraction
     volatility_pct = vol * 100.0                                   # in percent
 
     # Sharpe ratio (dimensionless).
@@ -143,10 +161,10 @@ def risk_adjusted_stats(
         sharpe = (ann_ret - risk_free_annual) / vol
 
     # Downside deviation, MAR = 0 per period.
-    # dd = √( Σ min(r, 0)² / n ) × √252
+    # dd = √( Σ min(r, 0)² / n ) × √periods_per_year
     # Using the FULL sample n as denominator (Sortino-Price 1994).
     sum_neg_sq = sum(min(0.0, r) ** 2 for r in rets)
-    dd = math.sqrt(sum_neg_sq / n) * math.sqrt(_PERIODS_PER_YEAR)
+    dd = math.sqrt(sum_neg_sq / n) * math.sqrt(periods_per_year)
 
     sortino: float | None
     if dd < _MIN_MEANINGFUL_VOL:

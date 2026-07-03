@@ -1596,6 +1596,10 @@ export function DivSection({ portfolioId }: { portfolioId: string }) {
 //             allowed and DO render — they are NOT the composite (non-neg #2).
 //             risk_band renders as a badge+word only, never a number.
 //             No advisory verbs (non-neg #1).
+// M2.3 (resolves B88): max_drawdown_pct/recovery_months/sharpe_ratio/sortino_ratio/
+//             rolling_1y_pct_positive are real once the portfolio's own daily valuation
+//             series is long enough (risk_band_basis = "portfolio return series"); below
+//             that they're still null and render as ComingSoonCard, unchanged.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Maps backend risk_band → display word for RiskBadge (factual descriptors, not advisory verbs). */
@@ -1662,11 +1666,32 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
     >
       {adv && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {/* Standard ratios — DOM-allowed */}
-          {/* B88: a true portfolio Sharpe/Sortino needs the portfolio return series (not built) —
-              averaging per-fund ratios is meaningless, so defer rather than show a wrong number. */}
-          <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." tip={sharpeTip} />
-          <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." tip={sortinoTip} />
+          {/* Standard ratios — DOM-allowed. M2.3 (resolves B88): real once the portfolio's own daily
+              valuation series is long enough; below that they're still null → coming-soon. */}
+          {adv.sharpe_ratio !== null ? (
+            <div className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="flex items-center gap-1 text-caption text-ink-muted">
+                Sharpe Ratio
+                {sharpeTip && <HelpTip tip={sharpeTip} />}
+              </div>
+              <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{adv.sharpe_ratio.toFixed(2)}</div>
+              <div className="mt-1 text-caption text-ink-secondary">Return per unit of total risk.</div>
+            </div>
+          ) : (
+            <ComingSoonCard label="Sharpe Ratio" desc="Return per unit of total risk. Needs your portfolio return history — being built." tip={sharpeTip} />
+          )}
+          {adv.sortino_ratio !== null ? (
+            <div className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="flex items-center gap-1 text-caption text-ink-muted">
+                Sortino Ratio
+                {sortinoTip && <HelpTip tip={sortinoTip} />}
+              </div>
+              <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{adv.sortino_ratio.toFixed(2)}</div>
+              <div className="mt-1 text-caption text-ink-secondary">Return per unit of downside risk.</div>
+            </div>
+          ) : (
+            <ComingSoonCard label="Sortino Ratio" desc="Return per unit of downside risk. Needs your portfolio return history — being built." tip={sortinoTip} />
+          )}
           <div className="rounded-xl border border-line bg-surface-2 p-4">
             <div className="flex items-center gap-1 text-caption text-ink-muted">
               Rolling 1Y Avg
@@ -1675,9 +1700,15 @@ function AdvancedPanel({ portfolioId, open }: { portfolioId: string; open: boole
             <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_avg_pct, '')}</div>
             <div className="mt-1 text-caption text-ink-secondary">Average 1-year rolling return.</div>
           </div>
-          {/* B88: a per-fund hit-rate (% positive windows) doesn't value-aggregate to a portfolio figure
-              (depends on correlation/timing) — deferred like Sharpe/Sortino until the valuation series. */}
-          <ComingSoonCard label="Positive 1Y Windows" desc="% of 1-year periods with positive returns. Needs your portfolio return history — being built." />
+          {adv.rolling_1y_pct_positive !== null ? (
+            <div className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="text-caption text-ink-muted">Positive 1Y Windows</div>
+              <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">{fmtPctRisk(adv.rolling_1y_pct_positive, '')}</div>
+              <div className="mt-1 text-caption text-ink-secondary">% of 1-year periods with a positive return.</div>
+            </div>
+          ) : (
+            <ComingSoonCard label="Positive 1Y Windows" desc="% of 1-year periods with positive returns. Needs your portfolio return history — being built." />
+          )}
           {/* alpha/beta always null server-side — render as coming soon */}
           <ComingSoonCard label="Alpha" desc="Excess return vs benchmark. Being built." tip={alphaTip} />
           <ComingSoonCard label="Beta" desc="Market sensitivity measure. Being built." tip={betaTip} />
@@ -1756,13 +1787,40 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
                   {volatilityTip && <HelpTip tip={volatilityTip} />}
                 </div>
                 <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.volatility_pct)}</div>
-                <div className="mt-1 text-caption text-ink-secondary">Average annualised volatility of your funds (indicative).</div>
+                <div className="mt-1 text-caption text-ink-secondary">
+                  {risk.risk_band_basis === 'portfolio return series'
+                    ? 'Annualised volatility of your whole portfolio.'
+                    : 'Average annualised volatility of your funds (indicative).'}
+                </div>
               </div>
-              {/* B88: portfolio drawdown doesn't aggregate linearly (fund falls happen at different times)
-                  — needs the portfolio valuation series (not built). Defer, don't show a wrong number. */}
-              <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." tip={maxDrawdownTip} />
-              {/* recovery_months always null — render as coming soon (NO-SUPPRESS) */}
-              <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." tip={recoveryTip} />
+              {/* M2.3 (resolves B88): real once the portfolio's own daily valuation series is long
+                  enough (risk_band_basis = "portfolio return series"); below that still null. */}
+              {risk.max_drawdown_pct !== null ? (
+                <div className="rounded-xl border border-line bg-surface-2 p-4">
+                  <div className="flex items-center gap-1 text-caption text-ink-muted">
+                    Biggest Fall
+                    {maxDrawdownTip && <HelpTip tip={maxDrawdownTip} />}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">{fmtPctRisk(risk.max_drawdown_pct, '-')}</div>
+                  <div className="mt-1 text-caption text-ink-secondary">Largest peak-to-trough decline in your portfolio value.</div>
+                </div>
+              ) : (
+                <ComingSoonCard label="Biggest Fall" desc="Largest peak-to-trough decline. Needs your portfolio valuation history — being built." tip={maxDrawdownTip} />
+              )}
+              {risk.recovery_months !== null ? (
+                <div className="rounded-xl border border-line bg-surface-2 p-4">
+                  <div className="flex items-center gap-1 text-caption text-ink-muted">
+                    Recovery Time
+                    {recoveryTip && <HelpTip tip={recoveryTip} />}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[18px] font-extrabold text-ink">
+                    {risk.recovery_months} {risk.recovery_months === 1 ? 'month' : 'months'}
+                  </div>
+                  <div className="mt-1 text-caption text-ink-secondary">Time taken to recover from your biggest fall.</div>
+                </div>
+              ) : (
+                <ComingSoonCard label="Recovery Time" desc="Average months to recover from a drawdown. Being built." tip={recoveryTip} />
+              )}
               <div className="rounded-xl border border-line bg-surface-2 p-4">
                 <div className="text-caption text-ink-muted">Coverage</div>
                 <div className="mt-0.5 font-mono text-[15px] font-extrabold text-ink">
