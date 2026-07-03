@@ -67,11 +67,15 @@ class PortfolioReadModel:
 async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> PortfolioReadModel:
     """Load the owner's holdings (RLS-scoped) enriched with fund name/category + latest NAV + label/band,
     plus portfolio totals. `invested_amount` is read straight from `mf_user_holdings` = net-invested (B86).
-    `unified_score` is never queried."""
+    `unified_score` is never queried. Active positions only (`units > 0`) — a fully-redeemed (closed) folio
+    from CAS stays a row in the DB but is hidden from this and every downstream view; its history lives in
+    the transaction ledger, not here."""
     pid = uuid.UUID(portfolio_id)
 
     holdings = (
-        await db.execute(select(MfUserHolding).where(MfUserHolding.portfolio_id == pid))
+        await db.execute(
+            select(MfUserHolding).where(MfUserHolding.portfolio_id == pid, MfUserHolding.units > 0)
+        )
     ).scalars().all()
     isins = [h.isin for h in holdings]
 
@@ -575,11 +579,15 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
     dates simply doesn't contribute — partial coverage across holdings is fine). Both numbers are the
     user's OWN calculated change — DOM-allowed (#2-exempt user money). RLS-scoped: the caller must set
     app.user_id before calling (the router does this via the same session used for _owned_portfolio_id).
+    Active positions only (`units > 0`) — a zero-unit (fully-redeemed) row contributes 0 to the change
+    anyway, so filtering it out just skips a useless NAV lookup.
     """
     pid = uuid.UUID(portfolio_id)
     holdings = (
         await db.execute(
-            select(MfUserHolding.isin, MfUserHolding.units).where(MfUserHolding.portfolio_id == pid)
+            select(MfUserHolding.isin, MfUserHolding.units).where(
+                MfUserHolding.portfolio_id == pid, MfUserHolding.units > 0
+            )
         )
     ).all()
     if not holdings:
