@@ -117,6 +117,9 @@ async def test_subset_statement_no_rows_lost_checkpoints_only_covered(db_session
     await set_rls_user(app_session, uid)
     invested1, projected1 = await _project_and_write_holdings(app_session, uid, parsed1, pid)
     job1 = str(uuid.uuid4())
+    # _project_and_write_holdings commits internally, clearing the SET LOCAL GUC — re-scope for
+    # the checkpoint write's new transaction (prod's rls_user_session re-applies on after_begin).
+    await set_rls_user(app_session, uid)
     await _write_statement_checkpoints(app_session, uid, pid, job1, parsed1, projected1)
     await app_session.commit()
 
@@ -131,6 +134,7 @@ async def test_subset_statement_no_rows_lost_checkpoints_only_covered(db_session
     await set_rls_user(app_session, uid)
     invested2, projected2 = await _project_and_write_holdings(app_session, uid, parsed2, pid)
     job2 = str(uuid.uuid4())
+    await set_rls_user(app_session, uid)  # internal commit cleared the GUC (see upload 1)
     await _write_statement_checkpoints(app_session, uid, pid, job2, parsed2, projected2)
     await app_session.commit()
 
@@ -218,6 +222,7 @@ async def test_mismatch_checkpoint_never_mutates_ledger(db_session, app_session)
     await set_rls_user(app_session, uid)
     invested, projected = await _project_and_write_holdings(app_session, uid, parsed, pid)
     job = str(uuid.uuid4())
+    await set_rls_user(app_session, uid)  # internal commit cleared the GUC
     await _write_statement_checkpoints(app_session, uid, pid, job, parsed, projected)
     await app_session.commit()
 
@@ -270,6 +275,7 @@ async def test_ok_checkpoint_when_units_agree(db_session, app_session):
     await set_rls_user(app_session, uid)
     invested, projected = await _project_and_write_holdings(app_session, uid, parsed, pid)
     job = str(uuid.uuid4())
+    await set_rls_user(app_session, uid)  # internal commit cleared the GUC
     await _write_statement_checkpoints(app_session, uid, pid, job, parsed, projected)
     await app_session.commit()
 
@@ -314,6 +320,9 @@ async def test_checkpoint_rls_rejects_cross_user(db_session, app_session):
     await set_rls_user(app_session, a)
     invested, projected = await _project_and_write_holdings(app_session, a, parsed, pid)
 
+    # Re-scope to A after the internal commit — the rejection below must come from GUC=A vs
+    # row-owner=B (the WITH CHECK mismatch), not from an unset GUC.
+    await set_rls_user(app_session, a)
     with pytest.raises(DBAPIError) as exc:
         await _write_statement_checkpoints(
             app_session, b, pid, str(uuid.uuid4()), parsed, projected
