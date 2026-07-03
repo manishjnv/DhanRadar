@@ -35,6 +35,7 @@ from dhanradar.mf.portfolio_read import (
     diversification_payload,
     holdings_payload,
     load_day_change,
+    load_first_investment_date,
     load_holdings_xirr,
     load_portfolio_read_model,
     load_portfolio_risk,
@@ -292,17 +293,23 @@ async def portfolio_valuation_series(
     """M2.2 `portfolio.valuation_series` — the owner's daily portfolio total value series.
 
     Returns up to `days` most-recent data points (default 90, max ~3 years = 1095).
-    Each point: {date, value, invested} — the owner's OWN calculated numbers
-    (DOM-allowed, #2-exempt).  Empty `points` list on cold-start (no daily valuations
-    computed yet — the nightly Celery task fills this). Anonymous → 401; another
+    Each point: {date, value, invested, twr_index} — the owner's OWN calculated numbers
+    (DOM-allowed, #2-exempt). `twr_index` (PR-C) is the flow-neutral wealth index anchored to
+    `points[0]` — when `days` truncates the series (a caller requesting less than the full ~3y
+    window), the index anchors to the first RETURNED row, not the portfolio's absolute start;
+    every current FE caller requests the full window (`?days=1095`), so this never truncates in
+    practice. `first_investment_date` is the ledger's earliest date (falls back to the first
+    row of `points` when the ledger is empty). Empty `points` list on cold-start (no daily
+    valuations computed yet — the nightly Celery task fills this). Anonymous → 401; another
     user's portfolio → 404.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     points = await load_portfolio_valuation_series(db, portfolio_id, days=days)
+    first_investment_date = await load_first_investment_date(db, portfolio_id, points)
     return serialize_concept(
         "portfolio.valuation_series",
-        valuation_series_payload(points, portfolio_id),
+        valuation_series_payload(points, portfolio_id, first_investment_date),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

@@ -25,6 +25,7 @@ from dhanradar.mf.valuation import (
     ValuationPoint,
     _dated_flow_adjusted_returns,
     max_drawdown_and_recovery,
+    twr_index_series,
     wealth_index,
 )
 from dhanradar.models.mf import (
@@ -798,24 +799,55 @@ async def load_portfolio_valuation_series(
     ]
 
 
+async def load_first_investment_date(
+    db: AsyncSession, portfolio_id: str, series: list[ValuationPoint]
+) -> datetime.date | None:
+    """The portfolio's earliest ledger transaction date (PR-C money/TWR view) — anchors the FE's
+    "All" window and its age-based adaptive period-pill ladder. Falls back to the first row of
+    ``series`` (already loaded by the caller — no extra query) when the ledger has no rows yet, e.g.
+    a portfolio seeded before the transaction-ledger rollout. None only when BOTH are empty
+    (no ledger, no valuation series — a genuine cold start)."""
+    pid = uuid.UUID(portfolio_id)
+    earliest = await db.scalar(
+        select(func.min(MfPortfolioTransaction.txn_date)).where(
+            MfPortfolioTransaction.portfolio_id == pid
+        )
+    )
+    if earliest is not None:
+        return earliest
+    return series[0].valuation_date if series else None
+
+
 def valuation_series_payload(
     points: list[ValuationPoint],
     portfolio_id: str,
+    first_investment_date: datetime.date | None = None,
 ) -> dict:
     """`portfolio.valuation_series` payload.
 
-    ``points`` are the owner's own calculated numbers (total_value,
-    total_invested) — DOM-allowed, #2-exempt (serialization.py note).
-    No DhanRadar composite score is included.
+    ``points`` are the owner's own calculated numbers (total_value, total_invested) — DOM-allowed,
+    #2-exempt (serialization.py note). `twr_index` (PR-C) is the flow-neutral wealth index
+    (`valuation.twr_index_series`, base 100.0 at the FIRST row of `points`) — a deposit/redemption
+    never moves it, so it is the correct series for a "your return" line; unlike `value`, a big
+    lump-sum deposit does NOT inflate it (the founder-reported +212% fake-gain bug this fixes).
+    `first_investment_date` is the portfolio's earliest ledger date (`load_first_investment_date`)
+    — the FE clamps its "All" window there and derives its adaptive period-pill ladder from the
+    resulting age; None only for a portfolio with neither ledger rows nor a valuation series yet.
+    No DhanRadar composite score anywhere.
     """
+    twr_by_date = dict(twr_index_series(points))
     return {
         "portfolio_id": portfolio_id,
         "point_count": len(points),
+        "first_investment_date": (
+            first_investment_date.isoformat() if first_investment_date else None
+        ),
         "points": [
             {
                 "date": p.valuation_date.isoformat(),
                 "value": p.total_value,
                 "invested": p.total_invested,
+                "twr_index": round(twr_by_date.get(p.valuation_date, 100.0), 4),
             }
             for p in points
         ],

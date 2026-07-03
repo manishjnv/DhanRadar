@@ -30,6 +30,7 @@ import { RiskSection } from './sections';
 import { AllocSection } from './sections';
 import { DivSection } from './sections';
 import { EmptyHero } from './sections';
+import { VsMarketSection, buildPeriodPills, defaultPillKey } from './sections';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,8 @@ import {
   usePortfolioDiversification,
   usePortfolioRisk,
   usePortfolioRiskAdvanced,
+  usePortfolioValueSeries,
+  useNiftyCloseSeries,
 } from '@/features/portfolio/api';
 
 // ---------------------------------------------------------------------------
@@ -134,6 +137,24 @@ const HOLDINGS_PRESENT = {
 const LOADING_STATE = { status: 'loading' as const, data: null, meta: EMPTY_META };
 const EMPTY_STATE = { status: 'empty' as const, data: null, meta: { ...EMPTY_META, reason: 'empty' as const } };
 const ERROR_STATE = { status: 'error' as const, data: null, meta: EMPTY_META };
+
+// Money-view / TWR fixture — used by the HeroMiniChart and VsMarketSection tests below (PR-C).
+// day 2 is a same-day DEPOSIT (value + invested both jump 50,000, no price move) — twr_index stays
+// flat at 100 that day; day 3 is a pure +2% market move (invested unchanged) — twr_index moves.
+const VALUE_SERIES_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    point_count: 3,
+    first_investment_date: '2026-01-01',
+    points: [
+      { date: '2026-06-01', value: 100_000, invested: 100_000, twr_index: 100 },
+      { date: '2026-06-02', value: 150_000, invested: 150_000, twr_index: 100 },
+      { date: '2026-06-03', value: 153_000, invested: 150_000, twr_index: 102 },
+    ],
+  },
+  meta: EMPTY_META,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -248,6 +269,93 @@ describe('HeroSection', () => {
       data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: null, xirr_1y_window_days: 365 },
     } as any);
     expect(screen.queryByText('1Y XIRR')).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Hero mini "money view" chart (PR-C) — value vs invested, no Nifty line.
+  // -------------------------------------------------------------------------
+
+  it('money-view mini chart => Invested/Value/P&L chips + an invested step-line, no Nifty', () => {
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: VALUE_SERIES_PRESENT, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+
+    const { container } = renderHero(SUMMARY_PRESENT);
+
+    // P&L chip: value 153,000 - invested 150,000 = 3,000 (+2.0%) — unique text, no ambiguity.
+    expect(screen.getByText(/P&L/)).toBeDefined();
+    expect(screen.getAllByText(/Invested/).length).toBeGreaterThan(0);
+    // Invested step-line renders as a dashed grey stroke.
+    expect(container.querySelector('path[stroke="#94A3B8"]')).not.toBeNull();
+    // The hero chart no longer plots (or legends) a Nifty line — Section 2 owns the comparison.
+    // The "Compare with Nifty" LINK still stays (task spec) — only the amber line/legend goes.
+    expect(container.querySelector('path[stroke="#F5C451"]')).toBeNull();
+    expect(screen.queryByText(/YOU VS NIFTY/i)).toBeNull();
+    expect(screen.queryByText(/^NIFTY /i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPeriodPills / defaultPillKey — pure helper (PR-C §3, adaptive pill ladder)
+// ---------------------------------------------------------------------------
+
+describe('buildPeriodPills', () => {
+  it('age ~205 days => 1D, 7D, 1M, 3M, 6M, All (only 5 ladder rungs fit — 1Y needs 365)', () => {
+    expect(buildPeriodPills(205).map((p) => p.key)).toEqual(['1D', '7D', '1M', '3M', '6M', 'All']);
+  });
+
+  it('age 10 years => the largest six rungs that fit, plus All', () => {
+    expect(buildPeriodPills(3650).map((p) => p.key)).toEqual(['3M', '6M', '1Y', '3Y', '5Y', '10Y', 'All']);
+  });
+
+  it('age 3 days => only 1D fits, plus All', () => {
+    expect(buildPeriodPills(3).map((p) => p.key)).toEqual(['1D', 'All']);
+  });
+
+  it('age 0 days (brand-new portfolio) => just All', () => {
+    expect(buildPeriodPills(0).map((p) => p.key)).toEqual(['All']);
+  });
+
+  it('unknown age (null/undefined) is treated as unbounded — full ladder, not a collapsed [All]', () => {
+    expect(buildPeriodPills(null).map((p) => p.key)).toEqual(['3M', '6M', '1Y', '3Y', '5Y', '10Y', 'All']);
+    expect(buildPeriodPills(undefined).map((p) => p.key)).toEqual(['3M', '6M', '1Y', '3Y', '5Y', '10Y', 'All']);
+  });
+});
+
+describe('defaultPillKey', () => {
+  it('keeps 6M when it is still in the ladder', () => {
+    expect(defaultPillKey(buildPeriodPills(3650))).toBe('6M');
+  });
+
+  it('falls back to the largest non-All pill when 6M is not in the ladder', () => {
+    expect(defaultPillKey(buildPeriodPills(3))).toBe('1D'); // pills = [1D, All]
+  });
+
+  it('falls back to All when it is the only pill', () => {
+    expect(defaultPillKey(buildPeriodPills(0))).toBe('All'); // pills = [All]
+  });
+});
+
+// ---------------------------------------------------------------------------
+// VsMarketSection — Section-2 "You" line is TWR (flow-neutral), not value-rebased (PR-C §2)
+// ---------------------------------------------------------------------------
+
+describe('VsMarketSection — TWR return line', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a same-day deposit leaves the return line flat; a real market move still shows', () => {
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: VALUE_SERIES_PRESENT, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+
+    render(<VsMarketSection portfolioId="pid" />, { wrapper });
+
+    // twr_index: 100 -> 100 (deposit day, flat) -> 102 (+2% pure market move). The naive
+    // value-based calc would give (153,000/100,000 - 1) * 100 = +53% — the founder-reported bug.
+    expect(screen.getByText('+2.00%')).toBeDefined();
+    expect(screen.queryByText(/53\.00%/)).toBeNull();
   });
 });
 
