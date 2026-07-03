@@ -478,48 +478,19 @@ async def _run_pipeline(
     # validate against it so a wrong-investor CAS is caught early).
     await _store_or_validate_identity(user_id, identity)
 
-    # Resolve CAMS TDS placeholders (isin="CAMS:<product_code>") to real ISINs via
-    # pg_trgm similarity on mf_funds.scheme_name.  Unresolved holdings are kept with
-    # the placeholder ISIN and will score as insufficient_data (honest fail-safe).
+    # Resolve CAMS TDS placeholders (isin="CAMS:<product_code>") to real ISINs via the
+    # B94-hardened resolver (AMC token gate + similarity floor/ambiguity margin +
+    # txn-price vs NAV-history validation — see resolve_cams_isins). Unresolved holdings
+    # keep the placeholder ISIN and score as insufficient_data (honest fail-safe).
     cams_placeholders = [p for p in parsed if p.isin.startswith("CAMS:")]
     if cams_placeholders:
         from dataclasses import replace as _dc_replace
 
-        from sqlalchemy import String, bindparam
-        from sqlalchemy import text as _sa_text
-        from sqlalchemy.dialects.postgresql import ARRAY
-
         from dhanradar.db import task_session
+        from dhanradar.mf.cas import resolve_cams_isins
 
-        # Batch all CAMS-placeholder names into a single unnest query instead of N serial
-        # round trips. One query → one DB round-trip regardless of portfolio size.
-        # bindparam with ARRAY(String) so asyncpg infers the correct pg array type
-        # without the ::text[] cast syntax that confuses asyncpg's parameter parser.
-        names = [h.scheme_name for h in cams_placeholders]
         async with task_session() as _db:
-            rows = (await _db.execute(
-                _sa_text("""
-                    SELECT DISTINCT ON (n.idx)
-                        (n.idx - 1)::int AS idx,
-                        f.isin,
-                        similarity(f.scheme_name, n.name) AS sim
-                    FROM unnest(:names) WITH ORDINALITY AS n(name, idx),
-                         mf.mf_funds f
-                    WHERE similarity(f.scheme_name, n.name) > 0.25
-                    ORDER BY n.idx, sim DESC
-                """).bindparams(bindparam("names", type_=ARRAY(String))),
-                {"names": names},
-            )).all()
-
-        best_match: dict[int, tuple[str, float]] = {r.idx: (r.isin, float(r.sim)) for r in rows}
-        resolved_map: dict[str, str] = {}  # placeholder isin → real isin
-        for i, h in enumerate(cams_placeholders):
-            if i in best_match:
-                real_isin, sim = best_match[i]
-                logger.info("cams_isin_resolved: %r -> %s (sim=%.2f)", h.scheme_name, real_isin, sim)
-                resolved_map[h.isin] = real_isin
-            else:
-                logger.warning("cams_isin_unresolved: %r (best sim < 0.25) -- keeping placeholder", h.scheme_name)
+            resolved_map = await resolve_cams_isins(_db, cams_placeholders)
         if resolved_map:
             parsed = [
                 _dc_replace(p, isin=resolved_map[p.isin]) if p.isin in resolved_map else p
