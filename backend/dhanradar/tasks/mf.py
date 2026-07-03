@@ -373,7 +373,10 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
                 " WHERE isin = ANY(:isins) AND nav_date >= :from_date AND nav_date <= :to_date"
                 " ORDER BY isin, nav_date"
             ),
-            {"isins": isins, "from_date": from_date, "to_date": today},
+            # Fetch NAVs from 7 days BEFORE the replay window so carry-forward is seeded at
+            # from_date (the NAV in effect on day 1 was usually published a day or two earlier —
+            # weekend/holiday). replay_valuation_series applies any nav_date <= d correctly.
+            {"isins": isins, "from_date": from_date - timedelta(days=7), "to_date": today},
         )
         nav_by_isin: dict[str, list[tuple[date, float]]] = {}
         for r in nav_rows:

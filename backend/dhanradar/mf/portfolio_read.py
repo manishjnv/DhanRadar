@@ -188,9 +188,10 @@ def summary_payload(
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
     NO portfolio composite score and NO invented verdict label (that stays a future portfolio.health concept,
-    rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN flow-adjusted daily move —
-    None until ≥2 valuation rows exist. The pct is computed server-side from the SAME two valuation
-    rows as the ₹ change (the live summary total is a different base — don't recompute client-side)."""
+    rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN bottom-up daily move
+    (Σ units × ΔNAV from load_day_change, §39.1) — None when no holding has 2 NAV dates yet. The pct
+    is computed server-side from the SAME NAV pairs as the ₹ change (the live summary total is a
+    different base — don't recompute client-side)."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
@@ -499,6 +500,8 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
 
     isins = [h.isin for h in holdings]
     # ONE batched query for every holding's two most-recent NAV dates (never per-ISIN, never per-day).
+    # The 30-day bound keeps the window function on recent (uncompressed) Timescale chunks — this is
+    # a hot request-path read; a fund with no NAV in 30 days is honestly excluded, not scanned for.
     nav_rows = (
         await db.execute(
             text(
@@ -506,6 +509,7 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
                 "  SELECT isin, nav, "
                 "         ROW_NUMBER() OVER (PARTITION BY isin ORDER BY nav_date DESC) AS rn"
                 "  FROM mf.mf_nav_history WHERE isin = ANY(:isins)"
+                "    AND nav_date >= CURRENT_DATE - INTERVAL '30 days'"
                 ") ranked WHERE rn <= 2 ORDER BY isin, rn"
             ),
             {"isins": isins},
