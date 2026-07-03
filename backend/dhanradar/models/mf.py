@@ -350,6 +350,57 @@ class MfCasJob(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # §39.4 coverage window — the CAS's own statement-period header (casparser
+    # `statement_period`). NULL when the source format has no such header (CAMS
+    # Transaction-Details .txt/.xls) or the PDF parser couldn't find one.
+    stmt_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    stmt_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class MfPortfolioStatementCheckpoint(Base):
+    """Per-upload x (instrument, folio) evidence of the CAS-STATED units/cost (§39.4).
+
+    The ledger is append-only and absence-from-a-statement is never treated as a redemption
+    (S9), so this table is where a re-upload's stated balance gets PERMANENTLY recorded — the
+    RTA reconciliation practice (computed ledger balance must equal the statement balance,
+    tolerance `projection.UNITS_GAP_TOLERANCE`). `reconciliation_status='mismatch'` flags a
+    disagreement (S10 — an RTA-corrected re-issue, an un-captured txn type) WITHOUT ever
+    mutating the ledger (I12); it is also the ONLY data source in HOLDINGS_ONLY state (S3 —
+    a summary/CDSL CAS with no transaction section at all).
+    """
+
+    __tablename__ = "portfolio_statement_checkpoints"
+    __table_args__ = (
+        Index(
+            "ix_portfolio_stmt_checkpoints_portfolio_instr_folio",
+            "portfolio_id",
+            "instrument_id",
+            "folio_number",
+        ),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), nullable=False
+    )
+    portfolio_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    upload_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    instrument_id: Mapped[str] = mapped_column(Text, nullable=False)
+    folio_number: Mapped[str] = mapped_column(Text, nullable=False)
+    stated_units: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    stated_cost: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    stmt_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    reconciliation_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="ok")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class MfUserFundScoreHistory(Base):

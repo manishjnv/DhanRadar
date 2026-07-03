@@ -122,6 +122,31 @@ def test_parse_cas_handles_cdsl_accounts_structure():
     assert "AXIS" in h.scheme_name  # still mentions AXIS fund
 
 
+# --- §39.4 statement-period extraction ----------------------------------------
+
+
+def test_parse_cas_extracts_statement_period():
+    """casparser's PDF statement_period (dd-Mmm-yyyy strings, model_dump field name `from_`)
+    parses into ParsedCasIdentity.stmt_from/stmt_to."""
+
+    def _reader(_path, _password):
+        d = _fake_cas(_path, _password)
+        d["statement_period"] = {"from_": "01-Apr-2023", "to": "30-Jun-2023"}
+        return d
+
+    _, identity = parse_cas("x.pdf", "pw", reader=_reader)
+    assert identity.stmt_from == date(2023, 4, 1)
+    assert identity.stmt_to == date(2023, 6, 30)
+
+
+def test_parse_cas_statement_period_absent_is_none():
+    """No statement_period in the raw output (or an empty one) → stmt_from/stmt_to stay None —
+    §39.4 says never guess."""
+    _, identity = parse_cas("x.pdf", "pw", reader=_fake_cas)
+    assert identity.stmt_from is None
+    assert identity.stmt_to is None
+
+
 # --- dedup hash --------------------------------------------------------------
 def test_cas_sha256_is_deterministic():
     assert cas_sha256(b"abc") == cas_sha256(b"abc")

@@ -103,10 +103,16 @@ class ParsedCasIdentity:
     PAN is validated against the canonical 10-char format before being stored;
     anything that doesn't match is set to None so downstream callers never receive
     a malformed PAN. investor_name is trimmed but otherwise kept as-is.
+
+    stmt_from/stmt_to (§39.4) are the CAS's own statement-period header — casparser's PDF
+    parsers (CAMS/KFintech/CDSL/NSDL) expose `statement_period`; the CAMS Transaction-Details
+    .txt/.xls format has NO such header, so those stay None (never guessed).
     """
 
     pan: str | None           # uppercase, 10-char PAN — None if absent or malformed
     investor_name: str | None  # as printed in the CAS
+    stmt_from: date | None = None
+    stmt_to: date | None = None
 
 
 _PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
@@ -315,12 +321,33 @@ def parse_cas(
     return holdings, _extract_pdf_identity(raw)
 
 
+#: casparser's PDF statement_period strings are "dd-Mmm-yyyy" (e.g. "01-Apr-2023") — the same
+#: format its own STMT_PERIOD_RE/PERIOD_RE regexes emit for CAMS/KFintech and CDSL/NSDL alike.
+_STMT_DATE_FMTS = ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d")
+
+
+def _parse_stmt_date(s: str | None) -> date | None:
+    """Best-effort parse of a casparser statement_period date string. None on empty/unparseable
+    input (§39.4: never guess) — casparser itself defaults to "" when it can't find the header."""
+    if not s:
+        return None
+    for fmt in _STMT_DATE_FMTS:
+        try:
+            return datetime.strptime(s.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _extract_pdf_identity(raw: dict) -> ParsedCasIdentity:
     """Best-effort investor identity from a casparser raw output dict.
 
     casparser embeds investor info in `investor_info` (name, email, mobile) and
     the PAN in the first folio's `PAN` / `pan` key or in `investor_info.pan`.
     All of these are optional depending on the CAS type and casparser version.
+
+    §39.4: also extracts the statement-period header (`statement_period.from`/`.to` — pydantic
+    model_dump uses the field name `from_`, so both spellings are checked defensively).
     """
     info = raw.get("investor_info") or {}
     raw_pan = (
@@ -333,7 +360,12 @@ def _extract_pdf_identity(raw: dict) -> ParsedCasIdentity:
         )
     )
     name = str(info.get("name") or "").strip() or None
-    return ParsedCasIdentity(pan=_parse_pan(raw_pan), investor_name=name)
+    sp = raw.get("statement_period") or {}
+    stmt_from = _parse_stmt_date(sp.get("from_") or sp.get("from"))
+    stmt_to = _parse_stmt_date(sp.get("to"))
+    return ParsedCasIdentity(
+        pan=_parse_pan(raw_pan), investor_name=name, stmt_from=stmt_from, stmt_to=stmt_to
+    )
 
 
 def _extract_cams_tds_identity(rows: list[dict]) -> ParsedCasIdentity:
