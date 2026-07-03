@@ -37,6 +37,7 @@ from dhanradar.mf.portfolio_read import (
     load_day_change,
     load_first_investment_date,
     load_holdings_xirr,
+    load_ledger_flows_by_date,
     load_portfolio_read_model,
     load_portfolio_risk,
     load_portfolio_valuation_series,
@@ -307,9 +308,12 @@ async def portfolio_valuation_series(
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     points = await load_portfolio_valuation_series(db, portfolio_id, days=days)
     first_investment_date = await load_first_investment_date(db, portfolio_id, points)
+    # Real ledger flows for the TWR index — the same basis as the true-risk math (payouts
+    # included); None (empty ledger) → the invested-delta fallback inside the payload.
+    flows_by_date = await load_ledger_flows_by_date(db, portfolio_id)
     return serialize_concept(
         "portfolio.valuation_series",
-        valuation_series_payload(points, portfolio_id, first_investment_date),
+        valuation_series_payload(points, portfolio_id, first_investment_date, flows_by_date),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

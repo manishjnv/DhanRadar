@@ -147,7 +147,9 @@ def wealth_index(
 
 
 def twr_index_series(
-    points: list[ValuationPoint], base: float = 100.0
+    points: list[ValuationPoint],
+    base: float = 100.0,
+    flows_by_date: Mapping[datetime.date, float] | None = None,
 ) -> list[tuple[datetime.date, float]]:
     """Time-weighted-return wealth index, ONE ENTRY PER INPUT ROW (PR-C hero money-view / Section-2
     TWR return line — fixes the founder-reported bug where a large deposit rebased on window-start
@@ -160,8 +162,12 @@ def twr_index_series(
     or a data gap never reads as a move. Seeded at ``base`` (100.0) on the first row. The client
     rebases any window purely by division — ``(idx_t / idx_window_start − 1) × 100`` — a
     presentation concern, not a recompute.
+
+    ``flows_by_date`` — the ledger's real per-date cash flows (``load_ledger_flows_by_date``):
+    the SAME basis the true-risk math uses, so a dividend-payout day is a flow here too, not a
+    fake dip. None → the invested-delta fallback.
     """
-    dated_returns = dict(_dated_flow_adjusted_returns(points))
+    dated_returns = dict(_dated_flow_adjusted_returns(points, flows_by_date))
     out: list[tuple[datetime.date, float]] = []
     idx = base
     for i, p in enumerate(points):
