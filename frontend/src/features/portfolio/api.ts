@@ -151,6 +151,8 @@ export interface Holding {
   /** Data-confidence band — not a score or verdict */
   confidence_band: 'high' | 'medium' | 'low' | null;
   as_of: string | null;
+  /** User's own per-fund XIRR (M2.3, ledger-derived) — allowed in DOM; null when the ledger has no history for this holding (honest, never fabricated) */
+  xirr_pct?: number | null;
 }
 
 export interface HoldingsPayload {
@@ -174,9 +176,13 @@ export interface SummaryPayload {
   gain_pct: number | null;
   /** User's own XIRR — allowed in DOM */
   xirr_pct: number | null;
-  /** User's own 1-day value change, flow-adjusted — allowed in DOM; null until ≥2 daily-valuation rows exist (M2.2) */
+  /** User's own windowed (~1-year) XIRR (M2.3) — allowed in DOM; null on cold-start or a too-short window */
+  xirr_1y_pct?: number | null;
+  /** Actual days the xirr_1y_pct window covers — may be < 365 when the series is younger; only label it "1Y" when >= 360 */
+  xirr_1y_window_days?: number | null;
+  /** User's own 1-day value change, bottom-up (units × NAV move, §39.1) — allowed in DOM; null until a holding has two NAV dates */
   day_change?: number | null;
-  /** Day change % from the SAME two valuation rows as day_change — never recomputed client-side */
+  /** Day change % from the SAME NAV pairs as day_change — never recomputed client-side */
   day_change_pct?: number | null;
   fund_count: number;
   funds_scored: number;

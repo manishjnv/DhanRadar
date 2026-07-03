@@ -450,6 +450,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
   const heroTip = sectionTooltip('HeroSection');
   const xiirrTip = fieldTooltip('HeroSection', 'xirr');
+  const xirr1yTip = fieldTooltip('HeroSection', 'xirr_1y');
   const bandTip = fieldTooltip('HeroSection', 'confidence_band');
   const band = summary?.confidence_band ?? null;
   const dayChange = summary?.day_change ?? null;
@@ -545,7 +546,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 </div>
               </div>
 
-              {/* Bottom stat row — Invested · Day Change · Lifetime XIRR */}
+              {/* Bottom stat row — Invested · Day Change · 1Y XIRR · Lifetime XIRR */}
               <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4 sm:flex sm:justify-between sm:gap-8">
                 <HeroStat label="Invested" value={fmtFull(summary.total_invested)} />
                 <HeroStat
@@ -560,6 +561,16 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                         : undefined
                   }
                 />
+                {/* M2.3 — a shorter window must not masquerade as "1Y" (>= 360 days only) */}
+                {summary.xirr_1y_pct != null && (summary.xirr_1y_window_days ?? 0) >= 360 && (
+                  <HeroStat
+                    label="1Y XIRR"
+                    value={fmtPct(summary.xirr_1y_pct)}
+                    accent={summary.xirr_1y_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}
+                    hint="Last 12 months"
+                    tip={xirr1yTip}
+                  />
+                )}
                 {summary.xirr_pct !== null && (
                   <HeroStat
                     label="Lifetime XIRR"
@@ -1261,6 +1272,7 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
   const [filter, setFilter] = React.useState('All');
   const bandTip = fieldTooltip('HoldingsSection', 'band');
   const labelTip = fieldTooltip('HoldingsSection', 'label');
+  const xirrTip = fieldTooltip('HoldingsSection', 'xirr');
 
   const totalValue = holdings.reduce((s, h) => s + h.current_value, 0);
 
@@ -1305,12 +1317,13 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         <table className="min-w-[900px] w-full border-collapse text-small">
           <thead>
             <tr className="border-b border-line text-left">
-              {(['Fund', 'Band', 'Label', 'Value', 'Invested', 'P&L', 'Weight'] as const).map((col) => (
+              {(['Fund', 'Band', 'Label', 'Value', 'Invested', 'P&L', 'XIRR', 'Weight'] as const).map((col) => (
                 <th key={col} className="whitespace-nowrap py-2.5 pr-4 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted first:pl-0">
                   <span className="inline-flex items-center gap-1">
                     {col}
                     {col === 'Band' && bandTip && <HelpTip tip={bandTip} />}
                     {col === 'Label' && labelTip && <HelpTip tip={labelTip} />}
+                    {col === 'XIRR' && xirrTip && <HelpTip tip={xirrTip} />}
                   </span>
                 </th>
               ))}
@@ -1351,6 +1364,13 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                   {/* P&L — user's own — allowed */}
                   <td className="py-3 pr-4 font-mono font-bold" style={{ color: gainColor }}>
                     {gain !== null ? `${gain >= 0 ? '+' : ''}${fmt(Math.abs(gain))}` : '—'}
+                  </td>
+                  {/* Per-holding XIRR (M2.3) — user's own return, allowed; dash when the ledger has no history (no-suppress) */}
+                  <td
+                    className="py-3 pr-4 font-mono font-bold"
+                    style={{ color: h.xirr_pct == null ? '#94A3B8' : h.xirr_pct >= 0 ? E : R }}
+                  >
+                    {h.xirr_pct != null ? fmtPct(h.xirr_pct) : '—'}
                   </td>
                   {/* Weight */}
                   <td className="py-3 pr-4 font-mono text-ink-secondary">{weightPct}%</td>

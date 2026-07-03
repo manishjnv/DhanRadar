@@ -110,6 +110,7 @@ const HOLDINGS_PRESENT = {
         label: 'on_track' as const,
         confidence_band: 'high' as const,
         as_of: '2026-06-25T00:00:00Z',
+        xirr_pct: 12.34,
       },
       {
         isin: 'INF200K01QN7',
@@ -123,6 +124,7 @@ const HOLDINGS_PRESENT = {
         label: 'in_form' as const,
         confidence_band: 'medium' as const,
         as_of: '2026-06-25T00:00:00Z',
+        xirr_pct: null,
       },
     ],
   },
@@ -220,6 +222,33 @@ describe('HeroSection', () => {
     assertNoAdvisoryVerbs(text);
     assertNoNumericScore(text);
   });
+
+  it('present => shows 1Y XIRR chip when window is >= 360 days', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: 11.2, xirr_1y_window_days: 365 },
+    } as any);
+    expect(screen.getByText('1Y XIRR')).toBeDefined();
+    expect(screen.getByText(/11\.20%/)).toBeDefined();
+  });
+
+  it('present => omits 1Y XIRR chip when the window is shorter than 360 days', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: 11.2, xirr_1y_window_days: 200 },
+    } as any);
+    // A shrunk window must never be mislabeled "1Y" — Lifetime XIRR still renders.
+    expect(screen.queryByText('1Y XIRR')).toBeNull();
+    expect(screen.getByText('Lifetime XIRR')).toBeDefined();
+  });
+
+  it('present => omits 1Y XIRR chip when xirr_1y_pct is null', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: null, xirr_1y_window_days: 365 },
+    } as any);
+    expect(screen.queryByText('1Y XIRR')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -274,6 +303,16 @@ describe('HoldingsSection', () => {
     expect(screen.queryByText(/^Score$/i)).toBeNull();
     expect(screen.getByText('Band')).toBeDefined();
     expect(screen.getByText('Label')).toBeDefined();
+  });
+
+  it('present => shows the XIRR column, rendering a value and a dash on null (no-suppress)', () => {
+    renderHoldings(HOLDINGS_PRESENT);
+    expect(screen.getByText('XIRR')).toBeDefined();
+    // First holding has xirr_pct: 12.34 => "+12.34%"
+    expect(screen.getByText(/\+12\.34%/)).toBeDefined();
+    // Second holding has xirr_pct: null => rendered as a dash, column never hidden
+    const dashCells = screen.getAllByText('—');
+    expect(dashCells.length).toBeGreaterThan(0);
   });
 
   it('empty => EmptyState visible, no scheme names', () => {

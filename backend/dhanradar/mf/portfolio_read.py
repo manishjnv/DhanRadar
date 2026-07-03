@@ -11,18 +11,21 @@ Read-only, owner-scoped by RLS (the caller checks ownership first). No score, no
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.mf.snapshot import CashFlow, windowed_xirr, xirr
 from dhanradar.mf.valuation import ValuationPoint
 from dhanradar.models.mf import (
     MfFund,
     MfFundMetrics,
     MfPortfolioDailyValue,
     MfPortfolioSnapshot,
+    MfPortfolioTransaction,
     MfUserHolding,
     UserFundScore,
 )
@@ -141,9 +144,16 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
     )
 
 
-def holdings_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
+def holdings_payload(
+    rm: PortfolioReadModel,
+    portfolio_id: str,
+    xirr_map: dict[tuple[str, str], float | None] | None = None,
+) -> dict:
     """C1 `holdings.list` payload — explicit safe fields only; no score. label/band are the educational
-    outputs the client renders as StatusTag/BandRing."""
+    outputs the client renders as StatusTag/BandRing. `xirr_map` (M2.3, keyed by isin+folio_number) is
+    the per-holding XIRR from `load_holdings_xirr`; None (honest) for a holding it doesn't cover — the
+    user's OWN return, DOM-allowed (#2-exempt)."""
+    xirr_map = xirr_map or {}
     return {
         "portfolio_id": portfolio_id,
         "holdings": [
@@ -159,6 +169,7 @@ def holdings_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
                 "label": h.label,
                 "confidence_band": h.confidence_band,
                 "as_of": h.as_of,
+                "xirr_pct": xirr_map.get((h.isin, h.folio_number)),  # M2.3 — None when no ledger history
             }
             for h in rm.holdings
         ],
@@ -184,6 +195,7 @@ def summary_payload(
     portfolio_id: str,
     day_change: float | None = None,
     day_change_pct: float | None = None,
+    xirr_1y: tuple[float, int] | None = None,
 ) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
@@ -191,7 +203,9 @@ def summary_payload(
     rule-table-derived). `day_change`/`day_change_pct` are the owner's OWN bottom-up daily move
     (Σ units × ΔNAV from load_day_change, §39.1) — None when no holding has 2 NAV dates yet. The pct
     is computed server-side from the SAME NAV pairs as the ₹ change (the live summary total is a
-    different base — don't recompute client-side)."""
+    different base — don't recompute client-side). `xirr_1y` is `load_windowed_xirr`'s (pct, actual_days)
+    (M2.3) — None on cold-start or a too-short window; `xirr_1y_window_days` lets the client refuse to
+    label a shrunk window "1Y" (§ FE: only render when >= 360 days)."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
@@ -202,6 +216,8 @@ def summary_payload(
         "gain": gain,
         "gain_pct": gain_pct,
         "xirr_pct": rm.xirr_pct,
+        "xirr_1y_pct": xirr_1y[0] if xirr_1y else None,  # M2.3 — windowed XIRR, DOM-allowed (#2-exempt)
+        "xirr_1y_window_days": xirr_1y[1] if xirr_1y else None,  # actual days covered (may be < 365)
         "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
         "day_change_pct": day_change_pct,  # same two rows as day_change; None with it
         "fund_count": len(rm.holdings),
@@ -535,6 +551,132 @@ async def load_day_change(db: AsyncSession, portfolio_id: str) -> tuple[float, f
         return None
     pct = (change / prev_value * 100.0) if prev_value else None
     return change, pct
+
+
+# --- M2.3: windowed (e.g. 1Y) XIRR + per-holding XIRR — unblocked by the transaction ledger --------
+
+
+async def load_windowed_xirr(
+    db: AsyncSession,
+    portfolio_id: str,
+    end_value: float,
+    days: int = 365,
+) -> tuple[float, int] | None:
+    """Windowed XIRR (e.g. "1Y XIRR") from the daily-valuation series + the ledger's real capital
+    flows inside the window. Window start = today − `days`. The START value is the LATEST
+    `mf_portfolio_daily_values` row ON OR BEFORE that date; if the series doesn't reach back that
+    far, the EARLIEST row is used instead and the window honestly SHRINKS to match (never a
+    fabricated full year). `end_value` is the caller's already-computed live total_value (the read
+    model has it — not re-derived here). Flows are the ledger's B65-signed rows with a non-zero
+    amount (the SAME basis as the lifetime XIRR — dividend payouts included) and `txn_date`
+    strictly after the start row's date, summed per date (a multi-txn day is one flow).
+
+    Returns (xirr_pct, actual_window_days); None when:
+    - the valuation series is empty (cold start — no daily-valuation row at all)
+    - `end_value` <= 0
+    - the actual window is < 30 days (too short to annualise honestly)
+    - the underlying solver can't find a root (delegated to `windowed_xirr`/`xirr`)
+    """
+    pid = uuid.UUID(portfolio_id)
+    today = datetime.date.today()
+    window_start = today - datetime.timedelta(days=days)
+
+    start_row = (
+        await db.execute(
+            select(MfPortfolioDailyValue.valuation_date, MfPortfolioDailyValue.total_value)
+            .where(
+                MfPortfolioDailyValue.portfolio_id == pid,
+                MfPortfolioDailyValue.valuation_date <= window_start,
+            )
+            .order_by(MfPortfolioDailyValue.valuation_date.desc())
+            .limit(1)
+        )
+    ).first()
+    if start_row is None:
+        # Series doesn't reach back `days` — fall back to the earliest row (shrunk window).
+        start_row = (
+            await db.execute(
+                select(MfPortfolioDailyValue.valuation_date, MfPortfolioDailyValue.total_value)
+                .where(MfPortfolioDailyValue.portfolio_id == pid)
+                .order_by(MfPortfolioDailyValue.valuation_date.asc())
+                .limit(1)
+            )
+        ).first()
+    if start_row is None:
+        return None  # cold start — no valuation series yet
+
+    start_date, start_value = start_row.valuation_date, float(start_row.total_value)
+    actual_window_days = (today - start_date).days
+    if end_value <= 0 or actual_window_days < 30:
+        return None
+
+    # Flow basis = every non-zero signed amount — the SAME rule the lifetime XIRR uses
+    # (tasks/mf.py builds its cashflows from `t.amount if t.amount`, no type filter): a
+    # dividend payout is a real investor inflow and belongs in a money-weighted return.
+    # (_CAPITAL_FLOW_TYPES stays the rule for `invested`, which is a capital measure.)
+    flow_rows = (
+        await db.execute(
+            select(MfPortfolioTransaction.txn_date, func.sum(MfPortfolioTransaction.amount))
+            .where(
+                MfPortfolioTransaction.portfolio_id == pid,
+                MfPortfolioTransaction.txn_date > start_date,
+                MfPortfolioTransaction.amount != 0,
+            )
+            .group_by(MfPortfolioTransaction.txn_date)
+        )
+    ).all()
+    flows = [CashFlow(when=r[0], amount=float(r[1])) for r in flow_rows]
+
+    rate = windowed_xirr(start_value, start_date, flows, end_value, today)
+    if rate is None:
+        return None
+    return rate, actual_window_days
+
+
+async def load_holdings_xirr(
+    db: AsyncSession,
+    portfolio_id: str,
+    current_values: dict[tuple[str, str], float],
+) -> dict[tuple[str, str], float | None]:
+    """Per-holding XIRR (M2.3) — ONE ledger query grouped by (isin, folio_number); `instrument_id` IS
+    the ISIN for asset_class='mf' (`dhanradar.mf.cas` writes `instrument_id: p.isin`). Each holding's
+    own real B65-signed flows (every non-zero amount — the SAME basis as the lifetime XIRR, so a
+    dividend payout counts as the investor inflow it is) + a pseudo-terminal inflow of its CURRENT
+    value (from `current_values` — the read model's already-computed figure, never re-derived here)
+    dated today. Reuses `xirr()` — no new root-finder.
+
+    A holding with no ledger rows maps to None (honest "not enough history"), never a fabricated 0%.
+    """
+    pid = uuid.UUID(portfolio_id)
+    today = datetime.date.today()
+
+    rows = (
+        await db.execute(
+            select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.folio_number,
+                MfPortfolioTransaction.txn_date,
+                MfPortfolioTransaction.amount,
+            ).where(
+                MfPortfolioTransaction.portfolio_id == pid,
+                MfPortfolioTransaction.amount != 0,
+            )
+        )
+    ).all()
+
+    flows_by_holding: dict[tuple[str, str], list[CashFlow]] = {}
+    for r in rows:
+        key = (r.instrument_id, r.folio_number)
+        flows_by_holding.setdefault(key, []).append(CashFlow(when=r.txn_date, amount=float(r.amount)))
+
+    result: dict[tuple[str, str], float | None] = {}
+    for key, current_value in current_values.items():
+        flows = flows_by_holding.get(key)
+        if not flows:
+            result[key] = None
+            continue
+        result[key] = xirr([*flows, CashFlow(when=today, amount=current_value)])
+    return result
 
 
 async def load_portfolio_valuation_series(

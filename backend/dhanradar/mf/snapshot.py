@@ -105,6 +105,38 @@ def xirr(cashflows: list[CashFlow]) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Windowed XIRR — annualized return over a fixed window (M2.3), e.g. "1Y XIRR"
+# ---------------------------------------------------------------------------
+
+def windowed_xirr(
+    start_value: float,
+    start_date: datetime.date,
+    flows: list[CashFlow],
+    end_value: float,
+    end_date: datetime.date,
+) -> float | None:
+    """Annualized return over [start_date, end_date] — reuses `xirr()`, no new root-finder.
+
+    Modeled as three legs: a pseudo-PURCHASE of ``start_value`` on ``start_date`` (negative —
+    money "invested" at the window's start) + the REAL B65-signed capital flows that happened
+    strictly inside the window + a pseudo-terminal INFLOW of ``end_value`` on ``end_date``
+    (positive — today's mark-to-market). The B65 investor convention (outflow negative, inflow
+    positive) already matches `CashFlow`'s sign convention, so ledger flows pass straight through.
+
+    None when ``start_value`` <= 0, ``end_date`` <= ``start_date``, or the solver can't find a
+    root (delegated to `xirr()`'s own guards — e.g. a flat window with no real move).
+    """
+    if start_value <= 0 or end_date <= start_date:
+        return None
+    cashflows = [
+        CashFlow(when=start_date, amount=-start_value),
+        *flows,
+        CashFlow(when=end_date, amount=end_value),
+    ]
+    return xirr(cashflows)
+
+
+# ---------------------------------------------------------------------------
 # Category allocation
 # ---------------------------------------------------------------------------
 

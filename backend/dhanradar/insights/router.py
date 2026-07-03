@@ -35,9 +35,11 @@ from dhanradar.mf.portfolio_read import (
     diversification_payload,
     holdings_payload,
     load_day_change,
+    load_holdings_xirr,
     load_portfolio_read_model,
     load_portfolio_risk,
     load_portfolio_valuation_series,
+    load_windowed_xirr,
     risk_advanced_payload,
     risk_payload,
     summary_payload,
@@ -102,14 +104,18 @@ async def portfolio_holdings(
     """C1 `holdings.list` — the owner's holdings, enriched (fund name/category, latest-NAV current value)
     and served THROUGH the serialization boundary (§10 layer 8). Each fund carries its educational label +
     confidence band (DOM-allowed) — NEVER the unified_score (hand-built payload + the A3 #2 scrub backstop).
-    `invested_amount` is ledger net-invested (B86). Anonymous → 401; another user's portfolio → 404.
+    `invested_amount` is ledger net-invested (B86). `xirr_pct` per holding is M2.3's per-fund XIRR (None
+    when the ledger has no history for it — honest, never fabricated). Anonymous → 401; another user's
+    portfolio → 404.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
+    current_values = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
+    xirr_map = await load_holdings_xirr(db, portfolio_id, current_values)
     return serialize_concept(
         "holdings.list",
-        holdings_payload(rm, portfolio_id),
+        holdings_payload(rm, portfolio_id, xirr_map),
         RequestCtx(tier=user.tier),
         source="cas",
         engine_version=ENGINE_VERSION,
@@ -124,15 +130,18 @@ async def portfolio_summary(
 ) -> dict:
     """C2 `portfolio.summary` — the owner's value/invested/gain/XIRR (their own DOM-allowed numbers) + an
     overall data-confidence band, served THROUGH the boundary. HAND-BUILT: no portfolio composite score and
-    no invented verdict label (#1/#2). `total_invested` is ledger net-invested (B86). 401/404 as above.
+    no invented verdict label (#1/#2). `total_invested` is ledger net-invested (B86). `xirr_1y_pct` +
+    `xirr_1y_window_days` are M2.3's windowed XIRR (None on cold-start or a too-short window — the client
+    only labels it "1Y" when the window is >= 360 days). 401/404 as above.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
-    dc = await load_day_change(db, portfolio_id)  # (flow-adjusted ₹, pct) or None
+    dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct) or None
+    xirr_1y = await load_windowed_xirr(db, portfolio_id, rm.total_value)
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(rm, portfolio_id, dc[0] if dc else None, dc[1] if dc else None),
+        summary_payload(rm, portfolio_id, dc[0] if dc else None, dc[1] if dc else None, xirr_1y),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
