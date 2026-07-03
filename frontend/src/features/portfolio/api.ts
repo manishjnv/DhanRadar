@@ -180,9 +180,9 @@ export interface SummaryPayload {
   xirr_1y_pct?: number | null;
   /** Actual days the xirr_1y_pct window covers — may be < 365 when the series is younger; only label it "1Y" when >= 360 */
   xirr_1y_window_days?: number | null;
-  /** User's own 1-day value change, flow-adjusted — allowed in DOM; null until ≥2 daily-valuation rows exist (M2.2) */
+  /** User's own 1-day value change, bottom-up (units × NAV move, §39.1) — allowed in DOM; null until a holding has two NAV dates */
   day_change?: number | null;
-  /** Day change % from the SAME two valuation rows as day_change — never recomputed client-side */
+  /** Day change % from the SAME NAV pairs as day_change — never recomputed client-side */
   day_change_pct?: number | null;
   fund_count: number;
   funds_scored: number;

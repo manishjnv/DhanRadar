@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dhanradar.mf.projection import _CAPITAL_FLOW_TYPES
 from dhanradar.mf.snapshot import CashFlow, windowed_xirr, xirr
 from dhanradar.mf.valuation import ValuationPoint
 from dhanradar.models.mf import (
@@ -568,9 +567,9 @@ async def load_windowed_xirr(
     `mf_portfolio_daily_values` row ON OR BEFORE that date; if the series doesn't reach back that
     far, the EARLIEST row is used instead and the window honestly SHRINKS to match (never a
     fabricated full year). `end_value` is the caller's already-computed live total_value (the read
-    model has it — not re-derived here). Flows are the ledger's B65-signed capital-flow rows
-    (same `_CAPITAL_FLOW_TYPES` as `mf.projection`) with `txn_date` strictly after the start row's
-    date, summed per date (a multi-txn day is one flow, not double-counted).
+    model has it — not re-derived here). Flows are the ledger's B65-signed rows with a non-zero
+    amount (the SAME basis as the lifetime XIRR — dividend payouts included) and `txn_date`
+    strictly after the start row's date, summed per date (a multi-txn day is one flow).
 
     Returns (xirr_pct, actual_window_days); None when:
     - the valuation series is empty (cold start — no daily-valuation row at all)
@@ -611,13 +610,17 @@ async def load_windowed_xirr(
     if end_value <= 0 or actual_window_days < 30:
         return None
 
+    # Flow basis = every non-zero signed amount — the SAME rule the lifetime XIRR uses
+    # (tasks/mf.py builds its cashflows from `t.amount if t.amount`, no type filter): a
+    # dividend payout is a real investor inflow and belongs in a money-weighted return.
+    # (_CAPITAL_FLOW_TYPES stays the rule for `invested`, which is a capital measure.)
     flow_rows = (
         await db.execute(
             select(MfPortfolioTransaction.txn_date, func.sum(MfPortfolioTransaction.amount))
             .where(
                 MfPortfolioTransaction.portfolio_id == pid,
                 MfPortfolioTransaction.txn_date > start_date,
-                MfPortfolioTransaction.txn_type.in_(_CAPITAL_FLOW_TYPES),
+                MfPortfolioTransaction.amount != 0,
             )
             .group_by(MfPortfolioTransaction.txn_date)
         )
@@ -637,9 +640,10 @@ async def load_holdings_xirr(
 ) -> dict[tuple[str, str], float | None]:
     """Per-holding XIRR (M2.3) — ONE ledger query grouped by (isin, folio_number); `instrument_id` IS
     the ISIN for asset_class='mf' (`dhanradar.mf.cas` writes `instrument_id: p.isin`). Each holding's
-    own real B65 capital flows (`_CAPITAL_FLOW_TYPES`) + a pseudo-terminal inflow of its CURRENT value
-    (from `current_values` — the read model's already-computed figure, never re-derived here) dated
-    today. Reuses `xirr()` — no new root-finder.
+    own real B65-signed flows (every non-zero amount — the SAME basis as the lifetime XIRR, so a
+    dividend payout counts as the investor inflow it is) + a pseudo-terminal inflow of its CURRENT
+    value (from `current_values` — the read model's already-computed figure, never re-derived here)
+    dated today. Reuses `xirr()` — no new root-finder.
 
     A holding with no ledger rows maps to None (honest "not enough history"), never a fabricated 0%.
     """
@@ -655,7 +659,7 @@ async def load_holdings_xirr(
                 MfPortfolioTransaction.amount,
             ).where(
                 MfPortfolioTransaction.portfolio_id == pid,
-                MfPortfolioTransaction.txn_type.in_(_CAPITAL_FLOW_TYPES),
+                MfPortfolioTransaction.amount != 0,
             )
         )
     ).all()
