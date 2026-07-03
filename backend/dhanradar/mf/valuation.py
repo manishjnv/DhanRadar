@@ -21,7 +21,14 @@ no recommendation, no verdict.
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any
+
+#: Bump when the replay math changes — recorded for I11 replay parity (mirrors
+#: projection.ENGINE_VERSION, the holdings-projection sibling of this valuation replay).
+ENGINE_VERSION = "valuation-replay-1"
 
 # ---------------------------------------------------------------------------
 # Value objects
@@ -76,3 +83,73 @@ def compute_daily_value(
         total_value=round(total, 2),
         total_invested=round(total_invested, 2),
     )
+
+
+def replay_valuation_series(
+    ledger_rows: Iterable[Mapping[str, Any]],
+    nav_by_isin_date: Mapping[str, list[tuple[datetime.date, float]]],
+    from_date: datetime.date,
+    to_date: datetime.date,
+) -> list[ValuationPoint]:
+    """Replay a portfolio's FULL daily valuation series from ledger x NAV history (§39.5).
+
+    Retires the `_reset_valuation_series` flow-adjustment patch: a composition change (S11 — the
+    2026-07-02 -85% incident) is just more ledger rows, and the replayed series stays continuous
+    and TRUE (it really was worth X then, Y now) because units-held and NAV are recomputed fresh
+    for EVERY date in [from_date, to_date], never diffed against a stale snapshot.
+
+    ``ledger_rows`` — any iterable of mappings with instrument_id/units/amount/txn_type/txn_date
+    (a DB row mapping or plain dict — same shape `projection.project_holdings_from_ledger` reads).
+    ``nav_by_isin_date`` — isin -> ASCENDING list of (nav_date, nav); the caller batches ONE query
+    for every ISIN x the whole window (never per-day, never per-ISIN). A date with no NAV yet for
+    an isin contributes nothing (honest, not fabricated); once a NAV exists it carries forward
+    (last known value) through any gap — a weekend, a holiday, a missed fetch.
+
+    Pure + deterministic; Decimal internally (authoritative rupee math, plan §13), float at the
+    ValuationPoint boundary (matches compute_daily_value's existing contract)."""
+    from dhanradar.mf.projection import _CAPITAL_FLOW_TYPES
+
+    txns = sorted(ledger_rows, key=lambda r: r["txn_date"])
+    units_by_isin: dict[str, Decimal] = {}
+    last_nav: dict[str, Decimal] = {}
+    nav_ptr: dict[str, int] = {}
+    invested_total = Decimal(0)
+    points: list[ValuationPoint] = []
+
+    txn_idx = 0
+    n_txns = len(txns)
+    one_day = datetime.timedelta(days=1)
+    d = from_date
+    while d <= to_date:
+        # Apply every txn dated on-or-before today (units-held + net-invested are cumulative).
+        while txn_idx < n_txns and txns[txn_idx]["txn_date"] <= d:
+            r = txns[txn_idx]
+            isin = r["instrument_id"]
+            units_by_isin[isin] = units_by_isin.get(isin, Decimal(0)) + Decimal(str(r["units"]))
+            if r["txn_type"] in _CAPITAL_FLOW_TYPES:
+                invested_total += -Decimal(str(r["amount"]))
+            txn_idx += 1
+
+        total_value = Decimal(0)
+        for isin, units in units_by_isin.items():
+            navs = nav_by_isin_date.get(isin)
+            if navs:
+                idx = nav_ptr.get(isin, 0)
+                while idx + 1 < len(navs) and navs[idx + 1][0] <= d:
+                    idx += 1
+                nav_ptr[isin] = idx
+                if navs[idx][0] <= d:
+                    last_nav[isin] = Decimal(str(navs[idx][1]))
+            nav = last_nav.get(isin)
+            if nav is not None and units > 0:
+                total_value += units * nav
+
+        points.append(
+            ValuationPoint(
+                valuation_date=d,
+                total_value=round(float(total_value), 2),
+                total_invested=round(float(invested_total), 2),
+            )
+        )
+        d += one_day
+    return points
