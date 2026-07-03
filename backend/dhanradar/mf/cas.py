@@ -22,7 +22,11 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from statistics import median
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -410,8 +414,8 @@ def normalize_folio(folio: str) -> str:
 # from the CAS PDF.  It contains full transaction history (Purchase/SIP/
 # Redemption/Switch) but no ISIN codes.  The parser returns ParsedHolding
 # objects where `isin` is a PLACEHOLDER of the form "CAMS:<product_code>" —
-# the caller (tasks/mf.py _resolve_cams_txn_isins) is expected to resolve
-# these to real ISINs via the mf_funds master before further processing.
+# the caller (tasks/mf.py _run_pipeline) resolves these to real ISINs via
+# resolve_cams_isins() below before further processing.
 #
 # Supported formats:
 #   .txt   — tab-separated (CAMS Text option)
@@ -668,6 +672,213 @@ def detect_and_parse(path: str, password: str | None = None) -> tuple[list[Parse
         f"Unsupported file type '.{ext}'. "
         "Upload a CAS PDF, a CAMS Transaction Details Statement (.txt or .xls/.xlsx)."
     )
+
+
+# ---------------------------------------------------------------------------
+# CAMS placeholder → real-ISIN resolution (B94-hardened)
+# ---------------------------------------------------------------------------
+# B94 (prod 2026-07-03): a bare best-similarity match resolved the founder's
+# "HDFC NIFTY Smallcap 250 Index Fund" to DSP's INF740KA1XH4 (both names contain
+# "Nifty Smallcap 250 Index Fund"); 12 SIPs were priced off the wrong fund's NAV
+# (txn prices matched HDFC's NAV to 4 decimals, deviated 77% from DSP's).
+# A resolution must now clear THREE independent guards; anything that fails ANY
+# guard keeps its placeholder and scores as insufficient_data (honest fail-safe).
+
+#: Guard 2 — pg_trgm similarity floor for the best AMC-gate survivor.
+CAMS_RESOLVE_MIN_SIM = 0.45
+#: Guard 2 — required margin between best and second-best survivor (ambiguity).
+CAMS_RESOLVE_MIN_MARGIN = 0.05
+#: Guard 3 — max median relative deviation of txn purchase prices vs NAV history.
+CAMS_RESOLVE_MAX_PRICE_DEV = 0.05
+
+
+def _amc_token(amc_name: str | None, scheme_name: str) -> str:
+    """AMC brand token: first word of mf_funds.amc_name lowercased (fallback: first
+    word of the matched scheme_name — AMFI scheme names lead with the AMC brand)."""
+    words = ((amc_name or "").strip() or scheme_name.strip()).split()
+    return words[0].lower() if words else ""
+
+
+async def resolve_cams_isins(db: AsyncSession, holdings: list[ParsedHolding]) -> dict[str, str]:
+    """Resolve "CAMS:<product_code>" placeholder ISINs to real ISINs (B94-hardened).
+
+    Returns {placeholder_isin: real_isin} ONLY for holdings that clear all three guards:
+
+      1. AMC token gate — the candidate fund's AMC brand token must appear in the
+         CAMS scheme name ('dsp' is not in an HDFC statement line → rejected).
+      2. Similarity floor + ambiguity margin — best sim >= CAMS_RESOLVE_MIN_SIM AND
+         (best - second_best) >= CAMS_RESOLVE_MIN_MARGIN among AMC-gate survivors.
+      3. Price consistency (the money check) — the holding's per-txn purchase prices
+         must agree with mf_nav_history for the candidate ISIN on those dates
+         (median relative deviation <= CAMS_RESOLVE_MAX_PRICE_DEV). No comparable
+         price points → accept on guards 1+2 alone, logged cams_isin_unvalidated.
+
+    Holdings that fail any guard are omitted from the map (the caller keeps the
+    placeholder → the existing insufficient_data path downstream).
+    """
+    from sqlalchemy import Date, String, bindparam
+    from sqlalchemy import text as _sa_text
+    from sqlalchemy.dialects.postgresql import ARRAY
+
+    # Group by placeholder (same product code can appear under several folios).
+    by_ph: dict[str, list[ParsedHolding]] = {}
+    for h in holdings:
+        if h.isin.startswith("CAMS:"):
+            by_ph.setdefault(h.isin, []).append(h)
+    if not by_ph:
+        return {}
+
+    placeholders = list(by_ph)
+    names = [by_ph[ph][0].scheme_name for ph in placeholders]
+
+    # ONE batched query, top-5 candidates per name (0.25 is a deliberately wide
+    # candidate net — the three guards below do the actual accepting).
+    rows = (
+        await db.execute(
+            _sa_text("""
+            SELECT idx, isin, scheme_name, amc_name, sim FROM (
+                SELECT (n.idx - 1)::int AS idx,
+                       f.isin, f.scheme_name, f.amc_name,
+                       similarity(f.scheme_name, n.name) AS sim,
+                       row_number() OVER (
+                           PARTITION BY n.idx
+                           ORDER BY similarity(f.scheme_name, n.name) DESC, f.isin
+                       ) AS rn
+                FROM unnest(:names) WITH ORDINALITY AS n(name, idx),
+                     mf.mf_funds f
+                WHERE similarity(f.scheme_name, n.name) > 0.25
+            ) c WHERE rn <= 5
+            ORDER BY idx, sim DESC
+        """).bindparams(bindparam("names", type_=ARRAY(String))),
+            {"names": names},
+        )
+    ).all()
+    candidates: dict[int, list[Any]] = {}
+    for r in rows:
+        candidates.setdefault(r.idx, []).append(r)
+
+    # Guards 1 + 2 → at most one winner per placeholder.
+    winners: dict[str, tuple[str, float]] = {}  # placeholder → (isin, sim)
+    for i, ph in enumerate(placeholders):
+        cams_name = names[i]
+        cands = candidates.get(i, [])
+        if not cands:
+            logger.warning(
+                "cams_isin_unresolved: %r (no candidates above 0.25) -- keeping placeholder",
+                cams_name,
+            )
+            continue
+        cams_lower = cams_name.lower()
+        survivors = [c for c in cands if _amc_token(c.amc_name, c.scheme_name) in cams_lower]
+        if not survivors:
+            logger.warning(
+                "cams_isin_rejected: %r (reason=amc_token_mismatch, best_candidate=%s sim=%.2f)"
+                " -- keeping placeholder",
+                cams_name,
+                cands[0].isin,
+                float(cands[0].sim),
+            )
+            continue
+        best = survivors[0]
+        best_sim = float(best.sim)
+        second_sim = float(survivors[1].sim) if len(survivors) > 1 else 0.0
+        if best_sim < CAMS_RESOLVE_MIN_SIM:
+            logger.warning(
+                "cams_isin_rejected: %r (reason=low_similarity, best=%s sim=%.2f)"
+                " -- keeping placeholder",
+                cams_name,
+                best.isin,
+                best_sim,
+            )
+            continue
+        if best_sim - second_sim < CAMS_RESOLVE_MIN_MARGIN:
+            logger.warning(
+                "cams_isin_rejected: %r (reason=ambiguous, best=%s sim=%.2f vs second=%s sim=%.2f)"
+                " -- keeping placeholder",
+                cams_name,
+                best.isin,
+                best_sim,
+                survivors[1].isin,
+                second_sim,
+            )
+            continue
+        winners[ph] = (best.isin, best_sim)
+
+    if not winners:
+        return {}
+
+    # Guard 3 — price consistency. Collect (winner_isin, txn_date) pairs across all
+    # winners' txns that carry a purchase price, fetch NAV for all of them in ONE query.
+    points: dict[str, list[tuple[date, float]]] = {}  # placeholder → [(when, txn_price)]
+    pairs: set[tuple[str, date]] = set()
+    for ph, (isin, _sim) in winners.items():
+        pts = [
+            (t.when, float(t.nav))
+            for h in by_ph[ph]
+            for t in h.txns
+            if t.nav is not None and t.nav > 0
+        ]
+        points[ph] = pts
+        pairs.update((isin, when) for when, _ in pts)
+
+    nav_by_key: dict[tuple[str, date], float] = {}
+    if pairs:
+        ordered = sorted(pairs)
+        nav_rows = (
+            await db.execute(
+                _sa_text("""
+                SELECT n.isin AS isin, n.d AS nav_date, h.nav AS nav
+                FROM unnest(:isins, :dates) AS n(isin, d)
+                JOIN mf.mf_nav_history h ON h.isin = n.isin AND h.nav_date = n.d
+            """).bindparams(
+                    bindparam("isins", type_=ARRAY(String)),
+                    bindparam("dates", type_=ARRAY(Date)),
+                ),
+                {"isins": [p[0] for p in ordered], "dates": [p[1] for p in ordered]},
+            )
+        ).all()
+        nav_by_key = {(r.isin, r.nav_date): float(r.nav) for r in nav_rows if float(r.nav) > 0}
+
+    resolved: dict[str, str] = {}
+    for ph, (isin, sim) in winners.items():
+        cams_name = by_ph[ph][0].scheme_name
+        devs = [
+            abs(txn_price - nav_by_key[(isin, when)]) / nav_by_key[(isin, when)]
+            for when, txn_price in points[ph]
+            if (isin, when) in nav_by_key
+        ]
+        if devs:
+            med = median(devs)
+            if med > CAMS_RESOLVE_MAX_PRICE_DEV:
+                # This is the guard that would have caught B94 even if the names had
+                # passed: the DSP series deviated 77% from the actual txn prices.
+                logger.warning(
+                    "cams_isin_price_mismatch: %r -> %s REJECTED"
+                    " (median_dev=%.4f, n_price_points=%d) -- keeping placeholder",
+                    cams_name,
+                    isin,
+                    med,
+                    len(devs),
+                )
+                continue
+            logger.info(
+                "cams_isin_resolved: %r -> %s (sim=%.2f, validated_pct_dev=%.4f, n_price_points=%d)",
+                cams_name,
+                isin,
+                sim,
+                med,
+                len(devs),
+            )
+        else:
+            logger.info(
+                "cams_isin_unvalidated: %r -> %s (sim=%.2f, n_price_points=0)"
+                " -- no comparable NAV coverage; accepted on name+amc guards",
+                cams_name,
+                isin,
+                sim,
+            )
+        resolved[ph] = isin
+    return resolved
 
 
 def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
