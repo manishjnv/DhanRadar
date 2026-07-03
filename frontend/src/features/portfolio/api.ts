@@ -323,11 +323,25 @@ export interface ValueSeriesPoint {
   value: number;
   /** User's own total invested on this date — allowed in DOM */
   invested: number;
+  /**
+   * Flow-neutral time-weighted-return wealth index (PR-C), base 100.0 at the FIRST point of this
+   * series. A deposit/redemption never moves it — rebase any window client-side purely by
+   * division: `(twr_index_t / twr_index_window_start - 1) * 100`. This is the series Section 2's
+   * "You" return line and the hero P&L% are built from — never `value`, which a large deposit
+   * inflates (the founder-reported +212% fake-gain bug).
+   */
+  twr_index: number;
 }
 
 export interface ValueSeriesPayload {
   portfolio_id: string;
   point_count: number;
+  /**
+   * The portfolio's earliest ledger transaction date (ISO date string), falling back to the first
+   * `points` row when the ledger has no rows yet. Anchors the "All" window and the adaptive
+   * period-pill ladder (age = today - first_investment_date). Null only on a genuine cold start.
+   */
+  first_investment_date: string | null;
   /** All available daily data points, ordered ascending by date. Empty on cold-start. */
   points: ValueSeriesPoint[];
 }

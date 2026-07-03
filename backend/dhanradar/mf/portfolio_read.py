@@ -25,6 +25,7 @@ from dhanradar.mf.valuation import (
     ValuationPoint,
     _dated_flow_adjusted_returns,
     max_drawdown_and_recovery,
+    twr_index_series,
     wealth_index,
 )
 from dhanradar.models.mf import (
@@ -324,22 +325,7 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
 
     series = await load_portfolio_valuation_series(db, portfolio_id, days=_MAX_VALUATION_DAYS)
     if len(series) >= _MIN_TRUE_RISK_ROWS:
-        # Real per-date net cash flow from the ledger (money in positive = Σ(−amount), every
-        # non-zero row — payouts included, same basis as XIRR). Preferred over the invested-delta
-        # fallback: invested only tracks CAPITAL types, so a dividend-payout day would read as a
-        # fake loss. Empty ledger → None → the invested-delta fallback (equivalent there).
-        pid_r = uuid.UUID(portfolio_id)
-        flow_rows = (
-            await db.execute(
-                select(MfPortfolioTransaction.txn_date, func.sum(-MfPortfolioTransaction.amount))
-                .where(
-                    MfPortfolioTransaction.portfolio_id == pid_r,
-                    MfPortfolioTransaction.amount != 0,
-                )
-                .group_by(MfPortfolioTransaction.txn_date)
-            )
-        ).all()
-        flows_by_date = {r[0]: float(r[1]) for r in flow_rows} or None
+        flows_by_date = await load_ledger_flows_by_date(db, portfolio_id)
         dated_returns = _dated_flow_adjusted_returns(series, flows_by_date)
         wealth = wealth_index(dated_returns)
         # min_points=1: the product-level gate is `_MIN_TRUE_RISK_ROWS` above; risk_adjusted_stats's
@@ -798,24 +784,81 @@ async def load_portfolio_valuation_series(
     ]
 
 
+async def load_ledger_flows_by_date(
+    db: AsyncSession, portfolio_id: str
+) -> dict[datetime.date, float] | None:
+    """The ledger's REAL net cash flow per date — money into the portfolio positive =
+    Σ(−amount) over every non-zero B65 row, dividend payouts included (the same basis as
+    XIRR, PR #436). The ONE flow source for every flow-adjusted computation (true risk,
+    the TWR index): the invested-delta fallback only tracks CAPITAL types, so a
+    dividend-payout day would otherwise read as a fake loss. None when the ledger is
+    empty → callers fall back to the invested-delta (equivalent there)."""
+    pid = uuid.UUID(portfolio_id)
+    flow_rows = (
+        await db.execute(
+            select(MfPortfolioTransaction.txn_date, func.sum(-MfPortfolioTransaction.amount))
+            .where(
+                MfPortfolioTransaction.portfolio_id == pid,
+                MfPortfolioTransaction.amount != 0,
+            )
+            .group_by(MfPortfolioTransaction.txn_date)
+        )
+    ).all()
+    return {r[0]: float(r[1]) for r in flow_rows} or None
+
+
+async def load_first_investment_date(
+    db: AsyncSession, portfolio_id: str, series: list[ValuationPoint]
+) -> datetime.date | None:
+    """The portfolio's earliest ledger transaction date (PR-C money/TWR view) — anchors the FE's
+    "All" window and its age-based adaptive period-pill ladder. Falls back to the first row of
+    ``series`` (already loaded by the caller — no extra query) when the ledger has no rows yet, e.g.
+    a portfolio seeded before the transaction-ledger rollout. None only when BOTH are empty
+    (no ledger, no valuation series — a genuine cold start)."""
+    pid = uuid.UUID(portfolio_id)
+    earliest = await db.scalar(
+        select(func.min(MfPortfolioTransaction.txn_date)).where(
+            MfPortfolioTransaction.portfolio_id == pid
+        )
+    )
+    if earliest is not None:
+        return earliest
+    return series[0].valuation_date if series else None
+
+
 def valuation_series_payload(
     points: list[ValuationPoint],
     portfolio_id: str,
+    first_investment_date: datetime.date | None = None,
+    flows_by_date: dict[datetime.date, float] | None = None,
 ) -> dict:
     """`portfolio.valuation_series` payload.
 
-    ``points`` are the owner's own calculated numbers (total_value,
-    total_invested) — DOM-allowed, #2-exempt (serialization.py note).
-    No DhanRadar composite score is included.
+    ``points`` are the owner's own calculated numbers (total_value, total_invested) — DOM-allowed,
+    #2-exempt (serialization.py note). `twr_index` (PR-C) is the flow-neutral wealth index
+    (`valuation.twr_index_series`, base 100.0 at the FIRST row of `points`) — a deposit/redemption
+    never moves it, so it is the correct series for a "your return" line; unlike `value`, a big
+    lump-sum deposit does NOT inflate it (the founder-reported +212% fake-gain bug this fixes).
+    ``flows_by_date`` (`load_ledger_flows_by_date`) is the ledger's real per-date cash flow — the
+    SAME basis the true-risk math uses (payouts included); None falls back to the invested-delta.
+    `first_investment_date` is the portfolio's earliest ledger date (`load_first_investment_date`)
+    — the FE clamps its "All" window there and derives its adaptive period-pill ladder from the
+    resulting age; None only for a portfolio with neither ledger rows nor a valuation series yet.
+    No DhanRadar composite score anywhere.
     """
+    twr_by_date = dict(twr_index_series(points, flows_by_date=flows_by_date))
     return {
         "portfolio_id": portfolio_id,
         "point_count": len(points),
+        "first_investment_date": (
+            first_investment_date.isoformat() if first_investment_date else None
+        ),
         "points": [
             {
                 "date": p.valuation_date.isoformat(),
                 "value": p.total_value,
                 "invested": p.total_invested,
+                "twr_index": round(twr_by_date.get(p.valuation_date, 100.0), 4),
             }
             for p in points
         ],

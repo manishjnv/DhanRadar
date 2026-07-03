@@ -353,20 +353,23 @@ function HeroStat({ label, value, accent, hint, tip }: {
   );
 }
 
-// ── Hero mini sparkline chart ─────────────────────────────────────────────
+// ── Hero mini "money view" chart — value vs invested, PR-C ────────────────
+// Deposits are not returns: this chart plots VALUE and INVESTED together (a deposit steps both
+// lines — the gap between them is profit), instead of a %-rebased line that misreads a lump-sum
+// deposit as a fake gain. The %-vs-Nifty comparison lives in Section 2 (VsMarketSection) only.
 function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
   const { data: envelope, isLoading } = usePortfolioValueSeries(portfolioId);
-  const { data: nifty } = useNiftyCloseSeries(); // shared cache with VsMarketSection (same query key)
   const points = envelope?.data?.points ?? [];
   // Window to last 90 days
   const recent = points.slice(-90);
+  const pnlTip = fieldTooltip('HeroSection', 'pnl');
 
   if (isLoading) return <Skeleton className="h-full w-full rounded-xl bg-white/10" />;
 
   if (recent.length < 2) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 text-center px-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">YOUR VALUE · 90D</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">YOUR MONEY · 90D</div>
         <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
           Chart builds as daily data accumulates.<br />
           <span className="text-slate-600">Updates each trading day at 4 AM.</span>
@@ -378,47 +381,64 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
     );
   }
 
-  // Two-line chart on one ₹ axis: You (blue) as-is, Nifty (amber) INDEXED to your
-  // window-start value — same shape comparison the % rebase gives, without a 2nd axis.
-  // Series colors match Section 2 (You=blue #5B8CFF, Nifty=amber #F5C451).
   const W = 320; const H = 80;
   const t0 = toEpoch(recent[0].date);
   const t1 = toEpoch(recent[recent.length - 1].date);
   const span = t1 - t0 || 1;
   const you = recent.map(p => ({ t: toEpoch(p.date), v: p.value }));
-  const nfWin = (nifty?.points ?? []).filter(p => { const t = toEpoch(p.close_date); return t >= t0 && t <= t1; });
-  const startVal = recent[0].value;
-  const nf = nfWin.length >= 2
-    ? nfWin.map(p => ({ t: toEpoch(p.close_date), v: startVal * (p.close_value / nfWin[0].close_value) }))
-    : [];
-  const hasNifty = nf.length >= 2;
+  const invested = recent.map(p => ({ t: toEpoch(p.date), v: p.invested }));
 
-  const all = [...you.map(p => p.v), ...nf.map(p => p.v)];
+  const all = [...you.map(p => p.v), ...invested.map(p => p.v)];
   const lo = Math.min(...all); const hi = Math.max(...all);
   const range = hi - lo || 1;
   const toX = (t: number) => ((t - t0) / span) * W;
   const toY = (v: number) => H - ((v - lo) / range) * (H - 8) - 4;
   const line = (a: { t: number; v: number }[]) =>
     a.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' ');
+  // stepAfter: hold each invested value until the NEXT date, then jump — a deposit "steps" the
+  // line on the exact date it lands, instead of sloping between two ledger events.
+  const stepAfterPath = (a: { t: number; v: number }[]) => {
+    let d = `M ${toX(a[0].t).toFixed(1)} ${toY(a[0].v).toFixed(1)}`;
+    for (let i = 1; i < a.length; i++) {
+      d += ` L ${toX(a[i].t).toFixed(1)} ${toY(a[i - 1].v).toFixed(1)} L ${toX(a[i].t).toFixed(1)} ${toY(a[i].v).toFixed(1)}`;
+    }
+    return d;
+  };
   const youPath = line(you);
+  const investedPath = stepAfterPath(invested);
   const areaPath = `${youPath} L ${toX(you[you.length - 1].t).toFixed(1)} ${H} L ${toX(you[0].t).toFixed(1)} ${H} Z`;
-  const pct90d = (recent[recent.length - 1].value / recent[0].value - 1) * 100;
-  const nfPct = hasNifty ? (nfWin[nfWin.length - 1].close_value / nfWin[0].close_value - 1) * 100 : null;
+
+  const latestValue = you[you.length - 1].v;
+  const latestInvested = invested[invested.length - 1].v;
+  const pnl = latestValue - latestInvested;
+  const pnlPct = latestInvested !== 0 ? (pnl / latestInvested) * 100 : null;
+  const gaining = pnl >= 0;
+
+  // Shaded gap region between the two lines (the invested step expanded into a vertex list so the
+  // polygon follows the SAME steps as investedPath).
+  // ponytail: ONE fill colour for the whole 90D window (the LATEST P&L sign) — a mid-window
+  // crossover would need the region split into per-segment polygons; skip for a compact sparkline.
+  const investedSteps: { t: number; v: number }[] = [];
+  for (let i = 0; i < invested.length; i++) {
+    if (i > 0) investedSteps.push({ t: invested[i].t, v: invested[i - 1].v });
+    investedSteps.push({ t: invested[i].t, v: invested[i].v });
+  }
+  const gapPath =
+    `M ${you.map(p => `${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' L ')} ` +
+    `L ${[...investedSteps].reverse().map(p => `${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' L ')} Z`;
 
   return (
     <div className="flex h-full flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-          {hasNifty ? 'YOU VS NIFTY · 90D' : 'YOUR VALUE · 90D'}
-        </span>
-        <span className="text-[11px] font-bold tabular-nums">
-          <span style={{ color: '#9CC0FF' }}>YOU {pct90d >= 0 ? '+' : ''}{pct90d.toFixed(1)}%</span>
-          {nfPct !== null && (
-            <>
-              <span className="font-normal text-slate-500"> · </span>
-              <span style={{ color: '#F5C451' }}>NIFTY {nfPct >= 0 ? '+' : ''}{nfPct.toFixed(1)}%</span>
-            </>
-          )}
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR MONEY · 90D</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] tabular-nums">
+        <span className="text-slate-400">Invested <b className="font-semibold text-slate-300">{fmtCurrency(latestInvested)}</b></span>
+        <span style={{ color: '#9CC0FF' }}>Value <b>{fmtCurrency(latestValue)}</b></span>
+        <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: gaining ? '#6EE7B7' : '#FCA5A5' }}>
+          P&amp;L {gaining ? '+' : '−'}{fmtCurrency(Math.abs(pnl))}
+          {pnlPct !== null ? ` (${gaining ? '+' : '−'}${Math.abs(pnlPct).toFixed(1)}%)` : ''}
+          {pnlTip && <HelpTip tip={pnlTip} />}
         </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
@@ -429,11 +449,12 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
           </linearGradient>
         </defs>
         <path d={areaPath} fill="url(#heroYouFill)" />
-        {hasNifty && <path d={line(nf)} fill="none" stroke="#F5C451" strokeWidth="1.6" />}
+        <path d={gapPath} fill={gaining ? 'rgba(110,231,183,0.16)' : 'rgba(252,165,165,0.16)'} stroke="none" />
+        <path d={investedPath} fill="none" stroke="#94A3B8" strokeWidth="1.4" strokeDasharray="3 2" />
         <path d={youPath} fill="none" stroke="#5B8CFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <a href="#portfolio-vs-market" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
-        Open full comparison ↓
+        Compare with Nifty ↓
       </a>
     </div>
   );
@@ -597,14 +618,45 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
 // PRICE index (excludes dividends) — disclosed in the footer (non-neg #9).
 // ═══════════════════════════════════════════════════════════════════════════
 
-const VS_PERIODS = [
-  { k: '1M', days: 30 },
-  { k: '3M', days: 90 },
-  { k: '6M', days: 180 },
-  { k: '1Y', days: 365 },
-  { k: '3Y', days: 1095 },
-  { k: 'ALL', days: 100_000 },
+export interface PeriodPill {
+  key: string;
+  /** Window span in days; Infinity for "All". */
+  days: number;
+}
+
+// The full candidate ladder — youngest to oldest. "All" is added separately (always last, always
+// present) by buildPeriodPills, never part of this list.
+const PILL_LADDER: readonly PeriodPill[] = [
+  { key: '1D', days: 1 },
+  { key: '7D', days: 7 },
+  { key: '1M', days: 30 },
+  { key: '3M', days: 90 },
+  { key: '6M', days: 180 },
+  { key: '1Y', days: 365 },
+  { key: '3Y', days: 1095 },
+  { key: '5Y', days: 1825 },
+  { key: '10Y', days: 3650 },
 ] as const;
+
+/**
+ * Adaptive period-pill ladder (PR-C §3): the largest SIX ladder windows whose span fits the
+ * portfolio's age, plus "All" always last. A young portfolio has fewer than six that fit — show
+ * those + All (e.g. a 3-day-old portfolio → [1D, All]). `ageDays` null/undefined (age not known
+ * yet, e.g. mid-load) is treated as unbounded so the pill bar doesn't collapse to just "All" while
+ * `first_investment_date` is still loading.
+ */
+export function buildPeriodPills(ageDays: number | null | undefined): PeriodPill[] {
+  const age = ageDays ?? Infinity;
+  const fitting = PILL_LADDER.filter((p) => p.days <= age);
+  return [...fitting.slice(-6), { key: 'All', days: Infinity }];
+}
+
+/** The default selected pill: keeps `preferred` if it's still in the ladder, else the largest
+ * non-"All" pill (or "All" itself if that's the only pill — a brand-new portfolio). */
+export function defaultPillKey(pills: PeriodPill[], preferred = '6M'): string {
+  if (pills.some((p) => p.key === preferred)) return preferred;
+  return pills.length > 1 ? pills[pills.length - 2].key : pills[pills.length - 1].key;
+}
 
 const DAY_MS = 86_400_000;
 const toEpoch = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime();
@@ -615,6 +667,15 @@ function rebasePct(pts: { t: number; v: number }[]): { t: number; pct: number }[
   const base = pts[0].v;
   if (base === 0) return pts.map((p) => ({ t: p.t, pct: 0 }));
   return pts.map((p) => ({ t: p.t, pct: (p.v / base - 1) * 100 }));
+}
+
+/** Rebase the TWR wealth index (flow-neutral) to 0% at its first in-window point — Section 2's
+ * "You" return line (PR-C): a deposit steps `value` but never moves `twr_index`. */
+function rebaseTwrPct(pts: { t: number; twr: number }[]): { t: number; pct: number }[] {
+  if (pts.length === 0) return [];
+  const base = pts[0].twr;
+  if (base === 0) return pts.map((p) => ({ t: p.t, pct: 0 }));
+  return pts.map((p) => ({ t: p.t, pct: (p.twr / base - 1) * 100 }));
 }
 
 /** Two-line % chart: You (blue) vs Nifty (amber), zero baseline dashed. Points placed by DATE
@@ -716,15 +777,28 @@ function VsMarketChart({
 export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
   const { data: pfEnv, isLoading: pfLoading, isError: pfError, refetch } = usePortfolioValueSeries(portfolioId);
   const { data: nfData, isLoading: nfLoading } = useNiftyCloseSeries();
-  const [periodIdx, setPeriodIdx] = React.useState(2); // default 6M
+  const [periodKeySelected, setPeriodKeySelected] = React.useState<string | null>(null);
 
   const pfPoints = React.useMemo(() => pfEnv?.data?.points ?? [], [pfEnv]);
   const nfPoints = React.useMemo(() => nfData?.points ?? [], [nfData]);
+  const firstInvestmentDate = pfEnv?.data?.first_investment_date ?? null;
+  // Age drives the adaptive pill ladder (§3) — null while first_investment_date hasn't loaded yet
+  // (buildPeriodPills treats that as unbounded, so the bar doesn't flash a collapsed [All]).
+  const ageDays = firstInvestmentDate != null
+    ? Math.floor((Date.now() - toEpoch(firstInvestmentDate)) / DAY_MS)
+    : null;
+  const pills = React.useMemo(() => buildPeriodPills(ageDays), [ageDays]);
+  const periodKey = periodKeySelected && pills.some((p) => p.key === periodKeySelected)
+    ? periodKeySelected
+    : defaultPillKey(pills);
+  const selectedPill = pills.find((p) => p.key === periodKey) ?? pills[pills.length - 1];
 
-  // Build the aligned %-return series for the selected period. `you` is empty until ≥2 daily
+  // Build the aligned %-return series for the selected period. `you` is the TWR (flow-neutral)
+  // return line — rebased from `twr_index`, never `value` (a big deposit rebased on window-start
+  // VALUE reads as a fake gain, the founder-reported bug this fixes). Empty until ≥2 daily
   // portfolio rows exist (forward-only cold-start); `nifty` shows as soon as the backfill lands.
   const model = React.useMemo(() => {
-    const pfRaw = pfPoints.map((p) => ({ t: toEpoch(p.date), v: p.value }));
+    const pfRaw = pfPoints.map((p) => ({ t: toEpoch(p.date), v: p.value, twr: p.twr_index }));
     const nfRaw = nfPoints.map((p) => ({ t: toEpoch(p.close_date), v: p.close_value }));
     const hasPf = pfRaw.length >= 2;
     const lastT = Math.max(
@@ -732,26 +806,28 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
       nfRaw.length ? nfRaw[nfRaw.length - 1].t : 0,
     );
     if (!lastT) return null;
-    const startCap = lastT - VS_PERIODS[periodIdx].days * DAY_MS;
+    const startCap = lastT - selectedPill.days * DAY_MS;
     const winPf = pfRaw.filter((p) => p.t >= startCap);
     // Anchor both lines to the SAME window start for a fair head-to-head when portfolio data exists;
-    // else anchor to the period cap (Nifty-only teaser during cold-start).
+    // else anchor to the period cap (Nifty-only teaser during cold-start). Every window (including
+    // "All") naturally clamps to the earliest available portfolio row — there is no data before it.
     // ponytail: baselines align to within one trading day (portfolio is daily incl. weekends, Nifty
     // is trading-days) — exact alignment would need a shared trading-day grid; fine at this resolution.
     const t0 = winPf.length >= 2 ? winPf[0].t : startCap;
     const winNf = nfRaw.filter((p) => p.t >= t0 && p.t <= lastT);
-    const you = winPf.length >= 2 ? rebasePct(winPf) : [];
+    const you = winPf.length >= 2 ? rebaseTwrPct(winPf) : [];
     const nifty = winNf.length >= 2 ? rebasePct(winNf) : [];
     if (you.length < 2 && nifty.length < 2) return null;
     return {
       t0, t1: lastT, you, nifty,
       youPct: you.length ? you[you.length - 1].pct : null,
       nfPct: nifty.length ? nifty[nifty.length - 1].pct : null,
-      // ₹ anchors for the chips: your value at window start/end (user's own money, DOM-allowed)
+      // ₹ anchors for the chips: your value at window start/end (user's own money, DOM-allowed) —
+      // a MONEY fact, kept clearly separate from the % return lines above.
       youStartValue: winPf.length >= 2 ? winPf[0].v : null,
       youEndValue: winPf.length >= 2 ? winPf[winPf.length - 1].v : null,
     };
-  }, [pfPoints, nfPoints, periodIdx]);
+  }, [pfPoints, nfPoints, selectedPill]);
 
   const status = pfLoading || nfLoading ? 'loading'
     : pfError ? 'error'
@@ -759,11 +835,11 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
   const disclosure = nfData?.disclosure ?? 'Nifty 50 price index · excludes dividends';
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
   const bothLines = !!model && model.you.length >= 2 && model.nifty.length >= 2;
-  // Honest window disclosure: with a young forward-only series, "1Y"/"ALL" really spans
+  // Honest window disclosure: with a young forward-only series, "1Y"/"All" really spans
   // only the days tracked so far — say so instead of implying a full-period comparison.
   const spanDays = model ? Math.max(1, Math.round((model.t1 - model.t0) / DAY_MS)) + 1 : null;
   const windowTruncated =
-    !!model && model.you.length >= 2 && spanDays !== null && spanDays < VS_PERIODS[periodIdx].days;
+    !!model && model.you.length >= 2 && spanDays !== null && spanDays < selectedPill.days;
   const tickLabel = (t: number) => {
     const d = new Date(t);
     const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
@@ -790,7 +866,7 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
                 {sectionTooltip('VsMarketSection') && <HelpTip tip={sectionTooltip('VsMarketSection')!} />}
               </div>
               <div className="mt-0.5 text-[11px] text-slate-400">
-                {VS_PERIODS[periodIdx].k} · % return
+                {selectedPill.key} · % return
                 {windowTruncated && <span className="text-slate-500"> · {spanDays} days of data so far</span>}
               </div>
             </div>
@@ -816,7 +892,7 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
                       : `${bothLines && model.nfPct != null ? (model.youPct >= model.nfPct ? '▲ ' : '▼ ') : ''}${fmtPct(model.youPct)}`}
                   </div>
                   {model.youEndValue != null && (
-                    <div className="text-[10px] tabular-nums text-slate-400">{fmtFull(model.youEndValue)}</div>
+                    <div className="text-[10px] tabular-nums text-slate-400">{fmtFull(model.youEndValue)} value</div>
                   )}
                 </div>
                 <div className="self-center rounded-full border border-white/15 bg-[#0B1F3A] px-1.5 py-0.5 text-[9px] font-bold text-slate-400" style={{ margin: '0 -9px', zIndex: 3 }}>VS</div>
@@ -856,16 +932,17 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
                 </div>
               )}
 
-              {/* Period pills */}
+              {/* Period pills — adaptive ladder (§3): largest six windows that fit the portfolio's
+                  age, plus "All" always last. */}
               <div className="mt-3 flex gap-1 rounded-xl bg-white/[.06] p-1">
-                {VS_PERIODS.map((p, i) => (
+                {pills.map((p) => (
                   <button
-                    key={p.k}
+                    key={p.key}
                     type="button"
-                    onClick={() => setPeriodIdx(i)}
-                    className={`flex-1 rounded-lg py-1 text-[12px] font-semibold transition-colors focus-visible:outline-none ${i === periodIdx ? 'bg-royal text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    onClick={() => setPeriodKeySelected(p.key)}
+                    className={`flex-1 rounded-lg py-1 text-[12px] font-semibold transition-colors focus-visible:outline-none ${p.key === periodKey ? 'bg-royal text-white' : 'text-slate-400 hover:text-slate-200'}`}
                   >
-                    {p.k}
+                    {p.key}
                   </button>
                 ))}
               </div>

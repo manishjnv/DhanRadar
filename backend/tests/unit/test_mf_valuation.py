@@ -16,6 +16,7 @@ from dhanradar.mf.valuation import (
     flow_adjusted_daily_returns,
     max_drawdown_and_recovery,
     replay_valuation_series,
+    twr_index_series,
     wealth_index,
 )
 
@@ -270,6 +271,66 @@ class TestWealthIndex:
 
     def test_empty_returns_empty(self) -> None:
         assert wealth_index([]) == []
+
+
+class TestTwrIndexSeries:
+    """PR-C — flow-neutral wealth index, ONE ENTRY PER ROW (anchored to the full `points` list,
+    unlike `wealth_index` which only covers rows[1:]). Fixes the founder-reported bug where a
+    window-start-VALUE rebase renders a large deposit as a fake gain."""
+
+    def test_base_100_at_series_start(self) -> None:
+        rows = [_vp(datetime.date(2026, 1, 1), 1000.0, 1000.0)]
+        assert twr_index_series(rows) == [(datetime.date(2026, 1, 1), 100.0)]
+
+    def test_deposit_day_reads_flat_not_a_gain(self) -> None:
+        """Same-day SIP purchase (V and I both jump 500, no price move) leaves the index
+        unchanged — a deposit is not a return."""
+        rows = [
+            _vp(datetime.date(2026, 1, 1), 1000.0, 1000.0),
+            _vp(datetime.date(2026, 1, 2), 1500.0, 1500.0),
+        ]
+        idx = twr_index_series(rows)
+        assert idx[0] == (datetime.date(2026, 1, 1), pytest.approx(100.0))
+        assert idx[1] == (datetime.date(2026, 1, 2), pytest.approx(100.0))
+
+    def test_redemption_day_also_reads_flat(self) -> None:
+        rows = [
+            _vp(datetime.date(2026, 1, 1), 1000.0, 1000.0),
+            _vp(datetime.date(2026, 1, 2), 700.0, 700.0),
+        ]
+        idx = twr_index_series(rows)
+        assert idx[1][1] == pytest.approx(100.0)
+
+    def test_pure_market_moves_compound(self) -> None:
+        rows = [
+            _vp(datetime.date(2026, 1, 1), 1000.0, 1000.0),
+            _vp(datetime.date(2026, 1, 2), 1050.0, 1000.0),  # +5%
+            _vp(datetime.date(2026, 1, 3), 1029.0, 1000.0),  # -2%
+        ]
+        idx = twr_index_series(rows)
+        assert idx[0][1] == pytest.approx(100.0)
+        assert idx[1][1] == pytest.approx(105.0)
+        assert idx[2][1] == pytest.approx(105.0 * 0.98)
+
+    def test_skipped_pair_carries_index_forward(self) -> None:
+        """A cold-start row (V=0) can't produce a return (non-positive prev value) — the index
+        holds flat across the gap instead of resetting or erroring."""
+        rows = [
+            _vp(datetime.date(2026, 1, 1), 0.0, 0.0),
+            _vp(datetime.date(2026, 1, 2), 1000.0, 1000.0),
+            _vp(datetime.date(2026, 1, 3), 1100.0, 1000.0),  # +10% market move on day 3
+        ]
+        idx = twr_index_series(rows)
+        assert idx[0][1] == pytest.approx(100.0)
+        assert idx[1][1] == pytest.approx(100.0)  # no computable return off a 0 base — carried
+        assert idx[2][1] == pytest.approx(110.0)
+
+    def test_single_row_series(self) -> None:
+        idx = twr_index_series([_vp(datetime.date(2026, 1, 1), 5000.0, 5000.0)])
+        assert idx == [(datetime.date(2026, 1, 1), 100.0)]
+
+    def test_empty_series(self) -> None:
+        assert twr_index_series([]) == []
 
 
 class TestMaxDrawdownAndRecovery:
