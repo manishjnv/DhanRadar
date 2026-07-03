@@ -287,7 +287,6 @@ describe('HeroSection', () => {
 
     const { container } = renderHero(SUMMARY_PRESENT);
 
-    // P&L chip: value 153,000 - invested 150,000 = 3,000 (+2.0%) — unique text, no ambiguity.
     expect(screen.getByText(/P&L/)).toBeDefined();
     expect(screen.getAllByText(/Invested/).length).toBeGreaterThan(0);
     // Invested step-line renders as a dashed grey stroke.
@@ -298,6 +297,32 @@ describe('HeroSection', () => {
     expect(screen.queryByText(/YOU VS NIFTY/i)).toBeNull();
     expect(screen.queryByText(/^NIFTY /i)).toBeNull();
   });
+
+  it('money-view mini chart chips render the LIVE summary numbers, not the series last point', () => {
+    // founder-reported 2026-07-03: the chip row used to read the daily-series' LAST POINT
+    // (value 153,000 / invested 150,000, a different — stale-by-hours, cash-basis — truth than
+    // the hero stats above it). It must now show the SAME live summary numbers instead.
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: VALUE_SERIES_PRESENT, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+
+    const { container } = renderHero(SUMMARY_PRESENT);
+    const text = container.textContent ?? '';
+
+    // Value chip = summary.total_value (48,32,640 -> "48.33 L"), NOT the series' last point
+    // (1,53,000 -> "1.53 L").
+    expect(text).toMatch(/48\.33 L/);
+    expect(text).not.toMatch(/1\.53 L/);
+    // Invested falls back to total_invested (no cost_value in this fixture): 38,48,430 -> "38.48 L",
+    // NOT the series' invested last point (1,50,000 -> "1.50 L").
+    expect(text).toMatch(/38\.48 L/);
+    expect(text).not.toMatch(/1\.50 L/);
+    // P&L falls back to gain/gain_pct (9,84,210 / 25.6%), NOT the series-derived 3,000 (+2.0%).
+    expect(text).toMatch(/9\.84 L/);
+    expect(text).toMatch(/25\.6%/);
+    expect(text).not.toMatch(/2\.0%/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -307,12 +332,12 @@ describe('HeroSection', () => {
 describe('HeroSection — CAMS-parity chips', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function renderHero(envelope: unknown) {
+  function renderHero(envelope: unknown, valueSeries: unknown = undefined) {
     vi.mocked(usePortfolioSummaryById).mockReturnValue({
       data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
     } as any);
     vi.mocked(usePortfolioValueSeries).mockReturnValue({
-      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+      data: valueSeries, isLoading: false, isError: false, refetch: vi.fn(),
     } as any);
     vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
     return render(<HeroSection portfolioId="pid" />, { wrapper });
@@ -361,6 +386,81 @@ describe('HeroSection — CAMS-parity chips', () => {
   it('omits Avg Days chip when wt_avg_days is null', () => {
     renderHero({ ...FULL_FIXTURE, data: { ...FULL_FIXTURE.data, wt_avg_days: null } });
     expect(screen.queryByText('Avg Days')).toBeNull();
+  });
+
+  it('mini-chart chips use cost_value/gain_vs_cost when present (SAME numbers as the Invested chip)', () => {
+    // The mini chart's LINES still need >=2 value-series points to render past its cold-start
+    // placeholder — only the chip TEXT is under test here (it must reflect FULL_FIXTURE's numbers,
+    // not this series' own last point: value 153,000 / invested 150,000).
+    const { container } = renderHero(FULL_FIXTURE, VALUE_SERIES_PRESENT);
+    const text = container.textContent ?? '';
+    // cost_value 40,00,000 -> "40.00 L", NOT total_invested's 38.48 L.
+    expect(text).toMatch(/40\.00 L/);
+    // gain_vs_cost 8,32,640 -> "8.33 L" (+20.8%), NOT the cash-basis gain (9.84 L / 25.6%).
+    expect(text).toMatch(/8\.33 L/);
+    expect(text).toMatch(/20\.8%/);
+    expect(container.querySelector('path[stroke="#94A3B8"]')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HeroSection — hint styling + date-anchored Day Change (2026-07-04)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — hint styling + day_change_as_of', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown, niftyPoints?: { close_date: string; close_value: number }[]) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({
+      data: niftyPoints
+        ? { benchmark: 'NIFTY50', disclosure: '', point_count: niftyPoints.length, points: niftyPoints }
+        : undefined,
+      isLoading: false,
+    } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  it('Day Change hint is emerald (positive tone) when Nifty moved up today', () => {
+    renderHero(
+      { ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, day_change: 1200, day_change_pct: 0.5, day_change_as_of: '2026-07-15' } },
+      [{ close_date: '2026-07-14', close_value: 25_000 }, { close_date: '2026-07-15', close_value: 25_250 }], // +1.00%
+    );
+    const hint = screen.getByText(/Nifty \+1\.00% today/);
+    expect(hint.className).toMatch(/text-emerald-300/);
+    expect(hint.textContent).toMatch(/as of \d{1,2} Jul 2026/);
+  });
+
+  it('Day Change hint is red (negative tone) when Nifty moved down today', () => {
+    renderHero(
+      { ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, day_change: -800, day_change_pct: -0.3, day_change_as_of: '2026-07-15' } },
+      [{ close_date: '2026-07-14', close_value: 25_000 }, { close_date: '2026-07-15', close_value: 24_750 }], // -1.00%
+    );
+    const hint = screen.getByText(/Nifty −1\.00% today/);
+    expect(hint.className).toMatch(/text-red-300/);
+  });
+
+  it('Day Change hint falls back to a plain "As of <date>" when no Nifty data is available', () => {
+    renderHero(
+      { ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, day_change: 400, day_change_pct: 0.2, day_change_as_of: '2026-07-15' } },
+      undefined,
+    );
+    const hint = screen.getByText(/As of \d{1,2} Jul 2026/);
+    expect(hint.className).toMatch(/text-slate-300/); // neutral tone — no Nifty sign to color by
+  });
+
+  it('non-signed hints ("incl. reinvested payouts", "Last 12 months") render the brighter neutral tone', () => {
+    renderHero(
+      { ...SUMMARY_PRESENT, data: { ...SUMMARY_PRESENT.data, xirr_1y_pct: 11.2, xirr_1y_window_days: 365 } },
+      undefined,
+    );
+    expect(screen.getByText('incl. reinvested payouts').className).toMatch(/text-slate-300/);
+    expect(screen.getByText('Last 12 months').className).toMatch(/text-slate-300/);
   });
 });
 

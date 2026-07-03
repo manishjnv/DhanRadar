@@ -331,12 +331,22 @@ function fmtDate(iso: string): string {
   return `${d.getDate()} ${mon} ${d.getFullYear()}`;
 }
 
+/** Hint tone -> text colour. Sign-carrying hints (e.g. "Nifty +x% today") color by sign; plain
+ * hints ("incl. reinvested payouts") stay neutral — brighter than before so they read on the dark
+ * hero (founder-reported 2026-07-03), matching the mini-chart chip label's brightness step. */
+const HERO_HINT_TONE_CLASS: Record<'positive' | 'negative' | 'neutral', string> = {
+  positive: 'text-emerald-300',
+  negative: 'text-red-300',
+  neutral: 'text-slate-300',
+};
+
 /** Compact label/value stat used in the hero (Day Change · Invested · XIRR). */
-function HeroStat({ label, value, accent, hint, tip }: {
+function HeroStat({ label, value, accent, hint, hintTone = 'neutral', tip }: {
   label: string;
   value: string;
   accent?: string;
   hint?: string;
+  hintTone?: 'positive' | 'negative' | 'neutral';
   tip?: string;
 }) {
   return (
@@ -348,7 +358,7 @@ function HeroStat({ label, value, accent, hint, tip }: {
       <div className={`mt-0.5 font-sans text-[20px] font-semibold leading-tight ${accent ?? 'text-white'}`}>
         {value}
       </div>
-      {hint && <div className="mt-0.5 text-[10px] text-slate-500">{hint}</div>}
+      {hint && <div className={`mt-0.5 text-[10px] ${HERO_HINT_TONE_CLASS[hintTone]}`}>{hint}</div>}
     </div>
   );
 }
@@ -357,7 +367,21 @@ function HeroStat({ label, value, accent, hint, tip }: {
 // Deposits are not returns: this chart plots VALUE and INVESTED together (a deposit steps both
 // lines — the gap between them is profit), instead of a %-rebased line that misreads a lump-sum
 // deposit as a fake gain. The %-vs-Nifty comparison lives in Section 2 (VsMarketSection) only.
-function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
+//
+// One truth per card (founder-reported 2026-07-03): the LINES stay series-based (history is
+// correctly the daily-series' job), but the Invested/Value/P&L CHIP TEXT is the SAME live number
+// the hero stats render — passed in as props, never re-derived from the series' last point (which
+// used to read stale-by-hours + cash-basis-invested, a different truth than the stats above it).
+function HeroMiniChart({ portfolioId, invested, value, gain, gainPct }: {
+  portfolioId: string;
+  /** Live "Invested" figure — SAME number as the hero's Invested chip (cost_value, falls back to total_invested) */
+  invested: number;
+  /** Live total portfolio value — SAME number as the hero's headline value */
+  value: number;
+  /** Live gain (vs the SAME cost basis as `invested`) — SAME number as the hero's Total Gain/Loss */
+  gain: number;
+  gainPct: number | null;
+}) {
   const { data: envelope, isLoading } = usePortfolioValueSeries(portfolioId);
   const points = envelope?.data?.points ?? [];
   // Window to last 90 days
@@ -386,9 +410,9 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
   const t1 = toEpoch(recent[recent.length - 1].date);
   const span = t1 - t0 || 1;
   const you = recent.map(p => ({ t: toEpoch(p.date), v: p.value }));
-  const invested = recent.map(p => ({ t: toEpoch(p.date), v: p.invested }));
+  const investedSeries = recent.map(p => ({ t: toEpoch(p.date), v: p.invested }));
 
-  const all = [...you.map(p => p.v), ...invested.map(p => p.v)];
+  const all = [...you.map(p => p.v), ...investedSeries.map(p => p.v)];
   const lo = Math.min(...all); const hi = Math.max(...all);
   const range = hi - lo || 1;
   const toX = (t: number) => ((t - t0) / span) * W;
@@ -405,23 +429,20 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
     return d;
   };
   const youPath = line(you);
-  const investedPath = stepAfterPath(invested);
+  const investedPath = stepAfterPath(investedSeries);
   const areaPath = `${youPath} L ${toX(you[you.length - 1].t).toFixed(1)} ${H} L ${toX(you[0].t).toFixed(1)} ${H} Z`;
 
-  const latestValue = you[you.length - 1].v;
-  const latestInvested = invested[invested.length - 1].v;
-  const pnl = latestValue - latestInvested;
-  const pnlPct = latestInvested !== 0 ? (pnl / latestInvested) * 100 : null;
-  const gaining = pnl >= 0;
+  // Chip sign follows the LIVE gain prop (same truth as the hero stats), not the series.
+  const gaining = gain >= 0;
 
   // Shaded gap region between the two lines (the invested step expanded into a vertex list so the
   // polygon follows the SAME steps as investedPath).
-  // ponytail: ONE fill colour for the whole 90D window (the LATEST P&L sign) — a mid-window
+  // ponytail: ONE fill colour for the whole 90D window (the LIVE gain sign) — a mid-window
   // crossover would need the region split into per-segment polygons; skip for a compact sparkline.
   const investedSteps: { t: number; v: number }[] = [];
-  for (let i = 0; i < invested.length; i++) {
-    if (i > 0) investedSteps.push({ t: invested[i].t, v: invested[i - 1].v });
-    investedSteps.push({ t: invested[i].t, v: invested[i].v });
+  for (let i = 0; i < investedSeries.length; i++) {
+    if (i > 0) investedSteps.push({ t: investedSeries[i].t, v: investedSeries[i - 1].v });
+    investedSteps.push({ t: investedSeries[i].t, v: investedSeries[i].v });
   }
   const gapPath =
     `M ${you.map(p => `${toX(p.t).toFixed(1)} ${toY(p.v).toFixed(1)}`).join(' L ')} ` +
@@ -433,11 +454,11 @@ function HeroMiniChart({ portfolioId }: { portfolioId: string }) {
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR MONEY · 90D</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] tabular-nums">
-        <span className="text-slate-400">Invested <b className="font-semibold text-slate-300">{fmtCurrency(latestInvested)}</b></span>
-        <span style={{ color: '#9CC0FF' }}>Value <b>{fmtCurrency(latestValue)}</b></span>
+        <span className="text-slate-400">Invested <b className="font-semibold text-slate-300">{fmtCurrency(invested)}</b></span>
+        <span style={{ color: '#9CC0FF' }}>Value <b>{fmtCurrency(value)}</b></span>
         <span className="inline-flex items-center gap-0.5 font-semibold" style={{ color: gaining ? '#6EE7B7' : '#FCA5A5' }}>
-          P&amp;L {gaining ? '+' : '−'}{fmtCurrency(Math.abs(pnl))}
-          {pnlPct !== null ? ` (${gaining ? '+' : '−'}${Math.abs(pnlPct).toFixed(1)}%)` : ''}
+          P&amp;L {gaining ? '+' : '−'}{fmtCurrency(Math.abs(gain))}
+          {gainPct !== null ? ` (${gaining ? '+' : '−'}${Math.abs(gainPct).toFixed(1)}%)` : ''}
           {pnlTip && <HelpTip tip={pnlTip} />}
         </span>
       </div>
@@ -480,6 +501,9 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
   // Server-computed from the SAME two valuation rows as day_change (a client recompute
   // against the live summary total uses a different base — RCA 2026-07-02).
   const dayPct = summary?.day_change_pct ?? null;
+  // The date day_change/dayPct are anchored to (2026-07-04, AMFI staggered-ingest guard) —
+  // appended to the hint so "today's gain" never silently implies a day it isn't.
+  const dayChangeAsOf = summary?.day_change_as_of ?? null;
   // "Nifty +x% today" hint — last two benchmark closes (shared query cache).
   const { data: niftyData } = useNiftyCloseSeries();
   const nfPts = niftyData?.points ?? [];
@@ -487,6 +511,11 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
     nfPts.length >= 2
       ? (nfPts[nfPts.length - 1].close_value / nfPts[nfPts.length - 2].close_value - 1) * 100
       : null;
+  // One truth per card (founder-reported 2026-07-03): the mini-chart's Invested/Value/P&L chips
+  // render these SAME live numbers, not the stored daily-series' last point.
+  const chipInvested = summary?.cost_value ?? summary?.total_invested ?? 0;
+  const chipGain = summary?.gain_vs_cost ?? summary?.gain ?? 0;
+  const chipGainPct = summary?.gain_vs_cost_pct ?? summary?.gain_pct ?? null;
 
   return (
     <div
@@ -534,7 +563,13 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
 
                 {/* Centre: mini comparison chart */}
                 <div className="hidden min-h-[100px] lg:flex">
-                  <HeroMiniChart portfolioId={portfolioId} />
+                  <HeroMiniChart
+                    portfolioId={portfolioId}
+                    invested={chipInvested}
+                    value={summary.total_value}
+                    gain={chipGain}
+                    gainPct={chipGainPct}
+                  />
                 </div>
 
                 {/* Right: data completeness */}
@@ -585,8 +620,15 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     dayChange === null
                       ? 'Updates daily'
                       : niftyToday !== null
-                        ? `Nifty ${niftyToday >= 0 ? '+' : '−'}${Math.abs(niftyToday).toFixed(2)}% today`
-                        : undefined
+                        ? `Nifty ${niftyToday >= 0 ? '+' : '−'}${Math.abs(niftyToday).toFixed(2)}% today${dayChangeAsOf ? ` · as of ${fmtDate(dayChangeAsOf)}` : ''}`
+                        : dayChangeAsOf
+                          ? `As of ${fmtDate(dayChangeAsOf)}`
+                          : undefined
+                  }
+                  hintTone={
+                    dayChange !== null && niftyToday !== null
+                      ? (niftyToday >= 0 ? 'positive' : 'negative')
+                      : 'neutral'
                   }
                 />
                 {/* M2.3 — a shorter window must not masquerade as "1Y" (>= 360 days only) */}

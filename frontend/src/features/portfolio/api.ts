@@ -194,6 +194,12 @@ export interface SummaryPayload {
   day_change?: number | null;
   /** Day change % from the SAME NAV pairs as day_change — never recomputed client-side */
   day_change_pct?: number | null;
+  /**
+   * ISO date (YYYY-MM-DD) day_change/day_change_pct are anchored to (2026-07-04) — during AMFI's
+   * staggered ~23:30 IST NAV ingest, a fund still one day behind is excluded rather than blended
+   * in, so this names the single calendar day the figure actually covers. Null with day_change.
+   */
+  day_change_as_of?: string | null;
   /** CAMS "Wt.Avg.Days" — capital-weighted average holding period in days; null when no active cost remains */
   wt_avg_days?: number | null;
   fund_count: number;

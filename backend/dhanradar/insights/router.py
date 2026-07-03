@@ -142,7 +142,10 @@ async def portfolio_summary(
     overall data-confidence band, served THROUGH the boundary. HAND-BUILT: no portfolio composite score and
     no invented verdict label (#1/#2). `total_invested` is ledger net-invested (B86). `xirr_1y_pct` +
     `xirr_1y_window_days` are M2.3's windowed XIRR (None on cold-start or a too-short window — the client
-    only labels it "1Y" when the window is >= 360 days).
+    only labels it "1Y" when the window is >= 360 days). `day_change_as_of` (2026-07-04) is the calendar
+    date `day_change`/`day_change_pct` are anchored to — `load_day_change`'s guard against AMFI's
+    staggered ~23:30 IST NAV ingest blending two different funds' two different trading days into one
+    number; None whenever day_change itself is None.
 
     CAMS-parity (2026-07-03): `xirr_pct` is now `load_portfolio_xirr` — ledger-based, over the ACTIVE
     holdings' full flow history + live value (replaces the stale upload-time snapshot number). `cost_value`/
@@ -154,7 +157,7 @@ async def portfolio_summary(
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
-    dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct) or None
+    dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct, anchor nav_date) or None
     xirr_1y = await load_windowed_xirr(db, portfolio_id, rm.total_value)
     xirr_pct = await load_portfolio_xirr(db, portfolio_id, rm.total_value, active_keys)
     active_flows = await load_active_holding_flows(db, portfolio_id, active_keys)
@@ -172,6 +175,7 @@ async def portfolio_summary(
             xirr_pct=xirr_pct,
             wt_avg_days=wt_avg_days,
             reinvested_cost=reinvested_cost,
+            day_change_as_of=dc[2].isoformat() if dc else None,
         ),
         RequestCtx(tier=user.tier),
         source="computed",
