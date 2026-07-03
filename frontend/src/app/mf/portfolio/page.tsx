@@ -106,7 +106,7 @@ function PortfolioView() {
                 pageState === s ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
               )}
             >
-              {s === 'empty' ? 'Empty' : 'Dashboard'}
+              {s === 'empty' ? 'Upload CAS' : 'Dashboard'}
             </button>
           ))}
         </div>

@@ -207,6 +207,9 @@ export interface SummaryPayload {
   /** Data-confidence band for the portfolio as a whole — a data-quality descriptor, NOT a verdict */
   confidence_band: 'high' | 'medium' | 'low' | null;
   as_of: string | null;
+  /** Owner's own CAS-captured name (their own name to their own session, DPDP-fine) — null until
+   * a CAS upload has captured it. Their PAN is never included in this payload. */
+  investor_name?: string | null;
 }
 
 // ---------------------------------------------------------------------------

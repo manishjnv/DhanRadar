@@ -27,6 +27,7 @@ import {
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { HelpTip } from '@/components/ui/HelpTip';
+import { shortAmcName } from './format';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 import { tooltipFns } from '@/data/tooltipFns';
 import {
@@ -362,6 +363,7 @@ function HeroMiniChart({ portfolioId, invested, value, gain, gainPct }: {
   // Window to last 90 days
   const recent = points.slice(-90);
   const pnlTip = fieldTooltip('HeroSection', 'pnl');
+  const investedLineTip = fieldTooltip('HeroSection', 'invested_line');
 
   if (isLoading) return <Skeleton className="h-full w-full rounded-xl bg-white/10" />;
 
@@ -426,7 +428,13 @@ function HeroMiniChart({ portfolioId, invested, value, gain, gainPct }: {
   return (
     <div className="flex h-full w-full min-w-0 flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">YOUR MONEY · 90D</span>
+        <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          YOUR MONEY · 90D
+          {/* The dashed grey line below plots the CASH invested figure day-by-day (unlike the
+              cost-basis Invested chip text) — the one place the cash basis still renders
+              visually (founder-reported 2026-07-04, one P&L% story). */}
+          {investedLineTip && <HelpTip tip={investedLineTip} />}
+        </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] tabular-nums">
         <span className="text-slate-400">Invested <b className="font-semibold text-slate-300">{fmtCurrency(invested)}</b></span>
@@ -446,7 +454,17 @@ function HeroMiniChart({ portfolioId, invested, value, gain, gainPct }: {
         </defs>
         <path d={areaPath} fill="url(#heroYouFill)" />
         <path d={gapPath} fill={gaining ? 'rgba(110,231,183,0.16)' : 'rgba(252,165,165,0.16)'} stroke="none" />
-        <path d={investedPath} fill="none" stroke="#94A3B8" strokeWidth="1.4" strokeDasharray="3 2" />
+        {/* Cash invested line — see the "YOUR MONEY · 90D" HelpTip above for what this dashed
+            line means (a nested SVG <title> child element is avoided here — that tripped a
+            React18 hydration mismatch, see portfolio-v1-shipped RCA; `title` isn't a valid
+            attribute on SVGProps<SVGPathElement> either, so the HelpTip carries the copy). */}
+        <path
+          d={investedPath}
+          fill="none"
+          stroke="#94A3B8"
+          strokeWidth="1.4"
+          strokeDasharray="3 2"
+        />
         <path d={youPath} fill="none" stroke="#5B8CFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       <a href="#portfolio-vs-market" className="self-start text-[10px] text-slate-400 hover:text-slate-200 transition-colors">
@@ -486,8 +504,12 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
     nfPts.length >= 2
       ? (nfPts[nfPts.length - 1].close_value / nfPts[nfPts.length - 2].close_value - 1) * 100
       : null;
-  // One truth per card (founder-reported 2026-07-03): the mini-chart's Invested/Value/P&L chips
-  // render these SAME live numbers, not the stored daily-series' last point.
+  // One P&L% story (founder-reported 2026-07-04): every VISIBLE gain ₹/% on the hero — the top
+  // "Total Gain"/"Total Return" stat AND the mini-chart's Invested/Value/P&L chips — reads from
+  // this SAME cost-basis figure (gain_vs_cost/gain_vs_cost_pct, the CAMS-comparable pair),
+  // falling back to the cash-basis gain/gain_pct only when cost_value hasn't been computed yet.
+  // The cash basis stays in the payload but is never rendered directly here — its only visual
+  // trace is the mini-chart's dashed "cash invested line" (see HeroMiniChart).
   const chipInvested = summary?.cost_value ?? summary?.total_invested ?? 0;
   const chipGain = summary?.gain_vs_cost ?? summary?.gain ?? 0;
   const chipGainPct = summary?.gain_vs_cost_pct ?? summary?.gain_pct ?? null;
@@ -499,6 +521,16 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
     >
       <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.28),transparent 70%)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute -bottom-32 left-[32%] h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.3),transparent 70%)' }} aria-hidden="true" />
+      {/* Owner-name chip (CAMS-style, founder-reported 2026-07-04) — the owner's own name to
+          their own session (DPDP-fine); rendered only when the CAS upload captured one. */}
+      {summary?.investor_name && (
+        <span
+          data-testid="hero-owner-pill"
+          className="absolute right-6 top-6 z-[3] max-w-[45%] truncate rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:right-7 sm:top-7"
+        >
+          {summary.investor_name.toUpperCase()}
+        </span>
+      )}
       <div className="relative z-[2]">
         <DataState
           status={status}
@@ -521,16 +553,18 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     {fmtFull(summary.total_value)}
                   </div>
                   <div className="mt-3 flex gap-7">
+                    {/* Cost-basis gain/return — SAME figure as the mini-chart's P&L chip (one
+                        P&L% story, founder-reported 2026-07-04; chipGain/chipGainPct above). */}
                     <div>
-                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">{summary.gain >= 0 ? 'Total Gain' : 'Total Loss'}</div>
-                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${summary.gain >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {summary.gain >= 0 ? '+' : '−'}{fmtFull(Math.abs(summary.gain))}
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">{chipGain >= 0 ? 'Total Gain' : 'Total Loss'}</div>
+                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${chipGain >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {chipGain >= 0 ? '+' : '−'}{fmtFull(Math.abs(chipGain))}
                       </div>
                     </div>
                     <div>
                       <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Total Return</div>
-                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${(summary.gain_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {summary.gain_pct !== null ? fmtPct(summary.gain_pct) : '—'}
+                      <div className={`mt-0.5 font-sans text-[15px] font-semibold ${(chipGainPct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {chipGainPct !== null ? fmtPct(chipGainPct) : '—'}
                       </div>
                     </div>
                   </div>
@@ -1155,7 +1189,7 @@ function ConcentrationPanel({ portfolioId }: { portfolioId: string }) {
                   Biggest fund house
                   {topAmcTip && <HelpTip tip={topAmcTip} />}
                 </div>
-                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_amc?.name ?? undefined}>{conc.top_amc?.name ?? '—'}</div>
+                <div className="mt-0.5 truncate font-bold text-ink" title={conc.top_amc?.name ?? undefined}>{conc.top_amc ? shortAmcName(conc.top_amc.name) : '—'}</div>
                 <div className="font-mono text-[15px] font-extrabold text-ink">{conc.top_amc ? `${conc.top_amc.weight_pct}%` : '—'}</div>
               </div>
               {/* Band as descriptor WORD, never a number */}
@@ -1171,7 +1205,7 @@ function ConcentrationPanel({ portfolioId }: { portfolioId: string }) {
                 {conc.by_amc.map((a, i) => (
                   <div key={a.name}>
                     <div className="mb-1 flex items-center justify-between text-caption">
-                      <span className="truncate font-semibold text-ink" title={a.name}>{a.name}</span>
+                      <span className="truncate font-semibold text-ink" title={a.name}>{shortAmcName(a.name)}</span>
                       <span className="font-mono font-bold text-ink-secondary">{a.weight_pct}%</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-surface-3">
@@ -1196,6 +1230,9 @@ export function AllocSection({ portfolioId }: { portfolioId: string }) {
   const alloc = envelope?.data ?? null;
   const reason = envelope?.meta.reason ?? null;
   const allocTip = sectionTooltip('AllocSection');
+  // AMC bucket labels are the full backend fund-house name; shorten to the recognizable brand
+  // in the "By AMC" view only ("By Category" buckets are already short display words).
+  const bucketLabel = (name: string) => (by === 'amc' ? shortAmcName(name) : name);
 
   return (
     <Card className="mt-4 p-5">
@@ -1233,16 +1270,16 @@ export function AllocSection({ portfolioId }: { portfolioId: string }) {
             {/* Donut — user's own weight_pct per bucket */}
             <div className="flex flex-col items-center gap-4">
               <Donut
-                data={alloc.buckets.map((b, i) => [b.bucket, b.weight_pct, ALLOC_PALETTE[i % ALLOC_PALETTE.length]] as [string, number, string])}
+                data={alloc.buckets.map((b, i) => [bucketLabel(b.bucket), b.weight_pct, ALLOC_PALETTE[i % ALLOC_PALETTE.length]] as [string, number, string])}
                 size={200}
                 thick={30}
               />
               {/* Legend — each item carries the user's own % via the SafePoint tooltip_fn */}
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5">
                 {alloc.buckets.map((b, i) => (
-                  <span key={b.bucket} className="flex items-center gap-1.5 text-caption text-ink-secondary" title={tooltipFns.allocation_donut({ label: b.bucket, ownValue: `${b.weight_pct}%` })}>
+                  <span key={b.bucket} className="flex items-center gap-1.5 text-caption text-ink-secondary" title={tooltipFns.allocation_donut({ label: bucketLabel(b.bucket), ownValue: `${b.weight_pct}%` })}>
                     <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: ALLOC_PALETTE[i % ALLOC_PALETTE.length] }} />
-                    {b.bucket}
+                    {bucketLabel(b.bucket)}
                   </span>
                 ))}
               </div>
@@ -1250,9 +1287,9 @@ export function AllocSection({ portfolioId }: { portfolioId: string }) {
             {/* Weight bars — user's own %, NO ideal/recommended marker (non-neg #1) */}
             <div className="flex flex-col gap-3">
               {alloc.buckets.map((b, i) => (
-                <div key={b.bucket} title={tooltipFns.allocation_donut({ label: b.bucket, ownValue: `${b.weight_pct}%` })}>
+                <div key={b.bucket} title={tooltipFns.allocation_donut({ label: bucketLabel(b.bucket), ownValue: `${b.weight_pct}%` })}>
                   <div className="mb-1 flex items-center justify-between text-caption">
-                    <span className="font-semibold text-ink">{b.bucket}</span>
+                    <span className="font-semibold text-ink">{bucketLabel(b.bucket)}</span>
                     <span className="font-mono font-bold text-ink-secondary">{b.weight_pct}%</span>
                   </div>
                   <div className="relative h-2 overflow-hidden rounded-full bg-surface-3">
