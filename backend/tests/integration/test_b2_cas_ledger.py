@@ -86,6 +86,33 @@ def test_folio_normalization():
     assert normalize_folio("") == ""
 
 
+def test_folio_normalization_cross_format_variants():
+    """The 2026-07-04 incident: the SAME real folio printed with an internal space by one format
+    ("33375865/ 73", KFin/PDF) and without by another ("33375865/73", CAMS) must collapse to ONE
+    canonical key — not just leading/trailing whitespace."""
+    assert normalize_folio("33375865/ 73") == normalize_folio("33375865/73") == "33375865/73"
+    assert normalize_folio("33375865 / 73") == "33375865/73"
+    assert normalize_folio("  33375865/ 73  ") == "33375865/73"
+    assert normalize_folio("abc123/xyz") == "ABC123/XYZ"  # case-collapsed too
+
+
+def test_source_ref_collides_across_folio_spacing_variants():
+    """build_cas_ledger_rows must fingerprint the SAME real transaction identically (same
+    source_ref, same stored folio_number) regardless of which format's folio spacing produced the
+    ParsedHolding — this is the exact defect the 2026-07-04 incident traced back to."""
+    txns = _txns_base()
+    kwargs = dict(isin="INF200K01VT2", amfi_code=None, scheme_name="Test Fund", units=40.0,
+                  nav=21.0, value=840.0, cost=1000.0, as_of_date=None, txns=txns)
+    h_cams = ParsedHolding(folio_number="33375865/73", **kwargs)
+    h_kfin = ParsedHolding(folio_number="33375865/ 73", **kwargs)
+
+    rows_cams = build_cas_ledger_rows([h_cams], user_id=str(uuid.uuid4()), portfolio_id=str(uuid.uuid4()))
+    rows_kfin = build_cas_ledger_rows([h_kfin], user_id=str(uuid.uuid4()), portfolio_id=str(uuid.uuid4()))
+
+    assert [r["source_ref"] for r in rows_cams] == [r["source_ref"] for r in rows_kfin]
+    assert [r["folio_number"] for r in rows_cams] == [r["folio_number"] for r in rows_kfin] == ["33375865/73"] * len(txns)
+
+
 def test_source_ref_deterministic_and_distinct():
     t1, t2 = _txns_base()
     a = _cas_source_ref("INF1", "777", t1)

@@ -171,6 +171,12 @@ class ParsedHolding:
     cost: float | None
     as_of_date: date | None
     txns: list[ParsedTxn]
+    # Per-folio PAN, when the source exposes one (casparser PDF folios, CAMS TDS rows carry a PAN
+    # column) — the per-folio ownership guard (family-merge incident 2026-07-04: a consolidated PDF
+    # can carry a DIFFERENT investor's folios, e.g. a household member sharing one RTA email)
+    # compares this to the portfolio owner's stored PAN and excludes a folio whose PAN doesn't
+    # match. None when the source has no per-folio PAN (assumed the owner's — status quo).
+    folio_pan: str | None = None
 
 
 def _default_reader(path: str, password: str | None) -> Any:  # pragma: no cover
@@ -244,6 +250,8 @@ def parse_cas(
     excluded_txns = 0
     for folio in raw.get("folios", []) or []:
         folio_no = str(folio.get("folio") or "")
+        # Per-folio PAN (family-merge guard) — casparser exposes it on the folio dict itself.
+        folio_pan = _parse_pan(folio.get("PAN") or folio.get("pan"))
         for scheme in folio.get("schemes", []) or []:
             isin = (scheme.get("isin") or "").strip()
             if not isin:
@@ -293,6 +301,7 @@ def parse_cas(
                     cost=_opt_float(valuation.get("cost")),
                     as_of_date=_to_date(valuation.get("date")),
                     txns=txns,
+                    folio_pan=folio_pan,
                 )
             )
 
@@ -310,6 +319,10 @@ def parse_cas(
             mf_list = account.get("mutual_funds", []) if isinstance(account, dict) else []
             if not isinstance(mf_list, list):
                 continue
+            account_pan = (
+                _parse_pan(account.get("PAN") or account.get("pan"))
+                if isinstance(account, dict) else None
+            )
             for entry in mf_list:
                 if not isinstance(entry, dict):
                     continue
@@ -347,6 +360,7 @@ def parse_cas(
                         cost=_opt_float(entry.get("total_cost")),
                         as_of_date=None,  # CDSL CAS has no per-holding date field
                         txns=[],  # CDSL CAS has no transaction history
+                        folio_pan=account_pan,
                     )
                 )
 
@@ -423,16 +437,23 @@ def _opt_float(v: Any) -> float | None:
 # Ledger row construction (B2) — CAS holdings → canonical append-only ledger rows
 # ---------------------------------------------------------------------------
 
-_FOLIO_PLAN_SUFFIX = re.compile(r"\s*/\s*0+\s*$")
+_FOLIO_PLAN_SUFFIX = re.compile(r"/0+$")
 
 
 def normalize_folio(folio: str) -> str:
-    """Canonical folio for ledger/holdings agreement (B82): trim whitespace and strip a trailing `/0`
-    plan suffix CAMS appends (e.g. `12345/0` → `12345`). Conservative — only a slash-zeros tail is
-    removed, never digits from the folio body."""
+    """Canonical folio for ledger/holdings agreement across EVERY source format (B82, hardened
+    2026-07-04 after the cross-format dedup incident): strip ALL whitespace — not just
+    leading/trailing — since one format prints "33375865/ 73" (internal space) and another prints
+    "33375865/73" for the SAME real folio; then uppercase (a folio suffix letter can be cased
+    differently across exports); then strip a trailing `/0` plan suffix CAMS appends (e.g.
+    `12345/0` -> `12345`). Conservative — only a slash-zeros tail is removed, never digits from the
+    folio body. EVERY seam that keys on folio (source_ref fingerprint, the ledger row itself, the
+    holdings projection + write, statement checkpoints) MUST call this so the same real-world folio
+    collides to one key regardless of which format printed it."""
     if not folio:
         return ""
-    return _FOLIO_PLAN_SUFFIX.sub("", folio.strip()).strip()
+    no_ws = re.sub(r"\s+", "", folio).upper()
+    return _FOLIO_PLAN_SUFFIX.sub("", no_ws)
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +587,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
         product = str(row.get("PRODUCT_CODE") or "").strip()
         scheme_name = str(row.get("SCHEME_NAME") or "").strip()
         mf_name = str(row.get("MF_NAME") or "").strip()
+        pan = str(row.get("PAN") or "").strip()
 
         key = (folio, product)
         if key not in holdings_meta:
@@ -574,6 +596,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
                 "mf_name": mf_name,
                 "folio": folio,
                 "product": product,
+                "pan": pan,
             }
 
         txn = _cams_txn_to_parsedtxn(row)
@@ -601,6 +624,7 @@ def _rows_to_parsedholdings(rows: list[dict[str, Any]]) -> list[ParsedHolding]:
                 cost=round(net_invested, 2) if net_invested > 0 else None,
                 as_of_date=None,
                 txns=txns,
+                folio_pan=_parse_pan(meta.get("pan")),
             )
         )
 
@@ -907,6 +931,25 @@ async def resolve_cams_isins(db: AsyncSession, holdings: list[ParsedHolding]) ->
             )
         resolved[ph] = isin
     return resolved
+
+
+def filter_foreign_pan_folios(
+    parsed: list[ParsedHolding], owner_pan: str | None
+) -> tuple[list[ParsedHolding], list[ParsedHolding]]:
+    """Per-folio ownership guard (family-merge incident 2026-07-04): split parsed holdings into
+    (owned, foreign) against the portfolio owner's authoritative stored PAN. A consolidated
+    statement can carry a DIFFERENT investor's folios (e.g. a household member sharing one RTA
+    email) — a folio whose OWN PAN (when the source exposed one) disagrees with `owner_pan` is
+    foreign and must be excluded from the upload entirely (no ledger rows, no holdings, no
+    checkpoints). A folio with no PAN info is assumed the owner's (status quo — e.g. CAMS TDS
+    exports that predate this field, or CDSL account-level holdings). No `owner_pan` at all (the
+    uploader has no PAN on file yet and this CAS carried none either) → nothing to compare
+    against, so everything passes through unfiltered."""
+    if not owner_pan:
+        return list(parsed), []
+    owned = [p for p in parsed if not (p.folio_pan and p.folio_pan != owner_pan)]
+    foreign = [p for p in parsed if (p.folio_pan and p.folio_pan != owner_pan)]
+    return owned, foreign
 
 
 def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
