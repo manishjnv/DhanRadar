@@ -254,18 +254,23 @@ function lcg(seed: number) {
   };
 }
 
-/** Growth-of-₹10k area + benchmark/category comparison lines. */
-export function GrowthChart({ seed = 42, height = 170 }: { seed?: number; height?: number }) {
+/**
+ * Growth-of-₹10k line — real fund series, optional benchmark overlay (both already
+ * rebased to a 10k start by the caller). W1: reads real NAV/benchmark data
+ * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17); the seeded-random fallback is gone
+ * since this is the only call site and the caller always has real points to show.
+ */
+export function GrowthChart({
+  fund,
+  benchmark,
+  height = 170,
+}: {
+  fund: number[];
+  benchmark?: number[] | null;
+  height?: number;
+}) {
   const W = 640;
-  const mk = (s: number, trend: number, vol: number) => {
-    const rnd = lcg(s);
-    const out: number[] = [];
-    let v = 100;
-    for (let i = 0; i < 70; i++) { v *= 1 + (rnd() - 0.5) * vol + trend; out.push(v); }
-    return out;
-  };
-  const fund = mk(seed, 0.011, 0.032), cat = mk(seed + 5, 0.0085, 0.03), bench = mk(seed + 9, 0.0105, 0.031);
-  const all = [...fund, ...cat, ...bench];
+  const all = benchmark && benchmark.length > 1 ? [...fund, ...benchmark] : fund;
   const lo = Math.min(...all), hi = Math.max(...all), rng = hi - lo || 1;
   const pts = (arr: number[]) => arr.map((v, i) => [(i / (arr.length - 1)) * W, height - ((v - lo) / rng) * (height - 12) - 6]);
   const path = (arr: number[]) => 'M' + pts(arr).map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
@@ -273,23 +278,25 @@ export function GrowthChart({ seed = 42, height = 170 }: { seed?: number; height
   return (
     <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" className="block">
       <defs>
-        <linearGradient id={`fg${seed}`} x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="fund-growth-grad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#1E5EFF" stopOpacity="0.18" />
           <stop offset="100%" stopColor="#1E5EFF" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={`${path(fund)} L ${W},${height} L 0,${height} Z`} fill={`url(#fg${seed})`} />
-      <path d={path(bench)} fill="none" stroke="#CBD5E1" strokeWidth="1.6" />
-      <path d={path(cat)} fill="none" stroke="#F5A623" strokeWidth="1.6" />
+      <path d={`${path(fund)} L ${W},${height} L 0,${height} Z`} fill="url(#fund-growth-grad)" />
+      {benchmark && benchmark.length > 1 && (
+        <path d={path(benchmark)} fill="none" stroke="#CBD5E1" strokeWidth="1.6" />
+      )}
       <path d={path(fund)} fill="none" stroke="#1E5EFF" strokeWidth="2.4" />
       <circle cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="4" fill="#1E5EFF" />
     </svg>
   );
 }
 
-/** Rank trend (lower rank = higher line). */
-export function RankChart({ series, height = 150 }: { series: number[]; height?: number }) {
-  const W = 640, maxR = 8;
+/** Rank trend (lower rank = higher line). `maxRank` = the category's total fund
+ * count (worst possible rank) — real categories rarely have exactly 8 funds. */
+export function RankChart({ series, maxRank = 8, height = 150 }: { series: number[]; maxRank?: number; height?: number }) {
+  const W = 640, maxR = Math.max(maxRank, 2);
   const pts = series.map((v, i) => [(i / (series.length - 1)) * W, ((v - 1) / (maxR - 1)) * (height - 16) + 8]);
   const path = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
   return (
@@ -297,7 +304,7 @@ export function RankChart({ series, height = 150 }: { series: number[]; height?:
       <path d={path} fill="none" stroke="#00B386" strokeWidth="2.4" />
       {pts.map(([x, y], i) => <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3" fill="#00B386" />)}
       <text x="6" y="14" fontFamily="var(--font-mono,monospace)" fontSize="10" fill="#94A3B8">#1 (best)</text>
-      <text x="6" y={height - 6} fontFamily="var(--font-mono,monospace)" fontSize="10" fill="#94A3B8">#8</text>
+      <text x="6" y={height - 6} fontFamily="var(--font-mono,monospace)" fontSize="10" fill="#94A3B8">#{maxR}</text>
     </svg>
   );
 }

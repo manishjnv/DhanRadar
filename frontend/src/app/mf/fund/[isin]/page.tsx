@@ -13,10 +13,15 @@
  * the workspace shell.
  *
  * DATA: real values from useFundDetail() drive identity / assessment / rank /
- * NAV / expense ratio / AMC-AUM / period returns (W0). The rich sections
- * (SIP/rolling/rank-trend/drawdowns, holdings, manager, tax, flows, …) render
- * illustrative PREVIEW data (flagged "Preview") while their feeds are built —
- * founder call 2026-06-24: build all UI now, wire data later.
+ * NAV / expense ratio / AMC-AUM / period returns (W0). W1 wires Performance
+ * Center (returns/rolling/rank-trend), Risk Center, Holdings, Manager, AMC
+ * facts, Alternatives and Similar to real per-concept endpoints
+ * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). SIP/Drawdowns/Consistency,
+ * Market Cap/Asset Mix/Style Box, Fund Flow, Tax seed, Transactions, Portfolio
+ * Fit, Fund Health, What Changed, and Assessment Breakdown still render
+ * illustrative PREVIEW data (flagged "Preview" or an honest empty-state)
+ * while their feeds are built (W2/W3) — founder call 2026-06-24: build all
+ * UI now, wire data later.
  *
  * COMPLIANCE: non-neg #1 (no advisory verbs — educational labels only),
  * #2 (no numeric score in DOM — band rings + strength words),
@@ -30,7 +35,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
-import { useFundDetail } from '@/features/mf/api';
+import { useFundDetail, useFundComposition } from '@/features/mf/api';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 
 import {
@@ -107,6 +112,7 @@ function FundDetailView() {
   const category = searchParams.get('category');
 
   const { data: fund, isLoading } = useFundDetail(isin, category);
+  const { data: compositionEnv } = useFundComposition(isin);
   const backHref = category ? `/mf/explore?category=${encodeURIComponent(category)}` : '/mf/explore';
 
   if (isLoading) return <FundDetailSkeleton />;
@@ -143,6 +149,13 @@ function FundDetailView() {
     return3yPct: fund.return_3y_pct,
     return5yPct: fund.return_5y_pct,
   };
+
+  // S13 header info line — real when composition data exists (dedups against
+  // HoldingsSection's own useFundComposition call via the shared query cache).
+  const composition = compositionEnv?.data;
+  const holdingsInfo = composition && composition.holdings.length > 0
+    ? `Top ${composition.holdings.length} disclosed${composition.coverage.weight_covered_pct != null ? ` · ${composition.coverage.weight_covered_pct}% of assets` : ''}${composition.as_of_month ? ` · as of ${new Date(composition.as_of_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : ''}`
+    : 'Holdings not disclosed for this fund house yet';
 
   return (
     <div className="w-full pb-24">
@@ -182,25 +195,25 @@ function FundDetailView() {
       <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
 
       {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info="vs Nifty Smallcap 250 TRI · Category" /><PerformanceSection head={head} /></Section>
+      <Section><SectionHeader index="10" title="Performance Center" info="vs Nifty 50 · price index, excludes dividends" /><PerformanceSection head={head} isin={isin} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
       <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="8 modules · vs 18 peers" /><ScoreBreakdownSection /></Section>
 
       {/* S12 — Risk center */}
-      <Section><SectionHeader index="12" title="Risk Center" /><RiskCenterSection /></Section>
+      <Section><SectionHeader index="12" title="Risk Center" /><RiskCenterSection isin={isin} /></Section>
 
       {/* S13 — Holdings */}
-      <Section><SectionHeader index="13" title="Portfolio Holdings" info="250 stocks · as of 31 May 2026" /><HoldingsSection /></Section>
+      <Section><SectionHeader index="13" title="Portfolio Holdings" info={holdingsInfo} /><HoldingsSection isin={isin} /></Section>
 
       {/* S14 — Fund flow */}
       <Section><SectionHeader index="14" title="Fund Flow Intelligence" /><FundFlowSection /></Section>
 
       {/* S15 — Fund manager */}
-      <Section><SectionHeader index="15" title="Fund Manager" /><ManagerSection /></Section>
+      <Section><SectionHeader index="15" title="Fund Manager" /><ManagerSection isin={isin} /></Section>
 
       {/* S16 — AMC quality */}
-      <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection amcName={fund.amc_name ?? undefined} /></Section>
+      <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
 
       {/* S17 — Tax center */}
       <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection /></Section>
@@ -209,10 +222,10 @@ function FundDetailView() {
       <Section><SectionHeader index="18" title="Transaction History" info="Preview" /><TransactionsSection /></Section>
 
       {/* S19 — Alternatives */}
-      <Section><SectionHeader index="19" title="Alternatives" info="Hand-picked by goal" /><AlternativesSection /></Section>
+      <Section><SectionHeader index="19" title="Alternatives" info="Same category, ranked nearby" /><AlternativesSection isin={isin} /></Section>
 
       {/* S20 — Similar funds */}
-      <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" /><SimilarSection /></Section>
+      <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" /><SimilarSection isin={isin} /></Section>
 
       {/* S21 — FAQ */}
       <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection navLatest={fund.nav_latest} /></Section>

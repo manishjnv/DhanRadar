@@ -109,6 +109,41 @@
     "data_class": "public-fact",
     "content_class": "MARKET"
   },
+  "fund.nav_series": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "fund.analytics": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "CALCULATED"
+  },
+  "fund.rank_history": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "DERIVED"
+  },
+  "fund.composition": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "fund.people": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "fund.amc": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "fund.peers": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "DERIVED"
+  },
   "portfolio.score_raw": {
     "visibility_class": "gated",
     "data_class": "derived-personal",

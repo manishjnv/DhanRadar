@@ -11,11 +11,17 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
+import { useFundPeers } from '@/features/mf/api';
+import { DataState } from '@/components/ui/DataState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { Panel, WhatThisMeans } from './parts';
-import { TAX, TXNS, TXN_TOTAL, ALTERNATIVES, SIMILAR, FAQ } from './sampleData';
+import { TAX, TXNS, TXN_TOTAL, FAQ } from './sampleData';
+import type { Label } from '@/components/charts/ScoreRing';
+import type { FundPeer } from '@/features/mf/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -337,70 +343,104 @@ export function TransactionsSection() {
 // S19 — ALTERNATIVES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function AlternativesSection() {
+/** Peer's return field, preferring 3Y and falling back to 1Y (both labeled so the
+ * period shown is never ambiguous). null when neither is available yet. */
+function peerReturn(peer: FundPeer): { label: string; v: string } {
+  if (peer.return_3y_pct != null) return { label: '3Y ret', v: `${peer.return_3y_pct >= 0 ? '+' : ''}${peer.return_3y_pct.toFixed(1)}%` };
+  if (peer.return_1y_pct != null) return { label: '1Y ret', v: `${peer.return_1y_pct >= 0 ? '+' : ''}${peer.return_1y_pct.toFixed(1)}%` };
+  return { label: 'Return', v: '—' };
+}
+function peerRisk(peer: FundPeer): string {
+  return peer.volatility_pct != null ? `${peer.volatility_pct.toFixed(1)}% swings` : '—';
+}
+function peerExpense(peer: FundPeer): string {
+  return peer.expense_ratio_pct != null ? `${peer.expense_ratio_pct.toFixed(2)}%` : '—';
+}
+function peerName(peer: FundPeer): string {
+  return peer.fund_name_short ?? peer.scheme_name;
+}
+
+export function AlternativesSection({ isin }: { isin: string }) {
+  const { data: env, isLoading, isError, refetch } = useFundPeers(isin);
+  const peers = env?.data?.peers ?? [];
+  const status = isLoading ? 'loading' : isError ? 'error' : (peers.length ? 'present' : 'empty');
+  // Alternatives = the 3 best-ranked peers (not just nearest-rank — §17 W1 decision #3).
+  const alternatives = [...peers].sort((a, b) => a.category_rank - b.category_rank).slice(0, 3);
+
   return (
-    <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-3">
-      {ALTERNATIVES.map((alt) => (
-        <div
-          key={alt.name}
-          className="
-            flex flex-col rounded-2xl border border-line bg-surface p-4 shadow-sm
-          "
-        >
-          {/* Tag pill */}
-          <span
-            className={cn(
-              'mb-3 inline-block self-start rounded-lg border px-2.5 py-1',
-              'font-mono text-[9.5px] font-bold uppercase tracking-[0.05em]',
-              TAG_TINT[alt.tagTone] ?? 'bg-surface-2 text-ink-muted border-line',
-            )}
-          >
-            {alt.tag}
-          </span>
+    <DataState
+      status={status}
+      emptyCopy="We don't have alternatives for this fund's category yet."
+      onRetry={refetch}
+      skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+    >
+      <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-3">
+        {alternatives.map((alt) => {
+          const ret = peerReturn(alt);
+          return (
+            <div
+              key={alt.isin}
+              className="
+                flex flex-col rounded-2xl border border-line bg-surface p-4 shadow-sm
+              "
+            >
+              {/* Tag pill — factual (category rank), never a subjective claim */}
+              <span
+                className={cn(
+                  'mb-3 inline-block self-start rounded-lg border px-2.5 py-1',
+                  'font-mono text-[9.5px] font-bold uppercase tracking-[0.05em]',
+                  TAG_TINT.royal,
+                )}
+              >
+                Category rank #{alt.category_rank}
+              </span>
 
-          {/* Fund identity */}
-          <div className="mb-3">
-            <div className="text-small font-bold leading-snug text-ink">{alt.name}</div>
-            <div className="mt-0.5 text-caption text-ink-muted">
-              {alt.amc} · {alt.risk} risk
+              {/* Fund identity */}
+              <Link href={`/mf/fund/${alt.isin}`} className="mb-3 block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                <div className="text-small font-bold leading-snug text-ink hover:underline">{peerName(alt)}</div>
+                <div className="mt-0.5 text-caption text-ink-muted">
+                  {alt.amc_name ?? 'Unknown AMC'} · {peerRisk(alt)}
+                </div>
+              </Link>
+
+              {/* 3-up metric mini-grid */}
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                {/* Assessment — COMPLIANCE: label + band via FundScoreCell, NO score number.
+                    band is null — W1 doesn't serve a confidence band on peers yet. */}
+                <MetricCell label="Assessment">
+                  <FundScoreCell
+                    label={(alt.verb_label ?? 'insufficient_data') as Label}
+                    confidenceBand={null}
+                    ringSize={28}
+                    stacked
+                    className="w-full"
+                  />
+                </MetricCell>
+                <MetricCell label={ret.label}>
+                  <span className="font-mono text-caption font-bold text-emerald">{ret.v}</span>
+                </MetricCell>
+                <MetricCell label="Expense">
+                  <span className="font-mono text-caption font-bold text-ink">{peerExpense(alt)}</span>
+                </MetricCell>
+              </div>
+
+              {/* Compare CTA — decorative, compare page is a later build */}
+              <button
+                className="
+                  mt-auto w-full rounded-xl border border-line bg-surface-2 py-2
+                  text-small font-semibold text-ink-muted
+                  hover:bg-surface-3 hover:text-ink
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40
+                  transition-colors
+                "
+              >
+                ⇄ Compare with this fund
+              </button>
             </div>
-          </div>
-
-          {/* 3-up metric mini-grid */}
-          <div className="mb-4 grid grid-cols-3 gap-2">
-            {/* Assessment — COMPLIANCE: label + band via FundScoreCell, NO score number */}
-            <MetricCell label="Assessment">
-              <FundScoreCell
-                label={alt.label}
-                confidenceBand={alt.band}
-                ringSize={28}
-                stacked
-                className="w-full"
-              />
-            </MetricCell>
-            <MetricCell label="3Y ret">
-              <span className="font-mono text-caption font-bold text-emerald">{alt.ret}</span>
-            </MetricCell>
-            <MetricCell label="Expense">
-              <span className="font-mono text-caption font-bold text-ink">{alt.expense}</span>
-            </MetricCell>
-          </div>
-
-          {/* Compare CTA */}
-          <button
-            className="
-              mt-auto w-full rounded-xl border border-line bg-surface-2 py-2
-              text-small font-semibold text-ink-muted
-              hover:bg-surface-3 hover:text-ink
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40
-              transition-colors
-            "
-          >
-            ⇄ Compare with this fund
-          </button>
-        </div>
-      ))}
-    </div>
+          );
+        })}
+      </div>
+    </DataState>
   );
 }
 
@@ -408,70 +448,83 @@ export function AlternativesSection() {
 // S20 — SIMILAR FUNDS (horizontal scroll carousel)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function SimilarSection() {
+export function SimilarSection({ isin }: { isin: string }) {
+  const { data: env, isLoading, isError, refetch } = useFundPeers(isin);
+  const peers = env?.data?.peers ?? [];
+  const status = isLoading ? 'loading' : isError ? 'error' : (peers.length ? 'present' : 'empty');
+  // Similar = the nearest-rank peers, in the order the backend already returns them.
+  const similar = peers.slice(0, 5);
+
   return (
-    <div
-      className="flex gap-3.5 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory]"
-      role="list"
-      aria-label="Similar funds"
+    <DataState
+      status={status}
+      emptyCopy="We don't have similar funds for this category yet."
+      onRetry={refetch}
+      skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
     >
-      {SIMILAR.map((fund) => (
-        <div
-          key={fund.name}
-          role="listitem"
-          className="
-            flex w-[220px] flex-none scroll-snap-start flex-col
-            rounded-2xl border border-line bg-surface p-4 shadow-sm
-            [scroll-snap-align:start]
-          "
-        >
-          {/* Avatar + name */}
-          <div className="mb-3 flex items-center gap-2.5">
-            <FundAvatar name={fund.name} />
-            <div className="min-w-0">
-              <div className="truncate text-caption font-bold leading-snug text-ink">
-                {fund.name}
-              </div>
-              <div className="text-[10px] text-ink-muted">{fund.amc}</div>
-            </div>
-          </div>
-
-          {/* 3-up mini-grid: assessment / 3Y / risk */}
-          <div className="mb-4 grid grid-cols-3 gap-1.5">
-            {/* Assessment — COMPLIANCE: label + band via FundScoreCell, NO score number */}
-            <MetricCell label="Assessment">
-              <FundScoreCell
-                label={fund.label}
-                confidenceBand={fund.band}
-                ringSize={28}
-                stacked
-                className="w-full"
-              />
-            </MetricCell>
-            <MetricCell label="3Y">
-              <span className="font-mono text-caption font-bold text-emerald">{fund.ret}</span>
-            </MetricCell>
-            <MetricCell label="Risk">
-              <span className="font-mono text-[10px] font-semibold text-ink-secondary">
-                {fund.risk}
-              </span>
-            </MetricCell>
-          </div>
-
-          <button
+      <div
+        className="flex gap-3.5 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory]"
+        role="list"
+        aria-label="Similar funds"
+      >
+        {similar.map((fund) => (
+          <Link
+            key={fund.isin}
+            href={`/mf/fund/${fund.isin}`}
+            role="listitem"
             className="
-              mt-auto w-full rounded-xl border border-line bg-surface-2 py-2
-              text-caption font-semibold text-ink-muted
-              hover:bg-surface-3 hover:text-ink
+              flex w-[220px] flex-none scroll-snap-start flex-col
+              rounded-2xl border border-line bg-surface p-4 shadow-sm
+              [scroll-snap-align:start]
               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40
-              transition-colors
             "
           >
-            Quick compare
-          </button>
-        </div>
-      ))}
-    </div>
+            {/* Avatar + name */}
+            <div className="mb-3 flex items-center gap-2.5">
+              <FundAvatar name={peerName(fund)} />
+              <div className="min-w-0">
+                <div className="truncate text-caption font-bold leading-snug text-ink">
+                  {peerName(fund)}
+                </div>
+                <div className="text-[10px] text-ink-muted">{fund.amc_name ?? 'Unknown AMC'}</div>
+              </div>
+            </div>
+
+            {/* 3-up mini-grid: assessment / return / risk */}
+            <div className="mb-4 grid grid-cols-3 gap-1.5">
+              {/* Assessment — COMPLIANCE: label + band via FundScoreCell, NO score number.
+                  band is null — W1 doesn't serve a confidence band on peers yet. */}
+              <MetricCell label="Assessment">
+                <FundScoreCell
+                  label={(fund.verb_label ?? 'insufficient_data') as Label}
+                  confidenceBand={null}
+                  ringSize={28}
+                  stacked
+                  className="w-full"
+                />
+              </MetricCell>
+              <MetricCell label={peerReturn(fund).label}>
+                <span className="font-mono text-caption font-bold text-emerald">{peerReturn(fund).v}</span>
+              </MetricCell>
+              <MetricCell label="Risk">
+                <span className="font-mono text-[10px] font-semibold text-ink-secondary">
+                  {peerRisk(fund)}
+                </span>
+              </MetricCell>
+            </div>
+
+            <span
+              className="
+                mt-auto block w-full rounded-xl border border-line bg-surface-2 py-2
+                text-center text-caption font-semibold text-ink-muted
+              "
+            >
+              Quick compare
+            </span>
+          </Link>
+        ))}
+      </div>
+    </DataState>
   );
 }
 
