@@ -20,6 +20,11 @@ import type {
   FundExplorerResponse,
   FundCategoriesResponse,
   FundHead,
+  FundNavSeries,
+  FundAnalyticsResponse,
+  FundComposition,
+  FundPeopleResponse,
+  FundPeers,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -362,6 +367,83 @@ export function useFundDetail(isin: string, _category?: string | null) {
       const env = await api.get<DataEnvelope<FundHead>>(`/mf/fund/${isin}`);
       return env.data;
     },
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// W1 — nav_series, analytics+rank_history, composition, people+amc, peers
+// (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17 W1). Envelope-aware — callers read
+// .data/.status/.meta.reason themselves via <DataState>, same pattern as
+// features/portfolio/api.ts (usePortfolioConcentration etc.).
+// ---------------------------------------------------------------------------
+
+/** `fund.nav_series` — GET /api/v1/mf/fund/{isin}/nav?range=... */
+export function useFundNav(isin: string, range: FundNavSeries['range'] = '1y') {
+  return useQuery<DataEnvelope<FundNavSeries>>({
+    queryKey: queryKeys.mf.fundNav(isin, range),
+    queryFn: () => api.get<DataEnvelope<FundNavSeries>>(`/mf/fund/${isin}/nav?range=${range}`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.analytics` + `fund.rank_history` — GET /api/v1/mf/fund/{isin}/analytics */
+export function useFundAnalytics(isin: string) {
+  return useQuery<FundAnalyticsResponse>({
+    queryKey: queryKeys.mf.fundAnalytics(isin),
+    queryFn: () => api.get<FundAnalyticsResponse>(`/mf/fund/${isin}/analytics`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.composition` — GET /api/v1/mf/fund/{isin}/composition */
+export function useFundComposition(isin: string) {
+  return useQuery<DataEnvelope<FundComposition>>({
+    queryKey: queryKeys.mf.fundComposition(isin),
+    queryFn: () => api.get<DataEnvelope<FundComposition>>(`/mf/fund/${isin}/composition`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.people` + `fund.amc` — GET /api/v1/mf/fund/{isin}/people */
+export function useFundPeople(isin: string) {
+  return useQuery<FundPeopleResponse>({
+    queryKey: queryKeys.mf.fundPeople(isin),
+    queryFn: () => api.get<FundPeopleResponse>(`/mf/fund/${isin}/people`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.peers` — GET /api/v1/mf/fund/{isin}/peers (feeds Alternatives + Similar) */
+export function useFundPeers(isin: string) {
+  return useQuery<DataEnvelope<FundPeers>>({
+    queryKey: queryKeys.mf.fundPeers(isin),
+    queryFn: () => api.get<DataEnvelope<FundPeers>>(`/mf/fund/${isin}/peers`),
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;

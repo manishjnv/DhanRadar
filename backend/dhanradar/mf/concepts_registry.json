@@ -177,6 +177,62 @@
       "gate_flag": null,
       "status": "live"
     },
+    "fund.nav_series": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.analytics": {
+      "visibility_class": "educational",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.rank_history": {
+      "visibility_class": "educational",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.composition": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.people": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.amc": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.peers": {
+      "visibility_class": "educational",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "live"
+    },
     "portfolio.score_raw": {
       "visibility_class": "gated",
       "data_class": "derived-personal",

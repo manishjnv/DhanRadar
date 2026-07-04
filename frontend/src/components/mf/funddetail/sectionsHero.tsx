@@ -22,6 +22,7 @@ import {
 import {
   FUND, HERO_FACTORS, STATUS_BADGES, VERDICT, ENTRY, MOOD, SCORE_MODULES, STICKY,
 } from './sampleData';
+import { getCategoryAboutCopy, getStickyCategoryStats } from './categoryCopy';
 
 // Label → display + ring/text colour (mirrors ScoreRing/FundScoreCell canon).
 const LABEL_DISPLAY: Record<Label, string> = {
@@ -40,6 +41,16 @@ const BAND_WORD: Record<ConfidenceBand, string> = { high: 'High', medium: 'Mediu
 const BADGE_TONE: Record<string, string> = {
   emerald: 'bg-emerald', royal: 'bg-royal', cyan: 'bg-cyan', amber: 'bg-amber',
 };
+
+/** Rank presented as a percentile BAND, not a bare "#3/24" badge (§16.2 differentiator —
+ * counters the leaderboard framing rivals use). Rank ordinals are DOM-allowed (§9). */
+function percentileBandCaption(rank: number, total: number): string {
+  const pct = rank / total;
+  if (pct <= 0.1) return 'Top 10% of category';
+  if (pct <= 0.25) return 'Top 25% of category';
+  if (pct <= 0.5) return 'Top half of category';
+  return 'Bottom half of category';
+}
 
 const NAVY_GRADIENT = 'linear-gradient(115deg, var(--dr-navy,#0B1F3A) 0%, #13294F 48%, #1E3A6E 100%)';
 const EMERALD_GRADIENT = 'linear-gradient(135deg, #052E26 0%, #064E3B 70%)';
@@ -149,6 +160,11 @@ export function HeroSection({ head }: { head: FundHead }) {
           <div className="mt-1.5 text-caption text-white/75">
             {head.rank != null && head.total != null ? `Rank ${head.rank} of ${head.total} in category` : 'Not yet ranked in category'}
           </div>
+          {head.rank != null && head.total != null && (
+            <div className="mt-0.5 font-mono text-[10px] text-white/55">
+              {percentileBandCaption(head.rank, head.total)}
+            </div>
+          )}
           <div className="mt-3.5 flex w-full items-center justify-between border-t border-white/10 pt-3">
             <span className="font-mono text-[10px] uppercase tracking-wide text-white/55">Assessment factors</span>
             <PreviewBadge className="border-white/15 bg-white/10 text-white/60" />
@@ -237,6 +253,10 @@ export function VerdictSection({ head }: { head: FundHead }) {
           ))}
         </div>
       </div>
+      {/* About this category — static per-category-class copy (§16.2 table-stakes) */}
+      <p className="relative mt-5 border-t border-white/15 pt-4 text-caption leading-relaxed" style={{ color: '#D1FAE5' }}>
+        <b className="font-semibold text-white">About this category:</b> {getCategoryAboutCopy(head.category)}
+      </p>
     </section>
   );
 }
@@ -375,6 +395,14 @@ export function ScoreBreakdownSection() {
 export function StickyBar({ head }: { head: FundHead }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
+  // Per-category-class static educational copy (§5 row 22, W1) — "Top reason" stays
+  // sampleData preview until per-fund signals exist (W2).
+  const catStats = getStickyCategoryStats(head.category);
+  const stickyStats = [
+    { v: catStats.horizon, l: 'Horizon' },
+    { v: catStats.phase, l: 'Market phase' },
+    { v: catStats.approach, l: 'Approach note' },
+  ];
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 shadow-[0_-8px_30px_rgba(0,0,0,.18)] backdrop-blur" style={{ background: 'rgba(11,31,58,.97)' }}>
       <div className="flex w-full items-center gap-5 px-4 py-3 text-white sm:px-6 lg:px-8">
@@ -387,11 +415,11 @@ export function StickyBar({ head }: { head: FundHead }) {
             {bandWord ? `${bandWord} confidence` : 'Confidence n/a'}<br />Top reason: <b className="font-mono text-white">{STICKY.reason}</b>
           </div>
         </div>
-        <div className="ml-auto hidden gap-6 lg:flex">
-          {STICKY.stats.map((s) => (
-            <div key={s.l} className="text-center">
-              <div className="font-mono text-small font-bold text-white">{s.v}</div>
-              <div className="text-[9.5px] font-semibold uppercase tracking-wide text-white/55">{s.l}</div>
+        <div className="ml-auto hidden max-w-xl gap-4 xl:flex">
+          {stickyStats.map((s) => (
+            <div key={s.l} className="w-40 text-left">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-white/55">{s.l}</div>
+              <div className="text-[10.5px] leading-snug text-white/85">{s.v}</div>
             </div>
           ))}
         </div>

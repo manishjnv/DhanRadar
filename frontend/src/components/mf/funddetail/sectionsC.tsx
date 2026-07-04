@@ -14,13 +14,13 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
+import { useFundComposition, useFundPeople } from '@/features/mf/api';
+import { DataState } from '@/components/ui/DataState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import {
   Panel, TabBar, ChipToggle, StackBar, FlowBars, BandBar, WhatThisMeans,
 } from './parts';
-import {
-  HOLD_STOCKS, HOLD_SECTORS, HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE,
-  STYLE_BOX, FLOW, MANAGER, AMC,
-} from './sampleData';
+import { FLOW, AMC, HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE, STYLE_BOX } from './sampleData';
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
@@ -45,34 +45,28 @@ const HOLD_TABS = [
   { key: 'style',   label: 'Style Box' },
 ];
 
-// 3×3 style-box column labels (bottom row only)
-const STYLE_COL_LABELS = ['Value', 'Blend', 'Growth'];
-
-function HoldingsStocksPane() {
+/** Real top-holdings pane (W1). The per-stock daily-change column isn't sourced yet
+ * (would need a live equity-price feed) — shows "—" rather than a fabricated %. */
+function HoldingsStocksPane({ holdings, maxWeight }: { holdings: { name: string; sector: string | null; weight_pct: number | null }[]; maxWeight: number }) {
   return (
     <div>
-      {HOLD_STOCKS.map((s) => (
+      {holdings.map((s) => (
         <div
-          key={s.ticker}
+          key={s.name}
           className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0"
         >
           {/* avatar */}
-          <FundAvatar name={s.ticker} size="sm" />
+          <FundAvatar name={s.name} size="sm" />
 
           {/* name + sector */}
           <div className="min-w-0 flex-1">
             <div className="text-small font-semibold text-ink leading-tight truncate">{s.name}</div>
-            <div className="text-caption text-ink-muted">{s.sector}</div>
+            <div className="text-caption text-ink-muted">{s.sector ?? 'Sector not disclosed'}</div>
           </div>
 
-          {/* daily chg */}
-          <span
-            className={cn(
-              'w-12 shrink-0 text-right font-mono text-caption font-semibold',
-              s.chg >= 0 ? 'text-emerald' : 'text-red',
-            )}
-          >
-            {s.chg >= 0 ? '+' : ''}{s.chg}%
+          {/* daily chg — not sourced yet (needs a live equity-price feed, W2+) */}
+          <span className="w-12 shrink-0 text-right font-mono text-caption font-semibold text-ink-faint">
+            —
           </span>
 
           {/* weight bar */}
@@ -83,7 +77,7 @@ function HoldingsStocksPane() {
             <div
               className="h-full rounded"
               style={{
-                width: `${(s.wt / 1.9) * 100}%`,
+                width: `${maxWeight > 0 ? ((s.weight_pct ?? 0) / maxWeight) * 100 : 0}%`,
                 background: 'var(--dr-royal,#1E5EFF)',
               }}
             />
@@ -91,20 +85,10 @@ function HoldingsStocksPane() {
 
           {/* weight % */}
           <span className="w-10 shrink-0 text-right font-mono text-small font-semibold text-ink">
-            {s.wt}%
+            {s.weight_pct != null ? `${s.weight_pct}%` : '—'}
           </span>
         </div>
       ))}
-
-      <button
-        className={cn(
-          'mt-3 w-full rounded-xl border border-line bg-surface-2 px-4 py-2.5',
-          'text-small font-semibold text-ink-muted transition-colors hover:text-ink',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-        )}
-      >
-        View all 250 holdings →
-      </button>
     </div>
   );
 }
@@ -131,7 +115,36 @@ function LegendList({ items }: { items: { name: string; wt: number; color: strin
   );
 }
 
-function StyleBoxPane() {
+// Deterministic sector-legend palette (data-viz colors, cycled — not fabricated data).
+const SECTOR_COLORS = ['#1E5EFF', '#00C2FF', '#00B386', '#F5A623', '#F97316', '#0B1F3A', '#64748B'];
+
+// ─── Preview panes preserved, not rendered (founder no-deletion rule 2026-07-04) ────
+// Market Cap / Asset Mix / Style Box need a stock master we don't have (plan §11), so
+// their tabs show an honest no-data state. The built panes stay here, exported, to be
+// re-wired with real data in W3 — do not delete.
+
+const STYLE_COL_LABELS = ['Value', 'Blend', 'Growth'];
+
+export function CapMixPreviewPane() {
+  return (
+    <div>
+      <StackBar items={HOLD_CAP} />
+      <LegendList items={HOLD_CAP} />
+      <p className="mt-3 text-caption leading-relaxed text-ink-muted">{HOLD_CAP_NOTE}</p>
+    </div>
+  );
+}
+
+export function AssetMixPreviewPane() {
+  return (
+    <div>
+      <StackBar items={HOLD_ASSET} />
+      <LegendList items={HOLD_ASSET} />
+    </div>
+  );
+}
+
+export function StyleBoxPane() {
   return (
     <div className="flex flex-col items-center">
       <p className="mb-4 text-caption text-ink-muted self-start">
@@ -173,39 +186,50 @@ function StyleBoxPane() {
   );
 }
 
-export function HoldingsSection() {
+export function HoldingsSection({ isin }: { isin: string }) {
   const [tab, setTab] = React.useState('stocks');
+  const { data: env, isLoading, isError, refetch } = useFundComposition(isin);
+  const composition = env?.data ?? null;
+  const rawStatus = isLoading ? 'loading' : isError ? 'error' : (env?.status ?? 'empty');
+  const hasHoldings = (composition?.holdings.length ?? 0) > 0;
+  // Present-but-zero-holdings (uncovered AMC) reads as empty; loading/error pass through.
+  const status = rawStatus === 'present' && !hasHoldings ? 'empty' : rawStatus;
+
+  const maxWeight = composition?.holdings.reduce((m, h) => Math.max(m, h.weight_pct ?? 0), 0) ?? 0;
+  const sectorItems = (composition?.sectors ?? []).map((s, i) => ({
+    name: s.name, wt: s.weight_pct, color: SECTOR_COLORS[i % SECTOR_COLORS.length],
+  }));
 
   return (
     <Panel className="p-5 sm:p-6">
       <TabBar tabs={HOLD_TABS} active={tab} onChange={setTab} />
 
       <div className="mt-4">
-        {tab === 'stocks' && <HoldingsStocksPane />}
-
-        {tab === 'sectors' && (
-          <div>
-            <StackBar items={HOLD_SECTORS} />
-            <LegendList items={HOLD_SECTORS} />
-          </div>
+        {(tab === 'stocks' || tab === 'sectors') && (
+          <DataState
+            status={status}
+            emptyCopy="This fund house doesn't publish holdings where we can read them yet."
+            onRetry={refetch}
+            skeleton={<Skeleton className="h-48 w-full rounded-xl" />}
+          >
+            {tab === 'stocks' && (
+              <HoldingsStocksPane holdings={composition?.holdings ?? []} maxWeight={maxWeight} />
+            )}
+            {tab === 'sectors' && (
+              <div>
+                <StackBar items={sectorItems} />
+                <LegendList items={sectorItems} />
+              </div>
+            )}
+          </DataState>
         )}
 
-        {tab === 'cap' && (
-          <div>
-            <StackBar items={HOLD_CAP} />
-            <LegendList items={HOLD_CAP} />
-            <p className="mt-3 text-caption leading-relaxed text-ink-muted">{HOLD_CAP_NOTE}</p>
-          </div>
+        {/* Market Cap / Asset Mix / Style Box — need a stock master we don't have (blocked, §11) */}
+        {(tab === 'cap' || tab === 'asset' || tab === 'style') && (
+          <DataState status="empty" emptyCopy="We don't have this breakdown yet.">
+            <></>
+          </DataState>
         )}
-
-        {tab === 'asset' && (
-          <div>
-            <StackBar items={HOLD_ASSET} />
-            <LegendList items={HOLD_ASSET} />
-          </div>
-        )}
-
-        {tab === 'style' && <StyleBoxPane />}
       </div>
     </Panel>
   );
@@ -280,47 +304,70 @@ export function FundFlowSection() {
 // S15 — FUND MANAGER
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function ManagerSection() {
+export function ManagerSection({ isin }: { isin: string }) {
+  const { data, isLoading, isError, refetch } = useFundPeople(isin);
+  const people = data?.people.data ?? null;
+  const managers = people?.managers ?? [];
+  const status = isLoading ? 'loading' : isError ? 'error' : (managers.length ? 'present' : 'empty');
+
+  const name = managers.map((m) => m.name).join(' & ') || null;
+  const initials = managers.slice(0, 2).map((m) => m.name.trim()[0] ?? '').join('').toUpperCase() || '—';
+  const tenureYears = managers.length ? Math.max(...managers.map((m) => m.tenure_years)) : null;
+  const sub = managers.length > 1 ? `Co-managing · ${managers.length} managers` : managers.length === 1 ? 'Fund manager' : undefined;
+
+  const stats = [
+    { v: tenureYears != null ? `${tenureYears.toFixed(1)}y` : '—', l: 'Tenure' },
+    { v: '—', l: 'Avg tracking err' },
+    { v: '—', l: 'Manager quality' },
+    { v: people ? String(people.manager_changes_5y) : '—', l: 'Mgr changes' },
+  ];
+
+  const meaning = name
+    ? `${name} ${managers.length > 1 ? 'have' : 'has'} been managing this fund${tenureYears != null ? ` for about ${tenureYears.toFixed(1)} years` : ''}. Manager changes are tracked because turnover can affect consistency.`
+    : "We don't have fund manager information for this fund house yet.";
+
   return (
     <Panel className="p-5 sm:p-6">
-      {/* header row */}
-      <div className="flex flex-wrap items-center gap-4">
-        {/* gradient avatar */}
-        <div
-          className="grid h-[62px] w-[62px] shrink-0 place-items-center rounded-2xl text-[22px] font-bold text-white"
-          style={{ background: 'linear-gradient(135deg,#2563EB,#10B981)' }}
-          aria-hidden="true"
-        >
-          {MANAGER.initials}
-        </div>
+      <DataState
+        status={status}
+        emptyCopy="We don't have fund manager information for this fund house yet."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-24 w-full rounded-2xl" />}
+      >
+        {/* header row */}
+        <div className="flex flex-wrap items-center gap-4">
+          {/* gradient avatar */}
+          <div
+            className="grid h-[62px] w-[62px] shrink-0 place-items-center rounded-2xl text-[22px] font-bold text-white"
+            style={{ background: 'linear-gradient(135deg,#2563EB,#10B981)' }}
+            aria-hidden="true"
+          >
+            {initials}
+          </div>
 
-        {/* name + sub */}
-        <div className="min-w-0 flex-1">
-          <div className="text-body font-bold text-ink leading-tight">{MANAGER.name}</div>
-          <div className="mt-0.5 text-caption text-ink-muted">{MANAGER.sub}</div>
-        </div>
+          {/* name + sub */}
+          <div className="min-w-0 flex-1">
+            <div className="text-body font-bold text-ink leading-tight">{name ?? '—'}</div>
+            {sub && <div className="mt-0.5 text-caption text-ink-muted">{sub}</div>}
+          </div>
 
-        {/* 4-up stat grid */}
-        <div className="flex flex-wrap gap-5 sm:gap-6">
-          {MANAGER.stats.map((s) => (
-            <div key={s.l} className="text-center">
-              <div
-                className={cn(
-                  'font-mono text-[17px] font-bold leading-none',
-                  s.tone ? (TONE_TEXT[s.tone] ?? 'text-ink') : 'text-ink',
-                )}
-              >
-                {s.v}
+          {/* 4-up stat grid */}
+          <div className="flex flex-wrap gap-5 sm:gap-6">
+            {stats.map((s) => (
+              <div key={s.l} className="text-center">
+                <div className="font-mono text-[17px] font-bold leading-none text-ink">
+                  {s.v}
+                </div>
+                <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                  {s.l}
+                </div>
               </div>
-              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                {s.l}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
 
-      <WhatThisMeans>{MANAGER.meaning}</WhatThisMeans>
+        <WhatThisMeans>{meaning}</WhatThisMeans>
+      </DataState>
     </Panel>
   );
 }
@@ -329,7 +376,16 @@ export function ManagerSection() {
 // S16 — AMC QUALITY
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function AmcSection({ amcName = 'This fund house' }: { amcName?: string }) {
+export function AmcSection({ isin, amcName = 'This fund house' }: { isin: string; amcName?: string }) {
+  const { data } = useFundPeople(isin);
+  const amc = data?.amc.data ?? null;
+  const factsLine = amc
+    ? `${amc.scheme_count} scheme${amc.scheme_count === 1 ? '' : 's'} across ${amc.category_count} categor${amc.category_count === 1 ? 'y' : 'ies'} on DhanRadar`
+    : null;
+  // "Total AUM" is source-blocked (B67/ADR-0035) — never fabricate it; every other
+  // stat stays the existing decorative preview (no numeric DhanRadar score, non-neg #2).
+  const stats = AMC.stats.map((s) => (s.l === 'Total AUM' ? { ...s, v: '—' } : s));
+
   return (
     <Panel className="p-5 sm:p-6">
       {/* header row */}
@@ -347,11 +403,12 @@ export function AmcSection({ amcName = 'This fund house' }: { amcName?: string }
         <div className="min-w-0 flex-1">
           <div className="text-body font-bold text-ink leading-tight">{amcName}</div>
           <div className="mt-0.5 text-caption text-ink-muted">{AMC.est}</div>
+          {factsLine && <div className="mt-0.5 text-caption font-semibold text-ink-secondary">{factsLine}</div>}
         </div>
 
         {/* 4-up stat grid */}
         <div className="flex flex-wrap gap-5 sm:gap-6">
-          {AMC.stats.map((s) => (
+          {stats.map((s) => (
             <div key={s.l} className="text-center">
               <div
                 className={cn(
