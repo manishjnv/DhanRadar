@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import zipfile
 from dataclasses import dataclass
@@ -3300,6 +3301,23 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
     return result
 
 
+# Section-header / subtotal / grand-total rows that some AMC disclosure sheets
+# interleave among actual holding rows — e.g. "(a)  Listed/awaiting listing on
+# Stock Exchanges", "(b) Unlisted", "Sub Total". Name-pattern backstop for the
+# 2026-07 INF789F01WY2 incident (docs/rca/README.md) — structural detection in
+# _extract_sebi_row (missing ISIN + no numbers) is the primary guard; this
+# catches header rows that DO carry a subtotal weight/value of their own.
+_SECTION_HEADER_RE = re.compile(
+    r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$",
+    re.IGNORECASE,
+)
+
+# SEBI sheets sometimes prefix "Name of Instrument" with a short instrument-type
+# code, e.g. UTI writes "EQ - ABB INDIA LTD.". 2-4 caps + " - " is never how a
+# real company name starts, so this can't over-strip a genuine holding name.
+_INSTRUMENT_PREFIX_RE = re.compile(r"^[A-Z]{2,4}\s*-\s*")
+
+
 def _extract_sebi_row(
     row_strs: list[str],
     col_map: dict[str, int],
@@ -3309,7 +3327,9 @@ def _extract_sebi_row(
 ) -> dict | None:
     """Extract one constituent row from a parsed SEBI row using loose column matching.
 
-    Returns None if the row has no constituent name (blank/total/header rows).
+    Returns None if the row has no constituent name, or is a section-header /
+    subtotal / grand-total row rather than an actual holding — see
+    docs/rca/README.md (INF789F01WY2, 2026-05, weight_pct sum ~200%).
     §8.4: market_value_cr and weight_pct are taken directly from the file — never computed
     from AMC-level totals.
     """
@@ -3334,6 +3354,9 @@ def _extract_sebi_row(
     if not constituent_name:
         return None
 
+    # Strip display-only instrument-type prefix (confirmed on UTI's "EQ - " rows).
+    constituent_name = _INSTRUMENT_PREFIX_RE.sub("", constituent_name).strip() or constituent_name
+
     # Skip total/sub-total rows.
     if any(
         kw in constituent_name.lower()
@@ -3342,8 +3365,6 @@ def _extract_sebi_row(
         return None
 
     isin_col = _get(["isin", "isin code"])
-    sector = _get(["sector", "industry", "industry/sector"])
-    rating = _get(["rating", "credit rating", "instrument rating"])
 
     weight_pct_raw = _get(
         ["% to nav", "% of net assets", "% to net assets", "weight", "% of nav"]
@@ -3372,6 +3393,19 @@ def _extract_sebi_row(
         except ValueError:
             pass
 
+    # Skip section-header rows. Structural signal first: a genuine holding
+    # always carries an ISIN; a label-only row with no ISIN and no number is
+    # pure section text, not a holding. Name-pattern backstop second, for
+    # headers that DO carry the section's own subtotal weight/value (the
+    # INF789F01WY2 case — see _SECTION_HEADER_RE docstring above).
+    if not isin_col and weight_pct is None and market_value_cr is None:
+        return None
+    if _SECTION_HEADER_RE.search(constituent_name):
+        return None
+
+    sector = _get(["sector", "industry", "industry/sector"])
+    rating = _get(["rating", "credit rating", "instrument rating"])
+
     # Use first-of-month date if as_of_month was parsed, else None (never fabricated).
     effective_month = as_of_month
 
@@ -3386,6 +3420,34 @@ def _extract_sebi_row(
         "as_of_month": effective_month,
         "source_amc": amc_name,
     }
+
+
+def _drop_over_covered_funds(constituent_batch: list[dict], amc_name: str) -> list[dict]:
+    """Fail-closed fund-level sanity check (ADR-0039).
+
+    Sums weight_pct per isin; a fund whose holdings sum past 105% almost
+    certainly still has a section-header/subtotal row leaking through (see
+    docs/rca/README.md, INF789F01WY2 2026-05 — 107 rows summed to ~199.66%).
+    Rather than write a fund we know is wrong, drop its rows entirely and log
+    a structured warning — null-over-wrong-number.
+    """
+    weight_by_isin: dict[str, float] = {}
+    for r in constituent_batch:
+        if r["weight_pct"] is not None:
+            weight_by_isin[r["isin"]] = weight_by_isin.get(r["isin"], 0.0) + r["weight_pct"]
+
+    bad_isins = {isin for isin, total in weight_by_isin.items() if total > 105}
+    for isin in bad_isins:
+        logger.warning(
+            "mf_constituents_fetch amc=%s isin=%s weight_pct_sum=%.2f exceeds 105%% "
+            "— skipping fund, suspected header/subtotal row leak",
+            amc_name,
+            isin,
+            weight_by_isin[isin],
+        )
+    if not bad_isins:
+        return constituent_batch
+    return [r for r in constituent_batch if r["isin"] not in bad_isins]
 
 
 async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[int, int]:
@@ -3506,6 +3568,13 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
             seen_keys.add(key)
             deduped.append(r)
     constituent_batch = deduped
+
+    # Fail-closed fund-level sanity check (ADR-0039, docs/rca/README.md
+    # INF789F01WY2 incident): if a fund's weight_pct rows still sum past 105%
+    # — an AMC quirk the row filter above doesn't catch — drop that fund's
+    # rows entirely rather than write a partially-garbage portfolio. A missing
+    # constituents row beats a wrong one.
+    constituent_batch = _drop_over_covered_funds(constituent_batch, amc_name)
 
     rows_upserted = 0
     aum_updates = 0

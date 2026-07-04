@@ -419,6 +419,12 @@ async def get_fund_composition(session: AsyncSession, isin: str) -> dict | None:
 
     weighted = [float(r.weight_pct) for r in rows if r.weight_pct is not None]
     weight_covered_pct = round(sum(weighted), 2) if weighted else None
+    # Data-quality guard (docs/rca/README.md, INF789F01WY2 incident): a coverage
+    # sum past 105% means garbage rows (section-header/subtotal leak) reached
+    # this fund despite the ingestion-side guard — report null, never a wrong
+    # number.
+    if weight_covered_pct is not None and weight_covered_pct > 105:
+        weight_covered_pct = None
 
     return {
         "holdings": holdings,

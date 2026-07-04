@@ -291,6 +291,42 @@ async def test_fund_composition_happy_path(async_client, db_session, patch_redis
     assert d["coverage"]["holdings_count"] == 3
 
 
+async def test_fund_composition_over_covered_returns_null_weight_pct(
+    async_client, db_session, patch_redis
+):
+    """Data-quality guard (docs/rca/README.md, INF789F01WY2 incident): if garbage
+    rows still get weight_pct summing past 105%, report null coverage rather than
+    a wrong number — holdings_count still reflects the actual row count."""
+    await _seed_fund(db_session, _ISIN_A)
+    month = datetime.date(2026, 5, 1)
+    db_session.add(
+        MfFundConstituent(
+            isin=_ISIN_A,
+            constituent_name="(a)  Listed/awaiting listing on Stock Exchanges",
+            as_of_month=month,
+            weight_pct=60.0,
+            source_amc="uti",
+        )
+    )
+    db_session.add(
+        MfFundConstituent(
+            isin=_ISIN_A,
+            constituent_name="ABB India Ltd.",
+            as_of_month=month,
+            sector="Capital Goods",
+            weight_pct=50.0,
+            source_amc="uti",
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/composition")
+    assert resp.status_code == 200, resp.text
+    d = resp.json()["data"]
+    assert d["coverage"]["holdings_count"] == 2
+    assert d["coverage"]["weight_covered_pct"] is None
+
+
 async def test_fund_composition_uncovered_amc_empty_200(async_client, db_session, patch_redis):
     await _seed_fund(db_session, _ISIN_A, amc="Some Uncovered AMC")
     await db_session.commit()
