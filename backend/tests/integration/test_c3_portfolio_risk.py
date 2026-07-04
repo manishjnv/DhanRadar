@@ -9,7 +9,7 @@ the tier-gate (advanced → 402 for a free user), and RLS owner-scoping.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -111,6 +111,9 @@ async def _seed_user(db_session, email: str) -> str:
 
 
 async def _seed_fund(db_session, isin: str, vol: float, sharpe: float) -> None:
+    # ADR-0039: load_portfolio_read_model's NAV lookup is now bounded to the last 30 days — a
+    # RECENT date keeps current_nav on the live NAV (100.0) instead of falling back to avg_cost_nav.
+    recent = date.today() - timedelta(days=1)
     # Global tables → idempotent (the test DB accumulates across tests).
     await db_session.execute(
         text(
@@ -124,7 +127,7 @@ async def _seed_fund(db_session, isin: str, vol: float, sharpe: float) -> None:
             "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 100.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"i": isin, "d": date(2026, 3, 31)},
+        {"i": isin, "d": recent},
     )
     await db_session.execute(
         text(
@@ -132,7 +135,7 @@ async def _seed_fund(db_session, isin: str, vol: float, sharpe: float) -> None:
             " sortino_ratio, rolling_1y_avg_pct, rolling_1y_pct_positive, as_of_date)"
             " VALUES (:i, :v, -30.0, :s, :s, 12.0, 65.0, :d) ON CONFLICT (isin) DO NOTHING"
         ),
-        {"i": isin, "v": vol, "s": sharpe, "d": date(2026, 3, 31)},
+        {"i": isin, "v": vol, "s": sharpe, "d": recent},
     )
 
 

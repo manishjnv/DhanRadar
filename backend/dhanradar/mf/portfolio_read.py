@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,15 @@ class EnrichedHolding:
     confidence_band: str | None  # high|medium|low band — never a numeric score (#2)
     as_of: str | None
     amc: str | None = None  # fund house — public fact (M2.1 allocation/concentration by AMC)
+    # ADR-0039 Rule 1 — classified at load time from signals already loaded (zero new storage).
+    # data_state:  'ledger_backed' | 'stated_only' | 'unpriced' | 'placeholder'. Defaults to
+    #   'ledger_backed' (the read model's FIRST pass has no ledger-flow knowledge yet — see
+    #   `_classify_holding` / `classify_holdings`); other callers (holdings.list, risk, allocation,
+    #   concentration, diversification) never call the post-step, so this default IS their state.
+    # value_basis: 'live_nav' (a recent NAV priced it) | 'cost_fallback' (avg_cost_nav fallback) |
+    #   'none' (neither — current_value is 0).
+    data_state: str = "ledger_backed"
+    value_basis: str = "live_nav"
 
 
 @dataclass(frozen=True)
@@ -64,19 +73,106 @@ class PortfolioReadModel:
     as_of: str | None
 
 
-async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> PortfolioReadModel:
+#: NAV staleness bound (ADR-0039 Rule 1) — matches `_active_holdings_nav_pairs`'s day-change window.
+#: A holding with no NAV row inside this window is priced off `avg_cost_nav` (or not at all), never
+#: an arbitrarily-old NAV masquerading as "current".
+_NAV_STALENESS_DAYS = 30
+
+
+def _classify_holding(
+    isin: str,
+    live_nav: float | None,
+    avg_cost_nav: float | None,
+    folio_number: str,
+    covered_keys: set[tuple[str, str]] | None,
+) -> tuple[str, str]:
+    """ADR-0039 Rule 1 — one holding's `(data_state, value_basis)` from signals `load_portfolio_read_model`
+    already has (zero new storage/queries). `live_nav` is the nav_map lookup AFTER the 30-day staleness
+    bound (None = no recent NAV); `avg_cost_nav` is the holding's own stored fallback.
+
+    `value_basis`: 'live_nav' (a recent NAV priced it) | 'cost_fallback' (falls back to avg_cost_nav) |
+    'none' (neither — current_value is 0).
+
+    `data_state`: checked in priority order — 'placeholder' (isin is an unresolved `CAMS:<code>`,
+    regardless of pricing) > 'unpriced' (value_basis isn't live_nav) > ledger-flow presence.
+    `covered_keys` is the router's `load_active_holding_flows` key set (every active holding with >= 1
+    ledger row); None means the caller doesn't know it yet (the read model's first pass, before the
+    router has queried flows) — every remaining holding defaults to 'ledger_backed' (`classify_holdings`
+    upgrades this to 'stated_only' once covered_keys is known; other callers — holdings.list, risk,
+    allocation, concentration, diversification — never call that post-step, so this default IS their
+    state, identical to pre-ADR-0039 behaviour where no such distinction existed)."""
+    if live_nav is not None:
+        value_basis = "live_nav"
+    elif avg_cost_nav is not None:
+        value_basis = "cost_fallback"
+    else:
+        value_basis = "none"
+
+    if isin.startswith("CAMS:"):
+        return "placeholder", value_basis
+    if value_basis != "live_nav":
+        return "unpriced", value_basis
+    if covered_keys is not None and (isin, folio_number) not in covered_keys:
+        return "stated_only", value_basis
+    return "ledger_backed", value_basis
+
+
+def classify_holdings(
+    rm: PortfolioReadModel, covered_keys: set[tuple[str, str]]
+) -> PortfolioReadModel:
+    """ADR-0039 Rule 1 post-step — the router calls this AFTER `load_active_holding_flows` (once it
+    knows which `(isin, folio_number)` keys actually have ledger rows) and BEFORE payload assembly, to
+    upgrade every holding still defaulted to 'ledger_backed' into its TRUE 'ledger_backed'/'stated_only'
+    split. This avoids a second read-model query — the reclassification is pure Python over data already
+    loaded. Placeholder/unpriced holdings are left unchanged (their state is isin/pricing-derived, not
+    ledger-derived)."""
+    reclassified = [
+        replace(
+            h,
+            data_state=(
+                "ledger_backed" if (h.isin, h.folio_number) in covered_keys else "stated_only"
+            ),
+        )
+        if h.data_state == "ledger_backed"
+        else h
+        for h in rm.holdings
+    ]
+    return replace(rm, holdings=reclassified)
+
+
+async def load_portfolio_read_model(
+    db: AsyncSession,
+    portfolio_id: str,
+    covered_keys: set[tuple[str, str]] | None = None,
+) -> PortfolioReadModel:
     """Load the owner's holdings (RLS-scoped) enriched with fund name/category + latest NAV + label/band,
     plus portfolio totals. `invested_amount` is read straight from `mf_user_holdings` = net-invested (B86).
     `unified_score` is never queried. Active positions only (`units > 0`) — a fully-redeemed (closed) folio
     from CAS stays a row in the DB but is hidden from this and every downstream view; its history lives in
-    the transaction ledger, not here."""
+    the transaction ledger, not here.
+
+    ADR-0039: the NAV lookup is now bounded to the last `_NAV_STALENESS_DAYS` days (previously
+    unbounded — an arbitrarily stale NAV row silently priced a holding as "current"). No recent NAV
+    → `current_nav` falls back to `avg_cost_nav` (or None) and the holding classifies 'unpriced' /
+    'cost_fallback' (`_classify_holding`). `covered_keys` (optional, backward-compatible — every OTHER
+    caller of this function omits it and gets the SAME behaviour as before ADR-0039) is the router's
+    ledger-flow key set; when given, a holding not in it classifies 'stated_only' instead of the
+    'ledger_backed' default. Most callers can't supply it on this first pass (chicken-and-egg: the
+    flow query itself needs this function's `active_keys` first) — `classify_holdings` is the
+    post-step that upgrades the classification once the router has it."""
     pid = uuid.UUID(portfolio_id)
 
     holdings = (
-        await db.execute(
-            select(MfUserHolding).where(MfUserHolding.portfolio_id == pid, MfUserHolding.units > 0)
+        (
+            await db.execute(
+                select(MfUserHolding).where(
+                    MfUserHolding.portfolio_id == pid, MfUserHolding.units > 0
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     isins = [h.isin for h in holdings]
 
     nav_map: dict[str, float] = {}
@@ -85,20 +181,25 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
         nav_rows = await db.execute(
             text(
                 "SELECT DISTINCT ON (isin) isin, nav FROM mf.mf_nav_history"
-                " WHERE isin = ANY(:isins) ORDER BY isin, nav_date DESC"
+                " WHERE isin = ANY(:isins) AND nav_date >= CURRENT_DATE - INTERVAL '30 days'"
+                " ORDER BY isin, nav_date DESC"
             ),
             {"isins": isins},
         )
         nav_map = {r.isin: float(r.nav) for r in nav_rows}
         fund_meta = {
             f.isin: f
-            for f in (await db.execute(select(MfFund).where(MfFund.isin.in_(isins)))).scalars().all()
+            for f in (await db.execute(select(MfFund).where(MfFund.isin.in_(isins))))
+            .scalars()
+            .all()
         }
 
     # Educational label/band only — UserFundScore.unified_score is deliberately NOT selected.
     score_rows = (
-        await db.execute(select(UserFundScore).where(UserFundScore.portfolio_id == pid))
-    ).scalars().all()
+        (await db.execute(select(UserFundScore).where(UserFundScore.portfolio_id == pid)))
+        .scalars()
+        .all()
+    )
     score_map = {s.isin: s for s in score_rows}
 
     enriched: list[EnrichedHolding] = []
@@ -106,14 +207,19 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
     total_value = 0.0
     max_as_of: str | None = None
     for h in holdings:
-        nav = nav_map.get(h.isin)
-        current_nav = nav if nav is not None else (float(h.avg_cost_nav) if h.avg_cost_nav is not None else None)
+        nav = nav_map.get(h.isin)  # already bounded to _NAV_STALENESS_DAYS above
+        avg_cost_nav = float(h.avg_cost_nav) if h.avg_cost_nav is not None else None
+        current_nav = nav if nav is not None else avg_cost_nav
         units = float(h.units or 0)
         current_value = units * current_nav if current_nav is not None else 0.0
         invested = float(h.invested_amount or 0)  # net-invested (B86)
         fund = fund_meta.get(h.isin)
         score = score_map.get(h.isin)
         as_of = h.as_of_date.isoformat() if h.as_of_date else None
+        folio_number = h.folio_number or ""
+        data_state, value_basis = _classify_holding(
+            h.isin, nav, avg_cost_nav, folio_number, covered_keys
+        )
 
         total_invested += invested
         total_value += current_value
@@ -125,7 +231,7 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
                 isin=h.isin,
                 scheme_name=(fund.fund_name_short or fund.scheme_name) if fund else h.isin,
                 category=(fund.sebi_category or fund.category) if fund else None,
-                folio_number=h.folio_number or "",
+                folio_number=folio_number,
                 units=units,
                 invested=invested,
                 current_nav=current_nav,
@@ -134,6 +240,8 @@ async def load_portfolio_read_model(db: AsyncSession, portfolio_id: str) -> Port
                 confidence_band=score.confidence_band if score else None,
                 as_of=as_of,
                 amc=(fund.amc_name if fund else None),
+                data_state=data_state,
+                value_basis=value_basis,
             )
         )
 
@@ -185,7 +293,9 @@ def holdings_payload(
                 "label": h.label,
                 "confidence_band": h.confidence_band,
                 "as_of": h.as_of,
-                "xirr_pct": xirr_map.get((h.isin, h.folio_number)),  # M2.3 — None when no ledger history
+                "xirr_pct": xirr_map.get(
+                    (h.isin, h.folio_number)
+                ),  # M2.3 — None when no ledger history
                 "day_change": day_change_map.get(h.isin, (None, None))[0],
                 "day_change_pct": day_change_map.get(h.isin, (None, None))[1],
             }
@@ -220,6 +330,9 @@ def summary_payload(
     reinvested_cost: float = 0.0,
     day_change_as_of: str | None = None,
     investor_name: str | None = None,
+    wt_avg_days_coverage_pct: int | None = None,
+    day_change_coverage_pct: int | None = None,
+    valuation_as_of: str | None = None,
 ) -> dict:
     """C2 `portfolio.summary` payload — the user's own calculated facts (value/invested/gain/XIRR, all
     DOM-allowed #2-exempt user numbers) + an overall data-confidence band + today's value change.
@@ -254,17 +367,46 @@ def summary_payload(
     `covered_value_and_coverage_pct` result — the integer % of `total_value` that `xirr_pct`'s ledger
     flows actually explain. None (the common case: full ledger coverage, or no XIRR at all) omits the
     caveat; a partial-coverage portfolio (some holdings ledger-backed, some ledger-less) gets an
-    honest number so the client can caveat the XIRR chip instead of silently overstating it."""
+    honest number so the client can caveat the XIRR chip instead of silently overstating it.
+
+    ADR-0039 additions (2026-07-04, the hero data-integrity layer):
+      `value_priced_pct` — computed HERE from `rm.holdings` (no router wiring needed): the integer %
+        of `total_value` carried by holdings priced off a LIVE nav (`value_basis == 'live_nav'`);
+        None once it rounds to 100 (nothing to caveat) or `total_value` is 0. A stale/unpriced holding
+        (no NAV inside the 30-day bound — `load_portfolio_read_model`) lowers this instead of silently
+        inflating `total_value` off an old NAV.
+      `invested_missing_count` — count of active holdings with no positive invested amount (a
+        holdings-only source that never captured cost) — always present (0 when none), so the FE can
+        gate its "some funds missing cost" hint on `> 0`.
+      `gain_pct`/`gain_vs_cost_pct` — FIXED sign-flip: None whenever their denominator is <= 0, not
+        just == 0 (a NEGATIVE net-invested — a data anomaly, not a real state — used to pass the old
+        truthy check and silently flip the sign of an otherwise-correct gain).
+      `wt_avg_days_coverage_pct`/`day_change_coverage_pct` — the caller's coverage-% for those two
+        metrics (same `basis_coverage_pct` math as `xirr_coverage_pct`, over each metric's OWN covered
+        value) — None when that metric is itself None, or coverage is full.
+      `valuation_as_of` — the caller's NAV-anchor date used for PRICING (day-change's anchor date when
+        available, else the latest on-file NAV date across the holdings) — distinct from the existing
+        `as_of` (the statement date) and never conflated with it."""
     gain = rm.total_value - rm.total_invested
-    gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
+    gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested > 0 else None
     cost_value = rm.total_invested + reinvested_cost
     gain_vs_cost = rm.total_value - cost_value
-    gain_vs_cost_pct = (gain_vs_cost / cost_value * 100.0) if cost_value else None
+    gain_vs_cost_pct = (gain_vs_cost / cost_value * 100.0) if cost_value > 0 else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
+
+    priced_value = sum(h.current_value for h in rm.holdings if h.value_basis == "live_nav")
+    value_priced_pct: int | None = None
+    if rm.total_value > 0:
+        pct = round(priced_value / rm.total_value * 100.0)
+        value_priced_pct = None if pct >= 100 else pct
+    invested_missing_count = sum(1 for h in rm.holdings if h.invested <= 0 and h.units > 0)
+
     return {
         "portfolio_id": portfolio_id,
         "total_value": rm.total_value,
+        "value_priced_pct": value_priced_pct,  # ADR-0039 — % of total_value on a live NAV; None = 100%
         "total_invested": rm.total_invested,  # net-invested cash basis (B86) — unchanged
+        "invested_missing_count": invested_missing_count,  # ADR-0039 — active holdings with no cost
         "cost_value": cost_value,  # CAMS-comparable: cash invested + reinvested payout cost
         "gain": gain,
         "gain_pct": gain_pct,
@@ -272,16 +414,23 @@ def summary_payload(
         "gain_vs_cost_pct": gain_vs_cost_pct,
         "xirr_pct": xirr_pct,  # ledger-based, active-holdings-only (load_portfolio_xirr) — CAMS-parity
         "xirr_coverage_pct": xirr_coverage_pct,  # Fix 2b — % of value xirr_pct covers; None = full
-        "xirr_1y_pct": xirr_1y[0] if xirr_1y else None,  # M2.3 — windowed XIRR, DOM-allowed (#2-exempt)
-        "xirr_1y_window_days": xirr_1y[1] if xirr_1y else None,  # actual days covered (may be < 365)
+        "xirr_1y_pct": xirr_1y[0]
+        if xirr_1y
+        else None,  # M2.3 — windowed XIRR, DOM-allowed (#2-exempt)
+        "xirr_1y_window_days": xirr_1y[1]
+        if xirr_1y
+        else None,  # actual days covered (may be < 365)
         "wt_avg_days": wt_avg_days,  # CAMS "Wt.Avg.Days" — capital-weighted avg holding period
+        "wt_avg_days_coverage_pct": wt_avg_days_coverage_pct,  # ADR-0039 — % of value wt_avg_days covers
         "day_change": day_change,  # user's own daily ₹ change — DOM-allowed (#2-exempt); None until ≥2 valuation rows
         "day_change_pct": day_change_pct,  # same two rows as day_change; None with it
         "day_change_as_of": day_change_as_of,  # ISO date the anchor above covers; None with day_change
+        "day_change_coverage_pct": day_change_coverage_pct,  # ADR-0039 — % of value day_change covers
         "fund_count": len(rm.holdings),
         "funds_scored": len(bands),
         "confidence_band": _portfolio_confidence_band(bands),
         "as_of": rm.as_of,
+        "valuation_as_of": valuation_as_of,  # ADR-0039 — NAV pricing anchor date, distinct from as_of
         "investor_name": investor_name,  # owner's own CAS-captured name, DPDP-fine; PAN never included
     }
 
@@ -353,9 +502,9 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
     if isins:
         metrics = {
             m.isin: m
-            for m in (
-                await db.execute(select(MfFundMetrics).where(MfFundMetrics.isin.in_(isins)))
-            ).scalars().all()
+            for m in (await db.execute(select(MfFundMetrics).where(MfFundMetrics.isin.in_(isins))))
+            .scalars()
+            .all()
         }
 
     # ponytail: weights are current_value (units × latest NAV), which falls back to avg_cost_nav for a
@@ -670,7 +819,7 @@ def _day_change_anchor(
 
 async def load_day_change(
     db: AsyncSession, portfolio_id: str
-) -> tuple[float, float | None, datetime.date] | None:
+) -> tuple[float, float | None, datetime.date, frozenset[str]] | None:
     """Bottom-up day change (§39.1/§39.5) — Σ units × (NAV_latest − NAV_prev) over the portfolio's
     CURRENT holdings, using the two most-recent NAV dates per ISIN from mf_nav_history. This is the
     RTA/consumer-app method: it reads only today's holdings + NAV history, never a stored valuation
@@ -697,6 +846,10 @@ async def load_day_change(
     contributes 0 to the change anyway, so filtering it out just skips a useless NAV lookup. Shares its
     SQL + pairing logic with `load_holdings_day_change` via `_active_holdings_nav_pairs` (CAMS-parity,
     per-fund today's G/L).
+
+    ADR-0039: the 4th tuple element is the set of ISINs that actually contributed (2 NAV dates AND at
+    the anchor) — the router's `day_change_coverage_pct` basis, so a partial-coverage day change (some
+    holdings unpriced/behind the anchor) can carry an honest caveat instead of implying full coverage.
     """
     pair = await _active_holdings_nav_pairs(db, portfolio_id)
     if pair is None:
@@ -708,7 +861,7 @@ async def load_day_change(
 
     change = 0.0
     prev_value = 0.0
-    covered = False
+    covered_isins: set[str] = set()
     for isin, units in holdings:
         navs = navs_by_isin.get(isin)
         if not navs or len(navs) < 2 or navs[0][0] != anchor:
@@ -716,11 +869,11 @@ async def load_day_change(
         nav_latest, nav_prev = navs[0][1], navs[1][1]
         change += units * (nav_latest - nav_prev)
         prev_value += units * nav_prev
-        covered = True
-    if not covered:
+        covered_isins.add(isin)
+    if not covered_isins:
         return None
     pct = (change / prev_value * 100.0) if prev_value else None
-    return change, pct, anchor
+    return change, pct, anchor, frozenset(covered_isins)
 
 
 async def load_holdings_day_change(
@@ -757,6 +910,21 @@ async def load_holdings_day_change(
     return result
 
 
+async def load_latest_nav_date(db: AsyncSession, isins: list[str]) -> datetime.date | None:
+    """ADR-0039 `valuation_as_of` fallback — the most recent `mf_nav_history` date across `isins`,
+    UNBOUNDED (unlike the 30-day pricing bound `load_portfolio_read_model` applies) since this is a
+    DISPLAY fact ("as of when did we last see ANY price for these funds"), not a pricing decision.
+    Only called when `load_day_change` has no anchor (every holding is unpriced/stale/cold) —
+    the common case anchors `valuation_as_of` on `load_day_change`'s own nav_date directly, no extra
+    query. None when `isins` is empty or none of them has ever had a NAV row."""
+    if not isins:
+        return None
+    return await db.scalar(
+        text("SELECT MAX(nav_date) FROM mf.mf_nav_history WHERE isin = ANY(:isins)"),
+        {"isins": isins},
+    )
+
+
 # --- M2.3: windowed (e.g. 1Y) XIRR + per-holding XIRR — unblocked by the transaction ledger --------
 
 
@@ -765,15 +933,24 @@ async def load_windowed_xirr(
     portfolio_id: str,
     end_value: float,
     days: int = 365,
+    active_keys: set[tuple[str, str]] | None = None,
 ) -> tuple[float, int] | None:
     """Windowed XIRR (e.g. "1Y XIRR") from the daily-valuation series + the ledger's real capital
     flows inside the window. Window start = today − `days`. The START value is the LATEST
     `mf_portfolio_daily_values` row ON OR BEFORE that date; if the series doesn't reach back that
     far, the EARLIEST row is used instead and the window honestly SHRINKS to match (never a
-    fabricated full year). `end_value` is the caller's already-computed live total_value (the read
+    fabricated full year). `end_value` is the caller's already-computed terminal value (the read
     model has it — not re-derived here). Flows are the ledger's B65-signed rows with a non-zero
     amount (the SAME basis as the lifetime XIRR — dividend payouts included) and `txn_date`
     strictly after the start row's date, summed per date (a multi-txn day is one flow).
+
+    ADR-0039 (two mandated fixes): `active_keys` — optional, backward-compatible (None = the
+    original unfiltered behaviour every existing caller/test still gets) — when given, flows are
+    filtered to the portfolio's ACTIVE `(instrument_id, folio_number)` keys BEFORE grouping by date,
+    so a CLOSED position's flow no longer leaks into the window (it used to: the query summed every
+    row for the portfolio+date regardless of whether that holding is still held). The router also
+    now passes `end_value` = the SAME covered live-priced basis `load_portfolio_xirr` uses (never the
+    raw `total_value`) — a caller-side fix, no change needed here for that half.
 
     Returns (xirr_pct, actual_window_days); None when:
     - the valuation series is empty (cold start — no daily-valuation row at all)
@@ -818,18 +995,42 @@ async def load_windowed_xirr(
     # (tasks/mf.py builds its cashflows from `t.amount if t.amount`, no type filter): a
     # dividend payout is a real investor inflow and belongs in a money-weighted return.
     # (_CAPITAL_FLOW_TYPES stays the rule for `invested`, which is a capital measure.)
-    flow_rows = (
-        await db.execute(
-            select(MfPortfolioTransaction.txn_date, func.sum(MfPortfolioTransaction.amount))
-            .where(
-                MfPortfolioTransaction.portfolio_id == pid,
-                MfPortfolioTransaction.txn_date > start_date,
-                MfPortfolioTransaction.amount != 0,
+    if active_keys is None:
+        # Original unfiltered path — every existing caller/test that doesn't pass active_keys.
+        flow_rows = (
+            await db.execute(
+                select(MfPortfolioTransaction.txn_date, func.sum(MfPortfolioTransaction.amount))
+                .where(
+                    MfPortfolioTransaction.portfolio_id == pid,
+                    MfPortfolioTransaction.txn_date > start_date,
+                    MfPortfolioTransaction.amount != 0,
+                )
+                .group_by(MfPortfolioTransaction.txn_date)
             )
-            .group_by(MfPortfolioTransaction.txn_date)
-        )
-    ).all()
-    flows = [CashFlow(when=r[0], amount=float(r[1])) for r in flow_rows]
+        ).all()
+        flows = [CashFlow(when=r[0], amount=float(r[1])) for r in flow_rows]
+    else:
+        # ADR-0039 — select ungrouped so a closed holding's rows can be dropped BEFORE summing by date.
+        rows = (
+            await db.execute(
+                select(
+                    MfPortfolioTransaction.instrument_id,
+                    MfPortfolioTransaction.folio_number,
+                    MfPortfolioTransaction.txn_date,
+                    MfPortfolioTransaction.amount,
+                ).where(
+                    MfPortfolioTransaction.portfolio_id == pid,
+                    MfPortfolioTransaction.txn_date > start_date,
+                    MfPortfolioTransaction.amount != 0,
+                )
+            )
+        ).all()
+        by_date: dict[datetime.date, float] = {}
+        for r in rows:
+            if (r.instrument_id, r.folio_number) not in active_keys:
+                continue
+            by_date[r.txn_date] = by_date.get(r.txn_date, 0.0) + float(r.amount)
+        flows = [CashFlow(when=d, amount=amt) for d, amt in by_date.items()]
 
     rate = windowed_xirr(start_value, start_date, flows, end_value, today)
     if rate is None:
@@ -871,7 +1072,9 @@ async def load_holdings_xirr(
     flows_by_holding: dict[tuple[str, str], list[CashFlow]] = {}
     for r in rows:
         key = (r.instrument_id, r.folio_number)
-        flows_by_holding.setdefault(key, []).append(CashFlow(when=r.txn_date, amount=float(r.amount)))
+        flows_by_holding.setdefault(key, []).append(
+            CashFlow(when=r.txn_date, amount=float(r.amount))
+        )
 
     result: dict[tuple[str, str], float | None] = {}
     for key, current_value in current_values.items():
@@ -992,6 +1195,17 @@ async def load_active_holding_flows(
     return grouped
 
 
+def basis_coverage_pct(covered_value: float, total_value: float) -> int | None:
+    """ADR-0039 — shared coverage-% math, extracted from Fix 2b's threshold so `xirr_coverage_pct`,
+    `wt_avg_days_coverage_pct`, and `day_change_coverage_pct` all use ONE rule for "is this coverage
+    gap worth a caveat". None when `covered_value` is >= ~99% of `total_value` (full/near-full
+    coverage — a negligible rounding-noise gap needs no caveat) or `total_value` <= 0 (nothing to
+    divide by); otherwise the integer % of `total_value` that `covered_value` represents."""
+    if total_value <= 0 or covered_value >= total_value * 0.99:
+        return None
+    return round(covered_value / total_value * 100.0)
+
+
 def covered_value_and_coverage_pct(
     current_value_by_key: dict[tuple[str, str], float],
     covered_keys: set[tuple[str, str]],
@@ -1005,34 +1219,44 @@ def covered_value_and_coverage_pct(
       - `covered_value` = Σ `current_value_by_key` over `covered_keys` — the terminal
         `load_portfolio_xirr` must use so the XIRR solver is never credited a return on a
         ledger-less holding's value it never saw a flow for.
-      - `xirr_coverage_pct` = None when `covered_value` is >= ~99% of `total_value` (full/near-full
-        coverage — no caveat needed) or `total_value` is 0 (nothing to divide by); otherwise the
-        integer % of the portfolio's value the XIRR actually covers, for the summary payload's
-        honest caveat (never fabricated, never silently swallowed)."""
+      - `xirr_coverage_pct` = `basis_coverage_pct(covered_value, total_value)` — the summary
+        payload's honest caveat (never fabricated, never silently swallowed)."""
     covered_value = sum(v for k, v in current_value_by_key.items() if k in covered_keys)
-    if total_value <= 0 or covered_value >= total_value * 0.99:
-        return covered_value, None
-    return covered_value, round(covered_value / total_value * 100.0)
+    return covered_value, basis_coverage_pct(covered_value, total_value)
+
+
+# ADR-0039 FIFO fix — the walk used to key PURELY on amount sign (`amount < 0` opens a lot,
+# `amount > 0` consumes one). `dividend_payout` rows are B65-signed POSITIVE (investor-convention
+# inflow, same sign as a redemption — see cas.py's CAMS txn-type table) but a payout doesn't reduce
+# units or cost basis the way a redemption/switch_out does — walking it as a "redemption" silently
+# consumed FIFO lots it had no business touching, understating Wt.Avg.Days. `txn_type` (already
+# threaded through every flows tuple but previously ignored — the `_txn_type` name marked that) now
+# disambiguates: only these two sets move lots; everything else (dividend_payout, dividend_reinvest
+# — amount 0 anyway — or an unrecognised type) leaves lots untouched.
+_LOT_OPEN_TYPES = frozenset({"purchase", "sip", "switch_in"})
+_LOT_CONSUME_TYPES = frozenset({"redemption", "switch_out"})
 
 
 def _fifo_remaining_cost_and_weighted_age(
     flows: list[tuple[datetime.date, float, str]], today: datetime.date
 ) -> tuple[float, float]:
     """FIFO lot walk — the shared innards of `weighted_avg_holding_days`, for ONE (instrument, folio)'s
-    chronological ledger flows: a purchase (`amount < 0`) opens a lot costed at `-amount` on
-    `txn_date`; a redemption (`amount > 0`) consumes the OLDEST lots' remaining cost first (partial
-    consumption splits a lot); a `dividend_reinvest` row (`amount == 0`) is skipped — it changes
-    units, not cost (B65).
+    chronological ledger flows: a purchase/sip/switch_in (`_LOT_OPEN_TYPES`, amount < 0) opens a lot
+    costed at `-amount` on `txn_date`; a redemption/switch_out (`_LOT_CONSUME_TYPES`, amount > 0)
+    consumes the OLDEST lots' remaining cost first (partial consumption splits a lot). Any other
+    txn_type — `dividend_payout` (a positive inflow but NOT a redemption — ADR-0039 fix) or
+    `dividend_reinvest` (amount == 0, B65) — leaves lots untouched; it changes income or units, not
+    cost.
 
     Returns `(Σ remaining_lot_cost, Σ remaining_lot_cost × age_days)` — the RAW pair, so a caller
     combining several holdings' lots into one portfolio figure sums these BEFORE dividing (dividing
     per-holding first and averaging the per-holding results would double-round and mis-weight small
     holdings against large ones — see `portfolio_wt_avg_days`)."""
     lots: list[tuple[float, datetime.date]] = []  # (remaining_cost, purchase_date), oldest-first
-    for txn_date, amount, _txn_type in sorted(flows, key=lambda f: f[0]):
-        if amount < 0:
+    for txn_date, amount, txn_type in sorted(flows, key=lambda f: f[0]):
+        if txn_type in _LOT_OPEN_TYPES:
             lots.append((-amount, txn_date))
-        elif amount > 0:
+        elif txn_type in _LOT_CONSUME_TYPES:
             remaining = amount
             kept: list[tuple[float, datetime.date]] = []
             for cost, dt in lots:
@@ -1043,7 +1267,7 @@ def _fifo_remaining_cost_and_weighted_age(
                 if cost > 0:
                     kept.append((cost, dt))
             lots = kept
-        # amount == 0 (dividend_reinvest) — no cost / no lot effect.
+        # else (dividend_payout / dividend_reinvest / unrecognised) — no cost / no lot effect.
     cost_sum = sum(c for c, _ in lots)
     weighted_sum = sum(c * (today - d).days for c, d in lots)
     return cost_sum, weighted_sum
@@ -1114,13 +1338,17 @@ async def load_portfolio_valuation_series(
     n = min(max(days, 1), _MAX_VALUATION_DAYS)
 
     rows = (
-        await db.execute(
-            select(MfPortfolioDailyValue)
-            .where(MfPortfolioDailyValue.portfolio_id == pid)
-            .order_by(MfPortfolioDailyValue.valuation_date.desc())
-            .limit(n)
+        (
+            await db.execute(
+                select(MfPortfolioDailyValue)
+                .where(MfPortfolioDailyValue.portfolio_id == pid)
+                .order_by(MfPortfolioDailyValue.valuation_date.desc())
+                .limit(n)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # Reverse so result is ascending by date (oldest first).
     return [
@@ -1212,3 +1440,54 @@ def valuation_series_payload(
             for p in points
         ],
     }
+
+
+# --- ADR-0039 Rule 5: serve-time consistency tripwire ------------------------------------------
+#
+# Pure — no DB, no I/O. The router runs this AFTER assembling the summary payload and logs a single
+# structured `hero.integrity` warning listing whatever failed (never blocks serving — a wrong number
+# already shipped once this fires; the point is making the NEXT blend regression visible in
+# Grafana/logs the day it ships, not gating this request). Tolerances are small-money/rounding
+# slack, not correctness holes — the underlying figures already round to 2dp / whole percents.
+
+_MONEY_TOLERANCE = 0.05  # ₹ — covers float/Decimal rounding across the read-model boundary
+
+
+def hero_integrity_checks(rm: PortfolioReadModel, payload: dict) -> list[str]:
+    """ADR-0039 Rule 5 — the summary payload's consistency tripwire. Returns the list of FAILED check
+    codes (empty = clean). Codes:
+      - `total_value_mismatch` — `payload['total_value']` vs Σ `rm.holdings[].current_value`.
+      - `coverage_out_of_range` — any `*_coverage_pct`/`value_priced_pct` key outside [0, 100].
+      - `fund_count_mismatch` — `payload['fund_count']` vs `len(rm.holdings)`.
+      - `placeholder_live_nav` — a 'placeholder' holding whose `value_basis` is 'live_nav' (an
+        unresolved `CAMS:<code>` isin should never have matched a real NAV row).
+      - `gain_mismatch` — `payload['gain']` vs `total_value − total_invested`.
+    """
+    failed: list[str] = []
+
+    holdings_value = sum(h.current_value for h in rm.holdings)
+    if abs(payload.get("total_value", 0.0) - holdings_value) >= _MONEY_TOLERANCE:
+        failed.append("total_value_mismatch")
+
+    for key in (
+        "value_priced_pct",
+        "xirr_coverage_pct",
+        "wt_avg_days_coverage_pct",
+        "day_change_coverage_pct",
+    ):
+        pct = payload.get(key)
+        if pct is not None and not (0 <= pct <= 100):
+            failed.append("coverage_out_of_range")
+            break
+
+    if payload.get("fund_count") != len(rm.holdings):
+        failed.append("fund_count_mismatch")
+
+    if any(h.data_state == "placeholder" and h.value_basis == "live_nav" for h in rm.holdings):
+        failed.append("placeholder_live_nav")
+
+    expected_gain = payload.get("total_value", 0.0) - payload.get("total_invested", 0.0)
+    if abs(payload.get("gain", 0.0) - expected_gain) >= _MONEY_TOLERANCE:
+        failed.append("gain_mismatch")
+
+    return failed

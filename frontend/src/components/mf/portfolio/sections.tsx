@@ -316,6 +316,13 @@ const HERO_HINT_TONE_CLASS: Record<'positive' | 'negative' | 'neutral', string> 
   neutral: 'text-slate-300',
 };
 
+/** ADR-0039 — shared "covers N% of value" hint suffix, extracted from the XIRR chip's original Fix-2b
+ * format so XIRR/Avg Days/Day Change all render the SAME coverage caveat the same way. Returns `base`
+ * unchanged when `coveragePct` is null/undefined or >= 100 (full coverage — nothing to caveat). */
+function coverageHint(base: string, coveragePct: number | null | undefined): string {
+  return coveragePct != null && coveragePct < 100 ? `${base} · covers ${coveragePct}% of value` : base;
+}
+
 /** Compact label/value stat used in the hero (Day Change · Invested · XIRR). */
 function HeroStat({ label, value, accent, hint, hintTone = 'neutral', tip }: {
   label: string;
@@ -504,6 +511,21 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
     nfPts.length >= 2
       ? (nfPts[nfPts.length - 1].close_value / nfPts[nfPts.length - 2].close_value - 1) * 100
       : null;
+  // ADR-0039 — the Day Change hint's base text (unchanged from before), with the shared
+  // "covers N% of value" coverage caveat appended when day_change_coverage_pct is a meaningful
+  // shortfall (a stale/unpriced holding excluded from today's bottom-up move).
+  const dayChangeBaseHint =
+    dayChange === null
+      ? 'Updates daily'
+      : niftyToday !== null
+        ? `Nifty ${niftyToday >= 0 ? '+' : '−'}${Math.abs(niftyToday).toFixed(2)}% today${dayChangeAsOf ? ` · as of ${fmtDate(dayChangeAsOf)}` : ''}`
+        : dayChangeAsOf
+          ? `As of ${fmtDate(dayChangeAsOf)}`
+          : undefined;
+  const dayChangeHint =
+    dayChangeBaseHint === undefined
+      ? undefined
+      : coverageHint(dayChangeBaseHint, summary?.day_change_coverage_pct);
   // One P&L% story (founder-reported 2026-07-04): every VISIBLE gain ₹/% on the hero — the top
   // "Total Gain"/"Total Return" stat AND the mini-chart's Invested/Value/P&L chips — reads from
   // this SAME cost-basis figure (gain_vs_cost/gain_vs_cost_pct, the CAMS-comparable pair),
@@ -625,22 +647,20 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 <HeroStat
                   label="Invested"
                   value={fmtFull(summary.cost_value ?? summary.total_invested)}
-                  hint="incl. reinvested payouts"
+                  hint={
+                    // ADR-0039 — a holdings-only source that never captured cost lowers this,
+                    // appended (never replacing) the existing "incl. reinvested payouts" hint.
+                    summary.invested_missing_count && summary.invested_missing_count > 0
+                      ? 'incl. reinvested payouts · some funds missing cost'
+                      : 'incl. reinvested payouts'
+                  }
                   tip={costValueTip}
                 />
                 <HeroStat
                   label="Day Change"
                   value={dayChange === null ? '—' : `${dayChange >= 0 ? '+' : '−'}${fmtFull(Math.abs(dayChange))}${dayPct !== null ? ` (${Math.abs(dayPct).toFixed(2)}%)` : ''}`}
                   accent={dayChange === null ? undefined : dayChange >= 0 ? 'text-emerald-300' : 'text-red-300'}
-                  hint={
-                    dayChange === null
-                      ? 'Updates daily'
-                      : niftyToday !== null
-                        ? `Nifty ${niftyToday >= 0 ? '+' : '−'}${Math.abs(niftyToday).toFixed(2)}% today${dayChangeAsOf ? ` · as of ${fmtDate(dayChangeAsOf)}` : ''}`
-                        : dayChangeAsOf
-                          ? `As of ${fmtDate(dayChangeAsOf)}`
-                          : undefined
-                  }
+                  hint={dayChangeHint}
                   hintTone={
                     dayChange !== null && niftyToday !== null
                       ? (niftyToday >= 0 ? 'positive' : 'negative')
@@ -662,11 +682,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     label="XIRR"
                     value={fmtPct(summary.xirr_pct)}
                     accent={summary.xirr_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}
-                    hint={
-                      summary.xirr_coverage_pct != null && summary.xirr_coverage_pct < 100
-                        ? `current funds · since start · covers ${summary.xirr_coverage_pct}% of value`
-                        : 'current funds · since start'
-                    }
+                    hint={coverageHint('current funds · since start', summary.xirr_coverage_pct)}
                     tip={xiirrTip}
                   />
                 )}
@@ -674,7 +690,7 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                   <HeroStat
                     label="Avg Days"
                     value={`${summary.wt_avg_days}`}
-                    hint="capital-weighted"
+                    hint={coverageHint('capital-weighted', summary.wt_avg_days_coverage_pct)}
                     tip={wtAvgDaysTip}
                   />
                 )}

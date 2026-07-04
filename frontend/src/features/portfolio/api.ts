@@ -172,8 +172,18 @@ export interface SummaryPayload {
   portfolio_id: string;
   /** User's own total portfolio value — allowed in DOM */
   total_value: number;
+  /**
+   * ADR-0039 — the integer % of total_value carried by holdings priced off a LIVE nav (as opposed
+   * to a stale/no-NAV holding's cost_fallback). null once it rounds to 100% (nothing to caveat).
+   */
+  value_priced_pct?: number | null;
   /** User's own total invested — allowed in DOM */
   total_invested: number;
+  /**
+   * ADR-0039 — count of active holdings with no positive invested amount (a holdings-only source
+   * that never captured cost). 0 when none are missing.
+   */
+  invested_missing_count?: number;
   /** User's own absolute gain — allowed in DOM */
   gain: number;
   /** User's own gain % — allowed in DOM; null when total_invested is 0 (no holdings yet) */
@@ -210,11 +220,26 @@ export interface SummaryPayload {
   day_change_as_of?: string | null;
   /** CAMS "Wt.Avg.Days" — capital-weighted average holding period in days; null when no active cost remains */
   wt_avg_days?: number | null;
+  /**
+   * ADR-0039 — % of total_value that wt_avg_days' ledger-only basis covers (mirrors
+   * xirr_coverage_pct's math). null when wt_avg_days is itself null, or coverage is full.
+   */
+  wt_avg_days_coverage_pct?: number | null;
+  /**
+   * ADR-0039 — % of total_value that day_change's covered holdings (2 recent NAV dates, at the
+   * anchor) represent. null when day_change is itself null, or coverage is full.
+   */
+  day_change_coverage_pct?: number | null;
   fund_count: number;
   funds_scored: number;
   /** Data-confidence band for the portfolio as a whole — a data-quality descriptor, NOT a verdict */
   confidence_band: 'high' | 'medium' | 'low' | null;
   as_of: string | null;
+  /**
+   * ADR-0039 — the NAV pricing anchor date (day-change's anchor date, else the latest on-file NAV
+   * date across holdings) — distinct from `as_of` (the statement date); never conflated with it.
+   */
+  valuation_as_of?: string | null;
   /** Owner's own CAS-captured name (their own name to their own session, DPDP-fine) — null until
    * a CAS upload has captured it. Their PAN is never included in this payload. */
   investor_name?: string | null;

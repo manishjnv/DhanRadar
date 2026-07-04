@@ -19,6 +19,7 @@ No advisory verbs in any response copy. Disclosure bundle on every response (non
 from __future__ import annotations
 
 import datetime
+import logging
 import uuid
 from typing import Annotated
 
@@ -32,15 +33,19 @@ from dhanradar.insights import service
 from dhanradar.insights.schemas import MoodContextResponse, OverlapResponse
 from dhanradar.mf.portfolio_read import (
     allocation_payload,
+    basis_coverage_pct,
+    classify_holdings,
     concentration_payload,
     covered_value_and_coverage_pct,
     diversification_payload,
+    hero_integrity_checks,
     holdings_payload,
     load_active_holding_flows,
     load_day_change,
     load_first_investment_date,
     load_holdings_day_change,
     load_holdings_xirr,
+    load_latest_nav_date,
     load_ledger_flows_by_date,
     load_portfolio_read_model,
     load_portfolio_risk,
@@ -58,6 +63,8 @@ from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfPortfolio
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["portfolio-intelligence"])
 
@@ -98,7 +105,9 @@ async def _owned_portfolio_id(db: AsyncSession, portfolio_id: str, user_id: str)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
     owned = await db.scalar(
-        select(MfPortfolio.id).where(MfPortfolio.id == pid, MfPortfolio.user_id == uuid.UUID(user_id))
+        select(MfPortfolio.id).where(
+            MfPortfolio.id == pid, MfPortfolio.user_id == uuid.UUID(user_id)
+        )
     )
     if owned is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
@@ -162,45 +171,91 @@ async def portfolio_summary(
     holdings-only source, e.g. a KFin consolidated PDF) value it never saw a flow for. `xirr_coverage_pct`
     surfaces the honest % of value that basis covers whenever it's a meaningful shortfall (None = full
     coverage, or no XIRR at all).
+
+    ADR-0039 (hero data-integrity layer, 2026-07-04): the same `covered_value`/`active_keys` now also
+    fix `xirr_1y` (flows filtered to active keys — a closed position's flow no longer leaks into the
+    window — AND the same covered-value terminal, not raw `total_value`) and feed
+    `wt_avg_days_coverage_pct` (wt_avg_days is inherently ledger-only, so it shares xirr's covered
+    basis). `classify_holdings` upgrades each holding's `data_state` to the TRUE ledger_backed/
+    stated_only split now that `active_flows`' keys are known (a pure Python reclassification — no
+    second query). `day_change_coverage_pct` mirrors the same pattern over `load_day_change`'s own
+    covered-ISIN set. `valuation_as_of` is the NAV pricing anchor (day-change's anchor date, else the
+    latest on-file NAV date — `load_latest_nav_date`, only queried on that cold/stale fallback path).
+    Finally `hero_integrity_checks` runs a pure consistency tripwire over the assembled payload and
+    logs (never blocks) a single structured `hero.integrity` warning if anything looks inconsistent.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
-    dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct, anchor nav_date) or None
-    xirr_1y = await load_windowed_xirr(db, portfolio_id, rm.total_value)
     active_flows = await load_active_holding_flows(db, portfolio_id, active_keys)
     current_value_by_key = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
     covered_value, xirr_coverage_pct = covered_value_and_coverage_pct(
         current_value_by_key, set(active_flows), rm.total_value
     )
+    # ADR-0039 Rule 1 post-step — now that the ledger-flow keys are known, upgrade each holding's
+    # data_state from the load-time 'ledger_backed' default to the true ledger_backed/stated_only split.
+    rm = classify_holdings(rm, set(active_flows))
+
+    dc = await load_day_change(
+        db, portfolio_id
+    )  # (bottom-up ₹, pct, anchor nav_date, covered isins) or None
+    xirr_1y = await load_windowed_xirr(db, portfolio_id, covered_value, active_keys=active_keys)
     xirr_pct = await load_portfolio_xirr(db, portfolio_id, covered_value, active_keys)
     # No XIRR at all (no active flows) → no coverage caveat either; nothing to caveat around.
     if xirr_pct is None:
         xirr_coverage_pct = None
     today = datetime.date.today()
     wt_avg_days = portfolio_wt_avg_days(active_flows, today)
+    # wt_avg_days is computed ONLY from active_flows (ledger-backed holdings) — the SAME covered_value
+    # basis as XIRR, independent of whether the XIRR solver itself found a root.
+    wt_avg_days_coverage_pct = (
+        basis_coverage_pct(covered_value, rm.total_value) if wt_avg_days is not None else None
+    )
     reinvested_cost = reinvested_dividend_cost(active_flows)
+
+    day_change_coverage_pct: int | None = None
+    valuation_as_of: str | None = None
+    if dc is not None:
+        covered_isins = dc[3]
+        value_by_isin: dict[str, float] = {}
+        for h in rm.holdings:
+            value_by_isin[h.isin] = value_by_isin.get(h.isin, 0.0) + h.current_value
+        dc_covered_value = sum(v for isin, v in value_by_isin.items() if isin in covered_isins)
+        day_change_coverage_pct = basis_coverage_pct(dc_covered_value, rm.total_value)
+        valuation_as_of = dc[2].isoformat()
+    else:
+        latest_nav_date = await load_latest_nav_date(db, [h.isin for h in rm.holdings])
+        valuation_as_of = latest_nav_date.isoformat() if latest_nav_date else None
+
     # Owner's own CAS-captured name (hero polish, 2026-07-04) — their own name to their own
     # session, DPDP-fine. Never their investor_pan (not selected here at all).
     investor_name = await db.scalar(
         select(User.full_name).where(User.id == uuid.UUID(user.user_id))
     )
+    payload = summary_payload(
+        rm,
+        portfolio_id,
+        dc[0] if dc else None,
+        dc[1] if dc else None,
+        xirr_1y,
+        xirr_pct=xirr_pct,
+        xirr_coverage_pct=xirr_coverage_pct,
+        wt_avg_days=wt_avg_days,
+        reinvested_cost=reinvested_cost,
+        day_change_as_of=dc[2].isoformat() if dc else None,
+        investor_name=investor_name,
+        wt_avg_days_coverage_pct=wt_avg_days_coverage_pct,
+        day_change_coverage_pct=day_change_coverage_pct,
+        valuation_as_of=valuation_as_of,
+    )
+    # ADR-0039 Rule 5 — pure consistency tripwire; logs, never blocks.
+    failed_checks = hero_integrity_checks(rm, payload)
+    if failed_checks:
+        logger.warning("hero.integrity: portfolio=%s failed=%s", portfolio_id, failed_checks)
     return serialize_concept(
         "portfolio.summary",
-        summary_payload(
-            rm,
-            portfolio_id,
-            dc[0] if dc else None,
-            dc[1] if dc else None,
-            xirr_1y,
-            xirr_pct=xirr_pct,
-            xirr_coverage_pct=xirr_coverage_pct,
-            wt_avg_days=wt_avg_days,
-            reinvested_cost=reinvested_cost,
-            day_change_as_of=dc[2].isoformat() if dc else None,
-            investor_name=investor_name,
-        ),
+        payload,
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
@@ -375,5 +430,3 @@ async def portfolio_valuation_series(
         source="computed",
         engine_version=ENGINE_VERSION,
     )
-
-

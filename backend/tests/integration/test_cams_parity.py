@@ -85,6 +85,20 @@ def test_wt_avg_days_reinvest_rows_ignored():
     assert weighted_avg_holding_days(flows, _TODAY) == 30
 
 
+def test_wt_avg_days_dividend_payout_does_not_consume_lots():
+    """ADR-0039 FIFO fix golden case — a dividend_payout row is B65-signed POSITIVE (same sign as a
+    redemption, cas.py's CAMS txn-type table) but must NOT walk as one: it doesn't reduce units or
+    cost the way a redemption/switch_out does. Before the fix, `_fifo_remaining_cost_and_weighted_age`
+    keyed purely on amount sign, so this payout would have wrongly consumed the lot exactly like the
+    sibling `test_wt_avg_days_fifo_redemption_consumes_oldest_lot` case — leaving lots INTACT (30 days,
+    not None/fully-redeemed) proves txn_type now disambiguates the two."""
+    flows = [
+        (_TODAY - timedelta(days=30), -1000.0, "purchase"),
+        (_TODAY - timedelta(days=5), 1000.0, "dividend_payout"),
+    ]
+    assert weighted_avg_holding_days(flows, _TODAY) == 30
+
+
 def test_wt_avg_days_empty_is_none():
     assert weighted_avg_holding_days([], _TODAY) is None
 
