@@ -85,6 +85,7 @@ def _classify_holding(
     avg_cost_nav: float | None,
     folio_number: str,
     covered_keys: set[tuple[str, str]] | None,
+    stale_nav: float | None = None,
 ) -> tuple[str, str]:
     """ADR-0039 Rule 1 — one holding's `(data_state, value_basis)` from signals `load_portfolio_read_model`
     already has (zero new storage/queries). `live_nav` is the nav_map lookup AFTER the 30-day staleness
@@ -103,6 +104,11 @@ def _classify_holding(
     state, identical to pre-ADR-0039 behaviour where no such distinction existed)."""
     if live_nav is not None:
         value_basis = "live_nav"
+    elif stale_nav is not None:
+        # Review condition 1: a >30-day-old NAV that still postdates the holding's statement
+        # date (suspended/segregated schemes) — better price than the cost anchor, but NOT
+        # live: the holding classifies 'unpriced' and stays out of live-priced coverage.
+        value_basis = "stale_nav"
     elif avg_cost_nav is not None:
         value_basis = "cost_fallback"
     else:
@@ -175,18 +181,22 @@ async def load_portfolio_read_model(
     )
     isins = [h.isin for h in holdings]
 
-    nav_map: dict[str, float] = {}
+    # Latest NAV per ISIN WITH its date — the staleness split happens in Python so a
+    # stale-but-newer-than-statement NAV can still be preferred over the cost anchor
+    # (adversarial-review condition 1: suspended/segregated schemes pause NAV publishing for
+    # months; their newest on-file price beats the OLDER statement-date avg_cost_nav).
+    nav_map: dict[str, tuple[float, datetime.date]] = {}
     fund_meta: dict[str, MfFund] = {}
     if isins:
         nav_rows = await db.execute(
             text(
-                "SELECT DISTINCT ON (isin) isin, nav FROM mf.mf_nav_history"
-                " WHERE isin = ANY(:isins) AND nav_date >= CURRENT_DATE - INTERVAL '30 days'"
+                "SELECT DISTINCT ON (isin) isin, nav, nav_date FROM mf.mf_nav_history"
+                " WHERE isin = ANY(:isins)"
                 " ORDER BY isin, nav_date DESC"
             ),
             {"isins": isins},
         )
-        nav_map = {r.isin: float(r.nav) for r in nav_rows}
+        nav_map = {r.isin: (float(r.nav), r.nav_date) for r in nav_rows}
         fund_meta = {
             f.isin: f
             for f in (await db.execute(select(MfFund).where(MfFund.isin.in_(isins))))
@@ -206,10 +216,29 @@ async def load_portfolio_read_model(
     total_invested = 0.0
     total_value = 0.0
     max_as_of: str | None = None
+    staleness_cutoff = datetime.date.today() - datetime.timedelta(days=_NAV_STALENESS_DAYS)
     for h in holdings:
-        nav = nav_map.get(h.isin)  # already bounded to _NAV_STALENESS_DAYS above
+        latest = nav_map.get(h.isin)
         avg_cost_nav = float(h.avg_cost_nav) if h.avg_cost_nav is not None else None
-        current_nav = nav if nav is not None else avg_cost_nav
+        # Price preference (ADR-0039 Rule 1 + review condition 1):
+        #   recent NAV (≤ _NAV_STALENESS_DAYS) → live_nav
+        #   else newest on-file NAV IF it postdates the holding's statement date → stale_nav
+        #     (a paused/suspended scheme's last price is still fresher than the cost anchor)
+        #   else avg_cost_nav → cost_fallback; else none.
+        nav = latest[0] if latest is not None and latest[1] >= staleness_cutoff else None
+        stale_nav = (
+            latest[0]
+            if (
+                latest is not None
+                and latest[1] < staleness_cutoff
+                and h.as_of_date is not None
+                and latest[1] > h.as_of_date
+            )
+            else None
+        )
+        current_nav = (
+            nav if nav is not None else (stale_nav if stale_nav is not None else avg_cost_nav)
+        )
         units = float(h.units or 0)
         current_value = units * current_nav if current_nav is not None else 0.0
         invested = float(h.invested_amount or 0)  # net-invested (B86)
@@ -218,7 +247,7 @@ async def load_portfolio_read_model(
         as_of = h.as_of_date.isoformat() if h.as_of_date else None
         folio_number = h.folio_number or ""
         data_state, value_basis = _classify_holding(
-            h.isin, nav, avg_cost_nav, folio_number, covered_keys
+            h.isin, nav, avg_cost_nav, folio_number, covered_keys, stale_nav=stale_nav
         )
 
         total_invested += invested
@@ -1243,8 +1272,9 @@ def _fifo_remaining_cost_and_weighted_age(
     """FIFO lot walk — the shared innards of `weighted_avg_holding_days`, for ONE (instrument, folio)'s
     chronological ledger flows: a purchase/sip/switch_in (`_LOT_OPEN_TYPES`, amount < 0) opens a lot
     costed at `-amount` on `txn_date`; a redemption/switch_out (`_LOT_CONSUME_TYPES`, amount > 0)
-    consumes the OLDEST lots' remaining cost first (partial consumption splits a lot). Any other
-    txn_type — `dividend_payout` (a positive inflow but NOT a redemption — ADR-0039 fix) or
+    consumes the OLDEST lots' remaining cost first (partial consumption splits a lot). `reversal`
+    classifies by amount sign (amount < 0 opens, amount > 0 consumes — review condition 2). Any
+    other txn_type — `dividend_payout` (a positive inflow but NOT a redemption — ADR-0039 fix) or
     `dividend_reinvest` (amount == 0, B65) — leaves lots untouched; it changes income or units, not
     cost.
 
@@ -1254,9 +1284,15 @@ def _fifo_remaining_cost_and_weighted_age(
     holdings against large ones — see `portfolio_wt_avg_days`)."""
     lots: list[tuple[float, datetime.date]] = []  # (remaining_cost, purchase_date), oldest-first
     for txn_date, amount, txn_type in sorted(flows, key=lambda f: f[0]):
-        if txn_type in _LOT_OPEN_TYPES:
+        # Review condition 2 — `reversal` keeps its pre-fix amount-sign semantics: a reversal
+        # of a purchase (amount > 0, cash back) consumes cost; a reversal of a redemption
+        # (amount < 0, cash re-deployed) opens a lot. FIFO can't target the specific reversed
+        # lot, so oldest-first is the documented approximation.
+        opens = txn_type in _LOT_OPEN_TYPES or (txn_type == "reversal" and amount < 0)
+        consumes = txn_type in _LOT_CONSUME_TYPES or (txn_type == "reversal" and amount > 0)
+        if opens:
             lots.append((-amount, txn_date))
-        elif txn_type in _LOT_CONSUME_TYPES:
+        elif consumes:
             remaining = amount
             kept: list[tuple[float, datetime.date]] = []
             for cost, dt in lots:

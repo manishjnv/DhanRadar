@@ -38,6 +38,7 @@ from dhanradar.mf.portfolio_read import (
     load_day_change,
     load_windowed_xirr,
     summary_payload,
+    weighted_avg_holding_days,
 )
 from dhanradar.models.auth import User
 
@@ -81,6 +82,36 @@ def test_classify_stated_only_when_key_not_covered():
 def test_classify_ledger_backed_when_key_covered():
     state, basis = _classify_holding("INF1", 100.0, 90.0, "1", {("INF1", "1")})
     assert state == "ledger_backed" and basis == "live_nav"
+
+
+def test_classify_stale_nav_preferred_over_cost_fallback():
+    """Review condition 1: a suspended/segregated fund's stale-but-real NAV values the holding
+    (basis 'stale_nav') instead of the cost guess — but the data_state stays 'unpriced' and the
+    holding stays OUT of live-priced coverage."""
+    state, basis = _classify_holding("INF1", None, 90.0, "1", None, stale_nav=85.0)
+    assert state == "unpriced" and basis == "stale_nav"
+
+
+def test_classify_live_nav_wins_over_stale_nav():
+    state, basis = _classify_holding("INF1", 100.0, 90.0, "1", None, stale_nav=85.0)
+    assert state == "ledger_backed" and basis == "live_nav"
+
+
+# ---------------------------------------------------------------------------
+# Pure: FIFO reversal semantics (review condition 2)
+# ---------------------------------------------------------------------------
+
+
+def test_wt_avg_days_reversal_classifies_by_amount_sign():
+    """`reversal` keeps amount-sign semantics: amount < 0 opens a lot, amount > 0 consumes the
+    oldest lot. A purchase fully reversed the same month leaves only the later lot's cost/age."""
+    today = date(2026, 7, 4)
+    flows = [
+        (date(2026, 1, 1), -1000.0, "purchase"),  # opens lot A (184 days old)
+        (date(2026, 1, 15), 1000.0, "reversal"),  # consumes lot A entirely
+        (date(2026, 6, 4), -500.0, "reversal"),  # opens a lot (30 days old)
+    ]
+    assert weighted_avg_holding_days(flows, today) == 30
 
 
 # ---------------------------------------------------------------------------
