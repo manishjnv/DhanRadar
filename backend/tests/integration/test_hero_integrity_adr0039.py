@@ -448,12 +448,16 @@ async def _seed_txn(
 
 async def test_load_windowed_xirr_active_keys_excludes_closed_position(db_session):
     uid = await _seed_user(db_session, "hero-xirr1y@test.dev")
-    pid = (
-        await db_session.execute(
-            text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'W') RETURNING id"),
-            {"u": uid},
-        )
-    ).scalar_one()
+    # str() — the loaders' declared contract is portfolio_id: str; asyncpg's raw UUID
+    # blows up inside uuid.UUID(hex=...) coercion.
+    pid = str(
+        (
+            await db_session.execute(
+                text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'W') RETURNING id"),
+                {"u": uid},
+            )
+        ).scalar_one()
+    )
     today = date.today()
     active_isin, closed_isin = "INFW001ACTIVE", "INFW001CLOSED"
     await _seed_fund(db_session, active_isin)
@@ -523,12 +527,14 @@ async def test_load_windowed_xirr_active_keys_excludes_closed_position(db_sessio
 
 async def test_load_day_change_covered_isins_excludes_single_nav_date_holding(db_session):
     uid = await _seed_user(db_session, "hero-daychange@test.dev")
-    pid = (
-        await db_session.execute(
-            text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'D') RETURNING id"),
-            {"u": uid},
-        )
-    ).scalar_one()
+    pid = str(
+        (
+            await db_session.execute(
+                text("INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'D') RETURNING id"),
+                {"u": uid},
+            )
+        ).scalar_one()
+    )
     today = date.today()
     two_date_isin, one_date_isin = "INFD001TWO", "INFD001ONE"
     await _seed_fund(db_session, two_date_isin)
