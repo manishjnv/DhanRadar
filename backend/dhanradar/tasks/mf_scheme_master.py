@@ -139,6 +139,29 @@ async def _mf_scheme_master_pipeline() -> str:
         stats.failed = n_invalid
         stats.metadata = {"closed_schemes": n_closed}
 
+        # Batch-level isin2 dedupe (adversarial-review condition, 2026-07-04): AMFI ships
+        # duplicate primaries (hence the last-seen-wins dict above), so duplicate SECONDARIES
+        # are equally plausible — and uq_mf_funds_isin2 would fail the whole upsert chunk on
+        # one. Also null out an isin2 that collides with any batch PRIMARY (primary wins,
+        # mirroring alias_secondary_isins' precedence). First-seen keeps the secondary.
+        seen_secondary: set[str] = set()
+        n_isin2_dropped = 0
+        for rec in deduped.values():
+            sec = rec["isin2"]
+            if sec is None:
+                continue
+            if sec in deduped or sec in seen_secondary:
+                rec["isin2"] = None
+                n_isin2_dropped += 1
+            else:
+                seen_secondary.add(sec)
+        if n_isin2_dropped:
+            logger.warning(
+                "mf_scheme_master_refresh: %d duplicate/primary-colliding isin2 values dropped"
+                " from this batch (first-seen kept; uq_mf_funds_isin2 protected)",
+                n_isin2_dropped,
+            )
+
         upsert_rows = list(deduped.values())
 
         # -----------------------------------------------------------------
