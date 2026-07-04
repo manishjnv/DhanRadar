@@ -47,6 +47,7 @@ module.exports = {
         body:    ['15px',    { lineHeight: '1.55',    letterSpacing: '-0.005em' }],
         small:   ['13px',   { lineHeight: '1.45' }],
         caption: ['11px', { lineHeight: '1.3', letterSpacing: '0.08em', fontWeight: '500' }],
+        micro:   ['10px',   { lineHeight: '1.2',   letterSpacing: '0em',   fontWeight: '500' }],
       },
       spacing: {
         '5': '20px',
