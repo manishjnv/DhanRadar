@@ -531,29 +531,27 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
         >
           {summary && (
             <div className="flex flex-col gap-6">
-              {/* Header lines (founder layout, 2026-07-04): line 1 = data freshness, line 2 =
-                  owner name (CAMS-style; own name to own session, DPDP-fine), then the value
-                  block two lines below. */}
-              <div className="space-y-1">
-                {(dayChangeAsOf || summary.as_of) && (
-                  <p className="text-[11px] text-slate-300">
-                    Data as of {fmtDate((dayChangeAsOf || summary.as_of) as string)} · NAV updates nightly
-                  </p>
-                )}
-                {summary.investor_name && (
-                  <div
-                    data-testid="hero-owner-pill"
-                    className="text-[12px] font-semibold uppercase tracking-wide text-slate-200"
-                  >
-                    {summary.investor_name.toUpperCase()}
-                  </div>
-                )}
-              </div>
-
               {/* Top row: value+gain | chart | completeness */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[auto_1fr_auto] lg:items-start">
-                {/* Left: value + gain/return */}
+                {/* Left: freshness + owner name (top-aligned with the chart's "YOUR MONEY · 90D"
+                    header — no standalone header rows, keeps the hero compact; founder 2026-07-04),
+                    then the value block below. */}
                 <div className="shrink-0">
+                  <div className="mb-2 space-y-0.5">
+                    {(dayChangeAsOf || summary.as_of) && (
+                      <p className="text-[11px] text-slate-300">
+                        Data as of {fmtDate((dayChangeAsOf || summary.as_of) as string)} · NAV updates nightly
+                      </p>
+                    )}
+                    {summary.investor_name && (
+                      <div
+                        data-testid="hero-owner-pill"
+                        className="text-[12px] font-semibold uppercase tracking-wide text-slate-200"
+                      >
+                        {summary.investor_name.toUpperCase()}
+                      </div>
+                    )}
+                  </div>
                   <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                     Total Portfolio Value
                     {heroTip && <HelpTip tip={heroTip} />}
