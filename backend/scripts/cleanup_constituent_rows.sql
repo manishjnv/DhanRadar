@@ -51,3 +51,33 @@ DELETE FROM mf.mf_fund_constituents
 WHERE constituent_name ~* '^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$';
 
 COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- Incident 2 (2026-07-04, same day, post-fix re-fetch): funds whose pre-fix
+-- snapshots stayed UNDER the 105% threshold kept their old "EQ - "-prefixed
+-- stock rows (statement 2 above only removed header rows). The fixed parser
+-- re-inserted the same holdings under prefix-STRIPPED names -> every stock
+-- twice per (isin, as_of_month), weight sums ~190%. The ingestion guard
+-- (_drop_over_covered_funds) sums only the incoming batch, so it cannot see
+-- DB-resident duplicates. Post-fix code never writes prefixed names, so any
+-- remaining prefixed row is pre-fix garbage by definition.
+BEGIN;
+
+-- 3) Delete stale instrument-type-prefixed rows (e.g. "EQ - ABB INDIA LTD.").
+--    Same pattern as _INSTRUMENT_PREFIX_RE in backend/dhanradar/tasks/mf.py.
+DELETE FROM mf.mf_fund_constituents
+WHERE constituent_name ~ '^[A-Z]{2,4}\s*-\s+';
+
+-- 4) Re-run statement 1's >105% wipe for any snapshot still over after (3)
+--    (defence in depth; a re-fetch rebuilds wiped snapshots).
+DELETE FROM mf.mf_fund_constituents t
+USING (
+    SELECT isin, as_of_month
+    FROM mf.mf_fund_constituents
+    WHERE weight_pct IS NOT NULL
+    GROUP BY isin, as_of_month
+    HAVING SUM(weight_pct) > 105
+) bad
+WHERE t.isin = bad.isin AND t.as_of_month = bad.as_of_month;
+
+COMMIT;
