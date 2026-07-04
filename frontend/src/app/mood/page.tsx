@@ -33,6 +33,8 @@ import type { Flows } from '@/features/mood/types';
 import { ApiError } from '@/lib/apiClient';
 import type { Regime, MoodFactor, MoodFactorTier } from '@/features/mood/types';
 import { relativeTime } from '@/features/mood/relative-time';
+import { useMarketNews } from '@/features/news/api';
+import { MarketNewsWidget } from '@/features/news/components/MarketNewsWidget';
 import s from './mmi.module.css';
 
 // ---------------------------------------------------------------------------
@@ -781,6 +783,15 @@ export default function MoodPage() {
                 </div>
               </div>
 
+              {/* MARKET NEWS — compact informational headlines, moved here from the
+                  decommissioned /dashboard. No advisory language; headlines link out. */}
+              <div className={s.sectionTitle}>
+                <h2>Market news</h2>
+              </div>
+              <section className={s.panel}>
+                <MarketNewsSection />
+              </section>
+
               {/* DISCLOSURE — the single SEBI-required bundle (non-neg #9), tied to the in-force
                   disclaimer version. The standing site footer (MaybeShell/AppShell) is the common
                   footer for all users; no extra page-level disclaimer here. */}
@@ -992,6 +1003,31 @@ function InstitutionalFlowsCard({ flows }: { flows?: Flows }) {
       )}
     </section>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Market news — compact, informational headlines (moved from the
+// decommissioned /dashboard). No-suppress rule: stays mounted; the widget
+// itself renders a "no news" state rather than the section disappearing.
+// ---------------------------------------------------------------------------
+function MarketNewsSection() {
+  const { data, isLoading, isError, refetch } = useMarketNews();
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-3">
+        {[...Array(3)].map((_, i) => (
+          <Skeleton key={i} className="h-12 rounded" />
+        ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return <ErrorCard message="Could not load market news." onRetry={() => void refetch()} />;
+  }
+
+  return <MarketNewsWidget items={data ?? []} />;
 }
 
 // Signed % change, e.g. "+0.46%" — public market data (NOT the mood score).

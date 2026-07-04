@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, Compass,
+  Compass,
   Settings, Menu, X, BarChart2, ChevronLeft, ChevronRight, Signal,
   ShieldCheck, Search, GitCompare, Trophy, Wallet, Star,
   type LucideIcon,
@@ -26,7 +26,6 @@ interface NavItem {
 }
 
 const WORKSPACE: NavItem[] = [
-  { href: '/dashboard',      label: 'Dashboard',       icon: LayoutDashboard },
   { href: '/mf/portfolio',   label: 'Portfolio',       icon: Wallet           },
   { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
   { href: '/mf/compare',     label: 'Compare Funds',   icon: GitCompare       },
@@ -102,13 +101,13 @@ function SidebarContent({
     <>
       {/* Brand lockup */}
       <Link
-        href="/dashboard"
+        href="/mf/portfolio"
         onClick={onNavClick}
         className={cn(
           'flex h-14 items-center border-b border-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
           collapsed ? 'justify-center px-2' : 'gap-2.5 px-4',
         )}
-        aria-label="DhanRadar — go to dashboard"
+        aria-label="DhanRadar — go to portfolio"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/icon.svg" alt="" width={26} height={26} className="shrink-0" />

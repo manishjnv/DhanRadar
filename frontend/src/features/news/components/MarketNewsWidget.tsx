@@ -5,7 +5,7 @@
  * to headlines (non-negotiable #9 analogy for educational surfaces).
  */
 import * as React from 'react';
-import type { NewsItem } from '@/features/dashboard/api';
+import type { NewsItem } from '@/features/news/api';
 
 // ---------------------------------------------------------------------------
 // Relative-time helper

@@ -29,7 +29,7 @@ vi.mock('./api', () => ({
 }));
 
 const mockReplace = vi.fn();
-let mockPathname = '/dashboard';
+let mockPathname = '/mf/portfolio';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockReplace, push: vi.fn(), prefetch: vi.fn() }),
@@ -50,14 +50,14 @@ function renderGuard(children = <div data-testid="child">Protected</div>) {
 
 beforeEach(() => {
   mockReplace.mockClear();
-  mockPathname = '/dashboard';
+  mockPathname = '/mf/portfolio';
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 describe('AuthGuard — cold-start routing', () => {
-  it('redirects to /onboarding when user has risk_profile: null on /dashboard', async () => {
+  it('redirects to /onboarding when user has risk_profile: null on /mf/portfolio', async () => {
     mockUseMe.mockReturnValue({
       data: { id: '1', email: 'a@b.com', tier: 'free', totp_verified: false, risk_profile: null, dpdp_consent_version: null },
       isLoading: false,
@@ -86,7 +86,7 @@ describe('AuthGuard — cold-start routing', () => {
     expect(mockReplace).not.toHaveBeenCalledWith('/onboarding');
   });
 
-  it('redirects a COMPLETED user (risk_profile set) away from /onboarding to /dashboard', async () => {
+  it('redirects a COMPLETED user (risk_profile set) away from /onboarding to /mf/portfolio', async () => {
     // The post-submit double-visit bug: a user whose profile is already set must
     // never sit on /onboarding (no re-entry / no second showing of the quiz).
     mockPathname = '/onboarding';
@@ -99,7 +99,7 @@ describe('AuthGuard — cold-start routing', () => {
     renderGuard();
 
     await waitFor(() =>
-      expect(mockReplace).toHaveBeenCalledWith('/dashboard'),
+      expect(mockReplace).toHaveBeenCalledWith('/mf/portfolio'),
     );
   });
 

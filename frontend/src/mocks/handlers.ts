@@ -311,23 +311,6 @@ export const handlers = [
     ]);
   }),
 
-  // GET /api/v1/instruments/top-scored
-  http.get('/api/v1/instruments/top-scored', () => {
-    return HttpResponse.json({
-      funds: [
-        { isin: 'INF879O01019', scheme_name: 'Parag Parikh Flexi Cap Fund', category: 'Flexi Cap', label: 'in_form', confidence_band: 'high' },
-        { isin: 'INF179K01BB8', scheme_name: 'HDFC Flexi Cap Fund', category: 'Flexi Cap', label: 'in_form', confidence_band: 'high' },
-        { isin: 'INF846K01EW2', scheme_name: 'Axis Midcap Fund', category: 'Mid Cap', label: 'in_form', confidence_band: 'medium' },
-        { isin: 'INF200K01RO2', scheme_name: 'SBI Bluechip Fund', category: 'Large Cap', label: 'on_track', confidence_band: 'high' },
-        { isin: 'INF760K01EF1', scheme_name: 'Mirae Asset Large Cap Fund', category: 'Large Cap', label: 'on_track', confidence_band: 'medium' },
-        { isin: 'INF109K01Z98', scheme_name: 'ICICI Pru Value Discovery Fund', category: 'Value', label: 'off_track', confidence_band: 'medium' },
-      ],
-      disclosure: 'Educational fund assessment based on publicly available NAV and category data. Labels are computed using DhanRadar\'s scoring engine.',
-      not_advice: 'Not investment advice.',
-      disclaimer_version: 'v1',
-    });
-  }),
-
   // GET /api/v1/news
   http.get('/api/v1/news', () => {
     return HttpResponse.json([
@@ -337,28 +320,6 @@ export const handlers = [
       { title: 'Flexi Cap category beats benchmark for 8th consecutive quarter', source: 'Value Research', url: 'https://valueresearchonline.com/flexi-cap-benchmark', published_at: new Date(Date.now() - 24 * 3600_000).toISOString(), category: 'mutual_funds' },
       { title: 'Foreign portfolio investors buy ₹14,000 Cr in Indian equities in June', source: 'NDTV Profit', url: 'https://ndtvprofit.com/fpi-june-inflows', published_at: new Date(Date.now() - 26 * 3600_000).toISOString(), category: 'flows' },
     ]);
-  }),
-
-  // GET /api/v1/portfolio/summary — returns a populated 200 for dev convenience.
-  // Cold-start 404 (no CAS uploaded yet) is exercised against the real backend or
-  // via server.use() override in tests that assert the empty-state UI path.
-  http.get('/api/v1/portfolio/summary', () => {
-    return HttpResponse.json({
-      current_value: 881760,
-      xirr_pct: 18.4,
-      fund_count: SCHEMES.length,
-      last_updated: '2026-06-04',
-      funds: SCHEMES.map(({ isin, scheme_name, label, confidence_band }) => ({
-        isin,
-        scheme_name,
-        label,
-        confidence_band,
-      })),
-      disclosure:
-        'Educational portfolio assessment derived from your uploaded CAS and publicly available fund data. Labels are computed using DhanRadar\'s scoring engine.',
-      not_advice: 'This is not investment advice. Past performance is not indicative of future results.',
-      disclaimer_version: '2026-06-01',
-    });
   }),
 
   // GET /api/v1/notifications/preferences (authed)

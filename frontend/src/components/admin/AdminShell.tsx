@@ -213,7 +213,7 @@ function AdminSidebar({ variant }: { variant: AdminShellVariant }) {
           {switchLabel}
         </Link>
         <Link
-          href="/dashboard"
+          href="/mf/portfolio"
           className="flex items-center gap-2 rounded-md px-3 py-2 text-small text-ink-secondary hover:bg-surface-2 hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
         >
           ← Back to app

@@ -9,7 +9,7 @@
  *
  * After signup the user has no risk_profile yet; once the Onboarding screen
  * (and its backend write endpoint) lands, route new accounts to /onboarding.
- * Until then they go to the dashboard cold-start state.
+ * Until then they go to /mf/portfolio's empty (upload CTA) state.
  */
 
 import * as React from 'react';
@@ -47,7 +47,7 @@ export default function SignupPage() {
     signup(values, {
       // TODO(onboarding): route to /onboarding once the risk-profile screen
       // and its backend write endpoint exist.
-      onSuccess: () => router.replace('/dashboard'),
+      onSuccess: () => router.replace('/mf/portfolio'),
       onError: (err) => {
         if (err instanceof ApiError && err.problem.status === 409) {
           setFormError('An account with this email already exists. Try logging in.');
@@ -129,7 +129,7 @@ export default function SignupPage() {
           className="w-full"
           onClick={() =>
             window.location.assign(
-              `${API_BASE}/auth/google/start?next=${encodeURIComponent('/dashboard')}`,
+              `${API_BASE}/auth/google/start?next=${encodeURIComponent('/mf/portfolio')}`,
             )
           }
         >
