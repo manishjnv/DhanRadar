@@ -83,6 +83,14 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "portfolio.valuation_series": frozenset({"portfolio_id", "point_count", "first_investment_date", "points"}),
     "portfolio.score_raw": frozenset(),  # gated-never (registry) — nothing is ever allowed through, gated or not
     "fund.label": frozenset({"label"}),
+    "fund.head": frozenset({"isin", "scheme_name", "fund_name_short", "amc_name", "sebi_category", "category", "plan_type", "option_type", "idcw_frequency", "launch_date", "expense_ratio_pct", "is_segregated", "verb_label", "category_rank", "category_total", "rank_as_of", "return_3m_pct", "return_6m_pct", "return_1y_pct", "return_3y_pct", "return_5y_pct", "metrics_as_of", "nav_latest", "nav_date", "nav_change_pct", "confidence_band", "amc_level_aum_crore"}),
+    "fund.nav_series": frozenset({"range", "points", "from", "to", "n_total"}),
+    "fund.analytics": frozenset({"sharpe_ratio", "sortino_ratio", "volatility_pct", "max_drawdown_pct", "rolling_1y_avg_pct", "rolling_1y_min_pct", "rolling_1y_max_pct", "rolling_1y_pct_positive", "as_of", "volatility_percentile", "category_percentiles"}),
+    "fund.rank_history": frozenset({"points"}),
+    "fund.composition": frozenset({"holdings", "sectors", "as_of_month", "coverage"}),
+    "fund.people": frozenset({"managers", "manager_changes_5y"}),
+    "fund.amc": frozenset({"amc_name", "scheme_count", "category_count"}),
+    "fund.peers": frozenset({"peers"}),
 }
 
 
