@@ -17,7 +17,11 @@ from dhanradar.mf.cas import CasParseError, classify_cas_failure, parse_cas
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
 from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
-from dhanradar.tasks.mf import parsed_to_snapshot_holdings
+from dhanradar.tasks.mf import (
+    _drop_over_covered_funds,
+    _extract_sebi_row,
+    parsed_to_snapshot_holdings,
+)
 
 
 # --- CAS parse ---------------------------------------------------------------
@@ -760,3 +764,82 @@ def test_b65_remaining_excluded_types():
     for ttype in ("TDS_TAX", "SEGREGATION", "UNKNOWN"):
         holdings, _ = parse_cas("x.pdf", None, reader=_b65_single_txn_reader(ttype, 50.0))
         assert holdings[0].txns == [], ttype
+
+
+# --- Constituents parser: section-header / subtotal row filter --------------
+# Bug repro: mf.mf_fund_constituents for INF789F01WY2 (UTI), as_of_month
+# 2026-05-01, had 107 rows whose weight_pct summed to ~199.66% because
+# section-header/subtotal disclosure-sheet rows were ingested as holdings.
+# See docs/rca/README.md.
+
+
+def _col_map(*headers: str) -> dict[str, int]:
+    return {h.lower(): i for i, h in enumerate(headers)}
+
+
+def test_extract_sebi_row_skips_lettered_section_header():
+    """A section header like "(a) Listed/awaiting listing on Stock Exchanges" carries
+    the section's own subtotal weight — must not be ingested alongside the holdings
+    it summarizes."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["(a)  Listed/awaiting listing on Stock Exchanges", "", "99.83", "23456.78"]
+    assert _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1)) is None
+
+
+def test_extract_sebi_row_skips_unlisted_header():
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Unlisted", "", "0.17", "40.12"]
+    assert _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1)) is None
+
+
+def test_extract_sebi_row_skips_subtotal_by_keyword():
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Sub Total", "", "99.83", "23456.78"]
+    assert _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1)) is None
+
+
+def test_extract_sebi_row_skips_label_only_row_with_no_data():
+    """A bare category label with no ISIN and no numbers at all is structurally
+    not a holding, even when its name matches no "total"/header keyword."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Money Market Instruments", "", "", ""]
+    assert _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1)) is None
+
+
+def test_extract_sebi_row_keeps_no_isin_row_with_real_data():
+    """Cash/receivable lines legitimately carry no ISIN but do carry a weight — the
+    structural no-ISIN guard must not drop these (no over-strip)."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Net Receivables/(Payables)", "", "0.42", "98.5"]
+    result = _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1))
+    assert result is not None
+    assert result["constituent_name"] == "Net Receivables/(Payables)"
+
+
+def test_extract_sebi_row_strips_eq_prefix():
+    """UTI writes "EQ - ABB INDIA LTD." in the Name-of-Instrument cell — strip the
+    display-only instrument-type prefix so the UI shows a clean stock name."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value", "Sector")
+    row = ["EQ - ABB INDIA LTD.", "INE117A01022", "5.234", "1234.56", "Capital Goods"]
+    result = _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 5, 1))
+    assert result is not None
+    assert result["constituent_name"] == "ABB INDIA LTD."
+    assert result["constituent_isin"] == "INE117A01022"
+    assert result["weight_pct"] == 5.234
+    assert result["market_value_cr"] == 12.3456
+
+
+def test_drop_over_covered_funds_skips_fund_over_105_pct():
+    """ADR-0039 fail-closed guard: a fund whose weight_pct rows already sum past
+    105% is dropped entirely rather than written half-garbage."""
+    batch = [
+        {"isin": "INF789F01WY2", "weight_pct": 99.83},
+        {"isin": "INF789F01WY2", "weight_pct": 99.83},  # header-leak duplicates the weight
+        {"isin": "INF000OTHER", "weight_pct": 40.0},
+        {"isin": "INF000OTHER", "weight_pct": 50.0},
+    ]
+    result = _drop_over_covered_funds(batch, "UTI")
+    isins = {r["isin"] for r in result}
+    assert "INF789F01WY2" not in isins
+    assert "INF000OTHER" in isins
+    assert len(result) == 2
