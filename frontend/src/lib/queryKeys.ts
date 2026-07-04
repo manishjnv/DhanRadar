@@ -59,8 +59,8 @@ export const queryKeys = {
     explorerCategories: ()              => ['mf', 'explorer', 'categories'] as const,
     explorerFunds:      (params: { category: string; sort: string; sortDir?: string; planType?: string; optionType?: string; page: number; limit?: number }) =>
                           ['mf', 'explorer', 'funds', params] as const,
-    fundDetail:         (isin: string, category: string) =>
-                          ['mf', 'fund-detail', isin, category] as const,
+    fundDetail:         (isin: string) =>
+                          ['mf', 'fund-detail', isin] as const,
   },
   notifications: {
     preferences: () => ['notifications', 'preferences'] as const,

@@ -16,9 +16,10 @@ import {
 } from './parts';
 import {
   SNAPSHOT,
-  RETURNS, RETURN_TABLE, RETURN_TABLE_HEAD, GROWTH, SIP, ROLLING, RANK, DRAWDOWN, CONSISTENCY,
+  RETURN_TABLE, RETURN_TABLE_HEAD, GROWTH, SIP, ROLLING, RANK, DRAWDOWN, CONSISTENCY,
   RISK_SIMPLE, RISK_ADV, RISK_MEANING,
 } from './sampleData';
+import type { FundHead } from './sectionsHero';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S9 — INVESTMENT SNAPSHOT
@@ -89,14 +90,27 @@ const PERF_TABS = [
 ];
 
 // ── Returns tab ──────────────────────────────────────────────────────────────
-function ReturnsTab() {
+function ReturnsTab({ head }: { head: FundHead }) {
   const [range, setRange] = React.useState(GROWTH.ranges[2]); // default 5Y
+
+  // W0 — real period returns (§17); periods we don't have yet (1M/10Y/Launch) show "—"
+  // rather than the sampleData preview number, so real and unbuilt cells aren't mixed.
+  const returns: { p: string; v: number | null }[] = [
+    { p: '1M', v: null },
+    { p: '3M', v: head.return3mPct },
+    { p: '6M', v: head.return6mPct },
+    { p: '1Y', v: head.return1yPct },
+    { p: '3Y', v: head.return3yPct },
+    { p: '5Y', v: head.return5yPct },
+    { p: '10Y', v: null },
+    { p: 'Launch', v: null },
+  ];
 
   return (
     <>
       {/* 8-col return cells */}
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-        {RETURNS.map((r) => (
+        {returns.map((r) => (
           <div
             key={r.p}
             className="rounded-xl border border-line bg-surface px-1.5 py-3 text-center"
@@ -423,7 +437,7 @@ function ConsistencyTab() {
 // S10 — PERFORMANCE CENTER
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function PerformanceSection() {
+export function PerformanceSection({ head }: { head: FundHead }) {
   const [tab, setTab] = React.useState('returns');
 
   return (
@@ -433,7 +447,7 @@ export function PerformanceSection() {
         <PreviewBadge className="shrink-0" />
       </div>
 
-      {tab === 'returns'   && <ReturnsTab />}
+      {tab === 'returns'   && <ReturnsTab head={head} />}
       {tab === 'sip'       && <SipTab />}
       {tab === 'rolling'   && <RollingTab />}
       {tab === 'rank'      && <RankTab />}

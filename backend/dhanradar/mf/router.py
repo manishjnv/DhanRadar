@@ -36,6 +36,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Request,
     UploadFile,
@@ -82,24 +83,26 @@ _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-proces
 
 # Validated sort-column whitelist — column expressions only, never interpolated from user input.
 _SORT_COL: dict[str, str] = {
-    "rank":         "r.rank",
-    "return_3m":    "m.return_3m_pct",
-    "return_6m":    "m.return_6m_pct",
-    "return_1y":    "m.return_1y_pct",
-    "return_3y":    "m.return_3y_pct",
-    "return_5y":    "m.return_5y_pct",
+    "rank": "r.rank",
+    "return_3m": "m.return_3m_pct",
+    "return_6m": "m.return_6m_pct",
+    "return_1y": "m.return_1y_pct",
+    "return_3y": "m.return_3y_pct",
+    "return_5y": "m.return_5y_pct",
     "max_drawdown": "m.max_drawdown_pct",
 }
 # Columns where ASC = "best first" (rank 1 is best; lower drawdown is better).
 _SORT_BEST_ASC: frozenset[str] = frozenset({"rank", "max_drawdown"})
 # Columns that need NULLS LAST (metrics may be absent; rank is always present).
-_SORT_NULLS_LAST: frozenset[str] = frozenset({"return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"})
+_SORT_NULLS_LAST: frozenset[str] = frozenset(
+    {"return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"}
+)
 
 # Minimum NAV data-points required to surface a return figure.
 # Below the threshold the field is suppressed (set to None) to avoid misleading
 # partial-period return figures for young or very recently-launched funds.
-_MIN_NAV_POINTS_1Y = 252   # ~1 trading year
-_MIN_NAV_POINTS_3Y = 756   # ~3 trading years
+_MIN_NAV_POINTS_1Y = 252  # ~1 trading year
+_MIN_NAV_POINTS_3Y = 756  # ~3 trading years
 
 
 def _sebi_display_name(full_category: str) -> str:
@@ -130,12 +133,16 @@ async def list_portfolios(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
 
     rows = (
-        await db.execute(
-            select(MfPortfolio)
-            .where(MfPortfolio.user_id == uuid.UUID(user.user_id))
-            .order_by(MfPortfolio.created_at)
+        (
+            await db.execute(
+                select(MfPortfolio)
+                .where(MfPortfolio.user_id == uuid.UUID(user.user_id))
+                .order_by(MfPortfolio.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     portfolios = [
         PortfolioSummary(
@@ -163,9 +170,7 @@ async def create_portfolio(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
 
     uid = uuid.UUID(user.user_id)
-    count_row = await db.execute(
-        select(func.count()).where(MfPortfolio.user_id == uid)
-    )
+    count_row = await db.execute(select(func.count()).where(MfPortfolio.user_id == uid))
     count = count_row.scalar_one()
 
     if count >= 1 and not await is_plus(user.user_id, db):
@@ -286,7 +291,9 @@ async def upload_cas(
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty_file")
     if len(data) > _MAX_CAS_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large"
+        )
 
     # Detect file type — support CAS PDF and CAMS Transaction Details Statement
     # (.txt tab-separated, .xls, .xlsx).
@@ -334,14 +341,16 @@ async def upload_cas(
     with open(path, "wb") as fh:
         fh.write(data)
 
-    db.add(MfCasJob(
-        job_id=uuid.UUID(job_id),
-        user_id=uid,
-        portfolio_id=uuid.UUID(resolved_portfolio_id),
-        status="queued",
-        progress_pct=0,
-        source_hash=source_hash,
-    ))
+    db.add(
+        MfCasJob(
+            job_id=uuid.UUID(job_id),
+            user_id=uid,
+            portfolio_id=uuid.UUID(resolved_portfolio_id),
+            status="queued",
+            progress_pct=0,
+            source_hash=source_hash,
+        )
+    )
     await db.commit()
     await service.dedup_record(redis, user.user_id, resolved_portfolio_id, source_hash, job_id)
 
@@ -411,7 +420,9 @@ async def cas_report(
     cached = await redis.get(f"{service._REPORT_PREFIX}{job_id}")
     if cached:
         payload = json.loads(cached)
-        payload["portfolio_id"] = portfolio_id  # use DB-authoritative value; adds if absent, overwrites if stale
+        payload["portfolio_id"] = (
+            portfolio_id  # use DB-authoritative value; adds if absent, overwrites if stale
+        )
         # Fetch market ranks at read time — ranks are not baked into the Redis
         # cache so they remain fresh after nightly compute_market_ranks runs.
         isins = [f["isin"] for f in payload.get("funds", [])]
@@ -855,6 +866,39 @@ async def fund_explorer_list(
     )
 
 
+@router.get("/fund/{isin}")
+async def fund_head(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.head` (W0) — the one per-ISIN public endpoint, replacing the frontend's
+    30-page explorer-scan pagination hack (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17).
+
+    Public — current_user_or_anonymous (anonymous is a valid caller); same rate limiter
+    as the explorer. Returns 200 for ANY ISIN (ranked or not) — rank/metrics/NAV rows are
+    independently optional. Unknown ISIN → 404. unified_score is never selected
+    (non-neg #2); serialize_concept applies the A3 scrub as a second layer.
+    """
+    from dhanradar.mf.fund_read import get_fund_head
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+
+    payload = await get_fund_head(db, isin)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept(
+        "fund.head",
+        payload,
+        RequestCtx(tier=user.tier),
+        as_of=payload["nav_date"] or payload["metrics_as_of"],
+        source="amfi",
+        disclaimer_version=DISCLAIMER_VERSION,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -897,6 +941,7 @@ async def _own_portfolio(db: AsyncSession, portfolio_id: str, user_id: str) -> M
 # Benchmark reference-data endpoint (public — no auth, no RLS)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/benchmark/nifty50")
 async def benchmark_nifty50(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -931,21 +976,16 @@ async def benchmark_nifty50(
         try:
             stmt = stmt.where(MfBenchmarkDaily.close_date >= _date.fromisoformat(from_date))
         except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_from_date"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_from_date")
     if to_date:
         try:
             stmt = stmt.where(MfBenchmarkDaily.close_date <= _date.fromisoformat(to_date))
         except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_to_date"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_to_date")
 
     rows = (await db.execute(stmt)).all()
     points = [
-        {"close_date": r.close_date.isoformat(), "close_value": float(r.close_value)}
-        for r in rows
+        {"close_date": r.close_date.isoformat(), "close_value": float(r.close_value)} for r in rows
     ]
     return {
         "benchmark": BENCHMARK_KEY_NIFTY50,

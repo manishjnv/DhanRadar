@@ -5,16 +5,18 @@
  *
  * Public educational destination view of a single mutual fund, rebuilt to the
  * approved FundDetailPageV3 mockup (22 sections, responsive desktop + mobile).
- * Resolved from the SEBI category list (uses the `category` URL param set by
- * FundExplorerTable row navigation). No auth required — wrapped in <MaybeShell>
- * so anonymous visitors/crawlers get clean standalone chrome (no app sidebar =
- * the V3 destination model) and logged-in users keep the workspace shell.
+ * Fetches by ISIN alone (W0, FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17) — the
+ * `category` URL param (set by FundExplorerTable row navigation) is read only
+ * for the "back to Explorer" link, never required to load. No auth required —
+ * wrapped in <MaybeShell> so anonymous visitors/crawlers get clean standalone
+ * chrome (no app sidebar = the V3 destination model) and logged-in users keep
+ * the workspace shell.
  *
  * DATA: real values from useFundDetail() drive identity / assessment / rank /
- * AMC-AUM. The rich sections (performance, holdings, manager, tax, flows, …)
- * render illustrative PREVIEW data (flagged "Preview") while the per-scheme
- * feeds are built — founder call 2026-06-24: build all UI now, wire data later.
- * NO API / routing / permission changes.
+ * NAV / expense ratio / AMC-AUM / period returns (W0). The rich sections
+ * (SIP/rolling/rank-trend/drawdowns, holdings, manager, tax, flows, …) render
+ * illustrative PREVIEW data (flagged "Preview") while their feeds are built —
+ * founder call 2026-06-24: build all UI now, wire data later.
  *
  * COMPLIANCE: non-neg #1 (no advisory verbs — educational labels only),
  * #2 (no numeric score in DOM — band rings + strength words),
@@ -107,7 +109,6 @@ function FundDetailView() {
   const { data: fund, isLoading } = useFundDetail(isin, category);
   const backHref = category ? `/mf/explore?category=${encodeURIComponent(category)}` : '/mf/explore';
 
-  if (!category) return <FundNotFound backHref={backHref} />;
   if (isLoading) return <FundDetailSkeleton />;
   if (!fund) return <FundNotFound backHref={backHref} />;
 
@@ -123,13 +124,24 @@ function FundDetailView() {
   const head: FundHead = {
     name: fund.scheme_name,
     amc: fund.amc_name,
-    category: fund.sebi_category,
-    label: fund.verb_label as Label,
+    category: fund.sebi_category ?? 'Mutual Fund',
+    // null verb_label (unranked fund, W0 gate: any ISIN loads) → the label set's own
+    // "not yet rated" value — never a fabricated educational read.
+    label: (fund.verb_label ?? 'insufficient_data') as Label,
     band: (fund.confidence_band ?? null) as ConfidenceBand | null,
     rank: fund.category_rank,
     total: fund.category_total,
     planOption: [planLabel, optionLabel].filter(Boolean) as string[],
     aumCr: fund.amc_level_aum_crore,
+    navLatest: fund.nav_latest,
+    navDate: fund.nav_date,
+    navChangePct: fund.nav_change_pct,
+    expenseRatioPct: fund.expense_ratio_pct,
+    return3mPct: fund.return_3m_pct,
+    return6mPct: fund.return_6m_pct,
+    return1yPct: fund.return_1y_pct,
+    return3yPct: fund.return_3y_pct,
+    return5yPct: fund.return_5y_pct,
   };
 
   return (
@@ -138,7 +150,7 @@ function FundDetailView() {
         <Link href={backHref} className="mb-3 inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
           ← Back to Fund Explorer
         </Link>
-        <Crumb category={fund.sebi_category} name={fund.scheme_name} />
+        <Crumb category={head.category} name={fund.scheme_name} />
       </div>
 
       {/* S1 — Hero + status */}
@@ -170,7 +182,7 @@ function FundDetailView() {
       <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
 
       {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info="vs Nifty Smallcap 250 TRI · Category" /><PerformanceSection /></Section>
+      <Section><SectionHeader index="10" title="Performance Center" info="vs Nifty Smallcap 250 TRI · Category" /><PerformanceSection head={head} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
       <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="8 modules · vs 18 peers" /><ScoreBreakdownSection /></Section>
@@ -203,10 +215,13 @@ function FundDetailView() {
       <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" /><SimilarSection /></Section>
 
       {/* S21 — FAQ */}
-      <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection /></Section>
+      <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection navLatest={fund.nav_latest} /></Section>
 
       {/* Disclosure (non-neg #9) */}
       <div className="mt-7 rounded-2xl border border-line bg-surface-2 p-4">
+        <p className="mb-3 text-small text-ink-secondary">
+          DhanRadar doesn&apos;t sell funds or earn commissions. Everything here is education, not advice.
+        </p>
         <DisclosureBundle notAdvice="For education only — not investment advice. Rankings, assessments, and the figures shown (many illustrative previews while data feeds are built) are educational signals derived from factual data, not recommendations to buy, sell, or hold any fund. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not indicate future returns." />
       </div>
 

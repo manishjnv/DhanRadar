@@ -27,6 +27,7 @@ export type ConceptId =
   | 'goals.list'
   | 'goals.progress'
   | 'fund.label'
+  | 'fund.head'
   | 'portfolio.score_raw'
   | 'mood.current'
   | 'portfolio.recommendations'
