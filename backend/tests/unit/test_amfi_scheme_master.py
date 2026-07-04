@@ -230,6 +230,179 @@ class TestSecondaryIsinFor:
 
 
 # ---------------------------------------------------------------------------
+# Scheme lineage diff (enrichment item 6) — pure, no DB/network.
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSchemeName:
+    def test_case_and_whitespace_ignored(self):
+        from dhanradar.tasks.mf_scheme_master import _normalize_scheme_name
+
+        assert _normalize_scheme_name("HDFC Top 100 Fund") == _normalize_scheme_name(
+            "hdfc   top 100   fund"
+        )
+
+    def test_punctuation_only_change_ignored(self):
+        from dhanradar.tasks.mf_scheme_master import _normalize_scheme_name
+
+        a = "HDFC Top 100 Fund - Direct Plan - Growth"
+        b = "HDFC Top 100 Fund -- Direct Plan- Growth"
+        assert _normalize_scheme_name(a) == _normalize_scheme_name(b)
+
+    def test_real_word_change_differs(self):
+        from dhanradar.tasks.mf_scheme_master import _normalize_scheme_name
+
+        assert _normalize_scheme_name("HDFC Top 100 Fund") != _normalize_scheme_name(
+            "HDFC Top 200 Fund"
+        )
+
+
+class TestDetectRenames:
+    def test_material_name_change_detected_as_rename(self):
+        from dhanradar.tasks.mf_scheme_master import detect_renames
+
+        db_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "Old Equity Fund"}]
+        fresh_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "New Equity Fund"}]
+        rows = detect_renames(db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4))
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["old_scheme_uid"] == "INF001"
+        assert row["new_scheme_uid"] == "INF001"
+        assert row["event_type"] == "rename"
+        assert row["effective_date"] == datetime.date(2026, 7, 4)
+        assert "Old Equity Fund" in row["notes"]
+        assert "New Equity Fund" in row["notes"]
+
+    def test_punctuation_only_change_is_not_a_rename(self):
+        from dhanradar.tasks.mf_scheme_master import detect_renames
+
+        db_funds = [
+            {"isin": "INF001", "amfi_code": "100", "scheme_name": "HDFC Fund - Direct - Growth"}
+        ]
+        fresh_funds = [
+            {"isin": "INF001", "amfi_code": "100", "scheme_name": "HDFC Fund -- Direct-Growth"}
+        ]
+        assert detect_renames(db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4)) == []
+
+    def test_unmatched_fund_produces_no_rename(self):
+        from dhanradar.tasks.mf_scheme_master import detect_renames
+
+        db_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "Old Fund"}]
+        fresh_funds = [{"isin": "INF999", "amfi_code": "999", "scheme_name": "Unrelated Fund"}]
+        assert detect_renames(db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4)) == []
+
+    def test_matched_by_amfi_code_when_isin_changed(self):
+        """A scheme that changed ISIN but kept its AMFI code is still matched and,
+        if the name also changed, reported as a rename old-isin -> new-isin."""
+        from dhanradar.tasks.mf_scheme_master import detect_renames
+
+        db_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "Old Name Fund"}]
+        fresh_funds = [{"isin": "INF002", "amfi_code": "100", "scheme_name": "New Name Fund"}]
+        rows = detect_renames(db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4))
+        assert len(rows) == 1
+        assert rows[0]["old_scheme_uid"] == "INF001"
+        assert rows[0]["new_scheme_uid"] == "INF002"
+
+
+class TestDetectDisappeared:
+    def test_missing_isin_written_as_closure_candidate(self):
+        from dhanradar.tasks.mf_scheme_master import detect_disappeared
+
+        db_funds = [
+            {"isin": f"INF{i:03d}", "amfi_code": str(i), "scheme_name": f"Fund {i}"}
+            for i in range(100)
+        ]
+        fresh_funds = [f for f in db_funds if f["isin"] != "INF050"]
+        rows, tripped, missing, tracked = detect_disappeared(
+            db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4)
+        )
+        assert tripped is False
+        assert missing == 1
+        assert tracked == 100
+        assert len(rows) == 1
+        assert rows[0]["old_scheme_uid"] == "INF050"
+        assert rows[0]["new_scheme_uid"] == "INF050"
+        assert rows[0]["event_type"] == "closure"
+        assert "unconfirmed" in rows[0]["notes"]
+
+    def test_over_threshold_disappearance_trips_noise_guard_and_writes_nothing(self):
+        from dhanradar.tasks.mf_scheme_master import detect_disappeared
+
+        db_funds = [
+            {"isin": f"INF{i:03d}", "amfi_code": str(i), "scheme_name": f"Fund {i}"}
+            for i in range(100)
+        ]
+        # Drop 5/100 = 5%, well above the 2% threshold.
+        fresh_funds = db_funds[10:]
+        rows, tripped, missing, tracked = detect_disappeared(
+            db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4)
+        )
+        assert tripped is True
+        assert missing == 10
+        assert tracked == 100
+        assert rows == []
+
+    def test_amfi_code_match_prevents_false_disappeared(self):
+        """A fund matched via amfi_code (ISIN changed) must not also be reported
+        as disappeared — rename and disappearance are mutually exclusive."""
+        from dhanradar.tasks.mf_scheme_master import detect_disappeared
+
+        db_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "Fund"}]
+        fresh_funds = [{"isin": "INF002", "amfi_code": "100", "scheme_name": "Fund"}]
+        rows, tripped, missing, tracked = detect_disappeared(
+            db_funds, fresh_funds, effective_date=datetime.date(2026, 7, 4)
+        )
+        assert rows == []
+        assert missing == 0
+        assert tracked == 1
+
+    def test_empty_db_funds_never_trips_guard(self):
+        from dhanradar.tasks.mf_scheme_master import detect_disappeared
+
+        rows, tripped, missing, tracked = detect_disappeared(
+            [], [], effective_date=datetime.date(2026, 7, 4)
+        )
+        assert rows == []
+        assert tripped is False
+        assert tracked == 0
+
+
+class TestDedupeNewLineageRows:
+    def test_idempotent_second_run_skips_existing_rows(self):
+        """Same diff computed twice (simulating two identical runs on the same day)
+        must not re-write a row already present from the first run."""
+        from dhanradar.tasks.mf_scheme_master import (
+            _dedupe_new_lineage_rows,
+            detect_renames,
+        )
+
+        db_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "Old Fund"}]
+        fresh_funds = [{"isin": "INF001", "amfi_code": "100", "scheme_name": "New Fund"}]
+        effective_date = datetime.date(2026, 7, 4)
+
+        first_run_rows = detect_renames(db_funds, fresh_funds, effective_date=effective_date)
+        # Simulate the first run's rows already having landed in the DB.
+        existing_keys = {
+            (r["old_scheme_uid"], r["event_type"], r["effective_date"]) for r in first_run_rows
+        }
+
+        second_run_rows = detect_renames(db_funds, fresh_funds, effective_date=effective_date)
+        assert _dedupe_new_lineage_rows(second_run_rows, existing_keys) == []
+
+    def test_new_row_not_filtered_out(self):
+        from dhanradar.tasks.mf_scheme_master import _dedupe_new_lineage_rows
+
+        candidate = [
+            {
+                "old_scheme_uid": "INF001",
+                "event_type": "rename",
+                "effective_date": datetime.date(2026, 7, 4),
+            }
+        ]
+        assert _dedupe_new_lineage_rows(candidate, existing_keys=set()) == candidate
+
+
+# ---------------------------------------------------------------------------
 # fetch_scheme_master — fake client, no network
 # ---------------------------------------------------------------------------
 

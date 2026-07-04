@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date
 
 import httpx
@@ -34,6 +35,11 @@ _UPSERT_CHUNK = 2000
 SOURCE = "amfi_scheme_master"
 TASK = "dhanradar.tasks.mf.mf_scheme_master_refresh"
 
+# Scheme-lineage noise guard (enrichment item 6): AMFI's feed occasionally drops chunks
+# transiently, which looks exactly like a wave of scheme closures. Above this fraction of
+# tracked funds, treat it as a bad fetch, not real mergers/closures — fail closed.
+_DISAPPEARED_NOISE_THRESHOLD = 0.02
+
 
 def secondary_isin_for(row: SchemeMasterRow, canonical_isin: str) -> str | None:
     """The AMFI plan-variant ISIN NOT chosen as canonical (2026-07-04 double-count incident,
@@ -44,6 +50,152 @@ def secondary_isin_for(row: SchemeMasterRow, canonical_isin: str) -> str | None:
     Pure — no DB/network — so the isin2 extraction is unit-testable from a synthetic AMFI row.
     Returns None when the scheme has no second variant (most schemes)."""
     return row.isin_reinvest if canonical_isin == row.isin_growth else row.isin_growth
+
+
+# ---------------------------------------------------------------------------
+# Scheme lineage diff (enrichment item 6 — renames / disappearances).
+#
+# mf_funds is upserted IN PLACE, so a rename or disappearance is only ever
+# observable at the moment of this refresh, diffed against the pre-upsert DB
+# state — there are no historical snapshots. All functions below are pure
+# (no DB/network) so they are unit-testable from synthetic fund dicts; the one
+# DB-touching helper (_write_scheme_lineage) is a thin wrapper around them.
+#
+# Fund dict shape used throughout: {"isin": str, "amfi_code": str | None,
+# "scheme_name": str}.
+# ---------------------------------------------------------------------------
+
+_PUNCT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_scheme_name(name: str) -> str:
+    """Lowercase + collapse whitespace/punctuation runs to a single space.
+
+    Two names that normalize equal differ only in case/spacing/punctuation —
+    not a real rename (e.g. "ABC Fund - Direct" == "abc  fund  direct").
+    """
+    return _PUNCT_RE.sub(" ", name.lower()).strip()
+
+
+def _match_fresh(fund: dict, by_isin: dict[str, dict], by_amfi: dict[str, dict]) -> dict | None:
+    """Find the fresh-AMFI-batch record for a tracked DB fund: same isin, falling
+    back to same amfi_code (a scheme can carry its AMFI code across an ISIN change)."""
+    match = by_isin.get(fund["isin"])
+    if match is not None:
+        return match
+    amfi_code = fund.get("amfi_code")
+    return by_amfi.get(amfi_code) if amfi_code else None
+
+
+def detect_renames(
+    db_funds: list[dict], fresh_funds: list[dict], *, effective_date: date
+) -> list[dict]:
+    """Compare scheme_name for every DB fund matched in the fresh AMFI batch (by isin,
+    or by amfi_code) and emit a scheme_lineage row dict for each material rename.
+    Pure — no DB. Returns rows shaped for MfSchemeLineage(**row)."""
+    by_isin = {f["isin"]: f for f in fresh_funds}
+    by_amfi = {f["amfi_code"]: f for f in fresh_funds if f.get("amfi_code")}
+    rows = []
+    for old in db_funds:
+        match = _match_fresh(old, by_isin, by_amfi)
+        if match is None:
+            continue
+        if _normalize_scheme_name(old["scheme_name"]) == _normalize_scheme_name(
+            match["scheme_name"]
+        ):
+            continue
+        rows.append(
+            {
+                "old_scheme_uid": old["isin"],
+                "new_scheme_uid": match["isin"],
+                "event_type": "rename",
+                "effective_date": effective_date,
+                "sebi_circular": None,
+                "notes": f"{old['scheme_name']} -> {match['scheme_name']}",
+            }
+        )
+    return rows
+
+
+def detect_disappeared(
+    db_funds: list[dict], fresh_funds: list[dict], *, effective_date: date
+) -> tuple[list[dict], bool, int, int]:
+    """Diff DB-tracked (AMFI-sourced) funds against the fresh AMFI batch for isins
+    present in the DB but unmatched in the fresh file (by isin or amfi_code) — a
+    candidate merger/closure, never confirmed without a SEBI circular.
+
+    NB: the scheme_lineage.event_type check constraint (migration 0035) has no
+    'disappeared' member; 'closure' is the closest existing value for an
+    unconfirmed candidate — the caveat lives in `notes`.
+
+    Applies the _DISAPPEARED_NOISE_THRESHOLD noise guard: when tripped, returns no
+    rows (fail closed) — the caller decides whether/how to log the warning.
+    Returns (lineage_rows, noise_guard_tripped, missing_count, tracked_count).
+    """
+    by_isin = {f["isin"]: f for f in fresh_funds}
+    by_amfi = {f["amfi_code"]: f for f in fresh_funds if f.get("amfi_code")}
+    missing = [old for old in db_funds if _match_fresh(old, by_isin, by_amfi) is None]
+    tracked_count = len(db_funds)
+    missing_count = len(missing)
+    tripped = tracked_count > 0 and missing_count > _DISAPPEARED_NOISE_THRESHOLD * tracked_count
+    if tripped:
+        return [], True, missing_count, tracked_count
+    rows = [
+        {
+            "old_scheme_uid": f["isin"],
+            "new_scheme_uid": f["isin"],
+            "event_type": "closure",
+            "effective_date": effective_date,
+            "sebi_circular": None,
+            "notes": "candidate merger or closure; unconfirmed without SEBI circular",
+        }
+        for f in sorted(missing, key=lambda x: x["isin"])
+    ]
+    return rows, False, missing_count, tracked_count
+
+
+def _dedupe_new_lineage_rows(
+    candidate_rows: list[dict], existing_keys: set[tuple[str, str, date]]
+) -> list[dict]:
+    """Filter out rows whose (old_scheme_uid, event_type, effective_date) already
+    exists — scheme_lineage has no unique constraint on this triple (predates this
+    writer), so idempotency across repeated runs is enforced here in Python."""
+    return [
+        r
+        for r in candidate_rows
+        if (r["old_scheme_uid"], r["event_type"], r["effective_date"]) not in existing_keys
+    ]
+
+
+async def _write_scheme_lineage(db, rows: list[dict]) -> int:
+    """Insert lineage rows idempotently (see _dedupe_new_lineage_rows). Append-only —
+    never updates/deletes an existing row. Returns the count actually written."""
+    if not rows:
+        return 0
+
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfSchemeLineage
+
+    old_uids = {r["old_scheme_uid"] for r in rows}
+    dates = {r["effective_date"] for r in rows}
+    existing = (
+        await db.execute(
+            select(
+                MfSchemeLineage.old_scheme_uid,
+                MfSchemeLineage.event_type,
+                MfSchemeLineage.effective_date,
+            ).where(
+                MfSchemeLineage.old_scheme_uid.in_(old_uids),
+                MfSchemeLineage.effective_date.in_(dates),
+            )
+        )
+    ).all()
+    existing_keys = {(r[0], r[1], r[2]) for r in existing}
+    new_rows = _dedupe_new_lineage_rows(rows, existing_keys)
+    if new_rows:
+        db.add_all(MfSchemeLineage(**r) for r in new_rows)
+    return len(new_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -163,18 +315,63 @@ async def _mf_scheme_master_pipeline() -> str:
             )
 
         upsert_rows = list(deduped.values())
+        fresh_funds = [
+            {"isin": r["isin"], "amfi_code": r["amfi_code"], "scheme_name": r["scheme_name"]}
+            for r in upsert_rows
+        ]
 
         # -----------------------------------------------------------------
         # 4. Upsert into mf.mf_funds in chunks of 2000
         # -----------------------------------------------------------------
-        from sqlalchemy import func
+        from sqlalchemy import func, select
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         from dhanradar.db import TaskSessionLocal
         from dhanradar.models.mf import MfFund
 
         n_written = 0
+        n_renamed = 0
+        n_disappeared = 0
         async with TaskSessionLocal() as db:
+            # -------------------------------------------------------------
+            # 3.5 Scheme lineage diff — MUST run before the upsert below
+            # overwrites mf_funds; it is the only point a rename/disappearance
+            # is ever observable (no historical snapshots exist). "AMFI-sourced"
+            # = amfi_code IS NOT NULL: the only two writers of mf_funds (this
+            # task + nav_daily_fetch) both stamp amfi_code from an AMFI feed, so
+            # it is a reliable "previously seen from AMFI" signal.
+            # -------------------------------------------------------------
+            db_rows = (
+                await db.execute(
+                    select(MfFund.isin, MfFund.amfi_code, MfFund.scheme_name).where(
+                        MfFund.amfi_code.isnot(None)
+                    )
+                )
+            ).all()
+            db_funds = [
+                {"isin": r.isin, "amfi_code": r.amfi_code, "scheme_name": r.scheme_name}
+                for r in db_rows
+            ]
+
+            rename_rows = detect_renames(db_funds, fresh_funds, effective_date=today)
+            disappeared_rows, noise_tripped, n_missing, n_tracked = detect_disappeared(
+                db_funds, fresh_funds, effective_date=today
+            )
+            if noise_tripped:
+                logger.warning(
+                    "mf_scheme_master_refresh: disappeared-count noise guard tripped — "
+                    "%d/%d (%.1f%%) exceeds the %.0f%% threshold; writing NO disappeared "
+                    "lineage rows this run (treated as a transient AMFI drop, not real "
+                    "closures/mergers)",
+                    n_missing,
+                    n_tracked,
+                    (100 * n_missing / n_tracked) if n_tracked else 0.0,
+                    _DISAPPEARED_NOISE_THRESHOLD * 100,
+                )
+
+            n_renamed = await _write_scheme_lineage(db, rename_rows)
+            n_disappeared = await _write_scheme_lineage(db, disappeared_rows)
+
             for start in range(0, len(upsert_rows), _UPSERT_CHUNK):
                 chunk = upsert_rows[start : start + _UPSERT_CHUNK]
                 if not chunk:
@@ -201,12 +398,20 @@ async def _mf_scheme_master_pipeline() -> str:
             await db.commit()
 
         stats.written = n_written
+        stats.metadata = {
+            **(stats.metadata or {}),
+            "lineage_renamed": n_renamed,
+            "lineage_disappeared": n_disappeared,
+        }
         logger.info(
-            "mf_scheme_master_refresh: fetched=%d written=%d failed=%d closed=%d",
+            "mf_scheme_master_refresh: fetched=%d written=%d failed=%d closed=%d "
+            "lineage_renamed=%d lineage_disappeared=%d",
             stats.fetched,
             stats.written,
             stats.failed,
             n_closed,
+            n_renamed,
+            n_disappeared,
         )
 
     return f"mf_scheme_master_refresh: {stats.written} written, {stats.failed} failed"
