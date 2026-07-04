@@ -333,12 +333,12 @@ async def portfolio_valuation_series(
 ) -> dict:
     """M2.2 `portfolio.valuation_series` — the owner's daily portfolio total value series.
 
-    Returns up to `days` most-recent data points (default 90, max ~3 years = 1095).
+    Returns up to `days` most-recent data points (default 90, max ~10 years = 3650).
     Each point: {date, value, invested, twr_index} — the owner's OWN calculated numbers
     (DOM-allowed, #2-exempt). `twr_index` (PR-C) is the flow-neutral wealth index anchored to
-    `points[0]` — when `days` truncates the series (a caller requesting less than the full ~3y
+    `points[0]` — when `days` truncates the series (a caller requesting less than the full ~10y
     window), the index anchors to the first RETURNED row, not the portfolio's absolute start;
-    every current FE caller requests the full window (`?days=1095`), so this never truncates in
+    every current FE caller requests the full window (`?days=3650`), so this never truncates in
     practice. `first_investment_date` is the ledger's earliest date (falls back to the first
     row of `points` when the ledger is empty). Empty `points` list on cold-start (no daily
     valuations computed yet — the nightly Celery task fills this). Anonymous → 401; another

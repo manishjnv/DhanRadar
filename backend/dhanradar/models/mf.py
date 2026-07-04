@@ -45,7 +45,14 @@ _SCHEMA = {"schema": "mf"}
 
 class MfFund(Base):
     __tablename__ = "mf_funds"
-    __table_args__ = _SCHEMA
+    __table_args__ = (
+        # AMFI issues TWO ISINs per scheme-plan line (growth/payout + dividend-reinvest); isin2
+        # holds the one `isin` didn't get (mf_scheme_master_refresh, migration 0062, 2026-07-04
+        # plan-variant double-count incident). Unique-where-not-null: a secondary ISIN maps to
+        # exactly one primary scheme.
+        Index("uq_mf_funds_isin2", "isin2", unique=True, postgresql_where=text("isin2 IS NOT NULL")),
+        _SCHEMA,
+    )
 
     isin: Mapped[str] = mapped_column(Text, primary_key=True)
     amfi_code: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
@@ -77,6 +84,9 @@ class MfFund(Base):
     idcw_frequency: Mapped[str | None] = mapped_column(Text, nullable=True)
     launch_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_segregated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # AMFI plan-variant secondary ISIN (see __table_args__ comment above). Nullable — most
+    # schemes have no dividend-reinvest variant.
+    isin2: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class MfNavHistory(Base):

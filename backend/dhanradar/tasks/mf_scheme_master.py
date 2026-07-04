@@ -25,6 +25,7 @@ from datetime import date
 import httpx
 
 from dhanradar.celery_app import celery_app
+from dhanradar.market_data.amfi_scheme_master import SchemeMasterRow
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,17 @@ _UPSERT_CHUNK = 2000
 
 SOURCE = "amfi_scheme_master"
 TASK = "dhanradar.tasks.mf.mf_scheme_master_refresh"
+
+
+def secondary_isin_for(row: SchemeMasterRow, canonical_isin: str) -> str | None:
+    """The AMFI plan-variant ISIN NOT chosen as canonical (2026-07-04 double-count incident,
+    defect 2 of 3): AMFI's Scheme Master concatenates a Growth ISIN + a Reinvest ISIN per
+    scheme-plan line; `parse_scheme_master` already splits both, but only the canonical one
+    (growth-preferred) was ever stored — the other was silently discarded, so a CAS printed
+    under the discarded ISIN became a second, un-aliased holding for the same real position.
+    Pure — no DB/network — so the isin2 extraction is unit-testable from a synthetic AMFI row.
+    Returns None when the scheme has no second variant (most schemes)."""
+    return row.isin_reinvest if canonical_isin == row.isin_growth else row.isin_growth
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +117,11 @@ async def _mf_scheme_master_pipeline() -> str:
             if row.closure_date and row.closure_date <= today:
                 n_closed += 1
 
+            # 2026-07-04 plan-variant fix: store the NOT-chosen ISIN in isin2 so the CAS ingest
+            # aliasing (alias_secondary_isins) can rewrite a holding parsed under it back to the
+            # primary ISIN.
+            secondary_isin = secondary_isin_for(row, canonical_isin)
+
             # Last-seen wins for duplicate ISINs within one batch
             # (prevents ON CONFLICT DO UPDATE cardinality errors, mirrors
             # _navrows_to_fund_upserts dedup pattern in mf.py).
@@ -116,16 +133,41 @@ async def _mf_scheme_master_pipeline() -> str:
                 # "category" column stores the raw scheme_category from master.
                 "category": row.scheme_category,
                 "launch_date": row.launch_date,
+                "isin2": secondary_isin,
             }
 
         stats.failed = n_invalid
         stats.metadata = {"closed_schemes": n_closed}
+
+        # Batch-level isin2 dedupe (adversarial-review condition, 2026-07-04): AMFI ships
+        # duplicate primaries (hence the last-seen-wins dict above), so duplicate SECONDARIES
+        # are equally plausible — and uq_mf_funds_isin2 would fail the whole upsert chunk on
+        # one. Also null out an isin2 that collides with any batch PRIMARY (primary wins,
+        # mirroring alias_secondary_isins' precedence). First-seen keeps the secondary.
+        seen_secondary: set[str] = set()
+        n_isin2_dropped = 0
+        for rec in deduped.values():
+            sec = rec["isin2"]
+            if sec is None:
+                continue
+            if sec in deduped or sec in seen_secondary:
+                rec["isin2"] = None
+                n_isin2_dropped += 1
+            else:
+                seen_secondary.add(sec)
+        if n_isin2_dropped:
+            logger.warning(
+                "mf_scheme_master_refresh: %d duplicate/primary-colliding isin2 values dropped"
+                " from this batch (first-seen kept; uq_mf_funds_isin2 protected)",
+                n_isin2_dropped,
+            )
 
         upsert_rows = list(deduped.values())
 
         # -----------------------------------------------------------------
         # 4. Upsert into mf.mf_funds in chunks of 2000
         # -----------------------------------------------------------------
+        from sqlalchemy import func
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         from dhanradar.db import TaskSessionLocal
@@ -137,21 +179,22 @@ async def _mf_scheme_master_pipeline() -> str:
                 chunk = upsert_rows[start : start + _UPSERT_CHUNK]
                 if not chunk:
                     continue
-                stmt = (
-                    pg_insert(MfFund)
-                    .values(chunk)
-                    .on_conflict_do_update(
-                        index_elements=["isin"],
-                        set_={
-                            # Only the columns this source owns — never touch
-                            # aum_crore, expense_ratio_pct, sebi_category (§8.4).
-                            "amfi_code": pg_insert(MfFund).excluded.amfi_code,
-                            "scheme_name": pg_insert(MfFund).excluded.scheme_name,
-                            "amc_name": pg_insert(MfFund).excluded.amc_name,
-                            "category": pg_insert(MfFund).excluded.category,
-                            "launch_date": pg_insert(MfFund).excluded.launch_date,
-                        },
-                    )
+                insert_stmt = pg_insert(MfFund).values(chunk)
+                stmt = insert_stmt.on_conflict_do_update(
+                    index_elements=["isin"],
+                    set_={
+                        # Only the columns this source owns — never touch
+                        # aum_crore, expense_ratio_pct, sebi_category (§8.4).
+                        "amfi_code": insert_stmt.excluded.amfi_code,
+                        "scheme_name": insert_stmt.excluded.scheme_name,
+                        "amc_name": insert_stmt.excluded.amc_name,
+                        "category": insert_stmt.excluded.category,
+                        "launch_date": insert_stmt.excluded.launch_date,
+                        # Never overwrite a non-null isin2 with null: a later refresh whose row
+                        # happens to have no secondary ISIN this time (or a stale batch) must not
+                        # erase a previously-discovered plan-variant mapping.
+                        "isin2": func.coalesce(insert_stmt.excluded.isin2, MfFund.isin2),
+                    },
                 )
                 await db.execute(stmt)
                 n_written += len(chunk)

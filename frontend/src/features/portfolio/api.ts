@@ -373,14 +373,14 @@ export interface ValueSeriesPayload {
  * The front-end windows the data for the chart/sparkline — no `days` param needed.
  */
 /**
- * Calls the existing M2.2 /valuation-series endpoint with ?days=1095 (the full
- * available window). The FE windows locally for the chart/sparkline.
+ * Calls the existing M2.2 /valuation-series endpoint with ?days=3650 (the full
+ * available ~10-year window). The FE windows locally for the chart/sparkline.
  */
 export function usePortfolioValueSeries(portfolioId: string) {
   return useQuery<DataEnvelope<ValueSeriesPayload>>({
     queryKey: queryKeys.portfolio.valueSeries(portfolioId),
     queryFn: () =>
-      api.get<DataEnvelope<ValueSeriesPayload>>(`/portfolio/${portfolioId}/valuation-series?days=1095`),
+      api.get<DataEnvelope<ValueSeriesPayload>>(`/portfolio/${portfolioId}/valuation-series?days=3650`),
     enabled: !!portfolioId,
     retry: (count, error) => {
       if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;

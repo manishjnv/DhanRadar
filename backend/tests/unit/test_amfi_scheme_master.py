@@ -182,6 +182,54 @@ class TestParseSchemeMaster:
 
 
 # ---------------------------------------------------------------------------
+# secondary_isin_for — pure isin2 extraction (2026-07-04 plan-variant double-count
+# incident, defect 2 of 3): the ISIN NOT chosen as canonical must be recoverable
+# from a synthetic AMFI line, not silently discarded.
+# ---------------------------------------------------------------------------
+
+
+class TestSecondaryIsinFor:
+    def test_both_isins_present_growth_canonical_reinvest_is_secondary(self):
+        """Row 2 of the live-format fixture: growth wins as canonical, reinvest is the
+        discarded-until-now secondary — this is the founder's HDFC Mid Cap incident shape."""
+        from dhanradar.tasks.mf_scheme_master import secondary_isin_for
+
+        rows = parse_scheme_master(SCHEME_MASTER_FIXTURE)
+        nippon = next(r for r in rows if r.amfi_code == "118701")
+        canonical = nippon.isin_growth or nippon.isin_reinvest
+        assert secondary_isin_for(nippon, canonical) == "INF204K01EZ3"
+
+    def test_only_growth_present_secondary_is_none(self):
+        """A scheme with no dividend-reinvest variant (most schemes) → isin2 stays None,
+        never fabricated."""
+        from dhanradar.tasks.mf_scheme_master import secondary_isin_for
+
+        rows = parse_scheme_master(SCHEME_MASTER_FIXTURE)
+        hdfc = next(r for r in rows if r.amfi_code == "119551")
+        canonical = hdfc.isin_growth or hdfc.isin_reinvest
+        assert secondary_isin_for(hdfc, canonical) is None
+
+    def test_synthetic_line_reinvest_only_secondary_is_growth(self):
+        """If a scheme ever presented with only isin_reinvest set (growth is None), canonical
+        falls back to reinvest and the secondary slot correctly reports the (absent) growth
+        side — never the same value as canonical."""
+        from dhanradar.tasks.mf_scheme_master import secondary_isin_for
+
+        line = (
+            "AMC,Code,Scheme Name,Scheme Type,Scheme Category,Scheme NAV Name,"
+            "Scheme Minimum Amount,Launch Date,Closure Date,"
+            "ISIN Div Payout/ISIN GrowthISIN Div Reinvestment\n"
+            "TestAMC,55501,Reinvest Only Fund,Open,Equity,Nav,500,01-Jun-2020,,INF555Z01AB1\n"
+        )
+        rows = parse_scheme_master(line)
+        assert len(rows) == 1
+        row = rows[0]
+        canonical = row.isin_growth or row.isin_reinvest
+        assert canonical == "INF555Z01AB1"
+        assert secondary_isin_for(row, canonical) is None
+
+
+# ---------------------------------------------------------------------------
 # fetch_scheme_master — fake client, no network
 # ---------------------------------------------------------------------------
 
