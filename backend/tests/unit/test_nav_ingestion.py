@@ -26,7 +26,11 @@ from dhanradar.market_data.amfi import (
     parse_navall_with_category,
 )
 from dhanradar.market_data.exceptions import ProviderError
-from dhanradar.tasks.mf import _navrows_to_fund_upserts, _navrows_to_nav_upserts
+from dhanradar.tasks.mf import (
+    _batch_nav_upserts,
+    _navrows_to_fund_upserts,
+    _navrows_to_nav_upserts,
+)
 
 # ---------------------------------------------------------------------------
 # Golden fixture — two category headers + schemes + AMC-name lines
@@ -242,6 +246,140 @@ class TestNavrowsToNavUpserts:
         out = _navrows_to_nav_upserts(rows)
         assert len(out) == 2
         assert {r["isin"] for r in out} == {"INF_A", "INF_B"}
+
+
+# ===========================================================================
+# _batch_nav_upserts — memory-flat batching (B-OOM nav_backfill fix)
+#
+# Pure, DB-free: consumes an async stream of NavRow, yields upsert-dict
+# batches of at most chunk_size. No network, no DB, no Celery.
+# ===========================================================================
+
+async def _arows(rows: list[NavRow]):
+    for r in rows:
+        yield r
+
+
+class TestBatchNavUpserts:
+    async def test_batches_at_chunk_boundaries(self):
+        rows = [_row(amfi_code=str(i), isin_growth=f"INF_{i}") for i in range(5)]
+        batches = [b async for b in _batch_nav_upserts(_arows(rows), chunk_size=2)]
+        assert [len(b) for b in batches] == [2, 2, 1]
+        # order preserved across batch boundaries
+        assert [d["isin"] for b in batches for d in b] == [f"INF_{i}" for i in range(5)]
+
+    async def test_exact_multiple_of_chunk_size_no_trailing_empty_batch(self):
+        rows = [_row(amfi_code=str(i), isin_growth=f"INF_{i}") for i in range(4)]
+        batches = [b async for b in _batch_nav_upserts(_arows(rows), chunk_size=2)]
+        assert [len(b) for b in batches] == [2, 2]
+
+    async def test_dedup_within_batch_last_seen_wins(self):
+        """Two rows sharing (isin, nav_date) inside the SAME batch dedupe to
+        one, mirroring _navrows_to_nav_upserts — the invariant that prevents
+        asyncpg.CardinalityViolationError on a single multi-row
+        ON CONFLICT DO UPDATE. Dedup is scoped to the batch (not the whole
+        window) — that is what keeps peak memory O(batch)."""
+        d = datetime.date(2026, 6, 1)
+        rows = [
+            _row(amfi_code="A1", isin_growth="INF_DUP", nav=10.0, nav_date=d),
+            _row(amfi_code="A2", isin_growth="INF_DUP", nav=20.0, nav_date=d),
+        ]
+        batches = [b async for b in _batch_nav_upserts(_arows(rows), chunk_size=5)]
+        assert len(batches) == 1
+        assert len(batches[0]) == 1
+        assert batches[0][0]["nav"] == pytest.approx(20.0)
+
+    async def test_no_isin_rows_produce_no_batch(self):
+        rows = [_row(amfi_code="X", isin_growth=None, isin_reinvest=None)]
+        batches = [b async for b in _batch_nav_upserts(_arows(rows), chunk_size=5)]
+        assert batches == []
+
+    async def test_empty_stream_yields_no_batches(self):
+        batches = [b async for b in _batch_nav_upserts(_arows([]), chunk_size=5)]
+        assert batches == []
+
+    async def test_default_chunk_size_is_upsert_chunk(self):
+        from dhanradar.tasks.mf import _UPSERT_CHUNK
+
+        rows = [_row(amfi_code=str(i), isin_growth=f"INF_{i}") for i in range(_UPSERT_CHUNK + 1)]
+        batches = [b async for b in _batch_nav_upserts(_arows(rows))]
+        assert [len(b) for b in batches] == [_UPSERT_CHUNK, 1]
+
+
+# ===========================================================================
+# _nav_backfill_pipeline — window loop keeps going after one window fails
+#
+# Fakes amfi.stream_nav_history (per-window) + TaskSessionLocal (DB) so the
+# real window/ProviderError/summary control flow runs, with no network/DB.
+# ===========================================================================
+
+class _FakeNavBackfillSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, stmt):
+        return MagicMock()
+
+    async def commit(self):
+        pass
+
+
+async def _fake_stream_error(frmdt, todt, client=None):
+    raise ProviderError("amfi_history", "boom")
+    yield  # pragma: no cover — unreachable; makes this an async generator
+
+
+async def _fake_stream_two_rows(frmdt, todt, client=None):
+    yield _row(amfi_code="A", isin_growth="INF_A")
+    yield _row(amfi_code="B", isin_growth="INF_B")
+
+
+class TestNavBackfillPipelineWindowFailure:
+    async def test_provider_error_on_one_window_continues_to_next(self, monkeypatch):
+        """The FIRST window's fetch raises ProviderError; every subsequent
+        window must still be fetched, batched, and upserted — one bad window
+        does not abort the whole backfill."""
+        import dhanradar.market_data.amfi as amfi_mod
+        import dhanradar.tasks.mf as mf_tasks
+
+        call_count = {"n": 0}
+
+        def fake_stream(frmdt, todt, client=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _fake_stream_error(frmdt, todt, client)
+            return _fake_stream_two_rows(frmdt, todt, client)
+
+        monkeypatch.setattr(amfi_mod, "stream_nav_history", fake_stream, raising=True)
+        monkeypatch.setattr(
+            "dhanradar.db.TaskSessionLocal", lambda: _FakeNavBackfillSession(), raising=True
+        )
+        # Skip the real 1s inter-window sleep — keeps this test fast (5+ windows/year).
+        monkeypatch.setattr("asyncio.sleep", AsyncMock(), raising=True)
+
+        # Independently compute the window count for years=1 the SAME way the
+        # pipeline does, so the assertion does not hardcode a "today"-dependent
+        # magic number.
+        today = datetime.datetime.now(datetime.timezone.utc).date()  # noqa: UP017
+        start = today - datetime.timedelta(days=365)
+        expected_windows = 0
+        cursor = start
+        while cursor < today:
+            end = min(cursor + datetime.timedelta(days=89), today)
+            expected_windows += 1
+            cursor = end + datetime.timedelta(days=1)
+
+        summary = await mf_tasks._nav_backfill_pipeline(years=1)
+
+        assert call_count["n"] == expected_windows, "every window must still be attempted"
+        expected_ok = expected_windows - 1
+        assert summary == (
+            f"nav_backfill: {2 * expected_ok} rows upserted across "
+            f"{expected_ok}/{expected_windows} windows (years=1)"
+        )
 
 
 # ===========================================================================

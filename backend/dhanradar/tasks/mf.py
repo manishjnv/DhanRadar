@@ -30,6 +30,7 @@ import os
 import re
 import time
 import zipfile
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -176,6 +177,38 @@ def _navrows_to_nav_upserts(rows: Any) -> list[dict]:
             "source": "amfi",
         }
     return list(out.values())
+
+
+async def _batch_nav_upserts(
+    rows: Any, chunk_size: int = _UPSERT_CHUNK
+) -> AsyncIterator[list[dict]]:
+    """
+    Buffer an ASYNC stream of NavRow (e.g. ``amfi.stream_nav_history``) into
+    upsert-dict batches of at most ``chunk_size``, applying
+    ``_navrows_to_nav_upserts`` dedup PER BATCH.
+
+    Memory-flat backfill helper: a 90-day all-funds window is ~1.1M NAV
+    lines — materializing the whole window as NavRow objects, then a second
+    full list of upsert dicts, doubles peak memory past the 640MiB
+    celery-batch cap. Flushing at ``chunk_size`` keeps peak memory O(batch),
+    not O(window). Dedup scoped to the batch (not the whole window) is
+    sufficient: it only needs to prevent a duplicate (isin, nav_date) key
+    inside one multi-row INSERT (asyncpg.CardinalityViolationError on
+    ON CONFLICT DO UPDATE) — that only requires no duplicates WITHIN a
+    chunk, not across the whole window.
+    """
+    buf: list = []
+    async for row in rows:
+        buf.append(row)
+        if len(buf) >= chunk_size:
+            batch = _navrows_to_nav_upserts(buf)
+            if batch:
+                yield batch
+            buf = []
+    if buf:
+        batch = _navrows_to_nav_upserts(buf)
+        if batch:
+            yield batch
 
 
 def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
@@ -1549,24 +1582,16 @@ async def _nav_backfill_pipeline(years: int) -> str:
     windows_fetched = 0
 
     for idx, (frmdt, todt) in enumerate(windows, start=1):
+        window_rows = 0
         try:
-            rows = await amfi.fetch_nav_history(frmdt, todt)
-        except ProviderError as exc:
-            logger.warning(
-                "nav_backfill: window %d/%d (%s–%s) fetch failed: %s",
-                idx, len(windows), frmdt, todt, exc,
-            )
-            await _asyncio.sleep(1)
-            continue
-
-        nav_dicts = _navrows_to_nav_upserts(rows)
-        if nav_dicts:
-            async with TaskSessionLocal() as db:
-                for i in range(0, len(nav_dicts), _UPSERT_CHUNK):
-                    chunk = nav_dicts[i : i + _UPSERT_CHUNK]
-                    if not chunk:
-                        continue
-                    stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
+            # Streamed + batched (not one full-window list): a 90-day
+            # all-funds window is ~1.1M lines — materializing it whole (plus
+            # a second upsert-dict list) is what OOM-killed the celery-batch
+            # worker (640MiB cap). _batch_nav_upserts yields chunk_size-sized
+            # upsert-dict batches as rows arrive, so peak memory is O(batch).
+            async for nav_dicts in _batch_nav_upserts(amfi.stream_nav_history(frmdt, todt)):
+                async with TaskSessionLocal() as db:
+                    stmt = insert(MfNavHistory).values(nav_dicts).on_conflict_do_update(
                         constraint="uq_mf_nav_isin_date",
                         set_={
                             "nav": insert(MfNavHistory).excluded.nav,
@@ -1575,13 +1600,22 @@ async def _nav_backfill_pipeline(years: int) -> str:
                         },
                     )
                     await db.execute(stmt)
-                await db.commit()
-            total_rows += len(nav_dicts)
+                    await db.commit()
+                window_rows += len(nav_dicts)
+        except ProviderError as exc:
+            logger.warning(
+                "nav_backfill: window %d/%d (%s–%s) fetch failed: %s",
+                idx, len(windows), frmdt, todt, exc,
+            )
+            await _asyncio.sleep(1)
+            continue
+
+        total_rows += window_rows
 
         windows_fetched += 1
         logger.info(
             "nav_backfill: window %d/%d (%s–%s) → %d rows (total so far: %d)",
-            idx, len(windows), frmdt, todt, len(nav_dicts), total_rows,
+            idx, len(windows), frmdt, todt, window_rows, total_rows,
         )
         await _asyncio.sleep(1)
 

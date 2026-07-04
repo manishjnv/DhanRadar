@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
@@ -210,9 +211,9 @@ def parse_navall_with_category(text: str) -> list[NavRow]:
     return rows
 
 
-def parse_nav_history(text: str) -> list[NavRow]:
+def _parse_history_line(line: str) -> NavRow | None:
     """
-    Parse the HISTORICAL AMFI report (DownloadNAVHistoryReport_Po.aspx).
+    Parse ONE line of the HISTORICAL AMFI report (DownloadNAVHistoryReport_Po.aspx).
 
     Expected format — 8 fields, ";" delimiter, DIFFERENT column order
     compared to NAVAll.txt::
@@ -223,37 +224,53 @@ def parse_nav_history(text: str) -> list[NavRow]:
     Field mapping: [0] code, [1] name, [2] ISIN growth, [3] ISIN reinvest,
     [4] NAV, [5] Repurchase (ignored), [6] Sale (ignored), [7] Date.
 
-    Lines that do not split into exactly 8 fields are skipped.
-    Rows with unparseable NAV or date are also skipped.
+    Returns ``None`` for lines that do not split into exactly 8 fields, the
+    column-header row, or rows with unparseable NAV/date.
+
+    Single source of parsing truth for both ``parse_nav_history`` (whole-text,
+    used by ``fetch_nav_history``) and ``stream_nav_history`` (line-by-line,
+    memory-flat — used by the multi-year backfill).
+    """
+    parts = line.split(";")
+    if len(parts) != _HISTORY_FIELDS:
+        return None
+    if parts[0].strip().lower() == _SCHEME_CODE_HEADER:
+        return None
+    nav = _parse_nav(parts[4])
+    if nav is None:
+        return None
+    nav_date = _parse_date(parts[7])
+    if nav_date is None:
+        return None
+    return NavRow(
+        amfi_code=parts[0].strip(),
+        isin_growth=_isin_or_none(parts[2]),
+        isin_reinvest=_isin_or_none(parts[3]),
+        scheme_name=parts[1].strip(),
+        nav=nav,
+        nav_date=nav_date,
+    )
+
+
+def parse_nav_history(text: str) -> list[NavRow]:
+    """
+    Parse the HISTORICAL AMFI report (DownloadNAVHistoryReport_Po.aspx).
+
+    Delegates per-line parsing to ``_parse_history_line`` (shared with
+    ``stream_nav_history``). Lines that do not split into exactly 8 fields,
+    the header row, and rows with unparseable NAV or date are skipped.
 
     Note: AMFI caps this endpoint to ~3 months per request. For multi-year
     backfills the caller must loop over multiple (frmdt, todt) windows and
     concatenate results — this function and ``fetch_nav_history`` handle
-    exactly one window each.
+    exactly one window each. ``stream_nav_history`` is the memory-flat
+    variant used by the backfill pipeline.
     """
     rows: list[NavRow] = []
     for line in text.splitlines():
-        parts = line.split(";")
-        if len(parts) != _HISTORY_FIELDS:
-            continue
-        if parts[0].strip().lower() == _SCHEME_CODE_HEADER:
-            continue
-        nav = _parse_nav(parts[4])
-        if nav is None:
-            continue
-        nav_date = _parse_date(parts[7])
-        if nav_date is None:
-            continue
-        rows.append(
-            NavRow(
-                amfi_code=parts[0].strip(),
-                isin_growth=_isin_or_none(parts[2]),
-                isin_reinvest=_isin_or_none(parts[3]),
-                scheme_name=parts[1].strip(),
-                nav=nav,
-                nav_date=nav_date,
-            )
-        )
+        row = _parse_history_line(line)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -370,3 +387,53 @@ async def fetch_nav_history(
         raise
     except (httpx.TimeoutException, httpx.TransportError) as exc:
         raise ProviderError("amfi_history", exc) from exc
+
+
+async def stream_nav_history(
+    frmdt: datetime.date,
+    todt: datetime.date,
+    client: httpx.AsyncClient | None = None,
+) -> AsyncIterator[NavRow]:
+    """
+    Stream-parse a single window of historical NAV data from AMFI, one row
+    at a time — memory-flat sibling of ``fetch_nav_history``.
+
+    A 90-day all-funds window can be ~1.1M lines. ``fetch_nav_history``
+    materializes the whole response as a NavRow list; a caller that then
+    builds a second full list of upsert dicts holds ~2x the window in memory
+    at once, which is what OOM-killed the multi-year backfill on the
+    640MiB celery-batch worker. This variant never buffers the response body
+    or the parsed rows — it uses ``client.stream()`` + ``aiter_lines()`` and
+    yields one ``NavRow`` per valid line, via the SAME ``_parse_history_line``
+    rule ``parse_nav_history`` uses (single source of parsing truth).
+
+    Same single-window contract as ``fetch_nav_history``: AMFI caps this
+    endpoint to ~3 months per request; the caller loops over windows.
+
+    Raises ``ProviderError("amfi_history", ...)`` on HTTP or transport error
+    (raised lazily, on first iteration, per async-generator semantics).
+    """
+    params = {"frmdt": _fmt_date(frmdt), "todt": _fmt_date(todt)}
+    headers = {"User-Agent": _USER_AGENT}
+    owns_client = client is None
+    c = client if client is not None else httpx.AsyncClient()
+    try:
+        async with c.stream(
+            "GET", NAV_HISTORY_URL, params=params, headers=headers, timeout=_TIMEOUT
+        ) as resp:
+            if resp.status_code != 200:
+                raise ProviderError(
+                    "amfi_history",
+                    f"HTTP {resp.status_code} from NAVHistoryReport",
+                )
+            async for line in resp.aiter_lines():
+                row = _parse_history_line(line)
+                if row is not None:
+                    yield row
+    except ProviderError:
+        raise
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise ProviderError("amfi_history", exc) from exc
+    finally:
+        if owns_client:
+            await c.aclose()

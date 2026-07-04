@@ -22,6 +22,7 @@ from dhanradar.market_data.amfi import (
     parse_nav_history,
     parse_navall,
     parse_navall_with_category,
+    stream_nav_history,
 )
 from dhanradar.market_data.exceptions import ProviderError
 
@@ -306,6 +307,135 @@ class TestFetchNavHistory:
         call_args = fake_client.get.call_args
         url = call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
         assert url == NAV_HISTORY_URL
+
+
+# ===========================================================================
+# stream_nav_history — memory-flat variant (B-OOM nav_backfill fix)
+#
+# Fakes `httpx.AsyncClient.stream()` — a context manager yielding a response
+# with `.status_code` + async `.aiter_lines()` — never `.get()`. No network.
+# ===========================================================================
+
+class _FakeStreamResponse:
+    """Mimics the object yielded by `async with client.stream(...) as resp`."""
+
+    def __init__(self, text: str, status_code: int = 200):
+        self.status_code = status_code
+        self._lines = text.splitlines()
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _FakeStreamCtx:
+    def __init__(self, resp: _FakeStreamResponse):
+        self._resp = resp
+
+    async def __aenter__(self):
+        return self._resp
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeStreamErrorCtx:
+    """Raises on __aenter__ — mimics a connect-time transport failure."""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    async def __aenter__(self):
+        raise self._exc
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeStreamClient:
+    def __init__(self, text: str, status_code: int = 200):
+        self._resp = _FakeStreamResponse(text, status_code)
+        self.stream_calls: list[tuple] = []
+
+    def stream(self, method, url, **kwargs):
+        self.stream_calls.append((method, url, kwargs))
+        return _FakeStreamCtx(self._resp)
+
+
+class _FakeStreamErrorClient:
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    def stream(self, method, url, **kwargs):
+        return _FakeStreamErrorCtx(self._exc)
+
+
+async def _collect(gen):
+    return [row async for row in gen]
+
+
+class TestStreamNavHistory:
+    async def test_yields_only_valid_rows(self):
+        """Same skip rules as parse_nav_history: header/blank/N.A. lines skipped."""
+        fake_client = _FakeStreamClient(NAV_HISTORY_FIXTURE)
+        rows = await _collect(
+            stream_nav_history(
+                datetime.date(2026, 4, 1), datetime.date(2026, 6, 30), client=fake_client
+            )
+        )
+        assert len(rows) == 2
+        assert rows[0].amfi_code == "100016"
+        assert rows[1].amfi_code == "100017"
+
+    async def test_matches_parse_nav_history_for_same_fixture(self):
+        """Regression guard: the shared per-line parser must produce IDENTICAL
+        output whether consumed whole-text (parse_nav_history) or streamed
+        line-by-line (stream_nav_history) — same rule, two entry points."""
+        whole = parse_nav_history(NAV_HISTORY_FIXTURE)
+        fake_client = _FakeStreamClient(NAV_HISTORY_FIXTURE)
+        streamed = await _collect(
+            stream_nav_history(
+                datetime.date(2026, 4, 1), datetime.date(2026, 6, 30), client=fake_client
+            )
+        )
+        assert streamed == whole
+
+    async def test_date_params_formatted_as_dd_mmm_yyyy(self):
+        from dhanradar.market_data.amfi import NAV_HISTORY_URL
+
+        fake_client = _FakeStreamClient(NAV_HISTORY_FIXTURE)
+        await _collect(
+            stream_nav_history(
+                datetime.date(2026, 4, 1), datetime.date(2026, 6, 30), client=fake_client
+            )
+        )
+        _method, url, kwargs = fake_client.stream_calls[0]
+        assert url == NAV_HISTORY_URL
+        assert kwargs["params"]["frmdt"] == "01-Apr-2026"
+        assert kwargs["params"]["todt"] == "30-Jun-2026"
+
+    async def test_raises_provider_error_on_non_200(self):
+        fake_client = _FakeStreamClient("bad body", status_code=503)
+        with pytest.raises(ProviderError) as exc_info:
+            await _collect(
+                stream_nav_history(
+                    datetime.date(2026, 1, 1), datetime.date(2026, 3, 31), client=fake_client
+                )
+            )
+        assert exc_info.value.provider == "amfi_history"
+        assert "503" in str(exc_info.value)
+
+    async def test_raises_provider_error_on_transport_error(self):
+        import httpx
+
+        fake_client = _FakeStreamErrorClient(httpx.TimeoutException("timed out"))
+        with pytest.raises(ProviderError) as exc_info:
+            await _collect(
+                stream_nav_history(
+                    datetime.date(2026, 1, 1), datetime.date(2026, 3, 31), client=fake_client
+                )
+            )
+        assert exc_info.value.provider == "amfi_history"
 
 
 # ===========================================================================
