@@ -521,16 +521,6 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
     >
       <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.28),transparent 70%)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute -bottom-32 left-[32%] h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.3),transparent 70%)' }} aria-hidden="true" />
-      {/* Owner-name chip (CAMS-style, founder-reported 2026-07-04) — the owner's own name to
-          their own session (DPDP-fine); rendered only when the CAS upload captured one. */}
-      {summary?.investor_name && (
-        <span
-          data-testid="hero-owner-pill"
-          className="absolute right-6 top-6 z-[3] max-w-[45%] truncate rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:right-7 sm:top-7"
-        >
-          {summary.investor_name.toUpperCase()}
-        </span>
-      )}
       <div className="relative z-[2]">
         <DataState
           status={status}
@@ -541,6 +531,25 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
         >
           {summary && (
             <div className="flex flex-col gap-6">
+              {/* Header lines (founder layout, 2026-07-04): line 1 = data freshness, line 2 =
+                  owner name (CAMS-style; own name to own session, DPDP-fine), then the value
+                  block two lines below. */}
+              <div className="space-y-1">
+                {(dayChangeAsOf || summary.as_of) && (
+                  <p className="text-[11px] text-slate-300">
+                    Data as of {fmtDate((dayChangeAsOf || summary.as_of) as string)} · NAV updates nightly
+                  </p>
+                )}
+                {summary.investor_name && (
+                  <div
+                    data-testid="hero-owner-pill"
+                    className="text-[12px] font-semibold uppercase tracking-wide text-slate-200"
+                  >
+                    {summary.investor_name.toUpperCase()}
+                  </div>
+                )}
+              </div>
+
               {/* Top row: value+gain | chart | completeness */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[auto_1fr_auto] lg:items-start">
                 {/* Left: value + gain/return */}
@@ -669,14 +678,6 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                 )}
               </div>
 
-              {/* Freshness line — founder-requested (2026-07-03): a visible "data as of" stamp so
-                  customers know how current the numbers are. Falls back to the summary's own as_of
-                  when day_change_as_of hasn't been computed yet (e.g. a fund still one day behind). */}
-              {(dayChangeAsOf || summary.as_of) && (
-                <p className="text-[11px] text-slate-400">
-                  Data as of {fmtDate((dayChangeAsOf || summary.as_of) as string)} · NAV updates nightly
-                </p>
-              )}
             </div>
           )}
         </DataState>
