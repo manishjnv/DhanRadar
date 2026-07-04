@@ -94,6 +94,6 @@ export const queryKeys = {
     current: () => ['market', 'breadth'] as const,
   },
   benchmark: {
-    nifty50: (params?: { from?: string; to?: string }) => ['benchmark', 'nifty50', params] as const,
+    byKey: (key: string, params?: { from?: string; to?: string }) => ['benchmark', key, params] as const,
   },
 } as const;

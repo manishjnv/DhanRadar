@@ -926,7 +926,7 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
   const status = pfLoading || nfLoading ? 'loading'
     : pfError ? 'error'
     : (pfEnv?.status ?? 'empty');
-  const disclosure = nfData?.disclosure ?? 'Nifty 50 price index · excludes dividends';
+  const disclosure = nfData?.disclosure ?? 'Nifty 50 · price index, excludes dividends';
   const heroGradient = 'linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%)';
   const bothLines = !!model && model.you.length >= 2 && model.nifty.length >= 2;
   // Honest window disclosure: with a young forward-only series, "1Y"/"All" really spans

@@ -42,6 +42,7 @@ import {
   HeroSection, StatusRow, VerdictSection, EntryTimingSection,
   MoodSection, ScoreBreakdownSection, StickyBar, type FundHead,
 } from '@/components/mf/funddetail/sectionsHero';
+import { benchmarkForCategory } from '@/components/mf/funddetail/categoryBenchmark';
 import {
   PortfolioFitSection, MyInvestmentSection, FundHealthSection, WhatChangedSection,
 } from '@/components/mf/funddetail/sectionsA';
@@ -150,6 +151,12 @@ function FundDetailView() {
     return5yPct: fund.return_5y_pct,
   };
 
+  // S10 header info line — category-appropriate benchmark (item 3, 2026-07);
+  // ReturnsTab (sectionsB.tsx) falls back to Nifty 50 if the mapped
+  // benchmark's series is empty, but the header caption always names the
+  // category's intended benchmark.
+  const benchmarkMeta = benchmarkForCategory(head.category);
+
   // S13 header info line — real when composition data exists (dedups against
   // HoldingsSection's own useFundComposition call via the shared query cache).
   const composition = compositionEnv?.data;
@@ -195,7 +202,7 @@ function FundDetailView() {
       <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
 
       {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info="vs Nifty 50 · price index, excludes dividends" /><PerformanceSection head={head} isin={isin} /></Section>
+      <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} /><PerformanceSection head={head} isin={isin} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
       <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="8 modules · vs 18 peers" /><ScoreBreakdownSection /></Section>
