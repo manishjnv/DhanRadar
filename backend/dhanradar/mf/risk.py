@@ -307,3 +307,95 @@ def category_percentiles(
         "p75": percentile(valid, 75.0),
         "p90": percentile(valid, 90.0),
     }
+
+
+# ---------------------------------------------------------------------------
+# Risk-free rate resolution (RBI 91-day T-bill; nightly Sharpe/Sortino input)
+# ---------------------------------------------------------------------------
+
+# RBI DBIE is a fragile, undocumented SPA that can silently zero-fill or go
+# stale — the ingested T-bill yield is trusted ONLY when it looks like a real,
+# fresh, published rate. Outside that window this fails CLOSED to the
+# existing hardcoded placeholder (config.RISK_FREE_RATE_ANNUAL) rather than
+# risk a garbage Sharpe/Sortino denominator.
+_TBILL_MAX_AGE_DAYS: int = 45
+_TBILL_MIN_SANE_PCT: float = 3.0
+_TBILL_MAX_SANE_PCT: float = 10.0
+
+
+@dataclass(frozen=True)
+class RiskFreeRateResolution:
+    """Outcome of resolving the nightly Sharpe/Sortino risk-free rate.
+
+    ``rate_annual`` is always populated (a FRACTION, e.g. 0.0675 = 6.75%) —
+    this function never raises and never returns an unvalidated rate.
+    ``source`` is ``"tbill"`` when the ingested RBI 91-day T-bill yield
+    (``mf.macro_indicators``, indicator_key='tbill_91d_yield_pct') was used,
+    else ``"placeholder"``. ``as_of_date`` is the T-bill row's date when used,
+    else None. ``rejected_reason`` is None when a T-bill rate was used,
+    otherwise one of "missing" / "stale" / "insane_value" — the caller logs
+    ONE structured warning per run keyed off this.
+    """
+
+    rate_annual: float
+    source: str
+    as_of_date: datetime.date | None
+    rejected_reason: str | None
+
+
+def resolve_risk_free_rate(
+    *,
+    tbill_value_pct: float | None,
+    tbill_as_of: datetime.date | None,
+    today: datetime.date,
+    placeholder_annual: float,
+    max_age_days: int = _TBILL_MAX_AGE_DAYS,
+    min_sane_pct: float = _TBILL_MIN_SANE_PCT,
+    max_sane_pct: float = _TBILL_MAX_SANE_PCT,
+) -> RiskFreeRateResolution:
+    """Resolve the annual risk-free rate for ``risk_adjusted_stats()``, fail-CLOSED.
+
+    Pure function — no DB access; the caller queries the latest
+    ``mf.macro_indicators`` row for indicator_key='tbill_91d_yield_pct' and
+    passes its value/as_of_date in (or None/None if no row exists).
+
+    Uses the ingested T-bill rate only when ALL hold:
+      - a row exists (``tbill_value_pct``/``tbill_as_of`` both not None)
+      - ``tbill_as_of`` is within ``max_age_days`` of ``today``
+      - ``tbill_value_pct`` is within [``min_sane_pct``, ``max_sane_pct``]
+        (guards a DBIE zero-fill or other garbage publish)
+
+    Otherwise returns ``placeholder_annual`` unchanged — the pre-existing
+    hardcoded Sharpe/Sortino denominator.
+    """
+    if tbill_value_pct is None or tbill_as_of is None:
+        return RiskFreeRateResolution(
+            rate_annual=placeholder_annual,
+            source="placeholder",
+            as_of_date=None,
+            rejected_reason="missing",
+        )
+
+    age_days = (today - tbill_as_of).days
+    if age_days > max_age_days:
+        return RiskFreeRateResolution(
+            rate_annual=placeholder_annual,
+            source="placeholder",
+            as_of_date=None,
+            rejected_reason="stale",
+        )
+
+    if not (min_sane_pct <= tbill_value_pct <= max_sane_pct):
+        return RiskFreeRateResolution(
+            rate_annual=placeholder_annual,
+            source="placeholder",
+            as_of_date=None,
+            rejected_reason="insane_value",
+        )
+
+    return RiskFreeRateResolution(
+        rate_annual=tbill_value_pct / 100.0,
+        source="tbill",
+        as_of_date=tbill_as_of,
+        rejected_reason=None,
+    )

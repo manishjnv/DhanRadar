@@ -1615,12 +1615,53 @@ async def _metrics_refresh_pipeline() -> str:
 
     from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
-    from dhanradar.mf.risk import percentile, risk_adjusted_stats
+    from dhanradar.mf.risk import percentile, resolve_risk_free_rate, risk_adjusted_stats
     from dhanradar.mf.signals import extended_horizon_stats
-    from dhanradar.models.mf import MfCategoryStats, MfFund, MfFundMetrics, MfNavHistory
+    from dhanradar.models.mf import (
+        MfCategoryStats,
+        MfFund,
+        MfFundMetrics,
+        MfMacroIndicator,
+        MfNavHistory,
+    )
 
     today = date.today()
     run_id = str(uuid4())
+
+    # Resolve the Sharpe/Sortino risk-free rate ONCE per run (tbill enrichment).
+    # RBI DBIE is fragile (undocumented SPA, can silently zero-fill/stale) —
+    # resolve_risk_free_rate() fails CLOSED to the existing placeholder unless
+    # the latest ingested 91-day T-bill yield is fresh and sane.
+    async with TaskSessionLocal() as db:
+        tbill_row = (
+            await db.execute(
+                select(MfMacroIndicator.indicator_value, MfMacroIndicator.as_of_date)
+                .where(MfMacroIndicator.indicator_key == "tbill_91d_yield_pct")
+                .order_by(MfMacroIndicator.as_of_date.desc())
+                .limit(1)
+            )
+        ).first()
+    tbill_value, tbill_as_of = tbill_row if tbill_row else (None, None)
+
+    rf_resolution = resolve_risk_free_rate(
+        tbill_value_pct=float(tbill_value) if tbill_value is not None else None,
+        tbill_as_of=tbill_as_of,
+        today=today,
+        placeholder_annual=_s.RISK_FREE_RATE_ANNUAL,
+    )
+    risk_free_annual = rf_resolution.rate_annual
+    if rf_resolution.source == "placeholder":
+        _slog.warning(
+            "mf_metrics_refresh.risk_free_rate_fallback",
+            reason=rf_resolution.rejected_reason,
+            placeholder_annual=_s.RISK_FREE_RATE_ANNUAL,
+        )
+    else:
+        logger.info(
+            "mf_metrics_refresh: risk-free rate source=tbill@%s rate_annual=%.4f",
+            rf_resolution.as_of_date,
+            risk_free_annual,
+        )
 
     async with TaskSessionLocal() as db:
         # Load all ISINs that have any NAV data.
@@ -1655,7 +1696,7 @@ async def _metrics_refresh_pipeline() -> str:
                 # Risk-adjusted metrics (Sharpe, Sortino, vol, rolling 1Y).
                 rs = risk_adjusted_stats(
                     series.get(isin, []),
-                    risk_free_annual=_s.RISK_FREE_RATE_ANNUAL,
+                    risk_free_annual=risk_free_annual,
                 )
 
                 upsert_dicts.append({
@@ -1781,7 +1822,8 @@ async def _metrics_refresh_pipeline() -> str:
             n_cat_stats = len(cat_stat_upserts)
 
     summary = (
-        f"mf_metrics_refresh: {n_processed} funds, {n_cat_stats} category-stat rows"
+        f"mf_metrics_refresh: {n_processed} funds, {n_cat_stats} category-stat rows, "
+        f"rf_source={rf_resolution.source}"
     )
     logger.info(summary)
     return summary

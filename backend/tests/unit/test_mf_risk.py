@@ -26,6 +26,7 @@ from dhanradar.mf.risk import (
     RiskStats,
     category_percentiles,
     percentile,
+    resolve_risk_free_rate,
     risk_adjusted_stats,
     rolling_1y_returns,
 )
@@ -529,3 +530,105 @@ class TestMinPointsAndPeriodsPerYearOverride:
         rs_365 = risk_adjusted_stats(pts, risk_free_annual=_RF, min_points=90, periods_per_year=365)
         assert rs_252.sortino_ratio is not None and rs_365.sortino_ratio is not None
         assert rs_252.sortino_ratio != pytest.approx(rs_365.sortino_ratio)
+
+
+# ---------------------------------------------------------------------------
+# 9. resolve_risk_free_rate — RBI 91-day T-bill fail-CLOSED resolution
+# ---------------------------------------------------------------------------
+
+class TestResolveRiskFreeRate:
+    """mf_metrics_refresh resolves the Sharpe/Sortino Rf ONCE per run from the latest
+    mf.macro_indicators row for indicator_key='tbill_91d_yield_pct'. RBI DBIE is fragile
+    (undocumented SPA, can silently zero-fill/stale) so every non-ideal case must fail
+    CLOSED to the pre-existing hardcoded placeholder, never propagate a garbage rate."""
+
+    _TODAY = datetime.date(2026, 7, 4)
+    _PLACEHOLDER = 0.065  # matches config.RISK_FREE_RATE_ANNUAL default
+
+    def test_sane_fresh_row_is_used(self):
+        """6.75% published 10 days ago → used, converted from PERCENT to a fraction."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=6.75,
+            tbill_as_of=self._TODAY - datetime.timedelta(days=10),
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "tbill"
+        assert res.rejected_reason is None
+        assert res.rate_annual == pytest.approx(0.0675)
+        assert res.as_of_date == self._TODAY - datetime.timedelta(days=10)
+
+    def test_boundary_45_days_still_used(self):
+        """Exactly 45 days old is still within the freshness window (inclusive)."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=6.5,
+            tbill_as_of=self._TODAY - datetime.timedelta(days=45),
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "tbill"
+
+    def test_stale_row_falls_back_to_placeholder(self):
+        """46 days old (> 45d max) → placeholder, reason='stale'."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=6.5,
+            tbill_as_of=self._TODAY - datetime.timedelta(days=46),
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "placeholder"
+        assert res.rejected_reason == "stale"
+        assert res.rate_annual == pytest.approx(self._PLACEHOLDER)
+
+    def test_zero_value_from_dbie_zero_fill_falls_back_to_placeholder(self):
+        """0.0 (a DBIE zero-fill artefact) is outside the [3.0, 10.0] sane band → rejected."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=0.0,
+            tbill_as_of=self._TODAY - datetime.timedelta(days=1),
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "placeholder"
+        assert res.rejected_reason == "insane_value"
+        assert res.rate_annual == pytest.approx(self._PLACEHOLDER)
+
+    def test_value_above_sane_band_falls_back_to_placeholder(self):
+        """15% is above the sane 10.0 ceiling → rejected (guards a garbage publish)."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=15.0,
+            tbill_as_of=self._TODAY,
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "placeholder"
+        assert res.rejected_reason == "insane_value"
+
+    def test_missing_row_falls_back_to_placeholder(self):
+        """No mf.macro_indicators row at all → placeholder, reason='missing'."""
+        res = resolve_risk_free_rate(
+            tbill_value_pct=None,
+            tbill_as_of=None,
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert res.source == "placeholder"
+        assert res.rejected_reason == "missing"
+        assert res.rate_annual == pytest.approx(self._PLACEHOLDER)
+        assert res.as_of_date is None
+
+    def test_sane_boundary_values_are_used(self):
+        """Exactly 3.0 and 10.0 are inclusive boundaries of the sane band."""
+        low = resolve_risk_free_rate(
+            tbill_value_pct=3.0,
+            tbill_as_of=self._TODAY,
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        high = resolve_risk_free_rate(
+            tbill_value_pct=10.0,
+            tbill_as_of=self._TODAY,
+            today=self._TODAY,
+            placeholder_annual=self._PLACEHOLDER,
+        )
+        assert low.source == "tbill"
+        assert high.source == "tbill"
