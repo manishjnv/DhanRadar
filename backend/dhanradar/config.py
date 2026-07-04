@@ -288,12 +288,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Annual risk-free rate as a FRACTION (e.g. 0.065 = 6.5 %).
     # Proxy for the RBI 91-day T-bill / 10Y G-sec rate (~6.5% as of 2026).
-    # TODO: replace with an ingested RBI DBIE macro indicator once the macro
-    # feed is live (B75 / macro_data_refresh task).
+    # FALLBACK value: mf_metrics_refresh resolves the real rate nightly via
+    # mf.risk.resolve_risk_free_rate(), preferring a fresh+sane ingested
+    # 'tbill_91d_yield_pct' row from mf.macro_indicators over this constant.
+    # As of 2026-07-04 the rbi_dbie fetch URL (market_data/rbi.py) 404s, so
+    # no row is ever ingested and this placeholder is what's actually used —
+    # ingestion is a separate follow-up once a working RBI money-market
+    # source is identified (do not swap the placeholder default without one).
     RISK_FREE_RATE_ANNUAL: float = Field(
         default=0.065,
         description="Annual risk-free proxy for Sharpe/Sortino (~6.5%). "
-                    "TODO: replace with ingested RBI 91-day T-bill / 10Y G-sec once the macro feed exists.",
+        "Fallback used by mf_metrics_refresh when no fresh/sane "
+        "ingested 'tbill_91d_yield_pct' row exists.",
     )
 
     # ------------------------------------------------------------------
