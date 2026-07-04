@@ -51,6 +51,28 @@ class MarketIndex(BaseModel):
     change_pct: float
 
 
+class TickerItem(BaseModel):
+    """One global-ticker-strip quote — raw public market data (index/FX/commodity
+    level + daily % change), DOM-allowed like `MarketIndex`."""
+
+    key: str
+    label: str
+    value: float
+    change_pct: float
+
+
+class TickerOut(BaseModel):
+    """The global top-strip payload: quote items in render order plus the cached
+    FII/DII net flows (₹ Cr) + Nifty PCR from the mood snapshot — all raw public
+    figures, all None when the flows cache is cold (strip shows an em-dash)."""
+
+    items: list[TickerItem]
+    fii_cr: float | None = None
+    dii_cr: float | None = None
+    pcr: float | None = None
+    flows_as_of: str | None = None
+
+
 class TopScoredFund(BaseModel):
     """One ranked fund — label + band only (no numeric)."""
 

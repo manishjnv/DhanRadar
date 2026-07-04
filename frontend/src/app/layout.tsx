@@ -17,6 +17,7 @@ import { GeistMono } from 'geist/font/mono';
 import { Instrument_Serif } from 'next/font/google';
 import { Providers } from './providers';
 import { DevBanner } from '@/components/site/DevBanner';
+import { TickerBar } from '@/components/site/TickerBar';
 import './globals.css';
 import '@/styles/tokens.css';
 
@@ -58,7 +59,10 @@ export default function RootLayout({
               --dev-banner-h so the wrapper below reserves space, SiteHeader
               offsets its sticky top, and AppShell shrinks its viewport height. */}
           <DevBanner />
-          <div style={{ paddingTop: 'var(--dev-banner-h, 0px)' }}>{children}</div>
+          <div style={{ paddingTop: 'var(--dev-banner-h, 0px)' }}>
+            <TickerBar />
+            {children}
+          </div>
         </Providers>
       </body>
     </html>

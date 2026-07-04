@@ -15,7 +15,8 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.dashboard.indices import get_indices
-from dhanradar.dashboard.schemas import MarketIndex
+from dhanradar.dashboard.schemas import MarketIndex, TickerOut
+from dhanradar.dashboard.ticker import get_ticker
 from dhanradar.db import get_db
 from dhanradar.market_data.providers.yahoo import fetch_macro_quotes
 from dhanradar.mood import service
@@ -97,3 +98,11 @@ async def market_quotes() -> list[MacroQuote]:
     US 10Y, Brent, USD/INR, India VIX, Nifty 50. Public Yahoo market data, DOM-allowed
     (NOT the proprietary mood score). Cached 5 min; public like /vix and /breadth."""
     return [MacroQuote(**q) for q in await fetch_macro_quotes()]
+
+
+@router.get("/ticker", response_model=TickerOut)
+async def market_ticker() -> TickerOut:
+    """Public global ticker strip — index/FX/commodity levels + % change (Yahoo,
+    60s read-through cache) plus cached FII/DII/PCR. Raw public market data,
+    DOM-allowed like /quotes and /flows; NOT a DhanRadar score."""
+    return await get_ticker()

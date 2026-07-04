@@ -19,7 +19,12 @@ from dhanradar.dashboard.service import latest_per_isin, rank_top_scored
 
 # --- indices (Yahoo mocked; fakeredis via patch_redis) -----------------------
 async def test_indices_happy_path_from_yahoo(patch_redis, monkeypatch):
-    prices = {"^NSEI": 24832.65, "^BSESN": 81234.78, "^NSEBANK": 53120.40, "NIFTYMIDCAP150.NS": 18945.30}
+    prices = {
+        "^NSEI": 24832.65,
+        "^BSESN": 81234.78,
+        "^NSEBANK": 53120.40,
+        "NIFTYMIDCAP150.NS": 18945.30,
+    }
 
     async def fake_meta(client, symbol):
         p = prices.get(symbol)
@@ -72,8 +77,8 @@ def test_rank_top_scored_orders_by_label_then_band():
 
 def test_latest_per_isin_keeps_the_most_recent_row():
     rows = [
-        ("I1", "in_form", "high", 3, "A", "X"),   # latest (pre-ordered scored_at DESC)
-        ("I1", "on_track", "low", 1, "A", "X"),   # older → dropped
+        ("I1", "in_form", "high", 3, "A", "X"),  # latest (pre-ordered scored_at DESC)
+        ("I1", "on_track", "low", 1, "A", "X"),  # older → dropped
         ("I2", "off_track", "medium", 2, "B", "Y"),
     ]
     out = latest_per_isin(rows)
@@ -99,7 +104,11 @@ def test_schemas_never_expose_unified_score():
     # The fund projections expose ONLY label + band as the rating signal.
     assert set(FundLabel.model_fields) == {"isin", "scheme_name", "label", "confidence_band"}
     assert set(TopScoredFund.model_fields) == {
-        "isin", "scheme_name", "category", "label", "confidence_band",
+        "isin",
+        "scheme_name",
+        "category",
+        "label",
+        "confidence_band",
     }
 
 
@@ -107,7 +116,75 @@ def test_portfolio_summary_carries_disclosure_bundle():
     from dhanradar.scoring.engine.schemas import NOT_ADVICE
 
     s = PortfolioSummary(
-        current_value=None, xirr_pct=None, fund_count=0, last_updated=None, funds=[],
-        disclosure="d", not_advice=NOT_ADVICE, disclaimer_version="v1",
+        current_value=None,
+        xirr_pct=None,
+        fund_count=0,
+        last_updated=None,
+        funds=[],
+        disclosure="d",
+        not_advice=NOT_ADVICE,
+        disclaimer_version="v1",
     )
     assert s.not_advice == NOT_ADVICE
+
+
+# --- ticker (Yahoo mocked; fakeredis via patch_redis) -------------------------
+async def test_ticker_happy_path_items_ordered_and_flows_served(patch_redis, monkeypatch):
+    import json as _json
+
+    from dhanradar.dashboard import ticker as ticker_mod
+    from dhanradar.dashboard.ticker import get_ticker
+    from dhanradar.redis_client import get_redis
+
+    async def fake_meta(client, symbol):
+        return {"regularMarketPrice": 100.0, "chartPreviousClose": 99.0}
+
+    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    await get_redis().set(
+        "signal:flows:last",
+        _json.dumps(
+            {"fii_cr": -1234.5, "dii_cr": 987.6, "pcr": 1.07, "as_of": "2026-07-04T04:00:00+00:00"}
+        ),
+    )
+
+    out = await get_ticker()
+    assert [i.key for i in out.items] == [k for k, _, _ in ticker_mod._TICKER_SYMBOLS]
+    assert out.items[0].label == "NIFTY 50"
+    assert out.items[0].value == 100.0
+    assert out.items[0].change_pct == round((1.0 / 99.0) * 100, 2)
+    assert out.fii_cr == -1234.5 and out.dii_cr == 987.6 and out.pcr == 1.07
+
+
+async def test_ticker_flows_cache_cold_serves_items_with_none_flows(patch_redis, monkeypatch):
+    from dhanradar.dashboard import ticker as ticker_mod
+    from dhanradar.dashboard.ticker import get_ticker
+
+    async def fake_meta(client, symbol):
+        return {"regularMarketPrice": 50.0, "chartPreviousClose": 50.0}
+
+    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    out = await get_ticker()
+    assert len(out.items) == len(ticker_mod._TICKER_SYMBOLS)
+    assert out.fii_cr is None and out.dii_cr is None and out.pcr is None
+    assert out.flows_as_of is None
+
+
+async def test_ticker_yahoo_down_serves_fallback(patch_redis, monkeypatch):
+    import json as _json
+
+    from dhanradar.dashboard import ticker as ticker_mod
+    from dhanradar.dashboard.ticker import get_ticker
+    from dhanradar.redis_client import get_redis
+
+    await get_redis().set(
+        "dashboard:ticker:fallback",
+        _json.dumps([{"key": "nifty50", "label": "NIFTY 50", "value": 24000.0, "change_pct": 0.5}]),
+    )
+
+    async def fake_meta(client, symbol):
+        return None  # every symbol fails
+
+    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    out = await get_ticker()
+    assert len(out.items) == 1
+    assert out.items[0].value == 24000.0  # last-known-good, not an empty strip
