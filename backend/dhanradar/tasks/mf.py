@@ -4058,7 +4058,8 @@ async def _compute_portfolio_daily_valuations_async() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Nifty 50 price-index daily-close series (ADR-0037 — benchmark for chart)
+# Benchmark price-index daily-close series (ADR-0037 — benchmark for chart;
+# generalized to a category-benchmark registry, item 3 2026-07)
 # ---------------------------------------------------------------------------
 
 #: Benchmark key stored in mf_benchmark_daily.benchmark (ADR-0037 part b).
@@ -4068,12 +4069,46 @@ BENCHMARK_KEY_NIFTY50 = "nifty50_price"
 _NIFTY50_TICKER = "^NSEI"
 
 
-def _fetch_nifty_closes(
+@dataclass(frozen=True)
+class BenchmarkSpec:
+    """One benchmark index's Yahoo source + public metadata.
+
+    ``storage_key`` is the value written to ``mf_benchmark_daily.benchmark`` —
+    nifty50 keeps its legacy ``BENCHMARK_KEY_NIFTY50`` value ("nifty50_price",
+    ADR-0037) so existing rows stay valid; every other benchmark uses its own
+    registry key as the storage key (no legacy rows to reconcile).
+    """
+
+    yahoo_symbol: str
+    display_name: str
+    storage_key: str
+
+
+#: Category-benchmark registry (item 3, 2026-07). Each Yahoo symbol was
+#: live-verified against query1.finance.yahoo.com/v8/finance/chart/<symbol>
+#: (real historical daily closes, not just a same-day snapshot) before being
+#: added here. Nifty Smallcap 250 has NO working historical-series symbol on
+#: Yahoo — every candidate (NIFTYSMLCAP250.NS, NIFTYSMCAP250.NS, ^CNXSC
+#: [= Smallcap 100, wrong index], NIFTY_SMLCAP_250.NS) returns either 404 or a
+#: single-point stub (validRanges=['1d','5d'], firstTradeDate=null) — so it was
+#: DROPPED; the frontend category map falls back to nifty50 for Small Cap funds.
+BENCHMARK_REGISTRY: dict[str, BenchmarkSpec] = {
+    "nifty50": BenchmarkSpec("^NSEI", "Nifty 50", BENCHMARK_KEY_NIFTY50),
+    "nifty100": BenchmarkSpec("^CNX100", "Nifty 100", "nifty100"),
+    "nifty500": BenchmarkSpec("^CRSLDX", "Nifty 500", "nifty500"),
+    "nifty_midcap_150": BenchmarkSpec("NIFTYMIDCAP150.NS", "Nifty Midcap 150", "nifty_midcap_150"),
+}
+
+
+def _fetch_index_closes(
+    symbol: str,
     start: date,
     end: date,
 ) -> list[tuple[date, float]]:
-    """Synchronous yfinance fetch of ^NSEI daily closes in [start, end].
+    """Synchronous yfinance fetch of `symbol`'s daily closes in [start, end].
 
+    Generalized core shared by every BENCHMARK_REGISTRY entry (and the
+    back-compat ^NSEI-only `_fetch_nifty_closes` wrapper below).
     Returns a list of (close_date, close_value) pairs with NaN rows dropped.
     Raises on import failure; returns [] on empty data (weekend / holiday range).
     Kept as a module-level helper so tests can monkeypatch it without touching
@@ -4082,11 +4117,11 @@ def _fetch_nifty_closes(
     import yfinance as yf  # lazy — not loaded at worker startup
 
     raw = yf.download(
-        _NIFTY50_TICKER,
+        symbol,
         start=start.isoformat(),
         end=(end + timedelta(days=1)).isoformat(),  # yfinance end is exclusive
         progress=False,
-        auto_adjust=False,  # ^NSEI is the price index; no dividend adjustment needed or wanted
+        auto_adjust=False,  # price index; no dividend adjustment needed or wanted
     )
     if raw.empty:
         return []
@@ -4104,6 +4139,16 @@ def _fetch_nifty_closes(
         # yfinance index is a pandas Timestamp; .date() gives a stdlib date.
         rows.append((ts.date(), fval))  # type: ignore[union-attr]
     return rows
+
+
+def _fetch_nifty_closes(
+    start: date,
+    end: date,
+) -> list[tuple[date, float]]:
+    """Back-compat wrapper — ^NSEI only. Existing tests import this name directly
+    and monkeypatch the `yfinance` module, which still works unchanged since this
+    just delegates to `_fetch_index_closes`."""
+    return _fetch_index_closes(_NIFTY50_TICKER, start, end)
 
 
 async def _upsert_benchmark_rows(
@@ -4142,6 +4187,68 @@ async def _upsert_benchmark_rows(
     return len(rows)
 
 
+async def _daily_close_upsert_async(key: str) -> str:
+    """Fetch + upsert one BENCHMARK_REGISTRY benchmark's latest close (5-day
+    catch-up lookback across weekends/holidays, keep most-recent row only —
+    idempotent). Shared core for the nifty50 back-compat entry point and the
+    registry-wide daily task; network/parse failures are caught so one bad
+    symbol doesn't block the rest of the registry.
+
+    The nifty50 label is kept literally "nifty_close_daily" (not the registry
+    key) so its return string — and every existing test asserting on it — is
+    byte-identical to the pre-registry single-benchmark implementation.
+    """
+    spec = BENCHMARK_REGISTRY[key]
+    label = "nifty_close_daily" if key == "nifty50" else key
+    today = date.today()
+    start = today - timedelta(days=5)  # catch up across weekends / holidays
+    try:
+        rows = _fetch_index_closes(spec.yahoo_symbol, start, today)
+    except Exception:
+        logger.exception("%s: yfinance fetch failed", label)
+        return f"{label}: fetch_failed"
+
+    if not rows:
+        logger.warning("%s: no closes returned from yfinance for %s", label, today)
+        return f"{label}: no_data as_of={today}"
+
+    # Keep only the most-recent close (we re-run daily so yesterday's row
+    # is already stored from the previous run).
+    latest_date, latest_value = max(rows, key=lambda r: r[0])
+    upserted = await _upsert_benchmark_rows(
+        [(latest_date, latest_value)], benchmark=spec.storage_key
+    )
+    logger.info(
+        "%s: close_date=%s close_value=%.2f upserted=%d",
+        label,
+        latest_date,
+        latest_value,
+        upserted,
+    )
+    return f"{label}: close_date={latest_date} close_value={latest_value}"
+
+
+async def _nifty_close_daily_async() -> str:
+    """Back-compat nifty50-only entry point — kept for existing direct-import
+    tests / external callers. Production now runs through
+    `_all_benchmarks_daily_close_async` (below), which processes nifty50 via
+    this exact same `_daily_close_upsert_async` helper.
+
+    Runs on the 640 MB batch queue — do NOT call from celery-mood (192 MB).
+    """
+    return await _daily_close_upsert_async("nifty50")
+
+
+async def _all_benchmarks_daily_close_async() -> str:
+    """Async core for the nifty_close_daily Celery task — iterates every
+    BENCHMARK_REGISTRY key (one Yahoo call each, same upsert). Per-benchmark
+    failures don't block the rest (mirrors the ticker/indices per-symbol
+    tolerance pattern).
+    """
+    results = [await _daily_close_upsert_async(key) for key in BENCHMARK_REGISTRY]
+    return "; ".join(results)
+
+
 @celery_app.task(
     name="dhanradar.tasks.mf.nifty_close_daily",
     bind=True,
@@ -4152,96 +4259,95 @@ async def _upsert_benchmark_rows(
     max_retries=2,
 )
 def nifty_close_daily(self: Any) -> str:  # type: ignore[override]
-    """EOD task (23:45 IST) — fetch the latest ^NSEI price-index close and upsert.
+    """EOD task (23:45 IST) — fetch each registered benchmark's latest
+    price-index close and upsert (ADR-0037; generalized to the registry,
+    item 3 2026-07). Task name/beat schedule unchanged.
 
-    Sync Celery wrapper; the async core lives in ``_nifty_close_daily_async``
-    (mirrors the M2.2 compute_portfolio_daily_valuations pattern) so tests can
-    ``await _nifty_close_daily_async()`` without hitting the asyncio.run-inside-
-    running-loop error.
+    Sync Celery wrapper; the async core lives in
+    ``_all_benchmarks_daily_close_async`` (mirrors the M2.2
+    compute_portfolio_daily_valuations pattern) so tests can await the async
+    core without hitting the asyncio.run-inside-running-loop error.
     """
-    return asyncio.run(_nifty_close_daily_async())
+    return asyncio.run(_all_benchmarks_daily_close_async())
 
 
-async def _nifty_close_daily_async() -> str:
-    """Async core for nifty_close_daily — testable without a running event loop.
+async def _backfill_benchmark_async(key: str, years: int = 10) -> str:
+    """Bulk-backfill one BENCHMARK_REGISTRY benchmark's daily closes for the
+    last `years` years. Idempotent; safe to re-run. Shared core for the
+    nifty50 back-compat entry point and the registry-wide 'all' backfill.
 
-    Fetches the last 5 calendar days from Yahoo Finance (to handle weekends/
-    holidays) and upserts the most-recent close row.  Idempotent.  Network
-    errors are logged and the function returns a no-op result.
-
-    Runs on the 640 MB batch queue — do NOT call from celery-mood (192 MB).
+    The nifty50 label is kept literally "backfill_nifty_close_series" (not the
+    registry key) for byte-identical return strings vs the pre-registry
+    implementation.
     """
+    spec = BENCHMARK_REGISTRY[key]
+    label = "backfill_nifty_close_series" if key == "nifty50" else key
     today = date.today()
-    start = today - timedelta(days=5)  # catch up across weekends / holidays
+    start = today - timedelta(days=years * 365)
+    logger.info("%s: start=%s end=%s", label, start, today)
     try:
-        rows = _fetch_nifty_closes(start, today)
+        rows = _fetch_index_closes(spec.yahoo_symbol, start, today)
     except Exception:
-        logger.exception("nifty_close_daily: yfinance fetch failed")
-        return "nifty_close_daily: fetch_failed"
+        logger.exception("%s: yfinance fetch failed", label)
+        return f"{label}: fetch_failed"
 
     if not rows:
-        logger.warning("nifty_close_daily: no closes returned from yfinance for %s", today)
-        return f"nifty_close_daily: no_data as_of={today}"
+        return f"{label}: no_data"
 
-    # Keep only the most-recent close (we re-run daily so yesterday's row
-    # is already stored from the previous run).
-    latest_date, latest_value = max(rows, key=lambda r: r[0])
-    upserted = await _upsert_benchmark_rows([(latest_date, latest_value)])
+    upserted = await _upsert_benchmark_rows(rows, benchmark=spec.storage_key)
     logger.info(
-        "nifty_close_daily: close_date=%s close_value=%.2f upserted=%d",
-        latest_date, latest_value, upserted,
+        "%s: upserted=%d range=%s..%s",
+        label,
+        upserted,
+        start,
+        today,
     )
-    return f"nifty_close_daily: close_date={latest_date} close_value={latest_value}"
-
-
-def backfill_nifty_close_series(years: int = 10) -> str:
-    """One-time backfill of ^NSEI daily closes.  Sync wrapper — calls the async core.
-
-    Example (KVM4 shell):
-        python -c "from dhanradar.tasks.mf import backfill_nifty_close_series; print(backfill_nifty_close_series())"
-    Or via Celery:
-        celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
-    """
-    return asyncio.run(_backfill_nifty_close_series_async(years))
+    return f"{label}: upserted={upserted} range={start}..{today}"
 
 
 async def _backfill_nifty_close_series_async(years: int = 10) -> str:
-    """Async core for backfill_nifty_close_series — testable in pytest-asyncio.
+    """Back-compat nifty50-only entry point — kept for existing direct-import
+    tests / external callers. Delegates to the generalized per-benchmark
+    backfill core."""
+    return await _backfill_benchmark_async("nifty50", years)
 
-    Bulk-upserts ^NSEI daily closes for the last ``years`` years.  Idempotent;
-    safe to re-run.  Fetches synchronously via yfinance then upserts via the
-    async DB session.
+
+async def _backfill_all_benchmarks_async(years: int = 10) -> str:
+    """Backfill every BENCHMARK_REGISTRY key. Per-benchmark failures don't
+    block the rest (mirrors the daily task's tolerance)."""
+    results = [await _backfill_benchmark_async(key, years) for key in BENCHMARK_REGISTRY]
+    return "; ".join(results)
+
+
+def backfill_nifty_close_series(benchmark: str = "all", years: int = 10) -> str:
+    """One-time backfill of benchmark daily closes.  Sync wrapper — calls the
+    async core.
+
+    `benchmark`: a BENCHMARK_REGISTRY key (e.g. "nifty50", "nifty100"), or the
+    default "all" to backfill every registered benchmark.
+
+    Example (KVM4 shell):
+        python -c "from dhanradar.tasks.mf import backfill_nifty_close_series; print(backfill_nifty_close_series('nifty50'))"
+    Or via Celery:
+        celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
     """
-    today = date.today()
-    start = today - timedelta(days=years * 365)
-    logger.info("backfill_nifty_close_series: start=%s end=%s", start, today)
-    try:
-        rows = _fetch_nifty_closes(start, today)
-    except Exception:
-        logger.exception("backfill_nifty_close_series: yfinance fetch failed")
-        return "backfill_nifty_close_series: fetch_failed"
-
-    if not rows:
-        return "backfill_nifty_close_series: no_data"
-
-    upserted = await _upsert_benchmark_rows(rows)
-    logger.info(
-        "backfill_nifty_close_series: upserted=%d range=%s..%s",
-        upserted, start, today,
-    )
-    return f"backfill_nifty_close_series: upserted={upserted} range={start}..{today}"
+    if benchmark == "all":
+        return asyncio.run(_backfill_all_benchmarks_async(years))
+    if benchmark not in BENCHMARK_REGISTRY:
+        return f"backfill_nifty_close_series: unknown_benchmark={benchmark}"
+    return asyncio.run(_backfill_benchmark_async(benchmark, years))
 
 
 @celery_app.task(
     name="dhanradar.tasks.mf.backfill_nifty_close_series_task",
     bind=False,
 )
-def backfill_nifty_close_series_task(years: int = 10) -> str:
+def backfill_nifty_close_series_task(benchmark: str = "all", years: int = 10) -> str:
     """Celery-triggerable wrapper around backfill_nifty_close_series.
 
     Invoke via the admin ops console or directly:
         celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
     """
-    return backfill_nifty_close_series(years=years)
+    return backfill_nifty_close_series(benchmark=benchmark, years=years)
 
 

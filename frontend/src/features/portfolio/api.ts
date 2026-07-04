@@ -446,23 +446,40 @@ export interface NiftyCloseSeriesPayload {
 }
 
 /**
- * Nifty 50 price-index daily close series from GET /mf/benchmark/nifty50.
+ * Any registered benchmark's price-index daily close series from
+ * GET /mf/benchmark/{key} (item 3, 2026-07 — category-benchmark overlays).
  * Public endpoint — no auth needed. Optional from/to ISO date filters.
- * Empty points on cold-start (before the historical backfill runs on deploy).
+ * `enabled: false` skips the fetch (used for the nifty50 empty-series fallback
+ * on the fund detail Returns tab, so it only fires when actually needed).
  */
-export function useNiftyCloseSeries(params?: { from?: string; to?: string }) {
+export function useBenchmarkSeries(
+  benchmark: string,
+  params?: { from?: string; to?: string },
+  options?: { enabled?: boolean },
+) {
   const searchParams = new URLSearchParams();
   if (params?.from) searchParams.set('from', params.from);
   if (params?.to) searchParams.set('to', params.to);
   const qs = searchParams.toString();
   return useQuery<NiftyCloseSeriesPayload>({
-    queryKey: queryKeys.benchmark.nifty50(params),
+    queryKey: queryKeys.benchmark.byKey(benchmark, params),
     queryFn: () =>
-      api.get<NiftyCloseSeriesPayload>(`/mf/benchmark/nifty50${qs ? `?${qs}` : ''}`),
+      api.get<NiftyCloseSeriesPayload>(`/mf/benchmark/${benchmark}${qs ? `?${qs}` : ''}`),
+    enabled: options?.enabled ?? true,
     retry: (count, error) => {
       if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
       return count < 1;
     },
     staleTime: 10 * 60 * 1000, // closes change only once a day
   });
+}
+
+/**
+ * Nifty 50 price-index daily close series from GET /mf/benchmark/nifty50.
+ * Thin nifty50-only wrapper around `useBenchmarkSeries` — kept so the
+ * Portfolio-vs-Market chart (always nifty50) doesn't need to know about the
+ * benchmark registry.
+ */
+export function useNiftyCloseSeries(params?: { from?: string; to?: string }) {
+  return useBenchmarkSeries('nifty50', params);
 }

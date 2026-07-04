@@ -7,16 +7,23 @@
  *
  * W1 (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17): Returns/Rolling/Rank-Trend tabs
  * and the whole Risk Center are wired to real data (`fund.nav_series`,
- * `fund.analytics`, `fund.rank_history`, plus the existing Nifty 50 benchmark
- * endpoint reused from the portfolio-vs-market chart). SIP/Drawdowns/Consistency
- * stay sampleData preview (W2) — PreviewBadge shows only on those tabs now.
+ * `fund.analytics`, `fund.rank_history`, plus the benchmark daily-close
+ * endpoint). SIP/Drawdowns/Consistency stay sampleData preview (W2) —
+ * PreviewBadge shows only on those tabs now.
+ *
+ * Item 3 (2026-07): the Returns-tab overlay picks a category-appropriate
+ * benchmark (`categoryBenchmark.ts` — Large Cap → Nifty 100, Mid Cap → Nifty
+ * Midcap 150, Flexi/Multi/ELSS/Value/Focused/Contra/Div-Yield → Nifty 500,
+ * everything else → Nifty 50), falling back to Nifty 50 when the mapped
+ * benchmark's series is empty (e.g. cold-start before its backfill runs).
  */
 'use client';
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { useFundNav, useFundAnalytics } from '@/features/mf/api';
-import { useNiftyCloseSeries } from '@/features/portfolio/api';
+import { useBenchmarkSeries } from '@/features/portfolio/api';
+import { benchmarkForCategory } from './categoryBenchmark';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
@@ -115,9 +122,21 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
 
   const { data: navEnv, isLoading: navLoading } = useFundNav(isin, apiRange);
   const navData = navEnv?.data ?? null;
-  const { data: benchSeries } = useNiftyCloseSeries(
-    navData ? { from: navData.from ?? undefined, to: navData.to ?? undefined } : undefined,
-  );
+
+  // Item 3 (2026-07): category-appropriate benchmark, falling back to Nifty 50
+  // when the mapped benchmark's own series is empty (e.g. cold-start before
+  // its backfill has run) — the `enabled` flag skips the fallback fetch
+  // entirely until it's actually needed.
+  const benchmarkMeta = React.useMemo(() => benchmarkForCategory(head.category), [head.category]);
+  const dateParams = navData
+    ? { from: navData.from ?? undefined, to: navData.to ?? undefined }
+    : undefined;
+  const { data: mappedBench } = useBenchmarkSeries(benchmarkMeta.key, dateParams);
+  const mappedIsEmpty = !!mappedBench && mappedBench.points.length === 0;
+  const shouldFallback = benchmarkMeta.key !== 'nifty50' && mappedIsEmpty;
+  const { data: fallbackBench } = useBenchmarkSeries('nifty50', dateParams, { enabled: shouldFallback });
+  const benchSeries = shouldFallback ? fallbackBench : mappedBench;
+  const benchDisplayName = shouldFallback ? 'Nifty 50' : benchmarkMeta.displayName;
 
   // Rebase both series to a ₹10,000 start (growth-of-10k) — W1 real chart
   // (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.5). Each series rebases off its own
@@ -250,14 +269,14 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
           </span>
           <span className="inline-flex items-center gap-1.5">
             <i className="inline-block h-2 w-5 rounded-full bg-ink-faint" aria-hidden="true" />
-            Benchmark (Nifty 50)
+            Benchmark ({benchDisplayName})
           </span>
         </div>
       </div>
 
       <WhatThisMeans>
         This chart shows how {GROWTH.invested} invested at the start of the selected period would
-        have grown, next to the Nifty 50 price index (excludes dividends) for comparison.
+        have grown, next to the {benchDisplayName} price index (excludes dividends) for comparison.
       </WhatThisMeans>
     </>
   );

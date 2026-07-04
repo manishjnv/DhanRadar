@@ -35,10 +35,12 @@ pytestmark = pytest.mark.integration
 # (_fetch_nifty_closes_*) still pass in environments without a live Postgres.
 # ---------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_benchmark():
     try:
         from dhanradar.db import task_session
+
         async with task_session() as db:
             await db.execute(text("DELETE FROM mf.mf_benchmark_daily"))
             await db.commit()
@@ -50,6 +52,7 @@ async def _clean_benchmark():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_yf_df(rows: list[tuple[str, float]]):
     """Lightweight mock that duck-types yf.download() output used by _fetch_nifty_closes.
@@ -170,14 +173,16 @@ def test_fetch_nifty_closes_multiindex_columns():
 # ---------------------------------------------------------------------------
 
 
-async def _seed_close(db_session, close_date: date, close_value: float) -> None:
+async def _seed_close(
+    db_session, close_date: date, close_value: float, benchmark: str = "nifty50_price"
+) -> None:
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_benchmark_daily (benchmark, close_date, close_value)"
-            " VALUES ('nifty50_price', :d, :v)"
+            " VALUES (:b, :d, :v)"
             " ON CONFLICT (benchmark, close_date) DO UPDATE SET close_value = EXCLUDED.close_value"
         ),
-        {"d": close_date, "v": close_value},
+        {"b": benchmark, "d": close_date, "v": close_value},
     )
     await db_session.commit()
 
@@ -264,9 +269,7 @@ async def test_backfill_upserts_multiple_rows(db_session, async_client):
 
     count = (
         await db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM mf.mf_benchmark_daily WHERE benchmark = :b"
-            ),
+            text("SELECT COUNT(*) FROM mf.mf_benchmark_daily WHERE benchmark = :b"),
             {"b": BENCHMARK_KEY_NIFTY50},
         )
     ).scalar_one()
@@ -309,9 +312,7 @@ async def test_benchmark_endpoint_from_to_filter(db_session, async_client):
     await _seed_close(db_session, date(2026, 6, 30), 24_300.00)
     await _seed_close(db_session, date(2026, 7, 1), 24_800.00)
 
-    r = await async_client.get(
-        "/api/v1/mf/benchmark/nifty50?from=2026-06-30&to=2026-06-30"
-    )
+    r = await async_client.get("/api/v1/mf/benchmark/nifty50?from=2026-06-30&to=2026-06-30")
     assert r.status_code == 200, r.text
     pts = r.json()["points"]
     assert len(pts) == 1
@@ -323,3 +324,75 @@ async def test_benchmark_endpoint_invalid_date(db_session, async_client):
     """Invalid date format returns HTTP 400."""
     r = await async_client.get("/api/v1/mf/benchmark/nifty50?from=not-a-date")
     assert r.status_code == 400, r.text
+
+
+# ---------------------------------------------------------------------------
+# Registry-driven daily/backfill tasks + GET /mf/benchmark/{key} (item 3, 2026-07)
+# ---------------------------------------------------------------------------
+
+
+async def test_all_benchmarks_daily_close_upserts_every_registry_key(db_session, async_client):
+    """The registry-wide daily task upserts a row for every BENCHMARK_REGISTRY key
+    (one mocked Yahoo call each), each keyed by its own storage_key."""
+    from dhanradar.tasks.mf import BENCHMARK_REGISTRY, _all_benchmarks_daily_close_async
+
+    mock_df = _make_yf_df([("2026-07-01", 100.0)])
+    with _patch_yf(mock_df):
+        result = await _all_benchmarks_daily_close_async()
+
+    assert "nifty_close_daily: close_date=2026-07-01" in result  # nifty50 label preserved
+
+    for spec in BENCHMARK_REGISTRY.values():
+        row = (
+            await db_session.execute(
+                text(
+                    "SELECT close_value FROM mf.mf_benchmark_daily"
+                    " WHERE benchmark = :b AND close_date = '2026-07-01'"
+                ),
+                {"b": spec.storage_key},
+            )
+        ).scalar_one_or_none()
+        assert row is not None, f"missing row for {spec.storage_key}"
+
+
+async def test_backfill_all_benchmarks_upserts_every_registry_key(db_session, async_client):
+    """backfill_nifty_close_series('all') upserts every registered benchmark."""
+    from dhanradar.tasks.mf import BENCHMARK_REGISTRY, _backfill_all_benchmarks_async
+
+    rows = [("2026-06-27", 100.0), ("2026-06-30", 101.0)]
+    mock_df = _make_yf_df(rows)
+    with _patch_yf(mock_df):
+        result = await _backfill_all_benchmarks_async(years=1)
+
+    assert "backfill_nifty_close_series: upserted=2" in result  # nifty50 label preserved
+
+    for spec in BENCHMARK_REGISTRY.values():
+        count = (
+            await db_session.execute(
+                text("SELECT COUNT(*) FROM mf.mf_benchmark_daily WHERE benchmark = :b"),
+                {"b": spec.storage_key},
+            )
+        ).scalar_one()
+        assert count >= 2, f"missing rows for {spec.storage_key}"
+
+
+async def test_benchmark_endpoint_by_key_returns_seeded_series(db_session, async_client):
+    """GET /mf/benchmark/{key} returns 200 + the mapped display name's disclosure
+    for a registered non-nifty50 key."""
+    await _seed_close(db_session, date(2026, 6, 30), 8_200.00, benchmark="nifty100")
+
+    r = await async_client.get("/api/v1/mf/benchmark/nifty100")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["benchmark"] == "nifty100"
+    assert body["point_count"] == 1
+    assert body["points"][0]["close_value"] == 8_200.00
+    assert "Nifty 100" in body["disclosure"]
+    assert "excludes dividends" in body["disclosure"]
+
+
+async def test_benchmark_endpoint_by_key_unknown_404(db_session, async_client):
+    """GET /mf/benchmark/{key} 404s (RFC7807) for a key not in BENCHMARK_REGISTRY."""
+    r = await async_client.get("/api/v1/mf/benchmark/not_a_real_benchmark")
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "benchmark_not_found"

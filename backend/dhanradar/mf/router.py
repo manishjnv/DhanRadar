@@ -1075,33 +1075,32 @@ async def _own_portfolio(db: AsyncSession, portfolio_id: str, user_id: str) -> M
 # ---------------------------------------------------------------------------
 
 
-@router.get("/benchmark/nifty50")
-async def benchmark_nifty50(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    from_date: str | None = Query(None, alias="from", description="ISO date YYYY-MM-DD"),
-    to_date: str | None = Query(None, alias="to", description="ISO date YYYY-MM-DD"),
-    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+async def _benchmark_daily_closes(
+    db: AsyncSession,
+    key: str,
+    from_date: str | None,
+    to_date: str | None,
 ) -> dict:
-    """Public reference endpoint — Nifty 50 price-index daily closes.
+    """Shared query + response builder for /benchmark/nifty50 and /benchmark/{key}.
 
-    Returns ``[{close_date, close_value}]`` ordered ascending by date.  An
-    optional ``from`` / ``to`` date range (ISO YYYY-MM-DD) filters the results.
-    Empty list when no rows exist yet (pre-backfill cold-start).
-
-    DOM-allowed: Nifty 50 price closes are public market facts (founder 2026-06-22).
-    No auth required.  No RLS (non-personal reference data).
-    Disclosure: price index only — excludes dividends (see ADR-0037 part b).
+    Validates `key` against BENCHMARK_REGISTRY (404 RFC7807 for an unknown
+    key), then returns ``[{close_date, close_value}]`` ordered ascending by
+    date. Empty list when no rows exist yet (pre-backfill cold-start).
     """
     from datetime import date as _date
 
     from sqlalchemy import select as sa_select
 
     from dhanradar.models.mf import MfBenchmarkDaily
-    from dhanradar.tasks.mf import BENCHMARK_KEY_NIFTY50
+    from dhanradar.tasks.mf import BENCHMARK_REGISTRY
+
+    spec = BENCHMARK_REGISTRY.get(key)
+    if spec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="benchmark_not_found")
 
     stmt = (
         sa_select(MfBenchmarkDaily.close_date, MfBenchmarkDaily.close_value)
-        .where(MfBenchmarkDaily.benchmark == BENCHMARK_KEY_NIFTY50)
+        .where(MfBenchmarkDaily.benchmark == spec.storage_key)
         .order_by(MfBenchmarkDaily.close_date.asc())
     )
 
@@ -1121,8 +1120,44 @@ async def benchmark_nifty50(
         {"close_date": r.close_date.isoformat(), "close_value": float(r.close_value)} for r in rows
     ]
     return {
-        "benchmark": BENCHMARK_KEY_NIFTY50,
-        "disclosure": "Nifty 50 price index · excludes dividends",
+        "benchmark": spec.storage_key,
+        "disclosure": f"{spec.display_name} · price index, excludes dividends",
         "point_count": len(points),
         "points": points,
     }
+
+
+@router.get("/benchmark/nifty50")
+async def benchmark_nifty50(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: str | None = Query(None, alias="from", description="ISO date YYYY-MM-DD"),
+    to_date: str | None = Query(None, alias="to", description="ISO date YYYY-MM-DD"),
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """Public reference endpoint — Nifty 50 price-index daily closes.
+
+    DOM-allowed: Nifty 50 price closes are public market facts (founder 2026-06-22).
+    No auth required.  No RLS (non-personal reference data).
+    Disclosure: price index only — excludes dividends (see ADR-0037 part b).
+    Delegates to the shared `_benchmark_daily_closes` helper (item 3, 2026-07).
+    """
+    return await _benchmark_daily_closes(db, "nifty50", from_date, to_date)
+
+
+@router.get("/benchmark/{key}")
+async def benchmark_by_key(
+    key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: str | None = Query(None, alias="from", description="ISO date YYYY-MM-DD"),
+    to_date: str | None = Query(None, alias="to", description="ISO date YYYY-MM-DD"),
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """Public reference endpoint — any registered benchmark's daily closes
+    (item 3, 2026-07 — category-benchmark overlays on the fund detail chart).
+
+    404s (RFC7807, detail=benchmark_not_found) for a `key` not in
+    BENCHMARK_REGISTRY (`dhanradar.tasks.mf`). Same shape / rate-limit /
+    disclosure pattern as `/benchmark/nifty50`, which delegates to the same
+    helper as this route.
+    """
+    return await _benchmark_daily_closes(db, key, from_date, to_date)
