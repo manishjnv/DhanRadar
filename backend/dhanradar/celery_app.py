@@ -189,6 +189,15 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mood.compute_mood_snapshot",
         "schedule": crontab(hour="9,16", minute=0),
     },
+    # Enrichment item 4 — daily regime-history snapshot, 16:05 IST (5 min after the
+    # 16:00 compute_mood_snapshot run so mood:latest is fresh). PURE Redis cache
+    # consumer: reads mood:latest, writes one mood.mood_regime_history row. Cold
+    # cache -> no-op (fail-closed). Prerequisite for per-fund "performance by market
+    # phase" (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.8).
+    "mood-history-snapshot": {
+        "task": "dhanradar.tasks.mood.mood_history_snapshot",
+        "schedule": crontab(hour=16, minute=5),
+    },
     # Plus monthly re-score — 1st of each month, 03:00 IST. Re-scores every Plus
     # user's current holdings from the latest NAV (no re-upload required).
     "mf-monthly-rescore": {
