@@ -21,9 +21,26 @@
     from { opacity: 0; transform: translateY(12px); }
     to   { opacity: 1; transform: translateY(0);    }
   }
+  /* Global ticker strip (TickerBar) — content is duplicated once, so -50% is one
+     seamless loop. Hover pauses; reduced motion gets a static swipeable row. */
+  @keyframes ticker-scroll {
+    to { transform: translateX(-50%); }
+  }
+  .ticker-track {
+    animation: ticker-scroll 60s linear infinite;
+  }
+  .ticker-wrap:hover .ticker-track {
+    animation-play-state: paused;
+  }
   @media (prefers-reduced-motion: reduce) {
     .animate-fade-up {
       animation: none !important;
+    }
+    .ticker-track {
+      animation: none !important;
+    }
+    .ticker-wrap {
+      overflow-x: auto;
     }
   }
 }

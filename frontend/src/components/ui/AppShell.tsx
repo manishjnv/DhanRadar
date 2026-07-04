@@ -392,7 +392,7 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
   }, []);
 
   return (
-    <div className="flex h-[calc(100dvh_-_var(--dev-banner-h,0px))] overflow-hidden bg-bg">
+    <div className="flex h-[calc(100dvh_-_var(--dev-banner-h,0px)_-_var(--ticker-h,0px))] overflow-hidden bg-bg">
       {/* Desktop sidebar — animates between w-56 (expanded) and w-14 (collapsed) */}
       <aside
         className={cn(
