@@ -324,6 +324,31 @@ async def get_history(db: Any, days: int) -> list[MoodHistoryItem]:
     return [MoodHistoryItem(snapshot_date=r.snapshot_date.isoformat(), regime=r.regime) for r in rows]
 
 
+async def get_regime_series(db: Any, from_date: date, to_date: date) -> list[dict]:
+    """Return [{date, regime}] from `mood.mood_regime_history` between `from_date`
+    and `to_date` inclusive, ordered chronologically.
+
+    Feeds the future per-fund "performance by market phase" consumer
+    (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.8) — no public endpoint yet (YAGNI,
+    the consumer is a later wave). Read-only; never writes.
+    """
+    from sqlalchemy import select
+
+    from dhanradar.models.mood import MoodRegimeHistory
+
+    rows = (
+        await db.scalars(
+            select(MoodRegimeHistory)
+            .where(
+                MoodRegimeHistory.snapshot_date >= from_date,
+                MoodRegimeHistory.snapshot_date <= to_date,
+            )
+            .order_by(MoodRegimeHistory.snapshot_date.asc())
+        )
+    ).all()
+    return [{"date": r.snapshot_date.isoformat(), "regime": r.regime} for r in rows]
+
+
 async def get_why_today(db: Any) -> WhyToday | None:
     """Return the WhyToday breakdown with human-readable factor labels."""
     from sqlalchemy import select

@@ -173,6 +173,85 @@ def compute_mood_snapshot() -> str:
     return asyncio.run(_go())
 
 
+@celery_app.task(name="dhanradar.tasks.mood.mood_history_snapshot")
+def mood_history_snapshot() -> str:
+    """Persist today's served regime into `mood.mood_regime_history` — enrichment
+    item 4, the prerequisite for per-fund "performance by market phase"
+    (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.8).
+
+    PURE Redis cache consumer (mood worker discipline — see mood/service.py module
+    docstring + memory 'mood-breadth-is-cache-consumer'): reads the already-published
+    `mood:latest` key (written by `service._cache_latest` on every
+    `compute_mood_snapshot` run) and writes ONE row. NEVER recomputes, NEVER
+    live-fetches. Cache cold / unparseable / missing regime -> a structured warning
+    and no row (fail-closed) -- never a task failure.
+
+    Runs 16:05 IST, five minutes after `compute_mood_snapshot`'s 16:00 run has had
+    time to refresh the cache. Idempotent: upserts on `snapshot_date`, so a re-run
+    the same day still leaves exactly one row.
+    """
+    return asyncio.run(_mood_history_snapshot_async())
+
+
+async def _mood_history_snapshot_async() -> str:
+    import json
+
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mood import MoodRegimeHistory
+    from dhanradar.mood import service
+    from dhanradar.redis_client import get_redis
+
+    today = datetime.now(_IST).date()
+
+    try:
+        raw = await get_redis().get(service._LATEST_KEY)
+    except Exception:  # noqa: BLE001 — Redis is a soft dependency here too
+        logger.warning("mood_history_snapshot: redis read failed — skip (fail-closed)")
+        return "mood_history_snapshot: skipped (redis error)"
+
+    if not raw:
+        logger.warning("mood_history_snapshot: mood:latest cache cold — skip (fail-closed)")
+        return "mood_history_snapshot: skipped (cold cache)"
+
+    try:
+        cached = json.loads(raw if isinstance(raw, str) else raw.decode())
+    except (ValueError, UnicodeDecodeError):
+        logger.warning("mood_history_snapshot: mood:latest cache unparseable — skip (fail-closed)")
+        return "mood_history_snapshot: skipped (unparseable cache)"
+
+    regime = cached.get("regime")
+    if not regime:
+        logger.warning("mood_history_snapshot: mood:latest missing 'regime' — skip (fail-closed)")
+        return "mood_history_snapshot: skipped (no regime in cache)"
+
+    # score_inputs = exactly the component readings the cache already carries — no
+    # recompute, no numeric mood_score (non-neg #2).
+    score_inputs = {
+        "confidence_band": cached.get("confidence_band"),
+        "data_quality": cached.get("data_quality"),
+        "contributing_factors": cached.get("contributing_factors", []),
+        "contradicting_factors": cached.get("contradicting_factors", []),
+    }
+
+    values = dict(
+        snapshot_date=today,
+        regime=regime,
+        score_inputs=score_inputs,
+        as_of=datetime.now(_IST),
+    )
+    async with TaskSessionLocal() as db:
+        stmt = insert(MoodRegimeHistory).values(**values).on_conflict_do_update(
+            index_elements=["snapshot_date"],
+            set_={k: values[k] for k in values if k != "snapshot_date"},
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+    return f"mood_history_snapshot: {regime} for {today}"
+
+
 @celery_app.task(name="dhanradar.tasks.mood.run_sentiment_analysis")
 def run_sentiment_analysis(symbol: str | None = None) -> str:
     """

@@ -51,3 +51,33 @@ class MarketMood(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MoodRegimeHistory(Base):
+    """One row per calendar day of served regime — enrichment item 4, prerequisite
+    for per-fund "performance by market phase" (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md
+    §10.8). Migration 0063.
+
+    Deliberately NOT named `mood_history` — that name is reserved (see the module
+    docstring above + migration 0007) for the deferred pgvector(11) historical-
+    analogues table for AI-Enrichment.
+
+    Populated by `tasks.mood.mood_history_snapshot` (daily 16:05 IST), which is a
+    PURE Redis cache consumer: it reads the already-published `mood:latest` key
+    (written by `service._cache_latest` on every `compute_and_store` run) and never
+    recomputes or live-fetches anything. `score_inputs` stores exactly the component
+    readings that cache already carries (contributing/contradicting factor tiers +
+    confidence_band/data_quality) — no numeric mood_score (non-neg #2).
+    """
+
+    __tablename__ = "mood_regime_history"
+    __table_args__ = _SCHEMA
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True)
+    regime: Mapped[str] = mapped_column(Text, nullable=False)
+    score_inputs: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
