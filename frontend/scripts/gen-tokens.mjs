@@ -221,6 +221,7 @@ module.exports = {
         body:    ['${typ.scale.body.size}',    { lineHeight: '${typ.scale.body.lineHeight}',    letterSpacing: '${typ.scale.body.letterSpacing}' }],
         small:   ['${typ.scale.small.size}',   { lineHeight: '${typ.scale.small.lineHeight}' }],
         caption: ['${typ.scale.caption.size}', { lineHeight: '${typ.scale.caption.lineHeight}', letterSpacing: '${typ.scale.caption.letterSpacing}', fontWeight: '${typ.scale.caption.weight}' }],
+        micro:   ['${typ.scale.micro.size}',   { lineHeight: '${typ.scale.micro.lineHeight}',   letterSpacing: '${typ.scale.micro.letterSpacing}',   fontWeight: '${typ.scale.micro.weight}' }],
       },
       spacing: {
         '5': '${sp['5']}',
