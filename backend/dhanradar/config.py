@@ -213,6 +213,13 @@ class Settings(BaseSettings):
     # Optional comma-separated allowlist of BSE webhook SOURCE IPs (defence in depth
     # on top of the JOSE signature). EMPTY ⇒ IP check skipped (signature is the gate).
     BSE_WEBHOOK_SOURCE_IPS: str = ""
+    # Explicit opt-in to accept BSE's UNSIGNED plain-JSON webhooks (their UAT pushes
+    # plaintext; their doc defines no webhook signing). SECURITY: a dedicated flag —
+    # NOT overloaded onto BSE_ENV — so an unrelated ops change never re-arms it.
+    # Even when True, plaintext is accepted ONLY from a non-empty BSE_WEBHOOK_SOURCE_IPS
+    # allowlist (the source IP is the authentication in place of a signature). Keep
+    # False in any environment where BSE signs its webhooks.
+    BSE_WEBHOOK_ALLOW_PLAINTEXT: bool = False
 
     # ------------------------------------------------------------------
     # Google SSO (OAuth 2.0 authorization-code + PKCE)
