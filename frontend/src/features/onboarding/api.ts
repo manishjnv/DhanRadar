@@ -13,7 +13,7 @@ import type { RiskQuizRequest, RiskQuizResponse } from './types';
 // ---------------------------------------------------------------------------
 // useSubmitRiskQuiz — POST /onboarding/risk-quiz { answers: number[] }
 // On success, seed the now-set risk_profile into the auth.me cache, THEN
-// invalidate. The seed matters: the page navigates to /dashboard immediately
+// invalidate. The seed matters: the page navigates to /mf/portfolio immediately
 // in onComplete, and AuthGuard reads risk_profile synchronously — if we only
 // invalidated, the in-flight refetch still holds the stale null and the guard
 // bounces the user back to /onboarding (the quiz shows a second time). The

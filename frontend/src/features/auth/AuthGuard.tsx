@@ -24,7 +24,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     // 1. Anonymous user → /login (primary guard, runs first).
     if (isError || !user) {
-      const next = encodeURIComponent(pathname || '/dashboard');
+      const next = encodeURIComponent(pathname || '/mf/portfolio');
       router.replace(`/login?next=${next}`);
       return;
     }
@@ -37,10 +37,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     // 3. Completed: risk_profile IS set but the user is sitting on /onboarding
-    //    (post-submit refetch race, back-button, or a bookmark) → /dashboard.
+    //    (post-submit refetch race, back-button, or a bookmark) → /mf/portfolio.
     //    Without this the onboarding quiz shows a second time and sticks.
     if (user.risk_profile != null && pathname === '/onboarding') {
-      router.replace('/dashboard');
+      router.replace('/mf/portfolio');
     }
   }, [isLoading, isError, user, pathname, router]);
 

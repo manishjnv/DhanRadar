@@ -83,7 +83,7 @@ function LoginForm() {
     ) {
       return next;
     }
-    return '/dashboard';
+    return '/mf/portfolio';
   }
 
   // Read URL error params on mount.

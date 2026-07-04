@@ -8,6 +8,12 @@ const nextConfig = {
   // rewrites: async () => [
   //   { source: "/api/:path*", destination: "http://dhanradar-fastapi:8000/api/:path*" },
   // ],
+
+  // /dashboard was decommissioned (folded into /mf/portfolio) — redirect any
+  // bookmarks / stale links to the new home.
+  redirects: async () => [
+    { source: "/dashboard", destination: "/mf/portfolio", permanent: true },
+  ],
 };
 
 module.exports = nextConfig;

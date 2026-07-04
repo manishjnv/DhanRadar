@@ -82,8 +82,6 @@ function PortfolioView() {
       {/* Breadcrumb + state toggle */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <nav className="flex flex-wrap items-center gap-1.5 text-caption text-ink-muted" aria-label="Breadcrumb">
-          <Link href="/dashboard" className="hover:text-ink">Dashboard</Link>
-          <span className="text-ink-faint">›</span>
           <Link href="/mf/portfolio" aria-current="page" className="font-semibold text-ink-secondary hover:text-ink">
             Portfolio
           </Link>

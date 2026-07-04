@@ -5,7 +5,7 @@
  *
  * AuthGuard redirects unauthenticated users to /login before this renders.
  * AuthGuard also redirects users whose risk_profile is already set away from
- * this page (to /dashboard), preventing re-entry once complete.
+ * this page (to /mf/portfolio), preventing re-entry once complete.
  *
  * Compliance: educational framing only, no advisory copy, no numerics in DOM.
  */
@@ -31,7 +31,7 @@ export default function OnboardingPage() {
       </div>
 
       {/* Quiz */}
-      <RiskQuiz onComplete={() => router.replace('/dashboard')} />
+      <RiskQuiz onComplete={() => router.replace('/mf/portfolio')} />
     </div>
   );
 }

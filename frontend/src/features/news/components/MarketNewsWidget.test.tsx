@@ -6,7 +6,7 @@
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MarketNewsWidget } from './MarketNewsWidget';
-import type { NewsItem } from '@/features/dashboard/api';
+import type { NewsItem } from '@/features/news/api';
 
 const ITEMS: NewsItem[] = [
   {

@@ -86,13 +86,13 @@ test.describe('Authenticated report flow', () => {
       await page.click('button[type="submit"], button:has-text("Verify"), button:has-text("Login")');
     }
 
-    await page.waitForURL(`${BASE}/dashboard`, { timeout: 15_000 });
+    await page.waitForURL(`${BASE}/mf/portfolio`, { timeout: 15_000 });
     await ss(page, 'post-login-dashboard');
   });
 
   test('Upload CAS and wait for report', async ({ page }) => {
     if (!EMAIL) test.skip(true, 'TEST_EMAIL not set');
-    await page.goto(`${BASE}/dashboard`);
+    await page.goto(`${BASE}/mf/portfolio`);
     await page.waitForLoadState('networkidle');
 
     // Find the upload input
@@ -206,7 +206,7 @@ test.describe('Authenticated report flow', () => {
   test('B3 — ProgressView: pulsing ring + rotating tips', async ({ page }) => {
     if (!EMAIL) test.skip(true, 'TEST_EMAIL not set');
     // Upload CAS again to see progress screen
-    await page.goto(`${BASE}/dashboard`);
+    await page.goto(`${BASE}/mf/portfolio`);
     await page.waitForLoadState('networkidle');
     const uploadInput = page.locator('input[type="file"]');
     if (await uploadInput.count() > 0) {

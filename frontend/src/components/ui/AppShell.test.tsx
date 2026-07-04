@@ -1,7 +1,7 @@
 /**
  * AppShell tests — responsive layout + mobile drawer behaviour.
  *
- * next/navigation is mocked minimally: usePathname returns '/dashboard' and
+ * next/navigation is mocked minimally: usePathname returns '/mf/portfolio' and
  * useRouter returns a no-op push function (NavLink uses href, not push, but
  * the hook must be defined to avoid "invariant" errors from next internals).
  */
@@ -14,7 +14,7 @@ import { AppShell } from './AppShell';
 // Mock next/navigation — vitest vi.mock hoisted at module level
 // ---------------------------------------------------------------------------
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/dashboard',
+  usePathname: () => '/mf/portfolio',
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));

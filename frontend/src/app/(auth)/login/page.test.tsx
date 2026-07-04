@@ -206,7 +206,7 @@ describe('LoginPage — email_otp phase 2 (code)', () => {
     });
 
     // Redirect — same idiom as password login test
-    expect(mockRouterReplace).toHaveBeenCalledWith('/dashboard');
+    expect(mockRouterReplace).toHaveBeenCalledWith('/mf/portfolio');
   });
 
   it('401 shows the generic error and clears the code input', async () => {
@@ -270,7 +270,7 @@ describe('LoginPage — email_otp phase 2 (code)', () => {
         expect.any(Object),
       );
     });
-    expect(mockRouterReplace).toHaveBeenCalledWith('/dashboard');
+    expect(mockRouterReplace).toHaveBeenCalledWith('/mf/portfolio');
   });
 
   it('manual submit with <6 digits shows the enter-6-digit error and does NOT fire the request', async () => {
