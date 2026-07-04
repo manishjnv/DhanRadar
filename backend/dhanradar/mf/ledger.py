@@ -138,6 +138,17 @@ async def append_transactions(db: Any, rows: list[dict[str, Any]]) -> tuple[int,
     if not rows:
         return (0, 0)
 
+    # Fix 1 backstop (2026-07-04 placeholder-ISIN ledger leak): a row keyed on an unresolved
+    # "CAMS:<code>" placeholder must NEVER reach the ledger — the pipeline (split_ledger_eligible)
+    # is supposed to filter these out before calling here; this is a programming-error guard, not
+    # a silent skip, so a regression in the caller fails loudly instead of quietly polluting data.
+    bad = [r["instrument_id"] for r in rows if str(r.get("instrument_id", "")).startswith("CAMS:")]
+    if bad:
+        raise ValueError(
+            "append_transactions: instrument_id must be a resolved ISIN, never a CAMS: "
+            f"placeholder (got {len(bad)} placeholder row(s), e.g. {bad[0]!r})"
+        )
+
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 

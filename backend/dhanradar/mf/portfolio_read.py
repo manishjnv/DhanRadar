@@ -600,7 +600,7 @@ def diversification_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
 
 # --- M2.2: portfolio.valuation_series and day-change -------------------------
 
-_MAX_VALUATION_DAYS = 1095  # hard cap: ~3 years of daily points
+_MAX_VALUATION_DAYS = 3650  # hard cap: ~10 years of daily points
 
 
 async def _active_holdings_nav_pairs(
@@ -1072,7 +1072,7 @@ async def load_portfolio_valuation_series(
 
     Returns up to ``days`` most-recent points ordered ascending by date.
     Empty list when no rows exist yet (cold-start; the Celery task fills this).
-    ``days`` is capped at _MAX_VALUATION_DAYS (~3 years).
+    ``days`` is capped at _MAX_VALUATION_DAYS (~10 years).
     """
     pid = uuid.UUID(portfolio_id)
     n = min(max(days, 1), _MAX_VALUATION_DAYS)

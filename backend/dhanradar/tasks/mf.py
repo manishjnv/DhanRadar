@@ -48,6 +48,8 @@ from dhanradar.mf.cas import (
     filter_foreign_pan_folios,
     normalize_folio,
     parser_version_for,
+    resolve_blank_folios,
+    split_ledger_eligible,
 )
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
@@ -331,9 +333,9 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> str | None
         return None
 
 
-#: Cap the replay window at ~3 years — mirrors portfolio_read._MAX_VALUATION_DAYS (kept as a
+#: Cap the replay window at ~10 years — mirrors portfolio_read._MAX_VALUATION_DAYS (kept as a
 #: separate local constant; tasks/mf.py does not import from the read-model module).
-_MAX_REPLAY_DAYS = 1095
+_MAX_REPLAY_DAYS = 3650
 
 
 async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> None:
@@ -464,7 +466,7 @@ async def _run_pipeline(
     job_id: str, path: str, user_id: str, portfolio_id: str,
     request_id: str | None = None,
 ) -> str:
-    from sqlalchemy import text, update
+    from sqlalchemy import select, text, update
 
     # B81 PR-2: CAS writes the uploader's personal tables (cas_job/holdings/sip/scores/history/
     # snapshot), so it runs RLS WITH-CHECK enforced AS THE OWNER, not on the bypass admin engine.
@@ -533,6 +535,25 @@ async def _run_pipeline(
                 _dc_replace(p, isin=resolved_map[p.isin]) if p.isin in resolved_map else p
                 for p in parsed
             ]
+
+    # Fix 2 (2026-07-04 plan-variant double-count): rewrite any holding parsed under an AMFI
+    # secondary/reinvest-plan ISIN to its primary mf_funds.isin BEFORE ledger fingerprinting, so
+    # the same real position printed by two formats (e.g. a CAMS-resolved primary ISIN + a
+    # consolidated PDF printing the plan's other ISIN) collides instead of becoming two holdings.
+    from dhanradar.db import task_session as _alias_task_session
+    from dhanradar.mf.cas import alias_secondary_isins
+
+    async with _alias_task_session() as _db:
+        alias_map = await alias_secondary_isins(_db, parsed)
+    if alias_map:
+        from dataclasses import replace as _dc_replace
+
+        for secondary, primary in alias_map.items():
+            _slog.info("cas.isin.aliased", from_isin=secondary, to_isin=primary)
+        parsed = [
+            _dc_replace(p, isin=alias_map[p.isin]) if p.isin in alias_map else p for p in parsed
+        ]
+
     rengine = RatingEngine()
 
     async with rls_user_session(user_id) as db:
@@ -568,10 +589,50 @@ async def _run_pipeline(
         # re-acquire the SAME lock at the start of their own write transaction.
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
 
+        # Fix 3 (2026-07-04 blank-folio double-count): resolve any blank-folio holding (a
+        # holdings-only valuation file, or a demat/CDSL section within a consolidated CAS) against
+        # real folios for the SAME isin — from THIS batch and the portfolio's already-stored
+        # holdings — before it can duplicate a position that already has a folio.
+        existing_folios_by_isin: dict[str, set[str]] = {}
+        for p in parsed:
+            fn = normalize_folio(p.folio_number)
+            if fn:
+                existing_folios_by_isin.setdefault(p.isin, set()).add(fn)
+        blank_isins = {p.isin for p in parsed if not normalize_folio(p.folio_number)}
+        if blank_isins:
+            from dhanradar.models.mf import MfUserHolding
+
+            stored_folios = (
+                await db.execute(
+                    select(MfUserHolding.isin, MfUserHolding.folio_number).where(
+                        MfUserHolding.portfolio_id == portfolio_id,
+                        MfUserHolding.isin.in_(blank_isins),
+                    )
+                )
+            ).all()
+            for isin, folio in stored_folios:
+                if folio:
+                    existing_folios_by_isin.setdefault(isin, set()).add(folio)
+
+        parsed, blank_folio_skipped = resolve_blank_folios(parsed, existing_folios_by_isin)
+        if blank_folio_skipped:
+            _slog.warning(
+                "cas.blank_folio.ambiguous",
+                count=len(blank_folio_skipped),
+                isins=sorted({p.isin for p in blank_folio_skipped}),
+            )
+
+        # Fix 1 (2026-07-04 placeholder-ISIN ledger leak): a holding still keyed on an unresolved
+        # CAMS:<code> placeholder must never produce a ledger row — it still gets a holdings row
+        # (B3 snapshot-fallback below) + a statement checkpoint, both keyed off (isin, folio).
+        ledger_input, placeholder_holdings = split_ledger_eligible(parsed)
+        if placeholder_holdings:
+            _slog.info("cas.placeholder.ledger_barred", count=len(placeholder_holdings))
+
         # Format-specific parser_version: the ledger's natural-key dedup scopes itself to
         # CROSS-format matches only (same-format rows can be legitimate same-day twins).
         ledger_rows = build_cas_ledger_rows(
-            parsed, user_id=user_id, portfolio_id=portfolio_id,
+            ledger_input, user_id=user_id, portfolio_id=portfolio_id,
             parser_version=parser_version_for(path),
         )
         ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)

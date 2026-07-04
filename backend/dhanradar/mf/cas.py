@@ -972,6 +972,90 @@ async def resolve_cams_isins(db: AsyncSession, holdings: list[ParsedHolding]) ->
     return resolved
 
 
+async def alias_secondary_isins(
+    db: AsyncSession, holdings: list[ParsedHolding]
+) -> dict[str, str]:
+    """Resolve AMFI plan-variant secondary ISINs to their primary `mf_funds.isin` (2026-07-04
+    double-count incident, defect 2 of 3).
+
+    AMFI issues TWO ISINs per scheme-plan line (growth/payout + the dividend-reinvestment
+    variant); `mf_scheme_master_refresh` keys one as the primary `mf_funds.isin` and stores the
+    other in `mf_funds.isin2`. A CAS printed under the secondary ISIN (e.g. a consolidated PDF
+    prints a holding the founder's CAMS TDS already resolved under the primary ISIN) must be
+    rewritten to the primary BEFORE ledger fingerprinting, so the two prints of the SAME real
+    position collide instead of becoming two holdings.
+
+    Returns {secondary_isin: primary_isin} for every parsed ISIN that matches some row's isin2
+    AND is not itself a primary isin (a data inconsistency would otherwise let a genuinely
+    primary ISIN get rewritten out from under itself). Unknown ISINs (neither isin nor isin2 in
+    mf_funds) and CAMS: placeholders are absent from the map — the caller leaves them unchanged
+    (honest '?' fund / placeholder, existing behaviour)."""
+    from sqlalchemy import or_, select
+
+    from dhanradar.models.mf import MfFund
+
+    isins = sorted({h.isin for h in holdings if not h.isin.startswith("CAMS:")})
+    if not isins:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(MfFund.isin, MfFund.isin2).where(
+                or_(MfFund.isin.in_(isins), MfFund.isin2.in_(isins))
+            )
+        )
+    ).all()
+    primary_isins = {r.isin for r in rows}
+    alias_map: dict[str, str] = {}
+    for r in rows:
+        if r.isin2 and r.isin2 in isins and r.isin2 not in primary_isins:
+            alias_map[r.isin2] = r.isin
+    return alias_map
+
+
+def resolve_blank_folios(
+    parsed: list[ParsedHolding],
+    existing_folios_by_isin: dict[str, set[str]],
+) -> tuple[list[ParsedHolding], list[ParsedHolding]]:
+    """Blank-folio merge rule (2026-07-04 double-count incident, defect 3 of 3): a holdings-only
+    valuation file (or a demat/CDSL section within a consolidated CAS) can emit a holding with NO
+    folio. Blindly ingesting it as folio_number='' duplicates the SAME ISIN's already-folio'd
+    holding (the founder's Invesco/Edelweiss/Axis positions counted twice).
+
+    `existing_folios_by_isin` maps isin -> the set of REAL (already-canonical, non-blank)
+    folios that ISIN is held under, from BOTH this parsed batch and the portfolio's stored
+    holdings — the caller's job to union the two before calling, so a blank row can merge
+    against a folio'd holding introduced by the SAME upload.
+
+    Returns (resolved, skipped):
+      - a blank-folio holding whose isin has EXACTLY ONE real folio -> rewritten (folio_number
+        set to that folio) so it attributes to the SAME position — never a second '' row, and
+        the units are never doubled (the position is a single (isin, folio) key downstream);
+      - a blank-folio holding whose isin has ZERO real folios -> passed through unchanged
+        (folio_number stays '' — a legitimate demat/ETF holding with no folio);
+      - a blank-folio holding whose isin has MORE THAN ONE real folio -> AMBIGUOUS, moved to
+        `skipped` (the caller logs `cas.blank_folio.ambiguous`) and dropped entirely — honest,
+        rather than guessing which folio it belongs to.
+    Holdings with a real folio pass through unchanged in `resolved`."""
+    from dataclasses import replace as _dc_replace
+
+    resolved: list[ParsedHolding] = []
+    skipped: list[ParsedHolding] = []
+    for p in parsed:
+        folio_norm = normalize_folio(p.folio_number)
+        if folio_norm:
+            resolved.append(p)
+            continue
+        real_folios = existing_folios_by_isin.get(p.isin, set())
+        if len(real_folios) == 1:
+            resolved.append(_dc_replace(p, folio_number=next(iter(real_folios))))
+        elif not real_folios:
+            resolved.append(p)  # legit demat/ETF holding — folio stays ''
+        else:
+            skipped.append(p)
+    return resolved, skipped
+
+
 def filter_foreign_pan_folios(
     parsed: list[ParsedHolding], owner_pan: str | None
 ) -> tuple[list[ParsedHolding], list[ParsedHolding]]:
@@ -1011,6 +1095,27 @@ def _cas_source_ref(isin: str, folio_norm: str, t: ParsedTxn) -> str:
     units, so two same-amount/different-units txns don't collide. A genuine duplicate (every field
     identical) is indistinguishable in a CAS and de-dups to one row — accepted, best-effort."""
     return cas_txn_fingerprint(isin, folio_norm, t.when.isoformat(), t.txn_type, t.amount, t.units)
+
+
+def split_ledger_eligible(
+    parsed: list[ParsedHolding],
+) -> tuple[list[ParsedHolding], list[ParsedHolding]]:
+    """Fix 1 (2026-07-04 placeholder-ISIN ledger leak): split parsed holdings into
+    (ledger_eligible, placeholders) — a holding the CAMS resolver could NOT resolve (isin still
+    the "CAMS:<code>" placeholder) must NEVER produce a ledger row. It has no real ISIN to key
+    the append-only ledger's natural-key dedup or a future cross-format merge against, so writing
+    it in creates a row that silently double-counts once the real ISIN resolves (or is entered
+    under its real ISIN via another format/upload) — exactly the incident that put 42
+    'CAMS:D742'-instrument rows in the ledger.
+
+    The placeholder holding still flows into holdings (B3 snapshot-fallback) and the statement
+    checkpoint — those are keyed off (isin, folio) and tolerate the placeholder as an honest,
+    cost-valued, insufficient_data row; only the ledger write is barred."""
+    placeholders = [p for p in parsed if p.isin.startswith("CAMS:")]
+    if not placeholders:
+        return parsed, []
+    eligible = [p for p in parsed if not p.isin.startswith("CAMS:")]
+    return eligible, placeholders
 
 
 def build_cas_ledger_rows(

@@ -28,13 +28,17 @@ from dhanradar.db_security import set_rls_user
 from dhanradar.mf.cas import (
     ParsedHolding,
     ParsedTxn,
+    alias_secondary_isins,
     build_cas_ledger_rows,
     filter_foreign_pan_folios,
     parse_cas,
     parser_version_for,
+    resolve_blank_folios,
+    split_ledger_eligible,
 )
 from dhanradar.mf.ledger import _format_family, _natural_key, append_transactions
 from dhanradar.models.auth import User
+from dhanradar.models.mf import MfFund
 
 pytestmark = pytest.mark.integration
 
@@ -535,3 +539,295 @@ async def test_ownership_guard_end_to_end_excludes_foreign_folio(db_session, app
     assert set(cp_isins) == {"INF_OWN_E2E", "INF_NOPAN_E2E"}
 
     await app_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (2026-07-04 P0 re-upload incident) — placeholder-ISIN ledger bar.
+# Unresolved CAMS TDS holdings (isin still "CAMS:<code>") must NEVER produce a
+# ledger row — they still get a B3 snapshot-fallback holdings row + checkpoint.
+# ---------------------------------------------------------------------------
+
+
+def test_split_ledger_eligible_bars_cams_placeholders():
+    resolved = _mini_holding("INF_RESOLVED")
+    placeholder = _mini_holding("CAMS:D742")
+    eligible, placeholders = split_ledger_eligible([resolved, placeholder])
+    assert eligible == [resolved]
+    assert placeholders == [placeholder]
+
+
+def test_split_ledger_eligible_no_placeholders_passes_through_unchanged():
+    resolved = _mini_holding("INF_RESOLVED")
+    eligible, placeholders = split_ledger_eligible([resolved])
+    assert eligible == [resolved]
+    assert placeholders == []
+
+
+async def test_append_transactions_rejects_cams_placeholder_rows():
+    """DB-level backstop (programming-error guard): a regression that lets a placeholder slip
+    past split_ledger_eligible must fail LOUDLY, not silently write a bad ledger row. The guard
+    runs before any DB access, so this needs no session/DB at all."""
+    bad_rows = [
+        {
+            "instrument_id": "CAMS:D742",
+            "portfolio_id": "x",
+            "user_id": "y",
+            "folio_number": "F1",
+        }
+    ]
+    with pytest.raises(ValueError, match="CAMS:"):
+        await append_transactions(None, bad_rows)
+
+
+async def test_placeholder_holding_produces_zero_ledger_rows_but_holdings_and_checkpoint(
+    db_session, app_session
+):
+    """Mirrors _run_pipeline's real sequence: an unresolved CAMS placeholder holding is barred
+    from build_cas_ledger_rows' input (zero ledger rows) but still flows into
+    _project_and_write_holdings (B3 snapshot fallback) and _write_statement_checkpoints — honest,
+    insufficient_data rows, never silently dropped and never ledger-duplicated."""
+    from dhanradar.tasks.mf import _project_and_write_holdings, _write_statement_checkpoints
+
+    uid = await _seed_user(db_session, "placeholder-e2e@test.dev")
+    pid = await _seed_portfolio(db_session, uid)
+
+    placeholder_txns = [
+        ParsedTxn(
+            when=date(2026, 1, 5),
+            amount=-1000.0,
+            is_sip=False,
+            txn_type="purchase",
+            units=50.0,
+            nav=20.0,
+        )
+    ]
+    placeholder = ParsedHolding(
+        isin="CAMS:D999",
+        amfi_code=None,
+        scheme_name="Unresolved Fund",
+        folio_number="7001/1",
+        units=50.0,
+        nav=20.0,
+        value=1000.0,
+        cost=1000.0,
+        as_of_date=date(2026, 3, 1),
+        txns=placeholder_txns,
+    )
+
+    ledger_input, placeholder_holdings = split_ledger_eligible([placeholder])
+    assert ledger_input == []
+    assert placeholder_holdings == [placeholder]
+
+    await set_rls_user(app_session, uid)
+    ledger_rows = build_cas_ledger_rows(ledger_input, user_id=uid, portfolio_id=pid)
+    assert ledger_rows == []
+    ins, skip = await append_transactions(app_session, ledger_rows)
+    await app_session.commit()
+    assert (ins, skip) == (0, 0)
+
+    await set_rls_user(app_session, uid)
+    invested, projected = await _project_and_write_holdings(app_session, uid, [placeholder], pid)
+    job = str(uuid.uuid4())
+    await set_rls_user(app_session, uid)  # internal commit above cleared the GUC
+    await _write_statement_checkpoints(app_session, uid, pid, job, [placeholder], projected)
+    await app_session.commit()
+
+    await set_rls_user(app_session, uid)
+    ledger_count = await app_session.scalar(
+        text("SELECT count(*) FROM mf.portfolio_transactions WHERE portfolio_id = :p"), {"p": pid}
+    )
+    assert ledger_count == 0, "placeholder ISIN must never produce a ledger row"
+
+    holding_isins = (
+        (
+            await app_session.execute(
+                text("SELECT isin FROM mf.mf_user_holdings WHERE portfolio_id = :p"), {"p": pid}
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert holding_isins == ["CAMS:D999"], "B3 snapshot-fallback holdings row must still be written"
+
+    cp_isins = (
+        (
+            await app_session.execute(
+                text(
+                    "SELECT instrument_id FROM mf.portfolio_statement_checkpoints WHERE upload_ref = :j"
+                ),
+                {"j": job},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert cp_isins == ["CAMS:D999"], "statement checkpoint must still be written"
+
+    await app_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 (2026-07-04 P0 re-upload incident) — AMFI plan-variant ISIN pair aliasing.
+# mf_funds.isin2 holds the ISIN NOT chosen as canonical; a holding parsed under
+# the secondary ISIN must be rewritten to the primary before ledger fingerprinting.
+# ---------------------------------------------------------------------------
+
+
+async def test_alias_secondary_isins_maps_secondary_to_primary(db_session):
+    db_session.add(
+        MfFund(
+            isin="INF_ALIAS_PRIMARY",
+            isin2="INF_ALIAS_SECONDARY",
+            scheme_name="HDFC Mid Cap Test",
+        )
+    )
+    await db_session.commit()
+
+    holding = _mini_holding("INF_ALIAS_SECONDARY")
+    alias_map = await alias_secondary_isins(db_session, [holding])
+    assert alias_map == {"INF_ALIAS_SECONDARY": "INF_ALIAS_PRIMARY"}
+
+
+async def test_alias_secondary_isins_unknown_isin_passes_through(db_session):
+    holding = _mini_holding("INF_TOTALLY_UNKNOWN_ZZZ")
+    alias_map = await alias_secondary_isins(db_session, [holding])
+    assert alias_map == {}
+
+
+async def test_alias_secondary_isins_never_rewrites_a_primary_isin(db_session):
+    """A data inconsistency — some OTHER row's isin2 happens to equal an ISIN that is itself a
+    genuine primary (its own mf_funds.isin row) — must never let the aliasing rewrite that
+    genuinely-primary ISIN out from under itself."""
+    db_session.add_all(
+        [
+            MfFund(isin="INF_GUARD_X", isin2=None, scheme_name="X is its own primary"),
+            MfFund(
+                isin="INF_GUARD_Y", isin2="INF_GUARD_X", scheme_name="Y inconsistently claims X"
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    holding = _mini_holding("INF_GUARD_X")
+    alias_map = await alias_secondary_isins(db_session, [holding])
+    assert "INF_GUARD_X" not in alias_map, (
+        "X is a genuine primary isin — must never become an alias source even though Y's row "
+        "inconsistently lists it as a secondary"
+    )
+
+
+async def test_secondary_isin_holding_aliased_ledger_rows_collide(db_session, app_session):
+    """The founder's real incident: the CAMS TDS resolver keys HDFC Mid Cap under the primary
+    ISIN; the consolidated KFin PDF prints the SAME holding under the plan's OTHER ISIN. Without
+    aliasing these are two different ledger instrument_ids (double count); with aliasing the
+    second print rewrites to the primary and the ledger's own cross-format dedup collapses them."""
+    uid = await _seed_user(db_session, "alias-collide@test.dev")
+    pid = await _seed_portfolio(db_session, uid)
+    db_session.add(
+        MfFund(
+            isin="INF_HDFC_PRIMARY",
+            isin2="INF_HDFC_SECONDARY",
+            scheme_name="HDFC Mid Cap Test",
+        )
+    )
+    await db_session.commit()
+
+    txn = ParsedTxn(
+        when=date(2026, 1, 5), amount=-1000.0, is_sip=True, txn_type="sip", units=50.0, nav=20.0
+    )
+    # CAMS TDS resolved this to the primary ISIN directly.
+    hold_primary = ParsedHolding(
+        isin="INF_HDFC_PRIMARY",
+        amfi_code=None,
+        scheme_name="HDFC Mid Cap",
+        folio_number="5001/1",
+        units=50.0,
+        nav=20.0,
+        value=1000.0,
+        cost=1000.0,
+        as_of_date=None,
+        txns=[txn],
+    )
+    await set_rls_user(app_session, uid)
+    rows1 = build_cas_ledger_rows(
+        [hold_primary], user_id=uid, portfolio_id=pid, parser_version="cas-tds-txt-1"
+    )
+    ins1, skip1 = await append_transactions(app_session, rows1)
+    await app_session.commit()
+    assert (ins1, skip1) == (1, 0)
+
+    # The consolidated PDF prints the SAME real position under the plan's other ISIN.
+    hold_secondary_raw = ParsedHolding(
+        isin="INF_HDFC_SECONDARY",
+        amfi_code=None,
+        scheme_name="HDFC Mid Cap",
+        folio_number="5001/1",
+        units=50.0,
+        nav=20.0,
+        value=1000.0,
+        cost=1000.0,
+        as_of_date=None,
+        txns=[txn],
+    )
+    alias_map = await alias_secondary_isins(db_session, [hold_secondary_raw])
+    assert alias_map == {"INF_HDFC_SECONDARY": "INF_HDFC_PRIMARY"}
+    from dataclasses import replace as _dc_replace
+
+    hold_aliased = _dc_replace(hold_secondary_raw, isin=alias_map[hold_secondary_raw.isin])
+    assert hold_aliased.isin == "INF_HDFC_PRIMARY"
+
+    await set_rls_user(app_session, uid)
+    rows2 = build_cas_ledger_rows(
+        [hold_aliased], user_id=uid, portfolio_id=pid, parser_version="cas-pdf-1"
+    )
+    ins2, skip2 = await append_transactions(app_session, rows2)
+    await app_session.commit()
+    assert (ins2, skip2) == (0, 1), (
+        "aliased second print must collide with the first, not double-count"
+    )
+
+    await set_rls_user(app_session, uid)
+    n = await app_session.scalar(
+        text("SELECT count(*) FROM mf.portfolio_transactions WHERE portfolio_id = :p"), {"p": pid}
+    )
+    assert n == 1
+    await app_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 (2026-07-04 P0 re-upload incident) — blank-folio merge rule.
+# A holdings-only valuation file / demat section can print a holding with NO
+# folio; it must merge onto the SAME isin's one real folio, never double-count,
+# and a genuinely folio-less demat/ETF holding must still ingest.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_blank_folios_merges_onto_the_one_real_folio():
+    blank = _mini_holding("INF_BLANK_ONE", folio="")
+    resolved, skipped = resolve_blank_folios([blank], {"INF_BLANK_ONE": {"F1"}})
+    assert skipped == []
+    assert len(resolved) == 1
+    assert resolved[0].folio_number == "F1"
+    assert resolved[0].units == blank.units, "units must never be doubled by the merge"
+
+
+def test_resolve_blank_folios_ambiguous_multiple_real_folios_skipped():
+    blank = _mini_holding("INF_BLANK_MANY", folio="")
+    resolved, skipped = resolve_blank_folios([blank], {"INF_BLANK_MANY": {"F1", "F2"}})
+    assert resolved == []
+    assert skipped == [blank]
+
+
+def test_resolve_blank_folios_no_real_folio_kept_as_demat():
+    blank = _mini_holding("INF_BLANK_DEMAT", folio="")
+    resolved, skipped = resolve_blank_folios([blank], {})
+    assert skipped == []
+    assert len(resolved) == 1
+    assert resolved[0].folio_number == ""
+
+
+def test_resolve_blank_folios_real_folio_passes_through_unchanged():
+    real = _mini_holding("INF_HAS_FOLIO", folio="9001/1")
+    resolved, skipped = resolve_blank_folios([real], {"INF_HAS_FOLIO": {"OTHER_FOLIO"}})
+    assert resolved == [real]
+    assert skipped == []
