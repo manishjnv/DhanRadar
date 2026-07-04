@@ -186,6 +186,14 @@ export interface SummaryPayload {
   gain_vs_cost_pct?: number | null;
   /** User's own ledger-based lifetime XIRR (CAMS-parity) — over ACTIVE holdings only; allowed in DOM */
   xirr_pct: number | null;
+  /**
+   * Share of total_value (%) that xirr_pct's ledger flows actually cover (Fix 2b, 2026-07-04) —
+   * null when coverage is full (>= ~99%) or there's no xirr_pct at all. A ledger-less holding (a
+   * holdings-only source, e.g. a KFin consolidated PDF with no transaction history) can leave the
+   * lifetime XIRR covering only PART of the portfolio's value; when that happens this names the
+   * honest share so the UI can caveat the XIRR chip instead of implying it covers everything.
+   */
+  xirr_coverage_pct?: number | null;
   /** User's own windowed (~1-year) XIRR (M2.3) — allowed in DOM; null on cold-start or a too-short window */
   xirr_1y_pct?: number | null;
   /** Actual days the xirr_1y_pct window covers — may be < 365 when the series is younger; only label it "1Y" when >= 360 */

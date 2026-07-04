@@ -275,6 +275,33 @@ describe('HeroSection', () => {
     expect(screen.queryByText('1Y XIRR')).toBeNull();
   });
 
+  // Fix 2b (2026-07-04 XIRR-basis-break incident) — the XIRR chip caveats partial coverage.
+  it('present => XIRR chip appends a coverage hint when xirr_coverage_pct < 100', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_coverage_pct: 44 },
+    } as any);
+    expect(screen.getByText(/covers 44% of value/)).toBeDefined();
+  });
+
+  it('present => XIRR chip hint stays plain when xirr_coverage_pct is null (full coverage)', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_coverage_pct: null },
+    } as any);
+    expect(screen.getByText('current funds · since start')).toBeDefined();
+    expect(screen.queryByText(/covers/)).toBeNull();
+  });
+
+  it('present => XIRR chip hint stays plain when xirr_coverage_pct is 100', () => {
+    renderHero({
+      ...SUMMARY_PRESENT,
+      data: { ...SUMMARY_PRESENT.data, xirr_coverage_pct: 100 },
+    } as any);
+    expect(screen.getByText('current funds · since start')).toBeDefined();
+    expect(screen.queryByText(/covers/)).toBeNull();
+  });
+
   // -------------------------------------------------------------------------
   // Hero mini "money view" chart (PR-C) — value vs invested, no Nifty line.
   // -------------------------------------------------------------------------

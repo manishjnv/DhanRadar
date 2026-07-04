@@ -33,6 +33,7 @@ from dhanradar.insights.schemas import MoodContextResponse, OverlapResponse
 from dhanradar.mf.portfolio_read import (
     allocation_payload,
     concentration_payload,
+    covered_value_and_coverage_pct,
     diversification_payload,
     holdings_payload,
     load_active_holding_flows,
@@ -153,6 +154,14 @@ async def portfolio_summary(
     `gain_vs_cost`/`gain_vs_cost_pct` and `wt_avg_days` come from ONE shared active-holdings ledger read
     (`load_active_holding_flows`) feeding `reinvested_dividend_cost` + `portfolio_wt_avg_days`. 401/404 as
     above.
+
+    Fix 2b (2026-07-04 XIRR-basis-break incident, founder-reported 237.83%): `load_portfolio_xirr`'s
+    terminal is now `covered_value` — Σ current_value over only the ACTIVE holdings `active_flows`
+    actually has ledger rows for (`covered_value_and_coverage_pct`, no extra query) — never the full
+    `rm.total_value`, which used to credit the solver with a return on a ledger-less holding's (a
+    holdings-only source, e.g. a KFin consolidated PDF) value it never saw a flow for. `xirr_coverage_pct`
+    surfaces the honest % of value that basis covers whenever it's a meaningful shortfall (None = full
+    coverage, or no XIRR at all).
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
@@ -160,8 +169,15 @@ async def portfolio_summary(
     active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
     dc = await load_day_change(db, portfolio_id)  # (bottom-up ₹, pct, anchor nav_date) or None
     xirr_1y = await load_windowed_xirr(db, portfolio_id, rm.total_value)
-    xirr_pct = await load_portfolio_xirr(db, portfolio_id, rm.total_value, active_keys)
     active_flows = await load_active_holding_flows(db, portfolio_id, active_keys)
+    current_value_by_key = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
+    covered_value, xirr_coverage_pct = covered_value_and_coverage_pct(
+        current_value_by_key, set(active_flows), rm.total_value
+    )
+    xirr_pct = await load_portfolio_xirr(db, portfolio_id, covered_value, active_keys)
+    # No XIRR at all (no active flows) → no coverage caveat either; nothing to caveat around.
+    if xirr_pct is None:
+        xirr_coverage_pct = None
     today = datetime.date.today()
     wt_avg_days = portfolio_wt_avg_days(active_flows, today)
     reinvested_cost = reinvested_dividend_cost(active_flows)
@@ -179,6 +195,7 @@ async def portfolio_summary(
             dc[1] if dc else None,
             xirr_1y,
             xirr_pct=xirr_pct,
+            xirr_coverage_pct=xirr_coverage_pct,
             wt_avg_days=wt_avg_days,
             reinvested_cost=reinvested_cost,
             day_change_as_of=dc[2].isoformat() if dc else None,

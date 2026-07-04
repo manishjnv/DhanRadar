@@ -34,6 +34,7 @@ from sqlalchemy import text
 from dhanradar.mf.portfolio_read import (
     EnrichedHolding,
     PortfolioReadModel,
+    covered_value_and_coverage_pct,
     holdings_payload,
     load_active_holding_flows,
     load_portfolio_read_model,
@@ -224,6 +225,47 @@ def test_summary_payload_gain_vs_cost_pct_none_when_cost_value_zero():
     p = summary_payload(_rm(holdings=[], total_invested=0.0, total_value=0.0), "pid-1")
     assert p["cost_value"] == 0.0
     assert p["gain_vs_cost_pct"] is None
+
+
+# ---------------------------------------------------------------------------
+# Pure: Fix 2b (2026-07-04 XIRR-basis-break incident) — covered_value_and_coverage_pct
+# ---------------------------------------------------------------------------
+
+
+def test_covered_value_and_coverage_pct_full_coverage_is_none():
+    result = covered_value_and_coverage_pct({("A", "1"): 1000.0}, {("A", "1")}, 1000.0)
+    assert result == (1000.0, None)
+
+
+def test_covered_value_and_coverage_pct_partial_coverage_returns_pct():
+    result = covered_value_and_coverage_pct(
+        {("A", "1"): 200.0, ("B", "1"): 800.0}, {("A", "1")}, 1000.0
+    )
+    assert result == (200.0, 20)
+
+
+def test_covered_value_and_coverage_pct_near_full_rounds_to_none():
+    """>= ~99% coverage counts as full — no caveat needed for a negligible rounding-noise gap."""
+    result = covered_value_and_coverage_pct(
+        {("A", "1"): 995.0, ("B", "1"): 5.0}, {("A", "1")}, 1000.0
+    )
+    assert result == (995.0, None)
+
+
+def test_covered_value_and_coverage_pct_zero_total_value_is_none():
+    result = covered_value_and_coverage_pct({}, set(), 0.0)
+    assert result == (0.0, None)
+
+
+def test_summary_payload_xirr_coverage_pct_passthrough():
+    p = summary_payload(_rm(), "pid-1", xirr_pct=12.5, xirr_coverage_pct=44)
+    assert p["xirr_coverage_pct"] == 44
+
+
+def test_summary_payload_xirr_coverage_pct_defaults_to_none():
+    p = summary_payload(_rm(), "pid-1", xirr_pct=12.5)
+    assert p["xirr_coverage_pct"] is None
+    assert _all_keys(p) & _FORBIDDEN == set()
 
 
 def test_holdings_payload_day_change_from_map():
@@ -439,6 +481,103 @@ async def test_load_portfolio_xirr_empty_active_keys_is_none(db_session):
     uid = await _seed_user(db_session, "cams-xirr-empty@test.dev")
     pid, _active_isin, _closed_isin = await _seed_cams_portfolio(db_session, uid, "X002")
     assert await load_portfolio_xirr(db_session, pid, 1000.0, set()) is None
+
+
+async def _seed_mixed_coverage_portfolio(db_session, uid: str, suffix: str) -> tuple[str, str, str]:
+    """Fix 2b fixture (2026-07-04 XIRR-basis-break incident, founder-reported 237.83%): one
+    LEDGER-BACKED holding (a real purchase 400 days ago, current value ~= its own invested — a
+    near-0% real return) + one LEDGER-LESS holding (a holdings-only source, e.g. a KFin
+    consolidated PDF with no transaction section — a stored holdings row with NO ledger rows at
+    all, and a current value FAR larger than the backed holding's). If the XIRR terminal ever used
+    the portfolio's FULL total_value instead of just the covered value, the backed holding's tiny
+    real flow would be paired against a terminal inflated by the ledger-less holding's untracked
+    value — producing a wildly positive rate instead of the sane ~0% the real flow implies.
+    Returns (portfolio_id, ledger_backed_isin, ledgerless_isin)."""
+    pid = (
+        await db_session.execute(
+            text(
+                "INSERT INTO mf.mf_portfolios (user_id, name) VALUES (:u, 'MixedCov') RETURNING id"
+            ),
+            {"u": uid},
+        )
+    ).scalar_one()
+    today = date.today()
+    backed_isin = f"INFCOVBK{suffix}"
+    ledgerless_isin = f"INFCOVLL{suffix}"
+
+    await _seed_fund_and_nav(db_session, backed_isin, 100.0, today)
+    await _seed_fund_and_nav(db_session, ledgerless_isin, 1000.0, today)
+
+    # Ledger-backed: 10 units @ NAV 100 = ₹1,000 invested & value.
+    await _seed_holding(db_session, uid, pid, backed_isin, "1", 10.0, 1000.0, 100.0, today)
+    await _seed_txn(
+        db_session,
+        uid,
+        pid,
+        backed_isin,
+        "1",
+        "purchase",
+        today - timedelta(days=400),
+        10.0,
+        100.0,
+        -1000.0,
+        "mixed-backed-purchase",
+    )
+
+    # Ledger-less: 500 units @ NAV 1000 = ₹500,000 — a holdings-only row, NO ledger rows at all.
+    await _seed_holding(db_session, uid, pid, ledgerless_isin, "1", 500.0, 500_000.0, 1000.0, today)
+
+    await db_session.commit()
+    return str(pid), backed_isin, ledgerless_isin
+
+
+async def test_load_portfolio_xirr_uses_covered_value_not_full_total(db_session):
+    """A portfolio with 1 ledger-backed + 1 ledger-less holding: XIRR must use the covered value
+    (the backed holding's own value) as the terminal, not the portfolio's full total_value — a
+    sane ~0% rate, never the 237.83%-style inflation the founder reported."""
+    uid = await _seed_user(db_session, "cams-mixed-cov@test.dev")
+    pid, backed_isin, ledgerless_isin = await _seed_mixed_coverage_portfolio(
+        db_session, uid, "M001"
+    )
+
+    rm = await load_portfolio_read_model(db_session, pid)
+    assert {h.isin for h in rm.holdings} == {backed_isin, ledgerless_isin}
+    active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
+    active_flows = await load_active_holding_flows(db_session, pid, active_keys)
+    assert set(active_flows.keys()) == {(backed_isin, "1")}, (
+        "only the backed holding has ledger rows"
+    )
+
+    current_value_by_key = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
+    covered_value, coverage_pct = covered_value_and_coverage_pct(
+        current_value_by_key, set(active_flows), rm.total_value
+    )
+    assert covered_value == pytest.approx(1000.0, abs=0.01)
+    assert coverage_pct is not None and coverage_pct < 100
+
+    xirr_pct = await load_portfolio_xirr(db_session, pid, covered_value, active_keys)
+    assert xirr_pct is not None
+    assert abs(xirr_pct) < 5.0, (
+        f"XIRR must stay sane when scoped to the covered value; got {xirr_pct} "
+        "(a leaked full-total terminal would inflate this wildly)"
+    )
+
+
+async def test_load_portfolio_xirr_fully_covered_portfolio_reports_no_gap(db_session):
+    """A portfolio where every active holding has ledger flows: coverage is full — the caller
+    would serve xirr_coverage_pct=None (no gap to caveat)."""
+    uid = await _seed_user(db_session, "cams-full-cov@test.dev")
+    pid, active_isin, _closed_isin = await _seed_cams_portfolio(db_session, uid, "M002")
+
+    rm = await load_portfolio_read_model(db_session, pid)
+    active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
+    active_flows = await load_active_holding_flows(db_session, pid, active_keys)
+    current_value_by_key = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
+    covered_value, coverage_pct = covered_value_and_coverage_pct(
+        current_value_by_key, set(active_flows), rm.total_value
+    )
+    assert covered_value == pytest.approx(rm.total_value, abs=0.01)
+    assert coverage_pct is None
 
 
 async def test_load_active_holding_flows_wt_avg_days_and_reinvested_cost(db_session):
