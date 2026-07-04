@@ -224,6 +224,121 @@ async def test_unconfigured_keys_503(async_client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Unsigned plaintext fallback — BSE UAT pushes UNSIGNED plain JSON. Accept ONLY when
+# BSE_WEBHOOK_ALLOW_PLAINTEXT is True AND CF-Connecting-IP is in a non-empty allowlist.
+# ---------------------------------------------------------------------------
+
+_BSE_IP = "203.199.49.100"
+_PLAINTEXT_HEADERS = {"Content-Type": "application/json", "CF-Connecting-IP": _BSE_IP}
+
+
+def _plaintext_body(payload: dict) -> bytes:
+    return json.dumps(payload).encode("utf-8")
+
+
+async def test_plaintext_from_allowlisted_ip_accepted(async_client, db_session, monkeypatch):
+    """Flag on + allowlisted source IP → unsigned plain JSON is accepted and stored."""
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_ALLOW_PLAINTEXT", True)
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_SOURCE_IPS", _BSE_IP)
+    enqueued: list[str] = []
+    import dhanradar.bse.router as bse_router
+    monkeypatch.setattr(bse_router.process_webhook_event, "delay", lambda eid: enqueued.append(eid))
+
+    payload = _event_payload(event_type="UCC", event="PENDING_AUTHENTICATION")
+    resp = await async_client.post(
+        "/api/v1/bse/webhook", content=_plaintext_body(payload), headers=_PLAINTEXT_HEADERS
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "success"
+
+    row = await db_session.scalar(
+        select(BSEWebhookEvent).where(BSEWebhookEvent.request_id == payload["request_id"])
+    )
+    assert row is not None
+    assert row.event_type == "UCC"
+    assert row.event == "PENDING_AUTHENTICATION"
+    assert len(enqueued) == 1
+
+
+async def test_plaintext_from_offallowlist_ip_403(async_client, db_session, monkeypatch):
+    """Allowlist set but request IP not in it → 403 before any parsing; nothing stored."""
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_ALLOW_PLAINTEXT", True)
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_SOURCE_IPS", _BSE_IP)
+
+    payload = _event_payload()
+    resp = await async_client.post(
+        "/api/v1/bse/webhook",
+        content=_plaintext_body(payload),
+        headers={"Content-Type": "application/json", "CF-Connecting-IP": "9.9.9.9"},
+    )
+    assert resp.status_code == 403, resp.text
+
+    row = await db_session.scalar(
+        select(BSEWebhookEvent).where(BSEWebhookEvent.request_id == payload["request_id"])
+    )
+    assert row is None
+
+
+async def test_plaintext_flag_off_rejected_even_from_allowlisted_ip(async_client, db_session, monkeypatch):
+    """Flag OFF (default) NEVER accepts plaintext — it falls through to JOSE and 400s."""
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_ALLOW_PLAINTEXT", False)
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_SOURCE_IPS", _BSE_IP)
+
+    payload = _event_payload()
+    resp = await async_client.post(
+        "/api/v1/bse/webhook", content=_plaintext_body(payload), headers=_PLAINTEXT_HEADERS
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "invalid_signature"
+
+    row = await db_session.scalar(
+        select(BSEWebhookEvent).where(BSEWebhookEvent.request_id == payload["request_id"])
+    )
+    assert row is None
+
+
+async def test_flag_on_empty_allowlist_plaintext_stays_jose_strict(async_client, db_session, monkeypatch):
+    """Fail-closed: flag on but NO source-IP allowlist → plaintext refused (JOSE required)."""
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_ALLOW_PLAINTEXT", True)
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_SOURCE_IPS", "")
+
+    payload = _event_payload()
+    resp = await async_client.post(
+        "/api/v1/bse/webhook", content=_plaintext_body(payload), headers=_PLAINTEXT_HEADERS
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "invalid_signature"
+
+    row = await db_session.scalar(
+        select(BSEWebhookEvent).where(BSEWebhookEvent.request_id == payload["request_id"])
+    )
+    assert row is None
+
+
+async def test_jose_still_accepted_when_plaintext_enabled(async_client, db_session, monkeypatch):
+    """Enabling the plaintext fallback must not break a genuine JOSE event."""
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_ALLOW_PLAINTEXT", True)
+    monkeypatch.setattr(settings, "BSE_WEBHOOK_SOURCE_IPS", _BSE_IP)
+    enqueued: list[str] = []
+    import dhanradar.bse.router as bse_router
+    monkeypatch.setattr(bse_router.process_webhook_event, "delay", lambda eid: enqueued.append(eid))
+
+    payload = _event_payload()
+    body = _build_webhook(payload)  # real JOSE (starts with base64, not '{')
+    resp = await async_client.post(
+        "/api/v1/bse/webhook",
+        content=body,
+        headers={**_JOSE_HEADERS, "CF-Connecting-IP": _BSE_IP},
+    )
+    assert resp.status_code == 200, resp.text
+    row = await db_session.scalar(
+        select(BSEWebhookEvent).where(BSEWebhookEvent.request_id == payload["request_id"])
+    )
+    assert row is not None
+    assert len(enqueued) == 1
+
+
+# ---------------------------------------------------------------------------
 # Pure round-trip of the security primitive (no HTTP / DB)
 # ---------------------------------------------------------------------------
 

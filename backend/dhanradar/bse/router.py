@@ -18,6 +18,17 @@ processing is off-row in Celery, so a processing fault never becomes a non-200 (
 would trigger BSE retries). Bad/absent signature → 400; keys unconfigured → 503;
 persistence failure → 503 (BSE retries). HTTP success is any 2xx; the app-level
 result is the body `status` (API doc §6.1.2).
+
+Unsigned plaintext fallback (verified 2026-07-04): BSE Star MF's UAT pushes webhooks
+as UNSIGNED plain JSON — their webhook doc defines no JOSE/signature for the callback
+channel (§6.1.7 encryption is the request/response API channel, not webhooks). We
+accept an unsigned body ONLY when the dedicated `BSE_WEBHOOK_ALLOW_PLAINTEXT` flag is
+True AND the request comes from an allowlisted BSE source IP (CF-Connecting-IP,
+edge-set, unforgeable through the tunnel). That source-IP allowlist IS the
+authentication in place of a signature, so an EMPTY allowlist accepts NO plaintext
+(fail-closed). The flag is deliberately separate from BSE_ENV so an unrelated ops
+change can't re-arm it; keep it False wherever BSE signs. The stored event is a HINT only —
+the async processor is inert at UAT (no transactional side effects).
 """
 
 from __future__ import annotations
@@ -65,6 +76,34 @@ def _check_source_ip(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ip_not_allowed")
 
 
+def _plaintext_webhook_allowed(request: Request, raw_body: bytes) -> bool:
+    """Escape hatch for BSE's UNSIGNED plain-JSON webhooks (UAT delivers plaintext).
+
+    Three INDEPENDENT fail-closed gates — returns True only when ALL hold (else the
+    caller requires full JOSE):
+      1. `BSE_WEBHOOK_ALLOW_PLAINTEXT` is explicitly True — a dedicated opt-in flag,
+         deliberately NOT `BSE_ENV`, so an unrelated ops change can't re-arm this;
+      2. a non-empty source-IP allowlist is configured AND the trusted client IP
+         (CF-Connecting-IP, edge-set/unforgeable through the tunnel) is in it — this
+         is the authentication that replaces the missing signature, so an empty
+         allowlist yields False;
+      3. the body is a JSON object (starts with `{`), not a JOSE compact string
+         (whose base64url alphabet excludes `{`, so genuine JOSE never misroutes).
+
+    (2) is also enforced by `_check_source_ip` (403 for off-allowlist IPs once the
+    allowlist is set); this predicate re-checks it so plaintext acceptance can NEVER
+    depend on an empty/absent allowlist.
+    """
+    if not settings.BSE_WEBHOOK_ALLOW_PLAINTEXT:
+        return False
+    allow = settings.bse_webhook_source_ips
+    if not allow:
+        return False
+    if RateLimit._get_client_ip(request) not in allow:
+        return False
+    return raw_body.lstrip()[:1] == b"{"
+
+
 @router.post(
     "/webhook",
     response_model=WebhookAck,
@@ -89,22 +128,34 @@ async def bse_webhook(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="payload_too_large"
         )
 
-    # Step 1 — optional source-IP allowlist.
+    # Step 1 — optional source-IP allowlist (defence-in-depth on the JOSE path;
+    # MANDATORY gate for the UAT plaintext fallback in Step 2).
     _check_source_ip(request)
 
-    # Step 2 — verify BSE's signature, then decrypt (verify-before-parse).
-    try:
-        clear_bytes = verify_and_decrypt(raw_body)
-    except BSEKeyNotConfigured as exc:
-        logger.error("bse.webhook: keys not configured: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="bse_keys_unconfigured"
+    # Step 2 — obtain the clear-text event bytes.
+    #   * Normal path: BSE signs+encrypts (JOSE) → verify-before-parse.
+    #   * UAT plaintext fallback: BSE UAT pushes UNSIGNED plain JSON; accept ONLY
+    #     from an allowlisted uat source IP (see `_plaintext_webhook_allowed`).
+    if _plaintext_webhook_allowed(request, raw_body):
+        clear_bytes = raw_body
+        logger.warning(
+            "bse.webhook: accepting UNSIGNED plaintext event (BSE_ENV=uat, "
+            "allowlisted source IP %s) — stored as a HINT, processor inert",
+            RateLimit._get_client_ip(request),
         )
-    except BSEWebhookSecurityError as exc:
-        logger.warning("bse.webhook: signature/decrypt failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_signature"
-        )
+    else:
+        try:
+            clear_bytes = verify_and_decrypt(raw_body)
+        except BSEKeyNotConfigured as exc:
+            logger.error("bse.webhook: keys not configured: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="bse_keys_unconfigured"
+            )
+        except BSEWebhookSecurityError as exc:
+            logger.warning("bse.webhook: signature/decrypt failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_signature"
+            )
 
     # Step 3 — parse JSON (only after verified + decrypted).
     try:
