@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+from dhanradar.mf import serialization
 from dhanradar.mf.concepts import UnknownConcept
 from dhanradar.mf.serialization import (
     FORBIDDEN_SCORE_KEYS,
@@ -89,14 +90,16 @@ def test_i1_numeric_strip_removes_raw_score_keeps_label():
 
 
 def test_i1_strip_is_recursive_and_present_in_nested():
-    """The strip is recursive — a forbidden key buried deep is still removed."""
+    """The strip is recursive — a forbidden key buried deep (inside an allowlisted top-level field) is
+    still removed. Nested under `holdings` (B87-allowlisted) rather than a synthetic top-level key,
+    since the B87 allowlist below now filters top-level keys first."""
     env = serialize_concept(
         "holdings.list",
-        {"a": {"b": [{"c": {"unified_score": 99, "ok": 1}}]}},
+        {"holdings": {"b": [{"c": {"unified_score": 99, "ok": 1}}]}},
         RequestCtx(tier="free"),
     )
     assert "unified_score" not in _all_keys(env)
-    assert env["data"]["a"]["b"][0]["c"] == {"ok": 1}
+    assert env["data"]["holdings"]["b"][0]["c"] == {"ok": 1}
 
 
 # --- I2: gated → withheld -------------------------------------------------------------------------
@@ -117,15 +120,15 @@ def test_i2_gated_concept_withheld():
 
 
 def test_tier_withheld_for_free_user():
-    env = serialize_concept("portfolio.risk_advanced", {"sharpe": 1.2}, RequestCtx(tier="free"))
+    env = serialize_concept("portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="free"))
     assert env["status"] == "withheld" and env["meta"]["reason"] == "tier" and env["data"] is None
     assert is_tier_withheld(env)  # the route raises HTTP 402 on this
 
 
 def test_tier_present_for_paid_user():
     # "pro" is the real paid tier (the registry's access_tier "plus" maps to Pro+).
-    env = serialize_concept("portfolio.risk_advanced", {"sharpe": 1.2}, RequestCtx(tier="pro"))
-    assert env["status"] == "present" and env["data"] == {"sharpe": 1.2} and not is_tier_withheld(env)
+    env = serialize_concept("portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="pro"))
+    assert env["status"] == "present" and env["data"] == {"sharpe_ratio": 1.2} and not is_tier_withheld(env)
 
 
 # --- REFUSED + fail-closed + meta tags ------------------------------------------------------------
@@ -184,6 +187,100 @@ def test_backend_registry_matches_concepts_json():
         for cid, row in reg.items()
     }
     assert got == expected, f"registry drift: {set(expected) ^ set(got) or 'axis mismatch'}"
+
+
+# --- B87: per-concept field ALLOWLIST (the structural #2 guarantee) --------------------------------
+
+
+def test_b87_unlisted_field_is_dropped():
+    """Contract (a): a top-level field NOT in the concept's ALLOWED_FIELDS entry is silently dropped —
+    even though it isn't a FORBIDDEN_SCORE_KEYS name (the guarantee the denylist alone can't give; a
+    score under a NOVEL key like `rating` would previously have slipped through untouched)."""
+    env = serialize_concept(
+        "holdings.list",
+        {"holdings": [], "rating": 87, "some_new_unlisted_field": "leak"},
+        RequestCtx(tier="free"),
+    )
+    assert env["data"] == {"holdings": []}
+    assert "rating" not in env["data"] and "some_new_unlisted_field" not in env["data"]
+
+
+def test_b87_forbidden_field_blocked_even_if_allowlisted(monkeypatch):
+    """Contract (b): even if a concept's ALLOWED_FIELDS entry were mistakenly widened to include a
+    forbidden score key, the FORBIDDEN_SCORE_KEYS scrub (the second tripwire layer, contract item 2)
+    still strips it before the allowlist ever runs — allowlist membership alone can never let a raw
+    score through."""
+    monkeypatch.setitem(
+        serialization.ALLOWED_FIELDS,
+        "holdings.list",
+        serialization.ALLOWED_FIELDS["holdings.list"] | {"unified_score"},
+    )
+    env = serialize_concept(
+        "holdings.list", {"holdings": [], "unified_score": 87}, RequestCtx(tier="free")
+    )
+    assert "unified_score" not in _all_keys(env)
+    assert "87" not in json.dumps(env)
+
+
+def test_b87_missing_allowlist_fails_closed():
+    """A concept with no `ALLOWED_FIELDS` entry raises `MissingConceptAllowlist` naming the fix, rather
+    than serving an un-allowlisted payload. `portfolio.health` is registered (build status) but not yet
+    wired through this boundary, so it has no entry yet — exactly the case this guards."""
+    with pytest.raises(serialization.MissingConceptAllowlist, match="portfolio.health"):
+        serialize_concept("portfolio.health", {"band": "ok"}, RequestCtx(tier="free"))
+
+
+def test_b87_parity_every_live_concept_allowlist_matches_real_payload():
+    """Contract (c) — before/after parity: for every concept actually served through this boundary
+    today (`insights/router.py`), the ALLOWED_FIELDS entry equals EXACTLY the fixed top-level key set
+    each real payload builder in `mf/portfolio_read.py` emits — zero behavior change from B87."""
+    from dhanradar.mf.portfolio_read import (
+        EnrichedHolding,
+        PortfolioReadModel,
+        PortfolioRisk,
+        allocation_payload,
+        concentration_payload,
+        diversification_payload,
+        holdings_payload,
+        risk_advanced_payload,
+        risk_payload,
+        summary_payload,
+        valuation_series_payload,
+    )
+    from dhanradar.mf.valuation import ValuationPoint
+
+    holding = EnrichedHolding(
+        isin="INF1", scheme_name="X Fund", category="Flexi Cap Fund", folio_number="F1",
+        units=10.0, invested=1000.0, current_nav=120.0, current_value=1200.0,
+        label="on_track", confidence_band="high", as_of="2026-03-31",
+    )
+    rm = PortfolioReadModel(
+        holdings=[holding], total_invested=1000.0, total_value=1200.0, xirr_pct=None, as_of="2026-03-31"
+    )
+    risk = PortfolioRisk(
+        volatility_pct=15.0, max_drawdown_pct=None, sharpe_ratio=None, sortino_ratio=None,
+        rolling_1y_avg_pct=12.0, rolling_1y_pct_positive=70.0, fund_count=3, funds_with_metrics=3,
+        as_of="2026-03-31",
+    )
+    point = ValuationPoint(valuation_date=date(2026, 3, 31), total_value=1200.0, total_invested=1000.0)
+
+    cases = [
+        ("holdings.list", holdings_payload(rm, "pid-1"), "free"),
+        ("portfolio.summary", summary_payload(rm, "pid-1"), "free"),
+        ("portfolio.risk", risk_payload(risk, "pid-1"), "free"),
+        ("portfolio.risk_advanced", risk_advanced_payload(risk, "pid-1"), "pro"),
+        ("portfolio.allocation", allocation_payload(rm, "pid-1"), "free"),
+        ("portfolio.concentration", concentration_payload(rm, "pid-1"), "free"),
+        ("portfolio.diversification", diversification_payload(rm, "pid-1"), "free"),
+        ("portfolio.valuation_series", valuation_series_payload([point], "pid-1"), "free"),
+    ]
+    for concept_id, payload, tier in cases:
+        # (i) the declared allowlist is EXACTLY the real builder's fixed key set — no drift either way.
+        assert serialization.ALLOWED_FIELDS[concept_id] == set(payload.keys()), concept_id
+        # (ii) round-tripping through the boundary serves every field unchanged — zero behavior change.
+        env = serialize_concept(concept_id, dict(payload), RequestCtx(tier=tier))
+        assert env["status"] == "present", concept_id
+        assert env["data"] == payload, concept_id
 
 
 # --- PG: the pilot endpoint end-to-end through the boundary, under RLS ------------------------------
