@@ -50,10 +50,23 @@ export interface FundHead {
   category: string;
   label: Label;
   band: ConfidenceBand | null;
-  rank: number;
-  total: number;
+  // null when the fund has no mf_fund_ranks row yet (unranked — W0 gate: any ISIN loads).
+  rank: number | null;
+  total: number | null;
   planOption: string[];        // ["Direct", "Growth"]
   aumCr: number | null;        // real AMC-level AUM if present
+  // W0 — real hero KPIs (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). Null = show "—",
+  // never the sampleData preview value (Min SIP·Lumpsum stays preview, source-blocked).
+  navLatest: number | null;
+  navDate: string | null;
+  navChangePct: number | null;
+  expenseRatioPct: number | null;
+  // Returns tab (S10 Performance Center) — real period returns; 1M/10Y/Launch stay "—".
+  return3mPct: number | null;
+  return6mPct: number | null;
+  return1yPct: number | null;
+  return3yPct: number | null;
+  return5yPct: number | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -84,16 +97,24 @@ export function HeroSection({ head }: { head: FundHead }) {
                   <span key={p} className="rounded-full bg-white/[0.12] px-2.5 py-1 text-caption font-semibold text-white/90">{p}</span>
                 ))}
                 <span className="rounded-full bg-amber/[0.22] px-2.5 py-1 text-caption font-semibold text-amber">⚠ {FUND.riskBand}</span>
-                <span className="rounded-full bg-emerald/[0.22] px-2.5 py-1 text-caption font-semibold text-emerald">★ Rank {head.rank} / {head.total}</span>
+                {head.rank != null && head.total != null && (
+                  <span className="rounded-full bg-emerald/[0.22] px-2.5 py-1 text-caption font-semibold text-emerald">★ Rank {head.rank} / {head.total}</span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* KPI strip */}
+          {/* KPI strip — NAV/AUM/Expense Ratio are real (W0); "—" when not present.
+              Min SIP · Lumpsum stays preview (source-blocked, §11). */}
           <div className="mt-5 grid grid-cols-2 gap-3.5 border-t border-white/10 pt-4 sm:grid-cols-4">
-            <HeroKpi l={`NAV · ${FUND.navAsOf}`} v={FUND.nav} sub={`▲${FUND.navChg}`} subTone />
-            <HeroKpi l="AUM" v={head.aumCr != null ? `₹${head.aumCr.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : FUND.aum} />
-            <HeroKpi l="Expense Ratio" v={FUND.expense} />
+            <HeroKpi
+              l={head.navDate ? `NAV · ${new Date(head.navDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'NAV'}
+              v={head.navLatest != null ? `₹${head.navLatest.toFixed(2)}` : '—'}
+              sub={head.navChangePct != null ? `${head.navChangePct >= 0 ? '▲' : '▼'}${Math.abs(head.navChangePct).toFixed(2)}%` : undefined}
+              subTone={head.navChangePct != null ? head.navChangePct >= 0 : undefined}
+            />
+            <HeroKpi l="AUM" v={head.aumCr != null ? `₹${head.aumCr.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : '—'} />
+            <HeroKpi l="Expense Ratio" v={head.expenseRatioPct != null ? `${head.expenseRatioPct.toFixed(2)}%` : '—'} />
             <HeroKpi l="Min SIP · Lumpsum" v={FUND.minSip} sub={`· ${FUND.minLump}`} />
           </div>
 
@@ -121,8 +142,13 @@ export function HeroSection({ head }: { head: FundHead }) {
               </div>
             }
           />
-          <div className="mt-2 rounded-full bg-emerald/20 px-3 py-1 text-small font-bold text-emerald">✦ {FUND.standing}</div>
-          <div className="mt-1.5 text-caption text-white/75">Rank {head.rank} of {head.total} in category</div>
+          {/* Standing badge is preview copy — hidden for unranked funds so it can't contradict "Not yet ranked". */}
+          {head.rank != null && (
+            <div className="mt-2 rounded-full bg-emerald/20 px-3 py-1 text-small font-bold text-emerald">✦ {FUND.standing}</div>
+          )}
+          <div className="mt-1.5 text-caption text-white/75">
+            {head.rank != null && head.total != null ? `Rank ${head.rank} of ${head.total} in category` : 'Not yet ranked in category'}
+          </div>
           <div className="mt-3.5 flex w-full items-center justify-between border-t border-white/10 pt-3">
             <span className="font-mono text-[10px] uppercase tracking-wide text-white/55">Assessment factors</span>
             <PreviewBadge className="border-white/15 bg-white/10 text-white/60" />

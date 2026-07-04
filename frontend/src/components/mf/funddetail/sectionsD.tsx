@@ -479,7 +479,7 @@ export function SimilarSection() {
 // S21 — FAQ (accordion)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function FaqSection() {
+export function FaqSection({ navLatest }: { navLatest?: number | null }) {
   // Seed open-state from FAQ[i].open
   const [openIndex, setOpenIndex] = React.useState<number | null>(
     () => FAQ.findIndex((f) => f.open === true),
@@ -488,11 +488,16 @@ export function FaqSection() {
   const toggle = (i: number) =>
     setOpenIndex((prev) => (prev === i ? null : i));
 
+  // W0 — interpolate the real NAV into the one FAQ answer that quotes it (§17);
+  // every other answer stays the static educational preview copy.
+  const navStr = navLatest != null ? `₹${navLatest.toFixed(2)}` : null;
+
   return (
     <Panel className="p-5 sm:p-6">
       <div className="divide-y divide-line">
         {FAQ.map((item, i) => {
           const isOpen = openIndex === i;
+          const answer = navStr ? item.a.replaceAll('₹18.42', navStr) : item.a;
           return (
             <div key={item.q}>
               <button
@@ -518,7 +523,7 @@ export function FaqSection() {
 
               {isOpen && (
                 <p className="pb-4 text-small leading-relaxed text-ink-muted">
-                  {item.a}
+                  {answer}
                 </p>
               )}
             </div>

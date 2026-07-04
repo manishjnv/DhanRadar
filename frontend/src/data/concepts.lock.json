@@ -104,6 +104,11 @@
     "data_class": "public-fact",
     "content_class": "COMPLIANCE"
   },
+  "fund.head": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
   "portfolio.score_raw": {
     "visibility_class": "gated",
     "data_class": "derived-personal",

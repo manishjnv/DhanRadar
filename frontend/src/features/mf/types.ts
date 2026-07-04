@@ -199,6 +199,43 @@ export interface FundExplorerResponse {
   not_advice: string;
 }
 
+// ---------------------------------------------------------------------------
+// W0 — fund.head (single-ISIN public read model, GET /api/v1/mf/fund/{isin})
+// FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §7/§8. Wire shape of the envelope's
+// `data` field — replaces the 30-page explorer-scan pagination hack.
+// ---------------------------------------------------------------------------
+export interface FundHead {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  sebi_category: string | null;
+  category: string | null;
+  plan_type: 'direct' | 'regular' | null;
+  option_type: 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | null;
+  idcw_frequency: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'half_yearly' | 'annual' | null;
+  launch_date: string | null;
+  expense_ratio_pct: number | null;
+  is_segregated: boolean;
+  verb_label: Label | null;
+  category_rank: number | null;
+  category_total: number | null;
+  rank_as_of: string | null;
+  return_3m_pct: number | null;
+  return_6m_pct: number | null;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  return_5y_pct: number | null;
+  metrics_as_of: string | null;
+  nav_latest: number | null;
+  nav_date: string | null;
+  nav_change_pct: number | null;
+  /** W2/W3 field — always null today (shape stability). */
+  confidence_band: ConfidenceBand | null;
+  /** W2/W3 field — source-blocked (B67/ADR-0035), always null today. */
+  amc_level_aum_crore: number | null;
+}
+
 /** One item from GET /api/v1/mf/funds/categories */
 export interface FundCategory {
   key: string;           // full SEBI string, e.g. "Equity Scheme - Large Cap Fund"

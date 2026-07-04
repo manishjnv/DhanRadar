@@ -3,9 +3,10 @@
  * All calls go through apiClient (cookie auth, /api/v1 base, RFC7807 errors).
  */
 import * as React from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/apiClient';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { api, ApiError } from '@/lib/apiClient';
 import { queryKeys } from '@/lib/queryKeys';
+import type { DataEnvelope } from '@/data/envelope';
 import type {
   CasUploadResponse,
   CasStatusResponse,
@@ -18,7 +19,7 @@ import type {
   PortfolioLatestResponse,
   FundExplorerResponse,
   FundCategoriesResponse,
-  FundExplorerItem,
+  FundHead,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -348,43 +349,24 @@ export function useFundExplorer(params: { category: string; sort: string; sortDi
   });
 }
 
-/** Fetch a single fund's detail by ISIN.
- *  Strategy: check Explorer cache first (covers normal click-through flow),
- *  then paginate /mf/funds (backend limit=50 max) until ISIN found or exhausted.
- *  category comes from the URL query param set by FundExplorerTable navigation. */
-export function useFundDetail(isin: string, category: string | null) {
-  const queryClient = useQueryClient();
-  return useQuery<FundExplorerItem | null>({
-    queryKey: queryKeys.mf.fundDetail(isin, category ?? ''),
+const FUND_HEAD_SKIP_RETRY = [404];
+
+/** Fetch a single fund's `fund.head` concept by ISIN — GET /api/v1/mf/fund/{isin} (W0).
+ *  Replaces the old Explorer-cache-scan + 30-page pagination fallback and the hard
+ *  `category` requirement (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17 W0). `category` is
+ *  accepted for backward compatibility with existing callers but is no longer used to fetch. */
+export function useFundDetail(isin: string, _category?: string | null) {
+  return useQuery<FundHead | null>({
+    queryKey: queryKeys.mf.fundDetail(isin),
     queryFn: async () => {
-      if (!category) return null;
-
-      // 1. Cache hit — fund was already loaded in the Explorer table.
-      const cached = queryClient.getQueriesData<FundExplorerResponse>({
-        queryKey: ['mf', 'explorer', 'funds'],
-      });
-      for (const [, data] of cached) {
-        const hit = data?.funds?.find((f) => f.isin === isin);
-        if (hit) return hit;
-      }
-
-      // 2. Paginate fallback (backend caps limit at 50).
-      let page = 1;
-      let total = Infinity;
-      while ((page - 1) * 50 < total) {
-        const qs = new URLSearchParams({ category, sort: 'rank', page: String(page), limit: '50' });
-        const res = await api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
-        if (page === 1) total = res.total;
-        const hit = res.funds.find((f) => f.isin === isin);
-        if (hit) return hit;
-        if (res.funds.length < 50) break;
-        page++;
-        if (page > 30) break; // safety: 30 pages × 50 = 1 500 funds max
-      }
-      return null;
+      const env = await api.get<DataEnvelope<FundHead>>(`/mf/fund/${isin}`);
+      return env.data;
     },
-    enabled: !!isin && !!category,
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
     staleTime: 5 * 60 * 1000,
-    retry: false,
   });
 }
