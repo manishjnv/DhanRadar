@@ -899,6 +899,139 @@ async def fund_head(
     )
 
 
+@router.get("/fund/{isin}/nav")
+async def fund_nav(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    range_: Annotated[str, Query(alias="range", pattern="^(1m|3m|6m|1y|3y|5y|max)$")] = "1y",
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.nav_series` (W1) — daily NAV history for the window, downsampled to
+    <=400 points (simple stride, always keeps the latest point). Growth-of-10k is
+    derived client-side from these raw points — not duplicated server-side.
+    """
+    from dhanradar.mf.fund_read import get_fund_nav_series
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_nav_series(db, isin, range_)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept(
+        "fund.nav_series", payload, RequestCtx(tier=user.tier), as_of=payload["to"], source="amfi"
+    )
+
+
+@router.get("/fund/{isin}/analytics")
+async def fund_analytics(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.analytics` + `fund.rank_history` (W1) — risk/return stats with category
+    percentile context, and the trailing 12-month rank trend. Two concepts on one
+    route — both derive from the same nightly metrics+ranks refresh (§8).
+    """
+    from dhanradar.mf.fund_read import get_fund_analytics, get_fund_rank_history
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    analytics = await get_fund_analytics(db, isin)
+    if analytics is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+    rank_history = await get_fund_rank_history(db, isin) or {"points": []}
+
+    ctx = RequestCtx(tier=user.tier)
+    points = rank_history["points"]
+    return {
+        "analytics": serialize_concept(
+            "fund.analytics", analytics, ctx, as_of=analytics["as_of"], source="amfi"
+        ),
+        "rank_history": serialize_concept(
+            "fund.rank_history",
+            rank_history,
+            ctx,
+            as_of=points[-1]["as_of"] if points else None,
+            source="amfi",
+        ),
+    }
+
+
+@router.get("/fund/{isin}/composition")
+async def fund_composition(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.composition` (W1) — top holdings + sector rollup for the latest disclosed
+    month (SEBI monthly disclosure scrape, top-10 AMCs only — ADR-0033(a)). An
+    uncovered AMC returns the same shape with empty lists — still 200 (no-suppress, §14.1).
+    """
+    from dhanradar.mf.fund_read import get_fund_composition
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_composition(db, isin)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept(
+        "fund.composition",
+        payload,
+        RequestCtx(tier=user.tier),
+        as_of=payload["as_of_month"],
+        source="market",
+    )
+
+
+@router.get("/fund/{isin}/people")
+async def fund_people(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.people` + `fund.amc` (W1) — fund manager tenure/changes and AMC facts.
+    `fund_manager_history` covers 5 AMCs only (§4.3) — an uncovered AMC returns empty
+    managers, still 200 (no-suppress, §14.1).
+    """
+    from dhanradar.mf.fund_read import get_fund_people
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    result = await get_fund_people(db, isin)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+    people, amc = result
+
+    ctx = RequestCtx(tier=user.tier)
+    return {
+        "people": serialize_concept("fund.people", people, ctx, source="market"),
+        "amc": serialize_concept("fund.amc", amc, ctx, source="market"),
+    }
+
+
+@router.get("/fund/{isin}/peers")
+async def fund_peers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.peers` (W1) — rank-adjacent same-category funds (feeds Alternatives +
+    Similar, same feed — §16.2 decision #3). Unranked/segregated fund → empty peers,
+    still 200.
+    """
+    from dhanradar.mf.fund_read import get_fund_peers
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_peers(db, isin)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept("fund.peers", payload, RequestCtx(tier=user.tier), source="amfi")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

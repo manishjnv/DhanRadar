@@ -1,4 +1,5 @@
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
+import type { DataEnvelope } from '@/data/envelope';
 
 export interface CasUploadResponse {
   job_id: string;
@@ -234,6 +235,122 @@ export interface FundHead {
   confidence_band: ConfidenceBand | null;
   /** W2/W3 field — source-blocked (B67/ADR-0035), always null today. */
   amc_level_aum_crore: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// W1 — fund.nav_series, fund.analytics, fund.rank_history, fund.composition,
+// fund.people, fund.amc, fund.peers (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §7/§8/§17 W1).
+// Wire shapes of each envelope's `data` field.
+// ---------------------------------------------------------------------------
+
+/** GET /api/v1/mf/fund/{isin}/nav?range=... */
+export interface FundNavPoint {
+  /** ISO date (YYYY-MM-DD) */
+  d: string;
+  nav: number;
+}
+export interface FundNavSeries {
+  range: '1m' | '3m' | '6m' | '1y' | '3y' | '5y' | 'max';
+  points: FundNavPoint[];
+  from: string | null;
+  to: string | null;
+  n_total: number;
+}
+
+/** Category percentile band for one metric (p25/p50/p75/p90), from GET .../analytics */
+export interface CategoryPercentileBand {
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  p90: number | null;
+}
+
+export interface FundAnalytics {
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  volatility_pct: number | null;
+  max_drawdown_pct: number | null;
+  rolling_1y_avg_pct: number | null;
+  rolling_1y_min_pct: number | null;
+  rolling_1y_max_pct: number | null;
+  rolling_1y_pct_positive: number | null;
+  as_of: string | null;
+  /** 0-100; higher = more volatile than category peers. null if uncategorised/uncohorted. */
+  volatility_percentile: number | null;
+  /** Keys present only when the category has enough funds to publish that metric. */
+  category_percentiles: Partial<
+    Record<'return_1y_pct' | 'return_3y_pct' | 'max_drawdown_pct', CategoryPercentileBand>
+  >;
+}
+
+export interface FundRankHistoryPoint {
+  as_of: string;
+  rank: number;
+  total: number;
+}
+export interface FundRankHistory {
+  points: FundRankHistoryPoint[];
+}
+
+/** GET /api/v1/mf/fund/{isin}/analytics — two concepts, one route. */
+export interface FundAnalyticsResponse {
+  analytics: DataEnvelope<FundAnalytics>;
+  rank_history: DataEnvelope<FundRankHistory>;
+}
+
+/** GET /api/v1/mf/fund/{isin}/composition */
+export interface FundHolding {
+  name: string;
+  sector: string | null;
+  weight_pct: number | null;
+}
+export interface FundSectorWeight {
+  name: string;
+  weight_pct: number;
+}
+export interface FundComposition {
+  holdings: FundHolding[];
+  sectors: FundSectorWeight[];
+  as_of_month: string | null;
+  coverage: { holdings_count: number; weight_covered_pct: number | null };
+}
+
+/** GET /api/v1/mf/fund/{isin}/people */
+export interface FundManager {
+  name: string;
+  start_date: string;
+  tenure_years: number;
+}
+export interface FundPeople {
+  managers: FundManager[];
+  manager_changes_5y: number;
+}
+export interface FundAmc {
+  amc_name: string | null;
+  scheme_count: number;
+  category_count: number;
+}
+/** GET /api/v1/mf/fund/{isin}/people — two concepts, one route. */
+export interface FundPeopleResponse {
+  people: DataEnvelope<FundPeople>;
+  amc: DataEnvelope<FundAmc>;
+}
+
+/** GET /api/v1/mf/fund/{isin}/peers */
+export interface FundPeer {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  verb_label: Label | null;
+  category_rank: number;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  expense_ratio_pct: number | null;
+  volatility_pct: number | null;
+}
+export interface FundPeers {
+  peers: FundPeer[];
 }
 
 /** One item from GET /api/v1/mf/funds/categories */
