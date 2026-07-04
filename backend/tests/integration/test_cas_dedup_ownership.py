@@ -35,6 +35,7 @@ from dhanradar.mf.cas import (
     parser_version_for,
     resolve_blank_folios,
     split_ledger_eligible,
+    suppress_placeholder_restatements,
 )
 from dhanradar.mf.ledger import _format_family, _natural_key, append_transactions
 from dhanradar.models.auth import User
@@ -831,3 +832,72 @@ def test_resolve_blank_folios_real_folio_passes_through_unchanged():
     resolved, skipped = resolve_blank_folios([real], {"INF_HAS_FOLIO": {"OTHER_FOLIO"}})
     assert resolved == [real]
     assert skipped == []
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (2026-07-04 hand-cleaned incident: 3 active + 5 closed dupes on prod) —
+# placeholder-restatement suppression. A holdings-only file can print an
+# ABBREVIATED fund name the resolver correctly refuses; the SAME position must
+# not show up twice (once resolved, once under the placeholder).
+# ---------------------------------------------------------------------------
+
+
+def test_suppress_placeholder_restatements_batch_match_suppressed():
+    """The resolved twin is in THIS SAME parsed batch (e.g. a CAMS TDS row alongside a
+    KFin holdings-only row from one upload) -- the placeholder is dropped."""
+    resolved = _mini_holding("INF_RESOLVED", folio="F1")  # units=10.0 (helper default)
+    placeholder = _mini_holding("CAMS:D742", folio="F1")  # same folio+units, restated
+    resolved_positions = {("F1", 10.0)}
+    kept, suppressed = suppress_placeholder_restatements(
+        [resolved, placeholder], resolved_positions
+    )
+    assert kept == [resolved]
+    assert suppressed == 1
+
+
+def test_suppress_placeholder_restatements_stored_match_suppressed():
+    """The resolved twin isn't in this batch at all -- it's already in the portfolio's stored
+    holdings from a prior upload. The caller unions stored (folio, units) into
+    resolved_positions before calling; the placeholder alone in `parsed` is still dropped."""
+    placeholder = _mini_holding("CAMS:D742", folio="F1")  # units=10.0
+    resolved_positions = {("F1", 10.0)}  # from mf_user_holdings, not this batch
+    kept, suppressed = suppress_placeholder_restatements([placeholder], resolved_positions)
+    assert kept == []
+    assert suppressed == 1
+
+
+def test_suppress_placeholder_restatements_genuinely_unknown_kept():
+    """No resolved twin anywhere (different folio) -- a genuinely-unknown fund passes through
+    unchanged (honest insufficient_data row, today's behaviour)."""
+    placeholder = _mini_holding("CAMS:D999", folio="F2")  # units=10.0
+    resolved_positions = {("F1", 10.0)}  # different folio -- no match
+    kept, suppressed = suppress_placeholder_restatements([placeholder], resolved_positions)
+    assert kept == [placeholder]
+    assert suppressed == 0
+
+
+def test_suppress_placeholder_restatements_units_within_tolerance_suppressed():
+    """Cross-format rounding noise (±0.001) still counts as the same real position."""
+    placeholder = _mini_holding("CAMS:D742", folio="F1")  # units=10.0
+    resolved_positions = {("F1", 10.0007)}
+    _kept, suppressed = suppress_placeholder_restatements([placeholder], resolved_positions)
+    assert suppressed == 1
+
+
+def test_suppress_placeholder_restatements_units_outside_tolerance_kept():
+    """A same-folio holding with a MATERIALLY different unit count is a different position, not
+    a restatement -- the placeholder must NOT be suppressed."""
+    placeholder = _mini_holding("CAMS:D742", folio="F1")  # units=10.0
+    resolved_positions = {("F1", 10.5)}
+    kept, suppressed = suppress_placeholder_restatements([placeholder], resolved_positions)
+    assert kept == [placeholder]
+    assert suppressed == 0
+
+
+def test_suppress_placeholder_restatements_non_placeholder_holdings_untouched():
+    """Resolved (non-"CAMS:") holdings are never dropped by this function, regardless of
+    resolved_positions content -- only placeholder rows are ever candidates for suppression."""
+    resolved = _mini_holding("INF_RESOLVED", folio="F1")
+    kept, suppressed = suppress_placeholder_restatements([resolved], {("F1", 10.0)})
+    assert kept == [resolved]
+    assert suppressed == 0

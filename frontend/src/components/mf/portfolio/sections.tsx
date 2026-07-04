@@ -662,7 +662,11 @@ export function HeroSection({ portfolioId }: { portfolioId: string }) {
                     label="XIRR"
                     value={fmtPct(summary.xirr_pct)}
                     accent={summary.xirr_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}
-                    hint="current funds · since start"
+                    hint={
+                      summary.xirr_coverage_pct != null && summary.xirr_coverage_pct < 100
+                        ? `current funds · since start · covers ${summary.xirr_coverage_pct}% of value`
+                        : 'current funds · since start'
+                    }
                     tip={xiirrTip}
                   />
                 )}

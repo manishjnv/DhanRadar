@@ -215,6 +215,7 @@ def summary_payload(
     day_change_pct: float | None = None,
     xirr_1y: tuple[float, int] | None = None,
     xirr_pct: float | None = None,
+    xirr_coverage_pct: int | None = None,
     wt_avg_days: int | None = None,
     reinvested_cost: float = 0.0,
     day_change_as_of: str | None = None,
@@ -247,7 +248,13 @@ def summary_payload(
     None whenever day_change itself is None. `investor_name` (2026-07-04, founder-reported hero
     polish) is the caller's already-loaded `auth.users.full_name` for the OWNER's own session
     (DPDP-fine, own name to own session) — None until a CAS upload has captured it
-    (`_store_or_validate_identity`). Their `investor_pan` is NEVER passed in or serialized here."""
+    (`_store_or_validate_identity`). Their `investor_pan` is NEVER passed in or serialized here.
+
+    `xirr_coverage_pct` (Fix 2b, 2026-07-04 XIRR-basis-break incident) is the caller's
+    `covered_value_and_coverage_pct` result — the integer % of `total_value` that `xirr_pct`'s ledger
+    flows actually explain. None (the common case: full ledger coverage, or no XIRR at all) omits the
+    caveat; a partial-coverage portfolio (some holdings ledger-backed, some ledger-less) gets an
+    honest number so the client can caveat the XIRR chip instead of silently overstating it."""
     gain = rm.total_value - rm.total_invested
     gain_pct = (gain / rm.total_invested * 100.0) if rm.total_invested else None
     cost_value = rm.total_invested + reinvested_cost
@@ -264,6 +271,7 @@ def summary_payload(
         "gain_vs_cost": gain_vs_cost,
         "gain_vs_cost_pct": gain_vs_cost_pct,
         "xirr_pct": xirr_pct,  # ledger-based, active-holdings-only (load_portfolio_xirr) — CAMS-parity
+        "xirr_coverage_pct": xirr_coverage_pct,  # Fix 2b — % of value xirr_pct covers; None = full
         "xirr_1y_pct": xirr_1y[0] if xirr_1y else None,  # M2.3 — windowed XIRR, DOM-allowed (#2-exempt)
         "xirr_1y_window_days": xirr_1y[1] if xirr_1y else None,  # actual days covered (may be < 365)
         "wt_avg_days": wt_avg_days,  # CAMS "Wt.Avg.Days" — capital-weighted avg holding period
@@ -893,7 +901,7 @@ _GroupedFlows = dict[tuple[str, str], list[tuple[datetime.date, float, str, floa
 async def load_portfolio_xirr(
     db: AsyncSession,
     portfolio_id: str,
-    end_value: float,
+    covered_value: float,
     active_keys: set[tuple[str, str]],
 ) -> float | None:
     """Ledger-based lifetime XIRR (CAMS-parity) — replaces the stale upload-time snapshot number the
@@ -903,9 +911,14 @@ async def load_portfolio_xirr(
     closed position's flow history is EXCLUDED (the CAMS-comparable basis; reopening it is a future
     'closed positions' feature, not this one). `dividend_reinvest` rows carry `amount=0` so the
     non-zero filter already drops them — correct, they're an internal unit bump, not external cash.
-    + a pseudo-terminal inflow of `end_value` (the caller's already-computed live total) dated today.
-    Reuses `xirr()` — no new root-finder. None when there are no active flows or the solver can't
-    find a root."""
+
+    `covered_value` (Fix 2b, 2026-07-04 XIRR-basis-break incident) is a pseudo-terminal inflow dated
+    today — but it must be the caller's Σ current_value over only the ACTIVE holdings that actually
+    HAVE ledger flows, never the portfolio's full `total_value`. A ledger-less holding (a holdings-only
+    source, e.g. a KFin consolidated PDF with no transaction section) contributes NO flow here, so a
+    terminal built from the FULL live total would credit the solver with a return on money it never
+    saw leave the ledger — the founder-reported 237.83% inflation this fixes. Reuses `xirr()` — no new
+    root-finder. None when there are no active flows or the solver can't find a root."""
     if not active_keys:
         return None
     pid = uuid.UUID(portfolio_id)
@@ -930,7 +943,7 @@ async def load_portfolio_xirr(
     if not flows:
         return None
     today = datetime.date.today()
-    return xirr([*flows, CashFlow(when=today, amount=end_value)])
+    return xirr([*flows, CashFlow(when=today, amount=covered_value)])
 
 
 async def load_active_holding_flows(
@@ -977,6 +990,29 @@ async def load_active_holding_flows(
             )
         )
     return grouped
+
+
+def covered_value_and_coverage_pct(
+    current_value_by_key: dict[tuple[str, str], float],
+    covered_keys: set[tuple[str, str]],
+    total_value: float,
+) -> tuple[float, int | None]:
+    """Fix 2b helper (2026-07-04 XIRR-basis-break incident) — the router's one-line glue between
+    `load_active_holding_flows`'s grouped keys (`covered_keys` = every active holding with >= 1
+    ledger flow — no extra query) and `load_portfolio_xirr`'s `covered_value` terminal.
+
+    Returns `(covered_value, xirr_coverage_pct)`:
+      - `covered_value` = Σ `current_value_by_key` over `covered_keys` — the terminal
+        `load_portfolio_xirr` must use so the XIRR solver is never credited a return on a
+        ledger-less holding's value it never saw a flow for.
+      - `xirr_coverage_pct` = None when `covered_value` is >= ~99% of `total_value` (full/near-full
+        coverage — no caveat needed) or `total_value` is 0 (nothing to divide by); otherwise the
+        integer % of the portfolio's value the XIRR actually covers, for the summary payload's
+        honest caveat (never fabricated, never silently swallowed)."""
+    covered_value = sum(v for k, v in current_value_by_key.items() if k in covered_keys)
+    if total_value <= 0 or covered_value >= total_value * 0.99:
+        return covered_value, None
+    return covered_value, round(covered_value / total_value * 100.0)
 
 
 def _fifo_remaining_cost_and_weighted_age(

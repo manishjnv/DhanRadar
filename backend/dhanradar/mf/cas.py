@@ -1056,6 +1056,51 @@ def resolve_blank_folios(
     return resolved, skipped
 
 
+#: Fix 1 (2026-07-04 placeholder-restatement incident) — units tolerance for matching a placeholder
+#: holding against a resolved twin, same rounding-noise allowance as the ledger's cross-format dedup.
+_RESTATEMENT_UNITS_TOL = 0.001
+
+
+def suppress_placeholder_restatements(
+    parsed: list[ParsedHolding],
+    resolved_positions: set[tuple[str, float]],
+) -> tuple[list[ParsedHolding], int]:
+    """Placeholder-restatement suppression (2026-07-04 hand-cleaned incident: 3 active + 5 closed
+    dupes on prod). A holdings-only valuation file (e.g. a KFin consolidated PDF) can print an
+    ABBREVIATED fund name the hardened resolver correctly refuses to resolve (`resolve_cams_isins`)
+    — the SAME real position then shows up TWICE: once under its resolved real ISIN (from a CAMS
+    TDS statement or an earlier upload) and again under the unresolvable "CAMS:<code>" placeholder,
+    both carrying the IDENTICAL canonical folio + units. It is one position restated under a name we
+    can't resolve, not a second holding. #450's `split_ledger_eligible` already keeps the placeholder
+    out of the LEDGER; this keeps it out of the HOLDINGS/checkpoint rows too.
+
+    A placeholder holding (`isin` still "CAMS:<code>") is DROPPED entirely when `resolved_positions`
+    contains a (canonical folio, units) pair within ±0.001 units of it. `resolved_positions` is the
+    caller's UNION of every RESOLVED (real-ISIN) holding's (folio, units) from BOTH this parsed
+    batch and the portfolio's already-stored holdings — so a restatement is caught whether its
+    resolved twin arrived in this same upload or a prior one.
+
+    A placeholder with no such match is a genuinely-unknown fund and passes through UNCHANGED
+    (honest insufficient_data row — today's behaviour). Call this AFTER aliasing + blank-folio
+    resolution (so folio_number is already canonical) and BEFORE `split_ledger_eligible`.
+
+    Returns (kept, suppressed_count) — the caller logs `cas.placeholder.restatement_suppressed`
+    (count only; never the scheme name or folio — DPDP log discipline)."""
+    kept: list[ParsedHolding] = []
+    suppressed = 0
+    for p in parsed:
+        if p.isin.startswith("CAMS:"):
+            folio_norm = normalize_folio(p.folio_number)
+            if any(
+                folio_norm == f and abs(p.units - u) <= _RESTATEMENT_UNITS_TOL
+                for f, u in resolved_positions
+            ):
+                suppressed += 1
+                continue
+        kept.append(p)
+    return kept, suppressed
+
+
 def filter_foreign_pan_folios(
     parsed: list[ParsedHolding], owner_pan: str | None
 ) -> tuple[list[ParsedHolding], list[ParsedHolding]]:

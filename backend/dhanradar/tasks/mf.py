@@ -50,6 +50,7 @@ from dhanradar.mf.cas import (
     parser_version_for,
     resolve_blank_folios,
     split_ledger_eligible,
+    suppress_placeholder_restatements,
 )
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
@@ -622,6 +623,38 @@ async def _run_pipeline(
                 isins=sorted({p.isin for p in blank_folio_skipped}),
             )
 
+        # Placeholder-restatement suppression (2026-07-04 hand-cleaned incident: 3 active + 5 closed
+        # dupes on prod): a holdings-only file can print an ABBREVIATED fund name the resolver
+        # correctly refuses -- the SAME position then shows up twice, once resolved and once under
+        # the unresolvable "CAMS:<code>" placeholder, both carrying the identical canonical folio +
+        # units. Suppress the placeholder twin when a resolved holding with that (folio, units) pair
+        # exists in THIS batch or the portfolio's already-stored holdings. Only queries the DB when
+        # this batch actually carries a placeholder (cheap no-op on every ordinary upload).
+        if any(p.isin.startswith("CAMS:") for p in parsed):
+            resolved_positions = {
+                (normalize_folio(p.folio_number), p.units)
+                for p in parsed
+                if not p.isin.startswith("CAMS:")
+            }
+            from dhanradar.models.mf import MfUserHolding
+
+            stored_rows = (
+                await db.execute(
+                    select(MfUserHolding.folio_number, MfUserHolding.units).where(
+                        MfUserHolding.portfolio_id == portfolio_id,
+                        ~MfUserHolding.isin.like("CAMS:%"),
+                    )
+                )
+            ).all()
+            resolved_positions |= {
+                (normalize_folio(folio), float(units)) for folio, units in stored_rows
+            }
+            parsed, restatements_suppressed = suppress_placeholder_restatements(
+                parsed, resolved_positions
+            )
+            if restatements_suppressed:
+                _slog.info("cas.placeholder.restatement_suppressed", count=restatements_suppressed)
+
         # Fix 1 (2026-07-04 placeholder-ISIN ledger leak): a holding still keyed on an unresolved
         # CAMS:<code> placeholder must never produce a ledger row — it still gets a holdings row
         # (B3 snapshot-fallback below) + a statement checkpoint, both keyed off (isin, folio).
@@ -872,9 +905,14 @@ async def _project_and_write_holdings(
 
     Read the portfolio's full ledger (just appended), project current holdings (units = Σ unit deltas;
     invested = Σ net capital invested, plan §13), and UPSERT each parsed holding using the projected
-    values WHERE the ledger has txns for it. A holding without ledger txns (txn-less CDSL / summary CAS)
-    stays snapshot-derived from the CAS close balance/cost (plan §32 step 2 'legacy'). UPSERT, never
-    truncate, so a partial/older CAS can't erase funds from a prior upload (§22).
+    values WHERE the ledger has txns for it. A holding without ledger txns (txn-less CDSL / summary CAS,
+    or a KFin holdings-only source with no transaction section — S3) stays snapshot-derived: its
+    `invested_amount` is the STATED basis from the statement itself (`ParsedHolding.cost`, when the
+    source printed one) rather than NULL, so `portfolio.summary`'s invested/cost_value totals cover the
+    WHOLE portfolio, not just its ledger-backed holdings (Fix 2a, 2026-07-04). A ledger-backed holding
+    keeps the ledger's net-CASH basis (Σ purchases − Σ redemptions) instead — both are the user's own
+    statement facts, just from different evidence; neither is invented. UPSERT, never truncate, so a
+    partial/older CAS can't erase funds from a prior upload (§22).
 
     Runs under the caller's rls_user_session → RLS scopes the ledger read and WITH-CHECK scopes the
     holding write to the uploader (user_id is the uploader, never the file). avg_cost_nav stays the

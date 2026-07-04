@@ -339,3 +339,36 @@ async def test_units_gap_falls_back_to_amc_close(db_session, app_session):
     assert row.invested_amount == Decimal("2000"), f"gap → AMC cost on fallback; got {row.invested_amount}"
 
     await app_session.rollback()
+
+
+async def test_ledgerless_holding_gets_stated_invested_not_null(db_session, app_session):
+    """Fix 2a (2026-07-04 XIRR-basis-break retest): a holding with NO ledger txns at ALL (a
+    holdings-only source, e.g. a KFin consolidated PDF with no transaction section) must write
+    invested_amount from the statement's stated cost (ParsedHolding.cost) — never NULL — so
+    portfolio.summary's invested/cost_value totals cover this holding too, not just the
+    ledger-backed ones."""
+    uid = await _seed_user(db_session, "b3-ledgerless@test.dev")
+    pid = await _seed_portfolio(db_session, uid)
+
+    parsed = [_holding([], isin="INF_LEDGERLESS", units=50.0, cost=50_000.0)]
+
+    await set_rls_user(app_session, uid)
+    rows = build_cas_ledger_rows(parsed, user_id=uid, portfolio_id=pid)
+    assert rows == [], "txn-less holding must produce zero ledger rows"
+
+    from dhanradar.tasks.mf import _project_and_write_holdings
+    await _project_and_write_holdings(app_session, uid, parsed, pid)
+
+    await set_rls_user(app_session, uid)
+    row = (
+        await app_session.execute(
+            text("SELECT units, invested_amount FROM mf.mf_user_holdings WHERE portfolio_id = :p"),
+            {"p": pid},
+        )
+    ).one()
+    assert row.units == Decimal("50")
+    assert row.invested_amount == Decimal("50000.00"), (
+        f"ledger-less holding must write the stated cost as invested, never NULL; got {row.invested_amount}"
+    )
+
+    await app_session.rollback()
