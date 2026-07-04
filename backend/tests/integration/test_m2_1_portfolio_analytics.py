@@ -10,7 +10,7 @@ Mirrors test_c1_c2_portfolio_concepts.py / test_c3_portfolio_risk.py (the proven
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -196,12 +196,16 @@ async def _seed_fund(db_session, isin: str, sebi_category: str, amc: str) -> Non
         ),
         {"i": isin, "n": f"Fund {isin}", "sc": sebi_category, "amc": amc},
     )
+    # ADR-0039: load_portfolio_read_model's NAV lookup is now bounded to the last 30 days — keep
+    # this RECENT so current_nav stays the live NAV (100.0), matching this file's
+    # total_value==4000.0 assertions (a fixed calendar date would eventually fall outside the
+    # bound and fall back to avg_cost_nav=90.0, giving 3600.0 instead).
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 100.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"i": isin, "d": date(2026, 3, 31)},
+        {"i": isin, "d": date.today() - timedelta(days=1)},
     )
 
 

@@ -431,6 +431,80 @@ describe('HeroSection — CAMS-parity chips', () => {
 });
 
 // ---------------------------------------------------------------------------
+// HeroSection — ADR-0039 hero data-integrity hints (2026-07-04)
+// ---------------------------------------------------------------------------
+
+describe('HeroSection — ADR-0039 coverage/basis hints', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderHero(envelope: unknown) {
+    vi.mocked(usePortfolioSummaryById).mockReturnValue({
+      data: envelope, isLoading: false, isError: false, error: null, refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioValueSeries).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, refetch: vi.fn(),
+    } as any);
+    vi.mocked(useNiftyCloseSeries).mockReturnValue({ data: undefined, isLoading: false } as any);
+    return render(<HeroSection portfolioId="pid" />, { wrapper });
+  }
+
+  const BASE_FIXTURE = {
+    ...SUMMARY_PRESENT,
+    data: { ...SUMMARY_PRESENT.data, wt_avg_days: 347 },
+  };
+
+  it('Invested hint appends "some funds missing cost" when invested_missing_count > 0', () => {
+    renderHero({ ...BASE_FIXTURE, data: { ...BASE_FIXTURE.data, invested_missing_count: 2 } });
+    expect(screen.getByText('incl. reinvested payouts · some funds missing cost')).toBeDefined();
+  });
+
+  it('Invested hint stays plain when invested_missing_count is 0 or absent', () => {
+    renderHero({ ...BASE_FIXTURE, data: { ...BASE_FIXTURE.data, invested_missing_count: 0 } });
+    expect(screen.getByText('incl. reinvested payouts')).toBeDefined();
+    expect(screen.queryByText(/missing cost/)).toBeNull();
+  });
+
+  it('Avg Days hint appends coverage when wt_avg_days_coverage_pct < 100', () => {
+    renderHero({ ...BASE_FIXTURE, data: { ...BASE_FIXTURE.data, wt_avg_days_coverage_pct: 37 } });
+    expect(screen.getByText('capital-weighted · covers 37% of value')).toBeDefined();
+  });
+
+  it('Avg Days hint stays plain when wt_avg_days_coverage_pct is null', () => {
+    renderHero({ ...BASE_FIXTURE, data: { ...BASE_FIXTURE.data, wt_avg_days_coverage_pct: null } });
+    expect(screen.getByText('capital-weighted')).toBeDefined();
+    expect(screen.queryByText(/covers/)).toBeNull();
+  });
+
+  it('Day Change hint appends coverage when day_change_coverage_pct < 100 (no Nifty data)', () => {
+    renderHero({
+      ...BASE_FIXTURE,
+      data: {
+        ...BASE_FIXTURE.data,
+        day_change: 100,
+        day_change_pct: 1.0,
+        day_change_as_of: '2026-07-04',
+        day_change_coverage_pct: 37,
+      },
+    });
+    expect(screen.getByText(/As of 4 Jul 2026 · covers 37% of value/)).toBeDefined();
+  });
+
+  it('Day Change hint stays plain when day_change_coverage_pct is null', () => {
+    renderHero({
+      ...BASE_FIXTURE,
+      data: {
+        ...BASE_FIXTURE.data,
+        day_change: 100,
+        day_change_pct: 1.0,
+        day_change_as_of: '2026-07-04',
+        day_change_coverage_pct: null,
+      },
+    });
+    expect(screen.queryByText(/covers/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HeroSection — owner-name pill (hero polish, 2026-07-04)
 // ---------------------------------------------------------------------------
 

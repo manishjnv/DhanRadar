@@ -8,7 +8,7 @@ Pure tests prove the #2-safe payload builders, the confidence-band rule, and the
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -148,12 +148,16 @@ async def _seed_portfolio_with_holding(db_session, uid: str) -> str:
             " ON CONFLICT (isin) DO NOTHING"
         )
     )
+    # ADR-0039: load_portfolio_read_model's NAV lookup is now bounded to the last 30 days (a stale
+    # NAV falls back to avg_cost_nav = 95.0, not 120.0) — this must stay a RECENT date, not a fixed
+    # calendar date that eventually rots, so current_nav stays live_nav (120.0) as the test intends.
+    nav_date = date.today() - timedelta(days=1)
     await db_session.execute(
         text(
             "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES ('INF200K01VT2', :d, 120.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"d": date(2026, 3, 31)},
+        {"d": nav_date},
     )
     await db_session.execute(
         text(
@@ -161,7 +165,7 @@ async def _seed_portfolio_with_holding(db_session, uid: str) -> str:
             " invested_amount, avg_cost_nav, source, as_of_date) VALUES (:u, :p, 'INF200K01VT2', '777',"
             " 10.5, 1000.00, 95.0, 'cas', :d)"
         ),
-        {"u": uid, "p": str(pid), "d": date(2026, 3, 31)},
+        {"u": uid, "p": str(pid), "d": nav_date},
     )
     # A score WITH a raw unified_score=87 — it must never reach either response.
     await db_session.execute(
