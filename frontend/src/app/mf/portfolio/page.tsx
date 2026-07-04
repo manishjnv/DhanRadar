@@ -94,21 +94,41 @@ function PortfolioView() {
             </>
           )}
         </nav>
-        {/* State toggle */}
-        <div className="flex rounded-xl border border-line bg-surface-2 p-1">
-          {(['empty', 'dash'] as PageState[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setPageState(s)}
-              className={cn(
-                'whitespace-nowrap rounded-lg px-3 py-1.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-none',
-                pageState === s ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
-              )}
-            >
-              {s === 'empty' ? 'Upload CAS' : 'Dashboard'}
-            </button>
-          ))}
+        {/* Actions + state toggle — ONE row (founder 2026-07-04: Refresh/Report/Export/Auto Sync
+            share the header row with Upload CAS/Dashboard to save vertical space). */}
+        <div className="flex flex-wrap items-center gap-2" data-testid="header-toolbar">
+          {pageState === 'dash' && (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => {/* ponytail: refresh stub — no backend call wired yet */}}>
+                ↻ Refresh
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => {/* ponytail: report stub */}}>
+                Generate Report
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => {/* ponytail: export stub */}}>
+                Export
+              </Button>
+              <Button variant="ghost" size="sm" disabled>
+                Auto Sync
+                <span className="ml-1 rounded-[5px] bg-violet px-1 py-px text-[8px] font-bold uppercase text-white">Soon</span>
+              </Button>
+            </>
+          )}
+          <div className="flex rounded-xl border border-line bg-surface-2 p-1">
+            {(['empty', 'dash'] as PageState[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setPageState(s)}
+                className={cn(
+                  'whitespace-nowrap rounded-lg px-3 py-1.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-none',
+                  pageState === s ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+                )}
+              >
+                {s === 'empty' ? 'Upload CAS' : 'Dashboard'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -136,22 +156,7 @@ function PortfolioView() {
       {/* ── DASHBOARD STATE ───────────────────────────────────────────────────── */}
       {pageState === 'dash' && (
         <div className="flex flex-col gap-6">
-          {/* In-flow header toolbar — actions in page flow, never floating (ui-system §header) */}
-          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="header-toolbar">
-            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: refresh stub — no backend call wired yet */}}>
-              ↻ Refresh
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: report stub */}}>
-              Generate Report
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => {/* ponytail: export stub */}}>
-              Export
-            </Button>
-            <Button variant="ghost" size="sm" disabled>
-              Auto Sync
-              <span className="ml-1 rounded-[5px] bg-violet px-1 py-px text-[8px] font-bold uppercase text-white">Soon</span>
-            </Button>
-          </div>
+          {/* Header toolbar moved into the breadcrumb row above (founder 2026-07-04, one-row header). */}
 
           {/* S1 Hero */}
           <HeroSection portfolioId={portfolioId} />
