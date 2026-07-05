@@ -177,6 +177,36 @@ async def portfolio_transactions(
     )
 
 
+@router.get("/portfolio/{portfolio_id}/fit")
+async def portfolio_fit(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    isin: Annotated[str, Query(pattern="^[A-Z0-9]{12}$")],
+) -> dict:
+    """`fund.fit` (item 1) — how the VIEWED fund (`isin`, required) relates to the
+    user's own holdings in `portfolio_id`: category allocation already held in that
+    fund's category, and a portfolio-value-weighted stock-level overlap with the
+    viewed fund's disclosed holdings. OBSERVATION ONLY — never a verdict, never a
+    suggestion (§14.3 compliance reframe; see insights.service._portfolio_fit_observation).
+    Mirrors the overlap route's auth/IDOR pattern: cookie-auth only (401 anonymous),
+    owner-scoped (404 for another user's portfolio_id, a malformed one, or an unknown
+    portfolio). Cold-start / no holdings / no disclosure data on either side -> valid
+    200 with nulled figures, never 404 for those cases.
+    """
+    _require_auth(user)
+    try:
+        payload = await service.get_portfolio_fit(db, user.user_id, portfolio_id, isin)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    return serialize_concept(
+        "fund.fit",
+        payload,
+        RequestCtx(tier=user.tier),
+        source="cas",
+    )
+
+
 @router.get("/portfolio/{portfolio_id}/summary")
 async def portfolio_summary(
     portfolio_id: str,

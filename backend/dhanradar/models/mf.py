@@ -67,6 +67,10 @@ class MfFund(Base):
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     sub_category: Mapped[str | None] = mapped_column(Text, nullable=True)
     aum_crore: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # Disclosure-month provenance for aum_crore (the SEBI monthly portfolio disclosure's
+    # own as_of_month, never "today" — §8.4 no-fabrication: the value's freshness must be
+    # traceable to the source file, not the ingestion run time). Migration <TBD>.
+    aum_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     expense_ratio_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     exit_load_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     exit_load_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

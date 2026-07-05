@@ -3755,12 +3755,27 @@ def _extract_sebi_row(
     # Strip display-only instrument-type prefix (confirmed on UTI's "EQ - " rows).
     constituent_name = _INSTRUMENT_PREFIX_RE.sub("", constituent_name).strip() or constituent_name
 
-    # Skip total/sub-total rows.
-    if any(
-        kw in constituent_name.lower()
-        for kw in ("total", "sub-total", "grand total", "net assets")
-    ):
-        return None
+    # Skip total/sub-total rows AS HOLDINGS -- but keep them in the returned dict
+    # (flagged is_total_row) when they carry a market_value_cr, so the caller can
+    # find the scheme's overall AUM. Root-cause fix 2026-07-05: total-labeled rows
+    # were previously dropped here unconditionally, silently discarding the very
+    # rows that carry AUM -- the real reason `mf_funds.aum_crore` stayed 100% NULL
+    # in prod despite `_upsert_constituents` already having AUM-detection code.
+    # Deliberately NARROW: only "grand total" / "net assets" -- a bare "total"
+    # match is unsafe, since several AMCs (UTI) label EVERY asset-class subtotal
+    # "TOTAL:(a) Listed..." / "TOTAL: EQUITY AND EQUITY RELATED" / "TOTAL: MONEY
+    # MARKET INSTRUMENTS" etc. within the SAME table shape as real holdings --
+    # broadening this to bare "total" was tried and reverted 2026-07-05 after it
+    # caused a sub-category subtotal (not the scheme's true AUM) to be written as
+    # if it were the grand total for UTI schemes (verified against a real UTI
+    # file: the scheme's actual "Total Net Assets" row lives in a differently
+    # shaped summary block that isn't captured by this row-level parse at all,
+    # so UTI schemes correctly get no aum_map entry from this source rather than
+    # a wrong one). NIPPON's literal "GRAND TOTAL" row IS in the same table shape
+    # as real holdings and is captured correctly by this narrower match.
+    is_total_row = any(
+        kw in constituent_name.lower() for kw in ("grand total", "net assets")
+    )
 
     isin_col = _get(["isin", "isin code"])
 
@@ -3781,6 +3796,14 @@ def _extract_sebi_row(
             "value (rs. in lakhs)",
             "value (lakhs)",
             "mkt value",
+            # NIPPON debt-scheme disclosures header this column "Market/Fair Value
+            # ( Rs. in Lacs)" (embedded newline, "/fair" breaks the "market value"
+            # substring match above) -- found 2026-07-05 fixing the grand-total AUM
+            # extraction; without this the column never resolves for ANY row in
+            # this file, not only the grand-total one.
+            "market/fair value",
+            # UTI hyphenates: "MARKET-VALUE" (found 2026-07-05, same fix).
+            "market-value",
         ]
     )
     market_value_cr: float | None = None
@@ -3795,10 +3818,14 @@ def _extract_sebi_row(
     # always carries an ISIN; a label-only row with no ISIN and no number is
     # pure section text, not a holding. Name-pattern backstop second, for
     # headers that DO carry the section's own subtotal weight/value (the
-    # INF789F01WY2 case — see _SECTION_HEADER_RE docstring above).
+    # INF789F01WY2 case — see _SECTION_HEADER_RE docstring above). A total-labeled
+    # row that DOES carry a market_value_cr is deliberately let through here (not
+    # a real holding, but needed downstream for the AUM max-value heuristic above).
     if not isin_col and weight_pct is None and market_value_cr is None:
         return None
-    if _SECTION_HEADER_RE.search(constituent_name):
+    if _SECTION_HEADER_RE.search(constituent_name) and not (
+        is_total_row and market_value_cr is not None
+    ):
         return None
 
     sector = _get(["sector", "industry", "industry/sector"])
@@ -3817,6 +3844,7 @@ def _extract_sebi_row(
         "market_value_cr": market_value_cr,
         "as_of_month": effective_month,
         "source_amc": amc_name,
+        "is_total_row": is_total_row,
     }
 
 
@@ -3920,22 +3948,23 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
 
     # Resolve ISINs and split into constituent rows vs aum updates.
     constituent_batch: list[dict] = []
-    # Map isin → net_assets_cr for aum updates (from "Total" / "Net Assets" rows in file).
-    aum_map: dict[str, float] = {}
+    # Map isin -> (net_assets_cr, as_of_month) for aum updates. Takes the MAX
+    # market_value_cr among all is_total_row rows per scheme (narrowed to
+    # "grand total" / "net assets" only -- see _extract_sebi_row's is_total_row
+    # docstring); as_of_month is carried through so aum_as_of reflects the
+    # disclosure file's own month, never the ingestion run time (§8.4).
+    aum_map: dict[str, tuple[float, date | None]] = {}
 
-    # Detect AUM from rows where constituent_name signals a net-assets total.
-    # (These are rows like "Net Assets" or "Total" with a market_value_cr.)
     for row in parsed_rows:
         sname = row.get("scheme_name")
         isin = scheme_isin_map.get(sname or "")
         if not isin:
             continue
 
-        cname = row.get("constituent_name", "")
-        if any(kw in cname.lower() for kw in ("net assets", "total net assets")):
+        if row.get("is_total_row"):
             mv = row.get("market_value_cr")
-            if mv is not None and sname:
-                aum_map[isin] = mv
+            if mv is not None and mv > aum_map.get(isin, (-1.0, None))[0]:
+                aum_map[isin] = (mv, row.get("as_of_month"))
             continue
 
         if row.get("as_of_month") is None:
@@ -3944,7 +3973,7 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
         constituent_batch.append(
             {
                 "isin": isin,
-                "constituent_name": cname,
+                "constituent_name": row.get("constituent_name", ""),
                 "as_of_month": row["as_of_month"],
                 "constituent_isin": row.get("constituent_isin"),
                 "sector": row.get("sector"),
@@ -4008,10 +4037,13 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
         await db.commit()
 
         # Update aum_crore from per-scheme net-assets (§8.4 — genuine scheme-level data only).
-        for isin, net_assets_cr in aum_map.items():
+        for isin, (net_assets_cr, as_of_month) in aum_map.items():
             await db.execute(
-                sa_text("UPDATE mf.mf_funds SET aum_crore = :v WHERE isin = :isin"),
-                {"v": net_assets_cr, "isin": isin},
+                sa_text(
+                    "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :as_of "
+                    "WHERE isin = :isin"
+                ),
+                {"v": net_assets_cr, "as_of": as_of_month, "isin": isin},
             )
             aum_updates += 1
         if aum_map:

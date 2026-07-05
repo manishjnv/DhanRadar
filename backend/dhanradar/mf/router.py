@@ -992,6 +992,36 @@ async def fund_composition(
     )
 
 
+@router.get("/fund/{isin}/flows")
+async def fund_flows(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.flows` (item 2) — trailing 12-month CATEGORY-level net-flow trend from AMFI's
+    monthly category-flow report (mf.mf_category_flows), keyed on this fund's own
+    scheme_category. CATEGORY-LEVEL ONLY, never this fund's own money flows — every
+    consumer MUST frame the payload as "funds in this category" (§14.3). A fund with no
+    category-flow rows yet (or no category) returns an empty points list, still 200
+    (no-suppress, §14.1).
+    """
+    from dhanradar.mf.fund_read import get_fund_flows
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_flows(db, isin)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept(
+        "fund.flows",
+        payload,
+        RequestCtx(tier=user.tier),
+        as_of=payload["as_of_month"],
+        source="amfi",
+    )
+
+
 @router.get("/fund/{isin}/people")
 async def fund_people(
     db: Annotated[AsyncSession, Depends(get_db)],

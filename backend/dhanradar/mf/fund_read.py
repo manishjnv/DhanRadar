@@ -29,6 +29,7 @@ from dhanradar.mf.risk import (
 # threshold, one place (mirrors the row-level guard already live in fund_explorer_list).
 from dhanradar.mf.router import _MIN_NAV_POINTS_1Y, _MIN_NAV_POINTS_3Y
 from dhanradar.models.mf import (
+    MfCategoryFlows,
     MfCategoryStats,
     MfFund,
     MfFundConstituent,
@@ -37,6 +38,7 @@ from dhanradar.models.mf import (
     MfFundMetrics,
     MfFundRanks,
     MfNavHistory,
+    MfStockCapClassification,
 )
 
 
@@ -130,6 +132,11 @@ async def get_fund_head(session: AsyncSession, isin: str) -> dict | None:
         # unranked/segregated fund or an insufficient_data read (no rateable band).
         "confidence_band": rank_row.confidence_band if rank_row else None,
         "amc_level_aum_crore": None,  # W3 field — source-blocked (B67/ADR-0035)
+        # Per-scheme AUM extracted from the SEBI monthly portfolio disclosure's
+        # scheme-level grand-total row (never AMC-level; ADR-0035). aum_as_of is
+        # that disclosure file's own as_of_month, not the ingestion run time.
+        "aum_crore": float(fund.aum_crore) if fund.aum_crore is not None else None,
+        "aum_as_of": fund.aum_as_of.isoformat() if fund.aum_as_of else None,
     }
 
 
@@ -510,6 +517,14 @@ async def get_fund_composition(session: AsyncSession, isin: str) -> dict | None:
         return {
             "holdings": [],
             "sectors": [],
+            "cap_mix": {
+                "large_pct": None,
+                "mid_pct": None,
+                "small_pct": None,
+                "unclassified_pct": None,
+                "basis": "top_holdings_weight",
+                "as_of_period": None,
+            },
             "as_of_month": None,
             "coverage": {"holdings_count": 0, "weight_covered_pct": None},
         }
@@ -559,11 +574,116 @@ async def get_fund_composition(session: AsyncSession, isin: str) -> dict | None:
     if weight_covered_pct is not None and weight_covered_pct > 105:
         weight_covered_pct = None
 
+    # cap_mix (item 3): join the SAME top-holdings rows' constituent_isin (equity ISIN,
+    # INE... prefix — null for debt/cash rows, which naturally fall into unclassified)
+    # against AMFI's half-yearly stock_cap_classification. Percentages are of the
+    # top-holdings weight actually classified — never renormalized/scaled to 100%
+    # (§8.4 no-fabrication: a fund whose top-10 covers 60% of AUM shows cap_mix that
+    # sums to <=60%, not 100%).
+    equity_isins = [r.constituent_isin for r in rows if r.constituent_isin]
+    cap_map: dict[str, str] = {}
+    as_of_period: str | None = None
+    if equity_isins:
+        as_of_period = (
+            await session.execute(select(func.max(MfStockCapClassification.effective_period)))
+        ).scalar_one_or_none()
+        if as_of_period:
+            cap_rows = (
+                await session.execute(
+                    select(
+                        MfStockCapClassification.stock_isin, MfStockCapClassification.cap_class
+                    ).where(
+                        MfStockCapClassification.effective_period == as_of_period,
+                        MfStockCapClassification.stock_isin.in_(equity_isins),
+                    )
+                )
+            ).all()
+            cap_map = {r.stock_isin: r.cap_class for r in cap_rows}
+
+    cap_totals = {"Large Cap": 0.0, "Mid Cap": 0.0, "Small Cap": 0.0}
+    unclassified_pct = 0.0
+    for r in rows:
+        if r.weight_pct is None:
+            continue
+        wt = float(r.weight_pct)
+        cls = cap_map.get(r.constituent_isin) if r.constituent_isin else None
+        if cls in cap_totals:
+            cap_totals[cls] += wt
+        else:
+            unclassified_pct += wt
+
+    cap_mix = {
+        "large_pct": round(cap_totals["Large Cap"], 2),
+        "mid_pct": round(cap_totals["Mid Cap"], 2),
+        "small_pct": round(cap_totals["Small Cap"], 2),
+        "unclassified_pct": round(unclassified_pct, 2),
+        "basis": "top_holdings_weight",
+        "as_of_period": as_of_period,
+    }
+
     return {
         "holdings": holdings,
         "sectors": sectors,
+        "cap_mix": cap_mix,
         "as_of_month": latest_month.isoformat(),
         "coverage": {"holdings_count": len(rows), "weight_covered_pct": weight_covered_pct},
+    }
+
+
+_FUND_FLOWS_MONTHS = 12
+_FUND_FLOWS_SCHEME_TYPE = "Open ended Schemes"
+
+
+async def get_fund_flows(session: AsyncSession, isin: str) -> dict | None:
+    """`fund.flows` (item 2) — trailing 12-month CATEGORY-level net-flow trend from
+    mf.mf_category_flows, keyed on the fund's own AMFI scheme_category (mf_funds.category
+    — the same raw AMFI taxonomy string mf_category_flows.scheme_category is written from;
+    see mf_scheme_master.py / mf_category_flows.py source docstrings).
+
+    CATEGORY-LEVEL ONLY — never the fund's own money flows (§8.4: this source cannot be
+    used to estimate or back out per-scheme flows). Every consumer of this payload MUST
+    frame it as "funds in this category" — never "this fund's flows" (compliance reframe,
+    FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §14.3). Returns None only if the fund itself
+    doesn't exist; a fund with no category or no category-flow rows yet gets the same
+    shape with an empty points list (no-suppress, §14.1).
+    """
+    fund = await session.get(MfFund, isin)
+    if fund is None:
+        return None
+
+    if not fund.category:
+        return {"points": [], "scheme_category": None, "as_of_month": None}
+
+    rows = (
+        (
+            await session.execute(
+                select(MfCategoryFlows)
+                .where(
+                    MfCategoryFlows.scheme_category == fund.category,
+                    MfCategoryFlows.scheme_type == _FUND_FLOWS_SCHEME_TYPE,
+                )
+                .order_by(MfCategoryFlows.period_month.desc())
+                .limit(_FUND_FLOWS_MONTHS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rows = sorted(rows, key=lambda r: r.period_month)  # chronological ascending for the chart
+
+    points = [
+        {
+            "period_month": r.period_month.isoformat(),
+            "net_flow_cr": float(r.net_flow_cr) if r.net_flow_cr is not None else None,
+            "net_aum_cr": float(r.net_aum_cr) if r.net_aum_cr is not None else None,
+        }
+        for r in rows
+    ]
+
+    return {
+        "points": points,
+        "scheme_category": fund.category,
+        "as_of_month": rows[-1].period_month.isoformat() if rows else None,
     }
 
 

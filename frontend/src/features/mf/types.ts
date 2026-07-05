@@ -235,6 +235,11 @@ export interface FundHead {
   confidence_band: ConfidenceBand | null;
   /** W3 field — source-blocked (B67/ADR-0035), always null today. */
   amc_level_aum_crore: number | null;
+  /** Per-scheme AUM from the SEBI monthly portfolio disclosure's grand-total row
+   * (never AMC-level; ADR-0035). Null until that scheme's file has been ingested. */
+  aum_crore: number | null;
+  /** Disclosure file's own as_of_month for aum_crore — never the ingestion run time. */
+  aum_as_of: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,11 +362,52 @@ export interface FundSectorWeight {
   name: string;
   weight_pct: number;
 }
+/** Market-cap mix of the SAME top-holdings rows above, joined against AMFI's
+ * half-yearly stock classification. Percentages are of top-holdings weight
+ * actually classified — they do NOT renormalize to 100 (a fund whose top-10
+ * covers 60% of AUM shows a cap_mix that sums to <=60%, not 100). */
+export interface FundCapMix {
+  large_pct: number | null;
+  mid_pct: number | null;
+  small_pct: number | null;
+  unclassified_pct: number | null;
+  basis: 'top_holdings_weight';
+  as_of_period: string | null;
+}
 export interface FundComposition {
   holdings: FundHolding[];
   sectors: FundSectorWeight[];
+  cap_mix: FundCapMix;
   as_of_month: string | null;
   coverage: { holdings_count: number; weight_covered_pct: number | null };
+}
+
+/** GET /api/v1/mf/fund/{isin}/flows — item 2. CATEGORY-LEVEL ONLY: every point is the
+ * trailing-12-month AMFI category-flow figure for funds sharing this fund's scheme
+ * category, NEVER this fund's own money flow. Any UI copy MUST say "funds in this
+ * category" — never imply the specific fund's own flows (compliance §14.3). */
+export interface FundFlowPoint {
+  period_month: string;
+  net_flow_cr: number | null;
+  net_aum_cr: number | null;
+}
+export interface FundFlows {
+  points: FundFlowPoint[];
+  scheme_category: string | null;
+  as_of_month: string | null;
+}
+
+/** GET /api/v1/portfolio/{portfolio_id}/fit?isin=... — item 1. Personal, auth-required.
+ * OBSERVATION ONLY: overlap_pct and category_allocation_pct are independent facts,
+ * never combined into a verdict. `observation` is server-generated factual copy —
+ * render as-is, never paraphrase into advisory language. */
+export interface FundFit {
+  portfolio_id: string;
+  viewed_isin: string;
+  overlap_pct: number | null;
+  category_allocation_pct: number | null;
+  data_completeness: 'empty' | 'no_constituent_data' | 'constituent_data';
+  observation: string;
 }
 
 /** GET /api/v1/mf/fund/{isin}/people */
