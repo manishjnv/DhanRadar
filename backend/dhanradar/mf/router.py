@@ -27,7 +27,7 @@ import logging
 import os
 import tempfile
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -1076,10 +1076,11 @@ async def fund_sip(
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
     # amount/years MENU VALUES ARE PROVISIONAL DEFAULTS — founder decision pending
-    # (§18.4). Literal-typed so an out-of-menu value 422s automatically, keeping
-    # the Redis cache-key space bounded to the 3×3 menu (§10.4).
-    amount: Annotated[Literal[1000, 5000, 10000], Query()] = 5000,
-    years: Annotated[Literal[1, 3, 5], Query()] = 5,
+    # (§18.4). int + explicit menu check (NOT Literal[int]: pydantic v2 does not
+    # coerce string query params into int literals, so ?amount=5000 422'd —
+    # found live 2026-07-05). Menu keeps the cache-key space bounded (§10.4).
+    amount: Annotated[int, Query()] = 5000,
+    years: Annotated[int, Query()] = 5,
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
 ) -> dict:
     """`fund.sip_illustration` (W2 §10.4) — historical SIP XIRR illustration for a
@@ -1089,6 +1090,12 @@ async def fund_sip(
     """
     from dhanradar.mf.fund_read import get_fund_sip
     from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    if amount not in (1000, 5000, 10000) or years not in (1, 3, 5):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="amount must be one of 1000/5000/10000 and years one of 1/3/5",
+        )
 
     payload = await get_fund_sip(db, isin, amount, years)
     if payload is None:
