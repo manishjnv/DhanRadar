@@ -193,6 +193,17 @@ jobs:
           # stays on so any OTHER error in the init still fails the job.
           psql -h localhost -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
             -f infra/postgres/init/01_init.sql
+      - name: Check migration collisions
+        if: steps.filter.outputs.run == 'true'
+        working-directory: backend
+        # --pr-check fetches the LIVE tip of origin/main itself (a shallow,
+        # targeted `git fetch origin main --depth=1` inside the script) rather
+        # than relying on the checkout step's history — this is the gap that
+        # caused two same-day revision-id collisions (see the script's module
+        # docstring / docs/rca/README.md). Runs BEFORE `alembic upgrade head`
+        # so a colliding PR fails fast with an actionable message instead of
+        # alembic's generic "Multiple head revisions" error.
+        run: python scripts/check_migration_collisions.py --pr-check --base-ref origin/main
       - name: alembic upgrade head
         if: steps.filter.outputs.run == 'true'
         working-directory: backend

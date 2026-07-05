@@ -14,6 +14,11 @@ Guards:
   4. No advisory verbs as usage in code (non-neg #2 — educational labels only).
   5. No obvious committed secrets.
   6. No pooled-engine session creation outside db.py (SEV2 NullPool invariant).
+  7. Alembic revision graph is locally consistent — unique revision ids, single
+     head (Check A of backend/scripts/check_migration_collisions.py; the
+     network-dependent PR-freshness Check B runs in CI's `migrations` job
+     instead, since it needs a fresh `git fetch` this fast local guard
+     shouldn't do).
 """
 
 from __future__ import annotations
@@ -286,6 +291,32 @@ if _UI_DIR.exists():
                     "'no data' state (no-suppress rule). Add 'no-suppress-ok: <reason>' if "
                     "intentional, or grandfather it in scripts/no_suppress_baseline.txt."
                 )
+
+# 10. Alembic migration revision-graph integrity (Check A only) -----------
+# The network/git-dependent PR-freshness comparison (Check B — did a new
+# migration's number collide with something merged into main after this
+# branch diverged) needs a fresh `git fetch` and is deliberately NOT run here;
+# it runs in CI's `migrations` job via `--pr-check` instead. This guard only
+# re-runs the pure local parsing/graph checks so a broken chain is caught on
+# every local dev run, not just in that dedicated CI job.
+import importlib.util as _importlib_util  # noqa: E402 (local, guard-scoped import)
+import sys as _sys  # noqa: E402 (local, guard-scoped import)
+
+_MIGRATION_GUARD_PATH = ROOT / "backend" / "scripts" / "check_migration_collisions.py"
+if _MIGRATION_GUARD_PATH.exists():
+    _mc_spec = _importlib_util.spec_from_file_location(
+        "check_migration_collisions", _MIGRATION_GUARD_PATH
+    )
+    if _mc_spec is not None and _mc_spec.loader is not None:
+        _mc = _importlib_util.module_from_spec(_mc_spec)
+        # dataclass() needs the module registered in sys.modules before exec.
+        _sys.modules[_mc_spec.name] = _mc
+        _mc_spec.loader.exec_module(_mc)
+        _migrations = _mc.load_migrations(_mc.VERSIONS_DIR)
+        for _f in _mc.check_unique_revisions(_migrations):
+            fails.append(f"alembic migrations: {_f}")
+        for _f in _mc.check_single_head(_migrations):
+            fails.append(f"alembic migrations: {_f}")
 
 # Result --------------------------------------------------------------------
 if fails:
