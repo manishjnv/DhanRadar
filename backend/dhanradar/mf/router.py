@@ -1103,6 +1103,30 @@ async def fund_sip(
     )
 
 
+@router.get("/fund/{isin}/events")
+async def fund_events(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.changes` (W2) — latest <=12 tracked changes for this fund (rank/TER/holding
+    diffs from the nightly `fund_events_refresh` job, FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md
+    §10.6), newest first. Facts only — no advisory verb ever reaches `summary`.
+    """
+    from dhanradar.mf.fund_read import get_fund_events
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_events(db, isin)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    as_of = payload["events"][0]["as_of"] if payload["events"] else None
+    return serialize_concept(
+        "fund.changes", payload, RequestCtx(tier=user.tier), as_of=as_of, source="market"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

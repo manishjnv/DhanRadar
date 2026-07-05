@@ -2082,6 +2082,231 @@ async def _compute_market_ranks_pipeline() -> str:
     return summary
 
 
+@celery_app.task(name="dhanradar.tasks.mf.fund_events_refresh")
+def fund_events_refresh() -> str:
+    """What-Changed diff engine (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.6, §17 W2).
+
+    Runs nightly at 01:15 IST, after compute_market_ranks (01:00). Diffs the two latest
+    `mf_fund_ranks.as_of_date` rows (rank_change), the last two `expense_ratio_history`
+    rows per isin (ter_change), and the two latest `mf_fund_constituents.as_of_month`
+    snapshots (holding_change), upserting typed events into `mf_fund_events`. Idempotent:
+    re-running upserts on (isin, event_type, as_of), never duplicates.
+    """
+    try:
+        return asyncio.run(_fund_events_refresh_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("fund_events_refresh pipeline error")
+        return "fund_events_refresh: failed — see worker logs"
+
+
+async def _fund_events_refresh_pipeline() -> str:
+    from collections import defaultdict
+
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.fund_events import (
+        cap_fund_events,
+        detect_holding_change,
+        detect_rank_change,
+        detect_ter_change,
+    )
+    from dhanradar.models.mf import (
+        MfExpenseRatioHistory,
+        MfFundConstituent,
+        MfFundEvent,
+        MfFundRanks,
+    )
+
+    events_by_isin: dict[str, list[dict]] = defaultdict(list)
+
+    async with TaskSessionLocal() as db:
+        # --- rank_change: the two latest as_of_dates are shared across the whole
+        # nightly compute_market_ranks run, so this is one pair of dates, not per-isin.
+        rank_dates = (
+            (
+                await db.execute(
+                    select(MfFundRanks.as_of_date)
+                    .distinct()
+                    .order_by(MfFundRanks.as_of_date.desc())
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(rank_dates) >= 2:
+            new_date, old_date = rank_dates[0], rank_dates[1]
+            new_ranks = (
+                (await db.execute(select(MfFundRanks).where(MfFundRanks.as_of_date == new_date)))
+                .scalars()
+                .all()
+            )
+            old_ranks = {
+                r.isin: r
+                for r in (
+                    await db.execute(select(MfFundRanks).where(MfFundRanks.as_of_date == old_date))
+                )
+                .scalars()
+                .all()
+            }
+            for new_r in new_ranks:
+                old_r = old_ranks.get(new_r.isin)
+                if old_r is None:
+                    continue
+                ev = detect_rank_change(
+                    old_rank=old_r.rank,
+                    old_total=old_r.total_in_cat,
+                    new_rank=new_r.rank,
+                    new_total=new_r.total_in_cat,
+                )
+                if ev is not None:
+                    events_by_isin[new_r.isin].append(
+                        {
+                            "isin": new_r.isin,
+                            "event_type": "rank_change",
+                            "as_of": new_date,
+                            "payload": ev,
+                        }
+                    )
+
+        # --- ter_change: per-isin last-two rows via a window function (one query,
+        # no N+1 — design principle 1, §2).
+        ter_subq = select(
+            MfExpenseRatioHistory.isin,
+            MfExpenseRatioHistory.ter_pct,
+            MfExpenseRatioHistory.effective_date,
+            func.row_number()
+            .over(
+                partition_by=MfExpenseRatioHistory.isin,
+                order_by=MfExpenseRatioHistory.effective_date.desc(),
+            )
+            .label("rn"),
+        ).subquery()
+        ter_rows = (
+            await db.execute(
+                select(
+                    ter_subq.c.isin, ter_subq.c.ter_pct, ter_subq.c.effective_date, ter_subq.c.rn
+                )
+                .where(ter_subq.c.rn <= 2)
+                .order_by(ter_subq.c.isin, ter_subq.c.rn)
+            )
+        ).all()
+        ter_by_isin: dict[str, list] = defaultdict(list)
+        for row in ter_rows:
+            ter_by_isin[row.isin].append(row)
+        for isin, rows in ter_by_isin.items():
+            if len(rows) < 2:
+                continue
+            newest = next(r for r in rows if r.rn == 1)
+            older = next(r for r in rows if r.rn == 2)
+            ev = detect_ter_change(
+                old_ter=float(older.ter_pct),
+                new_ter=float(newest.ter_pct),
+                effective_date=newest.effective_date,
+            )
+            if ev is not None:
+                events_by_isin[isin].append(
+                    {
+                        "isin": isin,
+                        "event_type": "ter_change",
+                        "as_of": newest.effective_date,
+                        "payload": ev,
+                    }
+                )
+
+        # --- holding_change: the two latest as_of_months are shared across the whole
+        # monthly disclosure ingestion run, same pattern as rank_change above.
+        months = (
+            (
+                await db.execute(
+                    select(MfFundConstituent.as_of_month)
+                    .distinct()
+                    .order_by(MfFundConstituent.as_of_month.desc())
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(months) >= 2:
+            new_month, old_month = months[0], months[1]
+            new_c_rows = (
+                (
+                    await db.execute(
+                        select(MfFundConstituent).where(MfFundConstituent.as_of_month == new_month)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            old_c_rows = (
+                (
+                    await db.execute(
+                        select(MfFundConstituent).where(MfFundConstituent.as_of_month == old_month)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            new_by_isin: dict[str, list[dict]] = defaultdict(list)
+            for r in new_c_rows:
+                new_by_isin[r.isin].append(
+                    {
+                        "name": r.constituent_name,
+                        "weight_pct": float(r.weight_pct) if r.weight_pct is not None else None,
+                    }
+                )
+            old_by_isin: dict[str, list[dict]] = defaultdict(list)
+            for r in old_c_rows:
+                old_by_isin[r.isin].append(
+                    {
+                        "name": r.constituent_name,
+                        "weight_pct": float(r.weight_pct) if r.weight_pct is not None else None,
+                    }
+                )
+            for isin, new_holdings in new_by_isin.items():
+                old_holdings = old_by_isin.get(isin)
+                if not old_holdings:
+                    continue
+                ev = detect_holding_change(old_holdings=old_holdings, new_holdings=new_holdings)
+                if ev is not None:
+                    events_by_isin[isin].append(
+                        {
+                            "isin": isin,
+                            "event_type": "holding_change",
+                            "as_of": new_month,
+                            "payload": ev,
+                        }
+                    )
+
+    # Cap per fund (<=3, one per type — §10.6) THEN flatten for the bulk upsert.
+    all_events: list[dict] = []
+    for isin, evs in events_by_isin.items():
+        all_events.extend(cap_fund_events(evs))
+
+    async with TaskSessionLocal() as db:
+        for i in range(0, len(all_events), _UPSERT_CHUNK):
+            chunk = all_events[i : i + _UPSERT_CHUNK]
+            if not chunk:
+                continue
+            stmt = (
+                insert(MfFundEvent)
+                .values(chunk)
+                .on_conflict_do_update(
+                    index_elements=["isin", "event_type", "as_of"],
+                    set_={"payload": insert(MfFundEvent).excluded.payload},
+                )
+            )
+            await db.execute(stmt)
+        await db.commit()
+
+    summary = f"fund_events_refresh: {len(all_events)} events across {len(events_by_isin)} funds"
+    logger.info(summary)
+    return summary
+
+
 @celery_app.task(name="dhanradar.tasks.mf.monthly_rescore_plus_users")
 def monthly_rescore_plus_users() -> str:
     """Re-score every Plus user's current holdings from the latest NAV without

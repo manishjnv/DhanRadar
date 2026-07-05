@@ -162,16 +162,8 @@ export const HEALTH: { name: string; light: Light; note: string }[] = [
   { name: 'Portfolio Quality', light: 'g', note: 'Broad 250-stock diversification' },
 ];
 
-// ───────────────────────────────────────────────────────────────────────────
-// S8 WHAT CHANGED THIS MONTH (timeline) — score numbers scrubbed to words
-// ───────────────────────────────────────────────────────────────────────────
-export const CHANGES: { tone: 'up' | 'down' | 'info'; html: string; time: string }[] = [
-  { tone: 'up',   html: 'Category <b>rank improved #5 → #3</b> on stronger 1-yr tracking.', time: '4 days ago' },
-  { tone: 'up',   html: '<b>AUM grew ₹230 Cr</b> to ₹1,840 Cr — steady passive inflows.', time: '1 week ago' },
-  { tone: 'info', html: '<b>Healthcare weight rose +1.4%</b> as the index rebalanced.', time: '2 weeks ago' },
-  { tone: 'up',   html: '<b>Momentum strengthened</b> over the trailing six months.', time: '3 weeks ago' },
-  { tone: 'down', html: 'Tracking error ticked up <b>0.18% → 0.21%</b> — still category-best.', time: '3 weeks ago' },
-];
+// S8 WHAT CHANGED THIS MONTH — wired to real data (fund.changes, §17 W2);
+// see WhatChangedSection in sectionsA.tsx, no sample data left to feed.
 
 // ───────────────────────────────────────────────────────────────────────────
 // S9 INVESTMENT SNAPSHOT (KPI grid, all factual)

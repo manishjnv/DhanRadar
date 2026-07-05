@@ -161,6 +161,13 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.compute_market_ranks",
         "schedule": crontab(hour=1, minute=0),
     },
+    # What-Changed diff engine — 01:15 IST; after compute_market_ranks (01:00), before
+    # daily_portfolio_refresh (01:30). Diffs rank/TER/holding-weight month-over-month
+    # into mf_fund_events (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.6, §17 W2).
+    "mf-fund-events-refresh": {
+        "task": "dhanradar.tasks.mf.fund_events_refresh",
+        "schedule": crontab(hour=1, minute=15),
+    },
     # Portfolio daily refresh — 01:30 IST; after NAV (23:30) + metrics (00:15).
     # Rebuilds cached reports from stored holdings + today's NAV so users see a
     # fresh portfolio when they log in without re-uploading their CAS statement.

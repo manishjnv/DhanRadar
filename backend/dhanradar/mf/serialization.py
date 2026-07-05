@@ -159,6 +159,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "fund.health": frozenset({"lights", "as_of"}),
+    "fund.changes": frozenset({"events"}),
 }
 
 

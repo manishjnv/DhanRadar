@@ -9,20 +9,23 @@
  * DhanRadar score.
  *
  * S7 Fund Health (§10.7, W2) is wired to the real `fund.health` envelope
- * (served alongside `fund.analytics` on GET /mf/fund/{isin}/analytics) — every
- * other section here still comes from sampleData exports.
+ * (served alongside `fund.analytics` on GET /mf/fund/{isin}/analytics).
+ * S8 What Changed (§10.6, W2) is wired to the real `fund.changes` envelope
+ * (GET /mf/fund/{isin}/events) — only S4 Portfolio Fit still uses sampleData.
  */
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { useFundAnalytics } from '@/features/mf/api';
+import { useFundAnalytics, useFundEvents } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
 import { DataState, type DataStatus } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Panel, WhatThisMeans, PreviewBadge, TONE_TEXT } from './parts';
-import { FIT, CHANGES } from './sampleData';
+import { FIT } from './sampleData';
+import { relativeTime } from '@/features/mood/relative-time';
+import type { FundEvent } from '@/features/mf/types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S4 — PORTFOLIO FIT
@@ -390,42 +393,68 @@ const CHANGE_DOT: Record<'up' | 'down' | 'info', string> = {
   info: 'bg-royal',
 };
 
-export function WhatChangedSection() {
+/** Tone (up/down/info) from an event's own payload — no separate score, just the
+ * facts it already carries (§17 W2: rank up/down from direction; TER down = positive;
+ * everything else, including holding_change, is neutral). */
+function eventTone(ev: FundEvent): 'up' | 'down' | 'info' {
+  if (ev.event_type === 'rank_change') {
+    const direction = ev.payload.direction;
+    return direction === 'up' ? 'up' : direction === 'down' ? 'down' : 'info';
+  }
+  if (ev.event_type === 'ter_change') {
+    const oldTer = Number(ev.payload.old_ter);
+    const newTer = Number(ev.payload.new_ter);
+    return Number.isFinite(oldTer) && Number.isFinite(newTer) && newTer < oldTer ? 'up' : 'info';
+  }
+  return 'info'; // holding_change — a fact, not a positive/negative signal
+}
+
+export function WhatChangedSection({ isin }: { isin: string }) {
+  const { data: env, isLoading, isError, refetch } = useFundEvents(isin);
+  const events = env?.data?.events ?? [];
+  const status = isLoading ? 'loading' : isError ? 'error' : (events.length ? 'present' : 'empty');
+
   return (
     <Panel className="p-5 sm:p-6">
-      {/* timeline rail: relative container with left border as the line */}
-      <div className="relative pl-[22px]">
-        {/* vertical rail line */}
-        <div
-          aria-hidden="true"
-          className="absolute bottom-[6px] left-[5px] top-[6px] w-[2px] bg-line"
-        />
-
-        {CHANGES.map((c, i) => (
+      <DataState
+        status={status}
+        emptyCopy="No notable changes tracked yet."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+      >
+        {/* timeline rail: relative container with left border as the line */}
+        <div className="relative pl-[22px]">
+          {/* vertical rail line */}
           <div
-            key={i}
-            className={cn('relative pb-4 last:pb-0')}
-          >
-            {/* colored dot */}
-            <span
-              aria-hidden="true"
-              className={cn(
-                'absolute -left-[22px] top-[3px] h-3 w-3 shrink-0 rounded-full border-2 border-surface',
-                CHANGE_DOT[c.tone],
-              )}
-            />
+            aria-hidden="true"
+            className="absolute bottom-[6px] left-[5px] top-[6px] w-[2px] bg-line"
+          />
 
-            {/* text (only <b> tags inside — safe to use dangerouslySetInnerHTML) */}
+          {events.map((ev, i) => (
             <div
-              className="text-small leading-relaxed text-ink-secondary [&_b]:font-semibold [&_b]:text-ink"
-              dangerouslySetInnerHTML={{ __html: c.html }}
-            />
-            <div className="mt-0.5 font-mono text-[11px] text-ink-faint">
-              {c.time}
+              key={i}
+              className={cn('relative pb-4 last:pb-0')}
+            >
+              {/* colored dot */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'absolute -left-[22px] top-[3px] h-3 w-3 shrink-0 rounded-full border-2 border-surface',
+                  CHANGE_DOT[eventTone(ev)],
+                )}
+              />
+
+              {/* plain text — server-templated summary, no HTML injection needed */}
+              <div className="text-small leading-relaxed text-ink-secondary">
+                {ev.summary}
+              </div>
+              <div className="mt-0.5 font-mono text-[11px] text-ink-faint">
+                {relativeTime(ev.as_of)}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </DataState>
     </Panel>
   );
 }

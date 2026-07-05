@@ -429,6 +429,18 @@ export interface FundFactorsResponse {
   signals: DataEnvelope<FundSignals>;
 }
 
+/** GET /api/v1/mf/fund/{isin}/events — What-Changed events (§10.6, §17 W2). */
+export interface FundEvent {
+  event_type: 'rank_change' | 'ter_change' | 'holding_change';
+  as_of: string;
+  /** One plain factual sentence, templated server-side — render verbatim. */
+  summary: string;
+  payload: Record<string, unknown>;
+}
+export interface FundEvents {
+  events: FundEvent[];
+}
+
 /** One item from GET /api/v1/mf/funds/categories */
 export interface FundCategory {
   key: string;           // full SEBI string, e.g. "Equity Scheme - Large Cap Fund"
