@@ -31,6 +31,8 @@ function makeFund(overrides: Partial<FundHead> = {}): FundHead {
     nav_change_pct: 0.3,
     confidence_band: 'high',
     amc_level_aum_crore: null,
+    aum_crore: null,
+    aum_as_of: null,
     ...overrides,
   };
 }
