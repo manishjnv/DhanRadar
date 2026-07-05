@@ -10,6 +10,7 @@ Paths:
   GET /api/v1/portfolio/{portfolio_id}/allocation       (M2.1, A3 envelope)
   GET /api/v1/portfolio/{portfolio_id}/concentration    (M2.1, A3 envelope)
   GET /api/v1/portfolio/{portfolio_id}/diversification  (M2.1, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/transactions     (P1, A3 envelope)
 
 Auth: cookie RS256 JWT only (`current_user_or_anonymous` → 401 if anonymous).
 IDOR: user sees ONLY their own portfolios — service raises ValueError on mismatch → 404.
@@ -23,7 +24,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +50,7 @@ from dhanradar.mf.portfolio_read import (
     load_ledger_flows_by_date,
     load_portfolio_read_model,
     load_portfolio_risk,
+    load_portfolio_transactions,
     load_portfolio_valuation_series,
     load_portfolio_xirr,
     load_windowed_xirr,
@@ -57,6 +59,7 @@ from dhanradar.mf.portfolio_read import (
     risk_advanced_payload,
     risk_payload,
     summary_payload,
+    transactions_payload,
     valuation_series_payload,
 )
 from dhanradar.mf.projection import ENGINE_VERSION
@@ -140,6 +143,37 @@ async def portfolio_holdings(
         RequestCtx(tier=user.tier),
         source="cas",
         engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/transactions")
+async def portfolio_transactions(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    isin: Annotated[str | None, Query(pattern="^[A-Z0-9]{12}$")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """P1 `holding.transactions` — the owner's append-only ledger, newest-first, optionally scoped to
+    one fund (`isin`) — the Fund Detail page's Transactions section (FUND_DETAIL_DATA_ARCHITECTURE_PLAN
+    §5 row 18, §8). Mirrors the holdings route's auth/IDOR pattern exactly: cookie-auth only
+    (401 anonymous), owner-scoped (404 for another user's portfolio_id or a malformed one), served
+    THROUGH the A3 boundary — hand-built, ledger-fact-only payload (no DhanRadar composite, ever).
+    `limit` is capped at 200 server-side regardless of what's requested; `offset` is simple pagination
+    (feeds the frontend's "view all N" affordance via the response's `total`). No cache — personal,
+    ledger-fresh on every call.
+    """
+    _require_auth(user)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    rows, total = await load_portfolio_transactions(
+        db, portfolio_id, isin=isin, limit=limit, offset=offset
+    )
+    return serialize_concept(
+        "holding.transactions",
+        transactions_payload(rows, total, portfolio_id, isin, limit, offset),
+        RequestCtx(tier=user.tier),
+        source="cas",
     )
 
 

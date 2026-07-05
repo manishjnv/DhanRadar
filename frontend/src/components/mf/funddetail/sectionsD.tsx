@@ -6,7 +6,8 @@
  *     <FundScoreCell> — NEVER a 0–100 score number.
  *   - Returns %, expense %, ₹ tax amounts are factual → DOM-allowed.
  *   - No advisory verbs (buy/sell/hold/avoid/caution/switch) anywhere.
- *   - "kind: 'sip' | 'lumpsum'" keys in TXNS are fine (not advisory verbs).
+ *   - Transactions (P1) renders the owner's OWN real ledger rows from
+ *     `GET /portfolio/{id}/transactions?isin=` — DOM-allowed user facts (§13).
  */
 'use client';
 
@@ -16,12 +17,14 @@ import { cn } from '@/lib/cn';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
 import { useFundPeers } from '@/features/mf/api';
-import { DataState } from '@/components/ui/DataState';
+import { usePortfolioTransactions, type Transaction } from '@/features/portfolio/api';
+import { DataState, type DataStatus } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Panel, WhatThisMeans } from './parts';
-import { TAX, TXNS, TXN_TOTAL, FAQ } from './sampleData';
+import { TAX, FAQ } from './sampleData';
 import type { Label } from '@/components/charts/ScoreRing';
 import type { FundPeer } from '@/features/mf/types';
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -43,13 +46,36 @@ const TAG_TINT: Record<string, string> = {
 // S17 — TAX CENTER
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function TaxSection() {
-  const [amount, setAmount] = React.useState(TAX.defaultAmount);
+export function TaxSection({
+  seedValue,
+  costBasis,
+}: {
+  /** Signed-in owner's real current value for this fund (P1) — seeds the redemption slider. */
+  seedValue?: number | null;
+  /** Signed-in owner's real invested amount for this fund (P1) — the calculator's cost basis. */
+  costBasis?: number | null;
+} = {}) {
+  const [amount, setAmount] = React.useState(
+    seedValue != null && seedValue > 0 ? Math.round(seedValue) : TAX.defaultAmount,
+  );
   // 1 = LTCG (> 1 year), 0 = STCG (< 1 year)
   const [holding, setHolding] = React.useState<0 | 1>(1);
 
-  // Live computation — mirrors HTML JS lines 1131-1145
-  const cost    = TAX.costBasis;
+  // Re-seed once the owner's real holding value resolves (it loads async, after this section
+  // first mounts with the static sample default) — never overrides a value the user has since
+  // dragged themselves.
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!seededRef.current && seedValue != null && seedValue > 0) {
+      setAmount(Math.round(seedValue));
+      seededRef.current = true;
+    }
+  }, [seedValue]);
+
+  // Live computation — mirrors HTML JS lines 1131-1145. Cost basis is the owner's REAL invested
+  // amount when signed in with this holding; the static sample figure otherwise (anonymous / no
+  // CAS / not holding this fund) so the calculator still works with manual input.
+  const cost    = costBasis != null && costBasis > 0 ? costBasis : TAX.costBasis;
   const gain    = Math.max(0, amount - cost);
   const isLT    = holding === 1;
   const exempt  = isLT ? Math.min(gain, TAX.ltcgExempt) : 0;
@@ -57,6 +83,9 @@ export function TaxSection() {
     ? Math.max(0, (gain - exempt) * TAX.ltcgRate)
     : gain * TAX.stcgRate;
   const net     = amount - tax;
+  // The slider's static 50k-500k range is a sample-data assumption — widen the ceiling so a real
+  // (signed-in) holding value larger than ₹5L is still reachable on the track.
+  const sliderMax = Math.max(500000, Math.ceil(amount / 50000) * 50000);
 
   const holdingLabel = isLT ? '> 1 year (LTCG)' : '< 1 year (STCG)';
   const exemptLabel  = isLT ? `LTCG exemption (₹1.25L/yr)` : 'STCG exemption';
@@ -81,7 +110,7 @@ export function TaxSection() {
             <input
               type="range"
               min={50000}
-              max={500000}
+              max={sliderMax}
               step={5000}
               value={amount}
               onChange={(e) => setAmount(Number(e.target.value))}
@@ -103,7 +132,7 @@ export function TaxSection() {
             />
             <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-faint">
               <span>₹50,000</span>
-              <span>₹5,00,000</span>
+              <span>{inr(sliderMax)}</span>
             </div>
           </div>
 
@@ -218,124 +247,152 @@ const FILTER_OPTIONS: { key: TxnFilter; label: string }[] = [
   { key: 'lumpsum', label: 'Lumpsum'  },
 ];
 
-export function TransactionsSection() {
-  const [filter, setFilter] = React.useState<TxnFilter>('all');
+const TXN_TYPE_LABEL: Record<string, string> = {
+  purchase: 'Purchase',
+  sip: 'SIP',
+  redemption: 'Redemption',
+  switch_in: 'Switch In',
+  switch_out: 'Switch Out',
+  dividend_payout: 'Div Payout',
+  dividend_reinvest: 'Div Reinvest',
+};
+function txnTypeLabel(t: string): string {
+  return TXN_TYPE_LABEL[t] ?? t;
+}
 
-  const rows = filter === 'all'
-    ? TXNS
-    : TXNS.filter((t) => t.kind === filter);
+const TXN_PAGE_SIZE = 10;
+
+export function TransactionsSection({ portfolioId, isin }: { portfolioId: string; isin: string }) {
+  const [filter, setFilter] = React.useState<TxnFilter>('all');
+  const [visibleLimit, setVisibleLimit] = React.useState(TXN_PAGE_SIZE);
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioTransactions(portfolioId, {
+    isin,
+    limit: visibleLimit,
+  });
+  const status: DataStatus = !portfolioId
+    ? 'empty'
+    : isLoading
+    ? 'loading'
+    : isError
+    ? 'error'
+    : envelope?.status ?? 'empty';
+
+  const payload = envelope?.data;
+  const allRows = payload?.transactions ?? [];
+  const rows: Transaction[] = filter === 'all'
+    ? allRows
+    : filter === 'sip'
+    ? allRows.filter((t) => t.txn_type === 'sip')
+    : allRows.filter((t) => t.txn_type !== 'sip');
+  const total = payload?.total ?? 0;
+  const remaining = Math.max(0, total - allRows.length);
 
   return (
-    <Panel className="p-5 sm:p-6">
-      {/* Tools row */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        {/* Search (decorative) */}
-        <div className="relative min-w-[160px] flex-1">
-          <svg
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-muted"
-            width={14} height={14} viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M16 16 L21 21" />
-          </svg>
-          <input
-            type="search"
-            placeholder="Search transactions…"
-            aria-label="Search transactions"
-            className="
-              h-9 w-full rounded-xl border border-line bg-surface-2
-              pl-8 pr-3 text-small text-ink placeholder:text-ink-faint
-              focus:outline-none focus:ring-2 focus:ring-royal/40
-            "
-          />
+    <DataState
+      status={status}
+      reason={envelope?.meta.reason ?? null}
+      emptyCopy="Upload your CAS statement to see your transactions for this fund here."
+      onRetry={() => refetch()}
+      skeleton={
+        <div className="flex flex-col gap-2">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-xl" />)}
         </div>
-
-        {/* Filter chips */}
-        <div className="flex gap-1.5" role="group" aria-label="Filter by transaction type">
-          {FILTER_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => setFilter(opt.key)}
-              aria-pressed={filter === opt.key}
-              className={cn(
-                'rounded-lg border px-3.5 py-1.5 font-mono text-caption font-semibold transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-                filter === opt.key
-                  ? 'border-transparent bg-surface-3 text-ink shadow-sm'
-                  : 'border-line bg-surface text-ink-muted hover:text-ink',
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-small">
-          <thead>
-            <tr className="border-b border-line bg-surface-2">
-              {['Date', 'Type', 'Amount', 'NAV', 'Units'].map((h, i) => (
-                <th
-                  key={h}
-                  className={cn(
-                    'px-3 py-2.5 font-mono text-[9.5px] font-bold uppercase tracking-[0.05em] text-ink-muted',
-                    i >= 2 ? 'text-right' : 'text-left',
-                  )}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {rows.map((txn) => (
-              <tr key={`${txn.date}-${txn.kind}-${txn.units}`} className="hover:bg-surface-2/60">
-                <td className="whitespace-nowrap px-3 py-3 font-mono text-caption text-ink-secondary">
-                  {txn.date}
-                </td>
-                <td className="px-3 py-3">
-                  <span
-                    className={cn(
-                      'inline-block rounded-md px-2 py-px font-mono text-[10px] font-bold',
-                      txn.kind === 'sip'
-                        ? 'bg-royal/10 text-royal'
-                        : 'bg-cyan/10 text-cyan',
-                    )}
-                  >
-                    {txn.kind === 'sip' ? 'SIP' : 'Lumpsum'}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-caption font-semibold text-ink">
-                  {txn.amount}
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-caption text-ink-secondary">
-                  ₹{txn.nav}
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-caption text-ink-secondary">
-                  {txn.units}
-                </td>
-              </tr>
+      }
+    >
+      {allRows.length === 0 ? (
+        <Panel className="p-6 text-center">
+          <p className="text-small font-medium text-ink">No transactions recorded for this fund yet.</p>
+        </Panel>
+      ) : (
+        <Panel className="p-5 sm:p-6">
+          {/* Filter chips */}
+          <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by transaction type">
+            {FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setFilter(opt.key)}
+                aria-pressed={filter === opt.key}
+                className={cn(
+                  'rounded-lg border px-3.5 py-1.5 font-mono text-caption font-semibold transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                  filter === opt.key
+                    ? 'border-transparent bg-surface-3 text-ink shadow-sm'
+                    : 'border-line bg-surface text-ink-muted hover:text-ink',
+                )}
+              >
+                {opt.label}
+              </button>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </div>
 
-      <button
-        className="
-          mt-3 w-full rounded-xl border border-line bg-surface-2 py-2.5
-          text-small font-semibold text-ink-muted
-          hover:bg-surface-3 hover:text-ink
-          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40
-          transition-colors
-        "
-      >
-        View all {TXN_TOTAL} transactions →
-      </button>
-    </Panel>
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-small">
+              <thead>
+                <tr className="border-b border-line bg-surface-2">
+                  {['Date', 'Type', 'Amount', 'NAV', 'Units'].map((h, i) => (
+                    <th
+                      key={h}
+                      className={cn(
+                        'px-3 py-2.5 font-mono text-[9.5px] font-bold uppercase tracking-[0.05em] text-ink-muted',
+                        i >= 2 ? 'text-right' : 'text-left',
+                      )}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {rows.map((txn) => (
+                  <tr key={txn.id} className="hover:bg-surface-2/60">
+                    <td className="whitespace-nowrap px-3 py-3 font-mono text-caption text-ink-secondary">
+                      {txn.txn_date}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={cn(
+                          'inline-block rounded-md px-2 py-px font-mono text-[10px] font-bold',
+                          txn.txn_type === 'sip'
+                            ? 'bg-royal/10 text-royal'
+                            : 'bg-cyan/10 text-cyan',
+                        )}
+                      >
+                        {txnTypeLabel(txn.txn_type)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono text-caption font-semibold text-ink">
+                      {inr(Math.abs(txn.amount))}
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono text-caption text-ink-secondary">
+                      {txn.nav_or_price != null ? `₹${txn.nav_or_price.toFixed(2)}` : '—'}
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono text-caption text-ink-secondary">
+                      {txn.units.toLocaleString('en-IN')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {remaining > 0 && (
+            <button
+              onClick={() => setVisibleLimit((n) => n + TXN_PAGE_SIZE)}
+              className="
+                mt-3 w-full rounded-xl border border-line bg-surface-2 py-2.5
+                text-small font-semibold text-ink-muted
+                hover:bg-surface-3 hover:text-ink
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40
+                transition-colors
+              "
+            >
+              View {Math.min(TXN_PAGE_SIZE, remaining)} more (of {total}) →
+            </button>
+          )}
+        </Panel>
+      )}
+    </DataState>
   );
 }
 

@@ -35,7 +35,8 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
-import { useFundDetail, useFundComposition } from '@/features/mf/api';
+import { useFundDetail, useFundComposition, useLatestPortfolio } from '@/features/mf/api';
+import { usePortfolioHoldings } from '@/features/portfolio/api';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 
 import {
@@ -116,6 +117,15 @@ function FundDetailView() {
   const { data: compositionEnv } = useFundComposition(isin);
   const backHref = category ? `/mf/explore?category=${encodeURIComponent(category)}` : '/mf/explore';
 
+  // P1 (My Investment / Transactions / Tax seed) — 404 on /mf/portfolio/latest = anonymous or no
+  // CAS yet; portfolioId stays '' and every personal section below renders its own upload-CAS
+  // empty state (never hidden). Holdings are fetched ONCE here and dedup via the shared TanStack
+  // cache with MyInvestmentSection's own identical call (same pattern as useFundComposition above).
+  const { data: latestPortfolio } = useLatestPortfolio();
+  const portfolioId = latestPortfolio?.portfolio_id ?? '';
+  const { data: holdingsEnv } = usePortfolioHoldings(portfolioId);
+  const myHolding = holdingsEnv?.data?.holdings.find((h) => h.isin === isin) ?? null;
+
   if (isLoading) return <FundDetailSkeleton />;
   if (!fund) return <FundNotFound backHref={backHref} />;
 
@@ -186,8 +196,8 @@ function FundDetailView() {
       {/* S4 — Portfolio fit */}
       <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" /><PortfolioFitSection /></Section>
 
-      {/* S5 — My investment */}
-      <Section><SectionHeader index="05" title="My Investment" info="Preview — upload your CAS to see real holdings" /><MyInvestmentSection /></Section>
+      {/* S5 — My investment (P1 — real data) */}
+      <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S6 — Market mood */}
       <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" /><MoodSection /></Section>
@@ -222,11 +232,11 @@ function FundDetailView() {
       {/* S16 — AMC quality */}
       <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
 
-      {/* S17 — Tax center */}
-      <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection /></Section>
+      {/* S17 — Tax center (P1 seed) */}
+      <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection seedValue={myHolding?.current_value} costBasis={myHolding?.invested_amount} /></Section>
 
-      {/* S18 — Transactions */}
-      <Section><SectionHeader index="18" title="Transaction History" info="Preview" /><TransactionsSection /></Section>
+      {/* S18 — Transactions (P1 — real data) */}
+      <Section><SectionHeader index="18" title="Transaction History" info="Your own transactions for this fund" /><TransactionsSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S19 — Alternatives */}
       <Section><SectionHeader index="19" title="Alternatives" info="Same category, ranked nearby" /><AlternativesSection isin={isin} /></Section>

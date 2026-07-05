@@ -157,6 +157,13 @@ export interface Holding {
   day_change?: number | null;
   /** Day change % from the SAME NAV pair as day_change; null with it */
   day_change_pct?: number | null;
+  /**
+   * ADR-0039 (P1) — per-holding data-integrity tag: 'ledger_backed' (normal) | 'stated_only'
+   * (holdings-only source, no transaction history) | 'unpriced' (no live NAV) | 'placeholder'
+   * (unresolved ISIN). A data-quality fact, never a score (#2-exempt). This route never upgrades
+   * 'ledger_backed' → 'stated_only' (that only happens on /summary) — see portfolio_read.py.
+   */
+  data_state?: 'ledger_backed' | 'stated_only' | 'unpriced' | 'placeholder' | null;
 }
 
 export interface HoldingsPayload {
@@ -259,6 +266,69 @@ export function usePortfolioHoldings(portfolioId: string) {
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Transactions types (DataEnvelope) — P1, the append-only ledger, owner-scoped.
+// ---------------------------------------------------------------------------
+
+/** Canonical transaction type (mf/cas.py::_CANON_TXN_TYPE) — not an advisory verb. */
+export type TransactionType =
+  | 'purchase'
+  | 'sip'
+  | 'redemption'
+  | 'switch_in'
+  | 'switch_out'
+  | 'dividend_payout'
+  | 'dividend_reinvest';
+
+export interface Transaction {
+  id: string;
+  isin: string;
+  folio_number: string;
+  txn_type: TransactionType | string;
+  txn_date: string;
+  /** User's own units for this row — allowed in DOM */
+  units: number;
+  nav_or_price: number | null;
+  /** B65-signed: outflow negative, inflow positive — allowed in DOM (§13) */
+  amount: number;
+}
+
+export interface TransactionsPayload {
+  portfolio_id: string;
+  isin: string | null;
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  transactions: Transaction[];
+}
+
+/** P1 `holding.transactions` — GET /api/v1/portfolio/{id}/transactions?isin=&limit=.
+ * No cache (personal, ledger-fresh) — matches the backend's no-cache contract. */
+export function usePortfolioTransactions(
+  portfolioId: string,
+  opts?: { isin?: string; limit?: number },
+) {
+  const isin = opts?.isin;
+  const limit = opts?.limit ?? 50;
+  return useQuery<DataEnvelope<TransactionsPayload>>({
+    queryKey: queryKeys.portfolio.transactions(portfolioId, isin),
+    queryFn: () => {
+      const qs = new URLSearchParams({ limit: String(limit) });
+      if (isin) qs.set('isin', isin);
+      return api.get<DataEnvelope<TransactionsPayload>>(
+        `/portfolio/${portfolioId}/transactions?${qs.toString()}`,
+      );
+    },
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 0,
   });
 }
 

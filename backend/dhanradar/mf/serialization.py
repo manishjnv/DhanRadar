@@ -74,6 +74,7 @@ class MissingConceptAllowlist(RuntimeError):
 #: (e.g. a future `fund.*` concept) appends a line and never touches an existing one.
 ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "holdings.list": frozenset({"portfolio_id", "holdings"}),
+    "holding.transactions": frozenset({"portfolio_id", "isin", "count", "total", "limit", "offset", "transactions"}),
     "portfolio.summary": frozenset({"portfolio_id", "total_value", "value_priced_pct", "total_invested", "invested_missing_count", "cost_value", "gain", "gain_pct", "gain_vs_cost", "gain_vs_cost_pct", "xirr_pct", "xirr_coverage_pct", "xirr_1y_pct", "xirr_1y_window_days", "wt_avg_days", "wt_avg_days_coverage_pct", "day_change", "day_change_pct", "day_change_as_of", "day_change_coverage_pct", "fund_count", "funds_scored", "confidence_band", "as_of", "valuation_as_of", "investor_name"}),
     "portfolio.risk": frozenset({"portfolio_id", "risk_band", "risk_band_basis", "volatility_pct", "max_drawdown_pct", "recovery_months", "fund_count", "funds_with_metrics", "as_of"}),
     "portfolio.risk_advanced": frozenset({"portfolio_id", "sharpe_ratio", "sortino_ratio", "rolling_1y_avg_pct", "rolling_1y_pct_positive", "alpha", "beta", "as_of"}),
