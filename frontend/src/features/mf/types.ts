@@ -235,6 +235,11 @@ export interface FundHead {
   confidence_band: ConfidenceBand | null;
   /** W3 field — source-blocked (B67/ADR-0035), always null today. */
   amc_level_aum_crore: number | null;
+  /** Per-scheme AUM from the SEBI monthly portfolio disclosure's grand-total row
+   * (never AMC-level; ADR-0035). Null until that scheme's file has been ingested. */
+  aum_crore: number | null;
+  /** Disclosure file's own as_of_month for aum_crore — never the ingestion run time. */
+  aum_as_of: string | null;
 }
 
 // ---------------------------------------------------------------------------

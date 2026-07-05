@@ -13,6 +13,8 @@ import enum
 from dataclasses import fields
 from datetime import date
 
+import pytest
+
 from dhanradar.mf.cas import CasParseError, classify_cas_failure, parse_cas
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
@@ -827,6 +829,61 @@ def test_extract_sebi_row_strips_eq_prefix():
     assert result["constituent_isin"] == "INE117A01022"
     assert result["weight_pct"] == 5.234
     assert result["market_value_cr"] == 12.3456
+
+
+# --- AUM extraction (root-cause fix 2026-07-05: aum_crore was 100% NULL) -----
+def test_extract_sebi_row_keeps_grand_total_as_total_row():
+    """NIPPON's literal "GRAND TOTAL" row must survive both the no-ISIN guard and
+    the section-header drop, flagged is_total_row=True, so _upsert_constituents can
+    use it as the scheme's AUM — the root cause of the 100%-NULL aum_crore bug was
+    this row being unconditionally dropped before ever reaching that logic."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["GRAND TOTAL", "", "100.00", "3587039.00"]
+    result = _extract_sebi_row(row, col_map, "Nippon India Liquid Fund", "NIPPON", date(2026, 6, 1))
+    assert result is not None
+    assert result["is_total_row"] is True
+    assert result["market_value_cr"] == 35870.39
+
+
+def test_extract_sebi_row_keeps_net_assets_as_total_row():
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Net Assets", "", "100.00", "96750.00"]
+    result = _extract_sebi_row(row, col_map, "Nippon India Conservative Hybrid Fund", "NIPPON", date(2026, 6, 1))
+    assert result is not None
+    assert result["is_total_row"] is True
+    assert result["market_value_cr"] == 967.5
+
+
+def test_extract_sebi_row_does_not_flag_bare_subtotal_as_total_row():
+    """A bare asset-class subtotal (UTI: "TOTAL: EQUITY AND EQUITY RELATED") must NOT
+    be flagged is_total_row — only "grand total"/"net assets" identify the scheme's
+    true AUM. Broadening to bare "total" was tried and reverted: it caused a
+    sub-category subtotal to be written as the scheme's AUM for UTI (2026-07-05)."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["TOTAL:  EQUITY AND EQUITY RELATED", "", "50.00", "194304.71"]
+    assert (
+        _extract_sebi_row(row, col_map, "UTI - Unit Linked Insurance Plan", "UTI", date(2026, 6, 1))
+        is None
+    )
+
+
+def test_extract_sebi_row_market_fair_value_header_variant():
+    """NIPPON debt schemes header the value column "Market/Fair Value\\n( Rs. in
+    Lacs)" — the embedded "/fair" breaks a plain "market value" substring match."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market/Fair Value\n( Rs. in Lacs)")
+    row = ["7.18% GOI 2033", "IN0020230019", "10.00", "9433.32"]
+    result = _extract_sebi_row(row, col_map, "Nippon India Corporate Bond Fund", "NIPPON", date(2026, 6, 1))
+    assert result is not None
+    assert result["market_value_cr"] == pytest.approx(94.3332)
+
+
+def test_extract_sebi_row_hyphenated_market_value_header_variant():
+    """UTI hyphenates the value column header: "MARKET-VALUE"."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "MARKET-VALUE")
+    row = ["HDFC BANK LIMITED", "INE040A01034", "5.00", "11454.10"]
+    result = _extract_sebi_row(row, col_map, "UTI - Large Cap Fund", "UTI", date(2026, 6, 1))
+    assert result is not None
+    assert result["market_value_cr"] == 114.541
 
 
 def test_drop_over_covered_funds_skips_fund_over_105_pct():

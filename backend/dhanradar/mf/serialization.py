@@ -113,6 +113,8 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "nav_change_pct",
             "confidence_band",
             "amc_level_aum_crore",
+            "aum_crore",
+            "aum_as_of",
         }
     ),
     "fund.nav_series": frozenset({"range", "points", "from", "to", "n_total"}),

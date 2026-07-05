@@ -130,6 +130,11 @@ async def get_fund_head(session: AsyncSession, isin: str) -> dict | None:
         # unranked/segregated fund or an insufficient_data read (no rateable band).
         "confidence_band": rank_row.confidence_band if rank_row else None,
         "amc_level_aum_crore": None,  # W3 field — source-blocked (B67/ADR-0035)
+        # Per-scheme AUM extracted from the SEBI monthly portfolio disclosure's
+        # scheme-level grand-total row (never AMC-level; ADR-0035). aum_as_of is
+        # that disclosure file's own as_of_month, not the ingestion run time.
+        "aum_crore": float(fund.aum_crore) if fund.aum_crore is not None else None,
+        "aum_as_of": fund.aum_as_of.isoformat() if fund.aum_as_of else None,
     }
 
 
