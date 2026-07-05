@@ -926,3 +926,78 @@ class MfBenchmarkDaily(Base):
     benchmark: Mapped[str] = mapped_column(Text, primary_key=True)
     close_date: Mapped[date] = mapped_column(Date, primary_key=True)
     close_value: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+
+
+class MfStockCapClassification(Base):
+    """AMFI half-yearly Large/Mid/Small Cap stock classification (W3 source B).
+
+    Stock-level dataset — `stock_isin` is the EQUITY ISIN (INE... prefix), NOT
+    an MF scheme ISIN (INF... prefix); this table has no FK to mf_funds. One
+    row per (stock_isin, effective_period), e.g. effective_period='2026H1'.
+    Written by `dhanradar.tasks.mf_cap_classification.mf_cap_classification_fetch`
+    (source_key = 'amfi_cap_classification'). Values are stored exactly as
+    AMFI publishes them — never derived or re-computed (§8.4 no-fabrication).
+    """
+
+    __tablename__ = "stock_cap_classification"
+    __table_args__ = (
+        UniqueConstraint(
+            "stock_isin", "effective_period", name="uq_stock_cap_classification_isin_period"
+        ),
+        Index("ix_stock_cap_classification_period", "effective_period"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stock_isin: Mapped[str] = mapped_column(Text, nullable=False)
+    stock_name: Mapped[str] = mapped_column(Text, nullable=False)
+    cap_class: Mapped[str] = mapped_column(Text, nullable=False)
+    avg_market_cap_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    effective_period: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfCategoryFlows(Base):
+    """AMFI monthly category-wise fund flows (W3 source C).
+
+    Category-level ONLY — never estimate or back out per-scheme flows from
+    this data (§8.4). One row per (period_month, scheme_category). Written by
+    `dhanradar.tasks.mf_category_flows.mf_category_flows_fetch`
+    (source_key = 'amfi_category_flows'). scheme_category is AMFI's raw SEBI
+    category label (e.g. "Liquid Fund", "Small Cap Fund") stored verbatim —
+    mapping to DhanRadar's internal category taxonomy, if any, happens at the
+    read layer, never at ingestion (raw fact preserved).
+    """
+
+    __tablename__ = "mf_category_flows"
+    __table_args__ = (
+        UniqueConstraint(
+            "period_month", "scheme_category", name="uq_mf_category_flows_month_category"
+        ),
+        Index("ix_mf_category_flows_period_month", "period_month"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    period_month: Mapped[date] = mapped_column(Date, nullable=False)
+    scheme_category: Mapped[str] = mapped_column(Text, nullable=False)
+    num_schemes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    num_folios: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    funds_mobilized_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    redemption_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    net_flow_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    net_aum_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    avg_aum_cr: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

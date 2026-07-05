@@ -50,6 +50,12 @@ celery_app = Celery(
         "dhanradar.tasks.mf_fund_manager",
         "dhanradar.tasks.sebi_circulars",
         "dhanradar.tasks.macro_data",
+        # W3 — AMFI free-source enrichment (Phase A verified 2026-07-05):
+        # cap classification (half-yearly) + category-wise flows (monthly).
+        # Riskometer (the 3rd candidate) was BLOCKED at Phase A — see
+        # docs/project-state/DATA_SOURCES.md.
+        "dhanradar.tasks.mf_cap_classification",
+        "dhanradar.tasks.mf_category_flows",
         # BSE Star MF 2.0 webhook async processing (misc queue).
         "dhanradar.tasks.bse",
     ],
@@ -307,6 +313,21 @@ celery_app.conf.beat_schedule = {
     "macro-data-refresh": {
         "task": "dhanradar.tasks.mf.macro_data_refresh",
         "schedule": crontab(day_of_week=0, hour=6, minute=0),
+    },
+    # W3 — AMFI half-yearly Large/Mid/Small Cap classification. DAILY 04:15 IST
+    # (not monthly cron) — freshness addendum: the task itself checks whether the
+    # current half's data is already stored and exits immediately without a network
+    # call when it is, so a real fetch only happens on the few days AMFI first
+    # publishes each half (avoids guessing the exact publish date with a fixed cron).
+    "mf-cap-classification-fetch": {
+        "task": "dhanradar.tasks.mf.mf_cap_classification_fetch",
+        "schedule": crontab(hour=4, minute=15),
+    },
+    # W3 — AMFI monthly category-wise fund flows. DAILY 04:45 IST, same freshness-
+    # addendum pattern as above (monthly data, daily check-then-skip).
+    "mf-category-flows-fetch": {
+        "task": "dhanradar.tasks.mf.mf_category_flows_fetch",
+        "schedule": crontab(hour=4, minute=45),
     },
 }
 
