@@ -1,280 +1,114 @@
-'use client';
-
 /**
- * Fund Detail page — /mf/fund/[isin]  (V3 redesign)
+ * Fund Detail page — /mf/fund/[isin]  (SSR core, V3 redesign)
  *
- * Public educational destination view of a single mutual fund, rebuilt to the
- * approved FundDetailPageV3 mockup (22 sections, responsive desktop + mobile).
- * Fetches by ISIN alone (W0, FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17) — the
- * `category` URL param (set by FundExplorerTable row navigation) is read only
- * for the "back to Explorer" link, never required to load. No auth required —
- * wrapped in <MaybeShell> so anonymous visitors/crawlers get clean standalone
- * chrome (no app sidebar = the V3 destination model) and logged-in users keep
- * the workspace shell.
+ * Server Component wrapper (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §18.6 —
+ * targeted SSR core, not a full rewrite of all 22 sections). Fetches
+ * `fund.head` server-side so crawlers get real content in the initial HTML
+ * response — page <title>/description, JSON-LD structured data, and a small
+ * server-rendered summary block — then hands the SAME payload to the existing
+ * 'use client' FundDetailClientView as `initialFundHead` so its
+ * useFundDetail() hook does not re-fetch on mount (no double fetch).
  *
- * DATA: real values from useFundDetail() drive identity / assessment / rank /
- * NAV / expense ratio / AMC-AUM / period returns (W0). W1 wires Performance
- * Center (returns/rolling/rank-trend), Risk Center, Holdings, Manager, AMC
- * facts, Alternatives and Similar to real per-concept endpoints; W2 adds
- * SIP/Drawdowns/Consistency (Performance Center), rolling-3Y, and Fund Health
- * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). Market Cap/Asset Mix/Style Box,
- * Fund Flow, Tax seed, Transactions, Portfolio Fit, What Changed, and
- * Assessment Breakdown still render illustrative PREVIEW data (flagged
- * "Preview" or an honest empty-state) while their feeds are built (W2/W3) —
- * founder call 2026-06-24: build all UI now, wire data later.
+ * FundDetailClientView.tsx carries the full 22-section client view UNCHANGED
+ * (moved here verbatim during this migration — see that file's own header).
  *
- * COMPLIANCE: non-neg #1 (no advisory verbs — educational labels only),
- * #2 (no numeric score in DOM — band rings + strength words),
- * #4 (confidence as band word), #9 (NOT_ADVICE disclosure bundle).
+ * BUILD-TIME TRAP (docs/rca/README.md G8): Next.js prerenders dynamic-segment
+ * pages at `next build` by default, including generateMetadata's own fetch —
+ * and the backend is not reachable during CI's `next build` (mocks-off job).
+ * `force-dynamic` below is therefore mandatory, not optional — the same proven
+ * fix already shipped on frontend/src/app/learn/tax/[slug]/page.tsx. It opts
+ * this route OUT of static generation entirely, so neither generateMetadata
+ * nor the page body ever run at build time — only at real request time.
+ *
+ * Caching: `force-dynamic` does NOT force every fetch in the route to
+ * `no-store` — an individual fetch's own `next: { revalidate: N }` option is
+ * still honored (verified against this Next.js version's fetch-cache
+ * semantics: vercel/next.js test/e2e/app-dir/app-static/app/
+ * force-dynamic-fetch-cache/revalidate/page.js — "should infer a fetch cache
+ * of 'force-cache' when force-dynamic is used on a fetch with revalidate").
+ * So `fetchFundHeadServer` (features/mf/server-api.ts) caches its own fetch
+ * for ~1h (`next: { revalidate: 3600 }`) while this route still renders per
+ * request — repeat requests within the hour reuse the cached backend response
+ * instead of re-hitting the backend every time. Confirmed via `npm run build`
+ * (no backend running) that this combination does NOT reintroduce the G8
+ * ECONNREFUSED trap — force-dynamic means the route is never touched at build.
+ *
+ * No `generateStaticParams` — 14k ISINs must never be attempted at build
+ * time; every fund page renders on-demand.
+ *
+ * COMPLIANCE: non-neg #1 (no advisory verbs), #2 (no numeric DhanRadar score —
+ * JSON-LD/metadata/summary block carry standard facts only: NAV, returns %,
+ * category, plan type, rank ordinal, and the educational label WORD).
  */
 
-import * as React from 'react';
-import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
-import { MaybeShell } from '@/components/ui/MaybeShell';
-import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
-import { useFundDetail, useFundComposition, useFundFactors, useLatestPortfolio } from '@/features/mf/api';
-import { usePortfolioHoldings } from '@/features/portfolio/api';
-import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
+import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { fetchFundHeadServer } from '@/features/mf/server-api';
+import { buildFundMetadataText, buildFundJsonLd, FUND_NOT_FOUND_METADATA } from '@/features/mf/fundMetadata';
+import { EDU_LABELS } from '@/lib/displayLabel';
+import FundDetailClientView from '@/components/mf/funddetail/FundDetailClientView';
 
-import {
-  HeroSection, StatusRow, VerdictSection, EntryTimingSection,
-  MoodSection, ScoreBreakdownSection, StickyBar, type FundHead,
-} from '@/components/mf/funddetail/sectionsHero';
-import { benchmarkForCategory } from '@/components/mf/funddetail/categoryBenchmark';
-import {
-  PortfolioFitSection, MyInvestmentSection, FundHealthSection, WhatChangedSection,
-} from '@/components/mf/funddetail/sectionsA';
-import {
-  SnapshotSection, PerformanceSection, RiskCenterSection,
-} from '@/components/mf/funddetail/sectionsB';
-import {
-  HoldingsSection, FundFlowSection, ManagerSection, AmcSection,
-} from '@/components/mf/funddetail/sectionsC';
-import {
-  TaxSection, TransactionsSection, AlternativesSection, SimilarSection, FaqSection,
-} from '@/components/mf/funddetail/sectionsD';
+// Mandatory — see file header ("BUILD-TIME TRAP").
+export const dynamic = 'force-dynamic';
 
-// ---------------------------------------------------------------------------
-// Loading + not-found
-// ---------------------------------------------------------------------------
-function FundDetailSkeleton() {
-  return (
-    <div className="w-full flex flex-col gap-6">
-      <Skeleton className="h-5 w-64 rounded-full" />
-      <Skeleton className="h-56 rounded-3xl" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Skeleton className="h-40 rounded-2xl" />
-        <Skeleton className="h-40 rounded-2xl" />
-      </div>
-      <Skeleton className="h-48 rounded-2xl" />
-    </div>
-  );
-}
+export async function generateMetadata({
+  params,
+}: {
+  params: { isin: string };
+}): Promise<Metadata> {
+  const fund = await fetchFundHeadServer(params.isin);
+  if (!fund) return FUND_NOT_FOUND_METADATA;
 
-function FundNotFound({ backHref }: { backHref: string }) {
-  return (
-    <div className="w-full flex flex-col gap-6">
-      <Link href={backHref} className="inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-        ← Back to Fund Explorer
-      </Link>
-      <div className="rounded-2xl border border-line bg-surface-2 p-10 text-center">
-        <p className="text-small font-medium text-ink">Fund not found</p>
-        <p className="mt-1 text-caption text-ink-muted">This fund isn&apos;t in our database yet — browse from the Fund Explorer to find it.</p>
-        <Link href="/mf/explore" className="mt-4 inline-block rounded text-small font-medium text-royal underline underline-offset-2 transition-colors hover:text-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-          Go to Fund Explorer →
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-// Breadcrumb (V3 destination chrome — links only, no routing change)
-function Crumb({ category, name }: { category: string; name: string }) {
-  return (
-    <nav className="flex flex-wrap items-center gap-1.5 text-caption text-ink-muted" aria-label="Breadcrumb">
-      <Link href="/mf/explore" className="hover:text-ink">Mutual Funds</Link>
-      <span className="text-ink-faint">›</span>
-      <Link href={`/mf/explore?category=${encodeURIComponent(category)}`} className="hover:text-ink">{category}</Link>
-      <span className="text-ink-faint">›</span>
-      <span className="font-semibold text-ink-secondary">{name}</span>
-    </nav>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main view
-// ---------------------------------------------------------------------------
-function FundDetailView() {
-  const params = useParams<{ isin: string }>();
-  const searchParams = useSearchParams();
-  const isin = params.isin;
-  const category = searchParams.get('category');
-
-  const { data: fund, isLoading } = useFundDetail(isin, category);
-  const { data: compositionEnv } = useFundComposition(isin);
-  const { data: factorsResp } = useFundFactors(isin);
-  const backHref = category ? `/mf/explore?category=${encodeURIComponent(category)}` : '/mf/explore';
-
-  // P1 (My Investment / Transactions / Tax seed) — 404 on /mf/portfolio/latest = anonymous or no
-  // CAS yet; portfolioId stays '' and every personal section below renders its own upload-CAS
-  // empty state (never hidden). Holdings are fetched ONCE here and dedup via the shared TanStack
-  // cache with MyInvestmentSection's own identical call (same pattern as useFundComposition above).
-  const { data: latestPortfolio } = useLatestPortfolio();
-  const portfolioId = latestPortfolio?.portfolio_id ?? '';
-  const { data: holdingsEnv } = usePortfolioHoldings(portfolioId);
-  const myHolding = holdingsEnv?.data?.holdings.find((h) => h.isin === isin) ?? null;
-
-  if (isLoading) return <FundDetailSkeleton />;
-  if (!fund) return <FundNotFound backHref={backHref} />;
-
-  const planLabel =
-    fund.plan_type === 'direct' ? 'Direct' : fund.plan_type === 'regular' ? 'Regular' : null;
-  const optionLabel =
-    fund.option_type === 'growth' ? 'Growth'
-    : fund.option_type === 'idcw' ? 'IDCW'
-    : fund.option_type === 'dividend_reinvest' ? 'Div Reinvest'
-    : fund.option_type === 'dividend_payout' ? 'Div Payout'
-    : null;
-
-  const head: FundHead = {
-    name: fund.scheme_name,
-    amc: fund.amc_name,
-    category: fund.sebi_category ?? 'Mutual Fund',
-    // null verb_label (unranked fund, W0 gate: any ISIN loads) → the label set's own
-    // "not yet rated" value — never a fabricated educational read.
-    label: (fund.verb_label ?? 'insufficient_data') as Label,
-    band: (fund.confidence_band ?? null) as ConfidenceBand | null,
-    rank: fund.category_rank,
-    total: fund.category_total,
-    planOption: [planLabel, optionLabel].filter(Boolean) as string[],
-    aumCr: fund.amc_level_aum_crore,
-    navLatest: fund.nav_latest,
-    navDate: fund.nav_date,
-    navChangePct: fund.nav_change_pct,
-    expenseRatioPct: fund.expense_ratio_pct,
-    return3mPct: fund.return_3m_pct,
-    return6mPct: fund.return_6m_pct,
-    return1yPct: fund.return_1y_pct,
-    return3yPct: fund.return_3y_pct,
-    return5yPct: fund.return_5y_pct,
+  const { title, description } = buildFundMetadataText(fund);
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: 'website', siteName: 'DhanRadar' },
   };
-
-  // S10 header info line — category-appropriate benchmark (item 3, 2026-07);
-  // ReturnsTab (sectionsB.tsx) falls back to Nifty 50 if the mapped
-  // benchmark's series is empty, but the header caption always names the
-  // category's intended benchmark.
-  const benchmarkMeta = benchmarkForCategory(head.category);
-
-  // S13 header info line — real when composition data exists (dedups against
-  // HoldingsSection's own useFundComposition call via the shared query cache).
-  const composition = compositionEnv?.data;
-  const holdingsInfo = composition && composition.holdings.length > 0
-    ? `Top ${composition.holdings.length} disclosed${composition.coverage.weight_covered_pct != null ? ` · ${composition.coverage.weight_covered_pct}% of assets` : ''}${composition.as_of_month ? ` · as of ${new Date(composition.as_of_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : ''}`
-    : 'Holdings not disclosed for this fund house yet';
-
-  // W2 (§10.1) — real factor bands + signal words; every field null/empty until
-  // the fund is ranked (§14.1 no-suppress: sections render their own no-data state).
-  const factors = factorsResp?.factors?.data?.factors ?? null;
-  const contributing = factorsResp?.signals?.data?.contributing ?? [];
-  const contradicting = factorsResp?.signals?.data?.contradicting ?? [];
-  const topReason = contributing[0] ?? null;
-
-  return (
-    <div className="w-full pb-24">
-      <div className="mb-4">
-        <Link href={backHref} className="mb-3 inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-          ← Back to Fund Explorer
-        </Link>
-        <Crumb category={head.category} name={fund.scheme_name} />
-      </div>
-
-      {/* S1 — Hero + status */}
-      <HeroSection head={head} factors={factors} />
-      <StatusRow contributing={contributing} />
-
-      {/* S2 — Educational verdict */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" /><VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
-
-      {/* S3 — Smart entry timing */}
-      <Section><SectionHeader index="03" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
-
-      {/* S4 — Portfolio fit */}
-      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" /><PortfolioFitSection /></Section>
-
-      {/* S5 — My investment (P1 — real data) */}
-      <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
-
-      {/* S6 — Market mood */}
-      <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" /><MoodSection /></Section>
-
-      {/* S7 — Fund health */}
-      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" /><FundHealthSection isin={isin} /></Section>
-
-      {/* S8 — What changed */}
-      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" /><WhatChangedSection isin={isin} /></Section>
-
-      {/* S9 — Snapshot */}
-      <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
-
-      {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} /><PerformanceSection head={head} isin={isin} /></Section>
-
-      {/* S11 — Assessment breakdown (band rings, no numbers) */}
-      <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="How confident the read is — by dimension" /><ScoreBreakdownSection factors={factors} /></Section>
-
-      {/* S12 — Risk center */}
-      <Section><SectionHeader index="12" title="Risk Center" /><RiskCenterSection isin={isin} /></Section>
-
-      {/* S13 — Holdings */}
-      <Section><SectionHeader index="13" title="Portfolio Holdings" info={holdingsInfo} /><HoldingsSection isin={isin} /></Section>
-
-      {/* S14 — Fund flow */}
-      <Section><SectionHeader index="14" title="Fund Flow Intelligence" /><FundFlowSection /></Section>
-
-      {/* S15 — Fund manager */}
-      <Section><SectionHeader index="15" title="Fund Manager" /><ManagerSection isin={isin} /></Section>
-
-      {/* S16 — AMC quality */}
-      <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
-
-      {/* S17 — Tax center (P1 seed) */}
-      <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection seedValue={myHolding?.current_value} costBasis={myHolding?.invested_amount} /></Section>
-
-      {/* S18 — Transactions (P1 — real data) */}
-      <Section><SectionHeader index="18" title="Transaction History" info="Your own transactions for this fund" /><TransactionsSection portfolioId={portfolioId} isin={isin} /></Section>
-
-      {/* S19 — Alternatives */}
-      <Section><SectionHeader index="19" title="Alternatives" info="Same category, ranked nearby" /><AlternativesSection isin={isin} /></Section>
-
-      {/* S20 — Similar funds */}
-      <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" /><SimilarSection isin={isin} /></Section>
-
-      {/* S21 — FAQ */}
-      <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection navLatest={fund.nav_latest} /></Section>
-
-      {/* Disclosure (non-neg #9) */}
-      <div className="mt-7 rounded-2xl border border-line bg-surface-2 p-4">
-        <p className="mb-3 text-small text-ink-secondary">
-          DhanRadar doesn&apos;t sell funds or earn commissions. Everything here is education, not advice.
-        </p>
-        <DisclosureBundle notAdvice="For education only — not investment advice. Rankings, assessments, and the figures shown (many illustrative previews while data feeds are built) are educational signals derived from factual data, not recommendations to buy, sell, or hold any fund. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not indicate future returns." />
-      </div>
-
-      {/* S22 — Sticky decision bar */}
-      <StickyBar head={head} topReason={topReason} />
-    </div>
-  );
 }
 
-export default function FundDetailPage() {
+export default async function FundDetailPage({
+  params,
+}: {
+  params: { isin: string };
+}) {
+  // Next.js dedupes identical fetch() calls (same URL + options) made during a
+  // single request across generateMetadata and the page body, so this does not
+  // double-hit the backend.
+  const fund = await fetchFundHeadServer(params.isin);
+  if (!fund) notFound();
+
+  const jsonLd = buildFundJsonLd(fund, params.isin);
+  const labelWord = fund.verb_label ? EDU_LABELS[fund.verb_label] : null;
+  const category = fund.sebi_category ?? fund.category;
+
   return (
-    <MaybeShell maxWidth="full">
-      <React.Suspense fallback={<FundDetailSkeleton />}>
-        <FundDetailView />
-      </React.Suspense>
-    </MaybeShell>
+    <>
+      {/* JSON-LD — factual fund entity only (compliance non-neg #1/#2: no
+          score, no advisory verb; see features/mf/fundMetadata.ts). */}
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      {/* Server-rendered summary — real content in the initial HTML response,
+          verifiable via `curl` without JS execution. Plain text label WORD
+          only (never the ScoreRing/numeric component). */}
+      <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-4">
+        <h1 className="text-h3 text-ink">{fund.scheme_name}</h1>
+        {category && <p className="text-small text-ink-secondary">{category}</p>}
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-secondary">
+          {fund.nav_latest != null && (
+            <span>NAV ₹{fund.nav_latest.toFixed(2)}{fund.nav_date ? ` (as of ${fund.nav_date})` : ''}</span>
+          )}
+          {fund.return_1y_pct != null && <span>1Y return {fund.return_1y_pct.toFixed(1)}%</span>}
+          {fund.return_3y_pct != null && <span>3Y return {fund.return_3y_pct.toFixed(1)}%</span>}
+          {labelWord && <span>DhanRadar educational read: {labelWord}</span>}
+        </div>
+      </div>
+
+      <FundDetailClientView initialFundHead={fund} />
+    </>
   );
 }

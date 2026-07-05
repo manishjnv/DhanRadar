@@ -362,8 +362,14 @@ const FUND_HEAD_SKIP_RETRY = [404];
 /** Fetch a single fund's `fund.head` concept by ISIN — GET /api/v1/mf/fund/{isin} (W0).
  *  Replaces the old Explorer-cache-scan + 30-page pagination fallback and the hard
  *  `category` requirement (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17 W0). `category` is
- *  accepted for backward compatibility with existing callers but is no longer used to fetch. */
-export function useFundDetail(isin: string, _category?: string | null) {
+ *  accepted for backward compatibility with existing callers but is no longer used to fetch.
+ *
+ *  `initialData` (SSR core, §18.6): the Fund Detail server component already fetches
+ *  `fund.head` server-side and passes the payload down as `initialFundHead`. Threading it
+ *  through here as TanStack Query's native `initialData` seeds the cache so this hook does
+ *  NOT re-fetch the same data on mount (no double fetch) — existing callers that don't pass
+ *  a third argument are unaffected. */
+export function useFundDetail(isin: string, _category?: string | null, initialData?: FundHead | null) {
   return useQuery<FundHead | null>({
     queryKey: queryKeys.mf.fundDetail(isin),
     queryFn: async () => {
@@ -376,6 +382,7 @@ export function useFundDetail(isin: string, _category?: string | null) {
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,
+    initialData: initialData ?? undefined,
   });
 }
 
