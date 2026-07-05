@@ -19,8 +19,8 @@ needed here.
 
 Additive + reversible.
 
-Revision ID: 0064
-Revises: 0063
+Revision ID: 0065
+Revises: 0064
 Create Date: 2026-07-05
 """
 
@@ -30,8 +30,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0064"
-down_revision: str | None = "0063"
+revision: str = "0065"
+down_revision: str | None = "0064"
 branch_labels = None
 depends_on = None
 
