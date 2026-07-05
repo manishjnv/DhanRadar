@@ -57,7 +57,11 @@ const URLS_PER_SITEMAP = 45_000;
 // Matches the /mf/funds `limit` query cap (`le=500`, dhanradar/mf/router.py).
 const EXPLORER_PAGE_LIMIT = 500;
 
-async function collectAllIsins(): Promise<string[]> {
+/** Exported so robots.ts can compute the same chunk count without duplicating
+ *  the category/pagination crawl — see that file's header for why it needs
+ *  this (generateSitemaps() has no auto-generated /sitemap.xml index; the
+ *  chunks must be listed explicitly for crawlers via robots.txt). */
+export async function collectAllIsins(): Promise<string[]> {
   try {
     const categories = await fetchFundCategoriesServer();
     const isins: string[] = [];
@@ -77,9 +81,13 @@ async function collectAllIsins(): Promise<string[]> {
   }
 }
 
+export function sitemapChunkCount(isinCount: number): number {
+  return Math.max(1, Math.ceil(isinCount / URLS_PER_SITEMAP));
+}
+
 export async function generateSitemaps() {
   const isins = await collectAllIsins();
-  const count = Math.max(1, Math.ceil(isins.length / URLS_PER_SITEMAP));
+  const count = sitemapChunkCount(isins.length);
   return Array.from({ length: count }, (_, id) => ({ id }));
 }
 
