@@ -382,6 +382,21 @@ export interface FundComposition {
   coverage: { holdings_count: number; weight_covered_pct: number | null };
 }
 
+/** GET /api/v1/mf/fund/{isin}/flows — item 2. CATEGORY-LEVEL ONLY: every point is the
+ * trailing-12-month AMFI category-flow figure for funds sharing this fund's scheme
+ * category, NEVER this fund's own money flow. Any UI copy MUST say "funds in this
+ * category" — never imply the specific fund's own flows (compliance §14.3). */
+export interface FundFlowPoint {
+  period_month: string;
+  net_flow_cr: number | null;
+  net_aum_cr: number | null;
+}
+export interface FundFlows {
+  points: FundFlowPoint[];
+  scheme_category: string | null;
+  as_of_month: string | null;
+}
+
 /** GET /api/v1/mf/fund/{isin}/people */
 export interface FundManager {
   name: string;

@@ -44,6 +44,11 @@
     "data_class": "derived-personal",
     "content_class": "CALCULATED"
   },
+  "fund.fit": {
+    "visibility_class": "educational",
+    "data_class": "derived-personal",
+    "content_class": "CALCULATED"
+  },
   "portfolio.concentration": {
     "visibility_class": "educational",
     "data_class": "derived-personal",
@@ -130,6 +135,11 @@
     "content_class": "DERIVED"
   },
   "fund.composition": {
+    "visibility_class": "public",
+    "data_class": "public-fact",
+    "content_class": "MARKET"
+  },
+  "fund.flows": {
     "visibility_class": "public",
     "data_class": "public-fact",
     "content_class": "MARKET"

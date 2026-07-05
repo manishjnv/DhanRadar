@@ -73,6 +73,14 @@
       "gate_flag": null,
       "status": "data-starved"
     },
+    "fund.fit": {
+      "visibility_class": "educational",
+      "data_class": "derived-personal",
+      "access_tier": "free",
+      "content_class": "CALCULATED",
+      "gate_flag": null,
+      "status": "live"
+    },
     "portfolio.concentration": {
       "visibility_class": "educational",
       "data_class": "derived-personal",
@@ -210,6 +218,14 @@
       "status": "live"
     },
     "fund.composition": {
+      "visibility_class": "public",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "MARKET",
+      "gate_flag": null,
+      "status": "live"
+    },
+    "fund.flows": {
       "visibility_class": "public",
       "data_class": "public-fact",
       "access_tier": "free",

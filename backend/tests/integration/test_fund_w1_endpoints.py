@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import text
 
 from dhanradar.models.mf import (
+    MfCategoryFlows,
     MfCategoryStats,
     MfFund,
     MfFundConstituent,
@@ -50,6 +51,7 @@ async def _truncate_mf(db_session):
     for tbl in (
         "mf.mf_fund_constituents",
         "mf.stock_cap_classification",
+        "mf.mf_category_flows",
         "mf.fund_manager_history",
         "mf.mf_category_stats",
         "mf.mf_fund_metrics",
@@ -387,6 +389,93 @@ async def test_fund_composition_uncovered_amc_empty_200(async_client, db_session
 
 async def test_fund_composition_unknown_isin_404(async_client, db_session, patch_redis):
     resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_UNKNOWN}/composition")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /fund/{isin}/flows  (item 2 — CATEGORY-level only)
+# ---------------------------------------------------------------------------
+
+
+async def test_fund_flows_happy_path(async_client, db_session, patch_redis):
+    await _seed_fund(db_session, _ISIN_A)
+    for i, month in enumerate(
+        (datetime.date(2026, 4, 1), datetime.date(2026, 5, 1), datetime.date(2026, 6, 1))
+    ):
+        db_session.add(
+            MfCategoryFlows(
+                period_month=month,
+                scheme_type="Open ended Schemes",
+                scheme_category="Equity",  # matches _seed_fund's fund.category, not sebi_category
+                num_schemes=42,
+                num_folios=100000,
+                funds_mobilized_cr=1000.0 + i,
+                redemption_cr=800.0 + i,
+                net_flow_cr=200.0 + i,
+                net_aum_cr=50000.0 + i * 100,
+                source_url="https://example.test/amfi-flows.xlsx",
+            )
+        )
+    # A different scheme_type under the SAME category label must never leak in
+    # (dedup-key regression guard, migration 0068 incident).
+    db_session.add(
+        MfCategoryFlows(
+            period_month=datetime.date(2026, 6, 1),
+            scheme_type="Close Ended Schemes",
+            scheme_category="Equity",
+            net_flow_cr=999999.0,
+            source_url="https://example.test/amfi-flows.xlsx",
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/flows")
+    assert resp.status_code == 200, resp.text
+    d = resp.json()["data"]
+    assert d["scheme_category"] == "Equity"
+    assert d["as_of_month"] == "2026-06-01"
+    assert [p["period_month"] for p in d["points"]] == ["2026-04-01", "2026-05-01", "2026-06-01"]
+    assert [p["net_flow_cr"] for p in d["points"]] == [200.0, 201.0, 202.0]
+    assert 999999.0 not in [p["net_flow_cr"] for p in d["points"]]
+
+
+async def test_fund_flows_no_matching_rows_empty_200(async_client, db_session, patch_redis):
+    """Fund has a category, but AMFI's category-flow feed has no rows for it yet
+    (e.g. the amfi_category_flows source hasn't run) — empty points, still 200."""
+    await _seed_fund(db_session, _ISIN_A)
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/flows")
+    assert resp.status_code == 200, resp.text
+    d = resp.json()["data"]
+    assert d == {"points": [], "scheme_category": "Equity", "as_of_month": None}
+
+
+async def test_fund_flows_no_category_null_shape(async_client, db_session, patch_redis):
+    """A fund with no scheme_category at all (category master hasn't populated it) gets
+    the null shape, not a 500 — never guess a category to join on (§8.4)."""
+    db_session.add(
+        MfFund(
+            isin=_ISIN_A,
+            scheme_name=f"Fund {_ISIN_A}",
+            amc_name="HDFC Asset Management Company Limited",
+            sebi_category=_CAT,
+            category=None,
+            plan_type="direct",
+            option_type="growth",
+            is_segregated=False,
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/flows")
+    assert resp.status_code == 200, resp.text
+    d = resp.json()["data"]
+    assert d == {"points": [], "scheme_category": None, "as_of_month": None}
+
+
+async def test_fund_flows_unknown_isin_404(async_client, db_session, patch_redis):
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_UNKNOWN}/flows")
     assert resp.status_code == 404
 
 
