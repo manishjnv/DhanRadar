@@ -231,9 +231,9 @@ export interface FundHead {
   nav_latest: number | null;
   nav_date: string | null;
   nav_change_pct: number | null;
-  /** W2/W3 field — always null today (shape stability). */
+  /** W2 (§10.1): real once the fund is ranked; null when unranked or insufficient_data. */
   confidence_band: ConfidenceBand | null;
-  /** W2/W3 field — source-blocked (B67/ADR-0035), always null today. */
+  /** W3 field — source-blocked (B67/ADR-0035), always null today. */
   amc_level_aum_crore: number | null;
 }
 
@@ -351,6 +351,33 @@ export interface FundPeer {
 }
 export interface FundPeers {
   peers: FundPeer[];
+}
+
+// ---------------------------------------------------------------------------
+// W2 — fund.factors + fund.signals (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.1,
+// §17 W2 — the second scored concept). Wire shapes of GET .../factors.
+// ---------------------------------------------------------------------------
+
+/** Named confidence-quality bands from the scoring engine (consistency/recency/
+ * volatility/data_coverage today) — band words only, never a numeric (non-neg #2).
+ * null when the fund is unranked or its latest read was insufficient_data. */
+export interface FundFactors {
+  factors: Record<string, 'high' | 'medium' | 'low'> | null;
+  confidence_band: ConfidenceBand | null;
+  as_of: string | null;
+}
+
+/** Plain-word reasons for/against the current label — never advisory verbs. */
+export interface FundSignals {
+  contributing: string[];
+  contradicting: string[];
+  as_of: string | null;
+}
+
+/** GET /api/v1/mf/fund/{isin}/factors — two concepts, one route. */
+export interface FundFactorsResponse {
+  factors: DataEnvelope<FundFactors>;
+  signals: DataEnvelope<FundSignals>;
 }
 
 /** One item from GET /api/v1/mf/funds/categories */

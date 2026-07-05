@@ -272,3 +272,257 @@ async def test_mf_fund_metrics_refresh_equivalence(db_session, db_tables):
             delete(MfFund).where(MfFund.isin.in_(_METRICS_ISINS))
         )
         await db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# W2 (§10.1, migration 0064) — compute_market_ranks persists band/factors/signals
+# with NO divergence from the rule table (the second scored concept, gate item d).
+# ---------------------------------------------------------------------------
+
+_RANKS_CATEGORY = "Equity Scheme - W2 Persistence Test Fund"
+_RANKS_ISINS = ["INF_W2RANKA1", "INF_W2RANKB2"]
+
+
+async def test_compute_market_ranks_persists_band_factors_signals_no_divergence(
+    db_session, db_tables, patch_redis
+):
+    """Seeds 2 funds in one category, runs the REAL `_compute_market_ranks_pipeline`,
+    then independently recomputes each fund's ScoringResult via the same
+    build_benchmark/compare_to_cohort/compute_fund_signals/score_fund call chain
+    (fresh engine, cold hysteresis — first-ever eval publishes immediately, so it is
+    directly comparable). The persisted mf_fund_ranks row must equal that independent
+    computation exactly — proving the job persists the SAME result the label came
+    from, never a re-derived one."""
+    from sqlalchemy import select
+
+    from dhanradar.mf.cohort import build_benchmark, compare_to_cohort
+    from dhanradar.models.mf import MfFundMetrics, MfFundRanks
+    from dhanradar.scoring.engine.schemas import VerbLabel
+    from dhanradar.tasks.mf import _compute_market_ranks_pipeline
+
+    stats_by_isin = {
+        _RANKS_ISINS[0]: (28.0, 55.0, -12.0),  # clear outperformer
+        _RANKS_ISINS[1]: (4.0, 9.0, -30.0),  # clear underperformer
+    }
+    for isin, (r1, r3, dd) in stats_by_isin.items():
+        await db_session.execute(
+            insert(MfFund).values(
+                isin=isin,
+                scheme_name=f"W2 Persistence {isin}",
+                sebi_category=_RANKS_CATEGORY,
+                category="Equity",
+            )
+        )
+        await db_session.execute(
+            insert(MfFundMetrics).values(
+                isin=isin,
+                return_1y_pct=r1,
+                return_3y_pct=r3,
+                max_drawdown_pct=dd,
+                nav_points=300,
+                as_of_date=_AS_OF,
+            )
+        )
+    await db_session.commit()
+
+    try:
+        summary = await _compute_market_ranks_pipeline()
+        assert "failed" not in summary
+
+        # --- independent recomputation (same inputs, fresh cold engine) ------
+        stats_list = list(stats_by_isin.values())
+        benchmark = build_benchmark(_RANKS_CATEGORY, stats_list)
+        expected: dict[str, dict] = {}
+        for isin, fund_stats in stats_by_isin.items():
+            cat_rel = compare_to_cohort(fund_stats, benchmark)
+            signals = compute_fund_signals(isin, [], category_relative=cat_rel)
+            engine = RatingEngine(hysteresis_store=_FakeHystStore(), result_store=_FakeResultStore())
+            result = await score_fund(engine, signals)
+            refused = result.verb_label == VerbLabel.insufficient_data
+            expected[isin] = {
+                "verb_label": result.verb_label.value,
+                "confidence_band": None if refused else result.confidence_band.value,
+                "confidence_factors": None if refused else dict(result.confidence_factors),
+                "contributing_signals": list(result.contributing_signals),
+                "contradicting_signals": list(result.contradicting_signals),
+            }
+
+        # --- read back the persisted rows ------------------------------------
+        rows = (
+            (
+                await db_session.execute(
+                    select(MfFundRanks).where(MfFundRanks.isin.in_(_RANKS_ISINS))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        for row in rows:
+            exp = expected[row.isin]
+            assert row.verb_label == exp["verb_label"], row.isin
+            assert row.confidence_band == exp["confidence_band"], row.isin
+            assert row.confidence_factors == exp["confidence_factors"], row.isin
+            assert row.contributing_signals == exp["contributing_signals"], row.isin
+            assert row.contradicting_signals == exp["contradicting_signals"], row.isin
+            # non-neg #2: no numeric ever lands on the row via this path.
+            assert row.confidence_factors is None or set(row.confidence_factors.values()) <= {
+                "high", "medium", "low",
+            }
+    finally:
+        await db_session.execute(
+            delete(MfFundRanks).where(MfFundRanks.isin.in_(_RANKS_ISINS))
+        )
+        await db_session.execute(
+            delete(MfFundMetrics).where(MfFundMetrics.isin.in_(_RANKS_ISINS))
+        )
+        await db_session.execute(delete(MfFund).where(MfFund.isin.in_(_RANKS_ISINS)))
+        await db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# RCA 2026-07-05 — compute_market_ranks passed an EMPTY NAV list to
+# compute_fund_signals, tripping its _MIN_POINTS guard before category_relative
+# was applied: every market label degraded to insufficient_data since 2026-06-15.
+# This test seeds real NAV + a real cohort and asserts differentiated labels,
+# non-null bands, and non-empty signals persist — it FAILS on the old code path
+# (which persisted insufficient_data/None/[] for every fund). Also asserts the
+# NAV load is chunked (bounded batches) and chunk-size-invariant (same style as
+# test_cohort_peer_load_is_chunked_and_equivalent).
+# ---------------------------------------------------------------------------
+
+_NAVFIX_CATEGORY = "Equity Scheme - W2 NAV Regression Test Fund"
+_NAVFIX_WINNER = "INF_NAVFIXW1"
+_NAVFIX_LAGGARD = "INF_NAVFIXL1"
+_NAVFIX_THIN = "INF_NAVFIXT1"  # < _MIN_POINTS NAV points → guard must still refuse
+_NAVFIX_FILLERS = [f"INF_NAVFIXF{i}" for i in range(3)]
+_NAVFIX_ISINS = [_NAVFIX_WINNER, _NAVFIX_LAGGARD, _NAVFIX_THIN, *_NAVFIX_FILLERS]
+
+
+def _monthly_nav(isin: str, months: int) -> list[dict]:
+    """`months` monthly NAV rows ending today (compounding growth) — enough points
+    for the momentum/risk axes, all inside _load_nav_series' 400-day window."""
+    rows = []
+    nav = 100.0
+    for i in range(months):
+        d = _AS_OF - datetime.timedelta(days=30 * (months - 1 - i))
+        rows.append({"isin": isin, "nav_date": d, "nav": round(nav, 4), "source": "amfi"})
+        nav *= 1.015
+    return rows
+
+
+async def test_compute_market_ranks_real_nav_yields_real_labels_chunked(
+    db_session, db_tables, patch_redis, monkeypatch
+):
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfFundMetrics, MfFundRanks
+    from dhanradar.tasks import mf as tasks_mf
+
+    # 6 funds with 1Y returns → n_peers ≥ _MIN_COHORT_PEERS (5), benchmark published.
+    # Equity margin is 2.0pp; medians: 1Y 10.25 / 3Y 20.5 / DD 20.5 (DD is a
+    # positive magnitude — see signals._max_drawdown_pct).
+    stats_by_isin: dict[str, tuple[float, float, float]] = {
+        _NAVFIX_WINNER: (28.0, 55.0, 12.0),  # ahead 1Y+3Y, controlled DD → in_form
+        _NAVFIX_LAGGARD: (2.0, 5.0, 30.0),  # behind 1Y (and 3Y) → off_track
+        _NAVFIX_THIN: (10.0, 20.0, 20.0),
+        _NAVFIX_FILLERS[0]: (9.5, 19.0, 19.0),
+        _NAVFIX_FILLERS[1]: (10.5, 21.0, 21.0),
+        _NAVFIX_FILLERS[2]: (11.0, 22.0, 22.0),
+    }
+    for isin, (r1, r3, dd) in stats_by_isin.items():
+        await db_session.execute(
+            insert(MfFund).values(
+                isin=isin,
+                scheme_name=f"NAV Regression {isin}",
+                sebi_category=_NAVFIX_CATEGORY,
+                category="Equity",
+            )
+        )
+        await db_session.execute(
+            insert(MfFundMetrics).values(
+                isin=isin,
+                return_1y_pct=r1,
+                return_3y_pct=r3,
+                max_drawdown_pct=dd,
+                nav_points=300,
+                as_of_date=_AS_OF,
+            )
+        )
+    # NAV: winner + laggard get a real 14-month series; thin gets 2 points
+    # (< _MIN_POINTS=4 → the honest-refusal guard must still fire); fillers none.
+    await db_session.execute(insert(MfNavHistory).values(_monthly_nav(_NAVFIX_WINNER, 14)))
+    await db_session.execute(insert(MfNavHistory).values(_monthly_nav(_NAVFIX_LAGGARD, 14)))
+    await db_session.execute(insert(MfNavHistory).values(_monthly_nav(_NAVFIX_THIN, 2)))
+    await db_session.commit()
+
+    # Record every NAV-load batch to assert bounded, chunked access (640MiB worker).
+    real_load = tasks_mf._load_nav_series
+    batch_sizes: list[int] = []
+
+    async def _recording_load(db, isins, lookback_days=400):
+        batch_sizes.append(len(isins))
+        return await real_load(db, isins, lookback_days=lookback_days)
+
+    monkeypatch.setattr(tasks_mf, "_load_nav_series", _recording_load)
+
+    async def _read_rows() -> dict[str, dict]:
+        rows = (
+            (
+                await db_session.execute(
+                    select(MfFundRanks).where(MfFundRanks.isin.in_(_NAVFIX_ISINS))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            r.isin: {
+                "verb_label": r.verb_label,
+                "confidence_band": r.confidence_band,
+                "confidence_factors": r.confidence_factors,
+                "contributing_signals": r.contributing_signals,
+                "contradicting_signals": r.contradicting_signals,
+            }
+            for r in rows
+        }
+
+    try:
+        # --- run 1: tiny chunk → the NAV load MUST split into bounded batches ---
+        monkeypatch.setattr(tasks_mf, "_RANKS_NAV_CHUNK", 2)
+        summary = await tasks_mf._compute_market_ranks_pipeline()
+        assert "failed" not in summary
+        assert len(batch_sizes) > 1, "NAV load was not chunked"
+        assert max(batch_sizes) <= 2, f"a NAV batch exceeded the chunk cap: {batch_sizes}"
+        chunked = await _read_rows()
+
+        # Differentiated labels + band + signals persisted (all were
+        # insufficient_data/None/[] on the pre-fix empty-list code path).
+        winner = chunked[_NAVFIX_WINNER]
+        assert winner["verb_label"] == "in_form"
+        assert winner["confidence_band"] in {"high", "medium", "low"}
+        assert winner["contributing_signals"], "winner must carry contributing signals"
+
+        laggard = chunked[_NAVFIX_LAGGARD]
+        assert laggard["verb_label"] == "off_track"
+        assert laggard["contradicting_signals"], "laggard must carry contradicting signals"
+
+        # < _MIN_POINTS NAV → the honest-refusal guard still wins.
+        thin = chunked[_NAVFIX_THIN]
+        assert thin["verb_label"] == "insufficient_data"
+        assert thin["confidence_band"] is None
+        assert thin["confidence_factors"] is None
+
+        # --- run 2: one-shot chunk → identical persisted output (chunk-invariant) ---
+        batch_sizes.clear()
+        monkeypatch.setattr(tasks_mf, "_RANKS_NAV_CHUNK", 10_000)
+        await tasks_mf._compute_market_ranks_pipeline()
+        assert await _read_rows() == chunked
+    finally:
+        await db_session.execute(delete(MfFundRanks).where(MfFundRanks.isin.in_(_NAVFIX_ISINS)))
+        await db_session.execute(
+            delete(MfFundMetrics).where(MfFundMetrics.isin.in_(_NAVFIX_ISINS))
+        )
+        await db_session.execute(delete(MfNavHistory).where(MfNavHistory.isin.in_(_NAVFIX_ISINS)))
+        await db_session.execute(delete(MfFund).where(MfFund.isin.in_(_NAVFIX_ISINS)))
+        await db_session.commit()

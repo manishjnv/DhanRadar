@@ -36,6 +36,8 @@ export type ConceptId =
   | 'fund.people'
   | 'fund.amc'
   | 'fund.peers'
+  | 'fund.factors'
+  | 'fund.signals'
   | 'portfolio.score_raw'
   | 'mood.current'
   | 'portfolio.recommendations'

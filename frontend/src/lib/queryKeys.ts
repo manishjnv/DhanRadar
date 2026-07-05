@@ -67,6 +67,7 @@ export const queryKeys = {
     fundComposition:    (isin: string) => ['mf', 'fund-composition', isin] as const,
     fundPeople:         (isin: string) => ['mf', 'fund-people', isin] as const,
     fundPeers:          (isin: string) => ['mf', 'fund-peers', isin] as const,
+    fundFactors:        (isin: string) => ['mf', 'fund-factors', isin] as const,
   },
   notifications: {
     preferences: () => ['notifications', 'preferences'] as const,

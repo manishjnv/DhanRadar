@@ -25,6 +25,7 @@ import type {
   FundComposition,
   FundPeopleResponse,
   FundPeers,
+  FundFactorsResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -444,6 +445,20 @@ export function useFundPeers(isin: string) {
   return useQuery<DataEnvelope<FundPeers>>({
     queryKey: queryKeys.mf.fundPeers(isin),
     queryFn: () => api.get<DataEnvelope<FundPeers>>(`/mf/fund/${isin}/peers`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.factors` + `fund.signals` (W2) — GET /api/v1/mf/fund/{isin}/factors */
+export function useFundFactors(isin: string) {
+  return useQuery<FundFactorsResponse>({
+    queryKey: queryKeys.mf.fundFactors(isin),
+    queryFn: () => api.get<FundFactorsResponse>(`/mf/fund/${isin}/factors`),
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;

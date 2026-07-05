@@ -35,7 +35,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
-import { useFundDetail, useFundComposition, useLatestPortfolio } from '@/features/mf/api';
+import { useFundDetail, useFundComposition, useFundFactors, useLatestPortfolio } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 
@@ -115,6 +115,7 @@ function FundDetailView() {
 
   const { data: fund, isLoading } = useFundDetail(isin, category);
   const { data: compositionEnv } = useFundComposition(isin);
+  const { data: factorsResp } = useFundFactors(isin);
   const backHref = category ? `/mf/explore?category=${encodeURIComponent(category)}` : '/mf/explore';
 
   // P1 (My Investment / Transactions / Tax seed) — 404 on /mf/portfolio/latest = anonymous or no
@@ -174,6 +175,13 @@ function FundDetailView() {
     ? `Top ${composition.holdings.length} disclosed${composition.coverage.weight_covered_pct != null ? ` · ${composition.coverage.weight_covered_pct}% of assets` : ''}${composition.as_of_month ? ` · as of ${new Date(composition.as_of_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : ''}`
     : 'Holdings not disclosed for this fund house yet';
 
+  // W2 (§10.1) — real factor bands + signal words; every field null/empty until
+  // the fund is ranked (§14.1 no-suppress: sections render their own no-data state).
+  const factors = factorsResp?.factors?.data?.factors ?? null;
+  const contributing = factorsResp?.signals?.data?.contributing ?? [];
+  const contradicting = factorsResp?.signals?.data?.contradicting ?? [];
+  const topReason = contributing[0] ?? null;
+
   return (
     <div className="w-full pb-24">
       <div className="mb-4">
@@ -184,11 +192,11 @@ function FundDetailView() {
       </div>
 
       {/* S1 — Hero + status */}
-      <HeroSection head={head} />
-      <StatusRow />
+      <HeroSection head={head} factors={factors} />
+      <StatusRow contributing={contributing} />
 
       {/* S2 — Educational verdict */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" /><VerdictSection head={head} /></Section>
+      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" /><VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
 
       {/* S3 — Smart entry timing */}
       <Section><SectionHeader index="03" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
@@ -215,7 +223,7 @@ function FundDetailView() {
       <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} /><PerformanceSection head={head} isin={isin} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
-      <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="8 modules · vs 18 peers" /><ScoreBreakdownSection /></Section>
+      <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="How confident the read is — by dimension" /><ScoreBreakdownSection factors={factors} /></Section>
 
       {/* S12 — Risk center */}
       <Section><SectionHeader index="12" title="Risk Center" /><RiskCenterSection isin={isin} /></Section>
@@ -256,7 +264,7 @@ function FundDetailView() {
       </div>
 
       {/* S22 — Sticky decision bar */}
-      <StickyBar head={head} />
+      <StickyBar head={head} topReason={topReason} />
     </div>
   );
 }

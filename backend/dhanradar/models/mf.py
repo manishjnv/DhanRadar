@@ -484,6 +484,19 @@ class MfFundRanks(Base):
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     total_in_cat: Mapped[int] = mapped_column(Integer, nullable=False)
     verb_label: Mapped[str] = mapped_column(Text, nullable=False)
+    # W2 (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.1, migration 0064): the
+    # scoring bridge already computes these per fund inside compute_market_ranks
+    # (score_fund()) — persistence only, never re-derived. NULL for
+    # insufficient_data funds (no rateable band). `confidence_factors` is the
+    # engine's own ScoringResult.confidence_factors shape (named confidence-
+    # quality bands, e.g. consistency/recency/volatility/data_coverage — NOT a
+    # per-axis quality/valuation/momentum/risk/trend band; the engine does not
+    # compute one). The numeric unified_score/confidence float is NEVER stored
+    # here (non-neg #2).
+    confidence_band: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_factors: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    contributing_signals: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    contradicting_signals: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
