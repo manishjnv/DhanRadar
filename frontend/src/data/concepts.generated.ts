@@ -38,6 +38,8 @@ export type ConceptId =
   | 'fund.peers'
   | 'fund.factors'
   | 'fund.signals'
+  | 'fund.sip_illustration'
+  | 'fund.health'
   | 'portfolio.score_raw'
   | 'mood.current'
   | 'portfolio.recommendations'

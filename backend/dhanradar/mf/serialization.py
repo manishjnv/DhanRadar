@@ -126,9 +126,17 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "rolling_1y_min_pct",
             "rolling_1y_max_pct",
             "rolling_1y_pct_positive",
+            "rolling_3y_avg_pct",
+            "rolling_3y_min_pct",
+            "rolling_3y_max_pct",
+            "rolling_3y_pct_positive",
             "as_of",
             "volatility_percentile",
             "category_percentiles",
+            "drawdown_series",
+            "worst_fall_pct",
+            "recovery_days",
+            "calendar_year_returns",
         }
     ),
     "fund.rank_history": frozenset({"points"}),
@@ -138,6 +146,19 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "fund.peers": frozenset({"peers"}),
     "fund.factors": frozenset({"factors", "confidence_band", "as_of"}),
     "fund.signals": frozenset({"contributing", "contradicting", "as_of"}),
+    "fund.sip_illustration": frozenset(
+        {
+            "amount",
+            "years",
+            "months_invested",
+            "total_invested",
+            "final_value",
+            "xirr_pct",
+            "as_of",
+            "assumptions",
+        }
+    ),
+    "fund.health": frozenset({"lights", "as_of"}),
 }
 
 

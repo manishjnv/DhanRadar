@@ -265,6 +265,20 @@ export interface CategoryPercentileBand {
   p90: number | null;
 }
 
+/** One point of the `drawdown_series` (§10.5) — pct is always <= 0. */
+export interface FundDrawdownPoint {
+  d: string;
+  pct: number;
+}
+
+/** One calendar-year entry of `calendar_year_returns` (§10.5). quartile is null
+ *  when the category hasn't published enough funds for that year yet. */
+export interface FundCalendarYearReturn {
+  year: number;
+  return_pct: number;
+  quartile: 1 | 2 | 3 | 4 | null;
+}
+
 export interface FundAnalytics {
   sharpe_ratio: number | null;
   sortino_ratio: number | null;
@@ -274,6 +288,11 @@ export interface FundAnalytics {
   rolling_1y_min_pct: number | null;
   rolling_1y_max_pct: number | null;
   rolling_1y_pct_positive: number | null;
+  /** W2 §10.5 — same shape as the rolling_1y_* fields, 3-year window. */
+  rolling_3y_avg_pct: number | null;
+  rolling_3y_min_pct: number | null;
+  rolling_3y_max_pct: number | null;
+  rolling_3y_pct_positive: number | null;
   as_of: string | null;
   /** 0-100; higher = more volatile than category peers. null if uncategorised/uncohorted. */
   volatility_percentile: number | null;
@@ -281,6 +300,11 @@ export interface FundAnalytics {
   category_percentiles: Partial<
     Record<'return_1y_pct' | 'return_3y_pct' | 'max_drawdown_pct', CategoryPercentileBand>
   >;
+  /** W2 §10.5 — stride-sampled to <=200 points; the caller draws the chart. */
+  drawdown_series: FundDrawdownPoint[];
+  worst_fall_pct: number | null;
+  recovery_days: number | null;
+  calendar_year_returns: FundCalendarYearReturn[];
 }
 
 export interface FundRankHistoryPoint {
@@ -292,10 +316,35 @@ export interface FundRankHistory {
   points: FundRankHistoryPoint[];
 }
 
-/** GET /api/v1/mf/fund/{isin}/analytics — two concepts, one route. */
+/** GET /api/v1/mf/fund/{isin}/health (§10.7) — traffic-light dimension. */
+export interface FundHealthLight {
+  name: string;
+  light: 'g' | 'y' | 'r' | 'grey';
+  note: string;
+}
+export interface FundHealth {
+  lights: FundHealthLight[];
+  as_of: string | null;
+}
+
+/** GET /api/v1/mf/fund/{isin}/analytics — three concepts, one route (W1 + W2 health). */
 export interface FundAnalyticsResponse {
   analytics: DataEnvelope<FundAnalytics>;
   rank_history: DataEnvelope<FundRankHistory>;
+  health: DataEnvelope<FundHealth>;
+}
+
+/** GET /api/v1/mf/fund/{isin}/sip?amount=&years= (§10.4) — historical illustration,
+ *  never a projection. Money fields are null under 12 months of history. */
+export interface FundSipIllustration {
+  amount: number;
+  years: number;
+  months_invested: number;
+  total_invested: number | null;
+  final_value: number | null;
+  xirr_pct: number | null;
+  as_of: string | null;
+  assumptions: string;
 }
 
 /** GET /api/v1/mf/fund/{isin}/composition */
