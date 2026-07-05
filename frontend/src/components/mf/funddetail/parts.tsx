@@ -309,20 +309,17 @@ export function RankChart({ series, maxRank = 8, height = 150 }: { series: numbe
   );
 }
 
-/** Drawdown area (always ≤ 0). */
-export function DrawdownChart({ seed = 7, height = 150 }: { seed?: number; height?: number }) {
+/**
+ * Drawdown area (always <= 0) — real series (W2, FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md
+ * §10.5): `series` is the fund's own pct-from-running-peak values (already stride-
+ * sampled server-side to <=200 points). The floor is the series' own worst point
+ * (not a fixed -27), so the chart always fills its height regardless of how deep
+ * the fund's actual worst drawdown was.
+ */
+export function DrawdownChart({ series, height = 150 }: { series: number[]; height?: number }) {
   const W = 640;
-  const rnd = lcg(seed);
-  const data: number[] = [];
-  let dd = 0;
-  for (let i = 0; i < 70; i++) {
-    const shock = rnd();
-    if (shock > 0.82) dd -= rnd() * 9; else dd += rnd() * 3.4;
-    if (dd > 0) dd = 0;
-    if (dd < -27) dd = -27;
-    data.push(dd);
-  }
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * W, (-v / 27) * (height - 10) + 5]);
+  const floor = Math.min(-1, ...series); // avoid a zero-range chart on an all-zero series
+  const pts = series.map((v, i) => [(i / Math.max(series.length - 1, 1)) * W, (-v / -floor) * (height - 10) + 5]);
   const path = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
   return (
     <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" className="block rounded-xl border border-line" style={{ background: '#FEF2F2' }}>

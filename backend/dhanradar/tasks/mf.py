@@ -1655,7 +1655,13 @@ async def _metrics_refresh_pipeline() -> str:
 
     from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
-    from dhanradar.mf.risk import percentile, resolve_risk_free_rate, risk_adjusted_stats
+    from dhanradar.mf.risk import (
+        calendar_year_returns,
+        percentile,
+        resolve_risk_free_rate,
+        risk_adjusted_stats,
+        rolling_3y_returns,
+    )
     from dhanradar.mf.signals import extended_horizon_stats
     from dhanradar.models.mf import (
         MfCategoryStats,
@@ -1715,6 +1721,10 @@ async def _metrics_refresh_pipeline() -> str:
     logger.info("mf_metrics_refresh: %d ISINs to process", len(all_isins))
 
     n_processed = 0
+    # Per-fund calendar-year returns, accumulated across chunks for the category-stats
+    # step below (W2 §10.5) — a small {year: pct} dict per ISIN, not the NAV series
+    # itself, so this stays well within the B63 memory cap even at full fund count.
+    cy_returns_by_isin: dict[str, dict[int, float]] = {}
     for start in range(0, len(all_isins), _METRICS_REFRESH_CHUNK):
         chunk = all_isins[start : start + _METRICS_REFRESH_CHUNK]
         if not chunk:
@@ -1738,6 +1748,17 @@ async def _metrics_refresh_pipeline() -> str:
                     series.get(isin, []),
                     risk_free_annual=risk_free_annual,
                 )
+                # Rolling 3Y (migration 0065, W2 §10.5) — same algorithm as rolling
+                # 1Y above, longer window; independent of risk_adjusted_stats/RiskStats
+                # (which stays fund-NAV 1Y-only; also reused by the portfolio M2.3 path).
+                r3y_avg, r3y_min, r3y_max, r3y_pct_pos = rolling_3y_returns(series.get(isin, []))
+
+                # ponytail: _METRICS_LOOKBACK_DAYS (1900d, ~5.2y) can fall a little short
+                # of the ~6y span calendar_year_returns wants for a full 5-year strip —
+                # the oldest year(s) just come back missing, same honest-partial-data
+                # pattern as every other window here. Extend _METRICS_LOOKBACK_DAYS if a
+                # deeper calendar-year history is ever needed.
+                cy_returns_by_isin[isin] = calendar_year_returns(series.get(isin, []), as_of=today)
 
                 upsert_dicts.append({
                     "isin": isin,
@@ -1758,6 +1779,11 @@ async def _metrics_refresh_pipeline() -> str:
                     "rolling_1y_min_pct": rs.rolling_1y_min_pct,
                     "rolling_1y_max_pct": rs.rolling_1y_max_pct,
                     "rolling_1y_pct_positive": rs.rolling_1y_pct_positive,
+                    # Rolling 3Y stats (migration 0065).
+                    "rolling_3y_avg_pct": r3y_avg,
+                    "rolling_3y_min_pct": r3y_min,
+                    "rolling_3y_max_pct": r3y_max,
+                    "rolling_3y_pct_positive": r3y_pct_pos,
                 })
 
             # Bulk upsert in sub-chunks to bound statement size.
@@ -1786,6 +1812,11 @@ async def _metrics_refresh_pipeline() -> str:
                         "rolling_1y_min_pct": insert(MfFundMetrics).excluded.rolling_1y_min_pct,
                         "rolling_1y_max_pct": insert(MfFundMetrics).excluded.rolling_1y_max_pct,
                         "rolling_1y_pct_positive": insert(MfFundMetrics).excluded.rolling_1y_pct_positive,
+                        # Rolling 3Y stats (migration 0065).
+                        "rolling_3y_avg_pct": insert(MfFundMetrics).excluded.rolling_3y_avg_pct,
+                        "rolling_3y_min_pct": insert(MfFundMetrics).excluded.rolling_3y_min_pct,
+                        "rolling_3y_max_pct": insert(MfFundMetrics).excluded.rolling_3y_max_pct,
+                        "rolling_3y_pct_positive": insert(MfFundMetrics).excluded.rolling_3y_pct_positive,
                     },
                 )
                 await db.execute(stmt)
@@ -1802,6 +1833,7 @@ async def _metrics_refresh_pipeline() -> str:
         rows = (
             await db.execute(
                 select(
+                    MfFund.isin,
                     MfFund.sebi_category,
                     MfFundMetrics.return_1y_pct,
                     MfFundMetrics.return_3y_pct,
@@ -1817,11 +1849,18 @@ async def _metrics_refresh_pipeline() -> str:
     by_cat_metric: dict[str, dict[str, list[float | None]]] = defaultdict(
         lambda: {k: [] for k in _CATEGORY_METRIC_KEYS}
     )
+    # Per-calendar-year cohort (W2 §10.5 consistency strip): {category: {year: [values]}}.
+    # metric_key is written as f"return_cy_{year}" below — the composite PK
+    # (sebi_category, metric_key, as_of) already supports an arbitrary key, no
+    # migration needed.
+    by_cat_cy: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         cat = row.sebi_category
         by_cat_metric[cat]["return_1y_pct"].append(row.return_1y_pct)
         by_cat_metric[cat]["return_3y_pct"].append(row.return_3y_pct)
         by_cat_metric[cat]["max_drawdown_pct"].append(row.max_drawdown_pct)
+        for year, ret in cy_returns_by_isin.get(row.isin, {}).items():
+            by_cat_cy[cat][year].append(ret)
 
     cat_stat_upserts: list[dict] = []
     for cat, metric_map in by_cat_metric.items():
@@ -1837,6 +1876,20 @@ async def _metrics_refresh_pipeline() -> str:
                 "p50": percentile(valid, 50.0),
                 "p75": percentile(valid, 75.0),
                 "p90": percentile(valid, 90.0),
+                "as_of": today,
+            })
+    for cat, year_map in by_cat_cy.items():
+        for year, cy_values in year_map.items():
+            valid_cy = sorted(cy_values)
+            if len(valid_cy) < _MIN_CATEGORY_FUNDS:
+                continue
+            cat_stat_upserts.append({
+                "sebi_category": cat,
+                "metric_key": f"return_cy_{year}",
+                "p25": percentile(valid_cy, 25.0),
+                "p50": percentile(valid_cy, 50.0),
+                "p75": percentile(valid_cy, 75.0),
+                "p90": percentile(valid_cy, 90.0),
                 "as_of": today,
             })
 

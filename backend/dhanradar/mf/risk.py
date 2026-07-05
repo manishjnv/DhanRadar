@@ -2,7 +2,8 @@
 DhanRadar — MF NAV → Risk-adjusted metrics (Phase 5, B74).
 
 Pure module: turns a fund's OWN NAV time-series into Sharpe ratio, Sortino
-ratio, annualised volatility, and rolling 1-year return stats.
+ratio, annualised volatility, rolling 1Y/3Y return stats, calendar-year
+returns, drawdown/recovery, and a historical SIP illustration (W2 §10.4/§10.5).
 No DB / network / Redis / Celery imports — golden-set testable.
 
 Mathematics conventions (documented once here; unit tests pin exact values):
@@ -43,6 +44,7 @@ import statistics
 from dataclasses import dataclass
 
 from dhanradar.mf.signals import _periodic_returns, _sorted_unique
+from dhanradar.mf.snapshot import CashFlow, xirr
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -189,59 +191,84 @@ def risk_adjusted_stats(
 
 
 # ---------------------------------------------------------------------------
-# Rolling 1-year windows
+# Shared NAV-lookup helper (rolling windows + calendar-year returns)
 # ---------------------------------------------------------------------------
 
-def rolling_1y_returns(
+def _nav_on_or_before(
+    dates: list[datetime.date],
+    navs: list[float],
+    d: datetime.date,
+    *,
+    max_gap_days: int | None = None,
+) -> float | None:
+    """Binary-search for the latest NAV point with date <= d (dates/navs ascending,
+    same length, produced by :func:`_sorted_unique`). None if no such point exists,
+    or — when ``max_gap_days`` is set — the nearest point is older than that many
+    days before ``d`` (guards a long stale-data gap masquerading as a genuine
+    boundary NAV; unused by the rolling-window callers below, only by
+    :func:`calendar_year_returns`, which needs a tight year-end match)."""
+    lo, hi = 0, len(dates) - 1
+    result_idx = -1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if dates[mid] <= d:
+            result_idx = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    if result_idx < 0:
+        return None
+    if max_gap_days is not None and (d - dates[result_idx]).days > max_gap_days:
+        return None
+    return navs[result_idx]
+
+
+# ---------------------------------------------------------------------------
+# Rolling N-year windows (generalised — the 1Y and 3Y stats are the SAME
+# algorithm at a different window length; do not duplicate it per window)
+# ---------------------------------------------------------------------------
+
+def rolling_window_returns(
     points: list[tuple[datetime.date, float]],
+    *,
+    window_days: int = 365,
+    step_days: int = 30,
 ) -> tuple[float | None, float | None, float | None, float | None]:
-    """Compute rolling 1-year return windows stepping by 30 days.
+    """Compute rolling ``window_days``-length return windows, stepping by
+    ``step_days``.
 
     Returns ``(avg_pct, min_pct, max_pct, pct_positive)`` or
-    ``(None, None, None, None)`` when the series spans less than 365 days.
+    ``(None, None, None, None)`` when the series spans less than ``window_days``.
 
-    Algorithm:
+    Algorithm (unchanged from the original 1Y-only implementation, just
+    parameterised on the window length):
       For k = 0, 1, 2, …:
-        end-anchor e = pts[-1].date − 30*k days
-        stop when e < pts[0].date + 365 days
+        end-anchor e = pts[-1].date − step_days*k days
+        stop when e < pts[0].date + window_days days
         nav_e   = NAV of the latest point with date <= e (or None)
-        nav_base = NAV of the latest point with date <= e−365 (or None)
+        nav_base = NAV of the latest point with date <= e−window_days (or None)
         window return = (nav_e / nav_base − 1) × 100  if both exist and nav_base > 0
     """
     pts = _sorted_unique(points)
     if not pts:
         return None, None, None, None
     span_days = (pts[-1][0] - pts[0][0]).days
-    if span_days < 365:
+    if span_days < window_days:
         return None, None, None, None
 
-    # Build a fast date→nav lookup for nav_on_or_before.
     dates = [p[0] for p in pts]
     navs = [p[1] for p in pts]
 
-    def nav_on_or_before(d: datetime.date) -> float | None:
-        """Binary-search for the latest NAV point with date <= d."""
-        lo, hi = 0, len(dates) - 1
-        result_idx = -1
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            if dates[mid] <= d:
-                result_idx = mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        return navs[result_idx] if result_idx >= 0 else None
-
     window_returns: list[float] = []
     k = 0
-    stop_anchor = pts[0][0] + datetime.timedelta(days=365)
+    stop_anchor = pts[0][0] + datetime.timedelta(days=window_days)
     while True:
-        e = pts[-1][0] - datetime.timedelta(days=30 * k)
+        e = pts[-1][0] - datetime.timedelta(days=step_days * k)
         if e < stop_anchor:
             break
-        base_date = e - datetime.timedelta(days=365)
-        nav_e = nav_on_or_before(e)
-        nav_base = nav_on_or_before(base_date)
+        base_date = e - datetime.timedelta(days=window_days)
+        nav_e = _nav_on_or_before(dates, navs, e)
+        nav_base = _nav_on_or_before(dates, navs, base_date)
         if nav_e is not None and nav_base is not None and nav_base > 0:
             window_returns.append((nav_e / nav_base - 1.0) * 100.0)
         k += 1
@@ -254,6 +281,137 @@ def rolling_1y_returns(
     max_pct = max(window_returns)
     pct_pos = 100.0 * sum(1 for r in window_returns if r > 0) / len(window_returns)
     return avg_pct, min_pct, max_pct, pct_pos
+
+
+def rolling_1y_returns(
+    points: list[tuple[datetime.date, float]],
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Rolling 1-year (365-day) windows, 30-day step. Thin back-compat wrapper
+    over :func:`rolling_window_returns` — behavior is byte-for-byte unchanged
+    from before the generalisation."""
+    return rolling_window_returns(points, window_days=365, step_days=30)
+
+
+# 3 × 365 — matches the existing 3Y convention elsewhere (signals._THREE_YEAR_DAYS).
+_ROLLING_3Y_WINDOW_DAYS = 365 * 3
+
+
+def rolling_3y_returns(
+    points: list[tuple[datetime.date, float]],
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Rolling 3-year (1095-day) windows, 30-day step (W2 §10.5) — the SAME
+    algorithm as :func:`rolling_1y_returns`, just a longer window."""
+    return rolling_window_returns(points, window_days=_ROLLING_3Y_WINDOW_DAYS, step_days=30)
+
+
+# ---------------------------------------------------------------------------
+# Calendar-year returns (Jan1–Dec31), for the consistency strip + category
+# quartile context (W2 §10.5)
+# ---------------------------------------------------------------------------
+
+# Tolerance for matching a NAV point to a Dec-31 year-end boundary — covers the
+# New Year holiday/weekend gap (AMFI NAV is business-daily, so Dec 31 itself is
+# frequently not a trading day).
+_CALENDAR_YEAR_BOUNDARY_MAX_GAP_DAYS = 10
+
+
+def calendar_year_returns(
+    points: list[tuple[datetime.date, float]],
+    *,
+    as_of: datetime.date | None = None,
+    n_years: int = 5,
+) -> dict[int, float]:
+    """Calendar-year (Jan1–Dec31) returns for the last ``n_years`` FULL years.
+
+    Returns ``{year: return_pct}`` — a year is included only when BOTH its own
+    year-end AND the prior year-end have a NAV point within
+    ``_CALENDAR_YEAR_BOUNDARY_MAX_GAP_DAYS`` of the boundary date. This
+    naturally excludes a fund's partial launch year (no prior year-end NAV
+    exists) and any year entirely before launch — never a fabricated partial-
+    year return. The current, not-yet-complete year is never included
+    (``as_of`` anchors "last full year"; defaults to today).
+    """
+    pts = _sorted_unique(points)
+    if not pts:
+        return {}
+
+    today = as_of or datetime.date.today()
+    last_full_year = today.year - 1
+    dates = [p[0] for p in pts]
+    navs = [p[1] for p in pts]
+
+    out: dict[int, float] = {}
+    for year in range(last_full_year - n_years + 1, last_full_year + 1):
+        nav_end = _nav_on_or_before(
+            dates, navs, datetime.date(year, 12, 31),
+            max_gap_days=_CALENDAR_YEAR_BOUNDARY_MAX_GAP_DAYS,
+        )
+        nav_start = _nav_on_or_before(
+            dates, navs, datetime.date(year - 1, 12, 31),
+            max_gap_days=_CALENDAR_YEAR_BOUNDARY_MAX_GAP_DAYS,
+        )
+        if nav_end is None or nav_start is None or nav_start <= 0:
+            continue
+        out[year] = (nav_end / nav_start - 1.0) * 100.0
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Drawdown series + worst-fall/recovery (W2 §10.5)
+# ---------------------------------------------------------------------------
+
+def drawdown_series(
+    points: list[tuple[datetime.date, float]],
+) -> tuple[list[tuple[datetime.date, float]], float | None, int | None]:
+    """Running drawdown-from-peak series (%, always <= 0) over the FULL series,
+    plus the worst (most negative) drawdown and its recovery time.
+
+    Returns ``(series, worst_fall_pct, recovery_days)``:
+      - ``series``: one ``(date, pct_from_running_peak)`` point per input point
+        (the caller downsamples for the chart — reuse ``fund_read._downsample``,
+        do not re-implement stride-sampling here).
+      - ``worst_fall_pct``: the single most negative drawdown, or None if the
+        series never fell below its running peak (< 2 points, or monotonically
+        non-decreasing).
+      - ``recovery_days``: calendar days from the PEAK that preceded the worst
+        drawdown to the first later date the NAV climbs back to that peak value
+        — None if the fund has not yet recovered from its worst fall.
+    """
+    pts = _sorted_unique(points)
+    if len(pts) < 2:
+        return [], None, None
+
+    series: list[tuple[datetime.date, float]] = []
+    peak_nav = pts[0][1]
+    peak_date = pts[0][0]
+    worst_pct = 0.0
+    worst_trough_date: datetime.date | None = None
+    worst_peak_date: datetime.date | None = None
+    worst_peak_nav: float | None = None
+
+    for d, nav in pts:
+        if nav > peak_nav:
+            peak_nav = nav
+            peak_date = d
+        pct = (nav - peak_nav) / peak_nav * 100.0 if peak_nav > 0 else 0.0
+        series.append((d, pct))
+        if pct < worst_pct:
+            worst_pct = pct
+            worst_trough_date = d
+            worst_peak_date = peak_date
+            worst_peak_nav = peak_nav
+
+    if worst_trough_date is None or worst_peak_nav is None:
+        # Series never fell below its running peak — no drawdown to report.
+        return series, None, None
+
+    recovery_days: int | None = None
+    for d, nav in pts:
+        if d > worst_trough_date and nav >= worst_peak_nav:
+            recovery_days = (d - worst_peak_date).days  # type: ignore[operator]
+            break
+
+    return series, round(worst_pct, 2), recovery_days
 
 
 # ---------------------------------------------------------------------------
@@ -398,4 +556,101 @@ def resolve_risk_free_rate(
         source="tbill",
         as_of_date=tbill_as_of,
         rejected_reason=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SIP illustration engine (W2 §10.4) — historical, never a projection
+# ---------------------------------------------------------------------------
+
+# SIP menu — amount/years are PROVISIONAL DEFAULTS (§18.4 founder decision
+# pending); the fixed menu (not free-form input) keeps the Redis cache-key
+# space bounded. The route (mf/router.py) 422s an out-of-menu value via a
+# Literal-typed query param — this module never validates the menu itself,
+# it just computes whatever (amount, years) it is given.
+SIP_AMOUNT_MENU: tuple[int, ...] = (1000, 5000, 10000)
+SIP_YEARS_MENU: tuple[int, ...] = (1, 3, 5)
+
+# A SIP illustration under a year of actual purchases is too short to mean
+# anything — the caller (mf/fund_read.py) nulls the money fields below this
+# and keeps months_invested, so the young-fund case reads as honest, not broken.
+SIP_MIN_MONTHS_FOR_ILLUSTRATION: int = 12
+
+
+@dataclass(frozen=True)
+class SipIllustration:
+    """Output of :func:`compute_sip_illustration` — money fields are always
+    computed here (the young-fund <12mo withholding is the CALLER's job, not
+    this pure function's, so tests can see the raw numbers either way)."""
+
+    months_invested: int
+    total_invested: float
+    final_value: float | None
+    xirr_pct: float | None
+
+
+def compute_sip_illustration(
+    nav_points: list[tuple[datetime.date, float]],
+    monthly_amount: float,
+    years: int,
+) -> SipIllustration:
+    """Historical SIP illustration (§10.4): buy ``monthly_amount`` on the FIRST
+    available NAV date of each calendar month, over the trailing ``years``-year
+    window ending at the fund's OWN latest NAV date (not wall-clock "today" —
+    mirrors the nav_series convention, so a stale/cold feed still gets a
+    coherent window). All accumulated units are marked at the LATEST NAV.
+
+    XIRR reuses the EXISTING server solver (:func:`dhanradar.mf.snapshot.xirr`)
+    over the resulting cash-flow schedule (each monthly buy negative, the final
+    mark-to-market positive) — no new root-finder.
+
+    Young-fund handling: if the fund's history is SHORTER than the requested
+    window, the SIP simply runs over however many months ARE available (never
+    fabricated) — ``months_invested`` always reports the TRUE number of
+    monthly purchases made. Returns ``months_invested=0`` / all-None money
+    fields when there is no usable NAV data in the window at all.
+    """
+    pts = _sorted_unique(nav_points)
+    if not pts:
+        return SipIllustration(
+            months_invested=0, total_invested=0.0, final_value=None, xirr_pct=None
+        )
+
+    latest_date, latest_nav = pts[-1]
+    window_start = latest_date - datetime.timedelta(days=365 * years)
+
+    # First NAV point of each (year, month) inside the window.
+    first_of_month: dict[tuple[int, int], tuple[datetime.date, float]] = {}
+    for d, nav in pts:
+        if d < window_start:
+            continue
+        key = (d.year, d.month)
+        if key not in first_of_month:
+            first_of_month[key] = (d, nav)
+
+    months = sorted(first_of_month)
+    if not months:
+        return SipIllustration(
+            months_invested=0, total_invested=0.0, final_value=None, xirr_pct=None
+        )
+
+    units = 0.0
+    total_invested = 0.0
+    cashflows: list[CashFlow] = []
+    for key in months:
+        d, nav = first_of_month[key]
+        if nav <= 0:
+            continue
+        units += monthly_amount / nav
+        total_invested += monthly_amount
+        cashflows.append(CashFlow(when=d, amount=-monthly_amount))
+
+    final_value = round(units * latest_nav, 2)
+    cashflows.append(CashFlow(when=latest_date, amount=final_value))
+
+    return SipIllustration(
+        months_invested=len(months),
+        total_invested=round(total_invested, 2),
+        final_value=final_value,
+        xirr_pct=xirr(cashflows),
     )

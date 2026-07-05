@@ -27,7 +27,7 @@ import logging
 import os
 import tempfile
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -930,17 +930,21 @@ async def fund_analytics(
     isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
 ) -> dict:
-    """`fund.analytics` + `fund.rank_history` (W1) — risk/return stats with category
-    percentile context, and the trailing 12-month rank trend. Two concepts on one
-    route — both derive from the same nightly metrics+ranks refresh (§8).
+    """`fund.analytics` + `fund.rank_history` + `fund.health` (W1/W2) — risk/return
+    stats with category percentile context, the trailing 12-month rank trend, and
+    the 9-dimension traffic-light health read. Three concepts on one route — all
+    derive from the same nightly metrics+ranks refresh (§8/§10.7).
     """
-    from dhanradar.mf.fund_read import get_fund_analytics, get_fund_rank_history
+    from dhanradar.mf.fund_read import get_fund_analytics, get_fund_health, get_fund_rank_history
     from dhanradar.mf.serialization import RequestCtx, serialize_concept
 
     analytics = await get_fund_analytics(db, isin)
     if analytics is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
     rank_history = await get_fund_rank_history(db, isin) or {"points": []}
+    # health reuses the already-built `analytics` dict (category cohort etc.) —
+    # no re-derivation, see fund_read.get_fund_health docstring.
+    health = await get_fund_health(db, isin, analytics=analytics) or {"lights": [], "as_of": None}
 
     ctx = RequestCtx(tier=user.tier)
     points = rank_history["points"]
@@ -954,6 +958,9 @@ async def fund_analytics(
             ctx,
             as_of=points[-1]["as_of"] if points else None,
             source="amfi",
+        ),
+        "health": serialize_concept(
+            "fund.health", health, ctx, as_of=health["as_of"], source="amfi"
         ),
     }
 
@@ -1061,6 +1068,39 @@ async def fund_factors(
             "fund.signals", signals, ctx, as_of=signals["as_of"], source="scoring"
         ),
     }
+
+
+@router.get("/fund/{isin}/sip")
+async def fund_sip(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    # amount/years MENU VALUES ARE PROVISIONAL DEFAULTS — founder decision pending
+    # (§18.4). Literal-typed so an out-of-menu value 422s automatically, keeping
+    # the Redis cache-key space bounded to the 3×3 menu (§10.4).
+    amount: Annotated[Literal[1000, 5000, 10000], Query()] = 5000,
+    years: Annotated[Literal[1, 3, 5], Query()] = 5,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.sip_illustration` (W2 §10.4) — historical SIP XIRR illustration for a
+    fixed (amount, years) menu pair. An ILLUSTRATION using past NAV history, never
+    a projection or recommendation (non-neg #1) — the served payload always
+    carries an `assumptions` line.
+    """
+    from dhanradar.mf.fund_read import get_fund_sip
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    payload = await get_fund_sip(db, isin, amount, years)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    return serialize_concept(
+        "fund.sip_illustration",
+        payload,
+        RequestCtx(tier=user.tier),
+        as_of=payload["as_of"],
+        source="amfi",
+    )
 
 
 # ---------------------------------------------------------------------------

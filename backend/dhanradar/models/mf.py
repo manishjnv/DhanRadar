@@ -144,6 +144,13 @@ class MfFundMetrics(Base):
     rolling_1y_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     rolling_1y_pct_positive: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Rolling-3Y stats (migration 0065, W2 §10.5) — same rolling_window_returns()
+    # algorithm as the 1Y columns above (dhanradar/mf/risk.py), 1095-day window.
+    rolling_3y_avg_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_3y_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_3y_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rolling_3y_pct_positive: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class MfCategoryStats(Base):
     """Per-category percentile distribution of key fund metrics.

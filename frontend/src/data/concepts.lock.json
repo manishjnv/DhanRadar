@@ -159,6 +159,16 @@
     "data_class": "public-fact",
     "content_class": "DERIVED"
   },
+  "fund.sip_illustration": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "CALCULATED"
+  },
+  "fund.health": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "DERIVED"
+  },
   "portfolio.score_raw": {
     "visibility_class": "gated",
     "data_class": "derived-personal",

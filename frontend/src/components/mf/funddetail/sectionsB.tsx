@@ -5,11 +5,14 @@
  * DOM-allowed. NO DhanRadar composite score numbers, no advisory verbs
  * (buy/sell/hold/avoid/caution/switch).
  *
- * W1 (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17): Returns/Rolling/Rank-Trend tabs
- * and the whole Risk Center are wired to real data (`fund.nav_series`,
- * `fund.analytics`, `fund.rank_history`, plus the benchmark daily-close
- * endpoint). SIP/Drawdowns/Consistency stay sampleData preview (W2) —
- * PreviewBadge shows only on those tabs now.
+ * W1+W2 (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17): every Performance-Center
+ * tab (Returns/SIP/Rolling/Rank-Trend/Drawdowns/Consistency) and the whole Risk
+ * Center are wired to real data (`fund.nav_series`, `fund.analytics`,
+ * `fund.rank_history`, `fund.sip_illustration`, `fund.health`, plus the
+ * benchmark daily-close endpoint). Only two small in-tab comparison TABLES
+ * (Returns-tab "vs benchmark & category", Rolling-tab "vs benchmark &
+ * category") stay sampleData preview — each carries its own inline
+ * <PreviewBadge/>, not a tab-level one.
  *
  * Item 3 (2026-07): the Returns-tab overlay picks a category-appropriate
  * benchmark (`categoryBenchmark.ts` — Large Cap → Nifty 100, Mid Cap → Nifty
@@ -21,7 +24,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
-import { useFundNav, useFundAnalytics } from '@/features/mf/api';
+import { useFundNav, useFundAnalytics, useFundSip } from '@/features/mf/api';
 import { useBenchmarkSeries } from '@/features/portfolio/api';
 import { benchmarkForCategory } from './categoryBenchmark';
 import { DataState } from '@/components/ui/DataState';
@@ -33,10 +36,23 @@ import {
 } from './parts';
 import {
   SNAPSHOT,
-  RETURN_TABLE, RETURN_TABLE_HEAD, GROWTH, SIP, ROLLING, RANK, DRAWDOWN, CONSISTENCY,
+  RETURN_TABLE, RETURN_TABLE_HEAD, GROWTH, ROLLING, RANK,
 } from './sampleData';
 import type { Band3 } from './sampleData';
 import type { FundHead } from './sectionsHero';
+
+// SIP menu — amount/years are PROVISIONAL DEFAULTS (§18.4 founder decision
+// pending), mirroring the backend's fixed Literal-typed menu (mf/router.py).
+const SIP_AMOUNTS = [1000, 5000, 10000] as const;
+const SIP_YEARS = [1, 3, 5] as const;
+
+// Quartile → tone colour (Q1 = top quartile, best) — shared by the Consistency tab.
+const QUARTILE_TONE: Record<1 | 2 | 3 | 4, string> = {
+  1: 'bg-emerald text-white',
+  2: 'bg-amber text-white',
+  3: 'bg-red/70 text-white',
+  4: 'bg-red text-white',
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S9 — INVESTMENT SNAPSHOT
@@ -283,47 +299,84 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
 }
 
 // ── SIP Growth tab ────────────────────────────────────────────────────────────
-function SipTab() {
-  const [selected, setSelected] = React.useState(SIP.amounts[0].key);
-  const current = SIP.amounts.find((a) => a.key === selected) ?? SIP.amounts[0];
+// Real (W2, §10.4) — historical SIP illustration, never a projection.
+function SipTab({ isin }: { isin: string }) {
+  const [amount, setAmount] = React.useState<(typeof SIP_AMOUNTS)[number]>(5000);
+  const [years, setYears] = React.useState<(typeof SIP_YEARS)[number]>(5);
+  const { data, isLoading, isError, refetch } = useFundSip(isin, amount, years);
+  const sip = data?.data ?? null;
+  const status = isLoading ? 'loading' : isError ? 'error' : (data?.status ?? 'empty');
+  const hasResult = sip != null && sip.total_invested != null && sip.final_value != null;
 
   return (
     <>
-      {/* Amount chips */}
-      <div className="mb-4">
+      {/* Amount + years chips */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <ChipToggle
-          options={SIP.amounts.map((a) => ({ key: a.key, label: a.label }))}
-          active={selected}
-          onChange={setSelected}
+          options={SIP_AMOUNTS.map((a) => ({ key: String(a), label: `₹${a.toLocaleString('en-IN')}/mo` }))}
+          active={String(amount)}
+          onChange={(k) => setAmount(Number(k) as (typeof SIP_AMOUNTS)[number])}
+        />
+        <ChipToggle
+          options={SIP_YEARS.map((y) => ({ key: String(y), label: `${y}Y` }))}
+          active={String(years)}
+          onChange={(k) => setYears(Number(k) as (typeof SIP_YEARS)[number])}
         />
       </div>
 
-      {/* Result panel */}
-      <div className="mb-4 flex items-start justify-between rounded-2xl bg-emerald/[0.08] p-4">
-        <div>
-          <div className="text-[11px] font-semibold text-ink-muted">{current.sub}</div>
-          <div className="mt-1 font-mono text-[24px] font-extrabold tracking-tight text-emerald">
-            {current.val}
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] font-semibold text-ink-muted">Gain</div>
-          <div className="font-mono text-[15px] font-bold text-emerald">{current.gain}</div>
-          <div className="font-mono text-[12px] text-emerald">{current.xirr}</div>
-        </div>
-      </div>
+      <DataState
+        status={status}
+        emptyCopy="We don't have price history for this fund yet."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+      >
+        {hasResult && sip ? (
+          <>
+            {/* Result panel */}
+            <div className="mb-4 flex items-start justify-between rounded-2xl bg-emerald/[0.08] p-4">
+              <div>
+                <div className="text-[11px] font-semibold text-ink-muted">
+                  ₹{amount.toLocaleString('en-IN')}/mo · {years} yr{years > 1 ? 's' : ''} · invested ₹{sip.total_invested!.toLocaleString('en-IN')}
+                </div>
+                <div className="mt-1 font-mono text-[24px] font-extrabold tracking-tight text-emerald">
+                  ₹{sip.final_value!.toLocaleString('en-IN')}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] font-semibold text-ink-muted">Gain</div>
+                <div className="font-mono text-[15px] font-bold text-emerald">
+                  +₹{(sip.final_value! - sip.total_invested!).toLocaleString('en-IN')}
+                </div>
+                <div className="font-mono text-[12px] text-emerald">
+                  {sip.xirr_pct != null ? `${sip.xirr_pct.toFixed(1)}% XIRR` : '— XIRR'}
+                </div>
+              </div>
+            </div>
 
-      {/* SIP tiles */}
-      <div className="grid grid-cols-3 gap-2">
-        {SIP.tiles.map((t) => (
-          <div key={t.p} className="rounded-xl border border-line bg-surface py-3 text-center">
-            <div className="text-[10.5px] font-semibold text-ink-muted">{t.p}</div>
-            <div className="mt-1 font-mono text-[14px] font-bold text-emerald">{t.v}</div>
-          </div>
-        ))}
-      </div>
+            {/* SIP tiles */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { p: 'Invested', v: `₹${sip.total_invested!.toLocaleString('en-IN')}` },
+                { p: 'Value today', v: `₹${sip.final_value!.toLocaleString('en-IN')}` },
+                { p: 'XIRR', v: sip.xirr_pct != null ? `${sip.xirr_pct.toFixed(1)}%` : '—' },
+              ].map((t) => (
+                <div key={t.p} className="rounded-xl border border-line bg-surface py-3 text-center">
+                  <div className="text-[10.5px] font-semibold text-ink-muted">{t.p}</div>
+                  <div className="mt-1 font-mono text-[14px] font-bold text-emerald">{t.v}</div>
+                </div>
+              ))}
+            </div>
 
-      <WhatThisMeans>{SIP.meaning}</WhatThisMeans>
+            <WhatThisMeans>{sip.assumptions}</WhatThisMeans>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-line bg-surface-2 p-4 text-center text-small text-ink-muted">
+            {sip
+              ? `This fund only has ${sip.months_invested} month${sip.months_invested === 1 ? '' : 's'} of price history — too short to illustrate a SIP outcome yet.`
+              : "We don't have price history for this fund yet."}
+          </div>
+        )}
+      </DataState>
     </>
   );
 }
@@ -340,6 +393,15 @@ function RollingTab({ isin }: { isin: string }) {
     { p: '% positive', v: a?.rolling_1y_pct_positive != null ? `${a.rolling_1y_pct_positive.toFixed(0)}%` : '—' },
   ];
 
+  // Rolling-3Y tiles (W2 §10.5) — same shape, longer window; "—" when not yet
+  // computed (fund under 3 years old, or nightly refresh hasn't run for it).
+  const tiles3y = [
+    { p: '3Y rolling avg', v: fmtPct(a?.rolling_3y_avg_pct) },
+    { p: '3Y rolling min', v: fmtPct(a?.rolling_3y_min_pct) },
+    { p: '3Y rolling max', v: fmtPct(a?.rolling_3y_max_pct) },
+    { p: '% positive', v: a?.rolling_3y_pct_positive != null ? `${a.rolling_3y_pct_positive.toFixed(0)}%` : '—' },
+  ];
+
   const meaning = a?.rolling_1y_pct_positive != null
     ? `Rolling returns test every holding period, not just lucky start dates. This fund's 1-year rolling return was positive in about ${a.rolling_1y_pct_positive.toFixed(0)}% of the periods measured.`
     : "Rolling returns test every holding period, not just lucky start dates — we don't have enough history yet to measure this fund's rolling-return consistency.";
@@ -347,8 +409,17 @@ function RollingTab({ isin }: { isin: string }) {
   return (
     <>
       {/* Tiles — real (W1) */}
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {tiles.map((t) => (
+          <div key={t.p} className="rounded-xl border border-line bg-surface py-3 text-center">
+            <div className="text-[10.5px] font-semibold text-ink-muted">{t.p}</div>
+            <div className="mt-1 font-mono text-[14px] font-bold text-emerald">{t.v}</div>
+          </div>
+        ))}
+      </div>
+      {/* 3Y tiles — real (W2 §10.5) */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {tiles3y.map((t) => (
           <div key={t.p} className="rounded-xl border border-line bg-surface py-3 text-center">
             <div className="text-[10.5px] font-semibold text-ink-muted">{t.p}</div>
             <div className="mt-1 font-mono text-[14px] font-bold text-emerald">{t.v}</div>
@@ -488,12 +559,39 @@ function RankTab({ isin, head }: { isin: string; head: FundHead }) {
 }
 
 // ── Drawdowns tab ─────────────────────────────────────────────────────────────
-function DrawdownsTab() {
+// Real (W2 §10.5) — worst fall/recovery/current-from-peak + the real drawdown chart.
+function DrawdownsTab({ isin }: { isin: string }) {
+  const { data, isLoading, isError, refetch } = useFundAnalytics(isin);
+  const a = data?.analytics.data ?? null;
+  const status = isLoading ? 'loading' : isError ? 'error' : (data?.analytics.status ?? 'empty');
+  const series = a?.drawdown_series ?? [];
+  const currentFromPeak = series.length ? series[series.length - 1].pct : null;
+
+  const cells: { v: string; l: string; tone: 'red' | 'ink' }[] = [
+    { v: a?.worst_fall_pct != null ? `${a.worst_fall_pct.toFixed(1)}%` : '—', l: 'Worst fall', tone: 'red' },
+    {
+      v: a?.recovery_days != null
+        ? `${Math.round(a.recovery_days / 30)} mo`
+        : a?.worst_fall_pct != null ? 'Not yet' : '—',
+      l: 'Recovery time',
+      tone: 'ink',
+    },
+    { v: currentFromPeak != null ? `${currentFromPeak.toFixed(1)}%` : '—', l: 'Current from peak', tone: 'red' },
+  ];
+
+  const meaning = a?.worst_fall_pct != null
+    ? `This fund's worst historical fall was ${a.worst_fall_pct.toFixed(1)}%${
+        a.recovery_days != null
+          ? `, recovered in about ${Math.round(a.recovery_days / 30)} months`
+          : ' and it has not yet recovered back to that peak'
+      }. Only invest money you will not need during such dips.`
+    : "We don't have enough price history yet to show this fund's drawdown history.";
+
   return (
     <>
       {/* 3-up stat cells */}
       <div className="mb-4 grid grid-cols-3 gap-3">
-        {DRAWDOWN.cells.map((c) => (
+        {cells.map((c) => (
           <div key={c.l} className="rounded-xl bg-surface-2 py-4 text-center">
             <div className={cn('font-mono text-[15px] font-bold', TONE_TEXT[c.tone])}>
               {c.v}
@@ -503,56 +601,90 @@ function DrawdownsTab() {
         ))}
       </div>
 
-      <DrawdownChart height={150} />
+      <DataState
+        status={status}
+        emptyCopy="We don't have enough price history yet to draw this chart."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-[150px] w-full rounded-xl" />}
+      >
+        <DrawdownChart series={series.map((p) => p.pct)} height={150} />
+      </DataState>
 
-      <WhatThisMeans>{DRAWDOWN.meaning}</WhatThisMeans>
+      <WhatThisMeans>{meaning}</WhatThisMeans>
     </>
   );
 }
 
 // ── Consistency tab ───────────────────────────────────────────────────────────
-const QUARTILE_COLOR: Record<string, string> = {
-  Q1: 'bg-emerald text-white',
-  Q2: 'bg-amber text-white',
-  Q3: 'bg-red/70 text-white',
-  Q4: 'bg-red text-white',
-};
+// Real (W2 §10.5) — calendar-year quartile strip from `calendar_year_returns`.
+function ConsistencyTab({ isin }: { isin: string }) {
+  const { data, isLoading, isError, refetch } = useFundAnalytics(isin);
+  const a = data?.analytics.data ?? null;
+  const status = isLoading ? 'loading' : isError ? 'error' : (data?.analytics.status ?? 'empty');
+  const years = a?.calendar_year_returns ?? [];
+  const q1Count = years.filter((y) => y.quartile === 1).length;
+  const consistencyWord = years.length === 0 ? '—'
+    : q1Count / years.length >= 0.6 ? 'Strong'
+    : q1Count / years.length >= 0.3 ? 'Moderate'
+    : 'Mixed';
 
-function ConsistencyTab() {
+  const tiles: { v: string; l: string; tone: 'emerald' | 'ink' }[] = [
+    { v: years.length ? `${q1Count}/${years.length}` : '—', l: 'Top-quartile years', tone: 'emerald' },
+    { v: consistencyWord, l: 'Consistency', tone: consistencyWord === 'Strong' ? 'emerald' : 'ink' },
+    {
+      v: a?.rolling_1y_pct_positive != null ? `${a.rolling_1y_pct_positive.toFixed(0)}%` : '—',
+      l: '1Y periods positive',
+      tone: 'ink',
+    },
+  ];
+
+  const meaning = years.length
+    ? `Finished top-quartile in ${q1Count} of the last ${years.length} year${years.length === 1 ? '' : 's'} measured (quartile shown only where its category has published enough funds).`
+    : "We don't have enough calendar-year history yet to show this fund's consistency.";
+
   return (
     <>
-      <p className="mb-3 text-[12.5px] text-ink-muted">{CONSISTENCY.intro}</p>
+      <p className="mb-3 text-[12.5px] text-ink-muted">
+        Quartile finish each calendar year (Q1 = top 25% of category):
+      </p>
 
-      {/* Quartile strip */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {CONSISTENCY.strip.map((s) => (
-          <div key={s.y} className="flex flex-col items-center gap-1">
-            <div
-              className={cn(
-                'h-9 w-9 rounded-lg text-center font-mono text-[13px] font-bold leading-9',
-                QUARTILE_COLOR[s.q] ?? 'bg-surface-2 text-ink',
-              )}
-            >
-              {s.q}
+      <DataState
+        status={status}
+        emptyCopy="We don't have enough calendar-year history yet for this fund."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-24 w-full rounded-xl" />}
+      >
+        {/* Quartile strip */}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {years.map((y) => (
+            <div key={y.year} className="flex flex-col items-center gap-1">
+              <div
+                className={cn(
+                  'h-9 w-9 rounded-lg text-center font-mono text-[13px] font-bold leading-9',
+                  y.quartile ? QUARTILE_TONE[y.quartile] : 'bg-surface-2 text-ink-faint',
+                )}
+              >
+                {y.quartile ? `Q${y.quartile}` : '—'}
+              </div>
+              <span className="text-[10px] font-semibold text-ink-muted">{y.year}</span>
             </div>
-            <span className="text-[10px] font-semibold text-ink-muted">{s.y}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
 
-      {/* Tiles — use sampleData (compliance: no numeric DhanRadar score) */}
-      <div className="grid grid-cols-3 gap-3">
-        {CONSISTENCY.tiles.map((t) => (
-          <div key={t.l} className="rounded-xl bg-surface-2 py-4 text-center">
-            <div className={cn('font-mono text-[15px] font-bold', TONE_TEXT[t.tone])}>
-              {t.v}
+        {/* Tiles */}
+        <div className="grid grid-cols-3 gap-3">
+          {tiles.map((t) => (
+            <div key={t.l} className="rounded-xl bg-surface-2 py-4 text-center">
+              <div className={cn('font-mono text-[15px] font-bold', TONE_TEXT[t.tone])}>
+                {t.v}
+              </div>
+              <div className="mt-1 text-[10px] font-semibold text-ink-muted">{t.l}</div>
             </div>
-            <div className="mt-1 text-[10px] font-semibold text-ink-muted">{t.l}</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
 
-      <WhatThisMeans>{CONSISTENCY.meaning}</WhatThisMeans>
+        <WhatThisMeans>{meaning}</WhatThisMeans>
+      </DataState>
     </>
   );
 }
@@ -563,21 +695,22 @@ function ConsistencyTab() {
 
 export function PerformanceSection({ head, isin }: { head: FundHead; isin: string }) {
   const [tab, setTab] = React.useState('returns');
-  const isPreviewTab = tab === 'sip' || tab === 'drawdowns' || tab === 'consist';
+  // SIP/Drawdowns/Consistency are real as of W2 (§10.5) — only the Returns-tab
+  // comparison table and the Rolling-tab comparison table stay preview
+  // (their own inline <PreviewBadge/>), so no tab-level badge is needed anymore.
 
   return (
     <Panel className="p-5 sm:p-6">
       <div className="flex items-center justify-between gap-3 mb-4">
         <TabBar tabs={PERF_TABS} active={tab} onChange={setTab} />
-        {isPreviewTab && <PreviewBadge className="shrink-0" />}
       </div>
 
       {tab === 'returns'   && <ReturnsTab head={head} isin={isin} />}
-      {tab === 'sip'       && <SipTab />}
+      {tab === 'sip'       && <SipTab isin={isin} />}
       {tab === 'rolling'   && <RollingTab isin={isin} />}
       {tab === 'rank'      && <RankTab isin={isin} head={head} />}
-      {tab === 'drawdowns' && <DrawdownsTab />}
-      {tab === 'consist'   && <ConsistencyTab />}
+      {tab === 'drawdowns' && <DrawdownsTab isin={isin} />}
+      {tab === 'consist'   && <ConsistencyTab isin={isin} />}
     </Panel>
   );
 }
@@ -619,9 +752,16 @@ function maxDDBand(v: number | null): Band3 {
 export function RiskCenterSection({ isin }: { isin: string }) {
   const { data, isLoading, isError, refetch } = useFundAnalytics(isin);
   const a = data?.analytics.data ?? null;
+  const health = data?.health.data ?? null;
   const envStatus = data?.analytics.status ?? 'empty';
   const allNull = a != null && a.sharpe_ratio == null && a.volatility_pct == null && a.max_drawdown_pct == null;
   const status = isLoading ? 'loading' : isError ? 'error' : (envStatus === 'present' && allNull ? 'empty' : envStatus);
+
+  // §10.7 — the SAME engine that powers Fund Health also stat-to-sentence
+  // translates a ratio; today only Risk (Std Deviation's exact input,
+  // volatility_percentile) has a ready-made sentence — others stay tip-only
+  // until their own health dimension exists.
+  const riskDimensionNote = health?.lights.find((l) => l.name === 'Risk')?.note ?? null;
 
   const risk = riskLevelWord(a?.volatility_percentile ?? null);
   const simpleCells: { v: string; l: string; tone: 'amber' | 'red' | 'emerald' | 'ink'; sub?: string }[] = [
@@ -629,20 +769,26 @@ export function RiskCenterSection({ isin }: { isin: string }) {
       v: risk.word, l: 'Risk level', tone: risk.tone,
       sub: a?.volatility_percentile != null ? 'based on price swings vs category' : undefined,
     },
-    { v: a?.max_drawdown_pct != null ? `${a.max_drawdown_pct.toFixed(1)}%` : '—', l: 'Worst fall', tone: 'red' },
-    { v: '—', l: 'Recovery time', tone: 'ink' },
+    { v: a?.worst_fall_pct != null ? `${a.worst_fall_pct.toFixed(1)}%` : '—', l: 'Worst fall', tone: 'red' },
+    {
+      v: a?.recovery_days != null
+        ? `${Math.round(a.recovery_days / 30)} mo`
+        : a?.worst_fall_pct != null ? 'Not yet' : '—',
+      l: 'Recovery time',
+      tone: 'ink',
+    },
     { v: '—', l: 'Upside (good yr)', tone: 'emerald' },
     { v: '—', l: 'Downside (bad yr)', tone: 'red' },
     { v: a?.volatility_pct != null ? `${a.volatility_pct.toFixed(1)}%` : '—', l: 'Volatility (std dev)', tone: 'ink' },
   ];
 
-  const advRows: { name: string; tip: string; real: boolean; value: string; band: Band3 }[] = [
+  const advRows: { name: string; tip: string; real: boolean; value: string; band: Band3; note?: string | null }[] = [
     { name: 'Sharpe Ratio', tip: 'Return earned per unit of risk', real: a?.sharpe_ratio != null, value: a?.sharpe_ratio != null ? a.sharpe_ratio.toFixed(2) : '—', band: sharpeBand(a?.sharpe_ratio ?? null) },
     { name: 'Sortino Ratio', tip: 'Downside-adjusted return', real: a?.sortino_ratio != null, value: a?.sortino_ratio != null ? a.sortino_ratio.toFixed(2) : '—', band: sortinoBand(a?.sortino_ratio ?? null) },
     { name: 'Alpha', tip: 'Excess vs benchmark', real: false, value: '—', band: 'medium' },
     { name: 'Beta', tip: 'Moves with the index', real: false, value: '—', band: 'medium' },
     { name: 'Tracking Error', tip: 'Index-tracking tightness', real: false, value: '—', band: 'medium' },
-    { name: 'Std Deviation', tip: 'Volatility', real: a?.volatility_pct != null, value: a?.volatility_pct != null ? `${a.volatility_pct.toFixed(1)}%` : '—', band: volFavorabilityBand(a?.volatility_percentile ?? null) },
+    { name: 'Std Deviation', tip: 'Volatility', real: a?.volatility_pct != null, value: a?.volatility_pct != null ? `${a.volatility_pct.toFixed(1)}%` : '—', band: volFavorabilityBand(a?.volatility_percentile ?? null), note: riskDimensionNote },
     { name: 'Max Drawdown', tip: 'Worst peak-to-trough', real: a?.max_drawdown_pct != null, value: a?.max_drawdown_pct != null ? `${a.max_drawdown_pct.toFixed(1)}%` : '—', band: maxDDBand(a?.max_drawdown_pct ?? null) },
     { name: 'Upside Capture', tip: 'Of index gains captured', real: false, value: '—', band: 'medium' },
     { name: 'Downside Capture', tip: 'Of index falls absorbed', real: false, value: '—', band: 'medium' },
@@ -685,25 +831,32 @@ export function RiskCenterSection({ isin }: { isin: string }) {
             {advRows.map((row) => (
               <div
                 key={row.name}
-                className="flex items-center gap-3 border-b border-line pb-3 last:border-b-0 last:pb-0"
+                className="border-b border-line pb-3 last:border-b-0 last:pb-0"
               >
-                {/* Name + tip */}
-                <div className="flex min-w-[140px] shrink-0 items-center gap-1.5">
-                  <span className="text-[12.5px] font-semibold text-ink">{row.name}</span>
-                  <InfoTip tip={row.tip} />
+                <div className="flex items-center gap-3">
+                  {/* Name + tip */}
+                  <div className="flex min-w-[140px] shrink-0 items-center gap-1.5">
+                    <span className="text-[12.5px] font-semibold text-ink">{row.name}</span>
+                    <InfoTip tip={row.tip} />
+                  </div>
+                  {/* Decorative band bar (no %) — only for metrics we actually compute */}
+                  <div className="flex-1">
+                    {row.real ? (
+                      <BandBar band={row.band} width={70} />
+                    ) : (
+                      <span className="text-caption text-ink-faint">Not available yet</span>
+                    )}
+                  </div>
+                  {/* Factual value */}
+                  <div className="w-[56px] shrink-0 text-right font-mono text-[12.5px] font-bold text-ink-secondary">
+                    {row.value}
+                  </div>
                 </div>
-                {/* Decorative band bar (no %) — only for metrics we actually compute */}
-                <div className="flex-1">
-                  {row.real ? (
-                    <BandBar band={row.band} width={70} />
-                  ) : (
-                    <span className="text-caption text-ink-faint">Not available yet</span>
-                  )}
-                </div>
-                {/* Factual value */}
-                <div className="w-[56px] shrink-0 text-right font-mono text-[12.5px] font-bold text-ink-secondary">
-                  {row.value}
-                </div>
+                {/* Stat-to-sentence line (§10.7) — rendered only where a health
+                    dimension already covers this exact metric (never fabricated). */}
+                {row.note && (
+                  <div className="mt-1.5 text-[11px] text-ink-faint">{row.note}</div>
+                )}
               </div>
             ))}
           </div>

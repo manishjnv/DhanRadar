@@ -15,13 +15,13 @@
  * DATA: real values from useFundDetail() drive identity / assessment / rank /
  * NAV / expense ratio / AMC-AUM / period returns (W0). W1 wires Performance
  * Center (returns/rolling/rank-trend), Risk Center, Holdings, Manager, AMC
- * facts, Alternatives and Similar to real per-concept endpoints
- * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). SIP/Drawdowns/Consistency,
- * Market Cap/Asset Mix/Style Box, Fund Flow, Tax seed, Transactions, Portfolio
- * Fit, Fund Health, What Changed, and Assessment Breakdown still render
- * illustrative PREVIEW data (flagged "Preview" or an honest empty-state)
- * while their feeds are built (W2/W3) — founder call 2026-06-24: build all
- * UI now, wire data later.
+ * facts, Alternatives and Similar to real per-concept endpoints; W2 adds
+ * SIP/Drawdowns/Consistency (Performance Center), rolling-3Y, and Fund Health
+ * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). Market Cap/Asset Mix/Style Box,
+ * Fund Flow, Tax seed, Transactions, Portfolio Fit, What Changed, and
+ * Assessment Breakdown still render illustrative PREVIEW data (flagged
+ * "Preview" or an honest empty-state) while their feeds are built (W2/W3) —
+ * founder call 2026-06-24: build all UI now, wire data later.
  *
  * COMPLIANCE: non-neg #1 (no advisory verbs — educational labels only),
  * #2 (no numeric score in DOM — band rings + strength words),
@@ -211,7 +211,7 @@ function FundDetailView() {
       <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" /><MoodSection /></Section>
 
       {/* S7 — Fund health */}
-      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" /><FundHealthSection /></Section>
+      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" /><FundHealthSection isin={isin} /></Section>
 
       {/* S8 — What changed */}
       <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" /><WhatChangedSection /></Section>

@@ -6,18 +6,23 @@
  * string literals, or object keys. Factual values (%, ₹, NAV) are allowed.
  * S5 (My Investment, P1) renders the owner's OWN real numbers from the existing
  * `GET /portfolio/{id}/holdings` endpoint — DOM-allowed user facts (§13), never a
- * DhanRadar score. Everything else in this file still comes from sampleData exports.
+ * DhanRadar score.
+ *
+ * S7 Fund Health (§10.7, W2) is wired to the real `fund.health` envelope
+ * (served alongside `fund.analytics` on GET /mf/fund/{isin}/analytics) — every
+ * other section here still comes from sampleData exports.
  */
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { Panel, WhatThisMeans, PreviewBadge, TONE_TEXT } from './parts';
-import { FIT, HEALTH, CHANGES } from './sampleData';
+import { useFundAnalytics } from '@/features/mf/api';
+import { usePortfolioHoldings } from '@/features/portfolio/api';
 import { DataState, type DataStatus } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { usePortfolioHoldings } from '@/features/portfolio/api';
+import { Panel, WhatThisMeans, PreviewBadge, TONE_TEXT } from './parts';
+import { FIT, CHANGES } from './sampleData';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S4 — PORTFOLIO FIT
@@ -317,29 +322,43 @@ export function MyInvestmentSection({ portfolioId, isin }: { portfolioId: string
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S7 — FUND HEALTH DASHBOARD (traffic-light grid)
+// S7 — FUND HEALTH DASHBOARD (traffic-light grid) — real, W2 §10.7
 // ═══════════════════════════════════════════════════════════════════════════
-const LIGHT_DOT: Record<'g' | 'y' | 'r', string> = {
+const LIGHT_DOT: Record<'g' | 'y' | 'r' | 'grey', string> = {
   g: 'bg-emerald',
   y: 'bg-amber',
   r: 'bg-red',
+  grey: 'bg-ink-faint',
 };
-const LIGHT_RING: Record<'g' | 'y' | 'r', string> = {
+const LIGHT_RING: Record<'g' | 'y' | 'r' | 'grey', string> = {
   g: 'shadow-[0_0_0_4px_rgba(0,179,134,0.15)]',
   y: 'shadow-[0_0_0_4px_rgba(245,166,35,0.15)]',
   r: 'shadow-[0_0_0_4px_rgba(229,72,77,0.15)]',
+  grey: 'shadow-[0_0_0_4px_rgba(148,163,184,0.15)]',
 };
 
-export function FundHealthSection() {
+export function FundHealthSection({ isin }: { isin: string }) {
+  const { data, isLoading, isError, refetch } = useFundAnalytics(isin);
+  const health = data?.health.data ?? null;
+  const lights = health?.lights ?? [];
+  const envStatus = data?.health.status ?? 'empty';
+  const status = isLoading ? 'loading' : isError ? 'error' : (envStatus === 'present' && lights.length === 0 ? 'empty' : envStatus);
+
   return (
     <Panel className="p-5 sm:p-6">
+      <DataState
+        status={status}
+        emptyCopy="We don't have a health read for this fund yet."
+        onRetry={refetch}
+        skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+      >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {HEALTH.map((item) => (
+        {lights.map((item) => (
           <div
             key={item.name}
             className="flex items-start gap-3 rounded-[13px] border border-line p-3.5"
           >
-            {/* traffic-light dot with soft ring */}
+            {/* traffic-light dot with soft ring — grey = source not available yet */}
             <span
               aria-hidden="true"
               className={cn(
@@ -357,6 +376,7 @@ export function FundHealthSection() {
           </div>
         ))}
       </div>
+      </DataState>
     </Panel>
   );
 }

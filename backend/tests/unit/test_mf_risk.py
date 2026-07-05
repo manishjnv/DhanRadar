@@ -24,11 +24,16 @@ import pytest
 from dhanradar.mf.risk import (
     _PERIODS_PER_YEAR,
     RiskStats,
+    calendar_year_returns,
     category_percentiles,
+    compute_sip_illustration,
+    drawdown_series,
     percentile,
     resolve_risk_free_rate,
     risk_adjusted_stats,
     rolling_1y_returns,
+    rolling_3y_returns,
+    rolling_window_returns,
 )
 
 # ---------------------------------------------------------------------------
@@ -632,3 +637,207 @@ class TestResolveRiskFreeRate:
         )
         assert low.source == "tbill"
         assert high.source == "tbill"
+
+
+# ---------------------------------------------------------------------------
+# 8. rolling_window_returns generalisation — rolling_1y/rolling_3y are thin
+#    wrappers over the SAME algorithm; prove they aren't silently diverging.
+# ---------------------------------------------------------------------------
+
+class TestRollingWindowGeneralisation:
+    def test_rolling_1y_returns_matches_generalised_call(self):
+        """rolling_1y_returns(pts) must be IDENTICAL to
+        rolling_window_returns(pts, window_days=365, step_days=30) — the
+        wrapper must not silently diverge from the generalised function."""
+        start = datetime.date(2024, 1, 1)
+        pts = [
+            (start + datetime.timedelta(days=30 * i), round(100.0 * (1.01 ** i), 6))
+            for i in range(25)
+        ]
+        assert rolling_1y_returns(pts) == rolling_window_returns(
+            pts, window_days=365, step_days=30
+        )
+
+    def test_rolling_3y_requires_three_years_span(self):
+        """A 25-month (< 3y) series has no 3Y window → all-None, even though it
+        is long enough for rolling_1y_returns."""
+        start = datetime.date(2024, 1, 1)
+        pts = [
+            (start + datetime.timedelta(days=30 * i), round(100.0 * (1.01 ** i), 6))
+            for i in range(25)
+        ]
+        assert rolling_3y_returns(pts) == (None, None, None, None)
+        # Sanity: the SAME series DOES support a 1Y window.
+        assert rolling_1y_returns(pts)[0] is not None
+
+    def test_rolling_3y_produces_windows_over_five_year_series(self):
+        """60 months (5y) of constant +1%/mo growth → rolling 3Y windows exist,
+        are all positive, and are tightly clustered (constant growth rate)."""
+        start = datetime.date(2020, 1, 1)
+        pts = [
+            (start + datetime.timedelta(days=30 * i), round(100.0 * (1.01 ** i), 6))
+            for i in range(61)
+        ]
+        avg, mn, mx, pct_pos = rolling_3y_returns(pts)
+        assert avg is not None and mn is not None and mx is not None
+        assert pct_pos == pytest.approx(100.0)
+        assert mn <= avg <= mx
+
+
+# ---------------------------------------------------------------------------
+# 9. calendar_year_returns
+# ---------------------------------------------------------------------------
+
+class TestCalendarYearReturns:
+    def test_excludes_partial_launch_year(self):
+        """Fund 'launched' mid-2022 (first NAV June 2022) — 2022 must be
+        EXCLUDED (no prior year-end NAV exists to compute a full-year return),
+        but 2023/2024 (full years) must be present."""
+        pts = [
+            (datetime.date(2022, 6, 15), 100.0),
+            (datetime.date(2022, 12, 30), 105.0),
+            (datetime.date(2023, 12, 29), 115.0),
+            (datetime.date(2024, 1, 2), 116.0),
+            (datetime.date(2024, 12, 31), 130.0),
+        ]
+        result = calendar_year_returns(pts, as_of=datetime.date(2025, 6, 1), n_years=5)
+        assert 2022 not in result
+        assert 2023 in result
+        assert result[2023] == pytest.approx((115.0 / 105.0 - 1.0) * 100.0)
+        assert 2024 in result
+        assert result[2024] == pytest.approx((130.0 / 115.0 - 1.0) * 100.0)
+
+    def test_excludes_current_incomplete_year(self):
+        """as_of inside 2025 → 2025 is never a candidate year (only FULL years)."""
+        pts = [
+            (datetime.date(2023, 12, 29), 100.0),
+            (datetime.date(2024, 12, 31), 110.0),
+            (datetime.date(2025, 3, 1), 90.0),  # a mid-2025 drop — must not leak in
+        ]
+        result = calendar_year_returns(pts, as_of=datetime.date(2025, 6, 1), n_years=5)
+        assert 2025 not in result
+
+    def test_no_data_returns_empty_dict(self):
+        assert calendar_year_returns([], as_of=datetime.date(2025, 1, 1)) == {}
+
+    def test_gap_beyond_tolerance_excludes_the_year(self):
+        """A year-end NAV point more than 10 days from Dec 31 is too stale to
+        count as that year's boundary — the year is excluded, not guessed."""
+        pts = [
+            (datetime.date(2022, 11, 1), 100.0),  # 60 days before 2022-12-31 — too stale
+            (datetime.date(2023, 12, 30), 110.0),
+            (datetime.date(2024, 12, 30), 120.0),
+        ]
+        result = calendar_year_returns(pts, as_of=datetime.date(2025, 6, 1), n_years=5)
+        assert 2023 not in result  # prior year-end (2022) boundary NAV too stale
+        assert 2024 in result
+
+
+# ---------------------------------------------------------------------------
+# 10. drawdown_series — worst fall + recovery
+# ---------------------------------------------------------------------------
+
+class TestDrawdownSeries:
+    def test_monotonically_rising_series_has_no_drawdown(self):
+        pts = [(datetime.date(2024, 1, i + 1), 100.0 + i) for i in range(10)]
+        series, worst, recovery = drawdown_series(pts)
+        assert len(series) == 10
+        assert all(pct == 0.0 for _, pct in series)
+        assert worst is None
+        assert recovery is None
+
+    def test_fall_and_recovery(self):
+        """100 -> 80 (−20%) -> 100 (recovered). Peak on day 1, trough day 2,
+        recovery on day 3 -> recovery_days = (day3 - day1).days = 2."""
+        pts = [
+            (datetime.date(2024, 1, 1), 100.0),
+            (datetime.date(2024, 1, 2), 80.0),
+            (datetime.date(2024, 1, 3), 100.0),
+        ]
+        series, worst, recovery = drawdown_series(pts)
+        assert worst == pytest.approx(-20.0)
+        assert recovery == 2
+
+    def test_unrecovered_fall_has_none_recovery(self):
+        """Fund never climbs back to its pre-fall peak → recovery_days is None
+        (never fabricated), even though the fall itself is a real number."""
+        pts = [
+            (datetime.date(2024, 1, 1), 100.0),
+            (datetime.date(2024, 1, 2), 70.0),
+            (datetime.date(2024, 1, 3), 85.0),  # partial recovery, still below peak
+        ]
+        series, worst, recovery = drawdown_series(pts)
+        assert worst == pytest.approx(-30.0)
+        assert recovery is None
+
+    def test_short_series_returns_all_none(self):
+        assert drawdown_series([(datetime.date(2024, 1, 1), 100.0)]) == ([], None, None)
+
+
+# ---------------------------------------------------------------------------
+# 11. compute_sip_illustration
+# ---------------------------------------------------------------------------
+
+def _month_starts(year: int, month: int, n: int) -> list[datetime.date]:
+    """n exact calendar-month-start dates starting at (year, month) — unlike a
+    fixed 30-day step (which drifts and can skip/double-count a month), this
+    guarantees exactly n distinct (year, month) keys for compute_sip_illustration's
+    monthly grouping."""
+    out = []
+    for i in range(n):
+        total = (month - 1) + i
+        y = year + total // 12
+        m = total % 12 + 1
+        out.append(datetime.date(y, m, 1))
+    return out
+
+
+class TestComputeSipIllustration:
+    def test_no_data_returns_zero_months(self):
+        result = compute_sip_illustration([], 5000.0, 5)
+        assert result.months_invested == 0
+        assert result.total_invested == 0.0
+        assert result.final_value is None
+        assert result.xirr_pct is None
+
+    def test_young_fund_reports_true_months_invested(self):
+        """6 months of NAV history requested over a 5-year window → the SIP
+        runs over the 6 available months only (never fabricated) —
+        months_invested reports the TRUE count, below the 12-month floor
+        (that floor is the CALLER's job, e.g. fund_read.get_fund_sip)."""
+        dates = _month_starts(2025, 1, 6)
+        pts = [(d, 100.0 + i) for i, d in enumerate(dates)]
+        result = compute_sip_illustration(pts, 5000.0, 5)
+        assert result.months_invested == 6
+        assert result.total_invested == pytest.approx(6 * 5000.0)
+        assert result.final_value is not None
+
+    def test_flat_nav_sip_invested_equals_value_zero_xirr(self):
+        """Constant NAV (no growth) over ~13 monthly buys → final value equals
+        total invested exactly (units × constant NAV == monthly_amount × months),
+        and XIRR is ~0% (money in, same money out, no growth). 14 months
+        generated (not exactly 13) — the 365-day window's exact boundary shifts
+        by a day around a leap year, so the test asserts on the ACTUAL count
+        returned rather than a brittle hand-computed one."""
+        dates = _month_starts(2024, 1, 14)
+        pts = [(d, 100.0) for d in dates]
+        result = compute_sip_illustration(pts, 1000.0, 1)
+        assert result.months_invested >= 12
+        assert result.total_invested == pytest.approx(result.months_invested * 1000.0)
+        assert result.final_value == pytest.approx(result.total_invested, abs=0.5)
+        assert result.xirr_pct is not None
+        assert result.xirr_pct == pytest.approx(0.0, abs=1.0)
+
+    def test_growing_nav_sip_shows_positive_gain(self):
+        """NAV doubling over the window → final value must exceed total
+        invested (units bought early are worth more at the end). 62 months
+        generated (not exactly 60) for the same leap-year boundary reason as
+        above — assert on the actual count, not a hand-computed exact one."""
+        dates = _month_starts(2020, 1, 62)
+        pts = [(d, 100.0 * (1.02**i)) for i, d in enumerate(dates)]
+        result = compute_sip_illustration(pts, 5000.0, 5)
+        assert result.months_invested >= 59
+        assert result.final_value is not None
+        assert result.final_value > result.total_invested
+        assert result.xirr_pct is not None
+        assert result.xirr_pct > 0

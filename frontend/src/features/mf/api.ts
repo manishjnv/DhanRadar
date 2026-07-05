@@ -26,6 +26,7 @@ import type {
   FundPeopleResponse,
   FundPeers,
   FundFactorsResponse,
+  FundSipIllustration,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -459,6 +460,29 @@ export function useFundFactors(isin: string) {
   return useQuery<FundFactorsResponse>({
     queryKey: queryKeys.mf.fundFactors(isin),
     queryFn: () => api.get<FundFactorsResponse>(`/mf/fund/${isin}/factors`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// W2 — fund.sip_illustration (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.4/§17 W2)
+// ---------------------------------------------------------------------------
+
+/** `fund.sip_illustration` — GET /api/v1/mf/fund/{isin}/sip?amount=&years=
+ *  amount/years must be one of the fixed menu values (1000/5000/10000, 1/3/5) —
+ *  the backend 422s anything else (bounded cache-key space, §10.4). */
+export function useFundSip(isin: string, amount: number, years: number) {
+  return useQuery<DataEnvelope<FundSipIllustration>>({
+    queryKey: queryKeys.mf.fundSip(isin, amount, years),
+    queryFn: () =>
+      api.get<DataEnvelope<FundSipIllustration>>(
+        `/mf/fund/${isin}/sip?amount=${amount}&years=${years}`,
+      ),
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
