@@ -9,6 +9,11 @@
     "data_class": "user-personal",
     "content_class": "PERSONAL"
   },
+  "holding.transactions": {
+    "visibility_class": "public",
+    "data_class": "user-personal",
+    "content_class": "PERSONAL"
+  },
   "holdings.xirr": {
     "visibility_class": "educational",
     "data_class": "derived-personal",

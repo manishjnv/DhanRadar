@@ -23,6 +23,7 @@ export const queryKeys = {
     summary:       () => ['portfolio', 'summary'] as const,
     summaryById:   (id: string) => ['portfolio', id, 'summary'] as const,
     holdings:      (id: string) => ['portfolio', id, 'holdings'] as const,
+    transactions:  (portfolioId: string, isin?: string) => ['portfolio', portfolioId, 'transactions', isin ?? 'all'] as const,
     allocation:    (portfolioId: string, by = 'category') => ['portfolio', portfolioId, 'allocation', by] as const,
     concentration: (portfolioId: string) => ['portfolio', portfolioId, 'concentration'] as const,
     diversification: (portfolioId: string) => ['portfolio', portfolioId, 'diversification'] as const,

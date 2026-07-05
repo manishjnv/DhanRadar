@@ -17,6 +17,14 @@
       "gate_flag": null,
       "status": "build"
     },
+    "holding.transactions": {
+      "visibility_class": "public",
+      "data_class": "user-personal",
+      "access_tier": "free",
+      "content_class": "PERSONAL",
+      "gate_flag": null,
+      "status": "live"
+    },
     "holdings.xirr": {
       "visibility_class": "educational",
       "data_class": "derived-personal",

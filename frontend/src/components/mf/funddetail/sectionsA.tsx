@@ -4,14 +4,20 @@
  * COMPLIANCE: no 0–100 numeric score/grade/percentile/weight rendered.
  * No advisory verbs (buy/sell/hold/avoid/caution/switch) as visible text,
  * string literals, or object keys. Factual values (%, ₹, NAV) are allowed.
- * All content comes from sampleData exports — nothing invented here.
+ * S5 (My Investment, P1) renders the owner's OWN real numbers from the existing
+ * `GET /portfolio/{id}/holdings` endpoint — DOM-allowed user facts (§13), never a
+ * DhanRadar score. Everything else in this file still comes from sampleData exports.
  */
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { Panel, WhatThisMeans, PreviewBadge, TONE_TEXT } from './parts';
-import { FIT, MINE, HEALTH, CHANGES } from './sampleData';
+import { FIT, HEALTH, CHANGES } from './sampleData';
+import { DataState, type DataStatus } from '@/components/ui/DataState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { usePortfolioHoldings } from '@/features/portfolio/api';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S4 — PORTFOLIO FIT
@@ -145,73 +151,170 @@ export function PortfolioFitSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S5 — MY INVESTMENT
+// S5 — MY INVESTMENT (P1 — real data, filtered to this fund's ISIN)
 // ═══════════════════════════════════════════════════════════════════════════
-export function MyInvestmentSection() {
+
+function inr(n: number): string {
+  const sign = n < 0 ? '-' : '';
+  return sign + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN');
+}
+
+/** ADR-0039 data-state tag — only shown for the non-default states (the normal
+ * 'ledger_backed' case renders no tag, matching the rest of the app's convention
+ * of only surfacing an integrity caveat when there IS one). */
+const DATA_STATE_TAG: Partial<Record<string, string>> = {
+  stated_only: 'From your statement — no transaction history yet',
+  unpriced: 'Price pending — showing your cost value',
+  placeholder: 'Fund match pending',
+};
+
+function NoHoldingCard() {
   return (
-    <div
-      className="relative overflow-hidden rounded-2xl p-6 text-white shadow-lg"
-      style={{
-        background: 'linear-gradient(135deg,var(--dr-navy,#0B1F3A),#1E3A6E)',
-      }}
-    >
-      {/* decorative radial glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-8 -top-12 h-48 w-48 rounded-full"
-        style={{
-          background: 'radial-gradient(circle, rgba(16,185,129,.22), transparent 70%)',
-        }}
-      />
-
-      {/* top row: current value left, XIRR right */}
-      <div className="relative flex flex-wrap items-start justify-between gap-3.5">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/60">
-            Current Value
-          </div>
-          <div className="mt-1.5 font-mono text-[32px] font-extrabold leading-none tracking-[-0.025em] text-white">
-            {MINE.currentValue}
-          </div>
-          <div className="mt-2 font-mono text-small font-bold text-emerald">
-            {MINE.pl}{' '}
-            <span style={{ color: '#6EE7B7' }}>{MINE.plToday}</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/60">
-            XIRR
-          </div>
-          <div
-            className="mt-1.5 font-mono text-[26px] font-extrabold leading-none tracking-[-0.02em]"
-            style={{ color: '#6EE7B7' }}
-          >
-            {MINE.xirr}
-          </div>
-        </div>
-      </div>
-
-      {/* preview badge */}
-      <div className="relative mt-3">
-        <PreviewBadge className="border-white/15 bg-white/10 text-white/60" />
-      </div>
-
-      {/* 4-col (2-col mobile) data grid */}
-      <div className="relative mt-5 grid grid-cols-2 gap-x-5 gap-y-4 border-t border-white/[0.14] pt-5 sm:grid-cols-4">
-        {MINE.grid.map((item) => (
-          <div key={item.l}>
-            <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">
-              {item.l}
-            </div>
-            <div className="mt-1.5 font-mono text-[15px] font-bold text-white">
-              {item.v}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <Panel className="p-6 text-center">
+      <p className="text-small font-medium text-ink">You don&apos;t currently hold this fund.</p>
+      <p className="mt-1 text-caption text-ink-muted">
+        This section shows your own numbers once you hold this fund in your uploaded portfolio.
+      </p>
+      <Link
+        href="/mf/portfolio"
+        className="mt-3 inline-block rounded text-small font-medium text-royal underline underline-offset-2 hover:text-royal/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+      >
+        View your portfolio →
+      </Link>
+    </Panel>
   );
 }
+
+export function MyInvestmentSection({ portfolioId, isin }: { portfolioId: string; isin: string }) {
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHoldings(portfolioId);
+  const status: DataStatus = !portfolioId
+    ? 'empty'
+    : isLoading
+    ? 'loading'
+    : isError
+    ? 'error'
+    : envelope?.status ?? 'empty';
+  const holdings = envelope?.data?.holdings ?? [];
+  const holding = holdings.find((h) => h.isin === isin) ?? null;
+
+  const totalValue = holdings.reduce((sum, h) => sum + h.current_value, 0);
+  const weightPct = holding && totalValue > 0 ? (holding.current_value / totalValue) * 100 : null;
+  const avgCostPerUnit =
+    holding && holding.units > 0 && holding.invested_amount != null
+      ? holding.invested_amount / holding.units
+      : null;
+  const gain = holding && holding.invested_amount != null ? holding.current_value - holding.invested_amount : null;
+  const gainPct = holding && gain != null && holding.invested_amount ? (gain / holding.invested_amount) * 100 : null;
+  const tag = holding ? DATA_STATE_TAG[holding.data_state ?? ''] : undefined;
+
+  return (
+    <DataState
+      status={status}
+      reason={envelope?.meta.reason ?? null}
+      emptyCopy="Upload your CAS statement to see your investment in this fund here."
+      onRetry={() => refetch()}
+      skeleton={<Skeleton className="h-56 w-full rounded-2xl" />}
+    >
+      {!holding ? (
+        <NoHoldingCard />
+      ) : (
+        <div
+          className="relative overflow-hidden rounded-2xl p-6 text-white shadow-lg"
+          style={{
+            background: 'linear-gradient(135deg,var(--dr-navy,#0B1F3A),#1E3A6E)',
+          }}
+        >
+          {/* decorative radial glow */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-8 -top-12 h-48 w-48 rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(16,185,129,.22), transparent 70%)',
+            }}
+          />
+
+          {/* top row: current value left, XIRR right */}
+          <div className="relative flex flex-wrap items-start justify-between gap-3.5">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/60">
+                Current Value
+              </div>
+              <div className="mt-1.5 font-mono text-[32px] font-extrabold leading-none tracking-[-0.025em] text-white">
+                {inr(holding.current_value)}
+              </div>
+              {gain != null && (
+                <div className="mt-2 font-mono text-small font-bold text-emerald">
+                  {gain >= 0 ? '+' : ''}{inr(gain)}{gainPct != null ? ` (${gainPct >= 0 ? '+' : ''}${gainPct.toFixed(1)}%)` : ''} overall
+                  {holding.day_change != null && (
+                    <span className="ml-1.5" style={{ color: '#6EE7B7' }}>
+                      {holding.day_change >= 0 ? '▲' : '▼'} {inr(Math.abs(holding.day_change))} today
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/60">
+                XIRR
+              </div>
+              <div
+                className="mt-1.5 font-mono text-[26px] font-extrabold leading-none tracking-[-0.02em]"
+                style={{ color: '#6EE7B7' }}
+              >
+                {holding.xirr_pct != null ? `${holding.xirr_pct >= 0 ? '+' : ''}${holding.xirr_pct.toFixed(1)}%` : '—'}
+              </div>
+            </div>
+          </div>
+
+          {tag && (
+            <div className="relative mt-3">
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-white/70">
+                {tag}
+              </span>
+            </div>
+          )}
+
+          {/* data grid — the user's own numbers only */}
+          <div className="relative mt-5 grid grid-cols-2 gap-x-5 gap-y-4 border-t border-white/[0.14] pt-5 sm:grid-cols-4">
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">Invested</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">
+                {holding.invested_amount != null ? inr(holding.invested_amount) : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">Units held</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">{holding.units.toLocaleString('en-IN')}</div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">Avg cost / unit</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">
+                {avgCostPerUnit != null ? `₹${avgCostPerUnit.toFixed(2)}` : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">Current NAV</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">
+                {holding.current_nav != null ? `₹${holding.current_nav.toFixed(2)}` : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">Portfolio weight</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">
+                {weightPct != null ? `${weightPct.toFixed(1)}%` : '—'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">As of</div>
+              <div className="mt-1.5 font-mono text-[15px] font-bold text-white">{holding.as_of ?? '—'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </DataState>
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S7 — FUND HEALTH DASHBOARD (traffic-light grid)

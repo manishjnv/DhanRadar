@@ -8,6 +8,7 @@ import type { ComponentDef, ConceptDef } from './registry.types';
 export type ConceptId =
   | 'portfolio.summary'
   | 'holdings.list'
+  | 'holding.transactions'
   | 'holdings.xirr'
   | 'holdings.pnl'
   | 'portfolio.valuation_series'

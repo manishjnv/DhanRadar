@@ -304,7 +304,11 @@ def holdings_payload(
     the per-holding XIRR from `load_holdings_xirr`; None (honest) for a holding it doesn't cover — the
     user's OWN return, DOM-allowed (#2-exempt). `day_change_map` (CAMS-parity, keyed by isin, from
     `load_holdings_day_change`) is the per-fund today's ₹ move + pct — None/None for a holding with
-    fewer than 2 recent NAV dates (honest, matches the portfolio-level `day_change` contract)."""
+    fewer than 2 recent NAV dates (honest, matches the portfolio-level `day_change` contract).
+    `data_state` (ADR-0039, P1) is the per-holding integrity tag — this route never calls
+    `classify_holdings`'s ledger-flow post-step, so a holding defaults to 'ledger_backed' unless it's
+    independently 'placeholder' (unresolved ISIN) or 'unpriced' (no live NAV) — a data-quality fact,
+    not a score (#2-exempt)."""
     xirr_map = xirr_map or {}
     day_change_map = day_change_map or {}
     return {
@@ -327,6 +331,7 @@ def holdings_payload(
                 ),  # M2.3 — None when no ledger history
                 "day_change": day_change_map.get(h.isin, (None, None))[0],
                 "day_change_pct": day_change_map.get(h.isin, (None, None))[1],
+                "data_state": h.data_state,  # ADR-0039 (P1) — ledger_backed|stated_only|unpriced|placeholder
             }
             for h in rm.holdings
         ],
@@ -1437,6 +1442,90 @@ async def load_first_investment_date(
     if earliest is not None:
         return earliest
     return series[0].valuation_date if series else None
+
+
+# --- P1: `holding.transactions` — the append-only ledger, newest-first, owner-scoped --------------
+
+_TXN_MAX_LIMIT = 200  # server-side cap regardless of what the caller asks for (fail-safe, not a default)
+_TXN_DEFAULT_LIMIT = 50
+
+
+async def load_portfolio_transactions(
+    db: AsyncSession,
+    portfolio_id: str,
+    isin: str | None = None,
+    limit: int = _TXN_DEFAULT_LIMIT,
+    offset: int = 0,
+) -> tuple[list[MfPortfolioTransaction], int]:
+    """P1 `holding.transactions` — the owner's append-only ledger rows (`instrument_id` IS the ISIN for
+    `asset_class='mf'`, per `ledger.py`), newest-first (`txn_date` desc, `ingested_at` desc as a stable
+    tiebreaker for same-day rows). Optional `isin` filter scopes to one fund (My Investment /
+    Transactions section on the fund-detail page). `limit` is hard-capped at `_TXN_MAX_LIMIT`
+    server-side no matter what the caller requests. Returns `(rows, total)` — `total` is the FULL
+    matching count (ignoring limit/offset), for the frontend's "view all N" affordance. Read-only;
+    owner-scoping is the caller's `_owned_portfolio_id` IDOR gate + this query's `portfolio_id` filter
+    (mirrors every other mf personal-table read — RLS on this table is deferred to a schema-wide
+    change, per `MfPortfolioTransaction`'s own docstring)."""
+    pid = uuid.UUID(portfolio_id)
+    capped_limit = max(1, min(limit, _TXN_MAX_LIMIT))
+    capped_offset = max(0, offset)
+
+    conditions = [MfPortfolioTransaction.portfolio_id == pid]
+    if isin:
+        conditions.append(MfPortfolioTransaction.instrument_id == isin)
+
+    total = await db.scalar(select(func.count()).select_from(MfPortfolioTransaction).where(*conditions))
+    rows = (
+        (
+            await db.execute(
+                select(MfPortfolioTransaction)
+                .where(*conditions)
+                .order_by(
+                    MfPortfolioTransaction.txn_date.desc(),
+                    MfPortfolioTransaction.ingested_at.desc(),
+                )
+                .limit(capped_limit)
+                .offset(capped_offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows), int(total or 0)
+
+
+def transactions_payload(
+    rows: list[MfPortfolioTransaction],
+    total: int,
+    portfolio_id: str,
+    isin: str | None,
+    limit: int,
+    offset: int,
+) -> dict:
+    """P1 `holding.transactions` payload — explicit safe fields only, the user's OWN ledger facts (§13,
+    DOM-allowed): no DhanRadar composite, ever. `amount` stays B65-signed (outflow negative, inflow
+    positive) — the SAME convention the ledger table itself uses, never re-signed here."""
+    return {
+        "portfolio_id": portfolio_id,
+        "isin": isin,
+        "count": len(rows),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "transactions": [
+            {
+                "id": str(t.id),
+                "isin": t.instrument_id,
+                "folio_number": t.folio_number,
+                "txn_type": t.txn_type,
+                "txn_date": t.txn_date.isoformat(),
+                "units": float(t.units),
+                "nav_or_price": float(t.nav_or_price) if t.nav_or_price is not None else None,
+                "amount": float(t.amount),
+            }
+            for t in rows
+        ],
+    }
 
 
 def valuation_series_payload(
