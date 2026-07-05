@@ -84,6 +84,11 @@ _CANONICAL_LEAVES: frozenset[str] = frozenset(
     }
 )
 
+#: The single ELSS/tax-saver leaf's canonical string (must match the member of
+#: `_CANONICAL_LEAVES` above) — the SEBI-mandated 3-year per-lot lock-in applies only to
+#: holdings in this exact category (P2, `mf/portfolio_read.py::compute_elss_lockin`).
+ELSS_CATEGORY = "Equity Scheme - ELSS"
+
 # ---------------------------------------------------------------------------
 # Legacy maps
 # ---------------------------------------------------------------------------

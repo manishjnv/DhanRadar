@@ -23,6 +23,7 @@ import pytest
 from dhanradar.mf.taxonomy import (
     _CANONICAL_LEAVES,
     _LEGACY_UNMAPPABLE,
+    ELSS_CATEGORY,
     canonical_for,
     classify,
     derive_short_name,
@@ -100,6 +101,14 @@ def test_elss_legacy_maps_to_canonical() -> None:
     assert result.status == "canonical"
     assert result.canonical == "Equity Scheme - ELSS"
     assert result.scheme_class == "Equity Scheme"
+
+
+def test_elss_category_constant_matches_canonical_leaves() -> None:
+    """P2 drift guard (2026-07-06) — `ELSS_CATEGORY` (the SEBI 3-year lock-in gate in
+    mf/portfolio_read.py::compute_elss_lockin) must always name an actual member of
+    `_CANONICAL_LEAVES`, never a stale/hand-typed duplicate."""
+    assert ELSS_CATEGORY in _CANONICAL_LEAVES
+    assert ELSS_CATEGORY == "Equity Scheme - ELSS"
 
 
 def test_double_space_normalizes_to_canonical() -> None:

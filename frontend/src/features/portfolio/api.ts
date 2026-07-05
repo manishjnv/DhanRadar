@@ -164,6 +164,31 @@ export interface Holding {
    * 'ledger_backed' → 'stated_only' (that only happens on /summary) — see portfolio_read.py.
    */
   data_state?: 'ledger_backed' | 'stated_only' | 'unpriced' | 'placeholder' | null;
+  /**
+   * ELSS/tax-saver per-lot lock-in block (P2, net new, 2026-07-06) — present ONLY for holdings
+   * whose category is the ELSS canonical leaf; `null` for every other holding (not an empty
+   * state, the block simply doesn't apply). `approximate` is honest-uncertainty, never a wrong
+   * precise number: true when a redemption's units couldn't be cleanly attributed to specific
+   * lots (the ledger doesn't cover the whole holding history).
+   */
+  lockin?: {
+    lots: Array<{
+      /** ISO date the lot opened (a BUY-type transaction). */
+      txn_date: string;
+      /** Units still open in this lot after any FIFO redemptions consumed earlier lots. */
+      units: number;
+      /** ISO date this lot's 3-year SEBI lock-in ends. */
+      lock_until: string;
+      locked: boolean;
+    }>;
+    locked_units: number;
+    free_units: number;
+    /** ISO date of the soonest-unlocking still-locked lot; null when nothing is locked. */
+    next_unlock_date: string | null;
+    /** True when a redemption's units couldn't be cleanly FIFO-attributed to specific lots —
+     * the figures above are a best-effort remainder, not a claimed-precise number. */
+    approximate: boolean;
+  } | null;
 }
 
 export interface HoldingsPayload {

@@ -213,7 +213,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="03" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
 
       {/* S4 — Portfolio fit */}
-      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" /><PortfolioFitSection /></Section>
+      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" /><PortfolioFitSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S5 — My investment (P1 — real data) */}
       <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>

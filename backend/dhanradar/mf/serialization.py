@@ -150,6 +150,9 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "viewed_isin",
             "overlap_pct",
             "category_allocation_pct",
+            "fund_count_in_category",
+            "overlap",
+            "overlap_coverage",
             "data_completeness",
             "observation",
         }

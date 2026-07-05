@@ -28,6 +28,7 @@ import type {
   FundFactorsResponse,
   FundSipIllustration,
   FundEvents,
+  FundFit,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -508,6 +509,27 @@ export function useFundEvents(isin: string) {
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `fund.fit` (item 1, 2026-07-06 P2 extension) — GET /api/v1/portfolio/{portfolioId}/fit?isin=...
+ * Personal, auth-required, owner-scoped (extends the ALREADY-SHIPPED get_portfolio_fit/route/
+ * concept — see insights/service.py + insights/router.py; never a second parallel endpoint).
+ * Enabled only once both portfolioId and isin are known. This hook alone can't distinguish
+ * "anonymous" from "signed-in, no CAS yet" (both leave portfolioId '' upstream) — callers pair it
+ * with `useMe()` for that (see PortfolioFitSection).
+ */
+export function useFundPortfolioFit(portfolioId: string, isin: string) {
+  return useQuery<DataEnvelope<FundFit>>({
+    queryKey: queryKeys.portfolio.fit(portfolioId, isin),
+    queryFn: () => api.get<DataEnvelope<FundFit>>(`/portfolio/${portfolioId}/fit?isin=${isin}`),
+    enabled: !!portfolioId && !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && [401, 404].includes(error.problem.status)) return false;
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,
