@@ -397,6 +397,19 @@ export interface FundFlows {
   as_of_month: string | null;
 }
 
+/** GET /api/v1/portfolio/{portfolio_id}/fit?isin=... — item 1. Personal, auth-required.
+ * OBSERVATION ONLY: overlap_pct and category_allocation_pct are independent facts,
+ * never combined into a verdict. `observation` is server-generated factual copy —
+ * render as-is, never paraphrase into advisory language. */
+export interface FundFit {
+  portfolio_id: string;
+  viewed_isin: string;
+  overlap_pct: number | null;
+  category_allocation_pct: number | null;
+  data_completeness: 'empty' | 'no_constituent_data' | 'constituent_data';
+  observation: string;
+}
+
 /** GET /api/v1/mf/fund/{isin}/people */
 export interface FundManager {
   name: string;

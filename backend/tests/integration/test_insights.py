@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import uuid as _uuid
+from datetime import date
 from typing import Any
 
 import pytest
@@ -183,3 +184,128 @@ async def test_overlap_disclosure_always_present(async_client, db_session, patch
         app.dependency_overrides.pop(current_user_or_anonymous, None)
     assert resp.status_code == 200, resp.text
     _assert_disclosure_present(resp.json())
+
+
+# ---------------------------------------------------------------------------
+# GET /portfolio/{portfolio_id}/fit?isin=...  (item 1, Fund Detail P2)
+#
+# Served through the A3 boundary (serialize_concept) -- unlike /overlap (raw
+# Pydantic), the payload is under body["data"], not the body root.
+# ---------------------------------------------------------------------------
+
+_FIT_VIEWED_ISIN = "INF209K01YD4"
+
+
+async def test_fit_anonymous_401(async_client, patch_redis) -> None:
+    pid = str(_uuid.uuid4())
+    resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit?isin={_FIT_VIEWED_ISIN}")
+    assert resp.status_code == 401, resp.text
+    assert resp.json().get("detail") == "not_authenticated"
+
+
+async def test_fit_wrong_portfolio_404(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = str(_uuid.uuid4())  # non-existent UUID
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit?isin={_FIT_VIEWED_ISIN}")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 404, resp.text
+    assert resp.json().get("detail") == "portfolio_not_found"
+
+
+async def test_fit_missing_isin_422(async_client, db_session, patch_redis) -> None:
+    """isin is a REQUIRED query param (unlike /transactions' optional isin) — Portfolio
+    Fit needs a specific fund to compare against."""
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+    assert resp.status_code == 422, resp.text
+
+
+async def test_fit_empty_portfolio_200(async_client, db_session, patch_redis) -> None:
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit?isin={_FIT_VIEWED_ISIN}")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    d = body["data"]
+    assert d["portfolio_id"] == pid
+    assert d["viewed_isin"] == _FIT_VIEWED_ISIN
+    assert d["overlap_pct"] is None
+    assert d["category_allocation_pct"] is None
+    assert d["data_completeness"] == "empty"
+    assert "No holdings found" in d["observation"]
+    _assert_no_unified_score(body)
+
+
+async def test_fit_category_allocation_happy_path(async_client, db_session, patch_redis) -> None:
+    """User holds one fund in the SAME category as the viewed fund, entirely -> 100%
+    category_allocation_pct. No constituent-disclosure data seeded for either fund, so
+    overlap_pct stays null (never estimated) with data_completeness=no_constituent_data."""
+    from dhanradar.models.mf import MfFund, MfUserHolding
+
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    held_isin = "INF200K01884"
+    db_session.add(
+        MfFund(
+            isin=held_isin,
+            scheme_name="Held Fund",
+            amc_name="HDFC Asset Management Company Limited",
+            sebi_category="Equity Scheme - Flexi Cap Fund",
+            category="Equity Scheme - Flexi Cap Fund",
+            plan_type="direct",
+            option_type="growth",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFund(
+            isin=_FIT_VIEWED_ISIN,
+            scheme_name="Viewed Fund",
+            amc_name="HDFC Asset Management Company Limited",
+            sebi_category="Equity Scheme - Flexi Cap Fund",
+            category="Equity Scheme - Flexi Cap Fund",
+            plan_type="direct",
+            option_type="growth",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfUserHolding(
+            portfolio_id=_uuid.UUID(pid),
+            user_id=_uuid.UUID(user_id),
+            isin=held_isin,
+            folio_number="12345",
+            units=100.0,
+            invested_amount=10000.0,
+            as_of_date=date(2026, 6, 1),
+            source="cas",
+        )
+    )
+    await db_session.commit()
+
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit?isin={_FIT_VIEWED_ISIN}")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    d = body["data"]
+    assert d["category_allocation_pct"] == 100.0
+    assert d["overlap_pct"] is None
+    assert d["data_completeness"] == "no_constituent_data"
+    _assert_no_unified_score(body)

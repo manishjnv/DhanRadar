@@ -144,6 +144,16 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "fund.rank_history": frozenset({"points"}),
     "fund.composition": frozenset({"holdings", "sectors", "cap_mix", "as_of_month", "coverage"}),
     "fund.flows": frozenset({"points", "scheme_category", "as_of_month"}),
+    "fund.fit": frozenset(
+        {
+            "portfolio_id",
+            "viewed_isin",
+            "overlap_pct",
+            "category_allocation_pct",
+            "data_completeness",
+            "observation",
+        }
+    ),
     "fund.people": frozenset({"managers", "manager_changes_5y"}),
     "fund.amc": frozenset({"amc_name", "scheme_count", "category_count"}),
     "fund.peers": frozenset({"peers"}),
