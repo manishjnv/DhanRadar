@@ -273,6 +273,14 @@
       "gate_flag": null,
       "status": "live"
     },
+    "fund.changes": {
+      "visibility_class": "educational",
+      "data_class": "public-fact",
+      "access_tier": "free",
+      "content_class": "DERIVED",
+      "gate_flag": null,
+      "status": "live"
+    },
     "portfolio.score_raw": {
       "visibility_class": "gated",
       "data_class": "derived-personal",

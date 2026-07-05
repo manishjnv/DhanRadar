@@ -169,6 +169,11 @@
     "data_class": "public-fact",
     "content_class": "DERIVED"
   },
+  "fund.changes": {
+    "visibility_class": "educational",
+    "data_class": "public-fact",
+    "content_class": "DERIVED"
+  },
   "portfolio.score_raw": {
     "visibility_class": "gated",
     "data_class": "derived-personal",

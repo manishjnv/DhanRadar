@@ -20,6 +20,7 @@ from uuid import UUID as StdUUID  # alias used in MfDataQualityIssue.acknowledge
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -959,6 +960,38 @@ class MfStockCapClassification(Base):
         BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
     )
     fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MfFundEvent(Base):
+    """`fund.changes` (W2, FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §10.6/§17) — one row per
+    detected month-over-month change (rank/TER/holding-weight), written by the nightly
+    `fund_events_refresh` diff engine (`dhanradar.tasks.mf.fund_events_refresh`).
+
+    `payload` carries FACTS only (old/new value, direction) — never an advisory framing;
+    the request-time `summary` sentence is templated from it in `mf/fund_events.py`, not
+    stored (so a copy fix doesn't require a backfill). Idempotent: re-running the nightly
+    job upserts on (isin, event_type, as_of), never duplicates.
+    """
+
+    __tablename__ = "mf_fund_events"
+    __table_args__ = (
+        UniqueConstraint("isin", "event_type", "as_of", name="uq_mf_fund_events_isin_type_date"),
+        Index("ix_mf_fund_events_isin_as_of", "isin", "as_of"),
+        CheckConstraint(
+            "event_type IN ('rank_change', 'ter_change', 'holding_change')",
+            name="ck_mf_fund_events_event_type",
+        ),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 

@@ -27,6 +27,7 @@ import type {
   FundPeers,
   FundFactorsResponse,
   FundSipIllustration,
+  FundEvents,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -483,6 +484,20 @@ export function useFundSip(isin: string, amount: number, years: number) {
       api.get<DataEnvelope<FundSipIllustration>>(
         `/mf/fund/${isin}/sip?amount=${amount}&years=${years}`,
       ),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.changes` — GET /api/v1/mf/fund/{isin}/events (What Changed, §17 W2) */
+export function useFundEvents(isin: string) {
+  return useQuery<DataEnvelope<FundEvents>>({
+    queryKey: queryKeys.mf.fundEvents(isin),
+    queryFn: () => api.get<DataEnvelope<FundEvents>>(`/mf/fund/${isin}/events`),
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;

@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.mf.fund_events import summarize_event
 from dhanradar.mf.risk import (
     SIP_MIN_MONTHS_FOR_ILLUSTRATION,
     calendar_year_returns,
@@ -31,6 +32,7 @@ from dhanradar.models.mf import (
     MfCategoryStats,
     MfFund,
     MfFundConstituent,
+    MfFundEvent,
     MfFundManagerHistory,
     MfFundMetrics,
     MfFundRanks,
@@ -934,4 +936,45 @@ async def get_fund_sip(session: AsyncSession, isin: str, amount: int, years: int
         "xirr_pct": result.xirr_pct,
         "as_of": as_of,
         "assumptions": _SIP_ASSUMPTIONS_TEXT,
+    }
+
+
+# ---------------------------------------------------------------------------
+# W2 — fund.changes (What-Changed events, §10.6/§17 W2)
+# ---------------------------------------------------------------------------
+
+_EVENTS_CAP = 12
+
+
+async def get_fund_events(session: AsyncSession, isin: str) -> dict | None:
+    """`fund.changes` — the latest <=12 tracked changes for this fund (rank/TER/holding
+    diffs written nightly by `fund_events_refresh`), newest first. No history yet →
+    empty list, still 200 (no-suppress, §14.1). Each event carries a plain templated
+    `summary` sentence built from its `payload` at request time (never stored)."""
+    fund = await session.get(MfFund, isin)
+    if fund is None:
+        return None
+
+    rows = (
+        (
+            await session.execute(
+                select(MfFundEvent)
+                .where(MfFundEvent.isin == isin)
+                .order_by(MfFundEvent.as_of.desc(), MfFundEvent.created_at.desc())
+                .limit(_EVENTS_CAP)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "events": [
+            {
+                "event_type": r.event_type,
+                "as_of": r.as_of.isoformat(),
+                "summary": summarize_event(r.event_type, r.payload),
+                "payload": r.payload,
+            }
+            for r in rows
+        ]
     }

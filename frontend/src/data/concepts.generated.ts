@@ -40,6 +40,7 @@ export type ConceptId =
   | 'fund.signals'
   | 'fund.sip_illustration'
   | 'fund.health'
+  | 'fund.changes'
   | 'portfolio.score_raw'
   | 'mood.current'
   | 'portfolio.recommendations'

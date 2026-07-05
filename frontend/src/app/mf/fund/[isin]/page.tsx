@@ -214,7 +214,7 @@ function FundDetailView() {
       <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" /><FundHealthSection isin={isin} /></Section>
 
       {/* S8 — What changed */}
-      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" /><WhatChangedSection /></Section>
+      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" /><WhatChangedSection isin={isin} /></Section>
 
       {/* S9 — Snapshot */}
       <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
