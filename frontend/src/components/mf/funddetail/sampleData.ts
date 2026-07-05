@@ -51,25 +51,12 @@ export const FUND = {
   benchmark: 'Nifty Smallcap 250 TRI',
 } as const;
 
-/** Hero factor breakdown — strength WORDS, never numbers. */
-export const HERO_FACTORS: { name: string; strength: Strength }[] = [
-  { name: 'Performance',     strength: 'strong'   },
-  { name: 'Consistency',     strength: 'strong'   },
-  { name: 'Momentum',        strength: 'strong'   },
-  { name: 'Risk',            strength: 'moderate' },
-  { name: 'Cost',            strength: 'strong'   },
-  { name: 'Flows',           strength: 'strong'   },
-  { name: 'Portfolio Qual.', strength: 'good'     },
-];
-
-/** Status badge row — neutral, educational phrasings (no "great to invest"). */
-export const STATUS_BADGES: { text: string; tone: 'emerald' | 'royal' | 'cyan' | 'amber' }[] = [
-  { text: 'In Form',           tone: 'emerald' },
-  { text: 'Consistent SIP history', tone: 'royal' },
-  { text: 'Diversifier',       tone: 'cyan' },
-  { text: 'Lowest cost in category', tone: 'amber' },
-  { text: 'Top ranked',        tone: 'emerald' },
-];
+// W2 (§10.1): HERO_FACTORS + STATUS_BADGES preview arrays retired — HeroSection
+// and StatusRow now render the real `fund.factors`/`fund.signals` concepts
+// (sectionsHero.tsx). Assessment-breakdown tiles whose source is still blocked
+// (§18.1) — Cost Efficiency (TER coverage), Fund Flow (no source), Manager
+// (signal not yet glued) — render as honest "no data yet" tiles.
+export const NO_DATA_FACTOR_TILES: string[] = ['Cost Efficiency', 'Fund Flow', 'Manager'];
 
 // ───────────────────────────────────────────────────────────────────────────
 // S2 VERDICT — educational assessment (label + band, NOT "Strong Buy")
@@ -78,17 +65,6 @@ export const VERDICT = {
   tag: 'Our Educational Read',
   summary:
     'A low-cost, passive way to track India’s small-cap segment. Best understood as a long-horizon SIP exposure — not money you may need within five years.',
-  suitable: [
-    'Long-term SIP investors (7+ years)',
-    'Wealth-building with an aggressive growth tilt',
-    'A small-cap sleeve inside a diversified portfolio',
-    'Cost-conscious, index-first investors',
-  ],
-  notIdeal: [
-    'Emergency funds or short-term parking',
-    'A 3-year (or shorter) horizon',
-    'Capital-protection / conservative needs',
-  ],
 } as const;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -293,22 +269,8 @@ export const CONSISTENCY = {
     'Finished top-quartile in 4 of the last 5 years. For a passive fund, that consistency is exactly what you want — low cost, reliably tracking a strong index.',
 };
 
-// ───────────────────────────────────────────────────────────────────────────
-// S11 DHANRADAR SCORE BREAKDOWN — band rings + strength WORDS (no numbers)
-// ───────────────────────────────────────────────────────────────────────────
-export const SCORE_MODULES: {
-  name: string; label: Label; band: ConfidenceBand; trend: 'up' | 'down' | 'flat';
-  trendWord: string; rank: number; standing: string; reason: string;
-}[] = [
-  { name: 'Performance',     label: 'in_form',  band: 'high',   trend: 'up',   trendWord: 'Improving', rank: 2, standing: 'Top decile',    reason: 'Tracks benchmark and category over 1, 3 and 5 years thanks to tight tracking and rock-bottom cost.' },
-  { name: 'Consistency',     label: 'in_form',  band: 'high',   trend: 'up',   trendWord: 'Improving', rank: 3, standing: 'Top decile',    reason: 'Finished top-quartile in 4 of the last 5 calendar years — dependable for a passive fund.' },
-  { name: 'Momentum',        label: 'in_form',  band: 'high',   trend: 'up',   trendWord: 'Improving', rank: 2, standing: 'Top decile',    reason: 'Recent 6-month relative strength improving as small-caps regain leadership.' },
-  { name: 'Risk',            label: 'off_track', band: 'medium', trend: 'flat', trendWord: 'Steady',    rank: 9, standing: 'Mid-pack',      reason: 'Very-high volatility is structural for small-caps; reflects the deep 2022 drawdown.' },
-  { name: 'Cost Efficiency', label: 'in_form',  band: 'high',   trend: 'up',   trendWord: 'Improving', rank: 1, standing: 'Top decile',    reason: '0.20% expense ratio is the lowest among all 18 small-cap index funds.' },
-  { name: 'Fund Flow',       label: 'in_form',  band: 'high',   trend: 'up',   trendWord: 'Improving', rank: 2, standing: 'Top decile',    reason: 'Net inflows in 11 of the last 12 months — strong, sticky investor demand.' },
-  { name: 'Manager',         label: 'on_track', band: 'high',   trend: 'flat', trendWord: 'Steady',    rank: 2, standing: 'Top quartile',  reason: 'Zero manager turnover and category-best tracking error since launch.' },
-  { name: 'Portfolio Quality', label: 'on_track', band: 'high', trend: 'up',   trendWord: 'Improving', rank: 4, standing: 'Top quartile',  reason: 'Broad 250-stock diversification limits single-name and sector risk.' },
-];
+// W2 (§10.1): SCORE_MODULES preview array retired — ScoreBreakdownSection now
+// renders real tiles from `fund.factors` + the NO_DATA_FACTOR_TILES list above.
 
 // ───────────────────────────────────────────────────────────────────────────
 // S12 RISK CENTER
@@ -486,14 +448,6 @@ export const FAQ: { q: string; a: string; open?: boolean }[] = [
   { q: 'When is SIP vs lumpsum usually discussed?', a: 'For small-cap index funds, a disciplined monthly SIP over 7+ years is commonly discussed because it averages your entry price through the inevitable ups and downs. See Smart Entry Timing above for the current educational read.' },
 ];
 
-// ───────────────────────────────────────────────────────────────────────────
-// S22 STICKY DECISION BAR (educational, not advisory)
-// ───────────────────────────────────────────────────────────────────────────
-export const STICKY = {
-  reason: 'low-cost passive small-cap exposure',
-  stats: [
-    { v: '7–10 yrs', l: 'Typical horizon' },
-    { v: 'SIP-friendly', l: 'Phase character' },
-    { v: 'Stagger', l: 'Lumpsum approach' },
-  ],
-};
+// W2 (§10.1): STICKY preview object retired — StickyBar's "Top reason" is now
+// the real first contributing signal (sectionsHero.tsx); its stats row already
+// came from getStickyCategoryStats(), not this object.

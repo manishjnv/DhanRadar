@@ -84,14 +84,60 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "portfolio.valuation_series": frozenset({"portfolio_id", "point_count", "first_investment_date", "points"}),
     "portfolio.score_raw": frozenset(),  # gated-never (registry) — nothing is ever allowed through, gated or not
     "fund.label": frozenset({"label"}),
-    "fund.head": frozenset({"isin", "scheme_name", "fund_name_short", "amc_name", "sebi_category", "category", "plan_type", "option_type", "idcw_frequency", "launch_date", "expense_ratio_pct", "is_segregated", "verb_label", "category_rank", "category_total", "rank_as_of", "return_3m_pct", "return_6m_pct", "return_1y_pct", "return_3y_pct", "return_5y_pct", "metrics_as_of", "nav_latest", "nav_date", "nav_change_pct", "confidence_band", "amc_level_aum_crore"}),
+    "fund.head": frozenset(
+        {
+            "isin",
+            "scheme_name",
+            "fund_name_short",
+            "amc_name",
+            "sebi_category",
+            "category",
+            "plan_type",
+            "option_type",
+            "idcw_frequency",
+            "launch_date",
+            "expense_ratio_pct",
+            "is_segregated",
+            "verb_label",
+            "category_rank",
+            "category_total",
+            "rank_as_of",
+            "return_3m_pct",
+            "return_6m_pct",
+            "return_1y_pct",
+            "return_3y_pct",
+            "return_5y_pct",
+            "metrics_as_of",
+            "nav_latest",
+            "nav_date",
+            "nav_change_pct",
+            "confidence_band",
+            "amc_level_aum_crore",
+        }
+    ),
     "fund.nav_series": frozenset({"range", "points", "from", "to", "n_total"}),
-    "fund.analytics": frozenset({"sharpe_ratio", "sortino_ratio", "volatility_pct", "max_drawdown_pct", "rolling_1y_avg_pct", "rolling_1y_min_pct", "rolling_1y_max_pct", "rolling_1y_pct_positive", "as_of", "volatility_percentile", "category_percentiles"}),
+    "fund.analytics": frozenset(
+        {
+            "sharpe_ratio",
+            "sortino_ratio",
+            "volatility_pct",
+            "max_drawdown_pct",
+            "rolling_1y_avg_pct",
+            "rolling_1y_min_pct",
+            "rolling_1y_max_pct",
+            "rolling_1y_pct_positive",
+            "as_of",
+            "volatility_percentile",
+            "category_percentiles",
+        }
+    ),
     "fund.rank_history": frozenset({"points"}),
     "fund.composition": frozenset({"holdings", "sectors", "as_of_month", "coverage"}),
     "fund.people": frozenset({"managers", "manager_changes_5y"}),
     "fund.amc": frozenset({"amc_name", "scheme_count", "category_count"}),
     "fund.peers": frozenset({"peers"}),
+    "fund.factors": frozenset({"factors", "confidence_band", "as_of"}),
+    "fund.signals": frozenset({"contributing", "contradicting", "as_of"}),
 }
 
 
@@ -111,6 +157,32 @@ def _apply_allowlist(concept_id: str, data: Any) -> Any:
             "its serializable top-level fields, before serving it (BLOCKERS B87)"
         ) from None
     return {k: v for k, v in data.items() if k in allowed}
+
+
+#: Top-level payload fields that carry per-dimension BAND dicts. Their leaves must be band
+#: WORDS — the engine's typed dataclass guarantees this today, but that is a Python-type trust
+#: boundary, not a runtime one. This assertion makes it structural at the serving seam: a future
+#: engine/read-path change that puts a numeric (or any non-band value) into one of these dicts
+#: 500s here instead of reaching an anonymous client (2026-07-05 W2-A adversarial-review
+#: condition; complements — never replaces — the allowlist + denylist above).
+_BAND_DICT_FIELDS: tuple[str, ...] = ("factors", "confidence_factors")
+_BAND_WORDS: frozenset[str] = frozenset({"high", "medium", "low"})
+
+
+def _assert_band_dicts(data: Any) -> None:
+    """Fail-closed: every leaf of a band-dict field must be a band WORD (raises, never strips)."""
+    if not isinstance(data, dict):
+        return
+    for field in _BAND_DICT_FIELDS:
+        value = data.get(field)
+        if value is None or not isinstance(value, dict):
+            continue
+        for k, v in value.items():
+            if not (isinstance(v, str) and v in _BAND_WORDS):
+                raise RuntimeError(
+                    f"#2 boundary: band-dict field '{field}' key '{k}' carries a non-band value "
+                    f"({type(v).__name__}) — only {sorted(_BAND_WORDS)} may reach a client"
+                )
 
 
 @dataclass(frozen=True)
@@ -145,7 +217,9 @@ def _assert_no_forbidden(value: Any) -> None:
     if isinstance(value, dict):
         leaked = FORBIDDEN_SCORE_KEYS & value.keys()
         if leaked:
-            raise RuntimeError(f"#2 violation: forbidden score key(s) {sorted(leaked)} at the boundary")
+            raise RuntimeError(
+                f"#2 violation: forbidden score key(s) {sorted(leaked)} at the boundary"
+            )
         for v in value.values():
             _assert_no_forbidden(v)
     elif isinstance(value, (list, tuple, set, frozenset)):
@@ -196,6 +270,10 @@ def serialize_concept(
     # 1b. B87 ALLOWLIST — the structural guarantee: keep ONLY this concept's declared top-level fields.
     # Fail-closed (`MissingConceptAllowlist`) if the concept has no entry in `ALLOWED_FIELDS`.
     data = _apply_allowlist(concept_id, data)
+
+    # 1c. Band-dict leaves must be band WORDS — closes the nested-numeric class the top-level
+    # allowlist + name-based denylist cannot see (W2-A adversarial-review condition).
+    _assert_band_dicts(data)
 
     status, reason, out = "present", None, data
     if m.visibility_class == "gated" and not ctx.gate_enabled:
