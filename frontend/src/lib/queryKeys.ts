@@ -33,6 +33,7 @@ export const queryKeys = {
     transparency:  (portfolioId: string) => ['portfolio', portfolioId, 'transparency'] as const,
     moodContext:   (portfolioId: string) => ['portfolio', portfolioId, 'mood-context'] as const,
     valueSeries:   (portfolioId: string) => ['portfolio', portfolioId, 'value-series'] as const,
+    fit:           (portfolioId: string, isin: string) => ['portfolio', portfolioId, 'fit', isin] as const,
   },
   watchlists: {
     all:    () => ['watchlists'] as const,

@@ -45,6 +45,7 @@ from dhanradar.mf.portfolio_read import (
     load_day_change,
     load_first_investment_date,
     load_holdings_day_change,
+    load_holdings_elss_lockin,
     load_holdings_xirr,
     load_latest_nav_date,
     load_ledger_flows_by_date,
@@ -64,6 +65,7 @@ from dhanradar.mf.portfolio_read import (
 )
 from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
+from dhanradar.mf.taxonomy import ELSS_CATEGORY
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfPortfolio
 
@@ -129,7 +131,9 @@ async def portfolio_holdings(
     `invested_amount` is ledger net-invested (B86). `xirr_pct` per holding is M2.3's per-fund XIRR (None
     when the ledger has no history for it — honest, never fabricated). `day_change`/`day_change_pct`
     (CAMS-parity) are the per-fund today's ₹/% move (`load_holdings_day_change`) — None until 2 recent
-    NAV dates exist for that ISIN. Anonymous → 401; another user's portfolio → 404.
+    NAV dates exist for that ISIN. `lockin` (P2, net new) is the ELSS/tax-saver per-lot lock-in block —
+    present only for holdings whose category is the ELSS canonical leaf (`ELSS_CATEGORY`), else null.
+    Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
@@ -137,9 +141,11 @@ async def portfolio_holdings(
     current_values = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
     xirr_map = await load_holdings_xirr(db, portfolio_id, current_values)
     day_change_map = await load_holdings_day_change(db, portfolio_id)
+    elss_keys = {(h.isin, h.folio_number) for h in rm.holdings if h.category == ELSS_CATEGORY}
+    lockin_map = await load_holdings_elss_lockin(db, portfolio_id, elss_keys)
     return serialize_concept(
         "holdings.list",
-        holdings_payload(rm, portfolio_id, xirr_map, day_change_map),
+        holdings_payload(rm, portfolio_id, xirr_map, day_change_map, lockin_map),
         RequestCtx(tier=user.tier),
         source="cas",
         engine_version=ENGINE_VERSION,
@@ -186,13 +192,16 @@ async def portfolio_fit(
 ) -> dict:
     """`fund.fit` (item 1) — how the VIEWED fund (`isin`, required) relates to the
     user's own holdings in `portfolio_id`: category allocation already held in that
-    fund's category, and a portfolio-value-weighted stock-level overlap with the
-    viewed fund's disclosed holdings. OBSERVATION ONLY — never a verdict, never a
-    suggestion (§14.3 compliance reframe; see insights.service._portfolio_fit_observation).
-    Mirrors the overlap route's auth/IDOR pattern: cookie-auth only (401 anonymous),
-    owner-scoped (404 for another user's portfolio_id, a malformed one, or an unknown
-    portfolio). Cold-start / no holdings / no disclosure data on either side -> valid
-    200 with nulled figures, never 404 for those cases.
+    fund's category (+ how many held funds share it), a portfolio-value-weighted
+    stock-level overlap with the viewed fund's disclosed holdings (+ the same
+    per-fund overlaps individually, top 3), and an honest `overlap_coverage` flag
+    for whether any held fund actually had disclosure data to compare against.
+    OBSERVATION ONLY — never a verdict, never a suggestion (§14.3 compliance
+    reframe; see insights.service._portfolio_fit_observation). Mirrors the overlap
+    route's auth/IDOR pattern: cookie-auth only (401 anonymous), owner-scoped (404
+    for another user's portfolio_id, a malformed one, or an unknown portfolio).
+    Cold-start / no holdings / no disclosure data on either side -> valid 200 with
+    nulled figures, never 404 for those cases.
     """
     _require_auth(user)
     try:

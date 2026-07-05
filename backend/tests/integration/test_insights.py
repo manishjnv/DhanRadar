@@ -32,7 +32,7 @@ from sqlalchemy import text
 from dhanradar.deps import UserContext, current_user_or_anonymous
 from dhanradar.main import app
 from dhanradar.models.auth import User, UserTierEnum
-from dhanradar.models.mf import MfPortfolio
+from dhanradar.models.mf import MfFundConstituent, MfPortfolio
 
 pytestmark = pytest.mark.integration
 
@@ -54,6 +54,7 @@ async def _truncate_mf(db_session):
             "mf.mf_user_holdings, "
             "mf.mf_portfolio_snapshots, "
             "mf.mf_portfolios, "
+            "mf.mf_fund_constituents, "
             "mf.mf_funds "
             "RESTART IDENTITY CASCADE"
         )
@@ -308,4 +309,161 @@ async def test_fit_category_allocation_happy_path(async_client, db_session, patc
     assert d["category_allocation_pct"] == 100.0
     assert d["overlap_pct"] is None
     assert d["data_completeness"] == "no_constituent_data"
+    # 2026-07-06 P2 extension — fund_count_in_category counts the one same-category
+    # held fund; overlap stays an empty list and overlap_coverage is honestly False
+    # (neither side had constituent-disclosure data).
+    assert d["fund_count_in_category"] == 1
+    assert d["overlap"] == []
+    assert d["overlap_coverage"] is False
+    _assert_no_unified_score(body)
+
+
+async def test_fit_overlap_top3_and_coverage_happy_path(
+    async_client, db_session, patch_redis
+) -> None:
+    """2026-07-06 P2 extension — three held funds share the viewed fund's category:
+    two (F1, F2) have SEBI top-10 constituent disclosures (F1 overlaps more than F2),
+    one (F3) has none. Proves: overlap top-3 reuses the SAME per-fund pairwise overlap
+    the aggregate sums (not a second algorithm), is sorted desc, and excludes F3 (no
+    data); fund_count_in_category counts all three (category membership doesn't need
+    constituent data); overlap_coverage is honestly True (F1/F2 had usable data) even
+    though F3 contributed nothing.
+    """
+    from dhanradar.models.mf import MfFund, MfUserHolding
+
+    user_id = await _seed_user(db_session)
+    pid = await _seed_empty_portfolio(db_session, user_id)
+    category = "Equity Scheme - Flexi Cap Fund"
+    month = date(2026, 6, 1)
+
+    def _fund(isin: str, name: str) -> MfFund:
+        return MfFund(
+            isin=isin,
+            scheme_name=name,
+            amc_name="HDFC Asset Management Company Limited",
+            sebi_category=category,
+            category=category,
+            plan_type="direct",
+            option_type="growth",
+            is_segregated=False,
+        )
+
+    db_session.add(_fund(_FIT_VIEWED_ISIN, "Viewed Fund"))
+    db_session.add(_fund("INF300K01F01", "Held Fund One"))
+    db_session.add(_fund("INF300K01F02", "Held Fund Two"))
+    db_session.add(_fund("INF300K01F03", "Held Fund Three"))
+
+    # Viewed fund's disclosed constituents: A=40%, B=30%, C=20%.
+    db_session.add_all(
+        [
+            MfFundConstituent(
+                isin=_FIT_VIEWED_ISIN,
+                constituent_name="Stock A",
+                as_of_month=month,
+                constituent_isin="STOCKA0000",
+                weight_pct=40.0,
+                source_amc="HDFC",
+            ),
+            MfFundConstituent(
+                isin=_FIT_VIEWED_ISIN,
+                constituent_name="Stock B",
+                as_of_month=month,
+                constituent_isin="STOCKB0000",
+                weight_pct=30.0,
+                source_amc="HDFC",
+            ),
+            MfFundConstituent(
+                isin=_FIT_VIEWED_ISIN,
+                constituent_name="Stock C",
+                as_of_month=month,
+                constituent_isin="STOCKC0000",
+                weight_pct=20.0,
+                source_amc="HDFC",
+            ),
+            # F1: A=40%, B=10% -> pair overlap = min(40,40)+min(10,30) = 50.0
+            MfFundConstituent(
+                isin="INF300K01F01",
+                constituent_name="Stock A",
+                as_of_month=month,
+                constituent_isin="STOCKA0000",
+                weight_pct=40.0,
+                source_amc="HDFC",
+            ),
+            MfFundConstituent(
+                isin="INF300K01F01",
+                constituent_name="Stock B",
+                as_of_month=month,
+                constituent_isin="STOCKB0000",
+                weight_pct=10.0,
+                source_amc="HDFC",
+            ),
+            # F2: A=10% only -> pair overlap = min(10,40) = 10.0
+            MfFundConstituent(
+                isin="INF300K01F02",
+                constituent_name="Stock A",
+                as_of_month=month,
+                constituent_isin="STOCKA0000",
+                weight_pct=10.0,
+                source_amc="HDFC",
+            ),
+            # F3 has NO constituent rows at all (no disclosure data).
+        ]
+    )
+
+    db_session.add(
+        MfUserHolding(
+            portfolio_id=_uuid.UUID(pid),
+            user_id=_uuid.UUID(user_id),
+            isin="INF300K01F01",
+            folio_number="F1",
+            units=100.0,
+            invested_amount=10000.0,
+            as_of_date=date(2026, 6, 1),
+            source="cas",
+        )
+    )
+    db_session.add(
+        MfUserHolding(
+            portfolio_id=_uuid.UUID(pid),
+            user_id=_uuid.UUID(user_id),
+            isin="INF300K01F02",
+            folio_number="F2",
+            units=100.0,
+            invested_amount=10000.0,
+            as_of_date=date(2026, 6, 1),
+            source="cas",
+        )
+    )
+    db_session.add(
+        MfUserHolding(
+            portfolio_id=_uuid.UUID(pid),
+            user_id=_uuid.UUID(user_id),
+            isin="INF300K01F03",
+            folio_number="F3",
+            units=100.0,
+            invested_amount=10000.0,
+            as_of_date=date(2026, 6, 1),
+            source="cas",
+        )
+    )
+    await db_session.commit()
+
+    try:
+        app.dependency_overrides[current_user_or_anonymous] = _auth_override(user_id)
+        resp = await async_client.get(f"/api/v1/portfolio/{pid}/fit?isin={_FIT_VIEWED_ISIN}")
+    finally:
+        app.dependency_overrides.pop(current_user_or_anonymous, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    d = body["data"]
+    assert d["data_completeness"] == "constituent_data"
+    assert d["overlap_coverage"] is True
+    assert d["fund_count_in_category"] == 3  # F1, F2, F3 all share the viewed category
+    # Equal invested amounts for F1/F2 -> weighted average = (50 + 10) / 2 = 30.0
+    assert d["overlap_pct"] == 30.0
+    assert d["overlap"] == [
+        {"holding_name": "Held Fund One", "overlap_pct": 50.0},
+        {"holding_name": "Held Fund Two", "overlap_pct": 10.0},
+    ]
     _assert_no_unified_score(body)

@@ -401,11 +401,28 @@ export interface FundFlows {
  * OBSERVATION ONLY: overlap_pct and category_allocation_pct are independent facts,
  * never combined into a verdict. `observation` is server-generated factual copy —
  * render as-is, never paraphrase into advisory language. */
+export interface FundFitOverlapEntry {
+  /** The user's own held fund's display name — DOM-allowed (own portfolio fact). */
+  holding_name: string;
+  /** Pairwise disclosed-holdings overlap % between that held fund and the viewed fund. */
+  overlap_pct: number;
+}
+
 export interface FundFit {
   portfolio_id: string;
   viewed_isin: string;
   overlap_pct: number | null;
   category_allocation_pct: number | null;
+  /** How many of the user's own held funds share the viewed fund's category; null when the
+   * viewed fund has no category on file (same gating as category_allocation_pct). */
+  fund_count_in_category: number | null;
+  /** Top 3 held funds by pairwise disclosed-holdings overlap with the viewed fund, sorted
+   * desc. Empty when no held fund had usable constituent data (see overlap_coverage). */
+  overlap: FundFitOverlapEntry[];
+  /** Honest completeness signal: true only when at least one held fund actually had
+   * disclosed-holdings data to compare against. Constituent disclosures exist for a
+   * handful of top-10 AMCs today — most portfolios will read false here. */
+  overlap_coverage: boolean;
   data_completeness: 'empty' | 'no_constituent_data' | 'constituent_data';
   observation: string;
 }

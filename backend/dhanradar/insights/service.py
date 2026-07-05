@@ -475,15 +475,25 @@ def _portfolio_fit_observation(
 
 async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str) -> dict:
     """`fund.fit` (item 1) — how a VIEWED fund (`isin`) relates to the user's own
-    holdings in `portfolio_id`. Two independent facts, never combined into a
-    verdict:
-      - category_allocation_pct: % of the user's portfolio value already in the
-        viewed fund's own scheme category (reuses category_allocation()).
+    holdings in `portfolio_id`. Independent facts, never combined into a verdict:
+      - category_allocation_pct / fund_count_in_category: % of the user's portfolio
+        value already in the viewed fund's own scheme category, and how many of the
+        user's own held funds share that category (reuses category_allocation()'s
+        underlying fund_categories map — no second query for the count).
       - overlap_pct: portfolio-value-weighted average of each held fund's stock-
         level overlap with the viewed fund's latest disclosed holdings (adapts
         _compute_constituent_overlap's pairwise math to a one-vs-many aggregate).
         Only held funds that themselves have constituent data are included in the
         weighted average; excluded funds are never estimated or scaled for (§8.4).
+      - overlap (top 3, 2026-07-06 P2): the SAME per-fund pairwise overlap the
+        aggregate above sums over — individually retained (not reimplemented),
+        sorted desc, capped at 3. Zero-overlap funds are omitted (not informative).
+      - overlap_coverage (2026-07-06 P2): honest completeness signal — True only
+        when at least one held fund actually had usable constituent data to
+        compare against (mirrors data_completeness == constituent_data).
+        Constituent disclosures only exist for a handful of top-10 AMCs today, so
+        most portfolios will read False — surfaced explicitly rather than left
+        for the client to infer from an empty overlap list.
 
     Same 200-with-empty-shape / IDOR contract as get_overlap: malformed portfolio_id
     or uid -> empty shape; portfolio not owned by user -> ValueError (caller maps to
@@ -508,12 +518,17 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
         *,
         overlap_pct: float | None = None,
         category_allocation_pct: float | None = None,
+        fund_count_in_category: int | None = None,
+        overlap: list[dict[str, Any]] | None = None,
     ) -> dict:
         return {
             "portfolio_id": portfolio_id,
             "viewed_isin": isin,
             "overlap_pct": overlap_pct,
             "category_allocation_pct": category_allocation_pct,
+            "fund_count_in_category": fund_count_in_category,
+            "overlap": overlap or [],
+            "overlap_coverage": completeness == _CONSTITUENT_COMPLETENESS,
             "data_completeness": completeness,
             "observation": observation,
         }
@@ -549,6 +564,7 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
     viewed_category = viewed_fund.category if viewed_fund else None
 
     category_allocation_pct: float | None = None
+    fund_count_in_category: int | None = None
     if viewed_category:
         held_isins_all = list(invested_by_isin.keys())
         fund_meta_result = await db.execute(
@@ -559,6 +575,9 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             v for i, v in invested_by_isin.items() if fund_categories.get(i) == viewed_category
         )
         category_allocation_pct = round(cat_value / total_invested * 100, 2)
+        fund_count_in_category = sum(
+            1 for i in held_isins_all if fund_categories.get(i) == viewed_category
+        )
 
     # Overlap: exclude the viewed fund from its own comparison if already held.
     held_isins = [i for i in invested_by_isin if i != isin]
@@ -567,6 +586,7 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             _NO_CONSTITUENT_DATA_COMPLETENESS,
             _portfolio_fit_observation(None, category_allocation_pct),
             category_allocation_pct=category_allocation_pct,
+            fund_count_in_category=fund_count_in_category,
         )
 
     viewed_month = (
@@ -579,6 +599,7 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             _NO_CONSTITUENT_DATA_COMPLETENESS,
             _portfolio_fit_observation(None, category_allocation_pct),
             category_allocation_pct=category_allocation_pct,
+            fund_count_in_category=fund_count_in_category,
         )
 
     viewed_rows = (
@@ -596,6 +617,7 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             _NO_CONSTITUENT_DATA_COMPLETENESS,
             _portfolio_fit_observation(None, category_allocation_pct),
             category_allocation_pct=category_allocation_pct,
+            fund_count_in_category=fund_count_in_category,
         )
 
     latest_months_result = await db.execute(
@@ -609,6 +631,7 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             _NO_CONSTITUENT_DATA_COMPLETENESS,
             _portfolio_fit_observation(None, category_allocation_pct),
             category_allocation_pct=category_allocation_pct,
+            fund_count_in_category=fund_count_in_category,
         )
 
     isin_month_pairs = [(h, latest_months[h]) for h in latest_months]
@@ -627,28 +650,51 @@ async def get_portfolio_fit(db: Any, user_id: str, portfolio_id: str, isin: str)
             continue
         held_maps.setdefault(r.isin, {})[r.constituent_isin] = float(r.weight_pct or 0.0)
 
+    # Held funds' display names for the top-3 breakdown (2026-07-06 P2) — only queried for
+    # funds that actually reached held_maps (constituent data present); a name-less/unresolved
+    # fund falls back to its own ISIN, never blank.
+    held_names: dict[str, str] = {}
+    if held_maps:
+        name_result = await db.execute(
+            select(MfFund.isin, MfFund.fund_name_short, MfFund.scheme_name).where(
+                MfFund.isin.in_(list(held_maps.keys()))
+            )
+        )
+        held_names = {
+            r.isin: (r.fund_name_short or r.scheme_name or r.isin) for r in name_result.fetchall()
+        }
+
     weighted_sum = 0.0
     weight_total = 0.0
+    per_fund_overlap: list[dict[str, Any]] = []
     for h_isin, cmap in held_maps.items():
         shared = set(cmap) & set(viewed_map)
-        pair_overlap_pct = sum(min(cmap[c], viewed_map[c]) for c in shared)
+        pair_overlap_pct = round(sum(min(cmap[c], viewed_map[c]) for c in shared), 2)
         w = invested_by_isin.get(h_isin, 0.0)
         weighted_sum += pair_overlap_pct * w
         weight_total += w
+        if pair_overlap_pct > 0:
+            per_fund_overlap.append(
+                {"holding_name": held_names.get(h_isin, h_isin), "overlap_pct": pair_overlap_pct}
+            )
 
     if weight_total <= 0:
         return _shape(
             _NO_CONSTITUENT_DATA_COMPLETENESS,
             _portfolio_fit_observation(None, category_allocation_pct),
             category_allocation_pct=category_allocation_pct,
+            fund_count_in_category=fund_count_in_category,
         )
 
     overlap_pct = round(weighted_sum / weight_total, 2)
+    per_fund_overlap.sort(key=lambda e: e["overlap_pct"], reverse=True)
     return _shape(
         _CONSTITUENT_COMPLETENESS,
         _portfolio_fit_observation(overlap_pct, category_allocation_pct),
         overlap_pct=overlap_pct,
         category_allocation_pct=category_allocation_pct,
+        fund_count_in_category=fund_count_in_category,
+        overlap=per_fund_overlap[:3],
     )
 
 

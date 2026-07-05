@@ -4,156 +4,147 @@
  * COMPLIANCE: no 0–100 numeric score/grade/percentile/weight rendered.
  * No advisory verbs (buy/sell/hold/avoid/caution/switch) as visible text,
  * string literals, or object keys. Factual values (%, ₹, NAV) are allowed.
+ * S4 (Portfolio Fit, 2026-07-06 P2) renders the real `fund.fit` envelope
+ * (extends the ALREADY-SHIPPED GET /portfolio/{id}/fit — see insights/service.py)
+ * — factual category/overlap facts only, never a verdict or recommended band.
  * S5 (My Investment, P1) renders the owner's OWN real numbers from the existing
  * `GET /portfolio/{id}/holdings` endpoint — DOM-allowed user facts (§13), never a
- * DhanRadar score.
+ * DhanRadar score. Its ELSS lock-in strip (P2) reads `holding.lockin`, present
+ * only for ELSS/tax-saver holdings.
  *
  * S7 Fund Health (§10.7, W2) is wired to the real `fund.health` envelope
  * (served alongside `fund.analytics` on GET /mf/fund/{isin}/analytics).
  * S8 What Changed (§10.6, W2) is wired to the real `fund.changes` envelope
- * (GET /mf/fund/{isin}/events) — only S4 Portfolio Fit still uses sampleData.
+ * (GET /mf/fund/{isin}/events). No section in this file uses sampleData anymore.
  */
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { useFundAnalytics, useFundEvents } from '@/features/mf/api';
+import { useFundAnalytics, useFundEvents, useFundPortfolioFit } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
+import { useMe } from '@/features/auth/api';
 import { DataState, type DataStatus } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Panel, WhatThisMeans, PreviewBadge, TONE_TEXT } from './parts';
-import { FIT } from './sampleData';
+import { Panel, WhatThisMeans, TONE_TEXT } from './parts';
 import { relativeTime } from '@/features/mood/relative-time';
 import type { FundEvent } from '@/features/mf/types';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S4 — PORTFOLIO FIT
+// S4 — PORTFOLIO FIT (rewired to real data, 2026-07-06 P2 — no more sampleData)
+//
+// COMPLIANCE (§14.3 reframe): factual observation only — "how this fund sits
+// next to YOUR portfolio", never a verdict ("Strong Fit") or a recommended
+// allocation band. No advisory verbs (fit/suit/should/ideal/recommended).
 // ═══════════════════════════════════════════════════════════════════════════
-export function PortfolioFitSection() {
-  // Allocation bar geometry — all values come from sampleData FIT constants.
-  // Map [0, 20]% exposure range → [0, 100]% track width (max shown = 20%).
-  const RANGE_MAX = 20; // max % shown on the track
-  const curFill   = (FIT.currentPct / RANGE_MAX) * 100;
-  const aftFill   = (FIT.afterPct   / RANGE_MAX) * 100;
-  const recLeft   = (FIT.recLow     / RANGE_MAX) * 100;
-  const recRight  = ((RANGE_MAX - FIT.recHigh) / RANGE_MAX) * 100; // right edge inset
+export function PortfolioFitSection({ portfolioId, isin }: { portfolioId: string; isin: string }) {
+  // useMe() distinguishes "anonymous" (401, real empty state) from "signed-in, no
+  // CAS yet" (portfolioId '' but a real session) — portfolioId alone can't tell
+  // the two apart (both leave it '' upstream in FundDetailClientView).
+  const { data: me, isLoading: meLoading, isError: meIsError } = useMe();
+  const isAnonymous = !meLoading && (meIsError || !me);
+
+  const { data: envelope, isLoading, isError, refetch } = useFundPortfolioFit(portfolioId, isin);
+
+  if (meLoading) {
+    return (
+      <Panel className="p-5 sm:p-6">
+        <Skeleton className="h-40 w-full rounded-2xl" />
+      </Panel>
+    );
+  }
+
+  if (isAnonymous) {
+    return (
+      <Panel className="p-5 sm:p-6">
+        <DataState
+          status="empty"
+          emptyCopy="Sign in to compare this fund with your own portfolio."
+        >
+          <></>
+        </DataState>
+      </Panel>
+    );
+  }
+
+  const status: DataStatus = !portfolioId
+    ? 'empty'
+    : isLoading
+    ? 'loading'
+    : isError
+    ? 'error'
+    : envelope?.status ?? 'empty';
+  const fit = envelope?.data ?? null;
+  const hasCategoryFact = fit?.category_allocation_pct != null;
+  const hasOverlapList = !!fit && fit.overlap.length > 0;
 
   return (
     <Panel className="p-5 sm:p-6">
-      {/* card header: icon + match word + preview badge */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {/* green icon pill */}
-          <span
-            aria-hidden="true"
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] bg-emerald/10 text-emerald"
-          >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.9"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M20 6 L9 17 L4 12" />
-            </svg>
-          </span>
-          <div>
-            <div className="font-mono text-[19px] font-extrabold text-emerald leading-none">
-              {FIT.match}
-            </div>
-            <div className="mt-1 text-caption text-ink-muted">{FIT.matchSub}</div>
+      <DataState
+        status={status}
+        reason={envelope?.meta.reason ?? null}
+        emptyCopy="Upload your CAS statement to compare this fund with your own portfolio."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+      >
+        {fit && (
+          <div className="space-y-4">
+            {hasCategoryFact && (
+              <p className="text-small leading-relaxed text-ink-secondary">
+                You already hold{' '}
+                <span className="font-mono font-semibold text-ink">
+                  {fit.category_allocation_pct!.toFixed(1)}%
+                </span>{' '}
+                of your portfolio&apos;s value in this fund&apos;s category
+                {fit.fund_count_in_category != null && (
+                  <>
+                    {' '}
+                    across {fit.fund_count_in_category}{' '}
+                    fund{fit.fund_count_in_category === 1 ? '' : 's'}
+                  </>
+                )}
+                .
+              </p>
+            )}
+
+            {hasOverlapList ? (
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-muted">
+                  Disclosed-holdings overlap with funds you hold
+                </div>
+                <ul className="space-y-2">
+                  {fit.overlap.map((entry) => (
+                    <li
+                      key={entry.holding_name}
+                      className="rounded-[11px] bg-surface-2 px-3 py-2 text-small text-ink-secondary"
+                    >
+                      <span className="font-medium text-ink">{entry.holding_name}</span> shares{' '}
+                      <span className="font-mono font-semibold text-ink">
+                        {entry.overlap_pct.toFixed(1)}%
+                      </span>{' '}
+                      of disclosed holdings with this fund.
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : fit.overlap_coverage ? (
+              <p className="text-caption text-ink-muted">
+                No shared disclosed holdings were found between the funds you hold and this fund.
+              </p>
+            ) : (
+              <p className="text-caption text-ink-muted">
+                Disclosed-holdings data isn&apos;t available yet for the funds you hold, so an
+                overlap comparison isn&apos;t possible right now.
+              </p>
+            )}
+
+            {!hasCategoryFact && !hasOverlapList && (
+              <p className="text-caption text-ink-muted">{fit.observation}</p>
+            )}
           </div>
-        </div>
-        <PreviewBadge />
-      </div>
-
-      {/* Allocation bar */}
-      <div className="mt-5">
-        <div className="mb-2 flex justify-between text-[11px] font-semibold text-ink-muted">
-          <span>Small-cap exposure</span>
-          <span>Recommended {FIT.recLow}–{FIT.recHigh}%</span>
-        </div>
-        <div className="relative h-8 overflow-hidden rounded-[9px] bg-surface-2">
-          {/* recommended band (emerald tint, dashed borders) */}
-          <div
-            aria-hidden="true"
-            className="absolute inset-y-0 border-l-2 border-r-2 border-dashed border-emerald bg-emerald/10"
-            style={{ left: `${recLeft}%`, right: `${recRight}%` }}
-          />
-          {/* current fill (royal blue) */}
-          <div
-            aria-hidden="true"
-            className="absolute inset-y-0 left-0 rounded-l-[9px]"
-            style={{ width: `${curFill}%`, background: 'var(--dr-royal,#1E5EFF)' }}
-          />
-          {/* after fill (royal blue tint) */}
-          <div
-            aria-hidden="true"
-            className="absolute inset-y-0"
-            style={{
-              left:  `${curFill}%`,
-              width: `${aftFill - curFill}%`,
-              background: 'rgba(30,94,255,0.35)',
-            }}
-          />
-        </div>
-        {/* legend */}
-        <div className="mt-3 flex flex-wrap gap-4 text-[11.5px] text-ink-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
-              style={{ background: 'var(--dr-royal,#1E5EFF)' }}
-            />
-            Current {FIT.currentPct}%
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] bg-royal/40"
-            />
-            After {FIT.afterPct}%
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] bg-emerald/50"
-            />
-            Recommended {FIT.recLow}–{FIT.recHigh}%
-          </span>
-        </div>
-      </div>
-
-      {/* 3-up stat row */}
-      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {FIT.stats.map((s) => (
-          <div
-            key={s.l}
-            className="rounded-[11px] bg-surface-2 px-3 py-3 text-center"
-          >
-            <div
-              className={cn(
-                'font-mono text-[18px] font-bold leading-none',
-                s.tone === 'emerald' ? 'text-emerald' : 'text-ink',
-              )}
-            >
-              {s.v}
-            </div>
-            <div className="mt-1.5 text-[10.5px] font-semibold text-ink-muted">
-              {s.l}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <WhatThisMeans>{FIT.meaning}</WhatThisMeans>
+        )}
+      </DataState>
     </Panel>
   );
 }
@@ -190,6 +181,36 @@ function NoHoldingCard() {
         View your portfolio →
       </Link>
     </Panel>
+  );
+}
+
+/** ELSS per-installment lock-in strip (P2, net new) — one row per surviving BUY-type lot +
+ * the totals line. Factual register only ("lock ends <date>" / "lock over") — never a nudge
+ * like "free to sell now". Absent entirely for a non-ELSS holding (`holding.lockin` is null),
+ * not rendered as an empty state — it simply doesn't apply. */
+function ElssLockinStrip({ lockin }: { lockin: NonNullable<import('@/features/portfolio/api').Holding['lockin']> }) {
+  return (
+    <div className="mt-4 border-t border-white/[0.14] pt-4">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.05em] text-white/50">
+        ELSS lock-in (3 years per instalment)
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {lockin.lots.map((lot, i) => (
+          <li key={i} className="flex items-center justify-between font-mono text-[12.5px] text-white/85">
+            <span>{lot.txn_date} · {lot.units.toLocaleString('en-IN')} units</span>
+            <span className={lot.locked ? 'text-white/70' : 'text-emerald'}>
+              {lot.locked ? `lock ends ${lot.lock_until}` : 'lock over'}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 text-[11px] text-white/60">
+        {lockin.locked_units.toLocaleString('en-IN')} units locked
+        {lockin.free_units > 0 && <>, {lockin.free_units.toLocaleString('en-IN')} units lock over</>}
+        {lockin.next_unlock_date && <> · next unlock {lockin.next_unlock_date}</>}
+        {lockin.approximate && ' · approximate — some lots could not be matched exactly from your ledger'}
+      </div>
+    </div>
   );
 }
 
@@ -317,6 +338,9 @@ export function MyInvestmentSection({ portfolioId, isin }: { portfolioId: string
               <div className="mt-1.5 font-mono text-[15px] font-bold text-white">{holding.as_of ?? '—'}</div>
             </div>
           </div>
+
+          {/* no-suppress-ok: lockin is null for every non-ELSS holding by design (P2) — doesn't apply, not hidden data */}
+          {holding.lockin && <ElssLockinStrip lockin={holding.lockin} />}
         </div>
       )}
     </DataState>

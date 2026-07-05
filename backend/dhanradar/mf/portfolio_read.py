@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from dataclasses import dataclass, replace
+from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -298,6 +299,7 @@ def holdings_payload(
     portfolio_id: str,
     xirr_map: dict[tuple[str, str], float | None] | None = None,
     day_change_map: dict[str, tuple[float, float | None]] | None = None,
+    lockin_map: dict[tuple[str, str], dict[str, Any] | None] | None = None,
 ) -> dict:
     """C1 `holdings.list` payload — explicit safe fields only; no score. label/band are the educational
     outputs the client renders as StatusTag/BandRing. `xirr_map` (M2.3, keyed by isin+folio_number) is
@@ -308,9 +310,14 @@ def holdings_payload(
     `data_state` (ADR-0039, P1) is the per-holding integrity tag — this route never calls
     `classify_holdings`'s ledger-flow post-step, so a holding defaults to 'ledger_backed' unless it's
     independently 'placeholder' (unresolved ISIN) or 'unpriced' (no live NAV) — a data-quality fact,
-    not a score (#2-exempt)."""
+    not a score (#2-exempt). `lockin_map` (P2, net new, keyed by isin+folio_number, from
+    `load_holdings_elss_lockin`) is the ELSS/tax-saver per-lot lock-in block — present (non-null)
+    ONLY for the ELSS holdings the caller included in the map; every other holding's `lockin` is
+    `None` via the same `dict.get` default (no per-holding category check needed here — the router
+    already filtered `lockin_map`'s keys to ELSS-only)."""
     xirr_map = xirr_map or {}
     day_change_map = day_change_map or {}
+    lockin_map = lockin_map or {}
     return {
         "portfolio_id": portfolio_id,
         "holdings": [
@@ -332,6 +339,7 @@ def holdings_payload(
                 "day_change": day_change_map.get(h.isin, (None, None))[0],
                 "day_change_pct": day_change_map.get(h.isin, (None, None))[1],
                 "data_state": h.data_state,  # ADR-0039 (P1) — ledger_backed|stated_only|unpriced|placeholder
+                "lockin": lockin_map.get((h.isin, h.folio_number)),  # P2 — ELSS-only, else None
             }
             for h in rm.holdings
         ],
@@ -1362,6 +1370,145 @@ def reinvested_dividend_cost(
             if txn_type == "dividend_reinvest" and nav_or_price:
                 total += units * nav_or_price
     return total
+
+
+# ---------------------------------------------------------------------------
+# ELSS per-installment lock-in (P2, net new, 2026-07-06) — SEBI mandates a 3-year lock-in
+# PER LOT (not per-folio) for ELSS/tax-saver units. Reuses the SAME FIFO-lot-walk discipline
+# as `_fifo_remaining_cost_and_weighted_age` (`_LOT_OPEN_TYPES`/`_LOT_CONSUME_TYPES`, the
+# ADR-0039 txn_type disambiguation) but tracks each lot's own UNITS (not remaining cost) so a
+# surviving lot's units — not its ₹ cost — are what's reported as locked/free.
+# ---------------------------------------------------------------------------
+
+_ELSS_LOCKIN_YEARS = 3
+
+
+def _lockin_end_date(txn_date: datetime.date) -> datetime.date:
+    """A lot's lock-until date — exactly `_ELSS_LOCKIN_YEARS` civil years on from its open date.
+    A Feb-29 open date falls back to Feb 28 in the (non-leap) target year — the standard
+    civil-calendar "add N years" rule, never a raw +1096-days approximation."""
+    try:
+        return txn_date.replace(year=txn_date.year + _ELSS_LOCKIN_YEARS)
+    except ValueError:
+        return txn_date.replace(month=2, day=28, year=txn_date.year + _ELSS_LOCKIN_YEARS)
+
+
+def compute_elss_lockin(
+    flows: list[tuple[datetime.date, float, str]],
+    today: datetime.date,
+) -> dict[str, Any] | None:
+    """Pure function: one ELSS holding's per-lot lock-in status from its ledger flows —
+    `(txn_date, units, txn_type)` triples for ONE `(instrument_id, folio_number)`, same shape as
+    `weighted_avg_holding_days`'s `flows` param minus the amount (units-based, not cost-based).
+
+    FIFO lot walk: a purchase/sip/switch_in (`_LOT_OPEN_TYPES`) opens a lot of `units` (positive —
+    cas.py's signed-by-direction convention) dated `txn_date`; a redemption/switch_out
+    (`_LOT_CONSUME_TYPES`) consumes the OLDEST surviving lots' units first (partial consumption
+    splits a lot, same discipline as the cost-based FIFO walk). `dividend_payout`/
+    `dividend_reinvest`/anything else leaves lots untouched (ADR-0039's disambiguation — a payout
+    is not a redemption).
+
+    `approximate` is set True — and ONLY then — when a redemption/switch_out's units exceed the
+    open lots' remaining units at that point in the walk: the ledger can't attribute which specific
+    units were sold (e.g. a lot opened before the ledger's own coverage window), so the surviving
+    lots are reported as the best-effort FIFO remainder, flagged rather than silently precise (§8.4:
+    null/approximate over a wrong number).
+
+    Returns None when there is no surviving lot at all — either no BUY-type flow was ever seen (a
+    ledger-less/'stated_only' holding, nothing to compute from) or every lot was fully consumed
+    (a fact the caller/router should not normally see, since `holdings_payload` only carries
+    `units > 0` active holdings, but stays honest rather than returning a hollow shape). Pure,
+    deterministic, no I/O — `today` is the caller's only non-deterministic input."""
+    lots: list[dict[str, Any]] = []  # {"txn_date": date, "units": remaining float}, oldest-first
+    approximate = False
+    for txn_date, units, txn_type in sorted(flows, key=lambda f: f[0]):
+        opens = txn_type in _LOT_OPEN_TYPES
+        consumes = txn_type in _LOT_CONSUME_TYPES
+        if opens and units > 0:
+            lots.append({"txn_date": txn_date, "units": units})
+        elif consumes:
+            remaining = abs(units)
+            kept: list[dict[str, Any]] = []
+            for lot in lots:
+                if remaining > 1e-6:
+                    consume = min(lot["units"], remaining)
+                    lot["units"] -= consume
+                    remaining -= consume
+                if lot["units"] > 1e-6:
+                    kept.append(lot)
+            if remaining > 1e-6:
+                approximate = True
+            lots = kept
+        # else (dividend_payout / dividend_reinvest / unrecognised) — no lot effect.
+
+    if not lots:
+        return None
+
+    lot_details: list[dict[str, Any]] = []
+    locked_units = 0.0
+    free_units = 0.0
+    next_unlock: datetime.date | None = None
+    for lot in lots:
+        lock_until = _lockin_end_date(lot["txn_date"])
+        locked = lock_until > today
+        lot_details.append(
+            {
+                "txn_date": lot["txn_date"].isoformat(),
+                "units": round(lot["units"], 4),
+                "lock_until": lock_until.isoformat(),
+                "locked": locked,
+            }
+        )
+        if locked:
+            locked_units += lot["units"]
+            if next_unlock is None or lock_until < next_unlock:
+                next_unlock = lock_until
+        else:
+            free_units += lot["units"]
+
+    return {
+        "lots": lot_details,
+        "locked_units": round(locked_units, 4),
+        "free_units": round(free_units, 4),
+        "next_unlock_date": next_unlock.isoformat() if next_unlock else None,
+        "approximate": approximate,
+    }
+
+
+async def load_holdings_elss_lockin(
+    db: AsyncSession,
+    portfolio_id: str,
+    elss_keys: set[tuple[str, str]],
+) -> dict[tuple[str, str], dict[str, Any] | None]:
+    """P2 loader — one query for the ledger flows of ONLY the portfolio's ELSS/tax-saver holdings
+    (`elss_keys` is the router's own `{(isin, folio_number) for h in rm.holdings if h.category ==
+    ELSS_CATEGORY}` — a cheap Python filter over data already loaded, no extra fund-metadata query),
+    then `compute_elss_lockin` per key. Empty `elss_keys` -> `{}` with zero DB round trips (the
+    common case: most portfolios hold no ELSS fund). A key with ledger rows that fully collapse to
+    no surviving lot maps to `None` (honest — see `compute_elss_lockin`'s docstring), same as a key
+    absent from the ledger entirely (`dict.get` on the caller side treats both identically)."""
+    if not elss_keys:
+        return {}
+    pid = uuid.UUID(portfolio_id)
+    rows = (
+        await db.execute(
+            select(
+                MfPortfolioTransaction.instrument_id,
+                MfPortfolioTransaction.folio_number,
+                MfPortfolioTransaction.txn_date,
+                MfPortfolioTransaction.units,
+                MfPortfolioTransaction.txn_type,
+            ).where(MfPortfolioTransaction.portfolio_id == pid)
+        )
+    ).all()
+    grouped: dict[tuple[str, str], list[tuple[datetime.date, float, str]]] = {}
+    for r in rows:
+        key = (r.instrument_id, r.folio_number)
+        if key not in elss_keys:
+            continue
+        grouped.setdefault(key, []).append((r.txn_date, float(r.units), r.txn_type))
+    today = datetime.date.today()
+    return {key: compute_elss_lockin(flows, today) for key, flows in grouped.items()}
 
 
 async def load_portfolio_valuation_series(

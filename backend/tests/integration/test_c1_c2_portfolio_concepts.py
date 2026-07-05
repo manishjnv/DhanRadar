@@ -75,6 +75,28 @@ def test_holdings_payload_safe_fields_no_score():
     assert h["invested_amount"] == 1000.0 and h["current_value"] == 1200.0  # user's own numbers
 
 
+def test_holdings_payload_lockin_present_only_for_elss_holding():
+    """P2 (2026-07-06) — `lockin` is present (non-null) ONLY for the holding(s) the caller's
+    `lockin_map` covers (the router only populates it for ELSS-category holdings); every other
+    holding's `lockin` is None via the same dict.get default, with zero per-holding category
+    check inside `holdings_payload` itself."""
+    rm = PortfolioReadModel(
+        holdings=[
+            _holding(isin="INF_ELSS", folio_number="F1", category="Equity Scheme - ELSS"),
+            _holding(isin="INF_OTHER", folio_number="F2", category="Flexi Cap Fund"),
+        ],
+        total_invested=2000.0, total_value=2400.0, xirr_pct=None, as_of="2026-03-31",
+    )
+    lockin_block = {
+        "lots": [{"txn_date": "2024-01-01", "units": 10.0, "lock_until": "2027-01-01", "locked": True}],
+        "locked_units": 10.0, "free_units": 0.0, "next_unlock_date": "2027-01-01", "approximate": False,
+    }
+    p = holdings_payload(rm, "pid-1", lockin_map={("INF_ELSS", "F1"): lockin_block})
+    by_isin = {h["isin"]: h for h in p["holdings"]}
+    assert by_isin["INF_ELSS"]["lockin"] == lockin_block
+    assert by_isin["INF_OTHER"]["lockin"] is None
+
+
 def test_summary_payload_facts_band_no_score():
     rm = PortfolioReadModel(
         holdings=[_holding(confidence_band="high"), _holding(isin="INF2", confidence_band="medium")],
