@@ -37,6 +37,7 @@ _PERIOD = date(2026, 6, 1)
 _FAKE_ROWS = [
     CategoryFlowRow(
         period_month=_PERIOD,
+        scheme_type="Open ended Schemes",
         scheme_category="Overnight Fund",
         num_schemes=37,
         num_folios=769280,
@@ -48,6 +49,7 @@ _FAKE_ROWS = [
     ),
     CategoryFlowRow(
         period_month=_PERIOD,
+        scheme_type="Open ended Schemes",
         scheme_category="Liquid Fund",
         num_schemes=42,
         num_folios=3128442,

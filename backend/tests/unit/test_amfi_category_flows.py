@@ -94,14 +94,45 @@ _LEAF_MULTICAP = (
 )
 _TOO_SHORT_ROW = ("i", "Truncated")
 
+# --- ELSS-collision fixture rows (Open ended vs Close Ended, same category
+# label "ELSS" — real AMFI data ambiguity found 2026-07-05, migration 0066) ---
+_SUPERGROUP_B = ("B", "Close Ended Schemes", "", "", "", "", "", "", "", "", "")
+_LEAF_ELSS_OPEN = (
+    "x",
+    "ELSS",
+    40.0,
+    1000000.0,
+    1000.0,
+    500.0,
+    500.0,
+    50000.0,
+    49000.0,
+    0.0,
+    0.0,
+)
+_LEAF_ELSS_CLOSE = (
+    "i",
+    "ELSS",
+    13.0,
+    50000.0,
+    10.0,
+    5.0,
+    5.0,
+    500.0,
+    490.0,
+    0.0,
+    0.0,
+)
+
 
 class TestParseCategoryFlowRows:
     def test_leaf_rows_parsed(self):
         rows = parse_category_flow_rows(
-            [_LEAF_OVERNIGHT, _LEAF_LIQUID], period_month=date(2026, 5, 1)
+            [_SUPERGROUP_A, _LEAF_OVERNIGHT, _LEAF_LIQUID], period_month=date(2026, 5, 1)
         )
         assert len(rows) == 2
         assert rows[0].scheme_category == "Overnight Fund"
+        assert rows[0].scheme_type == "Open ended Schemes"
         assert rows[0].period_month == date(2026, 5, 1)
         assert rows[0].num_schemes == 37
         assert rows[0].num_folios == 769280
@@ -111,6 +142,12 @@ class TestParseCategoryFlowRows:
         assert rows[0].net_aum_cr == 89939.73
         assert rows[0].avg_aum_cr == 125683.05
         assert rows[1].scheme_category == "Liquid Fund"
+
+    def test_leaf_row_before_any_type_marker_skipped(self):
+        """A leaf row with no preceding A/B/C scheme_type marker is malformed
+        input — skip rather than write an unknown scheme_type (§8.4)."""
+        rows = parse_category_flow_rows([_LEAF_OVERNIGHT], period_month=date(2026, 5, 1))
+        assert rows == []
 
     def test_supergroup_a_header_skipped(self):
         rows = parse_category_flow_rows([_SUPERGROUP_A], period_month=date(2026, 5, 1))
@@ -139,6 +176,7 @@ class TestParseCategoryFlowRows:
         (Multi Cap Fund) — both must be kept as distinct category rows."""
         rows = parse_category_flow_rows(
             [
+                _SUPERGROUP_A,
                 _SUPERGROUP_I,
                 _LEAF_OVERNIGHT,
                 _SUB_TOTAL_ROW,
@@ -150,6 +188,31 @@ class TestParseCategoryFlowRows:
         )
         assert len(rows) == 2
         assert {r.scheme_category for r in rows} == {"Overnight Fund", "Multi Cap Fund"}
+
+    def test_same_category_name_under_different_scheme_types_kept_distinct(self):
+        """Real AMFI data ambiguity (found 2026-07-05): "ELSS" appears as a leaf
+        category under BOTH Open ended and Close Ended Schemes in the same
+        month. Both rows must survive as distinct (scheme_type, category)
+        entries — this is the exact bug migration 0066 fixed (the old dedup
+        key without scheme_type silently dropped one of them)."""
+        rows = parse_category_flow_rows(
+            [
+                _SUPERGROUP_A,
+                _SUPERGROUP_II,
+                _LEAF_ELSS_OPEN,
+                _SUPERGROUP_B,
+                _SUPERGROUP_II,
+                _LEAF_ELSS_CLOSE,
+            ],
+            period_month=date(2026, 5, 1),
+        )
+        assert len(rows) == 2
+        by_type = {r.scheme_type: r for r in rows}
+        assert set(by_type) == {"Open ended Schemes", "Close Ended Schemes"}
+        assert by_type["Open ended Schemes"].scheme_category == "ELSS"
+        assert by_type["Open ended Schemes"].num_schemes == 40
+        assert by_type["Close Ended Schemes"].scheme_category == "ELSS"
+        assert by_type["Close Ended Schemes"].num_schemes == 13
 
     def test_full_mixed_fixture(self):
         rows = parse_category_flow_rows(

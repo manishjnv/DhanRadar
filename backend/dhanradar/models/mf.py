@@ -967,8 +967,14 @@ class MfCategoryFlows(Base):
     """AMFI monthly category-wise fund flows (W3 source C).
 
     Category-level ONLY — never estimate or back out per-scheme flows from
-    this data (§8.4). One row per (period_month, scheme_category). Written by
-    `dhanradar.tasks.mf_category_flows.mf_category_flows_fetch`
+    this data (§8.4). One row per (period_month, scheme_type, scheme_category).
+    `scheme_type` ("Open ended Schemes" / "Close Ended Schemes" / "Interval
+    Schemes") is REQUIRED in the dedup key — AMFI's raw report reuses the same
+    category label under more than one scheme_type in the same month (e.g.
+    "ELSS" appears once under Open ended and once under Close Ended); without
+    scheme_type in the key, the second row silently overwrites the first at
+    upsert (found + fixed 2026-07-05 auditing the live prod data, migration
+    0066). Written by `dhanradar.tasks.mf_category_flows.mf_category_flows_fetch`
     (source_key = 'amfi_category_flows'). scheme_category is AMFI's raw SEBI
     category label (e.g. "Liquid Fund", "Small Cap Fund") stored verbatim —
     mapping to DhanRadar's internal category taxonomy, if any, happens at the
@@ -978,7 +984,10 @@ class MfCategoryFlows(Base):
     __tablename__ = "mf_category_flows"
     __table_args__ = (
         UniqueConstraint(
-            "period_month", "scheme_category", name="uq_mf_category_flows_month_category"
+            "period_month",
+            "scheme_type",
+            "scheme_category",
+            name="uq_mf_category_flows_month_type_category",
         ),
         Index("ix_mf_category_flows_period_month", "period_month"),
         _SCHEMA,
@@ -986,6 +995,7 @@ class MfCategoryFlows(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     period_month: Mapped[date] = mapped_column(Date, nullable=False)
+    scheme_type: Mapped[str] = mapped_column(Text, nullable=False)
     scheme_category: Mapped[str] = mapped_column(Text, nullable=False)
     num_schemes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     num_folios: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

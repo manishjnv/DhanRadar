@@ -117,11 +117,11 @@ async def _run(run_id: int, stats, fetch_fn, today: date) -> None:
     stats.reachable = True
     stats.fetched = len(rows)
 
-    # --- Dedup by (period_month, scheme_category) in Python ---
-    seen: set[tuple[date, str]] = set()
+    # --- Dedup by (period_month, scheme_type, scheme_category) in Python ---
+    seen: set[tuple[date, str, str]] = set()
     deduped = []
     for row in rows:
-        key = (row.period_month, row.scheme_category)
+        key = (row.period_month, row.scheme_type, row.scheme_category)
         if key in seen:
             continue
         seen.add(key)
@@ -139,6 +139,7 @@ async def _run(run_id: int, stats, fetch_fn, today: date) -> None:
         upsert_vals = [
             {
                 "period_month": r.period_month,
+                "scheme_type": r.scheme_type,
                 "scheme_category": r.scheme_category,
                 "num_schemes": r.num_schemes,
                 "num_folios": r.num_folios,
@@ -157,7 +158,7 @@ async def _run(run_id: int, stats, fetch_fn, today: date) -> None:
             pg_insert(MfCategoryFlows)
             .values(upsert_vals)
             .on_conflict_do_update(
-                constraint="uq_mf_category_flows_month_category",
+                constraint="uq_mf_category_flows_month_type_category",
                 set_={
                     "num_schemes": pg_insert(MfCategoryFlows).excluded.num_schemes,
                     "num_folios": pg_insert(MfCategoryFlows).excluded.num_folios,
