@@ -1007,7 +1007,7 @@ class MfCategoryFlows(Base):
     "ELSS" appears once under Open ended and once under Close Ended); without
     scheme_type in the key, the second row silently overwrites the first at
     upsert (found + fixed 2026-07-05 auditing the live prod data, migration
-    0066). Written by `dhanradar.tasks.mf_category_flows.mf_category_flows_fetch`
+    0068). Written by `dhanradar.tasks.mf_category_flows.mf_category_flows_fetch`
     (source_key = 'amfi_category_flows'). scheme_category is AMFI's raw SEBI
     category label (e.g. "Liquid Fund", "Small Cap Fund") stored verbatim —
     mapping to DhanRadar's internal category taxonomy, if any, happens at the

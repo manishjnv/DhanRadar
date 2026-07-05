@@ -19,8 +19,8 @@ task run re-upserts all rows with the real per-row scheme_type (including the
 previously-missing Close-Ended ELSS row) — this migration only needs to get
 the column/constraint into a consistent state, not the numbers right.
 
-Revision ID: 0066
-Revises: 0065
+Revision ID: 0068
+Revises: 0067
 Create Date: 2026-07-05
 """
 
@@ -30,8 +30,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0066"
-down_revision: str | None = "0065"
+revision: str = "0068"
+down_revision: str | None = "0067"
 branch_labels = None
 depends_on = None
 
