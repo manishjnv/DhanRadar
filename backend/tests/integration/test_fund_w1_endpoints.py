@@ -7,6 +7,7 @@ Endpoints:
   GET /api/v1/mf/fund/{isin}/composition
   GET /api/v1/mf/fund/{isin}/people
   GET /api/v1/mf/fund/{isin}/peers
+  GET /api/v1/mf/fund/{isin}/factors  (W2, §10.1 — the second scored concept)
 
 Same infrastructure contract as test_fund_head_endpoint.py (async_client / db_session /
 patch_redis). Public — no auth required (current_user_or_anonymous).
@@ -478,3 +479,89 @@ async def test_fund_peers_unranked_fund_empty_200(async_client, db_session, patc
 async def test_fund_peers_unknown_isin_404(async_client, db_session, patch_redis):
     resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_UNKNOWN}/peers")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /fund/{isin}/factors  (W2, §10.1 — factors + signals, the second scored concept)
+# ---------------------------------------------------------------------------
+
+
+async def test_fund_factors_happy_path(async_client, db_session, patch_redis):
+    await _seed_fund(db_session, _ISIN_A)
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_A,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=2,
+            total_in_cat=10,
+            verb_label="in_form",
+            confidence_band="high",
+            confidence_factors={"consistency": "high", "recency": "medium"},
+            contributing_signals=["Outperformed category over 1 year"],
+            contradicting_signals=[],
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/factors")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    factors = body["factors"]["data"]
+    assert factors["confidence_band"] == "high"
+    assert factors["factors"] == {"consistency": "high", "recency": "medium"}
+    assert factors["as_of"] == _TODAY.isoformat()
+
+    signals = body["signals"]["data"]
+    assert signals["contributing"] == ["Outperformed category over 1 year"]
+    assert signals["contradicting"] == []
+    assert signals["as_of"] == _TODAY.isoformat()
+
+
+async def test_fund_factors_no_forbidden_tokens_and_bands_only(
+    async_client, db_session, patch_redis
+):
+    """Non-neg #2: no raw score/weight/fair-value token anywhere in the response, and
+    every factor value is one of the three allowed band words — never a bare numeric."""
+    await _seed_fund(db_session, _ISIN_A)
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_A,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=1,
+            total_in_cat=5,
+            verb_label="on_track",
+            confidence_band="medium",
+            confidence_factors={"consistency": "high", "data_coverage": "low"},
+            contributing_signals=[],
+            contradicting_signals=["Below category median over 3 years"],
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/factors")
+    assert resp.status_code == 200, resp.text
+    for forbidden in ("unified_score", '"score"', "raw_score", "factor_weights", "fair_value"):
+        assert forbidden not in resp.text
+
+    factors = resp.json()["factors"]["data"]["factors"]
+    assert set(factors.values()) <= {"high", "medium", "low"}
+
+
+async def test_fund_factors_unranked_fund_nulls_200(async_client, db_session, patch_redis):
+    await _seed_fund(db_session, _ISIN_A)
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/factors")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["factors"]["data"] == {"factors": None, "confidence_band": None, "as_of": None}
+    assert body["signals"]["data"] == {"contributing": [], "contradicting": [], "as_of": None}
+
+
+async def test_fund_factors_unknown_isin_404(async_client, db_session, patch_redis):
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_UNKNOWN}/factors")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "fund_not_found"

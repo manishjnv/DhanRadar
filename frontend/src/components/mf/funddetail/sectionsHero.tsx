@@ -17,12 +17,35 @@ import { cn } from '@/lib/cn';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import {
-  HeroRing, StrengthBar, WhatThisMeans, PreviewBadge, Panel, Sparkline,
+  HeroRing, StrengthBar, WhatThisMeans, Panel,
 } from './parts';
 import {
-  FUND, HERO_FACTORS, STATUS_BADGES, VERDICT, ENTRY, MOOD, SCORE_MODULES, STICKY,
+  FUND, VERDICT, ENTRY, MOOD, NO_DATA_FACTOR_TILES,
 } from './sampleData';
 import { getCategoryAboutCopy, getStickyCategoryStats } from './categoryCopy';
+import type { Strength } from './sampleData';
+
+// W2 (§10.1): the engine's named confidence-quality bands (consistency/recency/
+// volatility/data_coverage today) — band words only, never a number (non-neg #2).
+// NOT the frozen quality/valuation/momentum/risk/trend score axes (the engine
+// does not expose a per-axis band; see the W2 report deviations).
+export type FundFactors = Record<string, 'high' | 'medium' | 'low'> | null;
+export interface FundSignalWords {
+  contributing: string[];
+  contradicting: string[];
+}
+
+const BAND_STRENGTH: Record<'high' | 'medium' | 'low', Strength> = {
+  high: 'strong', medium: 'moderate', low: 'soft',
+};
+const BAND_RING_COLOR: Record<'high' | 'medium' | 'low', string> = {
+  high: '#00B386', medium: '#F5A623', low: '#64748B',
+};
+
+/** "data_coverage" → "Data Coverage" — no hardcoded name map; any engine key renders. */
+function factorDisplayName(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 // Label → display + ring/text colour (mirrors ScoreRing/FundScoreCell canon).
 const LABEL_DISPLAY: Record<Label, string> = {
@@ -33,14 +56,7 @@ const LABEL_STROKE: Record<Label, string> = {
   in_form: '#00B386', on_track: '#00C2FF', off_track: '#F5A623',
   out_of_form: '#E5484D', insufficient_data: '#6B7280',
 };
-const LABEL_TEXT: Record<Label, string> = {
-  in_form: 'text-emerald', on_track: 'text-cyan', off_track: 'text-amber',
-  out_of_form: 'text-red', insufficient_data: 'text-ink-muted',
-};
 const BAND_WORD: Record<ConfidenceBand, string> = { high: 'High', medium: 'Medium', low: 'Low' };
-const BADGE_TONE: Record<string, string> = {
-  emerald: 'bg-emerald', royal: 'bg-royal', cyan: 'bg-cyan', amber: 'bg-amber',
-};
 
 /** Rank presented as a percentile BAND, not a bare "#3/24" badge (§16.2 differentiator —
  * counters the leaderboard framing rivals use). Rank ordinals are DOM-allowed (§9). */
@@ -83,7 +99,7 @@ export interface FundHead {
 // ═══════════════════════════════════════════════════════════════════════════
 // S1 — HERO
 // ═══════════════════════════════════════════════════════════════════════════
-export function HeroSection({ head }: { head: FundHead }) {
+export function HeroSection({ head, factors }: { head: FundHead; factors: FundFactors }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
   const pills = [
@@ -167,10 +183,15 @@ export function HeroSection({ head }: { head: FundHead }) {
           )}
           <div className="mt-3.5 flex w-full items-center justify-between border-t border-white/10 pt-3">
             <span className="font-mono text-[10px] uppercase tracking-wide text-white/55">Assessment factors</span>
-            <PreviewBadge className="border-white/15 bg-white/10 text-white/60" />
           </div>
           <div className="mt-2.5 flex w-full flex-col gap-1.5">
-            {HERO_FACTORS.map((f) => <StrengthBar key={f.name} name={f.name} strength={f.strength} onDark />)}
+            {factors && Object.keys(factors).length > 0 ? (
+              Object.entries(factors).map(([key, band]) => (
+                <StrengthBar key={key} name={factorDisplayName(key)} strength={BAND_STRENGTH[band]} onDark />
+              ))
+            ) : (
+              <p className="m-0 text-caption text-white/60">Not yet rated — not enough data for an assessment yet.</p>
+            )}
           </div>
         </div>
       </div>
@@ -197,15 +218,22 @@ function CTA({ kind, children }: { kind: 'invest' | 'sip' | 'ghost'; children: R
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S1b — STATUS BADGE ROW
+// S1b — STATUS BADGE ROW (W2: real contributing signals, first 3 — §10.1)
 // ═══════════════════════════════════════════════════════════════════════════
-export function StatusRow() {
+export function StatusRow({ contributing }: { contributing: string[] }) {
+  const badges = contributing.slice(0, 3);
+  // no-suppress rule: an empty read still renders, as an honest no-data line.
+  if (badges.length === 0) {
+    return (
+      <p className="mt-3.5 text-caption text-ink-muted">Not enough data yet for a highlights row.</p>
+    );
+  }
   return (
     <div className="mt-3.5 flex flex-wrap gap-2">
-      {STATUS_BADGES.map((b) => (
-        <span key={b.text} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-caption font-semibold text-ink shadow-sm">
-          <span className={cn('grid h-4 w-4 place-items-center rounded-full text-[9px] text-white', BADGE_TONE[b.tone])}>✓</span>
-          {b.text}
+      {badges.map((text) => (
+        <span key={text} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-caption font-semibold text-ink shadow-sm">
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-emerald text-[9px] text-white">✓</span>
+          {text}
         </span>
       ))}
     </div>
@@ -215,7 +243,7 @@ export function StatusRow() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S2 — EDUCATIONAL VERDICT (label word, not "Strong Buy")
 // ═══════════════════════════════════════════════════════════════════════════
-export function VerdictSection({ head }: { head: FundHead }) {
+export function VerdictSection({ head, signals }: { head: FundHead; signals: FundSignalWords }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
   const fill = head.band === 'high' ? 85 : head.band === 'medium' ? 55 : head.band === 'low' ? 30 : 60;
@@ -237,20 +265,28 @@ export function VerdictSection({ head }: { head: FundHead }) {
       </div>
       <div className="relative mt-5 grid gap-6 border-t border-white/15 pt-4 sm:grid-cols-2">
         <div>
-          <h5 className="m-0 mb-2.5 font-mono text-caption font-bold uppercase tracking-wide text-emerald">✓ Tends to suit</h5>
-          {VERDICT.suitable.map((s) => (
-            <div key={s} className="mb-2 flex gap-2 text-small leading-snug" style={{ color: '#D1FAE5' }}>
-              <span className="shrink-0 font-bold text-emerald">✓</span>{s}
-            </div>
-          ))}
+          <h5 className="m-0 mb-2.5 font-mono text-caption font-bold uppercase tracking-wide text-emerald">✓ What&apos;s going well</h5>
+          {signals.contributing.length > 0 ? (
+            signals.contributing.map((s) => (
+              <div key={s} className="mb-2 flex gap-2 text-small leading-snug" style={{ color: '#D1FAE5' }}>
+                <span className="shrink-0 font-bold text-emerald">✓</span>{s}
+              </div>
+            ))
+          ) : (
+            <p className="m-0 text-small leading-snug" style={{ color: '#D1FAE5' }}>Not enough data yet to name specific strengths.</p>
+          )}
         </div>
         <div>
-          <h5 className="m-0 mb-2.5 font-mono text-caption font-bold uppercase tracking-wide" style={{ color: '#FCA5A5' }}>✗ Less suited to</h5>
-          {VERDICT.notIdeal.map((s) => (
-            <div key={s} className="mb-2 flex gap-2 text-small leading-snug" style={{ color: '#FED7D7' }}>
-              <span className="shrink-0 font-bold" style={{ color: '#FCA5A5' }}>✗</span>{s}
-            </div>
-          ))}
+          <h5 className="m-0 mb-2.5 font-mono text-caption font-bold uppercase tracking-wide" style={{ color: '#FCA5A5' }}>✗ What to watch</h5>
+          {signals.contradicting.length > 0 ? (
+            signals.contradicting.map((s) => (
+              <div key={s} className="mb-2 flex gap-2 text-small leading-snug" style={{ color: '#FED7D7' }}>
+                <span className="shrink-0 font-bold" style={{ color: '#FCA5A5' }}>✗</span>{s}
+              </div>
+            ))
+          ) : (
+            <p className="m-0 text-small leading-snug" style={{ color: '#FED7D7' }}>No specific concerns flagged yet.</p>
+          )}
         </div>
       </div>
       {/* About this category — static per-category-class copy (§16.2 table-stakes) */}
@@ -359,30 +395,37 @@ export function MoodSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S11 — SCORE BREAKDOWN (band rings + strength words, NO numbers)
+// S11 — SCORE BREAKDOWN (W2, §10.1: real factor tiles, band rings, NO numbers)
 // ═══════════════════════════════════════════════════════════════════════════
-const TREND_CHIP: Record<'up' | 'down' | 'flat', string> = {
-  up: 'bg-emerald/10 text-emerald', down: 'bg-red/10 text-red', flat: 'bg-surface-2 text-ink-muted',
-};
-const TREND_ARROW: Record<'up' | 'down' | 'flat', string> = { up: '▲', down: '▼', flat: '—' };
-
-export function ScoreBreakdownSection() {
+export function ScoreBreakdownSection({ factors }: { factors: FundFactors }) {
+  const entries = factors ? Object.entries(factors) : [];
   return (
     <div className="grid gap-3.5 sm:grid-cols-2 2xl:grid-cols-4">
-      {SCORE_MODULES.map((m, i) => (
-        <div key={m.name} className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
+      {entries.length === 0 && (
+        <div className="col-span-full rounded-2xl border border-dashed border-line bg-surface-2 p-4 text-caption text-ink-muted">
+          Not yet rated — this fund doesn&apos;t have enough data for an assessment yet.
+        </div>
+      )}
+      {entries.map(([key, band]) => (
+        <div key={key} className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
           <div className="flex items-center gap-3">
-            <HeroRing color={LABEL_STROKE[m.label]} band={m.band} size={50} stroke={5} onDark={false} />
+            <HeroRing color={BAND_RING_COLOR[band]} band={band} size={50} stroke={5} onDark={false} />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-small font-bold">
-                <span className={LABEL_TEXT[m.label]}>{m.name}</span>
-                <span className={cn('rounded-full px-2 py-px font-mono text-[10px] font-bold', TREND_CHIP[m.trend])}>{TREND_ARROW[m.trend]} {m.trendWord}</span>
-              </div>
-              <div className="mt-0.5 text-caption text-ink-muted">Rank <b className="text-ink-secondary">#{m.rank}</b> of 18 · {m.standing}</div>
+              <div className="text-small font-bold text-ink">{factorDisplayName(key)}</div>
+              <div className="mt-0.5 text-caption text-ink-muted">Rank — · Trend —</div>
             </div>
           </div>
-          <div className="mt-2.5"><Sparkline seed={i * 7 + 3} up={m.trend !== 'down'} /></div>
-          <p className="mt-2.5 border-t border-line pt-2.5 text-caption leading-relaxed text-ink-secondary">{m.reason}</p>
+          <p className="mt-2.5 border-t border-line pt-2.5 text-caption leading-relaxed text-ink-secondary">
+            {BAND_WORD[band]} confidence signal.
+          </p>
+        </div>
+      ))}
+      {NO_DATA_FACTOR_TILES.map((name) => (
+        <div key={name} className="rounded-2xl border border-dashed border-line bg-surface-2 p-4">
+          <div className="text-small font-bold text-ink-muted">{name}</div>
+          <p className="mt-2.5 border-t border-line pt-2.5 text-caption leading-relaxed text-ink-faint">
+            No data yet — this signal isn&apos;t built for this fund yet.
+          </p>
         </div>
       ))}
     </div>
@@ -392,11 +435,13 @@ export function ScoreBreakdownSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S22 — STICKY DECISION BAR (educational label, not advisory)
 // ═══════════════════════════════════════════════════════════════════════════
-export function StickyBar({ head }: { head: FundHead }) {
+export function StickyBar({ head, topReason }: { head: FundHead; topReason: string | null }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
-  // Per-category-class static educational copy (§5 row 22, W1) — "Top reason" stays
-  // sampleData preview until per-fund signals exist (W2).
+  // Per-category-class static educational copy (§5 row 22, W1). "Top reason" is now
+  // the real first contributing signal (W2, §10.1); falls back to a generic
+  // educational line when there isn't one yet (unranked / insufficient_data).
+  const reason = topReason ?? 'a category-relative educational read';
   const catStats = getStickyCategoryStats(head.category);
   const stickyStats = [
     { v: catStats.horizon, l: 'Horizon' },
@@ -412,7 +457,7 @@ export function StickyBar({ head }: { head: FundHead }) {
             <div className="text-h3 font-bold leading-none text-emerald">{labelWord}</div>
           </div>
           <div className="hidden text-caption leading-snug text-white/75 sm:block">
-            {bandWord ? `${bandWord} confidence` : 'Confidence n/a'}<br />Top reason: <b className="font-mono text-white">{STICKY.reason}</b>
+            {bandWord ? `${bandWord} confidence` : 'Confidence n/a'}<br />Top reason: <b className="font-mono text-white">{reason}</b>
           </div>
         </div>
         <div className="ml-auto hidden max-w-xl gap-4 xl:flex">

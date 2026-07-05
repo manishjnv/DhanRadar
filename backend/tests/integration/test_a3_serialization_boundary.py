@@ -120,23 +120,35 @@ def test_i2_gated_concept_withheld():
 
 
 def test_tier_withheld_for_free_user():
-    env = serialize_concept("portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="free"))
+    env = serialize_concept(
+        "portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="free")
+    )
     assert env["status"] == "withheld" and env["meta"]["reason"] == "tier" and env["data"] is None
     assert is_tier_withheld(env)  # the route raises HTTP 402 on this
 
 
 def test_tier_present_for_paid_user():
     # "pro" is the real paid tier (the registry's access_tier "plus" maps to Pro+).
-    env = serialize_concept("portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="pro"))
-    assert env["status"] == "present" and env["data"] == {"sharpe_ratio": 1.2} and not is_tier_withheld(env)
+    env = serialize_concept(
+        "portfolio.risk_advanced", {"sharpe_ratio": 1.2}, RequestCtx(tier="pro")
+    )
+    assert (
+        env["status"] == "present"
+        and env["data"] == {"sharpe_ratio": 1.2}
+        and not is_tier_withheld(env)
+    )
 
 
 # --- REFUSED + fail-closed + meta tags ------------------------------------------------------------
 
 
 def test_refused_runtime_compliance():
-    env = serialize_concept("fund.label", {"label": "x"}, RequestCtx(tier="free", refused="insufficient_data"))
-    assert env["status"] == "withheld" and env["meta"]["reason"] == "refused" and env["data"] is None
+    env = serialize_concept(
+        "fund.label", {"label": "x"}, RequestCtx(tier="free", refused="insufficient_data")
+    )
+    assert (
+        env["status"] == "withheld" and env["meta"]["reason"] == "refused" and env["data"] is None
+    )
 
 
 def test_unknown_concept_fail_closed():
@@ -158,10 +170,15 @@ def test_non_plain_input_fails_closed():
 
 def test_meta_tags_inherited_from_registry():
     """A present envelope carries the registry-derived governance axes — the contract the frontend reads."""
-    env = serialize_concept("holdings.list", {"holdings": []}, RequestCtx(tier="free"), source="cas")
+    env = serialize_concept(
+        "holdings.list", {"holdings": []}, RequestCtx(tier="free"), source="cas"
+    )
     m = env["meta"]
     assert (m["visibility_class"], m["data_class"], m["access_tier"], m["content_class"]) == (
-        "public", "user-personal", "free", "PERSONAL",
+        "public",
+        "user-personal",
+        "free",
+        "PERSONAL",
     )
     assert m["source"] == "cas" and m["gate"] is None and m["reason"] is None
 
@@ -175,11 +192,19 @@ def test_backend_registry_matches_concepts_json():
     this reds the BACKEND suite too if a stale copy slips in."""
     backend = Path(__file__).resolve().parents[2]
     repo = backend.parent
-    src = json.loads((repo / "frontend" / "src" / "data" / "concepts.json").read_text(encoding="utf-8"))["concepts"]
-    reg = json.loads((backend / "dhanradar" / "mf" / "concepts_registry.json").read_text(encoding="utf-8"))["concepts"]
+    src = json.loads(
+        (repo / "frontend" / "src" / "data" / "concepts.json").read_text(encoding="utf-8")
+    )["concepts"]
+    reg = json.loads(
+        (backend / "dhanradar" / "mf" / "concepts_registry.json").read_text(encoding="utf-8")
+    )["concepts"]
     axes = ("visibility_class", "data_class", "access_tier", "content_class")
     expected = {
-        c["concept"]: {**{k: c[k] for k in axes}, "gate_flag": c.get("gate_flag"), "status": c["status"]}
+        c["concept"]: {
+            **{k: c[k] for k in axes},
+            "gate_flag": c.get("gate_flag"),
+            "status": c["status"],
+        }
         for c in src
     }
     got = {
@@ -222,6 +247,37 @@ def test_b87_forbidden_field_blocked_even_if_allowlisted(monkeypatch):
     assert "87" not in json.dumps(env)
 
 
+def test_band_dict_leaves_must_be_band_words():
+    """W2-A adversarial-review condition: a numeric (or any non-band value) inside a band-dict
+    field (`factors`/`confidence_factors`) must fail closed at the boundary, never reach a client —
+    the top-level allowlist and the name-based denylist cannot see inside these nested dicts."""
+    with pytest.raises(RuntimeError, match="band-dict"):
+        serialize_concept(
+            "fund.factors",
+            {"factors": {"consistency": 0.83}, "confidence_band": "high", "as_of": "2026-07-05"},
+            RequestCtx(tier="free"),
+        )
+    # Happy path: real band words pass untouched.
+    env = serialize_concept(
+        "fund.factors",
+        {
+            "factors": {"consistency": "high", "recency": "low"},
+            "confidence_band": "medium",
+            "as_of": "2026-07-05",
+        },
+        RequestCtx(tier="free"),
+    )
+    assert env["status"] == "present"
+    assert env["data"]["factors"] == {"consistency": "high", "recency": "low"}
+    # Null factors (insufficient_data funds) are fine.
+    env2 = serialize_concept(
+        "fund.factors",
+        {"factors": None, "confidence_band": None, "as_of": None},
+        RequestCtx(tier="free"),
+    )
+    assert env2["data"]["factors"] is None
+
+
 def test_b87_missing_allowlist_fails_closed():
     """A concept with no `ALLOWED_FIELDS` entry raises `MissingConceptAllowlist` naming the fix, rather
     than serving an un-allowlisted payload. `portfolio.health` is registered (build status) but not yet
@@ -250,19 +306,39 @@ def test_b87_parity_every_live_concept_allowlist_matches_real_payload():
     from dhanradar.mf.valuation import ValuationPoint
 
     holding = EnrichedHolding(
-        isin="INF1", scheme_name="X Fund", category="Flexi Cap Fund", folio_number="F1",
-        units=10.0, invested=1000.0, current_nav=120.0, current_value=1200.0,
-        label="on_track", confidence_band="high", as_of="2026-03-31",
-    )
-    rm = PortfolioReadModel(
-        holdings=[holding], total_invested=1000.0, total_value=1200.0, xirr_pct=None, as_of="2026-03-31"
-    )
-    risk = PortfolioRisk(
-        volatility_pct=15.0, max_drawdown_pct=None, sharpe_ratio=None, sortino_ratio=None,
-        rolling_1y_avg_pct=12.0, rolling_1y_pct_positive=70.0, fund_count=3, funds_with_metrics=3,
+        isin="INF1",
+        scheme_name="X Fund",
+        category="Flexi Cap Fund",
+        folio_number="F1",
+        units=10.0,
+        invested=1000.0,
+        current_nav=120.0,
+        current_value=1200.0,
+        label="on_track",
+        confidence_band="high",
         as_of="2026-03-31",
     )
-    point = ValuationPoint(valuation_date=date(2026, 3, 31), total_value=1200.0, total_invested=1000.0)
+    rm = PortfolioReadModel(
+        holdings=[holding],
+        total_invested=1000.0,
+        total_value=1200.0,
+        xirr_pct=None,
+        as_of="2026-03-31",
+    )
+    risk = PortfolioRisk(
+        volatility_pct=15.0,
+        max_drawdown_pct=None,
+        sharpe_ratio=None,
+        sortino_ratio=None,
+        rolling_1y_avg_pct=12.0,
+        rolling_1y_pct_positive=70.0,
+        fund_count=3,
+        funds_with_metrics=3,
+        as_of="2026-03-31",
+    )
+    point = ValuationPoint(
+        valuation_date=date(2026, 3, 31), total_value=1200.0, total_invested=1000.0
+    )
 
     cases = [
         ("holdings.list", holdings_payload(rm, "pid-1"), "free"),
@@ -335,7 +411,9 @@ async def test_holdings_pilot_endpoint_through_boundary(db_session, rls_async_cl
     env = r.json()
     # envelope shape + registry tags
     assert env["status"] == "present"
-    assert env["meta"]["visibility_class"] == "public" and env["meta"]["content_class"] == "PERSONAL"
+    assert (
+        env["meta"]["visibility_class"] == "public" and env["meta"]["content_class"] == "PERSONAL"
+    )
     h = env["data"]["holdings"][0]
     # educational label/band + the user's own numbers present
     assert h["label"] == "on_track" and h["confidence_band"] == "high"
@@ -343,7 +421,9 @@ async def test_holdings_pilot_endpoint_through_boundary(db_session, rls_async_cl
     # #2: the raw score never appears — neither as a key nor as a numeric value anywhere. Structural
     # check, NOT a substring on the body: a random portfolio_id UUID can contain the score's digits.
     assert "unified_score" not in _all_keys(env)
-    numbers = [v for v in _all_values(env) if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    numbers = [
+        v for v in _all_values(env) if isinstance(v, (int, float)) and not isinstance(v, bool)
+    ]
     assert 87 not in numbers, "raw unified_score (87) leaked as a value (#2 violation)"
 
 

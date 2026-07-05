@@ -117,8 +117,10 @@ async def get_fund_head(session: AsyncSession, isin: str) -> dict | None:
         "nav_latest": nav_latest,
         "nav_date": nav_date,
         "nav_change_pct": nav_change_pct,
-        "confidence_band": None,  # W2/W3 field — shape stability, not computed yet
-        "amc_level_aum_crore": None,  # W2/W3 field — source-blocked (B67/ADR-0035)
+        # W2 (§10.1): real once compute_market_ranks persists it; null for an
+        # unranked/segregated fund or an insufficient_data read (no rateable band).
+        "confidence_band": rank_row.confidence_band if rank_row else None,
+        "amc_level_aum_crore": None,  # W3 field — source-blocked (B67/ADR-0035)
     }
 
 
@@ -559,3 +561,42 @@ async def get_fund_peers(session: AsyncSession, isin: str) -> dict | None:
         )
 
     return {"peers": peers}
+
+
+async def get_fund_factors(session: AsyncSession, isin: str) -> tuple[dict, dict] | None:
+    """`fund.factors` + `fund.signals` (W2, §10.1) — confidence band/factors and the
+    contributing/contradicting signal words, from the latest `mf_fund_ranks` row.
+    Returns (factors_payload, signals_payload), or None if the fund doesn't exist.
+
+    An unranked fund (or a fund whose latest eval was insufficient_data) still
+    returns 200 with null factors/band — never a fabricated read (no-suppress, §14.1).
+    `confidence_factors` is the engine's own named confidence-quality bands
+    (consistency/recency/volatility/data_coverage today) — NOT a per-axis
+    quality/valuation/momentum/risk/trend score (the engine does not compute one;
+    see the W2 report deviations).
+    """
+    fund = await session.get(MfFund, isin)
+    if fund is None:
+        return None
+
+    rank_row = (
+        await session.execute(
+            select(MfFundRanks)
+            .where(MfFundRanks.isin == isin)
+            .order_by(MfFundRanks.as_of_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    as_of = rank_row.as_of_date.isoformat() if rank_row else None
+    factors = {
+        "factors": rank_row.confidence_factors if rank_row else None,
+        "confidence_band": rank_row.confidence_band if rank_row else None,
+        "as_of": as_of,
+    }
+    signals = {
+        "contributing": list(rank_row.contributing_signals or []) if rank_row else [],
+        "contradicting": list(rank_row.contradicting_signals or []) if rank_row else [],
+        "as_of": as_of,
+    }
+    return factors, signals

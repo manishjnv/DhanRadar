@@ -1159,6 +1159,11 @@ _COHORT_PEER_CHUNK = 200
 # Batch size for the nightly mf_metrics_refresh upsert (ISINs per iteration).
 _METRICS_REFRESH_CHUNK = 500
 
+# Batch size for compute_market_ranks' per-fund 400-day NAV load (RCA 2026-07-05).
+# Same discipline as _METRICS_REFRESH_CHUNK/B63: peak memory is one batch, never
+# all ~14k funds' series at once (22M-row NAV table post-backfill, 640MiB worker).
+_RANKS_NAV_CHUNK = 500
+
 # Minimum number of funds with a non-None value in a category before we write
 # category-level percentiles (p25/p50/p75/p90) for that (category, metric_key).
 # Fewer than 5 funds is too thin to produce meaningful distribution stats.
@@ -1874,6 +1879,12 @@ def compute_market_ranks() -> str:
     mf_fund_ranks. unified_score is used ONLY internally for ordering — it is never
     written to mf_fund_ranks (non-neg #2). Idempotent: re-running on the same day
     upserts, never duplicates.
+
+    W2 (§10.1, migration 0064): also persists confidence_band + confidence_factors +
+    contributing/contradicting signals from the SAME `score_fund()` call — this was
+    already being computed here and discarded; now every browsed (not just held)
+    fund gets a band + signals. insufficient_data funds get a null band/factors
+    (signals may still carry the honest reason) — never a fabricated read.
     """
     try:
         return asyncio.run(_compute_market_ranks_pipeline())
@@ -1894,6 +1905,7 @@ async def _compute_market_ranks_pipeline() -> str:
     from dhanradar.mf.signals import compute_fund_signals
     from dhanradar.models.mf import MfFund, MfFundMetrics, MfFundRanks
     from dhanradar.scoring.engine import RatingEngine
+    from dhanradar.scoring.engine.schemas import VerbLabel
 
     today = date.today()
 
@@ -1935,27 +1947,55 @@ async def _compute_market_ranks_pipeline() -> str:
         ]
         benchmark = build_benchmark(cat, stats_list)
 
-        # Score each fund against its category benchmark. NAV series is empty — only
-        # category-relative signals inform the label (sufficient for ordinal ranking;
-        # OOM-safe vs loading peer NAV series for all ~14k ISINs, B63).
-        scored: list[tuple[str, int, str]] = []
-        for r in cat_rows:
-            fund_stats = (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct)
-            cat_rel = compare_to_cohort(fund_stats, benchmark)
-            signals = compute_fund_signals(r.isin, [], category_relative=cat_rel)
-            result = await score_fund(rengine, signals)
-            scored.append((r.isin, result.unified_score or 0, result.verb_label.value))
+        # Score each fund on its OWN 400-day NAV window (same loader + default
+        # window as the CAS report path) + the category-relative context.
+        # RCA 2026-07-05: this used to pass an empty NAV list, which tripped
+        # compute_fund_signals' _MIN_POINTS guard BEFORE category_relative was
+        # applied — every market label degraded to insufficient_data since
+        # 2026-06-15. NAV is loaded per _RANKS_NAV_CHUNK batch and discarded
+        # after scoring, so peak memory stays one batch (B63 discipline).
+        scored: list[tuple[str, int, str, str | None, dict | None, list, list]] = []
+        for start in range(0, len(cat_rows), _RANKS_NAV_CHUNK):
+            batch = cat_rows[start : start + _RANKS_NAV_CHUNK]
+            async with TaskSessionLocal() as db:
+                nav_series, _ = await _load_nav_series(db, [r.isin for r in batch])
+            for r in batch:
+                fund_stats = (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct)
+                cat_rel = compare_to_cohort(fund_stats, benchmark)
+                signals = compute_fund_signals(
+                    r.isin, nav_series.get(r.isin, []), category_relative=cat_rel
+                )
+                result = await score_fund(rengine, signals)
+                # W2 (§10.1): persist the SAME result the label already came from —
+                # never re-derive. insufficient_data has no rateable band/factors
+                # (non-neg #4 fail-safe); signals may still carry the honest reason.
+                refused = result.verb_label == VerbLabel.insufficient_data
+                scored.append((
+                    r.isin,
+                    result.unified_score or 0,
+                    result.verb_label.value,
+                    None if refused else result.confidence_band.value,
+                    None if refused else dict(result.confidence_factors),
+                    list(result.contributing_signals),
+                    list(result.contradicting_signals),
+                ))
 
         # Sort: highest unified_score first; isin alphabetically as deterministic tiebreaker.
         scored.sort(key=lambda x: (-x[1], x[0]))
         total = len(scored)
-        for rank, (isin, _score, verb_label) in enumerate(scored, start=1):
+        for rank, (isin, _score, verb_label, band, factors, contributing, contradicting) in enumerate(
+            scored, start=1
+        ):
             all_upserts.append({
                 "isin": isin,
                 "sebi_category": cat,
                 "rank": rank,
                 "total_in_cat": total,
                 "verb_label": verb_label,
+                "confidence_band": band,
+                "confidence_factors": factors,
+                "contributing_signals": contributing,
+                "contradicting_signals": contradicting,
                 "as_of_date": today,
             })
 
@@ -1972,6 +2012,10 @@ async def _compute_market_ranks_pipeline() -> str:
                     "rank": insert(MfFundRanks).excluded.rank,
                     "total_in_cat": insert(MfFundRanks).excluded.total_in_cat,
                     "verb_label": insert(MfFundRanks).excluded.verb_label,
+                    "confidence_band": insert(MfFundRanks).excluded.confidence_band,
+                    "confidence_factors": insert(MfFundRanks).excluded.confidence_factors,
+                    "contributing_signals": insert(MfFundRanks).excluded.contributing_signals,
+                    "contradicting_signals": insert(MfFundRanks).excluded.contradicting_signals,
                     "computed_at": func.now(),
                 },
             )

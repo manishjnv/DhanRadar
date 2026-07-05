@@ -1032,6 +1032,37 @@ async def fund_peers(
     return serialize_concept("fund.peers", payload, RequestCtx(tier=user.tier), source="amfi")
 
 
+@router.get("/fund/{isin}/factors")
+async def fund_factors(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.factors` + `fund.signals` (W2, §10.1) — confidence band/factors and the
+    contributing/contradicting signal words for a browsed fund, from the same nightly
+    `compute_market_ranks` row every other fund concept reads. Two concepts on one
+    route (mirrors `/analytics`). Unranked/insufficient_data fund → 200 with nulls.
+    """
+    from dhanradar.mf.fund_read import get_fund_factors
+    from dhanradar.mf.serialization import RequestCtx, serialize_concept
+
+    result = await get_fund_factors(db, isin)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+    factors, signals = result
+
+    ctx = RequestCtx(tier=user.tier)
+    return {
+        "factors": serialize_concept(
+            "fund.factors", factors, ctx, as_of=factors["as_of"], source="scoring"
+        ),
+        "signals": serialize_concept(
+            "fund.signals", signals, ctx, as_of=signals["as_of"], source="scoring"
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
