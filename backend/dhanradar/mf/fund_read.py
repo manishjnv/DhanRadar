@@ -37,6 +37,7 @@ from dhanradar.models.mf import (
     MfFundMetrics,
     MfFundRanks,
     MfNavHistory,
+    MfStockCapClassification,
 )
 
 
@@ -515,6 +516,14 @@ async def get_fund_composition(session: AsyncSession, isin: str) -> dict | None:
         return {
             "holdings": [],
             "sectors": [],
+            "cap_mix": {
+                "large_pct": None,
+                "mid_pct": None,
+                "small_pct": None,
+                "unclassified_pct": None,
+                "basis": "top_holdings_weight",
+                "as_of_period": None,
+            },
             "as_of_month": None,
             "coverage": {"holdings_count": 0, "weight_covered_pct": None},
         }
@@ -564,9 +573,57 @@ async def get_fund_composition(session: AsyncSession, isin: str) -> dict | None:
     if weight_covered_pct is not None and weight_covered_pct > 105:
         weight_covered_pct = None
 
+    # cap_mix (item 3): join the SAME top-holdings rows' constituent_isin (equity ISIN,
+    # INE... prefix — null for debt/cash rows, which naturally fall into unclassified)
+    # against AMFI's half-yearly stock_cap_classification. Percentages are of the
+    # top-holdings weight actually classified — never renormalized/scaled to 100%
+    # (§8.4 no-fabrication: a fund whose top-10 covers 60% of AUM shows cap_mix that
+    # sums to <=60%, not 100%).
+    equity_isins = [r.constituent_isin for r in rows if r.constituent_isin]
+    cap_map: dict[str, str] = {}
+    as_of_period: str | None = None
+    if equity_isins:
+        as_of_period = (
+            await session.execute(select(func.max(MfStockCapClassification.effective_period)))
+        ).scalar_one_or_none()
+        if as_of_period:
+            cap_rows = (
+                await session.execute(
+                    select(
+                        MfStockCapClassification.stock_isin, MfStockCapClassification.cap_class
+                    ).where(
+                        MfStockCapClassification.effective_period == as_of_period,
+                        MfStockCapClassification.stock_isin.in_(equity_isins),
+                    )
+                )
+            ).all()
+            cap_map = {r.stock_isin: r.cap_class for r in cap_rows}
+
+    cap_totals = {"Large Cap": 0.0, "Mid Cap": 0.0, "Small Cap": 0.0}
+    unclassified_pct = 0.0
+    for r in rows:
+        if r.weight_pct is None:
+            continue
+        wt = float(r.weight_pct)
+        cls = cap_map.get(r.constituent_isin) if r.constituent_isin else None
+        if cls in cap_totals:
+            cap_totals[cls] += wt
+        else:
+            unclassified_pct += wt
+
+    cap_mix = {
+        "large_pct": round(cap_totals["Large Cap"], 2),
+        "mid_pct": round(cap_totals["Mid Cap"], 2),
+        "small_pct": round(cap_totals["Small Cap"], 2),
+        "unclassified_pct": round(unclassified_pct, 2),
+        "basis": "top_holdings_weight",
+        "as_of_period": as_of_period,
+    }
+
     return {
         "holdings": holdings,
         "sectors": sectors,
+        "cap_mix": cap_mix,
         "as_of_month": latest_month.isoformat(),
         "coverage": {"holdings_count": len(rows), "weight_covered_pct": weight_covered_pct},
     }

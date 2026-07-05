@@ -28,6 +28,7 @@ from dhanradar.models.mf import (
     MfFundMetrics,
     MfFundRanks,
     MfNavHistory,
+    MfStockCapClassification,
 )
 
 pytestmark = pytest.mark.integration
@@ -48,6 +49,7 @@ async def _truncate_mf(db_session):
     await db_session.rollback()
     for tbl in (
         "mf.mf_fund_constituents",
+        "mf.stock_cap_classification",
         "mf.fund_manager_history",
         "mf.mf_category_stats",
         "mf.mf_fund_metrics",
@@ -254,6 +256,7 @@ async def test_fund_composition_happy_path(async_client, db_session, patch_redis
             isin=_ISIN_A,
             constituent_name="Reliance Industries",
             as_of_month=month,
+            constituent_isin="INE002A01018",
             sector="Energy",
             weight_pct=8.5,
             source_amc="hdfc",
@@ -264,6 +267,7 @@ async def test_fund_composition_happy_path(async_client, db_session, patch_redis
             isin=_ISIN_A,
             constituent_name="HDFC Bank",
             as_of_month=month,
+            constituent_isin="INE040A01034",
             sector="Financials",
             weight_pct=6.2,
             source_amc="hdfc",
@@ -274,9 +278,28 @@ async def test_fund_composition_happy_path(async_client, db_session, patch_redis
             isin=_ISIN_A,
             constituent_name="ICICI Bank",
             as_of_month=month,
+            constituent_isin="INE090A01021",  # deliberately NOT in stock_cap_classification
             sector="Financials",
             weight_pct=5.1,
             source_amc="hdfc",
+        )
+    )
+    db_session.add(
+        MfStockCapClassification(
+            stock_isin="INE002A01018",
+            stock_name="Reliance Industries",
+            cap_class="Large Cap",
+            effective_period="2026H1",
+            source_url="https://example.test/amfi.xlsx",
+        )
+    )
+    db_session.add(
+        MfStockCapClassification(
+            stock_isin="INE040A01034",
+            stock_name="HDFC Bank",
+            cap_class="Large Cap",
+            effective_period="2026H1",
+            source_url="https://example.test/amfi.xlsx",
         )
     )
     await db_session.commit()
@@ -290,6 +313,17 @@ async def test_fund_composition_happy_path(async_client, db_session, patch_redis
     assert sectors["Energy"] == 8.5
     assert d["as_of_month"] == month.isoformat()
     assert d["coverage"]["holdings_count"] == 3
+    # cap_mix: Reliance (8.5) + HDFC Bank (6.2) classified Large Cap; ICICI Bank (5.1)
+    # has an equity ISIN but no classification row -> unclassified. Sums to 19.8
+    # (the top-holdings weight), never renormalized to 100.
+    assert d["cap_mix"] == {
+        "large_pct": 14.7,
+        "mid_pct": 0.0,
+        "small_pct": 0.0,
+        "unclassified_pct": 5.1,
+        "basis": "top_holdings_weight",
+        "as_of_period": "2026H1",
+    }
 
 
 async def test_fund_composition_over_covered_returns_null_weight_pct(
@@ -338,6 +372,14 @@ async def test_fund_composition_uncovered_amc_empty_200(async_client, db_session
     assert d == {
         "holdings": [],
         "sectors": [],
+        "cap_mix": {
+            "large_pct": None,
+            "mid_pct": None,
+            "small_pct": None,
+            "unclassified_pct": None,
+            "basis": "top_holdings_weight",
+            "as_of_period": None,
+        },
         "as_of_month": None,
         "coverage": {"holdings_count": 0, "weight_covered_pct": None},
     }

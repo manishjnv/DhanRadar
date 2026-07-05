@@ -362,9 +362,22 @@ export interface FundSectorWeight {
   name: string;
   weight_pct: number;
 }
+/** Market-cap mix of the SAME top-holdings rows above, joined against AMFI's
+ * half-yearly stock classification. Percentages are of top-holdings weight
+ * actually classified — they do NOT renormalize to 100 (a fund whose top-10
+ * covers 60% of AUM shows a cap_mix that sums to <=60%, not 100). */
+export interface FundCapMix {
+  large_pct: number | null;
+  mid_pct: number | null;
+  small_pct: number | null;
+  unclassified_pct: number | null;
+  basis: 'top_holdings_weight';
+  as_of_period: string | null;
+}
 export interface FundComposition {
   holdings: FundHolding[];
   sectors: FundSectorWeight[];
+  cap_mix: FundCapMix;
   as_of_month: string | null;
   coverage: { holdings_count: number; weight_covered_pct: number | null };
 }
