@@ -67,11 +67,20 @@ _LOWERCASE_ROMAN_RE = re.compile(r"^(x{0,3})(ix|iv|v?i{0,3})$")
 _SUB_TOTAL_RE = re.compile(r"^\s*sub\s*total\b", re.IGNORECASE)
 
 
+# Top-level scheme-type row markers (Sr column literal 'A'/'B'/'C'). AMFI's raw
+# report reuses the SAME category name under more than one scheme type in the
+# same month (e.g. "ELSS" appears once under Open ended Schemes AND once under
+# Close Ended Schemes) — scheme_type is required in the dedup key or one of the
+# two rows is silently dropped (found 2026-07-05 auditing the live prod data).
+_SCHEME_TYPE_MARKERS = frozenset({"A", "B", "C"})
+
+
 @dataclass(frozen=True)
 class CategoryFlowRow:
     """One parsed row: a SEBI scheme category's monthly mobilisation/flow figures."""
 
     period_month: date  # first-of-month
+    scheme_type: str  # "Open ended Schemes" | "Close Ended Schemes" | "Interval Schemes"
     scheme_category: str
     num_schemes: int | None
     num_folios: int | None
@@ -110,26 +119,42 @@ def parse_category_flow_rows(rows: list[tuple], *, period_month: date) -> list[C
     Only keeps rows whose Sr column is a lowercase roman numeral (the leaf
     SEBI scheme category rows); skips supergroup headers, Sub Total rollups,
     and blank separator rows so category-level figures are never double-counted.
+    Tracks the current top-level scheme_type (Sr == 'A'/'B'/'C') as it walks the
+    rows in order, so a leaf category name that repeats under a different
+    scheme_type (e.g. "ELSS" under both Open ended and Close Ended Schemes) is
+    kept as two distinct rows rather than one overwriting the other at upsert.
     Column order (0-indexed): 0=Sr, 1=Scheme Name, 2=No. of Schemes,
     3=No. of Folios, 4=Funds Mobilized, 5=Repurchase/Redemption,
     6=Net Inflow/Outflow, 7=Net AUM, 8=Average AUM, 9=segregated count,
     10=segregated net assets.
     """
     out: list[CategoryFlowRow] = []
+    current_type: str | None = None
     for row in rows:
-        if not row or len(row) < 9:
+        if not row:
             continue
         sr = row[0]
-        name = row[1]
+        name = row[1] if len(row) > 1 else None
+        sr_token = sr.strip() if isinstance(sr, str) else None
+        if sr_token in _SCHEME_TYPE_MARKERS and isinstance(name, str) and name.strip():
+            current_type = name.strip()
+            continue
+        if len(row) < 9:
+            continue
         if _SUB_TOTAL_RE.match(name) if isinstance(name, str) else False:
             continue
         if not _is_leaf_roman(sr):
             continue
         if not isinstance(name, str) or not name.strip():
             continue
+        if current_type is None:
+            # Leaf row before any A/B/C marker was seen — malformed input, skip
+            # rather than write a row with an unknown scheme_type (§8.4).
+            continue
         out.append(
             CategoryFlowRow(
                 period_month=period_month,
+                scheme_type=current_type,
                 scheme_category=name.strip(),
                 num_schemes=_int(row[2]),
                 num_folios=_int(row[3]),
