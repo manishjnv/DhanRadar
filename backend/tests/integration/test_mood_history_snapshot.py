@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select, text
@@ -32,6 +33,19 @@ from dhanradar.mood import service
 from dhanradar.tasks.mood import _mood_history_snapshot_async
 
 pytestmark = pytest.mark.integration
+
+# The code under test (_mood_history_snapshot_async, dhanradar/tasks/mood.py:206)
+# deliberately computes "today" as datetime.now(IST).date() -- the market's own
+# trading day, never trusting a possibly-stale cached snapshot_date. A naive
+# date.today() (system/UTC in CI) diverges from IST for ~5.5h of every day
+# (after 00:00 IST but before 00:00 UTC) -- this test must match the SAME IST
+# clock the code uses, not a naive one (RCA: found failing consistently during
+# that window, not a flake).
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _ist_today() -> date:
+    return datetime.now(_IST).date()
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +64,7 @@ def _cached_public_dict(regime: str) -> str:
     """A minimal stand-in for the JSON `_public_dict` writes to `mood:latest`."""
     return json.dumps(
         {
-            "snapshot_date": date.today().isoformat(),
+            "snapshot_date": _ist_today().isoformat(),
             "regime": regime,
             "confidence_band": "medium",
             "data_quality": "ok",
@@ -79,7 +93,7 @@ async def test_snapshot_writes_row_from_warm_cache(db_session, monkeypatch, patc
 
     row = rows[0]
     assert row.regime == "greed"
-    assert row.snapshot_date == date.today()
+    assert row.snapshot_date == _ist_today()
     assert row.score_inputs["confidence_band"] == "medium"
     assert row.score_inputs["data_quality"] == "ok"
     assert row.score_inputs["contributing_factors"] == [{"label": "Nifty Trend", "tier": "strong"}]
