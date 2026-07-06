@@ -7,7 +7,8 @@
  *     NEVER a 0–100 number; factors are strength WORDS.
  *   - Verdict / Sticky bar: educational LABEL word (In Form / On Track …) and a
  *     confidence BAND word — never "Strong Buy" or a "%confidence" number.
- *   - Entry timing / Mood: factual category valuation + a regime WORD.
+ *   - Mood: real regime WORD (GET /market/mood). Entry timing: no valuation
+ *     source exists yet — an educational explainer + honest no-data state.
  * Action CTAs keep the "Invest / SIP" labels (founder call 2026-06-24).
  */
 'use client';
@@ -16,11 +17,17 @@ import * as React from 'react';
 import { cn } from '@/lib/cn';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
+import { MoodGauge } from '@/components/mood/MoodGauge';
+import { useMoodCurrent } from '@/features/mood/api';
+import type { MoodFactor, MoodTrend } from '@/features/mood/types';
+import { DataState } from '@/components/ui/DataState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
 import {
   HeroRing, StrengthBar, WhatThisMeans, Panel, LiveBadge,
 } from './parts';
 import {
-  FUND, VERDICT, ENTRY, MOOD, NO_DATA_FACTOR_TILES,
+  FUND, VERDICT, NO_DATA_FACTOR_TILES,
 } from './sampleData';
 import { getCategoryAboutCopy, getStickyCategoryStats } from './categoryCopy';
 import type { Strength } from './sampleData';
@@ -88,6 +95,12 @@ export interface FundHead {
   navDate: string | null;
   navChangePct: number | null;
   expenseRatioPct: number | null;
+  // S9 Snapshot (this wave) — launch date + the fund's OWN disclosed AUM (SEBI
+  // monthly portfolio disclosure grand-total row), distinct from the AMC-level
+  // aumCr above which is still source-blocked (B67/ADR-0035).
+  launchDate: string | null;
+  fundAumCr: number | null;
+  fundAumAsOf: string | null;
   // Returns tab (S10 Performance Center) — real period returns; 1M/10Y/Launch stay "—".
   return3mPct: number | null;
   return6mPct: number | null;
@@ -302,98 +315,107 @@ export function VerdictSection({ head, signals }: { head: FundHead; signals: Fun
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S3 — SMART ENTRY TIMING (factual category valuation + educational read)
+// S3 — SMART ENTRY TIMING (honest: no index/category valuation source exists
+// yet, §18.1 — an educational explainer + the standard no-data state, never a
+// fabricated valuation meter). No LiveBadge — nothing here is wired to data.
 // ═══════════════════════════════════════════════════════════════════════════
 export function EntryTimingSection() {
   return (
-    <Panel className="p-5 sm:p-6">
-      <div className="relative mt-2">
-        <div className="h-3 rounded-full" style={{ background: 'linear-gradient(90deg,#00B386,#84CC16 30%,#F5A623 60%,#F97316 80%,#E5484D)' }} />
-        <div className="absolute -top-2" style={{ left: `${ENTRY.markerPct}%`, transform: 'translateX(-50%)' }}>
-          <div className="relative whitespace-nowrap rounded-md px-2.5 py-1 font-mono text-[11px] font-bold text-white shadow" style={{ background: 'var(--dr-navy,#0B1F3A)' }}>
-            You are here · {ENTRY.markerWord}
-            <span className="absolute left-1/2 top-full -translate-x-1/2 border-[5px] border-transparent" style={{ borderTopColor: 'var(--dr-navy,#0B1F3A)' }} />
-          </div>
-          <div className="mx-auto mt-2 h-[15px] w-[15px] rounded-full border-[3px] bg-white" style={{ borderColor: 'var(--dr-navy,#0B1F3A)' }} />
-        </div>
-        <div className="mt-3.5 flex justify-between text-[10.5px] font-semibold">
-          {ENTRY.ticks.map((t, i) => (
-            <span key={t} className={cn('flex-1', i === 0 ? 'text-left text-emerald' : i === ENTRY.ticks.length - 1 ? 'text-right text-red' : 'text-center text-ink-muted')}>{t}</span>
-          ))}
-        </div>
+    <Panel className="p-4 sm:p-5">
+      <p className="text-small leading-relaxed text-ink-secondary">
+        Entry timing looks at how richly or cheaply a fund&apos;s category/index is valued —
+        long-term investors sometimes use it to decide between a lumpsum and spreading
+        purchases out over a few months (SIP or staggered tranches).
+      </p>
+      <div className="mt-3.5">
+        <EmptyState
+          title="Not available yet"
+          description="We don't have index valuation data yet for this fund's category."
+          className="py-6"
+        />
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-line p-4">
-          <div className="text-caption font-semibold text-ink-muted">Category valuation (P/E)</div>
-          <div className="mt-1.5 font-mono text-h3 font-semibold text-ink">{ENTRY.pe} <span className="text-small font-medium text-ink-muted">vs 5-yr avg {ENTRY.peAvg}</span></div>
-          <p className="mt-1.5 text-caption leading-relaxed text-ink-muted">{ENTRY.context}</p>
-        </div>
-        <div className="rounded-2xl border border-line p-4">
-          <div className="text-caption font-semibold text-ink-muted">What the valuation suggests</div>
-          <div className="mt-1.5 text-h3 font-semibold text-emerald">Staggered entry context</div>
-          <p className="mt-1.5 text-caption leading-relaxed text-ink-muted">Spreading entry over time has historically smoothed the price paid at fair-to-rich valuations like today’s.</p>
-        </div>
-      </div>
-      <WhatThisMeans>{ENTRY.meaning}</WhatThisMeans>
     </Panel>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S6 — MARKET MOOD ANALYSIS (regime WORD only)
+// S6 — MARKET MOOD ANALYSIS — real GET /market/mood (useMoodCurrent), same
+// regime word/gauge/vocabulary as /mood (shared MoodGauge component + the
+// same REGIME_DISPLAY word set). Per-fund phase-performance history isn't
+// recorded yet — an honest no-data note, never the old sample numbers.
 // ═══════════════════════════════════════════════════════════════════════════
-function MoodGauge({ fill, word, sub }: { fill: number; word: string; sub: string }) {
-  const W = 220, R = 86, CX = W / 2, CY = 108, STROKE = 16;
-  const a0 = Math.PI, a1 = Math.PI * (1 - fill);
-  const p = (a: number) => `${(CX + R * Math.cos(a)).toFixed(1)} ${(CY - R * Math.sin(a)).toFixed(1)}`;
-  const track = `M ${p(Math.PI)} A ${R} ${R} 0 0 1 ${p(0)}`;
-  const active = `M ${p(a0)} A ${R} ${R} 0 0 1 ${p(a1)}`;
+const MOOD_TREND_DISPLAY: Record<MoodTrend, { label: string; cls: string }> = {
+  improving: { label: 'Improving', cls: 'text-emerald bg-emerald/10' },
+  stable: { label: 'Stable', cls: 'text-ink-secondary bg-surface-2' },
+  deteriorating: { label: 'Cooling', cls: 'text-amber bg-amber/10' },
+};
+
+function MoodFactorList({ title, items, tone }: { title: string; items: MoodFactor[]; tone: 'up' | 'down' }) {
+  // no-suppress-ok: optional sub-list inside the still-mounted MoodSection (mirrors MarketMoodSection.tsx's FactorList)
+  if (!items.length) return null;
   return (
-    <figure className="m-0 inline-flex flex-col items-center">
-      <svg width={W} height={124} viewBox={`0 0 ${W} 124`} aria-hidden="true" focusable="false">
-        <path d={track} fill="none" stroke="var(--border)" strokeWidth={STROKE} strokeLinecap="round" />
-        <path d={active} fill="none" stroke="#F5A623" strokeWidth={STROKE} strokeLinecap="round" />
-      </svg>
-      <figcaption className="-mt-3 text-center">
-        <div className="text-h3 font-bold text-amber">{word}</div>
-        <div className="mt-0.5 text-caption text-ink-muted">{sub}</div>
-      </figcaption>
-    </figure>
+    <div>
+      <h5 className={cn('mb-1.5 text-caption font-semibold uppercase tracking-wide', tone === 'up' ? 'text-emerald' : 'text-amber')}>
+        {title}
+      </h5>
+      <ul className="flex flex-col gap-1">
+        {items.map((item) => (
+          <li key={item.label} className="flex gap-1.5 text-caption leading-relaxed text-ink-secondary">
+            <span aria-hidden="true" className={tone === 'up' ? 'text-emerald' : 'text-amber'}>•</span>
+            <span className={item.tier === 'strong' ? 'font-medium text-ink' : undefined}>{item.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
 export function MoodSection() {
+  const { data, isLoading, isError } = useMoodCurrent();
+  const unavailable = !data || data.data_quality === 'unavailable' || data.regime === 'data_unavailable';
+  const status = isLoading ? 'loading' : isError ? 'error' : unavailable ? 'empty' : 'present';
+  const trend = data?.trend ? MOOD_TREND_DISPLAY[data.trend] : null;
+
   return (
     <Panel className="p-5 sm:p-6">
-      <div className="grid items-center gap-6 md:grid-cols-[230px_1fr]">
-        <div className="flex justify-center">
-          <MoodGauge fill={MOOD.fill} word={MOOD.word} sub={MOOD.sub} />
-        </div>
-        <div>
-          <p className="mb-3.5 text-small leading-relaxed text-ink-secondary">
-            Current mood is <b className="text-ink">{MOOD.word}</b>. {MOOD.intro}
-          </p>
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            {MOOD.phases.map((ph) => (
-              <div key={ph.name} className={cn('rounded-2xl border p-3.5', ph.best ? 'border-emerald bg-emerald/[0.08]' : 'border-line')}>
-                <div className="flex items-center gap-1.5 text-caption font-semibold text-ink-muted">
-                  {ph.best && <span className="text-emerald">★</span>}{ph.name}{ph.tag && <span className="text-ink-faint">({ph.tag})</span>}
-                </div>
-                <div className={cn('mt-1.5 font-mono text-body font-bold', `text-${ph.tone}`)} style={{ color: ph.tone === 'emerald' ? '#00B386' : ph.tone === 'red' ? '#E5484D' : '#F5A623' }}>{ph.val}</div>
+      <DataState
+        status={status}
+        emptyCopy="The daily mood snapshot updates after market close — check back shortly."
+        skeleton={<Skeleton className="h-40 w-full rounded-2xl" />}
+      >
+        {data && (
+          <div className="grid items-center gap-6 md:grid-cols-[230px_1fr]">
+            <div className="flex flex-col items-center gap-2">
+              <MoodGauge regime={data.regime} confidenceBand={data.confidence_band} />
+              {trend && (
+                <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-caption font-semibold', trend.cls)}>
+                  Trend: {trend.label}
+                </span>
+              )}
+            </div>
+            <div>
+              {data.commentary && (
+                <p className="mb-3.5 text-small leading-relaxed text-ink-secondary">{data.commentary}</p>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <MoodFactorList title="Supporting the read" items={data.contributing_factors} tone="up" />
+                <MoodFactorList title="Counter-signals" items={data.contradicting_factors} tone="down" />
               </div>
-            ))}
+            </div>
           </div>
+        )}
+
+        <div className="mt-4 rounded-2xl border border-dashed border-line bg-surface-2 p-3.5 text-caption text-ink-muted">
+          How this fund has performed across past market-mood regimes isn&apos;t available yet —
+          we started recording regime history on 5 Jul 2026, so there isn&apos;t enough of it yet
+          for a reliable read.
         </div>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {MOOD.stats.map((s) => (
-          <div key={s.l} className="rounded-2xl bg-surface-2 p-3 text-center">
-            <div className={cn('font-mono text-h3 font-bold', s.tone === 'amber' ? 'text-amber' : s.tone === 'emerald' ? 'text-emerald' : 'text-ink')}>{s.v}</div>
-            <div className="mt-0.5 text-caption font-semibold text-ink-muted">{s.l}</div>
-          </div>
-        ))}
-      </div>
-      <WhatThisMeans>{MOOD.meaning}</WhatThisMeans>
+
+        <WhatThisMeans>
+          Market mood describes current investor sentiment — it is not a prediction of what
+          markets will do next. Mood is not direction.
+        </WhatThisMeans>
+      </DataState>
     </Panel>
   );
 }

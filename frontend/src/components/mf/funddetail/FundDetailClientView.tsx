@@ -27,10 +27,15 @@
  * Center (returns/rolling/rank-trend), Risk Center, Holdings, Manager, AMC
  * facts, Alternatives and Similar to real per-concept endpoints; W2 adds
  * SIP/Drawdowns/Consistency (Performance Center), rolling-3Y, and Fund Health
- * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). Market Cap/Asset Mix/Style Box,
- * Fund Flow, Tax seed, Transactions, Portfolio Fit, What Changed, and
- * Assessment Breakdown still render illustrative PREVIEW data (flagged
- * "Preview" or an honest empty-state) while their feeds are built (W2/W3) —
+ * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §17). A later wave (2026-07-06, "wire
+ * remaining 6") wires Snapshot (S9, real KPI grid) and AMC Quality (S16, real
+ * fact-line) to real data, wires Market Mood (S6) to the real GET /market/mood,
+ * and turns Smart Entry Timing (S3), Tax Center (S17, labeled example inputs)
+ * and FAQ (S21, interpolated real facts) honest — no source-blocked section
+ * shows a fabricated number, only a factual explainer + the standard no-data
+ * state. Market Cap/Asset Mix/Style Box, Fund Flow, Transactions, Portfolio
+ * Fit, What Changed, and Assessment Breakdown still render illustrative
+ * PREVIEW data or an honest empty-state while their feeds are built (W2/W3) —
  * founder call 2026-06-24: build all UI now, wire data later.
  *
  * COMPLIANCE: non-neg #1 (no advisory verbs — educational labels only),
@@ -172,6 +177,9 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
     return1yPct: fund.return_1y_pct,
     return3yPct: fund.return_3y_pct,
     return5yPct: fund.return_5y_pct,
+    launchDate: fund.launch_date,
+    fundAumCr: fund.aum_crore,
+    fundAumAsOf: fund.aum_as_of,
   };
 
   // S10 header info line — category-appropriate benchmark (item 3, 2026-07);
@@ -224,7 +232,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" />{/* dev-verify */}<LiveBadge className="mb-3" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S6 — Market mood */}
-      <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" /><MoodSection /></Section>
+      <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" />{/* dev-verify */}<LiveBadge className="mb-3" /><MoodSection /></Section>
 
       {/* S7 — Fund health */}
       <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" />{/* dev-verify */}<LiveBadge className="mb-3" /><FundHealthSection isin={isin} /></Section>
@@ -233,7 +241,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" />{/* dev-verify */}<LiveBadge className="mb-3" /><WhatChangedSection isin={isin} /></Section>
 
       {/* S9 — Snapshot */}
-      <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
+      <Section><SectionHeader index="09" title="Investment Snapshot" />{/* dev-verify */}<LiveBadge className="mb-3" /><SnapshotSection head={head} isin={isin} /></Section>
 
       {/* S10 — Performance center */}
       <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} />{/* dev-verify */}<LiveBadge className="mb-3" /><PerformanceSection head={head} isin={isin} /></Section>
@@ -254,10 +262,10 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="15" title="Fund Manager" />{/* dev-verify */}<LiveBadge className="mb-3" /><ManagerSection isin={isin} /></Section>
 
       {/* S16 — AMC quality */}
-      <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
+      <Section><SectionHeader index="16" title="AMC Quality Center" />{/* dev-verify */}<LiveBadge className="mb-3" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
 
       {/* S17 — Tax center (P1 seed) */}
-      <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection seedValue={myHolding?.current_value} costBasis={myHolding?.invested_amount} /></Section>
+      <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" />{/* dev-verify */}<LiveBadge className="mb-3" /><TaxSection seedValue={myHolding?.current_value} costBasis={myHolding?.invested_amount} /></Section>
 
       {/* S18 — Transactions (P1 — real data) */}
       <Section><SectionHeader index="18" title="Transaction History" info="Your own transactions for this fund" />{/* dev-verify */}<LiveBadge className="mb-3" /><TransactionsSection portfolioId={portfolioId} isin={isin} /></Section>
@@ -269,7 +277,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" />{/* dev-verify */}<LiveBadge className="mb-3" /><SimilarSection isin={isin} /></Section>
 
       {/* S21 — FAQ */}
-      <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection navLatest={fund.nav_latest} /></Section>
+      <Section><SectionHeader index="21" title="Frequently Asked" />{/* dev-verify */}<LiveBadge className="mb-3" /><FaqSection head={head} /></Section>
 
       {/* Disclosure (non-neg #9) */}
       <div className="mt-7 rounded-2xl border border-line bg-surface-2 p-4">

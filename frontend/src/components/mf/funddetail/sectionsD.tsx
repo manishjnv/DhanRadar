@@ -22,8 +22,10 @@ import { DataState, type DataStatus } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Panel, WhatThisMeans } from './parts';
 import { TAX, FAQ } from './sampleData';
+import { classifyCategory } from './categoryCopy';
 import type { Label } from '@/components/charts/ScoreRing';
 import type { FundPeer } from '@/features/mf/types';
+import type { FundHead } from './sectionsHero';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,6 +94,14 @@ export function TaxSection({
   const taxLabel     = isLT ? 'LTCG tax @ 12.5%' : 'STCG tax @ 20%';
   const exemptDisplay = isLT ? `−${inr(exempt)}` : '₹0';
 
+  // No real holding seeded (anonymous / no CAS / not holding this fund) — the
+  // slider still starts from an editable example, never presented as the
+  // user's own numbers (§9 no-fabrication).
+  const isExample = !(seedValue != null && seedValue > 0);
+  const meaning = gain > 0
+    ? `${isLT ? 'Long-term' : 'Short-term'} gain of ${inr(gain)} → ${isLT && exempt > 0 ? `${inr(exempt)} exempt, then ` : ''}tax of ${inr(tax)} → ${inr(net)} net in hand.${isExample ? ' These are example numbers — drag the sliders to match your own investment.' : ''}`
+    : `No taxable gain at this redemption value.${isExample ? ' These are example numbers — drag the sliders to match your own investment.' : ''}`;
+
   return (
     <Panel className="p-5 sm:p-6">
       {/* 2-col on sm+, 1-col on mobile */}
@@ -99,7 +109,14 @@ export function TaxSection({
 
         {/* LEFT — calculator controls */}
         <div>
-          <p className="mb-4 text-small font-bold text-ink">Tax calculator</p>
+          <p className="mb-4 flex flex-wrap items-center gap-2 text-small font-bold text-ink">
+            Tax calculator
+            {isExample && (
+              <span className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                Example — edit to your numbers
+              </span>
+            )}
+          </p>
 
           {/* Redemption amount slider */}
           <div className="mb-4">
@@ -201,7 +218,7 @@ export function TaxSection({
         </div>
       </div>
 
-      <WhatThisMeans>{TAX.meaning}</WhatThisMeans>
+      <WhatThisMeans>{meaning}</WhatThisMeans>
     </Panel>
   );
 }
@@ -589,7 +606,45 @@ export function SimilarSection({ isin }: { isin: string }) {
 // S21 — FAQ (accordion)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function FaqSection({ navLatest }: { navLatest?: number | null }) {
+/** Build the {{TOKEN}} → real-fact substitution map for one fund (§21). Every
+ * clause degrades to a generic, non-fabricated fallback when its field is null —
+ * factual substitutions only, never a new claim. */
+function buildFaqTokens(head: FundHead): Record<string, string> {
+  const navLine = head.navLatest != null
+    ? `${head.name}’s latest NAV is ₹${head.navLatest.toFixed(2)}${
+        head.navDate ? ` (as of ${new Date(head.navDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})` : ''
+      }${
+        head.rank != null && head.total != null ? `. It currently ranks #${head.rank} of ${head.total} in the ${head.category} category` : ''
+      }.`
+    : "We don't have this fund's latest NAV yet.";
+
+  const expenseLine = head.expenseRatioPct != null
+    ? `This fund’s expense ratio is ${head.expenseRatioPct.toFixed(2)}% — about ₹${Math.round(head.expenseRatioPct * 100)}/year per ₹10,000 invested.`
+    : "We don't have this fund's expense ratio yet.";
+
+  // Exit load has no real source anywhere in the platform (S9 Snapshot shows
+  // the same blocked cell) — never invent a %, name the gap instead.
+  const exitLoadLine = "We don't have this fund's exit load figure yet — check the scheme documents for the exact rule.";
+
+  const categoryClass = classifyCategory(head.category);
+  const taxLine = categoryClass === 'equity'
+    ? 'As an equity fund: gains within 1 year are STCG (20%); gains after 1 year are LTCG (12.5%), with the first ₹1.25L of LTCG each year tax-free.'
+    : 'Equity funds follow STCG (20%) / LTCG (12.5%, with a ₹1.25L/yr exemption) rules — other categories like debt and hybrid follow different tax rules not covered by the calculator above.';
+
+  const sipCategory = head.category && head.category !== 'Mutual Fund' ? head.category.toLowerCase() : 'equity funds';
+  const sipPointer = 'See Smart Entry Timing above for how entry timing is generally thought about.';
+
+  return {
+    '{{NAV_LINE}}': navLine,
+    '{{EXPENSE_LINE}}': expenseLine,
+    '{{EXIT_LOAD_LINE}}': exitLoadLine,
+    '{{TAX_LINE}}': taxLine,
+    '{{SIP_CATEGORY}}': sipCategory,
+    '{{SIP_POINTER}}': sipPointer,
+  };
+}
+
+export function FaqSection({ head }: { head: FundHead }) {
   // Seed open-state from FAQ[i].open
   const [openIndex, setOpenIndex] = React.useState<number | null>(
     () => FAQ.findIndex((f) => f.open === true),
@@ -598,16 +653,19 @@ export function FaqSection({ navLatest }: { navLatest?: number | null }) {
   const toggle = (i: number) =>
     setOpenIndex((prev) => (prev === i ? null : i));
 
-  // W0 — interpolate the real NAV into the one FAQ answer that quotes it (§17);
-  // every other answer stays the static educational preview copy.
-  const navStr = navLatest != null ? `₹${navLatest.toFixed(2)}` : null;
+  // §21 — interpolate real fund facts (name, NAV, category, TER, rank) into the
+  // static educational templates; every clause has a generic fallback when its
+  // field is null, so the sentence always reads correctly (no-fabrication §8.4).
+  const tokens = buildFaqTokens(head);
+  const resolveAnswer = (template: string): string =>
+    Object.entries(tokens).reduce((acc, [token, value]) => acc.replaceAll(token, value), template);
 
   return (
     <Panel className="p-5 sm:p-6">
       <div className="divide-y divide-line">
         {FAQ.map((item, i) => {
           const isOpen = openIndex === i;
-          const answer = navStr ? item.a.replaceAll('₹18.42', navStr) : item.a;
+          const answer = resolveAnswer(item.a);
           return (
             <div key={item.q}>
               <button
