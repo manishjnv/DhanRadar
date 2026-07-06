@@ -23,6 +23,7 @@ import type {
   FundNavSeries,
   FundAnalyticsResponse,
   FundComposition,
+  FundFlows,
   FundPeopleResponse,
   FundPeers,
   FundFactorsResponse,
@@ -469,6 +470,22 @@ export function useFundFactors(isin: string) {
   return useQuery<FundFactorsResponse>({
     queryKey: queryKeys.mf.fundFactors(isin),
     queryFn: () => api.get<FundFactorsResponse>(`/mf/fund/${isin}/factors`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** `fund.flows` (Block 0.10) — GET /api/v1/mf/fund/{isin}/flows. CATEGORY-LEVEL
+ * ONLY (trailing 12-month net flow for the fund's own AMFI scheme category) —
+ * never this fund's own money flows (§8.4/§14.3: no per-scheme flow source exists). */
+export function useFundFlows(isin: string) {
+  return useQuery<DataEnvelope<FundFlows>>({
+    queryKey: queryKeys.mf.fundFlows(isin),
+    queryFn: () => api.get<DataEnvelope<FundFlows>>(`/mf/fund/${isin}/flows`),
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;

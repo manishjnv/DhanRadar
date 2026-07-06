@@ -243,7 +243,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="13" title="Portfolio Holdings" info={holdingsInfo} /><HoldingsSection isin={isin} /></Section>
 
       {/* S14 — Fund flow */}
-      <Section><SectionHeader index="14" title="Fund Flow Intelligence" /><FundFlowSection /></Section>
+      <Section><SectionHeader index="14" title="Fund Flow Intelligence" /><FundFlowSection isin={isin} /></Section>
 
       {/* S15 — Fund manager */}
       <Section><SectionHeader index="15" title="Fund Manager" /><ManagerSection isin={isin} /></Section>
