@@ -395,6 +395,7 @@ async def cas_status(
 ) -> CasJobStatus:
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    await _require_mf_consent(user=user, db=db)
     job = await _own_job(db, job_id, user.user_id)
     return CasJobStatus(
         job_id=str(job.job_id),
@@ -414,6 +415,7 @@ async def cas_report(
 ) -> PortfolioReport:
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    await _require_mf_consent(user=user, db=db)
     job = await _own_job(db, job_id, user.user_id)  # IDOR guard
     portfolio_id = str(job.portfolio_id) if job.portfolio_id else None
     redis = get_redis()
@@ -467,6 +469,7 @@ async def portfolio_latest(
     """
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    await _require_mf_consent(user=user, db=db)
 
     result = await db.execute(
         select(MfPortfolio)

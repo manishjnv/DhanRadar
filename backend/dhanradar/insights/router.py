@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-from dhanradar.deps import UserContext, current_user_or_anonymous
+from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous
 from dhanradar.insights import service
 from dhanradar.insights.schemas import MoodContextResponse, OverlapResponse
 from dhanradar.mf.portfolio_read import (
@@ -73,6 +73,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["portfolio-intelligence"])
 
+# Block 0.12 — DPDP data-processing gate (fail-closed 403). Every route in this file
+# serves personal analytics derived from the user's own uploaded CAS holdings — the
+# SAME purpose CAS upload itself requires (mf/router.py's `_require_mf_consent`).
+# Called explicitly (not Depends()) right after `_require_auth`, preserving the
+# existing 401-then-403 ordering (RequireConsent itself also 401s an anonymous
+# caller, but every route here already 401s first via `_require_auth`).
+_require_mf_consent = RequireConsent("mf_analytics")
+
 
 def _require_auth(user: UserContext) -> None:
     if user.is_anonymous:
@@ -96,6 +104,7 @@ async def portfolio_overlap(
     Anonymous → 401.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     try:
         return await service.get_overlap(db, user.user_id, portfolio_id)
     except ValueError:
@@ -136,6 +145,7 @@ async def portfolio_holdings(
     Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     current_values = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
@@ -171,6 +181,7 @@ async def portfolio_transactions(
     ledger-fresh on every call.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rows, total = await load_portfolio_transactions(
         db, portfolio_id, isin=isin, limit=limit, offset=offset
@@ -204,6 +215,7 @@ async def portfolio_fit(
     nulled figures, never 404 for those cases.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     try:
         payload = await service.get_portfolio_fit(db, user.user_id, portfolio_id, isin)
     except ValueError:
@@ -258,6 +270,7 @@ async def portfolio_summary(
     logs (never blocks) a single structured `hero.integrity` warning if anything looks inconsistent.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
@@ -349,6 +362,7 @@ async def portfolio_risk(
     standard ratios only). Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     r = await load_portfolio_risk(db, portfolio_id)
     if advanced:
@@ -386,6 +400,7 @@ async def portfolio_allocation(
     ('coming soon', data-starved). Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     return serialize_concept(
@@ -409,6 +424,7 @@ async def portfolio_concentration(
     Cold-start / single-fund / no holdings → 200 with null top/empty list. 401/404 as above.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     return serialize_concept(
@@ -432,6 +448,7 @@ async def portfolio_diversification(
     facts (DOM-allowed). No DhanRadar composite. Anonymous → 401; another user's portfolio → 404.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     rm = await load_portfolio_read_model(db, portfolio_id)
     return serialize_concept(
@@ -463,6 +480,7 @@ async def portfolio_mood_context(
     Anonymous → 401.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     try:
         return await service.get_mood_context(db, user.user_id, portfolio_id)
     except ValueError:
@@ -490,6 +508,7 @@ async def portfolio_valuation_series(
     user's portfolio → 404.
     """
     _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
     await _owned_portfolio_id(db, portfolio_id, user.user_id)
     points = await load_portfolio_valuation_series(db, portfolio_id, days=days)
     first_investment_date = await load_first_investment_date(db, portfolio_id, points)

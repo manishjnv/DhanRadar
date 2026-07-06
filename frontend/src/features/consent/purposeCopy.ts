@@ -13,38 +13,38 @@ export interface PurposeCopy {
 
 export const purposeCopy: Record<ConsentPurpose, PurposeCopy> = {
   mf_analytics: {
-    title: 'Analyse your mutual fund holdings',
+    title: 'Read your mutual fund holdings',
     description:
-      'We process the holdings in your CAS to produce your educational, label-based portfolio report.',
+      'We look at the funds in your uploaded statement (CAS) to build your easy-to-read portfolio report.',
   },
   ai_insights: {
-    title: 'Generate AI-assisted portfolio commentary',
+    title: 'Write AI notes about your portfolio',
     description:
-      'We pass aggregated, anonymised portfolio data to our AI gateway to produce plain-language educational commentary about your holdings.',
+      'We use AI to turn your fund data into simple, plain-language notes explaining what is going on.',
   },
   marketing: {
-    title: 'Send you educational content and product updates',
+    title: 'Send you tips and product updates',
     description:
-      'We may send you newsletters, feature announcements, and educational material about DhanRadar.',
+      'We may email you helpful articles, new features, and other updates about DhanRadar.',
   },
   portfolio_sync: {
-    title: 'Periodically re-read your portfolio data',
+    title: 'Save a copy of your portfolio',
     description:
-      'We store a copy of your processed holdings so your report can be refreshed without re-uploading your CAS.',
+      'We keep a saved copy of your fund data so your report stays up to date without re-uploading your statement every time.',
   },
   behavioral_nudges: {
-    title: 'Send you timely portfolio health reminders',
+    title: 'Send you portfolio reminders',
     description:
-      'We may send you periodic reminders about reviewing your portfolio labels — for example, when the status of a fund changes.',
+      'We may remind you to check your portfolio — for example, if a fund’s status changes.',
   },
   cross_border_ai: {
-    title: 'Use an overseas AI service',
+    title: 'Let AI run on servers outside India',
     description:
-      'Some educational commentary is generated using an AI provider located outside India. Your data is transferred solely for this purpose.',
+      'The AI service that writes your notes is hosted outside India. Your data is sent there only for that purpose.',
   },
   cross_border_notify: {
-    title: 'Send alerts via overseas services',
+    title: 'Let alerts be sent from outside India',
     description:
-      'Delivery of your alerts may use messaging or email providers located outside India.',
+      'Some of the tools we use to send you emails or messages are hosted outside India.',
   },
 };
