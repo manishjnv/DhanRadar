@@ -27,6 +27,9 @@ casparser>=0.7.0       # CAMS/KFintech CAS PDF parsing (worker; lazily imported)
 scipy>=1.11.0          # XIRR via brentq
 openpyxl>=3.1.0        # SEBI monthly portfolio disclosure XLSX parser (ADR-0033(a); worker; lazily imported)
 xlrd>=2.0.1            # CAMS Transaction Details Statement .xls parser (legacy Excel 97-2003)
+pypdf>=5.0.0           # NIPPON factsheet PDF fund-manager parser (Phase 6 rebuild; NOT a
+                       # casparser dependency -- casparser uses pypdfium2 -- must be declared
+                       # explicitly; worker; lazily imported by market_data/amc_managers_nippon.py)
 # --- Phase 6: Notification module (Telegram + Resend email + Pillow share-cards) ---
 Pillow>=10.3.0         # 1200x630 share-card PNG render (worker; lazily imported)
 # --- Logging: structured JSON + redaction (P1) ---
