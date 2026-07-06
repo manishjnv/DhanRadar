@@ -39,6 +39,22 @@ from dhanradar.mf.manual_ingest import (
     intake_upload,
 )
 
+# NoReferencedTableError guard — MfManualIngestFile.uploaded_by (models/mf.py) has a
+# STRING ForeignKey("auth.users.id"); SQLAlchemy only resolves that reference once the
+# User model's Table has been registered into the shared declarative metadata, which
+# only happens after `dhanradar.models.auth` is imported somewhere in the process. The
+# FastAPI app transitively imports it at startup (auth router/deps), so the admin
+# upload channel — routed through this same intake_file() — never hits this. This
+# Celery worker boots this module directly via celery_app.py's `include=[...]` with no
+# such transitive import, so scan_incoming_folder / parse_manual_disclosure_file were
+# the first code in the worker process to ever touch MfManualIngestFile and crashed
+# with "could not find table 'auth.users'". Mirrors the same FK-registration
+# convention tasks/mf.py already uses for MfPortfolio (see
+# tasks/mf.py::_store_or_validate_identity) — imported here at MODULE level (not
+# function-scoped) so it runs once, deterministically, at worker boot, before ANY
+# task in this module can touch the FK'd table regardless of execution order.
+from dhanradar.models import auth as _auth_models  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 TASK_PARSE = "dhanradar.tasks.manual_ingest.parse_manual_disclosure_file"
