@@ -862,9 +862,9 @@ export function RiskCenterSection({ isin }: { isin: string }) {
   const advRows: { name: string; tip: string; real: boolean; value: string; band: Band3; note?: string | null }[] = [
     { name: 'Sharpe Ratio', tip: 'Return earned per unit of risk', real: a?.sharpe_ratio != null, value: a?.sharpe_ratio != null ? a.sharpe_ratio.toFixed(2) : '—', band: sharpeBand(a?.sharpe_ratio ?? null) },
     { name: 'Sortino Ratio', tip: 'Downside-adjusted return', real: a?.sortino_ratio != null, value: a?.sortino_ratio != null ? a.sortino_ratio.toFixed(2) : '—', band: sortinoBand(a?.sortino_ratio ?? null) },
-    { name: 'Alpha', tip: 'Excess vs benchmark', real: false, value: '—', band: 'medium' },
-    { name: 'Beta', tip: 'Moves with the index', real: false, value: '—', band: 'medium' },
-    { name: 'Tracking Error', tip: 'Index-tracking tightness', real: false, value: '—', band: 'medium' },
+    { name: 'Alpha', tip: 'Excess vs benchmark', real: a?.alpha_1y != null, value: a?.alpha_1y != null ? a.alpha_1y.toFixed(2) : '—', band: 'medium' },
+    { name: 'Beta', tip: 'Moves with the index', real: a?.beta_1y != null, value: a?.beta_1y != null ? a.beta_1y.toFixed(2) : '—', band: 'medium' },
+    { name: 'Tracking Error', tip: 'Index-tracking tightness', real: a?.tracking_error_pct != null, value: a?.tracking_error_pct != null ? `${a.tracking_error_pct.toFixed(1)}%` : '—', band: 'medium' },
     { name: 'Std Deviation', tip: 'Volatility', real: a?.volatility_pct != null, value: a?.volatility_pct != null ? `${a.volatility_pct.toFixed(1)}%` : '—', band: volFavorabilityBand(a?.volatility_percentile ?? null), note: riskDimensionNote },
     { name: 'Max Drawdown', tip: 'Worst peak-to-trough', real: a?.max_drawdown_pct != null, value: a?.max_drawdown_pct != null ? `${a.max_drawdown_pct.toFixed(1)}%` : '—', band: maxDDBand(a?.max_drawdown_pct ?? null), note: drawdownSentence(a?.max_drawdown_pct, a?.category_percentiles.max_drawdown_pct) },
     { name: 'Upside Capture', tip: 'Of index gains captured', real: false, value: '—', band: 'medium' },

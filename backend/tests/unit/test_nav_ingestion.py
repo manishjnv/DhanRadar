@@ -432,15 +432,47 @@ class TestNavrowsToFundUpserts:
         (B66 taxonomy layer). `plan_type` and `option_type` are parsed from the
         feed's own `scheme_name` (B67 Task 3) — derived, not a different source.
         `launch_date` and `is_segregated` are derived from the feed's own data (PR #213).
-        Scheme-master columns that require a separate data source (aum, expense_ratio,
-        benchmark_index) must NOT appear here."""
+        `benchmark_index` (Block 0.7) is ALSO derived purely from this same feed's
+        `scheme_name` + the just-computed `sebi_category` (map_index_fund_benchmark) —
+        it is NOT a separate data source, unlike aum/expense_ratio (SEBI monthly
+        portfolio disclosure), which still must NOT appear here."""
         rows = [_row()]
         out = _navrows_to_fund_upserts(rows)
         assert set(out[0].keys()) == {
             "isin", "amfi_code", "scheme_name", "category", "sebi_category",
             "plan_type", "option_type", "fund_name_short", "idcw_frequency",
-            "launch_date", "is_segregated",
+            "launch_date", "is_segregated", "benchmark_index",
         }
+
+    def test_benchmark_index_populated_for_index_fund(self):
+        """A Nifty 50 Index Fund gets benchmark_index='nifty50' — derived from
+        scheme_name + sebi_category, gated on the index-fund category (Block 0.7)."""
+        row = NavRow(
+            amfi_code="119551",
+            isin_growth="INF179KB1HA2",
+            isin_reinvest=None,
+            scheme_name="HDFC Index Fund - Nifty 50 Plan - Direct Plan - Growth",
+            nav=200.0,
+            nav_date=datetime.date(2026, 6, 1),
+            category="Other Scheme - Index Funds",
+        )
+        out = _navrows_to_fund_upserts([row])
+        assert out[0]["benchmark_index"] == "nifty50"
+
+    def test_benchmark_index_none_for_active_fund(self):
+        """An active (non-index) fund NEVER gets a benchmark_index, even if its
+        name happens to mention an index — architecture plan §19 non-negotiable."""
+        row = NavRow(
+            amfi_code="119552",
+            isin_growth="INF179KB1HA3",
+            isin_reinvest=None,
+            scheme_name="Some AMC Nifty 50 Opportunities Fund - Direct - Growth",
+            nav=50.0,
+            nav_date=datetime.date(2026, 6, 1),
+            category="Equity Scheme - Large Cap Fund",
+        )
+        out = _navrows_to_fund_upserts([row])
+        assert out[0]["benchmark_index"] is None
 
     def test_plan_type_and_option_type_populated(self):
         """plan_type and option_type are parsed from the scheme_name."""

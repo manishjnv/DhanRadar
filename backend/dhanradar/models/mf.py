@@ -158,6 +158,14 @@ class MfFundMetrics(Base):
     rolling_3y_max_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     rolling_3y_pct_positive: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Benchmark-relative stats (migration 0071, Block 0.7 — risk.py
+    # benchmark_relative_stats output). Populated ONLY for funds with a
+    # non-null mf_funds.benchmark_index (index funds mapped with high
+    # confidence, mf/benchmark_mapping.py) — every other fund keeps these NULL.
+    alpha_1y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    beta_1y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tracking_error_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class MfCategoryStats(Base):
     """Per-category percentile distribution of key fund metrics.

@@ -654,3 +654,133 @@ def compute_sip_illustration(
         final_value=final_value,
         xirr_pct=xirr(cashflows),
     )
+
+
+# ---------------------------------------------------------------------------
+# Benchmark-relative stats (alpha / beta / tracking error) — Block 0.7,
+# index funds only (mf/benchmark_mapping.py gates which funds get a
+# non-null benchmark_index in the first place).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BenchmarkRelativeStats:
+    """Fund-vs-benchmark relative risk stats, computed on COMMON dates only
+    (inner join by date — a fund's NAV calendar and its benchmark index's
+    close calendar rarely line up exactly, e.g. NSE trading holidays that
+    differ from AMFI NAV publication gaps).
+
+    All three fields are None together when fewer than ``min_points`` common
+    aligned dates exist, or when the benchmark's own periodic returns are
+    near-degenerate (mirrors the ``_MIN_MEANINGFUL_VOL`` guard on
+    :class:`RiskStats` — a near-flat benchmark series makes beta/alpha
+    unstable and would otherwise explode toward a meaningless value).  Never
+    fabricated on thin/degenerate data.
+
+    alpha_1y            : CAPM alpha, annualised, in PERCENT.
+    beta_1y             : fund-vs-benchmark beta (dimensionless).
+    tracking_error_pct  : annualised stdev of (fund_return − bench_return), in
+                          PERCENT (same √``periods_per_year`` annualisation as
+                          :data:`RiskStats.volatility_pct`).
+    """
+
+    alpha_1y: float | None
+    beta_1y: float | None
+    tracking_error_pct: float | None
+
+
+def benchmark_relative_stats(
+    fund_points: list[tuple[datetime.date, float]],
+    benchmark_points: list[tuple[datetime.date, float]],
+    *,
+    risk_free_annual: float,
+    min_points: int = _MIN_NAV_POINTS,
+    periods_per_year: int = _PERIODS_PER_YEAR,
+) -> BenchmarkRelativeStats:
+    """Compute CAPM alpha, beta, and tracking error for a fund against ONE
+    benchmark index's daily-close series.
+
+    ``risk_free_annual`` is an annual rate as a FRACTION (matches
+    :func:`risk_adjusted_stats`). Both input series are sorted/deduped via
+    :func:`_sorted_unique` (drops None/non-positive values) before alignment.
+
+    Alignment: the two series are inner-joined on date (COMMON dates only) —
+    never forward-filled or interpolated across a gap (that would fabricate a
+    price that never existed). Periodic (point-to-point) returns are then
+    computed on the ALIGNED pairs so each fund/benchmark return covers the
+    exact same calendar interval.
+
+    Beta uses the sample covariance/variance convention (``statistics.
+    covariance``/``statistics.variance``, ddof=1) — the same ddof=1 sample
+    convention :func:`risk_adjusted_stats` uses for volatility. Tracking error
+    is the annualised sample stdev of the per-period (fund − benchmark) return
+    difference. Alpha is the standard CAPM residual:
+    ``ann_fund_return − (risk_free_annual + beta × (ann_bench_return − risk_free_annual))``,
+    using the SAME geometric-annualisation formula as
+    :func:`risk_adjusted_stats` (``(last/first)^(periods_per_year/n) − 1``)
+    over the aligned window.
+
+    Returns an all-None :class:`BenchmarkRelativeStats` when there are fewer
+    than ``min_points`` common aligned dates, fewer than 2 resulting periodic
+    return pairs, or the benchmark's own annualised volatility is below
+    ``_MIN_MEANINGFUL_VOL`` (near-flat/degenerate benchmark series — variance
+    denominator too close to zero for a stable beta).
+    """
+    _none = BenchmarkRelativeStats(alpha_1y=None, beta_1y=None, tracking_error_pct=None)
+
+    fund_pts = _sorted_unique(fund_points)
+    bench_pts = _sorted_unique(benchmark_points)
+    if not fund_pts or not bench_pts:
+        return _none
+
+    fund_by_date = dict(fund_pts)
+    bench_by_date = dict(bench_pts)
+    common_dates = sorted(fund_by_date.keys() & bench_by_date.keys())
+    if len(common_dates) < min_points:
+        return _none
+
+    fund_vals = [fund_by_date[d] for d in common_dates]
+    bench_vals = [bench_by_date[d] for d in common_dates]
+
+    # Paired periodic returns — both series already filtered to positive
+    # values by _sorted_unique, so the prev>0 guard below is defensive, not
+    # load-bearing; it keeps the two return lists index-aligned regardless.
+    fund_rets: list[float] = []
+    bench_rets: list[float] = []
+    for i in range(1, len(common_dates)):
+        f_prev, f_cur = fund_vals[i - 1], fund_vals[i]
+        b_prev, b_cur = bench_vals[i - 1], bench_vals[i]
+        if f_prev > 0 and b_prev > 0:
+            fund_rets.append(f_cur / f_prev - 1.0)
+            bench_rets.append(b_cur / b_prev - 1.0)
+
+    n = len(fund_rets)
+    if n < 2:
+        return _none
+
+    var_bench = statistics.variance(bench_rets)  # sample variance, ddof=1
+    bench_annual_vol = math.sqrt(var_bench) * math.sqrt(periods_per_year) if var_bench > 0 else 0.0
+    if bench_annual_vol < _MIN_MEANINGFUL_VOL:
+        # Near-flat benchmark series — beta/alpha would be unstable/explosive; withhold.
+        return _none
+
+    cov = statistics.covariance(fund_rets, bench_rets)  # sample covariance, ddof=1
+    beta = cov / var_bench
+
+    diff_rets = [f - b for f, b in zip(fund_rets, bench_rets)]
+    te_annual = statistics.stdev(diff_rets) * math.sqrt(periods_per_year)
+    tracking_error_pct = te_annual * 100.0
+
+    # Geometric annualised returns over the ALIGNED window (same formula as
+    # risk_adjusted_stats — (last/first)^(periods_per_year/n) - 1).
+    ann_fund_ret = (fund_vals[-1] / fund_vals[0]) ** (periods_per_year / n) - 1.0
+    ann_bench_ret = (bench_vals[-1] / bench_vals[0]) ** (periods_per_year / n) - 1.0
+
+    alpha = ann_fund_ret - (risk_free_annual + beta * (ann_bench_ret - risk_free_annual))
+    alpha_1y = alpha * 100.0
+
+    return BenchmarkRelativeStats(
+        alpha_1y=alpha_1y,
+        beta_1y=beta,
+        tracking_error_pct=tracking_error_pct,
+    )
