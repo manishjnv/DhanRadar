@@ -8,7 +8,12 @@ Source key       : amc_expense_ratios  (matches ops_router._SOURCE_CATALOG)
 What this task does
 -------------------
 1. Fetches TER rows from non-bot-blocked AMC factsheet pages via
-   dhanradar.market_data.amc_expense.fetch_expense_ratios.
+   dhanradar.market_data.amc_expense.fetch_expense_ratios, PLUS SBI's dedicated
+   static-xlsx TER fetcher (dhanradar.market_data.amc_expense_sbi, Block 0.5,
+   2026-07-06 — SBI is reachable, not bot-blocked; see amc_registry.py). SBI's
+   rows are scheme-NAME+plan keyed and resolved to ISIN via the SAME pg_trgm
+   matcher the constituents pipeline uses (`_resolve_sbi_raw_rows`), mirroring
+   how mf_fund_manager.py resolves UTI/NIPPON rows.
 2. Validates ter_pct in (0, 10] — invalid rows → stats.failed (never written).
 3. Deduplicates the fetched batch by (isin, effective_date) in Python BEFORE
    the upsert (prevents CardinalityViolation on the unique constraint).
@@ -66,24 +71,86 @@ def mf_expense_ratio_fetch() -> str:
 async def _mf_expense_ratio_pipeline() -> str:
     """Async pipeline: fetch → validate → dedup → upsert → update mf_funds."""
     from dhanradar.market_data.amc_expense import fetch_expense_ratios
+    from dhanradar.market_data.amc_expense_sbi import fetch_sbi_expense_ratios
     from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
 
     if await is_source_paused(_SOURCE):
         return "mf_expense_ratio_fetch: skipped (paused)"
 
     async with ingestion_run(_TASK_NAME, _SOURCE) as (run_id, stats):
-        await _run(run_id, stats, fetch_expense_ratios)
+        await _run(run_id, stats, fetch_expense_ratios, sbi_fetch_fn=fetch_sbi_expense_ratios)
 
     return f"mf_expense_ratio_fetch: {stats.written} written, {stats.failed} failed"
 
 
-async def _run(run_id: int, stats, fetch_fn) -> None:
-    """Core pipeline body — separated so integration tests can inject fetch_fn."""
+def _merge_status(*status_dicts: dict) -> dict:
+    """Merge several {"bot_blocked": [...], "unreachable": [...],
+    "format_mismatch": [...], "ok": [...]} status dicts into one, concatenating
+    each bucket. Mirrors tasks/mf_fund_manager.py's helper of the same name."""
+    merged: dict[str, list[str]] = {
+        "bot_blocked": [],
+        "unreachable": [],
+        "format_mismatch": [],
+        "ok": [],
+    }
+    for d in status_dicts:
+        for key in merged:
+            merged[key].extend(d.get(key, []))
+    return merged
+
+
+async def _resolve_sbi_raw_rows(raw_rows: list) -> list:
+    """Resolve SBI's scheme-NAME+plan-keyed rows to `ExpenseRatioRow` (isin=ISIN)
+    via the SAME pg_trgm fuzzy matcher the constituents/UTI/NIPPON pipelines use
+    — never a second matcher. A (scheme_name + plan_suffix) that doesn't resolve
+    to an ISIN with sufficient similarity is dropped (fail-closed, never
+    guessed); see `dhanradar.tasks.mf._resolve_scheme_isins`."""
+    from dhanradar.market_data.amc_expense import ExpenseRatioRow
+    from dhanradar.tasks.mf import _resolve_scheme_isins
+
+    if not raw_rows:
+        return []
+
+    # Resolve each DISTINCT (scheme_name + plan_suffix) string once.
+    qualified_names = {r.scheme_name + r.plan_suffix for r in raw_rows}
+    scheme_isin_map = await _resolve_scheme_isins(qualified_names, "SBI")
+
+    resolved: list[ExpenseRatioRow] = []
+    for r in raw_rows:
+        isin = scheme_isin_map.get(r.scheme_name + r.plan_suffix)
+        if isin is None:
+            logger.debug(
+                "mf_expense_ratio: SBI scheme %r%s did not resolve to an ISIN — dropping row",
+                r.scheme_name,
+                r.plan_suffix,
+            )
+            continue
+        resolved.append(
+            ExpenseRatioRow(isin=isin, ter_pct=r.ter_pct, effective_date=r.effective_date)
+        )
+    return resolved
+
+
+async def _run(run_id: int, stats, fetch_fn, *, sbi_fetch_fn=None) -> None:
+    """Core pipeline body — separated so integration tests can inject fetch_fn
+    (+ optional sbi_fetch_fn; defaults to a no-op source that returns zero rows
+    so existing tests that don't pass it keep working unchanged)."""
+
+    async def _noop_fetch(client):
+        return [], {"bot_blocked": [], "unreachable": [], "format_mismatch": [], "ok": []}
+
+    sbi_fetch_fn = sbi_fetch_fn or _noop_fetch
+
     async with httpx.AsyncClient(
         headers={"User-Agent": "DhanRadar/1.0 data-pipeline"},
         follow_redirects=True,
     ) as client:
         rows, status = await fetch_fn(client)
+        sbi_raw_rows, sbi_status = await sbi_fetch_fn(client)
+
+    sbi_rows = await _resolve_sbi_raw_rows(sbi_raw_rows)
+    rows = list(rows) + sbi_rows
+    status = _merge_status(status, sbi_status)
 
     bot_blocked: list[str] = status.get("bot_blocked", [])
     unreachable: list[str] = status.get("unreachable", [])
@@ -174,9 +241,7 @@ async def _run(run_id: int, stats, fetch_fn) -> None:
                 await db.commit()
             written += len(chunk)
         except Exception as exc:
-            logger.error(
-                "mf_expense_ratio: upsert chunk failed: %s", exc, exc_info=True
-            )
+            logger.error("mf_expense_ratio: upsert chunk failed: %s", exc, exc_info=True)
             stats.failed += len(chunk)
 
     stats.written = written
@@ -194,9 +259,7 @@ async def _run(run_id: int, stats, fetch_fn) -> None:
             async with TaskSessionLocal() as db:
                 for isin, (_, ter_pct) in latest_per_isin.items():
                     await db.execute(
-                        update(MfFund)
-                        .where(MfFund.isin == isin)
-                        .values(expense_ratio_pct=ter_pct)
+                        update(MfFund).where(MfFund.isin == isin).values(expense_ratio_pct=ter_pct)
                     )
                 await db.commit()
             logger.info(
@@ -204,8 +267,6 @@ async def _run(run_id: int, stats, fetch_fn) -> None:
                 len(latest_per_isin),
             )
         except Exception as exc:
-            logger.error(
-                "mf_expense_ratio: mf_funds update failed: %s", exc, exc_info=True
-            )
+            logger.error("mf_expense_ratio: mf_funds update failed: %s", exc, exc_info=True)
             # Do not increment stats.failed — mf_funds update is a denorm mirror;
             # the history rows were already written. Log only.
