@@ -101,5 +101,6 @@ export const queryKeys = {
   },
   benchmark: {
     byKey: (key: string, params?: { from?: string; to?: string }) => ['benchmark', key, params] as const,
+    returns: (key: string) => ['benchmark', key, 'returns'] as const,
   },
 } as const;

@@ -578,3 +578,35 @@ export function useBenchmarkSeries(
 export function useNiftyCloseSeries(params?: { from?: string; to?: string }) {
   return useBenchmarkSeries('nifty50', params);
 }
+
+// ---------------------------------------------------------------------------
+// Benchmark trailing 1Y/3Y/5Y returns (Fix 1, fund-page-quick-wins) — feeds the
+// fund-detail Returns-tab "vs benchmark & category" comparison table's
+// Benchmark row. Computed SERVER-SIDE (GET /mf/benchmark/{key}/returns); the
+// frontend never derives trailing returns from raw daily closes itself.
+// ---------------------------------------------------------------------------
+
+export interface BenchmarkReturnsPayload {
+  benchmark: string;
+  display_name: string;
+  /** "<Display name> · price index, excludes dividends" */
+  disclosure: string;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  return_5y_pct: number | null;
+  as_of: string | null;
+}
+
+export function useBenchmarkReturns(benchmark: string, options?: { enabled?: boolean }) {
+  return useQuery<BenchmarkReturnsPayload>({
+    queryKey: queryKeys.benchmark.returns(benchmark),
+    queryFn: () => api.get<BenchmarkReturnsPayload>(`/mf/benchmark/${benchmark}/returns`),
+    enabled: (options?.enabled ?? true) && !!benchmark,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 10 * 60 * 1000, // trailing returns change only once a day
+  });
+}
+

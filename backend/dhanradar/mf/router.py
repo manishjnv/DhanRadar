@@ -1293,3 +1293,57 @@ async def benchmark_by_key(
     helper as this route.
     """
     return await _benchmark_daily_closes(db, key, from_date, to_date)
+
+
+async def _benchmark_returns(db: AsyncSession, key: str) -> dict:
+    """Trailing 1Y/3Y/5Y returns for a BENCHMARK_REGISTRY key (Fix 1,
+    fund-page-quick-wins) — feeds the Returns-tab "vs benchmark & category"
+    comparison table's Benchmark row. Computed SERVER-SIDE from
+    `mf_benchmark_daily` closes (never client-side from raw closes, cache
+    friendly) with the SAME trailing-return math `mf_fund_metrics` uses for a
+    fund's own return_1y_pct/return_3y_pct/return_5y_pct
+    (`mf.signals.extended_horizon_stats`) — one reusable implementation, not a
+    second one. 404s (RFC7807, detail=benchmark_not_found) for an unknown key,
+    same as `/benchmark/{key}`.
+    """
+    from dhanradar.mf.signals import extended_horizon_stats
+    from dhanradar.models.mf import MfBenchmarkDaily
+    from dhanradar.tasks.mf import BENCHMARK_REGISTRY
+
+    spec = BENCHMARK_REGISTRY.get(key)
+    if spec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="benchmark_not_found")
+
+    rows = (
+        await db.execute(
+            select(MfBenchmarkDaily.close_date, MfBenchmarkDaily.close_value)
+            .where(MfBenchmarkDaily.benchmark == spec.storage_key)
+            .order_by(MfBenchmarkDaily.close_date.asc())
+        )
+    ).all()
+    points = [(r.close_date, float(r.close_value)) for r in rows]
+    _r3m, _r6m, r1y, r3y, r5y, _dd = extended_horizon_stats(points)
+
+    return {
+        "benchmark": spec.storage_key,
+        "display_name": spec.display_name,
+        "disclosure": f"{spec.display_name} · price index, excludes dividends",
+        "return_1y_pct": r1y,
+        "return_3y_pct": r3y,
+        "return_5y_pct": r5y,
+        "as_of": points[-1][0].isoformat() if points else None,
+    }
+
+
+@router.get("/benchmark/{key}/returns")
+async def benchmark_returns(
+    key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """Public reference endpoint — a registered benchmark's trailing 1Y/3Y/5Y
+    returns (Fix 1, fund-page-quick-wins). Server-side only: the frontend never
+    derives benchmark trailing returns from raw daily closes in the browser.
+    Same 404 / rate-limit / disclosure conventions as `/benchmark/{key}`.
+    """
+    return await _benchmark_returns(db, key)

@@ -9,10 +9,11 @@
  * tab (Returns/SIP/Rolling/Rank-Trend/Drawdowns/Consistency) and the whole Risk
  * Center are wired to real data (`fund.nav_series`, `fund.analytics`,
  * `fund.rank_history`, `fund.sip_illustration`, `fund.health`, plus the
- * benchmark daily-close endpoint). Only two small in-tab comparison TABLES
- * (Returns-tab "vs benchmark & category", Rolling-tab "vs benchmark &
- * category") stay sampleData preview — each carries its own inline
- * <PreviewBadge/>, not a tab-level one.
+ * benchmark daily-close endpoint). Fix 1 (fund-page-quick-wins) wires the
+ * Returns-tab "vs benchmark & category" comparison table to real data too
+ * (fund.analytics + the new /mf/benchmark/{key}/returns route) — only the
+ * Rolling-tab "vs benchmark & category" table stays sampleData preview, with
+ * its own inline <PreviewBadge/>.
  *
  * Item 3 (2026-07): the Returns-tab overlay picks a category-appropriate
  * benchmark (`categoryBenchmark.ts` — Large Cap → Nifty 100, Mid Cap → Nifty
@@ -25,8 +26,9 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { useFundNav, useFundAnalytics, useFundSip } from '@/features/mf/api';
-import { useBenchmarkSeries } from '@/features/portfolio/api';
+import { useBenchmarkSeries, useBenchmarkReturns } from '@/features/portfolio/api';
 import { benchmarkForCategory } from './categoryBenchmark';
+import type { CategoryPercentileBand } from '@/features/mf/types';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
@@ -36,7 +38,7 @@ import {
 } from './parts';
 import {
   SNAPSHOT,
-  RETURN_TABLE, RETURN_TABLE_HEAD, GROWTH, ROLLING, RANK,
+  GROWTH, ROLLING, RANK,
 } from './sampleData';
 import type { Band3 } from './sampleData';
 import type { FundHead } from './sectionsHero';
@@ -131,6 +133,11 @@ const RANGE_TO_API: Record<string, '1y' | '3y' | '5y' | 'max'> = {
   '1Y': '1y', '3Y': '3y', '5Y': '5y', 'MAX': 'max',
 };
 
+// Returns-tab comparison table column labels (Fix 1) — Launch has no real
+// basis anywhere yet, kept as a column so its cells can honestly show "—"
+// rather than being silently dropped.
+const COMPARISON_TABLE_HEAD = ['Period', '1Y', '3Y', '5Y', 'Launch'];
+
 // ── Returns tab ──────────────────────────────────────────────────────────────
 function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
   const [uiRange, setUiRange] = React.useState(GROWTH.ranges[2]); // default 5Y
@@ -138,6 +145,11 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
 
   const { data: navEnv, isLoading: navLoading } = useFundNav(isin, apiRange);
   const navData = navEnv?.data ?? null;
+
+  // Fix 1 (fund-page-quick-wins) — category_percentiles.return_1y_pct/3y_pct p50
+  // feeds the comparison table's "Category avg" row below.
+  const { data: analyticsEnv } = useFundAnalytics(isin);
+  const analyticsData = analyticsEnv?.analytics.data ?? null;
 
   // Item 3 (2026-07): category-appropriate benchmark, falling back to Nifty 50
   // when the mapped benchmark's own series is empty (e.g. cold-start before
@@ -185,6 +197,49 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
     { p: 'Launch', v: null },
   ];
 
+  // Comparison table — real (Fix 1, fund-page-quick-wins). "This fund" reuses
+  // head.return1yPct/3yPct/5yPct (same numbers as the 8-col grid above).
+  // "Benchmark" is fetched from the new server-side /mf/benchmark/{key}/returns
+  // route for the SAME resolved key the growth-chart overlay above uses
+  // (mapped category benchmark, or its nifty50 fallback when the mapped
+  // series is empty) — table and chart always agree on which index is shown.
+  // "Category avg" is the category's stored p50 (mf_category_stats) already
+  // served in fund.analytics.category_percentiles. Launch has no real basis
+  // anywhere yet and 5Y category stats aren't published — both stay "—"
+  // rather than a fabricated/interpolated number (§8.4 no-fabrication).
+  const resolvedBenchmarkKey = shouldFallback ? 'nifty50' : benchmarkMeta.key;
+  const { data: benchReturns } = useBenchmarkReturns(resolvedBenchmarkKey);
+  const catPct = analyticsData?.category_percentiles;
+
+  const comparisonRows: { row: string; me: boolean; tip?: string; cells: string[] }[] = [
+    {
+      row: 'This fund',
+      me: true,
+      cells: [fmtPct(head.return1yPct), fmtPct(head.return3yPct), fmtPct(head.return5yPct), '—'],
+    },
+    {
+      row: 'Benchmark',
+      me: false,
+      tip: 'Price index; excludes dividends.',
+      cells: [
+        fmtPct(benchReturns?.return_1y_pct),
+        fmtPct(benchReturns?.return_3y_pct),
+        fmtPct(benchReturns?.return_5y_pct),
+        '—',
+      ],
+    },
+    {
+      row: 'Category avg',
+      me: false,
+      cells: [
+        fmtPct(catPct?.return_1y_pct?.p50),
+        fmtPct(catPct?.return_3y_pct?.p50),
+        '—',
+        '—',
+      ],
+    },
+  ];
+
   return (
     <>
       {/* 8-col return cells */}
@@ -200,16 +255,14 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
         ))}
       </div>
 
-      {/* Comparison table — preview (fund/benchmark/category-avg 1Y/3Y/5Y/Launch table;
-          not trivially fillable from what W1 serves without scope-creep, §10.5 W2). */}
+      {/* Comparison table — real (Fix 1): this fund / benchmark / category avg */}
       <div className="mt-4 flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">vs benchmark &amp; category</span>
-        <PreviewBadge />
       </div>
       <table className="mt-2 w-full border-collapse text-[12.5px]">
         <thead>
           <tr>
-            {RETURN_TABLE_HEAD.map((h, i) => (
+            {COMPARISON_TABLE_HEAD.map((h, i) => (
               <th
                 key={h}
                 className={cn(
@@ -223,7 +276,7 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
           </tr>
         </thead>
         <tbody>
-          {RETURN_TABLE.map((row) => (
+          {comparisonRows.map((row) => (
             <tr key={row.row}>
               <td
                 className={cn(
@@ -231,7 +284,10 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
                   row.me ? 'text-royal' : 'text-ink-secondary',
                 )}
               >
-                {row.row}
+                <span className="inline-flex items-center gap-1">
+                  {row.row}
+                  {row.tip && <InfoTip tip={row.tip} />}
+                </span>
               </td>
               {row.cells.map((c, i) => (
                 <td
@@ -695,9 +751,10 @@ function ConsistencyTab({ isin }: { isin: string }) {
 
 export function PerformanceSection({ head, isin }: { head: FundHead; isin: string }) {
   const [tab, setTab] = React.useState('returns');
-  // SIP/Drawdowns/Consistency are real as of W2 (§10.5) — only the Returns-tab
-  // comparison table and the Rolling-tab comparison table stay preview
-  // (their own inline <PreviewBadge/>), so no tab-level badge is needed anymore.
+  // SIP/Drawdowns/Consistency are real as of W2 (§10.5); the Returns-tab
+  // comparison table is real as of Fix 1 — only the Rolling-tab comparison
+  // table stays preview (its own inline <PreviewBadge/>), so no tab-level
+  // badge is needed.
 
   return (
     <Panel className="p-5 sm:p-6">
@@ -749,6 +806,26 @@ function maxDDBand(v: number | null): Band3 {
   return v > -10 ? 'high' : v > -25 ? 'medium' : 'low';
 }
 
+// Fix 2 (fund-page-quick-wins) — Max Drawdown stat-to-sentence. Honest basis:
+// the category percentile band already served in
+// fund.analytics.category_percentiles.max_drawdown_pct (mf_category_stats
+// p25/p50/p75/p90, computed ascending-sorted over the raw negative
+// max_drawdown_pct values — so p90 = smallest/least-negative fall = best,
+// p25 = largest fall = worst). Sharpe/Sortino get NO sentence anywhere in
+// this file: no category-relative or historical comparison basis is served
+// for either metric today (only the static band heuristics above, which the
+// code comment on them already flags as not a real percentile) — inventing
+// one would be a fabricated comparison (§16.2).
+function drawdownSentence(
+  value: number | null | undefined,
+  band: CategoryPercentileBand | undefined,
+): string | null {
+  if (value == null || !band || band.p25 == null || band.p75 == null) return null;
+  if (value >= band.p75) return 'Its worst fall was smaller than most funds in its category.';
+  if (value <= band.p25) return 'Its worst fall was larger than most funds in its category.';
+  return 'Its worst fall was about typical for its category.';
+}
+
 export function RiskCenterSection({ isin }: { isin: string }) {
   const { data, isLoading, isError, refetch } = useFundAnalytics(isin);
   const a = data?.analytics.data ?? null;
@@ -789,7 +866,7 @@ export function RiskCenterSection({ isin }: { isin: string }) {
     { name: 'Beta', tip: 'Moves with the index', real: false, value: '—', band: 'medium' },
     { name: 'Tracking Error', tip: 'Index-tracking tightness', real: false, value: '—', band: 'medium' },
     { name: 'Std Deviation', tip: 'Volatility', real: a?.volatility_pct != null, value: a?.volatility_pct != null ? `${a.volatility_pct.toFixed(1)}%` : '—', band: volFavorabilityBand(a?.volatility_percentile ?? null), note: riskDimensionNote },
-    { name: 'Max Drawdown', tip: 'Worst peak-to-trough', real: a?.max_drawdown_pct != null, value: a?.max_drawdown_pct != null ? `${a.max_drawdown_pct.toFixed(1)}%` : '—', band: maxDDBand(a?.max_drawdown_pct ?? null) },
+    { name: 'Max Drawdown', tip: 'Worst peak-to-trough', real: a?.max_drawdown_pct != null, value: a?.max_drawdown_pct != null ? `${a.max_drawdown_pct.toFixed(1)}%` : '—', band: maxDDBand(a?.max_drawdown_pct ?? null), note: drawdownSentence(a?.max_drawdown_pct, a?.category_percentiles.max_drawdown_pct) },
     { name: 'Upside Capture', tip: 'Of index gains captured', real: false, value: '—', band: 'medium' },
     { name: 'Downside Capture', tip: 'Of index falls absorbed', real: false, value: '—', band: 'medium' },
     { name: 'Portfolio Turnover', tip: 'Trading frequency', real: false, value: '—', band: 'medium' },
