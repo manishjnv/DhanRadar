@@ -16,6 +16,8 @@ Covers:
     - ok AMC: rows returned, recorded in status["ok"]
     - unreachable AMC (non-200): recorded in status["unreachable"], loop continues
     - transport error: recorded in status["unreachable"], loop continues
+    - HTTP 200 + 0 parseable rows: recorded in status["format_mismatch"], NOT
+      status["unreachable"] (site is up, the parser just doesn't match)
     - returns (rows, status_dict) regardless of failures
 
 ISIN format: ^INF[A-Z0-9]{9}$ (12 chars total). All fixtures use this shape.
@@ -238,18 +240,58 @@ class TestFetchFundManagers:
         assert len(rows) == 2
 
     async def test_returns_status_dict_keys(self):
-        """Status dict always has bot_blocked, unreachable, ok keys."""
+        """Status dict always has bot_blocked, unreachable, format_mismatch, ok keys."""
         fake_client = _make_fake_client(_NIPPON_PAYLOAD)
         _, status = await fetch_fund_managers(fake_client, sources=[])
-        assert set(status.keys()) == {"bot_blocked", "unreachable", "ok"}
+        assert set(status.keys()) == {"bot_blocked", "unreachable", "format_mismatch", "ok"}
 
-    async def test_empty_parse_result_marks_unreachable(self):
-        """An AMC page that yields 0 parseable rows is marked unreachable."""
+    async def test_empty_parse_result_marks_format_mismatch_not_unreachable(self):
+        """An AMC page that returns HTTP 200 but yields 0 parseable rows is a
+        format_mismatch (site up, parser wrong) -- NOT an unreachable (site down).
+        This is the Step 1 bucketing fix: bucketing these identically previously
+        masked every parser bug as a fake network outage."""
         # Response has text but no rows matching the parser pattern.
         fake_client = _make_fake_client("no rows here at all", status_code=200)
         rows, status = await fetch_fund_managers(fake_client, sources=_FAKE_SOURCES_OK)
         assert not rows
+        assert "NIPPON" in status["format_mismatch"]
+        assert "NIPPON" not in status["unreachable"]
+
+    async def test_non_200_still_marks_unreachable_not_format_mismatch(self):
+        """A real HTTP failure (404) must still land in unreachable, never
+        format_mismatch -- format_mismatch is reserved for HTTP 200 + 0 rows."""
+        fake_client = _make_fake_client("Not Found", status_code=404)
+        rows, status = await fetch_fund_managers(fake_client, sources=_FAKE_SOURCES_OK)
+        assert not rows
         assert "NIPPON" in status["unreachable"]
+        assert "NIPPON" not in status["format_mismatch"]
+
+    async def test_transport_error_still_marks_unreachable_not_format_mismatch(self):
+        """A real network/timeout error must still land in unreachable, never
+        format_mismatch."""
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(side_effect=httpx.TransportError("connection refused"))
+        rows, status = await fetch_fund_managers(fake_client, sources=_FAKE_SOURCES_OK)
+        assert not rows
+        assert "NIPPON" in status["unreachable"]
+        assert "NIPPON" not in status["format_mismatch"]
+
+    async def test_bot_blocked_amc_stays_bot_blocked_not_format_mismatch(self):
+        """A bot-blocked AMC is never fetched at all -- it must land only in
+        bot_blocked, never in format_mismatch or unreachable."""
+        fake_client = _make_fake_client(_NIPPON_PAYLOAD)
+        rows, status = await fetch_fund_managers(fake_client, sources=_FAKE_SOURCES_BOT_BLOCKED)
+        assert "HDFC" in status["bot_blocked"]
+        assert "HDFC" not in status["format_mismatch"]
+        assert "HDFC" not in status["unreachable"]
+
+    async def test_ok_amc_with_real_rows_lands_in_ok_not_format_mismatch(self):
+        """An AMC with real parseable rows lands in 'ok', never format_mismatch."""
+        fake_client = _make_fake_client(_NIPPON_PAYLOAD)
+        rows, status = await fetch_fund_managers(fake_client, sources=_FAKE_SOURCES_OK)
+        assert rows
+        assert "NIPPON" in status["ok"]
+        assert "NIPPON" not in status["format_mismatch"]
 
     def test_default_registry_contains_no_bot_blocked_amcs(self):
         """AMC_FACTSHEET_SOURCES must not list any BOT_BLOCKED_AMCS entry.

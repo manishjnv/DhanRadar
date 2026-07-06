@@ -3876,30 +3876,29 @@ def _drop_over_covered_funds(constituent_batch: list[dict], amc_name: str) -> li
     return [r for r in constituent_batch if r["isin"] not in bad_isins]
 
 
-async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[int, int]:
-    """Resolve scheme names → ISINs via pg_trgm, upsert constituent rows.
+async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[str, str]:
+    """Resolve a set of scheme NAMES → ISINs via pg_trgm fuzzy match, restricted
+    to the same AMC's funds (by name prefix) to avoid cross-AMC false positives
+    (e.g. "UTI - Liquid Fund" vs "HSBC Liquid Fund").
 
-    Returns (rows_upserted, aum_updates).
-    §8.4: aum_crore is written from the file's per-scheme net-assets row only;
-    never derived from AMC-level totals.
+    Extracted out of `_upsert_constituents` (Phase 6 fund-manager rebuild,
+    2026-07) so the SAME fuzzy matcher is shared by the constituents pipeline
+    and any other scheme-name-keyed source (currently: the UTI JSON-API and
+    NIPPON factsheet-PDF fund-manager fetchers in tasks/mf_fund_manager.py) —
+    never a second matcher. Behavior is unchanged from the original inline loop.
+
+    Returns {scheme_name: isin} for names that matched with similarity > 0.35
+    (or > 0.25 for MIRAE's shorter extracted names); unmatched names are simply
+    absent from the returned dict (never guessed).
     """
-    from sqlalchemy import func
     from sqlalchemy import text as sa_text
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from dhanradar.db import TaskSessionLocal
-    from dhanradar.models.mf import MfFundConstituent
 
-    # Group rows by scheme_name to resolve ISINs in bulk.
-    scheme_names: set[str] = {r["scheme_name"] for r in parsed_rows if r.get("scheme_name")}
     if not scheme_names:
-        return 0, 0
+        return {}
 
     scheme_isin_map: dict[str, str] = {}
-    # Restrict similarity search to the same AMC to avoid cross-AMC false matches
-    # (e.g. "UTI - Liquid Fund" vs "HSBC Liquid Fund"). amc_name may be "UTI",
-    # "NIPPON", etc.; fund names in mf_funds start with the AMC's short prefix.
-    # MIRAE funds are prefixed "Mirae Asset", not "MIRAE", so map that explicitly.
     amc_prefix_map = {"MIRAE": "Mirae Asset%"}
     amc_prefix = amc_prefix_map.get(amc_name) or (amc_name.split("_")[0] + "%")  # "ICICI_PRU" → "ICICI%"
     async with TaskSessionLocal() as db:
@@ -3945,6 +3944,31 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
                     "mf_constituents_fetch amc=%s no matches for scheme '%s' with prefix '%s'",
                     amc_name, sname, amc_prefix
                 )
+    return scheme_isin_map
+
+
+async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[int, int]:
+    """Resolve scheme names → ISINs via pg_trgm, upsert constituent rows.
+
+    Returns (rows_upserted, aum_updates).
+    §8.4: aum_crore is written from the file's per-scheme net-assets row only;
+    never derived from AMC-level totals.
+    """
+    from sqlalchemy import func
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfFundConstituent
+
+    # Group rows by scheme_name to resolve ISINs in bulk.
+    scheme_names: set[str] = {r["scheme_name"] for r in parsed_rows if r.get("scheme_name")}
+    if not scheme_names:
+        return 0, 0
+
+    # amc_name may be "UTI", "NIPPON", etc.; fund names in mf_funds start with
+    # the AMC's short prefix. Shared matcher — see `_resolve_scheme_isins`.
+    scheme_isin_map = await _resolve_scheme_isins(scheme_names, amc_name)
 
     # Resolve ISINs and split into constituent rows vs aum updates.
     constituent_batch: list[dict] = []

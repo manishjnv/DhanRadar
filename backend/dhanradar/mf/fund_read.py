@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.mf.fund_events import summarize_event
 from dhanradar.mf.risk import (
     SIP_MIN_MONTHS_FOR_ILLUSTRATION,
+    _nav_on_or_before,
     calendar_year_returns,
     compute_sip_illustration,
     drawdown_series,
@@ -698,6 +699,15 @@ async def get_fund_people(session: AsyncSession, isin: str) -> tuple[dict, dict]
     `market_data/amc_managers.py` ("scheme_uid — SEBI ISIN; the canonical scheme
     identifier") — a direct equality join, not a lookup table (see report deviations).
     Coverage is 5 AMCs only — an uncovered AMC gets empty managers, still 200.
+
+    Each CURRENT manager (`end_date is None`) additionally gets
+    `tenure_return_pct` + `tenure_return_as_of` when NAV history covers their
+    `start_date` — the fund's return from the NAV on/before that date to the
+    latest NAV. Reuses `_nav_on_or_before` (risk.py) and `_load_nav_points`
+    (this module, already used by get_fund_analytics/get_fund_sip) — no new
+    return math (B98 Step 3). Omitted (not zero, not guessed) when NAV history
+    doesn't reach back to `start_date` — fail-closed, matching the rest of
+    this read model's "absent, not fabricated" convention.
     """
     fund = await session.get(MfFund, isin)
     if fund is None:
@@ -717,15 +727,29 @@ async def get_fund_people(session: AsyncSession, isin: str) -> tuple[dict, dict]
 
     today = date.today()
     cutoff = today - timedelta(days=_MANAGER_CHANGE_WINDOW_DAYS)
-    managers = [
-        {
+
+    current_rows = [r for r in rows if r.end_date is None]
+    nav_points: list[tuple[date, float]] | None = None
+    if current_rows:
+        nav_points = await _load_nav_points(session, isin)
+
+    managers = []
+    for r in current_rows:
+        entry: dict = {
             "name": r.manager_name,
             "start_date": r.start_date.isoformat(),
             "tenure_years": round((today - r.start_date).days / 365.25, 1),
         }
-        for r in rows
-        if r.end_date is None
-    ]
+        if nav_points:
+            dates = [p[0] for p in nav_points]
+            navs = [p[1] for p in nav_points]
+            nav_start = _nav_on_or_before(dates, navs, r.start_date)
+            nav_latest = navs[-1]
+            if nav_start is not None and nav_start > 0:
+                entry["tenure_return_pct"] = round((nav_latest / nav_start - 1.0) * 100.0, 2)
+                entry["tenure_return_as_of"] = dates[-1].isoformat()
+        managers.append(entry)
+
     manager_changes_5y = sum(1 for r in rows if r.end_date is not None and r.end_date >= cutoff)
     people = {"managers": managers, "manager_changes_5y": manager_changes_5y}
 

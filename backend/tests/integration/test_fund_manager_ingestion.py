@@ -31,11 +31,36 @@ from __future__ import annotations
 import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy import select, text
 
 from dhanradar.market_data.amc_managers import FundManagerRow
 from dhanradar.models.mf import MfFundManagerHistory, MfIngestionRun, MfSourceHealth
 from dhanradar.tasks.mf_fund_manager import _mf_fund_manager_pipeline
+
+_EMPTY_STATUS = {"bot_blocked": [], "unreachable": [], "format_mismatch": [], "ok": []}
+
+
+@pytest.fixture(autouse=True)
+def _patch_uti_and_nippon_sources():
+    """The pipeline now ALSO fetches UTI (JSON API) and NIPPON (factsheet PDF)
+    fund-manager rows alongside the generic factsheet fetch under test here.
+    Default both to empty/no-op so these tests stay hermetic (no real network)
+    and keep exercising only the generic-fetch + DB-write path they were
+    written for; tests that care about UTI/NIPPON specifically live in
+    test_amc_managers_uti.py / test_amc_managers_nippon.py."""
+    with (
+        patch(
+            "dhanradar.market_data.amc_managers_uti.fetch_uti_fund_managers",
+            new=AsyncMock(return_value=([], dict(_EMPTY_STATUS))),
+        ),
+        patch(
+            "dhanradar.market_data.amc_managers_nippon.fetch_nippon_fund_managers",
+            new=AsyncMock(return_value=([], dict(_EMPTY_STATUS))),
+        ),
+    ):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Test data -- 12-char ISINs (INF + 9 alphanumeric).
@@ -61,12 +86,21 @@ _FAKE_ROWS = [
 _FAKE_STATUS_OK = {
     "bot_blocked": ["HDFC", "SBI"],
     "unreachable": [],
+    "format_mismatch": [],
     "ok": ["NIPPON"],
 }
 
 _FAKE_STATUS_ALL_BLOCKED = {
     "bot_blocked": ["HDFC", "SBI", "ICICI_PRU", "KOTAK", "AXIS"],
     "unreachable": ["NIPPON", "MIRAE"],
+    "format_mismatch": [],
+    "ok": [],
+}
+
+_FAKE_STATUS_FORMAT_MISMATCH_ONLY = {
+    "bot_blocked": ["HDFC", "SBI", "ICICI_PRU", "KOTAK", "AXIS"],
+    "unreachable": [],
+    "format_mismatch": ["NIPPON", "MIRAE", "DSP", "FRANKLIN", "UTI"],
     "ok": [],
 }
 
@@ -79,6 +113,12 @@ async def _fake_fetch_ok(client, sources=None):
 async def _fake_fetch_all_blocked(client, sources=None):
     """Deterministic fake: returns no rows because all AMCs are blocked."""
     return [], _FAKE_STATUS_ALL_BLOCKED
+
+
+async def _fake_fetch_format_mismatch_only(client, sources=None):
+    """Deterministic fake: every non-bot-blocked AMC returned HTTP 200 with 0
+    parseable rows -- the site is up, the parser is wrong."""
+    return [], _FAKE_STATUS_FORMAT_MISMATCH_ONLY
 
 
 def _async_client_cm_mock():
@@ -228,5 +268,53 @@ async def test_all_bot_blocked_records_partial_unreachable(db_tables, patch_redi
         )
     )
     assert count == 0, f"Expected 0 history rows for all-blocked run, got {count}"
+
+    await _cleanup(db_session, [])
+
+
+# ===========================================================================
+# Test 4 -- format_mismatch-only path: site up, parser wrong -> reachable=True
+# ===========================================================================
+
+async def test_format_mismatch_only_records_reachable_true(db_tables, patch_redis, db_session):
+    """When every non-bot-blocked AMC is HTTP 200 + 0 parseable rows
+    (format_mismatch), the run is still 'partial' (no rows written) but
+    source_health.reachable=True -- the site IS up, only the parser is wrong.
+    This is the Step 1 distinction: 'site down' vs 'site up, parser wrong'
+    must not both collapse to reachable=False."""
+    with patch(
+        "dhanradar.market_data.amc_managers.fetch_fund_managers",
+        new=AsyncMock(side_effect=_fake_fetch_format_mismatch_only),
+    ):
+        with patch(
+            "dhanradar.tasks.mf_fund_manager.httpx.AsyncClient",
+            return_value=_async_client_cm_mock(),
+        ):
+            await _mf_fund_manager_pipeline()
+
+    run_row = await db_session.scalar(
+        select(MfIngestionRun)
+        .where(MfIngestionRun.source == "amc_fund_managers")
+        .order_by(MfIngestionRun.run_id.desc())
+        .limit(1)
+    )
+    assert run_row is not None
+    assert run_row.status == "partial", f"Expected status='partial', got '{run_row.status}'"
+    assert run_row.run_metadata is not None
+    assert run_row.run_metadata.get("format_mismatch") == [
+        "NIPPON", "MIRAE", "DSP", "FRANKLIN", "UTI",
+    ]
+
+    health_row = await db_session.scalar(
+        select(MfSourceHealth)
+        .where(MfSourceHealth.source == "amc_fund_managers")
+        .order_by(MfSourceHealth.check_time.desc())
+        .limit(1)
+    )
+    assert health_row is not None
+    assert health_row.reachable is True, (
+        f"format_mismatch-only run must be reachable=True (site up, parser wrong), "
+        f"got {health_row.reachable}"
+    )
 
     await _cleanup(db_session, [])
