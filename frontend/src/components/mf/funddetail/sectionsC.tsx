@@ -14,13 +14,13 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
-import { useFundComposition, useFundPeople } from '@/features/mf/api';
+import { useFundComposition, useFundPeople, useFundFlows } from '@/features/mf/api';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
   Panel, TabBar, ChipToggle, StackBar, FlowBars, BandBar, WhatThisMeans,
 } from './parts';
-import { FLOW, AMC, HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE, STYLE_BOX } from './sampleData';
+import { AMC, HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE, STYLE_BOX } from './sampleData';
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
@@ -236,13 +236,41 @@ export function HoldingsSection({ isin }: { isin: string }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S14 — FUND FLOW INTELLIGENCE
+// S14 — FUND FLOW INTELLIGENCE (Block 0.10 — category-level reframe)
+//
+// COMPLIANCE (hard): the ONLY available source (AMFI's monthly category-flow
+// report, mf.mf_category_flows) publishes CATEGORY-level net flows, never a
+// per-scheme figure (§8.4/§14.3) — this section must never claim "this fund's
+// flows" and must never split into Inflows/Outflows (that split doesn't exist
+// in the source data either; only a single NET figure per month is published).
+// No "investors are buying"/"growing trust" framing — amounts and a category
+// label only.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function FundFlowSection() {
-  const [range, setRange] = React.useState(FLOW.ranges[2]); // default 1Y
+const FLOW_RANGE_MONTHS: Record<string, number> = { '3M': 3, '6M': 6, '1Y': 12 };
+const FLOW_RANGES = ['3M', '6M', '1Y'];
 
-  const rangeOpts = FLOW.ranges.map((r) => ({ key: r, label: r }));
+function fmtFlowCr(v: number | null): string {
+  if (v == null) return '—';
+  const rounded = Math.round(v);
+  const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+  return `${sign}₹${Math.abs(rounded).toLocaleString('en-IN')} Cr`;
+}
+
+export function FundFlowSection({ isin }: { isin: string }) {
+  const [range, setRange] = React.useState('1Y');
+  const { data, isLoading, isError, refetch } = useFundFlows(isin);
+  const flows = data?.data ?? null;
+  const points = flows?.points ?? [];
+
+  const rawStatus = data?.status ?? (isLoading ? 'loading' : isError ? 'error' : 'empty');
+  const status = rawStatus === 'present' && points.length === 0 ? 'empty' : rawStatus;
+
+  const rangeOpts = FLOW_RANGES.map((r) => ({ key: r, label: r }));
+  const monthsWindow = FLOW_RANGE_MONTHS[range] ?? 12;
+  const windowed = points.slice(-monthsWindow);
+  const series = windowed.map((p) => p.net_flow_cr ?? 0);
+  const latest = windowed[windowed.length - 1];
 
   return (
     <Panel className="p-5 sm:p-6">
@@ -253,49 +281,52 @@ export function FundFlowSection() {
         onChange={setRange}
       />
 
-      {/* 3-up stat grid */}
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {FLOW.cells.map((c) => (
-          <div
-            key={c.l}
-            className="rounded-2xl border border-line p-3.5 text-center"
-          >
+      <DataState
+        status={status}
+        emptyCopy="Category-level flow data isn't published for this fund's category yet."
+        onRetry={refetch}
+        skeleton={<Skeleton className="mt-4 h-48 w-full rounded-xl" />}
+      >
+        {/* 2-up stat grid — category label + latest month's net flow only (the
+            source has no inflow/outflow split, so none is invented here). */}
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-line p-3.5 text-center">
+            <div className="font-mono text-[15px] font-bold leading-none text-ink">
+              {flows?.scheme_category ?? '—'}
+            </div>
+            <div className="mt-1 text-caption font-semibold text-ink-muted">Category</div>
+          </div>
+          <div className="rounded-2xl border border-line p-3.5 text-center">
             <div
               className={cn(
                 'font-mono text-[17px] font-bold leading-none',
-                c.tone ? (TONE_TEXT[c.tone] ?? 'text-ink') : 'text-ink',
+                latest?.net_flow_cr != null
+                  ? latest.net_flow_cr >= 0 ? 'text-emerald' : 'text-red'
+                  : 'text-ink',
               )}
             >
-              {c.v}
+              {fmtFlowCr(latest?.net_flow_cr ?? null)}
             </div>
-            <div className="mt-1 text-caption font-semibold text-ink-muted">{c.l}</div>
+            <div className="mt-1 text-caption font-semibold text-ink-muted">
+              Net flow · {latest ? latest.period_month : 'latest month'}
+            </div>
           </div>
-        ))}
-      </div>
-
-      {/* chart wrapper */}
-      <div className="mt-4 rounded-xl border border-line p-3.5" style={{ background: 'linear-gradient(180deg,#fff,#FAFBFD)' }}>
-        <div className="mb-2 text-caption font-semibold text-ink-muted">
-          Net monthly flows · last 12 months (₹ Cr)
         </div>
-        <FlowBars series={FLOW.series} />
-      </div>
 
-      {/* badge row */}
-      <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald px-2.5 py-1 text-caption font-semibold text-emerald">
-          <span
-            className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full bg-emerald text-[9px] text-white"
-            aria-hidden="true"
-          >
-            ✓
-          </span>
-          {FLOW.badge}
-        </span>
-        <span className="text-small text-ink-muted">{FLOW.badgeNote}</span>
-      </div>
+        {/* chart wrapper */}
+        <div className="mt-4 rounded-xl border border-line p-3.5" style={{ background: 'linear-gradient(180deg,#fff,#FAFBFD)' }}>
+          <div className="mb-2 text-caption font-semibold text-ink-muted">
+            Category net flows · monthly, AMFI ({range})
+          </div>
+          <FlowBars series={series.length ? series : [0]} />
+        </div>
 
-      <WhatThisMeans>{FLOW.meaning}</WhatThisMeans>
+        <WhatThisMeans>
+          Net monthly flows for every fund AMFI classifies in {flows?.scheme_category ?? 'this fund\u2019s category'}
+          {' '}— not this fund alone. AMFI does not publish a per-scheme flow figure, so this is the closest
+          factual signal available for the category this fund belongs to.
+        </WhatThisMeans>
+      </DataState>
     </Panel>
   );
 }
