@@ -17,7 +17,7 @@ import { cn } from '@/lib/cn';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import {
-  HeroRing, StrengthBar, WhatThisMeans, Panel,
+  HeroRing, StrengthBar, WhatThisMeans, Panel, LiveBadge,
 } from './parts';
 import {
   FUND, VERDICT, ENTRY, MOOD, NO_DATA_FACTOR_TILES,
@@ -118,7 +118,11 @@ export function HeroSection({ head, factors }: { head: FundHead; factors: FundFa
               <span className="text-h3 font-bold" style={{ color: 'var(--dr-navy,#0B1F3A)' }}>{head.name[0]?.toUpperCase() ?? 'F'}</span>
             </div>
             <div className="min-w-0">
-              <h1 className="text-h2 font-semibold leading-tight tracking-[-0.02em] text-white">{head.name}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-h2 font-semibold leading-tight tracking-[-0.02em] text-white">{head.name}</h1>
+                {/* dev-verify */}
+                <LiveBadge />
+              </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {pills.map((p) => (
                   <span key={p} className="rounded-full bg-white/[0.12] px-2.5 py-1 text-caption font-semibold text-white/90">{p}</span>
@@ -453,7 +457,11 @@ export function StickyBar({ head, topReason }: { head: FundHead; topReason: stri
       <div className="flex w-full items-center gap-5 px-4 py-3 text-white sm:px-6 lg:px-8">
         <div className="flex shrink-0 items-center gap-3">
           <div>
-            <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-white/55">DhanRadar Read</div>
+            <div className="flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-white/55">
+              DhanRadar Read
+              {/* dev-verify */}
+              <LiveBadge />
+            </div>
             <div className="text-h3 font-bold leading-none text-emerald">{labelWord}</div>
           </div>
           <div className="hidden text-caption leading-snug text-white/75 sm:block">

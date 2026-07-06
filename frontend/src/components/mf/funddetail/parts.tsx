@@ -43,6 +43,22 @@ export function PreviewBadge({ className }: { className?: string }) {
   );
 }
 
+// dev-verify: temporary launch-verification badge — remove with all usages at launch (grep: dev-verify)
+export function LiveBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border border-emerald/30 bg-emerald/10 px-2 py-0.5',
+        'font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-emerald',
+        className,
+      )}
+      title="Wired to live data — temporary verification tag"
+    >
+      <span aria-hidden="true">●</span> Live
+    </span>
+  );
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // "What this means for you" insight line
 // ───────────────────────────────────────────────────────────────────────────
