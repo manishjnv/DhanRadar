@@ -81,7 +81,7 @@ async def test_tenure_return_computed_when_nav_covers_start_date(
             start_date=datetime.date(2023, 6, 1),
             end_date=None,
             source="test",
-            run_id=1,
+            run_id=None,
         )
     )
     await db_session.commit()
@@ -111,7 +111,7 @@ async def test_tenure_return_omitted_when_nav_predates_manager(
             start_date=datetime.date(2015, 6, 1),  # before the only NAV point on record
             end_date=None,
             source="test",
-            run_id=1,
+            run_id=None,
         )
     )
     await db_session.commit()
@@ -135,7 +135,7 @@ async def test_departed_manager_never_gets_tenure_return(async_client, db_sessio
             start_date=datetime.date(2018, 1, 1),
             end_date=datetime.date(2022, 1, 1),
             source="test",
-            run_id=1,
+            run_id=None,
         )
     )
     await db_session.commit()
