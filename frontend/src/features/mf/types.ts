@@ -298,6 +298,12 @@ export interface FundAnalytics {
   rolling_3y_min_pct: number | null;
   rolling_3y_max_pct: number | null;
   rolling_3y_pct_positive: number | null;
+  /** Block 0.7 — CAPM alpha/beta/tracking error vs the fund's mapped
+   *  benchmark_index. Populated ONLY for index funds with a high-confidence
+   *  benchmark mapping (mf/benchmark_mapping.py); null for every other fund. */
+  alpha_1y: number | null;
+  beta_1y: number | null;
+  tracking_error_pct: number | null;
   as_of: string | null;
   /** 0-100; higher = more volatile than category peers. null if uncategorised/uncohorted. */
   volatility_percentile: number | null;

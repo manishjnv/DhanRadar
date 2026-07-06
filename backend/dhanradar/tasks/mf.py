@@ -42,6 +42,7 @@ from structlog.contextvars import bind_contextvars
 from dhanradar.celery_app import celery_app
 from dhanradar.core.logging import get_logger, hash_user_ref
 from dhanradar.mf import service
+from dhanradar.mf.benchmark_mapping import map_index_fund_benchmark
 from dhanradar.mf.cas import (
     CasParseError,
     ParsedHolding,
@@ -216,12 +217,21 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
     Map a list of NavRow → list of dicts ready for mf_funds upsert.
 
     Columns this feed owns: amfi_code, scheme_name, category, sebi_category,
-    plan_type, option_type, fund_name_short, idcw_frequency.  isin is the PK
-    (isin_growth preferred, else isin_reinvest).  Rows without a keyable ISIN are
-    skipped.
+    plan_type, option_type, fund_name_short, idcw_frequency, benchmark_index.
+    isin is the PK (isin_growth preferred, else isin_reinvest).  Rows without
+    a keyable ISIN are skipped.
 
     Deduplication: last-seen row wins for duplicate ISINs in one batch (dict keyed
     by isin), preventing ON CONFLICT DO UPDATE cardinality errors.
+
+    benchmark_index (Block 0.7): populated ONLY for index funds with a
+    high-confidence name match against a BENCHMARK_REGISTRY entry
+    (map_index_fund_benchmark, gated on sebi_category — see mf/
+    benchmark_mapping.py). The registry membership is re-checked here (not
+    just trusted from the mapping function) so a future registry key rename
+    can never silently write a dangling benchmark_index value. Every other
+    fund (including all active/non-index funds) gets None — never a guessed
+    peer index (architecture plan §19).
     """
     out: dict[str, dict] = {}
     for row in rows:
@@ -230,12 +240,14 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             continue
         plan_type, option_type = parse_plan_option(row.scheme_name)
         is_segregated = "segregated portfolio" in row.scheme_name.lower()
+        sebi_category = canonical_for(row.category)
+        benchmark_key = map_index_fund_benchmark(row.scheme_name, sebi_category)
         out[isin] = {
             "isin": isin,
             "amfi_code": row.amfi_code,
             "scheme_name": row.scheme_name,
             "category": row.category,
-            "sebi_category": canonical_for(row.category),
+            "sebi_category": sebi_category,
             "plan_type": plan_type,
             "option_type": option_type,
             # Display-only clean name + IDCW cadence, derived from the same scheme
@@ -244,6 +256,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             "idcw_frequency": parse_idcw_frequency(row.scheme_name),
             "is_segregated": is_segregated,
             "launch_date": row.nav_date,
+            "benchmark_index": benchmark_key if benchmark_key in BENCHMARK_REGISTRY else None,
         }
     return list(out.values())
 
@@ -1522,6 +1535,7 @@ async def _nav_daily_pipeline() -> str:
                     "fund_name_short": insert(MfFund).excluded.fund_name_short,
                     "idcw_frequency": insert(MfFund).excluded.idcw_frequency,
                     "is_segregated": insert(MfFund).excluded.is_segregated,
+                    "benchmark_index": insert(MfFund).excluded.benchmark_index,
                     # Keep the earliest date seen — LEAST ignores NULL so a NULL
                     # existing launch_date gets replaced by the incoming nav_date.
                     "launch_date": func.least(
@@ -1656,6 +1670,7 @@ async def _metrics_refresh_pipeline() -> str:
     from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
     from dhanradar.mf.risk import (
+        benchmark_relative_stats,
         calendar_year_returns,
         percentile,
         resolve_risk_free_rate,
@@ -1664,6 +1679,7 @@ async def _metrics_refresh_pipeline() -> str:
     )
     from dhanradar.mf.signals import extended_horizon_stats
     from dhanradar.models.mf import (
+        MfBenchmarkDaily,
         MfCategoryStats,
         MfFund,
         MfFundMetrics,
@@ -1734,6 +1750,40 @@ async def _metrics_refresh_pipeline() -> str:
             # Load long NAV series for this chunk (5Y window for extended metrics).
             series, _ = await _load_nav_series(db, chunk, lookback_days=_METRICS_LOOKBACK_DAYS)
 
+            # Block 0.7 — benchmark_index map for this chunk (index funds only;
+            # every other fund's benchmark_index is NULL, so this dict only ever
+            # has entries for a subset of `chunk`). One extra read-only query per
+            # chunk, scoped to the ISINs already loaded above.
+            bm_rows = (
+                await db.execute(
+                    select(MfFund.isin, MfFund.benchmark_index)
+                    .where(MfFund.isin.in_(chunk), MfFund.benchmark_index.isnot(None))
+                )
+            ).all()
+            benchmark_by_isin: dict[str, str] = {r.isin: r.benchmark_index for r in bm_rows}
+
+            # Fetch each DISTINCT benchmark's daily-close series ONCE per chunk
+            # (multiple index funds commonly share the same benchmark) — same
+            # query shape as mf/router.py's _benchmark_returns (PR #483/block 0.4,
+            # read-only reuse, no edits to that function/table).
+            bench_series_cache: dict[str, list[tuple[date, float]]] = {}
+            for registry_key in set(benchmark_by_isin.values()):
+                spec = BENCHMARK_REGISTRY.get(registry_key)
+                if spec is None:
+                    # Registry drift guard — a stale benchmark_index value that no
+                    # longer resolves to a registry entry; skip, don't crash the chunk.
+                    continue
+                bench_rows = (
+                    await db.execute(
+                        select(MfBenchmarkDaily.close_date, MfBenchmarkDaily.close_value)
+                        .where(MfBenchmarkDaily.benchmark == spec.storage_key)
+                        .order_by(MfBenchmarkDaily.close_date.asc())
+                    )
+                ).all()
+                bench_series_cache[registry_key] = [
+                    (r.close_date, float(r.close_value)) for r in bench_rows
+                ]
+
             upsert_dicts: list[dict] = []
             for isin in chunk:
                 # as_of is currently window-irrelevant (long_horizon_stats anchors
@@ -1752,6 +1802,22 @@ async def _metrics_refresh_pipeline() -> str:
                 # 1Y above, longer window; independent of risk_adjusted_stats/RiskStats
                 # (which stays fund-NAV 1Y-only; also reused by the portfolio M2.3 path).
                 r3y_avg, r3y_min, r3y_max, r3y_pct_pos = rolling_3y_returns(series.get(isin, []))
+
+                # Benchmark-relative stats (alpha/beta/tracking error, Block 0.7) —
+                # only for index funds with a registry-valid mapped benchmark_index
+                # (bench_series_cache is empty for every other fund); everyone else
+                # gets all-None here, never a fabricated/guessed comparison.
+                bkey = benchmark_by_isin.get(isin)
+                bench_points = bench_series_cache.get(bkey) if bkey else None
+                if bench_points:
+                    brs = benchmark_relative_stats(
+                        series.get(isin, []),
+                        bench_points,
+                        risk_free_annual=risk_free_annual,
+                    )
+                    alpha_1y, beta_1y, te_pct = brs.alpha_1y, brs.beta_1y, brs.tracking_error_pct
+                else:
+                    alpha_1y = beta_1y = te_pct = None
 
                 # ponytail: _METRICS_LOOKBACK_DAYS (1900d, ~5.2y) can fall a little short
                 # of the ~6y span calendar_year_returns wants for a full 5-year strip —
@@ -1784,6 +1850,10 @@ async def _metrics_refresh_pipeline() -> str:
                     "rolling_3y_min_pct": r3y_min,
                     "rolling_3y_max_pct": r3y_max,
                     "rolling_3y_pct_positive": r3y_pct_pos,
+                    # Benchmark-relative stats (migration 0071, Block 0.7).
+                    "alpha_1y": alpha_1y,
+                    "beta_1y": beta_1y,
+                    "tracking_error_pct": te_pct,
                 })
 
             # Bulk upsert in sub-chunks to bound statement size.
@@ -1817,6 +1887,10 @@ async def _metrics_refresh_pipeline() -> str:
                         "rolling_3y_min_pct": insert(MfFundMetrics).excluded.rolling_3y_min_pct,
                         "rolling_3y_max_pct": insert(MfFundMetrics).excluded.rolling_3y_max_pct,
                         "rolling_3y_pct_positive": insert(MfFundMetrics).excluded.rolling_3y_pct_positive,
+                        # Benchmark-relative stats (migration 0071, Block 0.7).
+                        "alpha_1y": insert(MfFundMetrics).excluded.alpha_1y,
+                        "beta_1y": insert(MfFundMetrics).excluded.beta_1y,
+                        "tracking_error_pct": insert(MfFundMetrics).excluded.tracking_error_pct,
                     },
                 )
                 await db.execute(stmt)
