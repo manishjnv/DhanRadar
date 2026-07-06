@@ -11,6 +11,7 @@ import datetime
 
 from dhanradar.mf.fund_events import (
     cap_fund_events,
+    detect_aum_change,
     detect_holding_change,
     detect_rank_change,
     detect_ter_change,
@@ -77,6 +78,70 @@ def test_ter_change_idempotent_on_rerun():
 
 
 # ---------------------------------------------------------------------------
+# aum_change — >=5% month-over-month threshold, either direction
+# ---------------------------------------------------------------------------
+
+
+def test_aum_change_below_threshold_is_none():
+    """4.9% growth < 5% threshold -> no event."""
+    ev = detect_aum_change(
+        old_aum_crore=1000.0, new_aum_crore=1049.0, as_of_month=datetime.date(2026, 6, 1)
+    )
+    assert ev is None
+
+
+def test_aum_change_meets_threshold_direction_up():
+    ev = detect_aum_change(
+        old_aum_crore=1000.0, new_aum_crore=1100.0, as_of_month=datetime.date(2026, 6, 1)
+    )
+    assert ev == {
+        "old_aum_crore": 1000.0,
+        "new_aum_crore": 1100.0,
+        "pct_change": 10.0,
+        "direction": "up",
+    }
+
+
+def test_aum_change_meets_threshold_direction_down():
+    ev = detect_aum_change(
+        old_aum_crore=1000.0, new_aum_crore=900.0, as_of_month=datetime.date(2026, 6, 1)
+    )
+    assert ev == {
+        "old_aum_crore": 1000.0,
+        "new_aum_crore": 900.0,
+        "pct_change": -10.0,
+        "direction": "down",
+    }
+
+
+def test_aum_change_exactly_at_threshold_boundary_emits():
+    """Exactly 5.0% change meets the >= 5% threshold (boundary inclusive)."""
+    ev = detect_aum_change(
+        old_aum_crore=1000.0, new_aum_crore=1050.0, as_of_month=datetime.date(2026, 6, 1)
+    )
+    assert ev is not None
+    assert ev["pct_change"] == 5.0
+    assert ev["direction"] == "up"
+
+
+def test_aum_change_zero_old_aum_is_none():
+    """No baseline to compute a % change against — must not divide by zero."""
+    ev = detect_aum_change(
+        old_aum_crore=0.0, new_aum_crore=100.0, as_of_month=datetime.date(2026, 6, 1)
+    )
+    assert ev is None
+
+
+def test_aum_change_idempotent_on_rerun():
+    kwargs = {
+        "old_aum_crore": 1000.0,
+        "new_aum_crore": 1100.0,
+        "as_of_month": datetime.date(2026, 6, 1),
+    }
+    assert detect_aum_change(**kwargs) == detect_aum_change(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # holding_change — threshold + matched-name-only + single-largest
 # ---------------------------------------------------------------------------
 
@@ -121,17 +186,18 @@ def test_holding_change_idempotent_on_rerun():
 
 
 # ---------------------------------------------------------------------------
-# cap_fund_events — <=3 total, one per type
+# cap_fund_events — <=4 total, one per type
 # ---------------------------------------------------------------------------
 
 
-def test_cap_keeps_at_most_one_per_type_and_max_three():
+def test_cap_keeps_at_most_one_per_type_and_max_four():
     events = [
         {"event_type": "rank_change", "v": 1},
         {"event_type": "ter_change", "v": 2},
         {"event_type": "holding_change", "v": 3},
+        {"event_type": "aum_change", "v": 4},
     ]
-    assert cap_fund_events(events) == events  # exactly 3, one each -> unchanged
+    assert cap_fund_events(events) == events  # exactly 4, one each -> unchanged
 
 
 def test_cap_drops_duplicate_type_first_seen_wins():
@@ -147,14 +213,15 @@ def test_cap_drops_duplicate_type_first_seen_wins():
     ]
 
 
-def test_cap_never_exceeds_three_even_with_more_input():
+def test_cap_never_exceeds_four_even_with_more_input():
     events = [
         {"event_type": "rank_change"},
         {"event_type": "ter_change"},
         {"event_type": "holding_change"},
-        {"event_type": "rank_change"},  # duplicate — would push past 3 if not deduped first
+        {"event_type": "aum_change"},
+        {"event_type": "rank_change"},  # duplicate — would push past 4 if not deduped first
     ]
-    assert len(cap_fund_events(events)) <= 3
+    assert len(cap_fund_events(events)) <= 4
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +263,19 @@ def test_summary_holding_change_is_factual_and_short():
     payload = {"name": "HDFC Bank", "old_weight_pct": 6.1, "new_weight_pct": 7.4}
     sentence = summarize_event("holding_change", payload)
     assert sentence == "Largest holding shift: HDFC Bank 6.1% → 7.4%."
+    _assert_no_advisory_verb(sentence)
+    assert len(sentence.split()) <= 14
+
+
+def test_summary_aum_change_is_factual_and_short():
+    payload = {
+        "old_aum_crore": 1000.0,
+        "new_aum_crore": 1100.0,
+        "pct_change": 10.0,
+        "direction": "up",
+    }
+    sentence = summarize_event("aum_change", payload)
+    assert sentence == "AUM changed from ₹1000.00cr to ₹1100.00cr (+10.0%)."
     _assert_no_advisory_verb(sentence)
     assert len(sentence.split()) <= 14
 
