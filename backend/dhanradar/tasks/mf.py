@@ -2108,11 +2108,13 @@ async def _fund_events_refresh_pipeline() -> str:
     from dhanradar.db import TaskSessionLocal
     from dhanradar.mf.fund_events import (
         cap_fund_events,
+        detect_aum_change,
         detect_holding_change,
         detect_rank_change,
         detect_ter_change,
     )
     from dhanradar.models.mf import (
+        MfAumHistory,
         MfExpenseRatioHistory,
         MfFundConstituent,
         MfFundEvent,
@@ -2212,6 +2214,49 @@ async def _fund_events_refresh_pipeline() -> str:
                         "isin": isin,
                         "event_type": "ter_change",
                         "as_of": newest.effective_date,
+                        "payload": ev,
+                    }
+                )
+
+        # --- aum_change: per-isin last-two rows via a window function, same pattern
+        # as ter_change above, sourced from mf.aum_history instead of expense_ratio_history.
+        aum_subq = select(
+            MfAumHistory.isin,
+            MfAumHistory.aum_crore,
+            MfAumHistory.as_of_month,
+            func.row_number()
+            .over(
+                partition_by=MfAumHistory.isin,
+                order_by=MfAumHistory.as_of_month.desc(),
+            )
+            .label("rn"),
+        ).subquery()
+        aum_rows = (
+            await db.execute(
+                select(aum_subq.c.isin, aum_subq.c.aum_crore, aum_subq.c.as_of_month, aum_subq.c.rn)
+                .where(aum_subq.c.rn <= 2)
+                .order_by(aum_subq.c.isin, aum_subq.c.rn)
+            )
+        ).all()
+        aum_by_isin: dict[str, list] = defaultdict(list)
+        for row in aum_rows:
+            aum_by_isin[row.isin].append(row)
+        for isin, rows in aum_by_isin.items():
+            if len(rows) < 2:
+                continue
+            newest = next(r for r in rows if r.rn == 1)
+            older = next(r for r in rows if r.rn == 2)
+            ev = detect_aum_change(
+                old_aum_crore=float(older.aum_crore),
+                new_aum_crore=float(newest.aum_crore),
+                as_of_month=newest.as_of_month,
+            )
+            if ev is not None:
+                events_by_isin[isin].append(
+                    {
+                        "isin": isin,
+                        "event_type": "aum_change",
+                        "as_of": newest.as_of_month,
                         "payload": ev,
                     }
                 )
@@ -3947,19 +3992,24 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
     return scheme_isin_map
 
 
-async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[int, int]:
+async def _upsert_constituents(
+    parsed_rows: list[dict], amc_name: str, run_id: int | None = None
+) -> tuple[int, int]:
     """Resolve scheme names → ISINs via pg_trgm, upsert constituent rows.
 
     Returns (rows_upserted, aum_updates).
     §8.4: aum_crore is written from the file's per-scheme net-assets row only;
     never derived from AMC-level totals.
+    `run_id`: optional `mf.ingestion_runs.run_id` to stamp onto `mf.aum_history` rows.
+    None for all current callers (none of them open an `ingestion_run()` context yet) —
+    the column is nullable specifically to allow this.
     """
     from sqlalchemy import func
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from dhanradar.db import TaskSessionLocal
-    from dhanradar.models.mf import MfFundConstituent
+    from dhanradar.models.mf import MfAumHistory, MfFundConstituent
 
     # Group rows by scheme_name to resolve ISINs in bulk.
     scheme_names: set[str] = {r["scheme_name"] for r in parsed_rows if r.get("scheme_name")}
@@ -4070,6 +4120,32 @@ async def _upsert_constituents(parsed_rows: list[dict], amc_name: str) -> tuple[
                 {"v": net_assets_cr, "as_of": as_of_month, "isin": isin},
             )
             aum_updates += 1
+            # Also preserve the month-over-month history (mf.aum_history) so the
+            # aum_change What-Changed event can diff the latest two rows — same
+            # transaction, no second query pass. as_of_month is required (NOT NULL)
+            # on this table; a row with no disclosure month can't be dated, so it's
+            # skipped here (mf_funds.aum_crore above is still updated regardless).
+            if as_of_month is not None:
+                stmt = (
+                    pg_insert(MfAumHistory)
+                    .values(
+                        isin=isin,
+                        aum_crore=net_assets_cr,
+                        as_of_month=as_of_month,
+                        source=amc_name,
+                        run_id=run_id,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["isin", "as_of_month"],
+                        set_={
+                            "aum_crore": pg_insert(MfAumHistory).excluded.aum_crore,
+                            "source": pg_insert(MfAumHistory).excluded.source,
+                            "run_id": pg_insert(MfAumHistory).excluded.run_id,
+                            "ingested_at": func.now(),
+                        },
+                    )
+                )
+                await db.execute(stmt)
         if aum_map:
             await db.commit()
 

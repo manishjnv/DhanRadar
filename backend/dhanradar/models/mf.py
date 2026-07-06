@@ -51,7 +51,9 @@ class MfFund(Base):
         # holds the one `isin` didn't get (mf_scheme_master_refresh, migration 0062, 2026-07-04
         # plan-variant double-count incident). Unique-where-not-null: a secondary ISIN maps to
         # exactly one primary scheme.
-        Index("uq_mf_funds_isin2", "isin2", unique=True, postgresql_where=text("isin2 IS NOT NULL")),
+        Index(
+            "uq_mf_funds_isin2", "isin2", unique=True, postgresql_where=text("isin2 IS NOT NULL")
+        ),
         _SCHEMA,
     )
 
@@ -341,7 +343,9 @@ class MfPortfolioSnapshot(Base):
     total_invested: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     current_value: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     xirr_pct: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
-    category_allocation: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
+    category_allocation: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
     overlap_matrix: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -565,9 +569,7 @@ class MfSipTransaction(Base):
         ForeignKey("mf.mf_portfolios.id", ondelete="CASCADE"),
         nullable=False,
     )
-    user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
-    )
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     txn_date: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
 
@@ -804,6 +806,39 @@ class MfExpenseRatioHistory(Base):
     )
 
 
+class MfAumHistory(Base):
+    """Per-scheme AUM time series — one row per (isin, as_of_month).
+
+    `mf_funds.aum_crore`/`aum_as_of` (migrations 0004/0069) are overwritten in place on
+    every ingestion run; this table preserves the month-over-month history so the
+    `aum_change` What-Changed event (`mf/fund_events.py`) can diff the latest two rows.
+    Written by `_upsert_constituents` (`dhanradar.tasks.mf`) from the same per-scheme
+    net-assets row already used to write `mf_funds.aum_crore` (§8.4 — genuine
+    scheme-level data only, never derived from an AMC aggregate). `source` is the AMC
+    name string (matches the `source_amc` value on `mf_fund_constituents`).
+    """
+
+    __tablename__ = "aum_history"
+    __table_args__ = (
+        # The unique constraint's own index also serves the aum_change detector's
+        # last-two-rows-per-isin lookback query -- no separate plain index needed.
+        UniqueConstraint("isin", "as_of_month", name="uq_mf_aum_history_isin_month"),
+        _SCHEMA,
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    aum_crore: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    as_of_month: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("mf.ingestion_runs.run_id"), nullable=True
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfSebiCircular(Base):
     """SEBI circular metadata (regulatory updates, scheme mergers, category changes).
 
@@ -984,7 +1019,7 @@ class MfFundEvent(Base):
         UniqueConstraint("isin", "event_type", "as_of", name="uq_mf_fund_events_isin_type_date"),
         Index("ix_mf_fund_events_isin_as_of", "isin", "as_of"),
         CheckConstraint(
-            "event_type IN ('rank_change', 'ter_change', 'holding_change')",
+            "event_type IN ('rank_change', 'ter_change', 'holding_change', 'aum_change')",
             name="ck_mf_fund_events_event_type",
         ),
         _SCHEMA,

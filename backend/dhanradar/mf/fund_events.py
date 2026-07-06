@@ -18,8 +18,9 @@ from datetime import date
 # Thresholds (§10.6) — one place, reused by the pipeline and its tests.
 _RANK_DELTA_MIN = 3
 _WEIGHT_DELTA_MIN_PP = 1.0
-MAX_EVENTS_PER_FUND = 3  # one per event_type — the full type set below is exactly 3
-EVENT_TYPES: tuple[str, ...] = ("rank_change", "ter_change", "holding_change")
+_AUM_CHANGE_MIN_PCT = 5.0
+MAX_EVENTS_PER_FUND = 4  # one per event_type — the full type set below is exactly 4
+EVENT_TYPES: tuple[str, ...] = ("rank_change", "ter_change", "holding_change", "aum_change")
 
 
 def _quartile(rank: int, total: int) -> int:
@@ -64,6 +65,27 @@ def detect_ter_change(*, old_ter: float, new_ter: float, effective_date: date) -
         "old_ter": round(old_ter, 3),
         "new_ter": round(new_ter, 3),
         "effective_date": effective_date.isoformat(),
+    }
+
+
+def detect_aum_change(
+    *, old_aum_crore: float, new_aum_crore: float, as_of_month: date
+) -> dict | None:
+    """Emit when the month-over-month AUM % change is >= 5% in either direction.
+
+    `direction` is "up" (AUM grew) / "down" (AUM shrank). Facts only — no advisory
+    framing (a growing/shrinking AUM is not itself good or bad).
+    """
+    if old_aum_crore == 0:
+        return None
+    pct_change = (new_aum_crore - old_aum_crore) / old_aum_crore * 100
+    if abs(pct_change) < _AUM_CHANGE_MIN_PCT:
+        return None
+    return {
+        "old_aum_crore": round(old_aum_crore, 2),
+        "new_aum_crore": round(new_aum_crore, 2),
+        "pct_change": round(pct_change, 2),
+        "direction": "up" if pct_change > 0 else "down",
     }
 
 
@@ -138,10 +160,18 @@ def _summary_holding_change(p: dict) -> str:
     )
 
 
+def _summary_aum_change(p: dict) -> str:
+    return (
+        f"AUM changed from ₹{p['old_aum_crore']:.2f}cr to "
+        f"₹{p['new_aum_crore']:.2f}cr ({p['pct_change']:+.1f}%)."
+    )
+
+
 _SUMMARY_TEMPLATES = {
     "rank_change": _summary_rank_change,
     "ter_change": _summary_ter_change,
     "holding_change": _summary_holding_change,
+    "aum_change": _summary_aum_change,
 }
 
 
