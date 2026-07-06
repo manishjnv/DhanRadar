@@ -181,9 +181,13 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
 
   // S13 header info line — real when composition data exists (dedups against
   // HoldingsSection's own useFundComposition call via the shared query cache).
+  // "All N disclosed" (Block 0.11, ADR-0033-B) — every constituent row SEBI's
+  // monthly disclosure publishes is already captured (no top-10-per-scheme cap
+  // anywhere in the pipeline), so "Top N" would misleadingly imply a partial
+  // subset even when N is the fund's true full holdings count.
   const composition = compositionEnv?.data;
   const holdingsInfo = composition && composition.holdings.length > 0
-    ? `Top ${composition.holdings.length} disclosed${composition.coverage.weight_covered_pct != null ? ` · ${composition.coverage.weight_covered_pct}% of assets` : ''}${composition.as_of_month ? ` · as of ${new Date(composition.as_of_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : ''}`
+    ? `All ${composition.holdings.length} disclosed holdings${composition.coverage.weight_covered_pct != null ? ` · ${composition.coverage.weight_covered_pct}% of assets` : ''}${composition.as_of_month ? ` · as of ${new Date(composition.as_of_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : ''}`
     : 'Holdings not disclosed for this fund house yet';
 
   // W2 (§10.1) — real factor bands + signal words; every field null/empty until

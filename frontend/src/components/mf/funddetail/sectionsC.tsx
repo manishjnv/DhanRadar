@@ -46,11 +46,25 @@ const HOLD_TABS = [
 ];
 
 /** Real top-holdings pane (W1). The per-stock daily-change column isn't sourced yet
- * (would need a live equity-price feed) — shows "—" rather than a fabricated %. */
+ * (would need a live equity-price feed) — shows "—" rather than a fabricated %.
+ *
+ * Block 0.11: the backend already returns EVERY disclosed holding for the scheme
+ * (confirmed live — some schemes disclose 300-1,000+ constituent rows; there is no
+ * top-10-per-scheme cap anywhere in the pipeline, see ADR-0033-B). Rendering all of
+ * them unconditionally would be a real DOM-size/scroll problem for those funds, so
+ * this shows the first `_INITIAL_ROWS` (already sorted by weight desc by the caller)
+ * with a "View all N holdings" expander — client-side only, no extra fetch, since
+ * the full list is already in the one response. */
+const _INITIAL_ROWS = 15;
+
 function HoldingsStocksPane({ holdings, maxWeight }: { holdings: { name: string; sector: string | null; weight_pct: number | null }[]; maxWeight: number }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const visible = expanded ? holdings : holdings.slice(0, _INITIAL_ROWS);
+  const hiddenCount = holdings.length - visible.length;
+
   return (
     <div>
-      {holdings.map((s) => (
+      {visible.map((s) => (
         <div
           key={s.name}
           className="flex items-center gap-3 border-b border-line py-2.5 last:border-b-0"
@@ -89,6 +103,24 @@ function HoldingsStocksPane({ holdings, maxWeight }: { holdings: { name: string;
           </span>
         </div>
       ))}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-2.5 w-full rounded-lg border border-line py-2 text-center text-small font-semibold text-royal hover:bg-surface-2"
+        >
+          View all {holdings.length} holdings
+        </button>
+      )}
+      {expanded && holdings.length > _INITIAL_ROWS && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="mt-2.5 w-full rounded-lg border border-line py-2 text-center text-small font-semibold text-ink-muted hover:bg-surface-2"
+        >
+          Show fewer
+        </button>
+      )}
     </div>
   );
 }
