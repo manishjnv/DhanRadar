@@ -88,6 +88,15 @@ def test_detect_amc_returns_none_when_no_keyword_matches():
     assert detect_amc("generic_disclosure_file.xlsx") is None
 
 
+def test_detect_amc_matches_edelweiss_filename_prefix_and_folder_hint():
+    """Edelweiss's own filename convention abbreviates to "EDEL_" (not the full
+    "EDELWEISS_"), while the watched-subfolder hint is the full "Edelweiss" name —
+    one keyword ("edel") must match both forms."""
+    assert detect_amc("EDEL_Monthly_Portfolio_May2026.xlsx") == "EDELWEISS"
+    assert detect_amc("Edelweiss") == "EDELWEISS"
+    assert detect_amc("Edelweiss Mutual Fund disclosure") == "EDELWEISS"
+
+
 # ---------------------------------------------------------------------------
 # detect_amc_and_parse — real .xlsx bytes through the EXISTING SEBI parser
 # (_parse_sebi_xlsx, dhanradar/tasks/mf.py) — never a second parser.
@@ -120,6 +129,16 @@ def test_detect_amc_and_parse_filename_detection():
     assert any(r["constituent_name"] == "HDFC Bank Ltd" for r in rows)
     total_row = next(r for r in rows if r.get("is_total_row"))
     assert total_row["market_value_cr"] == 240.0  # 24000.00 lakh -> crore
+
+
+def test_detect_amc_and_parse_edelweiss_abbreviated_filename_prefix():
+    """Edelweiss files arrive as "EDEL_..." (abbreviated), not "EDELWEISS_..." —
+    filename detection must still resolve the full AMC name."""
+    data = _build_disclosure_xlsx("Edelweiss Large Cap Fund")
+    amc_name, period, rows = detect_amc_and_parse(data, "EDEL_Monthly_Portfolio_May2026.xlsx")
+    assert amc_name == "EDELWEISS"
+    assert period == date(2026, 5, 1)
+    assert len(rows) == 3
 
 
 def test_detect_amc_and_parse_falls_back_to_scheme_name_when_filename_uninformative():

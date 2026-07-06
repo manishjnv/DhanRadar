@@ -275,6 +275,14 @@ _AMC_KEYWORDS: dict[str, str] = {
     "mirae": "MIRAE",
     "franklin": "FRANKLIN",
     "dsp": "DSP",
+    # Edelweiss's own filename convention abbreviates to "EDEL_" (not the full
+    # "EDELWEISS_"), while its watched-subfolder hint is the full "Edelweiss" name —
+    # "edel" is the one substring present (lowercased) in BOTH, so a single keyword
+    # covers filename detection, scheme-name fallback, AND the folder hint. Not added
+    # to tasks.mf._AMC_DISCLOSURE_ROOTS — that list is the automated-scraper source
+    # registry, a separate (unverified, out-of-scope) concern from manual-ingest AMC
+    # recognition.
+    "edel": "EDELWEISS",
 }
 
 
