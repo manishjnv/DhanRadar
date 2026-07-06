@@ -37,7 +37,7 @@ const WORKSPACE: NavItem[] = [
   // the footer "Learn" column only (founder 2026-06-22).
 ];
 
-const SETTINGS: NavItem = { href: '/settings/privacy', label: 'Settings', icon: Settings };
+const SETTINGS: NavItem = { href: '/settings/profile', label: 'Settings', icon: Settings };
 const ADMIN_NAV: NavItem = { href: '/admin', label: 'Admin', icon: ShieldCheck };
 
 // ---------------------------------------------------------------------------

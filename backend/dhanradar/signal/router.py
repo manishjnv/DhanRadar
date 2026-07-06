@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-from dhanradar.deps import RequireTier, UserContext, current_user_or_anonymous
+from dhanradar.deps import RequireConsent, RequireTier, UserContext, current_user_or_anonymous
 from dhanradar.signal import service
 from dhanradar.signal.schemas import (
     AddDipFundBody,
@@ -57,6 +57,20 @@ async def _require_auth(
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return user
+
+
+# Block 0.12 — DPDP data-processing gate (fail-closed 403). The dip-fund/journal/
+# deployment/rules/trust-history routes below all read or write the caller's OWN
+# discretionary trading-discipline data — the same single "portfolio data fetch,
+# handling, processing" consent purpose as every other personal-data route in the
+# app (mf/router.py, insights/router.py) — ONE purpose, not a new one per feature.
+# Added as its own Depends() (not a plain function call like _require_auth):
+# RequireConsent.__call__ ALREADY 401s an anonymous caller itself (checked before
+# its own consent read) — it does not rely on _require_auth running first or on
+# any Depends() declaration-order guarantee, so where this appears relative to
+# RequireTier/_require_auth in each signature does not affect the 401-before-403
+# outcome either way.
+_require_mf_consent = RequireConsent("mf_analytics")
 
 
 @router.get("/state", response_model=SignalStateOut)
@@ -103,6 +117,7 @@ async def get_signal_state(
 @router.get("/rules", response_model=SignalRulesOut)
 async def get_rules(
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalRulesOut:
@@ -116,6 +131,7 @@ async def get_rules(
 async def update_rules(
     body: SignalRulesUpdate,
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalRulesOut:
@@ -128,6 +144,7 @@ async def update_rules(
 @router.get("/dip-fund", response_model=SignalDipFundOut)
 async def get_dip_fund(
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDipFundOut:
@@ -141,6 +158,7 @@ async def get_dip_fund(
 async def add_dip_fund(
     body: AddDipFundBody,
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> SignalDipFundOut:
@@ -153,6 +171,7 @@ async def add_dip_fund(
 @router.get("/deployments", response_model=list[SignalDeploymentOut])
 async def get_deployments(
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> list[SignalDeploymentOut]:
@@ -165,6 +184,7 @@ async def get_deployments(
 @router.get("/journal", response_model=JournalOut)
 async def get_journal(
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> JournalOut:
@@ -181,6 +201,7 @@ async def get_journal(
 async def create_journal_entry(
     body: JournalEntryCreate,
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> JournalEntryCreatedOut:
@@ -197,6 +218,7 @@ async def create_journal_entry(
 async def delete_journal_entry(
     entry_id: UUID,
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -247,6 +269,7 @@ async def mark_notification_read(
 @router.get("/trust-history", response_model=TrustHistoryOut)
 async def get_trust_history(
     _: None = Depends(RequireTier("free")),
+    _consent: None = Depends(_require_mf_consent),
     user: UserContext = Depends(_require_auth),
     db: AsyncSession = Depends(get_db),
 ) -> TrustHistoryOut:

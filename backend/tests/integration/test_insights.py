@@ -70,11 +70,15 @@ async def _truncate_mf(db_session):
 async def _seed_user(db_session) -> str:
     """Insert a free-tier User and return its id as a str UUID."""
     uid = _uuid.uuid4()
+    # Block 0.12: these portfolio-analytics routes are now gated on mf_analytics consent;
+    # grant it by default so pre-existing fixtures keep exercising the ROUTE logic under
+    # test, not the (separately, unit-tested) consent gate itself.
     user = User(
         id=uid,
         email=f"insights_{uid.hex[:8]}@example.com",
         hashed_password="$2b$12$placeholder_hash_for_testing_only",
         tier=UserTierEnum.free,
+        dpdp_consents={"mf_analytics": True},
     )
     db_session.add(user)
     await db_session.commit()

@@ -363,7 +363,10 @@ def test_b87_parity_every_live_concept_allowlist_matches_real_payload():
 
 
 async def _seed_user(db_session, email: str) -> str:
-    u = User(email=email)
+    # Block 0.12: these portfolio-analytics routes are now gated on mf_analytics consent;
+    # grant it by default so pre-existing fixtures keep exercising the ROUTE logic under
+    # test, not the (separately, unit-tested) consent gate itself.
+    u = User(email=email, dpdp_consents={"mf_analytics": True})
     db_session.add(u)
     await db_session.flush()
     uid = str(u.id)
