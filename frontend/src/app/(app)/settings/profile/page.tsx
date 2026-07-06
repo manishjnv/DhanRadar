@@ -1368,8 +1368,8 @@ export default function ProfilePage() {
       {/* Profile hero */}
       <ProfileHero email={me.email} tier={me.tier} />
 
-      {/* Tab navigation */}
-      <div className="sticky top-14 z-20 -mx-6 border-b border-line bg-surface/95 px-6 backdrop-blur-sm">
+      {/* Tab navigation — scrolls with the page (not sticky/fixed to the viewport) */}
+      <div className="-mx-6 border-b border-line bg-surface px-6">
         <div
           ref={tabsRef}
           className="flex gap-1 overflow-x-auto pb-2 pt-3 scrollbar-none"
