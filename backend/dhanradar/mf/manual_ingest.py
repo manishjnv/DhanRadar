@@ -13,16 +13,28 @@ disclosure file; a human downloads it and drops it via one of 3 channels:
 
 All 3 channels call `intake_file()` below — the ONE place that validates,
 dedups, persists, and enqueues. Untrusted input handling: extension allowlist
-(.xls/.xlsx only this wave), a hard size cap, sha256-keyed dedup (DB unique
-constraint is the real backstop — a pre-check SELECT is just the common-case
-fast path), and a uuid-named on-disk filename (the original name is kept ONLY
-as a DB string, never used to build a path or shell command).
+(.xls/.xlsx/.pdf), a hard size cap, sha256-keyed dedup (DB unique constraint
+is the real backstop — a pre-check SELECT is just the common-case fast
+path), and a uuid-named on-disk filename (the original name is kept ONLY as
+a DB string, never used to build a path or shell command). PDFs are stored
+and dedup'd identically but never parsed — the parse task marks them
+'archived' immediately (factsheet-PDF parsing is a future wave).
+
+`intake_upload()` is the ZIP-aware entry point every channel should call
+instead of `intake_file()` directly: a `.zip` is NEVER stored as a row
+itself — it is expanded in memory (`expand_zip()`) and each eligible member
+goes through `intake_file()` individually (member basename as
+original_filename, same channel/uploader/amc_hint). Plain (non-zip) input is
+an unchanged 1-element pass-through.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
+import logging
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -30,9 +42,15 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-# .xls/.xlsx ONLY this wave — factsheet PDFs are a later parser (contract §2).
-ALLOWED_EXTENSIONS: tuple[str, ...] = (".xls", ".xlsx")
-MAX_BYTES = 25 * 1024 * 1024  # 25 MB cap
+logger = logging.getLogger(__name__)
+
+# .xls/.xlsx/.pdf — PDFs are accepted + archived (never parsed, contract §2).
+ALLOWED_EXTENSIONS: tuple[str, ...] = (".xls", ".xlsx", ".pdf")
+MAX_BYTES = 25 * 1024 * 1024  # 25 MB cap — applies per file AND per zip member
+
+ZIP_EXTENSION = ".zip"
+MAX_ZIP_MEMBERS = 50  # counts every zip entry incl. directories — cheap, safe cap
+MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024  # 100 MB uncompressed total across all members
 
 
 @dataclass(frozen=True)
@@ -70,16 +88,21 @@ async def intake_file(
     original_filename: str,
     channel: str,
     uploaded_by: str | None,
+    amc_hint: str | None = None,
 ) -> IntakeResult:
-    """Validate, dedup, persist, and enqueue one file. Called by all 3 channels.
+    """Validate, dedup, persist, and enqueue one file. Called by all 3 channels
+    (directly for a plain file, or via `intake_upload()` per zip member).
 
     `channel` is 'upload' | 'folder' | 'email'. `uploaded_by` is the admin's
     user_id for channel='upload', else None (folder/email have no authenticated
-    actor). Every VALIDATION outcome (bad extension, oversized, empty, dedup) is
-    a returned status, never an exception — callers don't need a try/except for
-    those. A genuine infra failure (DB unreachable) still raises; each channel's
-    caller already runs inside its own fail-closed wrapper (the route's global
-    500 handler; the Celery task's outer try/except), so this is never silent.
+    actor). `amc_hint` is the per-AMC subfolder name for channel='folder' (None
+    otherwise) — threaded through to the parse task as a detection fallback,
+    never used for validation here. Every VALIDATION outcome (bad extension,
+    oversized, empty, dedup) is a returned status, never an exception —
+    callers don't need a try/except for those. A genuine infra failure (DB
+    unreachable) still raises; each channel's caller already runs inside its
+    own fail-closed wrapper (the route's global 500 handler; the Celery task's
+    outer try/except), so this is never silent.
     """
     from dhanradar.db import TaskSessionLocal
     from dhanradar.models.mf import MfManualIngestFile
@@ -133,8 +156,101 @@ async def intake_file(
 
     from dhanradar.tasks.manual_ingest import parse_manual_disclosure_file
 
-    parse_manual_disclosure_file.delay(str(file_id))
+    parse_manual_disclosure_file.delay(str(file_id), amc_hint)
     return IntakeResult(str(file_id), "pending", None)
+
+
+# ---------------------------------------------------------------------------
+# ZIP intake — expand in memory, never store the zip itself as a row.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ZipExpansion:
+    eligible: list[tuple[str, bytes]]  # (member_basename, bytes) — already decompressed
+    skipped: list[tuple[str, str]]  # (member_name_or_original, reason)
+
+
+def expand_zip(data: bytes, original_filename: str) -> ZipExpansion:
+    """Expand a `.zip` in memory. Every guard checks `ZipInfo.file_size` (the
+    UNCOMPRESSED size, known from the central directory) BEFORE any bytes are
+    decompressed, so a crafted zip-bomb is rejected without ever inflating it.
+    Member names are NEVER used to build a path — only `Path(name).name` (a
+    basename string) reaches `intake_file()`, same rule as `stored_path_for`.
+
+    Whole-zip rejections (encrypted / too many members / corrupt) return an
+    empty `eligible` list with a single skip entry naming the reason — callers
+    treat "0 eligible members" as one uniform outcome regardless of cause.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        infos = zf.infolist()
+    except zipfile.BadZipFile:
+        return ZipExpansion([], [(original_filename, "corrupt_zip")])
+
+    if any(info.flag_bits & 0x1 for info in infos):
+        # Traditional PKWARE encryption bit — reject the whole zip outright,
+        # never attempt to read a member (fail-closed, contract §1).
+        return ZipExpansion([], [(original_filename, "encrypted_zip")])
+    if len(infos) > MAX_ZIP_MEMBERS:
+        return ZipExpansion([], [(original_filename, "too_many_members")])
+
+    eligible: list[tuple[str, bytes]] = []
+    skipped: list[tuple[str, str]] = []
+    budget = MAX_ZIP_TOTAL_BYTES
+
+    for info in infos:
+        if info.is_dir():
+            continue  # directories are structure, not abuse — silently skipped
+        name = Path(info.filename).name  # basename ONLY — never a path
+        suffix = Path(name).suffix.lower()
+        if suffix == ZIP_EXTENSION:
+            skipped.append((name, "nested_zip"))  # never recursed
+            continue
+        if suffix not in ALLOWED_EXTENSIONS:
+            skipped.append((name, f"unsupported_extension:{suffix or 'none'}"))
+            continue
+        if info.file_size > MAX_BYTES:
+            skipped.append((name, "file_too_large"))
+            continue
+        if info.file_size > budget:
+            skipped.append((name, "zip_total_size_exceeded"))
+            continue
+        try:
+            member_bytes = zf.read(info.filename)
+        except (zipfile.BadZipFile, RuntimeError, OSError):
+            # Corrupt member / mid-archive read failure — skip, never crash.
+            skipped.append((name, "member_read_error"))
+            continue
+        budget -= info.file_size
+        eligible.append((name, member_bytes))
+
+    return ZipExpansion(eligible, skipped)
+
+
+async def intake_upload(
+    data: bytes,
+    original_filename: str,
+    channel: str,
+    uploaded_by: str | None,
+    amc_hint: str | None = None,
+) -> tuple[list[tuple[str, IntakeResult]], list[tuple[str, str]]]:
+    """ZIP-aware entry point — every channel calls this instead of
+    `intake_file()` directly. A plain (non-zip) file is an unchanged
+    1-element pass-through; a `.zip` is expanded (`expand_zip()`) and each
+    eligible member is intake_file()'d individually. Returns
+    (extracted [(member_name, IntakeResult), ...], skipped [(name, reason), ...]).
+    """
+    if Path(original_filename).suffix.lower() != ZIP_EXTENSION:
+        result = await intake_file(data, original_filename, channel, uploaded_by, amc_hint)
+        return [(original_filename, result)], []
+
+    expansion = expand_zip(data, original_filename)
+    extracted: list[tuple[str, IntakeResult]] = []
+    for member_name, member_data in expansion.eligible:
+        result = await intake_file(member_data, member_name, channel, uploaded_by, amc_hint)
+        extracted.append((member_name, result))
+    return extracted, expansion.skipped
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +288,16 @@ def detect_amc(text: str) -> str | None:
 
 
 def detect_amc_and_parse(
-    data: bytes, original_filename: str
+    data: bytes, original_filename: str, amc_hint: str | None = None
 ) -> tuple[str | None, date | None, list[dict]]:
     """Detect the AMC + disclosure month and parse constituent rows in one pass.
 
     Filename first (cheap, no parse needed); if that fails, parse once with a
-    placeholder AMC name and fall back to matching the first parsed scheme name.
+    placeholder AMC name and fall back to matching the first parsed scheme
+    name; if THAT still fails, `amc_hint` (the per-AMC watched-subfolder name,
+    e.g. incoming/HDFC/) is the last-resort fallback — matched against the
+    SAME keyword set as filename/scheme-name detection (`detect_amc`), so an
+    unrecognized folder name is simply ignored (logged), never guessed.
     Returns (amc_name, period, rows). `amc_name` is None when undetectable — the
     caller (tasks/manual_ingest.py::parse_manual_disclosure_file) treats that as
     `status='unsupported'`. May raise on a genuinely corrupt/legacy-binary .xls
@@ -196,6 +316,13 @@ def detect_amc_and_parse(
             amc_name = detect_amc(scheme_name)
             if amc_name:
                 break
+
+    if amc_name is None and amc_hint:
+        hinted = detect_amc(amc_hint)
+        if hinted:
+            amc_name = hinted
+        else:
+            logger.info("manual_ingest: unknown AMC subfolder hint=%r — ignoring", amc_hint)
 
     period = next((r["as_of_month"] for r in rows if r.get("as_of_month")), None)
     return amc_name, period, rows

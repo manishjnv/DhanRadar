@@ -175,6 +175,71 @@ async def test_parse_pipeline_missing_stored_file_marks_failed(db_session):
     assert row.error == "stored_file_missing"
 
 
+async def test_parse_pipeline_pdf_marks_archived_never_parsed(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """Contract §2 — the SEBI parser is xlsx-only; a PDF is stored + row kept,
+    marked 'archived' immediately, and NEVER routed through detect_amc_and_parse
+    / _upsert_constituents (no fake parsing, no OCR)."""
+    from dhanradar.mf.manual_ingest import sha256_bytes
+
+    data = b"%PDF-1.4 fake factsheet bytes"
+    file_id = uuid.uuid4()
+    db_session.add(
+        MfManualIngestFile(
+            id=file_id,
+            sha256=sha256_bytes(data),
+            original_filename="HDFC_factsheet_June2026.pdf",
+            channel="upload",
+            status="pending",
+        )
+    )
+    await db_session.commit()
+    stored_path_for(str(file_id), "HDFC_factsheet_June2026.pdf").write_bytes(data)
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("a PDF must never be routed through detect_amc_and_parse")
+
+    monkeypatch.setattr("dhanradar.tasks.manual_ingest.detect_amc_and_parse", _boom)
+    monkeypatch.setattr(
+        "dhanradar.tasks.mf._upsert_constituents",
+        lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("must never upsert a PDF")),
+    )
+
+    result = await mi._parse_pipeline(str(file_id))
+
+    assert result == "archived: pdf_saved_for_later"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, file_id)
+    assert row.status == "archived"
+    assert row.amc_detected is None
+    assert row.rows_ingested is None
+
+
+async def test_parse_pipeline_threads_amc_hint_into_detection(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """The optional amc_hint argument reaches detect_amc_and_parse as its
+    3rd positional/keyword arg — the fallback plumbing contract §3 relies on."""
+    file_id, data = await _insert_pending_row(db_session, filename="generic.xlsx")
+    stored_path_for(file_id, "generic.xlsx").write_bytes(data)
+
+    captured: dict = {}
+
+    def _fake_detect(data, filename, amc_hint=None):
+        captured["amc_hint"] = amc_hint
+        return "HDFC", None, []
+
+    monkeypatch.setattr("dhanradar.tasks.manual_ingest.detect_amc_and_parse", _fake_detect)
+
+    result = await mi._parse_pipeline(file_id, amc_hint="HDFC")
+
+    assert captured["amc_hint"] == "HDFC"
+    # rows == [] -> amc_or_period_undetectable path (not the point of this test,
+    # only that the hint was threaded through).
+    assert result == "unsupported: amc_or_period_undetectable"
+
+
 async def test_parse_pipeline_skips_already_terminal_row(db_session):
     """Idempotency guard: a re-enqueued/duplicate task run must never re-parse a
     row that already reached a terminal status."""

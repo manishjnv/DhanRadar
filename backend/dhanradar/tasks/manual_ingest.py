@@ -32,7 +32,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from dhanradar.celery_app import celery_app
-from dhanradar.mf.manual_ingest import detect_amc_and_parse, intake_file
+from dhanradar.mf.manual_ingest import (
+    ALLOWED_EXTENSIONS,
+    ZIP_EXTENSION,
+    detect_amc_and_parse,
+    intake_upload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +53,9 @@ SOURCE = "manual_disclosure_inbox"
 
 
 @celery_app.task(name=TASK_PARSE, bind=True, max_retries=2)
-def parse_manual_disclosure_file(self, file_id: str) -> str:
+def parse_manual_disclosure_file(self, file_id: str, amc_hint: str | None = None) -> str:
     try:
-        return asyncio.run(_parse_pipeline(file_id))
+        return asyncio.run(_parse_pipeline(file_id, amc_hint))
     except Exception:  # noqa: BLE001 — never leave the row at 'pending' silently
         logger.exception("manual_ingest parse failed file_id=%s", file_id)
         try:
@@ -85,7 +90,7 @@ async def _mark(
         await db.commit()
 
 
-async def _parse_pipeline(file_id: str) -> str:
+async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
     from dhanradar.db import TaskSessionLocal
     from dhanradar.mf.manual_ingest import stored_path_for
     from dhanradar.models.mf import MfManualIngestFile
@@ -108,6 +113,13 @@ async def _parse_pipeline(file_id: str) -> str:
         await _mark(file_id, "failed", error="stored_file_missing")
         return "failed: stored_file_missing"
 
+    if Path(original_filename).suffix.lower() == ".pdf":
+        # Contract §2 — the SEBI parser is xlsx-only; factsheet-PDF parsing is
+        # a future wave. Archive: keep the file on disk + the row, no fake
+        # parsing, no OCR. Never even reads the bytes past the exists() check.
+        await _mark(file_id, "archived")
+        return "archived: pdf_saved_for_later"
+
     data = path.read_bytes()
 
     async with ingestion_run(TASK_PARSE, SOURCE) as (run_id, stats):
@@ -115,7 +127,7 @@ async def _parse_pipeline(file_id: str) -> str:
         stats.reachable = True  # a local file read is never a reachability issue
 
         try:
-            amc_name, period, rows = detect_amc_and_parse(data, original_filename)
+            amc_name, period, rows = detect_amc_and_parse(data, original_filename, amc_hint)
         except Exception as exc:  # noqa: BLE001 — fail-closed, never partial-silent
             stats.failed = 1
             stats.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
@@ -124,9 +136,7 @@ async def _parse_pipeline(file_id: str) -> str:
 
         if amc_name is None or not rows:
             stats.status_override = "skipped"  # undetectable ≠ a pipeline failure
-            await _mark(
-                file_id, "unsupported", period=period, error="amc_or_period_undetectable"
-            )
+            await _mark(file_id, "unsupported", period=period, error="amc_or_period_undetectable")
             return "unsupported: amc_or_period_undetectable"
 
         rows_upserted, _aum_updates = await _upsert_constituents(rows, amc_name, run_id=run_id)
@@ -135,7 +145,10 @@ async def _parse_pipeline(file_id: str) -> str:
             stats.failed = 1
             stats.last_error = "zero_rows_upserted"
             await _mark(
-                file_id, "failed", amc=amc_name, period=period,
+                file_id,
+                "failed",
+                amc=amc_name,
+                period=period,
                 error="zero_rows_upserted_scheme_unresolved",
             )
             return "failed: zero_rows_upserted"
@@ -167,6 +180,21 @@ def _unique_dest(dest_dir: Path, name: str) -> Path:
     return dest_dir / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
 
 
+def _list_incoming(incoming: Path) -> list[tuple[Path, str | None]]:
+    """Flat files at the top level (amc_hint=None) + one level of per-AMC
+    subfolders (e.g. incoming/HDFC/file.xlsx -> amc_hint='HDFC'). Never
+    recurses past that one level — a subfolder's own subfolders are ignored."""
+    entries: list[tuple[Path, str | None]] = []
+    for path in sorted(incoming.iterdir()):
+        if path.is_file():
+            entries.append((path, None))
+        elif path.is_dir():
+            for sub in sorted(path.iterdir()):
+                if sub.is_file():
+                    entries.append((sub, path.name))
+    return entries
+
+
 async def _scan_incoming_pipeline() -> str:
     from dhanradar.config import settings
 
@@ -178,31 +206,49 @@ async def _scan_incoming_pipeline() -> str:
     processed_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
 
-    n_ok = n_dup = n_bad = 0
-    for path in sorted(incoming.iterdir()):
-        if not path.is_file():
-            continue
+    n_ok = n_dup = n_bad = n_skipped = 0
+    for path, amc_hint in _list_incoming(incoming):
         try:
             data = path.read_bytes()
         except OSError:
             logger.warning("manual_ingest: could not read %s — leaving in place", path.name)
             continue
 
-        result = await intake_file(data, path.name, "folder", None)
-        dest_dir = failed_dir if result.status == "unsupported" else processed_dir
+        extracted, skipped = await intake_upload(data, path.name, "folder", None, amc_hint)
+        n_skipped += len(skipped)
+        if not extracted:
+            # 0 eligible members — a bad extension, or a zip that yielded
+            # nothing usable (encrypted/corrupt/too-many-members/all-skipped).
+            logger.info(
+                "manual_ingest: unsupported — %s (0 eligible members, skipped=%s)",
+                path.name,
+                skipped,
+            )
+        elif skipped:
+            logger.info(
+                "manual_ingest: %s partially skipped %d member(s): %s",
+                path.name,
+                len(skipped),
+                skipped,
+            )
+
+        for _name, result in extracted:
+            if result.status == "unsupported":
+                n_bad += 1
+            elif result.status == "duplicate":
+                n_dup += 1
+            else:
+                n_ok += 1
+
+        all_unsupported = (not extracted) or all(r.status == "unsupported" for _n, r in extracted)
+        dest_dir = failed_dir if all_unsupported else processed_dir
         try:
+            # Flat processed/failed dirs — subfolders are never mirrored.
             shutil.move(str(path), str(_unique_dest(dest_dir, path.name)))
         except OSError:
             logger.warning("manual_ingest: could not move %s to %s", path.name, dest_dir)
 
-        if result.status == "unsupported":
-            n_bad += 1
-        elif result.status == "duplicate":
-            n_dup += 1
-        else:
-            n_ok += 1
-
-    return f"scanned: ok={n_ok} dup={n_dup} unsupported={n_bad}"
+    return f"scanned: ok={n_ok} dup={n_dup} unsupported={n_bad} zip_skipped={n_skipped}"
 
 
 # ---------------------------------------------------------------------------
@@ -269,13 +315,13 @@ async def _poll_email_pipeline() -> str:
                 if not filename:
                     continue
                 ext = Path(filename).suffix.lower()
-                if ext not in (".xls", ".xlsx"):
+                if ext not in ALLOWED_EXTENSIONS and ext != ZIP_EXTENSION:
                     continue
                 payload = part.get_payload(decode=True)
                 if not isinstance(payload, bytes) or not payload:
                     continue
-                await intake_file(payload, filename, "email", None)
-                n_ingested += 1
+                extracted, _skipped = await intake_upload(payload, filename, "email", None)
+                n_ingested += len(extracted)
 
             conn.store(mid, "+FLAGS", "\\Seen")
     finally:

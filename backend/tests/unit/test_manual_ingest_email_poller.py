@@ -1,14 +1,15 @@
 """
 Unit tests for the manual disclosure inbox's email poller (Channel C —
 dhanradar/tasks/manual_ingest.py::poll_email_inbox). Mocked imaplib — no
-network, no DB (a rejected/dormant run never reaches intake_file(), so these
+network, no DB (a rejected/dormant run never reaches intake_upload(), so these
 never touch TaskSessionLocal).
 
 Covers:
   - Dormant no-op when MANUAL_INGEST_IMAP_* is unset (never touches imaplib).
   - Fail-closed no-op when the sender allowlist is empty (default — "accept none").
   - Sender-allowlist rejection: a message from a non-allowlisted sender is
-    marked seen (never reprocessed) but never handed to intake_file().
+    marked seen (never reprocessed) but never handed to intake_upload().
+  - A .zip attachment is accepted and counted per-eligible-member (contract §1).
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ def _raw_email(sender: str, filename: str | None = None) -> bytes:
     msg["Subject"] = "Monthly disclosure"
     msg.set_content("see attached")
     if filename:
-        msg.add_attachment(b"fake-bytes", maintype="application", subtype="octet-stream", filename=filename)
+        msg.add_attachment(
+            b"fake-bytes", maintype="application", subtype="octet-stream", filename=filename
+        )
     return bytes(msg)
 
 
@@ -128,9 +131,9 @@ def test_sender_not_in_allowlist_is_rejected_and_marked_seen(
     monkeypatch.setattr(mi.imaplib, "IMAP4_SSL", lambda host: fake)
 
     async def _boom(*_a, **_kw):
-        raise AssertionError("intake_file must never be called for a rejected sender")
+        raise AssertionError("intake_upload must never be called for a rejected sender")
 
-    monkeypatch.setattr(mi, "intake_file", _boom)
+    monkeypatch.setattr(mi, "intake_upload", _boom)
 
     result = mi.poll_email_inbox()
 
@@ -150,13 +153,13 @@ def test_allowlisted_sender_attachment_is_ingested(
 
     calls: list[tuple[bytes, str, str]] = []
 
-    async def _fake_intake(data, filename, channel, uploaded_by):
+    async def _fake_intake_upload(data, filename, channel, uploaded_by, amc_hint=None):
         calls.append((data, filename, channel))
         from dhanradar.mf.manual_ingest import IntakeResult
 
-        return IntakeResult("fake-id", "pending", None)
+        return [(filename, IntakeResult("fake-id", "pending", None))], []
 
-    monkeypatch.setattr(mi, "intake_file", _fake_intake)
+    monkeypatch.setattr(mi, "intake_upload", _fake_intake_upload)
 
     result = mi.poll_email_inbox()
 
@@ -165,3 +168,29 @@ def test_allowlisted_sender_attachment_is_ingested(
     assert calls[0][1] == "HDFC_disclosure.xlsx"
     assert calls[0][2] == "email"
     assert fake.seen == [b"1"]
+
+
+def test_allowlisted_sender_zip_attachment_expands_to_multiple_ingested(
+    _configured_imap, monkeypatch: pytest.MonkeyPatch
+):
+    """A .zip email attachment is accepted and counted per-eligible-member,
+    not as one attachment (contract §1 — all 3 channels get zip intake)."""
+    monkeypatch.setattr(_configured_imap, "MANUAL_INGEST_SENDER_ALLOWLIST", "trusted@amc.com")
+
+    raw = _raw_email("trusted@amc.com", filename="bundle.zip")
+    fake = _FakeImap({b"1": raw})
+    monkeypatch.setattr(mi.imaplib, "IMAP4_SSL", lambda host: fake)
+
+    async def _fake_intake_upload(data, filename, channel, uploaded_by, amc_hint=None):
+        from dhanradar.mf.manual_ingest import IntakeResult
+
+        return [
+            ("HDFC_June2026.xlsx", IntakeResult("id-1", "pending", None)),
+            ("SBI_June2026.xlsx", IntakeResult("id-2", "pending", None)),
+        ], [("notes.txt", "unsupported_extension:.txt")]
+
+    monkeypatch.setattr(mi, "intake_upload", _fake_intake_upload)
+
+    result = mi.poll_email_inbox()
+
+    assert result == "polled: ingested=2 rejected_sender=0"
