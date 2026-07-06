@@ -48,6 +48,10 @@ _FAKE_ROWS = [
     ExpenseRatioRow(isin=_ISIN_B, ter_pct=1.20, effective_date=datetime.date(2026, 5, 15)),
 ]
 
+# Block 0.5: empty status-bucket dict used to no-op the dedicated SBI fetcher in tests
+# that only exercise the generic fetch_expense_ratios path.
+_EMPTY_STATUS = {"bot_blocked": [], "unreachable": [], "format_mismatch": [], "ok": []}
+
 _FAKE_STATUS_OK = {
     "bot_blocked": ["HDFC", "SBI"],
     "unreachable": [],
@@ -127,8 +131,15 @@ async def test_happy_path_writes_rows_and_updates_funds(db_tables, patch_redis, 
         "dhanradar.market_data.amc_expense.fetch_expense_ratios",
         new=AsyncMock(side_effect=_fake_fetch_ok),
     ):
-        with patch("dhanradar.tasks.mf_expense_ratio.httpx.AsyncClient", return_value=_async_client_cm_mock()):
-            await _mf_expense_ratio_pipeline()
+        # Block 0.5: _run also always calls the dedicated SBI fetcher now — patch it to a
+        # no-op (empty rows/status) so this generic-fetcher-only scenario's assertions
+        # (records_written == 2, etc.) stay valid without a real network call.
+        with patch(
+            "dhanradar.market_data.amc_expense_sbi.fetch_sbi_expense_ratios",
+            new=AsyncMock(return_value=([], _EMPTY_STATUS)),
+        ):
+            with patch("dhanradar.tasks.mf_expense_ratio.httpx.AsyncClient", return_value=_async_client_cm_mock()):
+                await _mf_expense_ratio_pipeline()
 
     # --- ingestion_runs: one row written ---
     run_row = await db_session.scalar(
@@ -179,8 +190,14 @@ async def test_all_bot_blocked_records_partial_unreachable(db_tables, patch_redi
         "dhanradar.market_data.amc_expense.fetch_expense_ratios",
         new=AsyncMock(side_effect=_fake_fetch_all_blocked),
     ):
-        with patch("dhanradar.tasks.mf_expense_ratio.httpx.AsyncClient", return_value=_async_client_cm_mock()):
-            await _mf_expense_ratio_pipeline()
+        # Block 0.5: patch the dedicated SBI fetcher to a no-op too — SBI is not bot-blocked
+        # so if left unpatched it would attempt a real network call here.
+        with patch(
+            "dhanradar.market_data.amc_expense_sbi.fetch_sbi_expense_ratios",
+            new=AsyncMock(return_value=([], _EMPTY_STATUS)),
+        ):
+            with patch("dhanradar.tasks.mf_expense_ratio.httpx.AsyncClient", return_value=_async_client_cm_mock()):
+                await _mf_expense_ratio_pipeline()
 
     # --- ingestion_runs: status='partial' ---
     run_row = await db_session.scalar(
