@@ -30,6 +30,7 @@ import os
 import re
 import time
 import zipfile
+from collections import Counter
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -3660,9 +3661,30 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             pass
 
             # Detect scheme name rows (usually bold / standalone text rows).
+            # HDFC's per-scheme disclosure files (manual-ingest inbox, ~88 files) title
+            # each sheet with a scheme-name banner MERGED across MOST (not necessarily
+            # all) columns — e.g. cols 0-9 all literally read "HDFC Liquid Fund (An Open
+            # ended Liquid scheme)" while cols 10-11 hold unrelated trailing metadata
+            # ("Income", "Hybrid"). openpyxl's read_only=True mode returns the SAME value
+            # for every cell in a merge instead of None-padding it, so `non_empty` here
+            # has the banner text repeated N times PLUS a couple of unrelated trailing
+            # values — not the single entry the original AMCs' banner rows produce.
+            # Using the row's MOST COMMON value (appearing >= 2x, or the sole value when
+            # there's exactly one) as the candidate accepts this shape without weakening
+            # the check for anyone else: a genuine holdings row never has any value
+            # repeated across 2+ of its columns (name/ISIN/quantity/value/etc. are all
+            # distinct), so this can't misfire on real data.
             non_empty = [s for s in row_strs if s and s.lower() not in ("none", "")]
-            if len(non_empty) == 1 and non_empty[0] and not col_map:
-                candidate = non_empty[0]
+            if non_empty and not col_map:
+                _val_counts = Counter(non_empty)
+                _top_val, _top_count = _val_counts.most_common(1)[0]
+                if _top_count >= 2 or len(non_empty) == 1:
+                    candidate = _top_val
+                else:
+                    candidate = ""
+            else:
+                candidate = ""
+            if candidate:
                 # Strip "SCHEME:" prefix used by UTI and some other AMCs.
                 if candidate.upper().startswith("SCHEME:"):
                     candidate = candidate[7:].strip()
@@ -3672,6 +3694,25 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # Reject rows starting with parentheses or other indicators of descriptions (e.g. MIRAE).
                 if candidate and not candidate[0].isalnum():
                     candidate = ""
+                # HDFC appends a boilerplate SEBI scheme-TYPE disclaimer in parens, e.g.
+                # "(An Open ended Liquid scheme)" / "(An open ended Scheme replicating/
+                # tracking NIFTY 1D Rate Index TRI)" — never a Direct/Regular/Growth
+                # disambiguator (unlike some other AMCs' legitimate "(Direct Plan)"
+                # qualifiers, which this deliberately does NOT touch), so stripping it
+                # only improves the pg_trgm scheme-name match in _resolve_scheme_isins,
+                # never loses information needed to pick the right ISIN.
+                if candidate:
+                    import re as _re_local  # local import — `re` is shadowed as a
+
+                    # function-local name elsewhere in this function (other branches
+                    # do `import re` inline), so the module-level import can't be
+                    # relied on here; alias avoids re-triggering that shadowing.
+                    candidate = _re_local.sub(
+                        r"\s*\(an\s+(open|close)[\s-]*ended.*$",
+                        "",
+                        candidate,
+                        flags=_re_local.IGNORECASE,
+                    ).strip()
                 # Scheme rows often start with scheme-type keywords.
                 if candidate and any(
                     kw in candidate.lower()
@@ -3921,6 +3962,12 @@ def _extract_sebi_row(
             # extraction; without this the column never resolves for ANY row in
             # this file, not only the grand-total one.
             "market/fair value",
+            # HDFC's per-scheme manual-ingest files header this column "Market/
+            # Fair Value (Rs. in Lacs.)" — WITH a space after the slash (unlike
+            # NIPPON's no-space "Market/Fair Value" above), which breaks that
+            # exact substring match too. Found 2026-07-06 fixing HDFC per-scheme
+            # AUM extraction (manual-ingest inbox).
+            "market/ fair value",
             # UTI hyphenates: "MARKET-VALUE" (found 2026-07-05, same fix).
             "market-value",
         ]
