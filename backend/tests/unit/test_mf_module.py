@@ -10,10 +10,12 @@ upload route is wired to the mf_analytics consent gate (B20).
 from __future__ import annotations
 
 import enum
+import io
 from dataclasses import fields
 from datetime import date
 
 import pytest
+from openpyxl import Workbook
 
 from dhanradar.mf.cas import CasParseError, classify_cas_failure, parse_cas
 from dhanradar.mf.schemas import FundReportItem, PortfolioReport
@@ -22,6 +24,7 @@ from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
 from dhanradar.tasks.mf import (
     _drop_over_covered_funds,
     _extract_sebi_row,
+    _parse_sebi_xlsx,
     parsed_to_snapshot_holdings,
 )
 
@@ -890,6 +893,77 @@ def test_extract_sebi_row_hyphenated_market_value_header_variant():
     result = _extract_sebi_row(row, col_map, "UTI - Large Cap Fund", "UTI", date(2026, 6, 1))
     assert result is not None
     assert result["market_value_cr"] == 114.541
+
+
+def test_extract_sebi_row_hdfc_market_fair_value_space_variant():
+    """HDFC's per-scheme manual-ingest files (2026-07-06 triage) header the value
+    column "Market/ Fair Value (Rs. in Lacs.)" -- WITH a space after the slash,
+    which the existing no-space "market/fair value" (NIPPON) variant doesn't match."""
+    col_map = _col_map(
+        "ISIN",
+        "Coupon (%)",
+        "Name Of the Instrument",
+        "Market/ Fair Value (Rs. in Lacs.)",
+    )
+    row = ["INE134E08MC7", "7.77", "Power Finance Corporation Ltd.^", "28016.41"]
+    result = _extract_sebi_row(
+        row, col_map, "HDFC Liquid Fund", "HDFC", date(2026, 6, 1)
+    )
+    assert result is not None
+    assert result["market_value_cr"] == pytest.approx(280.1641)
+
+
+def test_parse_sebi_xlsx_hdfc_per_scheme_merged_title_banner():
+    """HDFC's per-scheme manual-ingest files (~88 files, 2026-07-06 triage) title
+    each sheet with a scheme-name banner that openpyxl's read_only mode repeats
+    across MOST (not all) of the row's columns (a merged cell), with a couple of
+    unrelated trailing metadata values (e.g. "Income", "Hybrid") -- not the single
+    non-empty cell the original single-scheme-row detection expected. The banner
+    also carries a boilerplate SEBI scheme-TYPE disclaimer in parens that must be
+    stripped so the cleaned name resolves via pg_trgm fuzzy matching."""
+    banner = "HDFC Liquid Fund (An Open ended Liquid scheme)"
+    wb = Workbook()
+    ws = wb.active
+    ws.append([banner] * 10 + ["Income", "Hybrid"])
+    ws.append(["Portfolio as on 15-Jun-2026"] * 10 + [None, None])
+    ws.append([None] * 12)
+    ws.append(
+        [
+            None,
+            "ISIN",
+            "Coupon (%)",
+            "Name Of the Instrument",
+            "Industry+ /Rating",
+            "Quantity",
+            "Market/ Fair Value (Rs. in Lacs.)",
+            "% to NAV",
+        ]
+    )
+    ws.append(
+        [
+            "",
+            "INE134E08MC7",
+            7.77,
+            "Power Finance Corporation Ltd.^",
+            "CRISIL - AAA",
+            28000,
+            28016.41,
+            0.4,
+        ]
+    )
+    ws.append(
+        ["", "INE134E08ML8", 7.55, "REC LTD", "CRISIL - AAA", 25000, 25011.43, 0.36]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "HDFC")
+
+    assert len(rows) == 2
+    assert all(r["scheme_name"] == "HDFC Liquid Fund" for r in rows)
+    assert rows[0]["constituent_isin"] == "INE134E08MC7"
+    assert rows[0]["as_of_month"] == date(2026, 6, 1)
+    assert rows[0]["market_value_cr"] == pytest.approx(280.1641)
 
 
 def test_drop_over_covered_funds_skips_fund_over_105_pct():
