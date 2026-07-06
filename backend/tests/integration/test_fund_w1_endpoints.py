@@ -612,6 +612,153 @@ async def test_fund_peers_unknown_isin_404(async_client, db_session, patch_redis
     assert resp.status_code == 404
 
 
+async def test_fund_peers_excludes_same_amfi_code_plan_variant(
+    async_client, db_session, patch_redis
+):
+    """Fix 3 (fund-page-quick-wins): a fund's own OTHER plan variant (same
+    amfi_code — e.g. PPFAS Direct vs PPFAS Regular) must never appear as its
+    own peer, even though it is rank-adjacent in the same category."""
+    db_session.add(
+        MfFund(
+            isin=_ISIN_A,
+            scheme_name="PPFAS Flexicap Fund - Direct Plan - Growth",
+            amc_name="PPFAS Asset Management",
+            sebi_category=_CAT,
+            plan_type="direct",
+            amfi_code="12345",
+            fund_name_short="PPFAS Flexicap Fund",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_A,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=2,
+            total_in_cat=3,
+            verb_label="on_track",
+        )
+    )
+    # Same underlying scheme, Regular plan — same amfi_code, must be excluded.
+    db_session.add(
+        MfFund(
+            isin=_ISIN_B,
+            scheme_name="PPFAS Flexicap Fund - Regular Plan - Growth",
+            amc_name="PPFAS Asset Management",
+            sebi_category=_CAT,
+            plan_type="regular",
+            amfi_code="12345",
+            fund_name_short="PPFAS Flexicap Fund",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_B,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=1,
+            total_in_cat=3,
+            verb_label="on_track",
+        )
+    )
+    # A genuine peer — different underlying scheme entirely.
+    db_session.add(
+        MfFund(
+            isin=_ISIN_C,
+            scheme_name="Other Fund - Direct Plan - Growth",
+            amc_name="Other AMC",
+            sebi_category=_CAT,
+            plan_type="direct",
+            amfi_code="99999",
+            fund_name_short="Other Fund",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_C,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=3,
+            total_in_cat=3,
+            verb_label="on_track",
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/peers")
+    assert resp.status_code == 200, resp.text
+    peer_isins = {p["isin"] for p in resp.json()["data"]["peers"]}
+    assert _ISIN_B not in peer_isins  # same amfi_code plan variant — excluded
+    assert _ISIN_C in peer_isins  # genuine peer — kept
+
+
+async def test_fund_peers_prefers_same_plan_type_on_rank_tie(async_client, db_session, patch_redis):
+    """Fix 3: among candidates equally rank-near the viewed fund, the one
+    sharing its plan_type ranks first — a tie-break, never a filter."""
+    await _seed_fund(db_session, _ISIN_A)  # plan_type="direct"
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_A,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=5,
+            total_in_cat=9,
+            verb_label="on_track",
+        )
+    )
+    db_session.add(
+        MfFund(
+            isin=_ISIN_B,
+            scheme_name="Regular Tie Peer",
+            amc_name="Peer AMC",
+            sebi_category=_CAT,
+            plan_type="regular",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_B,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=1,  # distance 4 from A's rank=5
+            total_in_cat=9,
+            verb_label="on_track",
+        )
+    )
+    db_session.add(
+        MfFund(
+            isin=_ISIN_C,
+            scheme_name="Direct Tie Peer",
+            amc_name="Peer AMC",
+            sebi_category=_CAT,
+            plan_type="direct",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFundRanks(
+            isin=_ISIN_C,
+            as_of_date=_TODAY,
+            sebi_category=_CAT,
+            rank=9,  # distance 4 from A's rank=5 — ties with B
+            total_in_cat=9,
+            verb_label="on_track",
+        )
+    )
+    await db_session.commit()
+
+    resp = await async_client.get(f"/api/v1/mf/fund/{_ISIN_A}/peers")
+    assert resp.status_code == 200, resp.text
+    isins_in_order = [p["isin"] for p in resp.json()["data"]["peers"]]
+    # Same rank-distance (4) from both — the same-plan_type (direct) candidate
+    # must sort first.
+    assert isins_in_order.index(_ISIN_C) < isins_in_order.index(_ISIN_B)
+
+
 # ---------------------------------------------------------------------------
 # GET /fund/{isin}/factors  (W2, §10.1 — factors + signals, the second scored concept)
 # ---------------------------------------------------------------------------

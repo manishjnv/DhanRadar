@@ -809,7 +809,38 @@ async def get_fund_peers(session: AsyncSession, isin: str) -> dict | None:
         )
     ).all()
 
-    nearest = sorted(rows, key=lambda row: abs(row[0].rank - rank_row.rank))[:_PEERS_CAP]
+    # Fix 3 (fund-page-quick-wins): a fund's own OTHER plan/option variant is not
+    # its peer (e.g. PPFAS Direct's peers list must not include PPFAS Regular —
+    # same underlying scheme). Two independent signals, either is enough to
+    # exclude: the same `amfi_code` (the AMFI scheme code shared across a
+    # scheme's Direct/Regular/IDCW variants), or an identical `fund_name_short`
+    # (already plan/option-stripped by `taxonomy.derive_short_name` at
+    # ingestion — no new normalization needed here). Both sides must be
+    # non-null to match, so two funds with unknown/null amfi_code or
+    # fund_name_short never collide on a false None == None match.
+    def _is_same_scheme(candidate: MfFund) -> bool:
+        if fund.amfi_code and candidate.amfi_code and candidate.amfi_code == fund.amfi_code:
+            return True
+        if (
+            fund.fund_name_short
+            and candidate.fund_name_short
+            and candidate.fund_name_short == fund.fund_name_short
+        ):
+            return True
+        return False
+
+    filtered_rows = [(r, f, m) for (r, f, m) in rows if not _is_same_scheme(f)]
+
+    # Nearest category-rank first; among equally rank-near candidates, prefer
+    # peers sharing the viewed fund's OWN plan_type (Fix 3) — a tie-break, not
+    # a filter, so a plan-mismatched fund is never fully excluded.
+    nearest = sorted(
+        filtered_rows,
+        key=lambda row: (
+            abs(row[0].rank - rank_row.rank),
+            0 if row[1].plan_type == fund.plan_type else 1,
+        ),
+    )[:_PEERS_CAP]
 
     peers = []
     for r, f, m in nearest:

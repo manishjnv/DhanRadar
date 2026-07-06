@@ -15,7 +15,7 @@ yfinance is mocked throughout — no live network calls in tests.
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -394,5 +394,54 @@ async def test_benchmark_endpoint_by_key_returns_seeded_series(db_session, async
 async def test_benchmark_endpoint_by_key_unknown_404(db_session, async_client):
     """GET /mf/benchmark/{key} 404s (RFC7807) for a key not in BENCHMARK_REGISTRY."""
     r = await async_client.get("/api/v1/mf/benchmark/not_a_real_benchmark")
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "benchmark_not_found"
+
+
+# ---------------------------------------------------------------------------
+# GET /mf/benchmark/{key}/returns (Fix 1, fund-page-quick-wins) — trailing
+# 1Y/3Y/5Y returns computed server-side with the same trailing-return math
+# mf_fund_metrics uses (dhanradar.mf.signals.extended_horizon_stats).
+# ---------------------------------------------------------------------------
+
+
+async def test_benchmark_returns_endpoint_computes_trailing_returns(db_session, async_client):
+    """Seeded closes at ages ~1500d/~950d/~364d/0d (latest) give clean, hand-
+    checkable 1Y/3Y/5Y trailing returns: 100->120 (1Y, 20%), 90->120 (3Y,
+    33.33%), 80->120 (5Y, 50%) — mirrors the min-age-gated base-point selection
+    `_trailing_return_with_min_age` uses for a fund's own return_3y_pct/
+    return_5y_pct."""
+    latest = date(2026, 7, 1)
+    await _seed_close(db_session, latest - timedelta(days=1500), 80.0, benchmark="nifty100")
+    await _seed_close(db_session, latest - timedelta(days=950), 90.0, benchmark="nifty100")
+    await _seed_close(db_session, latest - timedelta(days=364), 100.0, benchmark="nifty100")
+    await _seed_close(db_session, latest, 120.0, benchmark="nifty100")
+
+    r = await async_client.get("/api/v1/mf/benchmark/nifty100/returns")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["benchmark"] == "nifty100"
+    assert body["as_of"] == latest.isoformat()
+    assert abs(body["return_1y_pct"] - 20.0) < 0.01
+    assert abs(body["return_3y_pct"] - 33.33) < 0.01
+    assert abs(body["return_5y_pct"] - 50.0) < 0.01
+    assert "Nifty 100" in body["disclosure"]
+    assert "excludes dividends" in body["disclosure"]
+
+
+async def test_benchmark_returns_endpoint_empty_before_backfill(db_session, async_client):
+    """No rows yet (pre-backfill cold-start) — all-null shape, still 200 (no-suppress)."""
+    r = await async_client.get("/api/v1/mf/benchmark/nifty50/returns")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["return_1y_pct"] is None
+    assert body["return_3y_pct"] is None
+    assert body["return_5y_pct"] is None
+    assert body["as_of"] is None
+
+
+async def test_benchmark_returns_endpoint_unknown_key_404(db_session, async_client):
+    """GET /mf/benchmark/{key}/returns 404s (RFC7807) for an unregistered key."""
+    r = await async_client.get("/api/v1/mf/benchmark/not_a_real_benchmark/returns")
     assert r.status_code == 404, r.text
     assert r.json()["detail"] == "benchmark_not_found"
