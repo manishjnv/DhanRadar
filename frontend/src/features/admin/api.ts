@@ -21,6 +21,7 @@ export const adminKeys = {
   run:        (id: string) => ['admin', 'run', id] as const,
   quality:    () => ['admin', 'quality'] as const,
   moodStatus: () => ['admin', 'mood-status'] as const,
+  manualIngestFiles: (limit?: number) => ['admin', 'manual-ingest', 'files', limit] as const,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -1177,5 +1178,73 @@ export function useAdminAudit(params?: {
     queryFn: () => api.get<AdminAuditRow[]>(path),
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Manual Disclosure Inbox — bot-blocked AMCs' monthly portfolio disclosure
+// files, dropped in by an admin (or landing via a watched folder / inbox).
+// ---------------------------------------------------------------------------
+
+export interface ManualIngestFileRow {
+  id: string;
+  original_filename: string;
+  channel: 'upload' | 'folder' | 'email';
+  status: 'pending' | 'parsed' | 'failed' | 'duplicate' | 'unsupported';
+  amc_detected: string | null;
+  period_detected: string | null;
+  rows_ingested: number | null;
+  error: string | null;
+  received_at: string;
+  parsed_at: string | null;
+}
+
+export interface ManualIngestUploadResult {
+  filename: string;
+  file_id: string | null;
+  status: 'pending' | 'duplicate';
+}
+
+export interface ManualIngestUploadResponse {
+  results: ManualIngestUploadResult[];
+}
+
+/** Recent rows for the Manual Disclosure Inbox table. Polled faster than the
+ *  other 60s-interval admin queries — files parse asynchronously in the
+ *  background, so a shorter interval keeps the status column current. */
+export function useManualIngestFiles(limit = 50) {
+  return useQuery({
+    queryKey: adminKeys.manualIngestFiles(limit),
+    queryFn: () => api.get<ManualIngestFileRow[]>(`/admin/ingest/disclosure-files?limit=${limit}`),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+  });
+}
+
+/** Upload up to 10 .xls/.xlsx disclosure files at once. Raw fetch (not
+ *  apiClient) — mirrors useUploadCas in features/mf/api.ts, since FormData
+ *  needs no Content-Type override and apiClient.post JSON-encodes bodies. */
+export function useUploadDisclosureFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (files: File[]) => {
+      const formData = new FormData();
+      for (const file of files) formData.append('files', file);
+      const res = await fetch('/api/v1/admin/ingest/disclosure-files', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? body.title ?? `Upload failed (${res.status})`);
+      }
+      return res.json() as Promise<ManualIngestUploadResponse>;
+    },
+    onSuccess: () => {
+      // Invalidate by prefix (no limit) so it refreshes regardless of which
+      // limit the currently-mounted table query used.
+      qc.invalidateQueries({ queryKey: ['admin', 'manual-ingest', 'files'] });
+    },
   });
 }

@@ -37,6 +37,13 @@ volumes:
   # and the dhanradar-celery-batch worker reads + purges it. Without a shared
   # volume the worker's container can't see the API's /tmp file (job → failed).
   dhanradar_cas_tmp:
+  # Manual disclosure inbox (mf/manual_ingest.py): the API (dhanradar-fastapi,
+  # admin upload channel) writes here; dhanradar-celery-batch reads it (parse
+  # task) and also owns the watched-folder scan + email-poller channels. Same
+  # writer/reader split as dhanradar_cas_tmp above — unlike CAS, these files are
+  # NOT purged after parse (kept for audit / re-parse), so this is a real
+  # persistent volume, not scratch.
+  dhanradar_manual_ingest:
 
 services:
 
@@ -127,6 +134,9 @@ services:
     volumes:
       # Writer side of the CAS hand-off (read + purged by dhanradar-celery-batch).
       - dhanradar_cas_tmp:/tmp/dhanradar_cas
+      # Writer side of the manual disclosure inbox (admin upload channel; read by
+      # dhanradar-celery-batch's parse task). MANUAL_INGEST_DIR must point here.
+      - dhanradar_manual_ingest:/data/manual_ingest
       # BSE Star MF 2.0 webhook keys (read-only). Host-only dir; the private key
       # is root:1001 0640 so the app's appuser (uid/gid 1001) can read it.
       # Referenced by BSE_PRIVATE_KEY_FILE / BSE_WEBHOOK_PUBLIC_KEY_FILE in .env.
@@ -209,6 +219,9 @@ services:
     volumes:
       # Reader/purger side of the CAS hand-off (written by dhanradar-fastapi).
       - dhanradar_cas_tmp:/tmp/dhanradar_cas
+      # Reader side of the manual disclosure inbox (parse task + folder-scan +
+      # email-poller channels all run on this worker; admin upload writes it).
+      - dhanradar_manual_ingest:/data/manual_ingest
     networks:
       - dhanradar
     depends_on:

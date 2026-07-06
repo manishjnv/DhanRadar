@@ -167,6 +167,27 @@ class Settings(BaseSettings):
     KITE_TOTP_SECRET: str = ""
 
     # ------------------------------------------------------------------
+    # Manual disclosure ingestion inbox (ADR-0033(a) human side-channel).
+    # HDFC/SBI/ICICI-Pru/Kotak/Axis block mf_constituents_fetch (Akamai/Radware);
+    # a human downloads the monthly SEBI disclosure and drops it via one of 3
+    # channels (admin upload / watched folder / email poller — all 3 funnel
+    # through dhanradar/mf/manual_ingest.py's one intake service).
+    # ------------------------------------------------------------------
+    # Filesystem root the intake service writes into (mirrors the CAS upload dir
+    # convention — a docker-volume-backed path in prod; default is repo-root-
+    # relative for local dev, matching the top-level .gitignore `data/` entry).
+    MANUAL_INGEST_DIR: str = "data/manual_ingest"
+    # Email poller (Channel C) — DORMANT unless all three of host/user/password
+    # are set (fail-closed no-op, never a crash or alert spam when unconfigured).
+    MANUAL_INGEST_IMAP_HOST: str = ""
+    MANUAL_INGEST_IMAP_USER: str = ""
+    MANUAL_INGEST_IMAP_PASSWORD: str = ""
+    # Comma-separated sender email allowlist. EMPTY ⇒ accept none (fail-closed —
+    # mirrors ADMIN_USER_IDS/BSE_WEBHOOK_SOURCE_IPS: no allowlist means no access,
+    # never "no filter"). Resolve via manual_ingest_sender_allowlist, never raw.
+    MANUAL_INGEST_SENDER_ALLOWLIST: str = ""
+
+    # ------------------------------------------------------------------
     # Upstox Analytics (Mood Compass FII / DII / PCR — Phase 2)
     # ------------------------------------------------------------------
     # Read-only 1-year Upstox Analytics Token for the market-data API
@@ -380,6 +401,16 @@ class Settings(BaseSettings):
         set ⇒ no IP gate (the JOSE signature is the real authentication)."""
         return frozenset(
             ip.strip() for ip in self.BSE_WEBHOOK_SOURCE_IPS.split(",") if ip.strip()
+        )
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def manual_ingest_sender_allowlist(self) -> frozenset[str]:
+        """Normalized (lowercased) set of allowed sender email addresses for the manual
+        disclosure email poller (Channel C). Empty ⇒ no sender can pass (fail-closed —
+        mirrors bse_webhook_source_ips: an unset allowlist widens nothing)."""
+        return frozenset(
+            e.strip().lower() for e in self.MANUAL_INGEST_SENDER_ALLOWLIST.split(",") if e.strip()
         )
 
     @computed_field  # type: ignore[misc]

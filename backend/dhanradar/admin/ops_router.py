@@ -225,6 +225,17 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
         "beat_key": "news-refresh-market",
     },
     {
+        "source_key": "manual_disclosure_inbox",
+        "name": "Manual Disclosure Inbox",
+        "tier": "2",
+        "description": "HDFC/SBI/ICICI-Pru/Kotak/Axis monthly portfolio disclosures — human-supplied (bot-blocked AMCs)",
+        "method": "Admin upload + watched folder + email poller",
+        "schedule_display": "Folder scan every 15 min; email poll every 30 min",
+        "cost": "Free",
+        "celery_task": "dhanradar.tasks.manual_ingest.scan_incoming_folder",
+        "beat_key": "manual-ingest-scan-folder",
+    },
+    {
         "source_key": "upstox_analytics",
         "name": "Upstox Analytics",
         "tier": "Market",
@@ -405,6 +416,19 @@ _BEAT_TASKS: list[dict] = [
         "task_name": "dhanradar.tasks.mf.nifty_close_daily",
         "schedule_display": "Daily 23:45 IST",
         "cron": {"hour": 23, "minute": 45},
+    },
+    # Manual disclosure inbox — Channel B (watched folder scan) + Channel C (email poll).
+    {
+        "beat_key": "manual-ingest-scan-folder",
+        "task_name": "dhanradar.tasks.manual_ingest.scan_incoming_folder",
+        "schedule_display": "Every 15 min",
+        "cron": {"minute": "*/15"},
+    },
+    {
+        "beat_key": "manual-ingest-poll-email",
+        "task_name": "dhanradar.tasks.manual_ingest.poll_email_inbox",
+        "schedule_display": "Every 30 min (dormant until IMAP env is configured)",
+        "cron": {"minute": "*/30"},
     },
 ]
 
