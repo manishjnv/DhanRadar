@@ -45,6 +45,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
+import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { useFundDetail, useFundComposition, useFundFactors, useLatestPortfolio } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
 import type { FundHead as ApiFundHead } from '@/features/mf/types';
@@ -211,46 +212,46 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <StatusRow contributing={contributing} />
 
       {/* S2 — Educational verdict */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" /><VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
+      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" />{/* dev-verify */}<LiveBadge className="mb-3" /><VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
 
       {/* S3 — Smart entry timing */}
       <Section><SectionHeader index="03" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
 
       {/* S4 — Portfolio fit */}
-      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" /><PortfolioFitSection portfolioId={portfolioId} isin={isin} /></Section>
+      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" />{/* dev-verify */}<LiveBadge className="mb-3" /><PortfolioFitSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S5 — My investment (P1 — real data) */}
-      <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
+      <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" />{/* dev-verify */}<LiveBadge className="mb-3" /><MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S6 — Market mood */}
       <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" /><MoodSection /></Section>
 
       {/* S7 — Fund health */}
-      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" /><FundHealthSection isin={isin} /></Section>
+      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" />{/* dev-verify */}<LiveBadge className="mb-3" /><FundHealthSection isin={isin} /></Section>
 
       {/* S8 — What changed */}
-      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" /><WhatChangedSection isin={isin} /></Section>
+      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" />{/* dev-verify */}<LiveBadge className="mb-3" /><WhatChangedSection isin={isin} /></Section>
 
       {/* S9 — Snapshot */}
       <Section><SectionHeader index="09" title="Investment Snapshot" /><SnapshotSection /></Section>
 
       {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} /><PerformanceSection head={head} isin={isin} /></Section>
+      <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} />{/* dev-verify */}<LiveBadge className="mb-3" /><PerformanceSection head={head} isin={isin} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
-      <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="How confident the read is — by dimension" /><ScoreBreakdownSection factors={factors} /></Section>
+      <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="How confident the read is — by dimension" />{/* dev-verify */}<LiveBadge className="mb-3" /><ScoreBreakdownSection factors={factors} /></Section>
 
       {/* S12 — Risk center */}
-      <Section><SectionHeader index="12" title="Risk Center" /><RiskCenterSection isin={isin} /></Section>
+      <Section><SectionHeader index="12" title="Risk Center" />{/* dev-verify */}<LiveBadge className="mb-3" /><RiskCenterSection isin={isin} /></Section>
 
       {/* S13 — Holdings */}
-      <Section><SectionHeader index="13" title="Portfolio Holdings" info={holdingsInfo} /><HoldingsSection isin={isin} /></Section>
+      <Section><SectionHeader index="13" title="Portfolio Holdings" info={holdingsInfo} />{/* dev-verify */}<LiveBadge className="mb-3" /><HoldingsSection isin={isin} /></Section>
 
       {/* S14 — Fund flow */}
-      <Section><SectionHeader index="14" title="Fund Flow Intelligence" /><FundFlowSection isin={isin} /></Section>
+      <Section><SectionHeader index="14" title="Fund Flow Intelligence" />{/* dev-verify */}<LiveBadge className="mb-3" /><FundFlowSection isin={isin} /></Section>
 
       {/* S15 — Fund manager */}
-      <Section><SectionHeader index="15" title="Fund Manager" /><ManagerSection isin={isin} /></Section>
+      <Section><SectionHeader index="15" title="Fund Manager" />{/* dev-verify */}<LiveBadge className="mb-3" /><ManagerSection isin={isin} /></Section>
 
       {/* S16 — AMC quality */}
       <Section><SectionHeader index="16" title="AMC Quality Center" /><AmcSection isin={isin} amcName={fund.amc_name ?? undefined} /></Section>
@@ -259,13 +260,13 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       <Section><SectionHeader index="17" title="Tax Center" info="FY 2026-27 · equity taxation" /><TaxSection seedValue={myHolding?.current_value} costBasis={myHolding?.invested_amount} /></Section>
 
       {/* S18 — Transactions (P1 — real data) */}
-      <Section><SectionHeader index="18" title="Transaction History" info="Your own transactions for this fund" /><TransactionsSection portfolioId={portfolioId} isin={isin} /></Section>
+      <Section><SectionHeader index="18" title="Transaction History" info="Your own transactions for this fund" />{/* dev-verify */}<LiveBadge className="mb-3" /><TransactionsSection portfolioId={portfolioId} isin={isin} /></Section>
 
       {/* S19 — Alternatives */}
-      <Section><SectionHeader index="19" title="Alternatives" info="Same category, ranked nearby" /><AlternativesSection isin={isin} /></Section>
+      <Section><SectionHeader index="19" title="Alternatives" info="Same category, ranked nearby" />{/* dev-verify */}<LiveBadge className="mb-3" /><AlternativesSection isin={isin} /></Section>
 
       {/* S20 — Similar funds */}
-      <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" /><SimilarSection isin={isin} /></Section>
+      <Section><SectionHeader index="20" title="Similar Funds" info="Swipe →" />{/* dev-verify */}<LiveBadge className="mb-3" /><SimilarSection isin={isin} /></Section>
 
       {/* S21 — FAQ */}
       <Section><SectionHeader index="21" title="Frequently Asked" /><FaqSection navLatest={fund.nav_latest} /></Section>
