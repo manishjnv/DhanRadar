@@ -36,6 +36,7 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy import func, select, text
 
 from dhanradar.market_data.rbi import MacroRow
@@ -129,7 +130,9 @@ async def test_happy_path_writes_one_row(db_tables, patch_redis, db_session):
         )
     )
     assert indicator_row is not None, "Expected one macro_indicators row"
-    assert indicator_row.indicator_value == 6.8307
+    # indicator_value is a Numeric(18,4) column -> comes back as Decimal; compare
+    # via float() to avoid a Decimal-vs-float exact-representation mismatch.
+    assert float(indicator_row.indicator_value) == pytest.approx(6.8307)
     assert indicator_row.unit == "percent"
     assert indicator_row.as_of_date == date(2026, 7, 3)
 
@@ -213,7 +216,10 @@ async def test_out_of_range_value_rejected(db_tables, patch_redis, db_session):
         ):
             await _rbi_tbill_pipeline()
 
-    # --- ingestion_runs: one row, status='success' (fetch succeeded), records_written==0 ---
+    # --- ingestion_runs: one row. _derive_status (tasks/ingestion_run.py) treats
+    # "fetched but everything failed validation, nothing written" as status='failed'
+    # (same policy every other source-ingestion task follows) -- the fetch itself
+    # succeeding is irrelevant to the run's overall status when 0 rows land.
     run_row = await db_session.scalar(
         select(MfIngestionRun)
         .where(MfIngestionRun.source == "rbi_tbill")
@@ -221,7 +227,7 @@ async def test_out_of_range_value_rejected(db_tables, patch_redis, db_session):
         .limit(1)
     )
     assert run_row is not None, "Expected one ingestion_runs row"
-    assert run_row.status == "success", f"Expected status='success', got '{run_row.status}'"
+    assert run_row.status == "failed", f"Expected status='failed', got '{run_row.status}'"
     assert run_row.records_written == 0, (
         f"Expected records_written=0, got {run_row.records_written}"
     )
