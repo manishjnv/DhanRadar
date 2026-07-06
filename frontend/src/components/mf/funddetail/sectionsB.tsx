@@ -25,7 +25,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
-import { useFundNav, useFundAnalytics, useFundSip } from '@/features/mf/api';
+import { useFundNav, useFundAnalytics, useFundSip, useFundPeople } from '@/features/mf/api';
 import { useBenchmarkSeries, useBenchmarkReturns } from '@/features/portfolio/api';
 import { benchmarkForCategory } from './categoryBenchmark';
 import type { CategoryPercentileBand } from '@/features/mf/types';
@@ -37,7 +37,6 @@ import {
   TONE_TEXT,
 } from './parts';
 import {
-  SNAPSHOT,
   GROWTH, ROLLING, RANK,
 } from './sampleData';
 import type { Band3 } from './sampleData';
@@ -60,16 +59,134 @@ const QUARTILE_TONE: Record<1 | 2 | 3 | 4, string> = {
 // S9 — INVESTMENT SNAPSHOT
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Years since launch, one decimal — "—" when launch_date isn't on file. */
+function fundAgeLabel(launchDate: string | null): string {
+  if (!launchDate) return '—';
+  const years = (Date.now() - new Date(launchDate).getTime()) / (365.25 * 24 * 3600 * 1000);
+  return years > 0 ? `${years.toFixed(1)} yrs` : '—';
+}
+
+/** ELSS carries a statutory 3-year lock-in; every other category has none — a
+ * static, factual category rule (not a per-fund data field). */
+function isElss(category: string): boolean {
+  return category.toLowerCase().includes('elss');
+}
+
+type SnapshotCell = {
+  l: string;
+  v: string;
+  p?: string;
+  /** sub-line tone */
+  tone?: 'emerald' | 'red';
+  /** main-value tone (returns colour up/down) */
+  valueTone?: 'emerald' | 'red';
+  tip: string;
+};
+
 /**
  * 4-col desktop / 2-col mobile KPI grid with 1px-gap dividers via gap-px +
  * bg-line wrapper (cells are bg-surface). Each cell: label + InfoTip, mono
- * value, optional coloured sub-line.
+ * value, optional coloured sub-line. Real cells come from `head` (already
+ * fetched by FundDetailClientView) plus fund.analytics/fund.people for the
+ * two cells that need them; source-blocked cells stay "—" with a tooltip
+ * naming the reason (ADR-0039 per-cell pattern) — never a fabricated number.
  */
-export function SnapshotSection() {
+export function SnapshotSection({ head, isin }: { head: FundHead; isin: string }) {
+  const { data: analyticsEnv } = useFundAnalytics(isin);
+  const { data: peopleEnv } = useFundPeople(isin);
+  const a = analyticsEnv?.analytics.data ?? null;
+  const managers = peopleEnv?.people.data?.managers ?? [];
+  const managerTenureYears = managers.length ? Math.max(...managers.map((m) => m.tenure_years)) : null;
+  const elss = isElss(head.category);
+
+  const cells: SnapshotCell[] = [
+    {
+      l: 'NAV',
+      v: head.navLatest != null ? `₹${head.navLatest.toFixed(2)}` : '—',
+      p: head.navChangePct != null
+        ? `${head.navChangePct >= 0 ? '▲' : '▼'} ${Math.abs(head.navChangePct).toFixed(2)}% today`
+        : head.navDate ? `as of ${new Date(head.navDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : undefined,
+      tone: head.navChangePct != null ? (head.navChangePct >= 0 ? 'emerald' : 'red') : undefined,
+      tip: 'Per-unit price of the fund.',
+    },
+    {
+      l: 'Expense Ratio',
+      v: head.expenseRatioPct != null ? `${head.expenseRatioPct.toFixed(2)}%` : '—',
+      tip: 'Annual fee as % of your investment.',
+    },
+    {
+      l: 'Fund Size (AUM)',
+      v: head.fundAumCr != null ? `₹${head.fundAumCr.toLocaleString('en-IN')} Cr` : '—',
+      p: head.fundAumCr != null && head.fundAumAsOf
+        ? `as of ${new Date(head.fundAumAsOf).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+        : undefined,
+      tip: 'Total assets from the fund’s own SEBI disclosure.',
+    },
+    {
+      l: 'Fund Age',
+      v: fundAgeLabel(head.launchDate),
+      p: head.launchDate ? `Since ${new Date(head.launchDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}` : undefined,
+      tip: 'Time since launch.',
+    },
+    {
+      l: 'Manager Tenure',
+      v: managerTenureYears != null ? `${managerTenureYears.toFixed(1)} yrs` : '—',
+      tip: 'How long the current manager(s) have run it.',
+    },
+    {
+      l: 'Category Rank',
+      v: head.rank != null && head.total != null ? `#${head.rank} / ${head.total}` : '—',
+      tip: 'Rank within its SEBI category.',
+    },
+    {
+      l: 'Tracking Error',
+      v: a?.tracking_error_pct != null ? `${a.tracking_error_pct.toFixed(2)}%` : '—',
+      tip: 'How tightly the fund tracks its benchmark index.',
+    },
+    {
+      l: 'Plan / Option',
+      v: head.planOption.length ? head.planOption.join(' · ') : '—',
+      tip: 'Direct/Regular plan and Growth/IDCW option.',
+    },
+    {
+      l: 'Lock-in',
+      v: elss ? '3 years' : 'None',
+      tip: elss ? 'ELSS funds carry a mandatory 3-year lock-in.' : 'No mandatory holding period for this category.',
+    },
+    {
+      l: 'Stamp Duty',
+      v: '0.005%',
+      p: 'On purchase',
+      tip: 'Statutory govt levy on buying units — same for every fund.',
+    },
+    {
+      l: '1Y Return',
+      v: fmtPct(head.return1yPct),
+      valueTone: head.return1yPct != null ? (head.return1yPct >= 0 ? 'emerald' : 'red') : undefined,
+      tip: 'Return over the last 1 year.',
+    },
+    {
+      l: '3Y Return',
+      v: fmtPct(head.return3yPct),
+      valueTone: head.return3yPct != null ? (head.return3yPct >= 0 ? 'emerald' : 'red') : undefined,
+      tip: 'Annualised return over the last 3 years.',
+    },
+    {
+      l: '5Y Return',
+      v: fmtPct(head.return5yPct),
+      valueTone: head.return5yPct != null ? (head.return5yPct >= 0 ? 'emerald' : 'red') : undefined,
+      tip: 'Annualised return over the last 5 years.',
+    },
+    { l: 'Exit Load', v: '—', tip: 'Exit load isn’t in our data yet.' },
+    { l: 'Min SIP · Lumpsum', v: '—', tip: 'Minimum investment amounts aren’t in our data yet.' },
+    { l: 'Portfolio Turnover', v: '—', tip: 'Portfolio turnover isn’t in our data yet.' },
+    { l: 'Riskometer', v: '—', tip: 'Riskometer band isn’t in our data yet.' },
+  ];
+
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-line">
       <div className="grid grid-cols-2 gap-px sm:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7">
-        {SNAPSHOT.map((item) => (
+        {cells.map((item) => (
           <div key={item.l} className="bg-surface px-4 py-3.5 sm:px-[15px]">
             {/* label + tip */}
             <div className="flex items-center gap-1.5">
@@ -77,7 +194,9 @@ export function SnapshotSection() {
               <InfoTip tip={item.tip} />
             </div>
             {/* value */}
-            <div className="mt-1.5 font-mono text-[15px] font-bold text-ink">{item.v}</div>
+            <div className={cn('mt-1.5 font-mono text-[15px] font-bold', item.valueTone ? TONE_TEXT[item.valueTone] : 'text-ink')}>
+              {item.v}
+            </div>
             {/* sub-line */}
             {item.p && (
               <div

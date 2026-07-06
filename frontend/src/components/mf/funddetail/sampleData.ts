@@ -67,21 +67,9 @@ export const VERDICT = {
     'A low-cost, passive way to track India’s small-cap segment. Best understood as a long-horizon SIP exposure — not money you may need within five years.',
 } as const;
 
-// ───────────────────────────────────────────────────────────────────────────
-// S3 SMART ENTRY TIMING — category valuation context (factual market data)
-// ───────────────────────────────────────────────────────────────────────────
-export const ENTRY = {
-  /** meter marker position 0–100 (left=cheap, right=expensive) + band word */
-  markerPct: 38,
-  markerWord: 'Fair',
-  ticks: ['Cheap', 'Fair', 'Neutral', 'Rich', 'Expensive'],
-  pe: '28.4',
-  peAvg: '26.1',
-  context:
-    'Category valuation is modestly above its 5-year average — fair, not a bargain.',
-  meaning:
-    'Valuations look reasonable but not cheap. A steady SIP averages your entry price; a lumpsum can be split into 3–4 monthly tranches to smooth timing.',
-} as const;
+// S3 SMART ENTRY TIMING — no source for category/index valuation exists yet
+// (§18.1); EntryTimingSection (sectionsHero.tsx) renders an honest educational
+// explainer + no-data state instead of a fabricated valuation meter.
 
 // ───────────────────────────────────────────────────────────────────────────
 // S4 PORTFOLIO FIT
@@ -123,29 +111,10 @@ export const MINE = {
   ],
 } as const;
 
-// ───────────────────────────────────────────────────────────────────────────
-// S6 MARKET MOOD ANALYSIS (regime WORD only, never a number)
-// ───────────────────────────────────────────────────────────────────────────
-export const MOOD = {
-  word: 'Optimistic',
-  fill: 0.64,
-  sub: 'Current market mood',
-  intro:
-    'Here is how this fund has historically behaved across market phases at the current mood:',
-  phases: [
-    { name: 'Recovery markets', tag: 'best phase', val: '+38% avg', best: true,  tone: 'emerald' as const },
-    { name: 'Bull markets',     tag: '',          val: '+29% avg', best: false, tone: 'emerald' as const },
-    { name: 'Fear markets',     tag: '',          val: '−21% avg', best: false, tone: 'red' as const },
-    { name: 'Euphoria',         tag: '',          val: '+11% avg', best: false, tone: 'amber' as const },
-  ],
-  stats: [
-    { v: '73%',      l: 'Hist. positive outcome in this phase', tone: 'ink' as const },
-    { v: 'Elevated', l: 'Volatility at current mood', tone: 'amber' as const },
-    { v: 'SIP-friendly', l: 'Phase character', tone: 'emerald' as const },
-  ],
-  meaning:
-    'Small-cap index exposure has historically done best entering recovery phases. The mood is Optimistic (not Euphoric), with a 73% historically-positive read — a context where steady SIPs have smoothed the elevated volatility.',
-} as const;
+// S6 MARKET MOOD ANALYSIS — MoodSection (sectionsHero.tsx) now wires the real
+// GET /market/mood (useMoodCurrent), same regime vocabulary as /mood. Per-fund
+// phase-performance history isn't recorded yet (regime history started
+// 2026-07-05) — rendered as an honest no-data note, no sample numbers.
 
 // ───────────────────────────────────────────────────────────────────────────
 // S7 FUND HEALTH DASHBOARD (traffic light)
@@ -165,25 +134,10 @@ export const HEALTH: { name: string; light: Light; note: string }[] = [
 // S8 WHAT CHANGED THIS MONTH — wired to real data (fund.changes, §17 W2);
 // see WhatChangedSection in sectionsA.tsx, no sample data left to feed.
 
-// ───────────────────────────────────────────────────────────────────────────
-// S9 INVESTMENT SNAPSHOT (KPI grid, all factual)
-// ───────────────────────────────────────────────────────────────────────────
-export const SNAPSHOT: { l: string; v: string; p?: string; tone?: 'emerald'; tip: string }[] = [
-  { l: 'NAV', v: '₹18.42', p: '▲ 0.68% today', tone: 'emerald', tip: 'Per-unit price of the fund.' },
-  { l: 'Expense Ratio', v: '0.20%', p: 'Lowest in category', tone: 'emerald', tip: 'Annual fee as % of investment.' },
-  { l: 'Exit Load', v: '1% < 1yr', p: 'Nil after 1 year', tip: 'Fee for redeeming within 1 year.' },
-  { l: 'Benchmark', v: 'Nifty Smallcap 250', p: 'TRI', tip: 'The index this fund tracks.' },
-  { l: 'Fund Size (AUM)', v: '₹1,840 Cr', p: '+₹230 Cr MoM', tone: 'emerald', tip: 'Total assets managed.' },
-  { l: 'Tracking Error', v: '0.21%', p: 'Best-in-class', tone: 'emerald', tip: 'How tightly it follows the index.' },
-  { l: 'Fund Age', v: '5.3 yrs', p: 'Since Mar 2021', tip: 'Time since launch.' },
-  { l: 'Manager Tenure', v: '5.3 yrs', p: 'No changes', tone: 'emerald', tip: 'How long managers have run it.' },
-  { l: 'Portfolio Turnover', v: '22%', p: 'Low (passive)', tone: 'emerald', tip: 'How often holdings change.' },
-  { l: 'Min SIP', v: '₹100', p: 'Very accessible', tone: 'emerald', tip: 'Smallest monthly SIP.' },
-  { l: 'Min Lumpsum', v: '₹100', tip: 'Smallest one-time investment.' },
-  { l: 'Stamp Duty', v: '0.005%', p: 'On purchase', tip: 'Govt levy on buying units.' },
-  { l: 'Lock-in', v: 'None', p: 'Open-ended', tip: 'No mandatory holding period.' },
-  { l: 'Category Rank', v: '#3 / 18', p: '▲ from #5', tone: 'emerald', tip: 'Rank within small-cap index funds.' },
-];
+// S9 INVESTMENT SNAPSHOT — SnapshotSection (sectionsB.tsx) now builds its KPI
+// grid from real head/analytics/people data, cell-by-cell, "—" where
+// source-blocked (exit load, min SIP/lumpsum, turnover, riskometer). No
+// sample array left to feed it.
 
 // ───────────────────────────────────────────────────────────────────────────
 // S10 PERFORMANCE CENTER
@@ -357,31 +311,16 @@ export const MANAGER = {
     'For an index fund, “manager skill” = keeping tracking error tiny. This desk has held it at a category-best ~0.21% with zero turnover since launch.',
 };
 
-// ───────────────────────────────────────────────────────────────────────────
-// S16 AMC QUALITY — ratings/scores replaced with descriptors/bands
-// ───────────────────────────────────────────────────────────────────────────
-export const AMC = {
-  initial: 'H',
-  est: 'Est. 2000 · one of India’s largest fund houses',
-  stats: [
-    { v: 'Well-regarded', l: 'AMC standing' },
-    { v: '₹6.8L Cr',      l: 'Total AUM' },
-    { v: '26 yrs',        l: 'In business' },
-    { v: 'Strong',        l: 'Trust signal', tone: 'emerald' as const },
-  ],
-  bars: [
-    { l: 'Investor confidence',      band: 'high' as Band3 },
-    { l: 'Operational stability',    band: 'high' as Band3 },
-    { l: 'Fund house strength',      band: 'high' as Band3 },
-    { l: 'Risk management',          band: 'high' as Band3 },
-    { l: 'Compliance track record',  band: 'high' as Band3 },
-  ],
-  meaning:
-    'You are with one of India’s most established, financially stable fund houses — strong operational systems mean fewer surprises and reliable execution.',
-};
+// S16 AMC QUALITY — AmcSection (sectionsC.tsx) renders only the real fact
+// line (amc_name/scheme_count/category_count from useFundPeople); AUM/years-
+// in-business/quality-signal bands are source-blocked, so it shows an honest
+// no-data block instead of the old decorative stats/bars sample.
 
 // ───────────────────────────────────────────────────────────────────────────
-// S17 TAX CENTER (factual calculator defaults)
+// S17 TAX CENTER (statutory rates — real, static by design; the calculator's
+// default amount/cost-basis below are an EDITABLE EXAMPLE when no real
+// holding is seeded — TaxSection labels them as such, never as the user's own
+// numbers. See sectionsD.tsx for the live-computed "what this means" copy.)
 // ───────────────────────────────────────────────────────────────────────────
 export const TAX = {
   defaultAmount: 284620,
@@ -389,8 +328,6 @@ export const TAX = {
   ltcgExempt: 125000,
   ltcgRate: 0.125,
   stcgRate: 0.20,
-  meaning:
-    'A ₹64,620 long-term gain sits within the ₹1.25L/yr LTCG exemption — redeeming now would attract zero tax. A holding under 1 year would instead be taxed at 20% STCG. Estimate only.',
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -430,14 +367,17 @@ export const SIMILAR: { name: string; amc: string; label: Label; band: Confidenc
 ];
 
 // ───────────────────────────────────────────────────────────────────────────
-// S21 FAQ
+// S21 FAQ — base educational copy (static by design). FaqSection (sectionsD.tsx)
+// substitutes the {{TOKEN}} placeholders with this fund's real facts (NAV,
+// expense ratio, category, rank) at render time, falling back to a generic
+// clause when a field is null — never a fabricated fund-specific claim.
 // ───────────────────────────────────────────────────────────────────────────
 export const FAQ: { q: string; a: string; open?: boolean }[] = [
-  { q: 'What is NAV?', open: true, a: 'NAV (Net Asset Value) is the per-unit price of the fund — the total value of all its holdings divided by the number of units. You transact at the day’s NAV. This fund’s NAV is ₹18.42.' },
-  { q: 'What is the Expense Ratio?', a: 'The annual fee the fund charges, as a % of your investment. At 0.20%, you pay ₹20/year per ₹10,000 invested — among the lowest in the category because this is a passive index fund.' },
-  { q: 'What is Exit Load?', a: 'A fee for redeeming early. This fund charges 1% within 1 year and nothing after — so it rewards staying invested for the long term.' },
-  { q: 'How is this taxed?', a: 'As an equity fund: gains within 1 year are STCG (20%); gains after 1 year are LTCG (12.5%), with the first ₹1.25L of LTCG each year tax-free. Use the Tax Center above to estimate yours.' },
-  { q: 'When is SIP vs lumpsum usually discussed?', a: 'For small-cap index funds, a disciplined monthly SIP over 7+ years is commonly discussed because it averages your entry price through the inevitable ups and downs. See Smart Entry Timing above for the current educational read.' },
+  { q: 'What is NAV?', open: true, a: 'NAV (Net Asset Value) is the per-unit price of the fund — the total value of all its holdings divided by the number of units. You transact at the day’s NAV. {{NAV_LINE}}' },
+  { q: 'What is the Expense Ratio?', a: 'The annual fee the fund charges, as a % of your investment — lower means more of your return stays with you. {{EXPENSE_LINE}}' },
+  { q: 'What is Exit Load?', a: 'A fee some funds charge for redeeming early, meant to discourage short-term withdrawals. {{EXIT_LOAD_LINE}}' },
+  { q: 'How is this taxed?', a: '{{TAX_LINE}} Use the Tax Center above to estimate yours.' },
+  { q: 'When is SIP vs lumpsum usually discussed?', a: 'For {{SIP_CATEGORY}}, a disciplined monthly SIP over several years is commonly discussed because it averages your entry price through market ups and downs. {{SIP_POINTER}}' },
 ];
 
 // W2 (§10.1): STICKY preview object retired — StickyBar's "Top reason" is now

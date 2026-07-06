@@ -3,8 +3,10 @@
  * S13 · S14 · S15 · S16
  *
  * COMPLIANCE (hard, CI-enforced):
- *   - NO DhanRadar score / grade / percentile in DOM (non-neg #2).
- *     AMC "bars" are decorative educational bands — no numeric value rendered.
+ *   - NO DhanRadar score / grade / percentile in DOM (non-neg #2). AMC Quality
+ *     (S16) renders only the real scheme/category fact-line — the old
+ *     decorative "quality" stats/bars are gone; source-blocked signals (total
+ *     AUM, years in business) show an honest no-data block instead.
  *   - NO advisory verbs (non-neg #1).
  *   - Portfolio weights %, AUM ₹Cr, tracking error %, flows ₹Cr are FACTUAL → allowed.
  *   - Chart/legend colors sourced from sampleData item.color (data-viz palette, allowed via style).
@@ -18,20 +20,9 @@ import { useFundComposition, useFundPeople, useFundFlows } from '@/features/mf/a
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
-  Panel, TabBar, ChipToggle, StackBar, FlowBars, BandBar, WhatThisMeans,
+  Panel, TabBar, ChipToggle, StackBar, FlowBars, WhatThisMeans,
 } from './parts';
-import { AMC, HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE, STYLE_BOX } from './sampleData';
-
-// ─── shared helpers ──────────────────────────────────────────────────────────
-
-const TONE_TEXT: Record<string, string> = {
-  emerald: 'text-emerald',
-  red: 'text-red',
-  amber: 'text-amber',
-  cyan: 'text-cyan',
-  royal: 'text-royal',
-  ink: 'text-ink',
-};
+import { HOLD_CAP, HOLD_ASSET, HOLD_CAP_NOTE, STYLE_BOX } from './sampleData';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S13 — HOLDINGS
@@ -467,64 +458,37 @@ export function AmcSection({ isin, amcName = 'This fund house' }: { isin: string
   const factsLine = amc
     ? `${amc.scheme_count} scheme${amc.scheme_count === 1 ? '' : 's'} across ${amc.category_count} categor${amc.category_count === 1 ? 'y' : 'ies'} on DhanRadar`
     : null;
-  // "Total AUM" is source-blocked (B67/ADR-0035) — never fabricate it; every other
-  // stat stays the existing decorative preview (no numeric DhanRadar score, non-neg #2).
-  const stats = AMC.stats.map((s) => (s.l === 'Total AUM' ? { ...s, v: '—' } : s));
+  const initial = amcName.trim()[0]?.toUpperCase() ?? '?';
 
   return (
     <Panel className="p-5 sm:p-6">
-      {/* header row */}
+      {/* header row — only real facts: name + scheme/category counts we actually have */}
       <div className="flex flex-wrap items-center gap-3.5">
-        {/* square logo block */}
         <div
           className="grid h-[54px] w-[54px] shrink-0 place-items-center rounded-2xl bg-surface-2 text-[18px] font-bold"
           style={{ color: 'var(--dr-navy,#0B1F3A)' }}
           aria-hidden="true"
         >
-          {AMC.initial}
+          {initial}
         </div>
 
-        {/* title + sub */}
         <div className="min-w-0 flex-1">
           <div className="text-body font-bold text-ink leading-tight">{amcName}</div>
-          <div className="mt-0.5 text-caption text-ink-muted">{AMC.est}</div>
           {factsLine && <div className="mt-0.5 text-caption font-semibold text-ink-secondary">{factsLine}</div>}
         </div>
-
-        {/* 4-up stat grid */}
-        <div className="flex flex-wrap gap-5 sm:gap-6">
-          {stats.map((s) => (
-            <div key={s.l} className="text-center">
-              <div
-                className={cn(
-                  'font-mono text-[17px] font-bold leading-none',
-                  'tone' in s && s.tone ? (TONE_TEXT[s.tone] ?? 'text-ink') : 'text-ink',
-                )}
-              >
-                {s.v}
-              </div>
-              <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
-                {s.l}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* bar rows — decorative bands only, NO numeric value rendered (non-neg #2) */}
-      <div className="mt-5 flex flex-col gap-3">
-        {AMC.bars.map((b) => (
-          <div key={b.l} className="flex items-center gap-3">
-            <span className="w-[140px] shrink-0 text-small text-ink-secondary font-medium">
-              {b.l}
-            </span>
-            {/* BandBar is decorative — width controlled by band word, no number shown */}
-            <BandBar band={b.band} width={120} />
-          </div>
-        ))}
+      {/* Total AUM / years-in-business / quality-signal bands are source-blocked
+          (B67/ADR-0035) — an honest no-data block, never a fabricated stat or bar. */}
+      <div className="mt-4 rounded-2xl border border-dashed border-line bg-surface-2 p-4 text-caption text-ink-muted">
+        We don&apos;t have enough public data yet to show this fund house&apos;s total AUM, years
+        in business, or a quality/stability read.
       </div>
 
-      <WhatThisMeans>{AMC.meaning}</WhatThisMeans>
+      <WhatThisMeans>
+        Fund-house signals like total AUM, years in business, and compliance record help gauge
+        stability — we don&apos;t have enough public data yet to show them for every AMC.
+      </WhatThisMeans>
     </Panel>
   );
 }

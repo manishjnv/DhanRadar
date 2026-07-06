@@ -17,12 +17,13 @@ import * as React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-import { PerformanceSection, RiskCenterSection } from './sectionsB';
+import { PerformanceSection, RiskCenterSection, SnapshotSection } from './sectionsB';
 import type { FundHead } from './sectionsHero';
 
 const mockUseFundNav = vi.fn();
 const mockUseFundAnalytics = vi.fn();
 const mockUseFundSip = vi.fn();
+const mockUseFundPeople = vi.fn();
 const mockUseBenchmarkSeries = vi.fn();
 const mockUseBenchmarkReturns = vi.fn();
 
@@ -30,6 +31,7 @@ vi.mock('@/features/mf/api', () => ({
   useFundNav: (...args: unknown[]) => mockUseFundNav(...args),
   useFundAnalytics: (...args: unknown[]) => mockUseFundAnalytics(...args),
   useFundSip: (...args: unknown[]) => mockUseFundSip(...args),
+  useFundPeople: (...args: unknown[]) => mockUseFundPeople(...args),
 }));
 
 vi.mock('@/features/portfolio/api', () => ({
@@ -58,6 +60,9 @@ const HEAD: FundHead = {
   return1yPct: 12.3,
   return3yPct: 45.6,
   return5yPct: 78.9,
+  launchDate: '2018-03-15',
+  fundAumCr: 1200,
+  fundAumAsOf: '2026-06-01',
 };
 
 function emptyDataEnvelope() {
@@ -224,5 +229,61 @@ describe('Risk Center advanced-ratio sentences (Fix 2)', () => {
     fireEvent.click(screen.getByText(/Advanced risk analytics/i));
 
     expect(screen.queryByText(/worst fall was (about typical|smaller|larger)/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('SnapshotSection (S9) — real KPI grid, null-safe', () => {
+  it('renders real cells (NAV, expense, AUM, fund age, manager tenure, category rank)', () => {
+    mockUseFundAnalytics.mockReturnValue({
+      data: {
+        analytics: { status: 'present', data: { tracking_error_pct: 0.21 } },
+        rank_history: { status: 'empty', data: null, meta: { reason: null } },
+        health: { status: 'empty', data: null, meta: { reason: null } },
+      },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mockUseFundPeople.mockReturnValue({
+      data: {
+        people: { status: 'present', data: { managers: [{ name: 'A Sharma', start_date: '2021-01-01', tenure_years: 5.3 }], manager_changes_5y: 0 } },
+        amc: { status: 'empty', data: null, meta: { reason: null } },
+      },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+
+    render(<SnapshotSection head={HEAD} isin={ISIN} />);
+
+    expect(screen.getByText('₹120.00')).toBeInTheDocument(); // NAV
+    expect(screen.getByText('0.75%')).toBeInTheDocument(); // Expense ratio
+    expect(screen.getByText('0.21%')).toBeInTheDocument(); // Tracking error
+    expect(screen.getByText('5.3 yrs')).toBeInTheDocument(); // Manager tenure
+    expect(screen.getByText('#3 / 20')).toBeInTheDocument(); // Category rank
+    expect(screen.getByText('None')).toBeInTheDocument(); // Lock-in (non-ELSS category)
+    expect(screen.getByText('0.005%')).toBeInTheDocument(); // Stamp duty (statutory)
+  });
+
+  it('never fabricates a number — every source-blocked/missing field renders "—"', () => {
+    mockUseFundAnalytics.mockReturnValue({
+      data: { analytics: { status: 'empty', data: null, meta: { reason: null } }, rank_history: { status: 'empty', data: null, meta: { reason: null } }, health: { status: 'empty', data: null, meta: { reason: null } } },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mockUseFundPeople.mockReturnValue({
+      data: { people: { status: 'empty', data: null, meta: { reason: null } }, amc: { status: 'empty', data: null, meta: { reason: null } } },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+
+    const blankHead: FundHead = {
+      ...HEAD,
+      navLatest: null, navDate: null, navChangePct: null, expenseRatioPct: null,
+      rank: null, total: null, launchDate: null, fundAumCr: null, fundAumAsOf: null,
+      planOption: [], return1yPct: null, return3yPct: null, return5yPct: null,
+    };
+
+    render(<SnapshotSection head={blankHead} isin={ISIN} />);
+
+    // Always-blocked cells (exit load, min SIP/lumpsum, turnover, riskometer) plus every
+    // now-null real cell — at least several honest "—" cells, never a fabricated value.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(8);
+    expect(screen.getByText('Exit Load').parentElement).toBeInTheDocument();
+    expect(screen.getByText('Riskometer').parentElement).toBeInTheDocument();
   });
 });
