@@ -60,6 +60,9 @@ celery_app = Celery(
         "dhanradar.tasks.rbi_tbill",
         # BSE Star MF 2.0 webhook async processing (misc queue).
         "dhanradar.tasks.bse",
+        # Manual disclosure ingestion inbox (ADR-0033(a) human side-channel for
+        # HDFC/SBI/ICICI-Pru/Kotak/Axis, which block the scraper).
+        "dhanradar.tasks.manual_ingest",
     ],
 )
 
@@ -136,6 +139,9 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.signal_alerts.*": {"queue": "batch"},
     # BSE webhook processing — misc queue (NOT mood; mood worker is mem-capped).
     "dhanradar.tasks.bse.*": {"queue": "misc"},
+    # Manual disclosure inbox — batch queue (same volume + memory headroom as
+    # mf_constituents_fetch/CAS parse, which this reuses openpyxl parsing from).
+    "dhanradar.tasks.manual_ingest.*": {"queue": "batch"},
 }
 
 # ---------------------------------------------------------------------------
@@ -344,6 +350,18 @@ celery_app.conf.beat_schedule = {
     "mf-category-flows-fetch": {
         "task": "dhanradar.tasks.mf.mf_category_flows_fetch",
         "schedule": crontab(hour=4, minute=45),
+    },
+    # Manual disclosure inbox — Channel B (watched folder). Every 15 min: scans
+    # MANUAL_INGEST_DIR/incoming/, intakes new files, moves them to processed/failed.
+    "manual-ingest-scan-folder": {
+        "task": "dhanradar.tasks.manual_ingest.scan_incoming_folder",
+        "schedule": crontab(minute="*/15"),
+    },
+    # Manual disclosure inbox — Channel C (email poller). Every 30 min. DORMANT
+    # (no-op) until MANUAL_INGEST_IMAP_HOST/USER/PASSWORD are all set.
+    "manual-ingest-poll-email": {
+        "task": "dhanradar.tasks.manual_ingest.poll_email_inbox",
+        "schedule": crontab(minute="*/30"),
     },
 }
 

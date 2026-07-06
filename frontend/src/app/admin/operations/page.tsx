@@ -23,6 +23,7 @@ import { SourceTable } from '@/components/admin/SourceTable';
 import { JobTable } from '@/components/admin/JobTable';
 import { RunHistoryTable } from '@/components/admin/RunHistoryTable';
 import { QualityIssueTable } from '@/components/admin/QualityIssueTable';
+import { ManualIngestPanel } from '@/components/admin/ManualIngestPanel';
 import { SideDrawer } from '@/components/admin/SideDrawer';
 import {
   useAdminSources,
@@ -411,6 +412,15 @@ export default function AdminOperationsPage() {
             onViewLogs={(key) => setSourceDrawer(key)}
           />
         )}
+      </Section>
+
+      {/* Section A2 — Manual Disclosure Inbox */}
+      <Section
+        id="section-manual-ingest"
+        title="Manual Disclosure Inbox"
+        subtitle="A few fund houses block our automatic downloader. Upload their monthly disclosure file here, or it arrives on its own once a watched folder or inbox is set up for that fund house."
+      >
+        <ManualIngestPanel />
       </Section>
 
       {/* Section B — Scheduled Jobs */}

@@ -1091,3 +1091,48 @@ class MfCategoryFlows(Base):
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MfManualIngestFile(Base):
+    """Manual SEBI disclosure inbox (migration 0072) — the human-supplied side-channel for
+    the 5 AMCs `mf_constituents_fetch` cannot scrape (HDFC/SBI/ICICI-Pru/Kotak/Axis bot-block).
+
+    One row per file, regardless of which of the 3 intake channels delivered it (admin
+    upload / watched folder / email poller — dhanradar/mf/manual_ingest.py is the single
+    shared intake service all three call). `sha256` is UNIQUE so the same file dropped
+    twice (any channel, any time) is a no-op (`status='duplicate'`), never re-parsed.
+    `uploaded_by` is nullable — only the 'upload' channel has an authenticated actor.
+    """
+
+    __tablename__ = "manual_ingest_files"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('upload', 'folder', 'email')", name="ck_manual_ingest_files_channel"
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'parsed', 'failed', 'duplicate', 'unsupported')",
+            name="ck_manual_ingest_files_status",
+        ),
+        Index("ix_mf_manual_ingest_files_received_at", "received_at"),
+        Index("ix_mf_manual_ingest_files_status", "status"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    sha256: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    uploaded_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="SET NULL"), nullable=True
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    amc_detected: Mapped[str | None] = mapped_column(Text, nullable=True)
+    period_detected: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rows_ingested: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
