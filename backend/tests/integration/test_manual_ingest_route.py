@@ -22,12 +22,21 @@ real task are not driven through a live broker in this suite).
 from __future__ import annotations
 
 import io
+import zipfile
 
 import pytest
 
 pytestmark = pytest.mark.integration
 
 _XLSX_BYTES = b"PK\x03\x04fake-xlsx-content-not-a-real-workbook"
+
+
+def _zip_bytes(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +63,11 @@ def _one_file(name: str = "HDFC_disclosure.xlsx", data: bytes = _XLSX_BYTES):
     return [
         (
             "files",
-            (name, io.BytesIO(data), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            (
+                name,
+                io.BytesIO(data),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
         )
     ]
 
@@ -173,7 +186,8 @@ async def test_admin_upload_bad_extension_returns_422(async_client, monkeypatch)
 
     r = await async_client.post(
         "/api/v1/admin/ingest/disclosure-files",
-        files=[("files", ("disclosure.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf"))],
+        # .pdf is now accepted (contract §2) — .txt stays genuinely unsupported.
+        files=[("files", ("disclosure.txt", io.BytesIO(b"not a real disclosure"), "text/plain"))],
         headers=headers,
     )
     assert r.status_code == 422, r.text
@@ -209,6 +223,96 @@ async def test_admin_upload_size_cap_returns_413(async_client, monkeypatch):
         headers=headers,
     )
     assert r.status_code == 413, r.text
+
+
+# ---------------------------------------------------------------------------
+# 8. ZIP upload — happy path multi-member
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_upload_zip_happy_path_multi_member(async_client, monkeypatch):
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    admin_id, access = await _signup(async_client, "admin_ingest_zip_ok@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", admin_id)
+    headers = make_auth_headers(access_token=access)
+
+    zip_data = _zip_bytes(
+        {
+            "HDFC_July2026.xlsx": _XLSX_BYTES + b"-hdfc",
+            "SBI_July2026.xls": _XLSX_BYTES + b"-sbi",
+            "notes.txt": b"not eligible",
+        }
+    )
+    r = await async_client.post(
+        "/api/v1/admin/ingest/disclosure-files",
+        files=[("files", ("bundle.zip", io.BytesIO(zip_data), "application/zip"))],
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    filenames = {res["filename"] for res in body["results"]}
+    assert filenames == {"HDFC_July2026.xlsx", "SBI_July2026.xls"}
+    assert all(res["status"] == "pending" for res in body["results"])
+    assert body["skipped"] == [{"filename": "notes.txt", "reason": "unsupported_extension:.txt"}]
+
+
+# ---------------------------------------------------------------------------
+# 9. ZIP upload — 0 eligible members -> 422, nothing persisted
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_upload_zip_zero_eligible_members_returns_422(async_client, monkeypatch):
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    admin_id, access = await _signup(async_client, "admin_ingest_zip_empty@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", admin_id)
+    headers = make_auth_headers(access_token=access)
+
+    zip_data = _zip_bytes({"notes.txt": b"not eligible", "readme.md": b"also not eligible"})
+    r = await async_client.post(
+        "/api/v1/admin/ingest/disclosure-files",
+        files=[("files", ("empty.zip", io.BytesIO(zip_data), "application/zip"))],
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "zip_no_eligible_members"
+
+    # Nothing was persisted — the recent-files list is still empty.
+    r2 = await async_client.get("/api/v1/admin/ingest/disclosure-files?limit=10", headers=headers)
+    assert r2.status_code == 200, r2.text
+    assert all(row["original_filename"] != "empty.zip" for row in r2.json())
+
+
+# ---------------------------------------------------------------------------
+# 10. PDF upload — accepted (archival happens in the parse task, not here)
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_upload_pdf_is_accepted(async_client, monkeypatch):
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    admin_id, access = await _signup(async_client, "admin_ingest_pdf_ok@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", admin_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.post(
+        "/api/v1/admin/ingest/disclosure-files",
+        files=[
+            (
+                "files",
+                ("HDFC_factsheet_July2026.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf"),
+            )
+        ],
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    result = r.json()["results"][0]
+    assert result["filename"] == "HDFC_factsheet_July2026.pdf"
+    assert result["status"] == "pending"  # 'archived' is set by the parse task, not intake
 
 
 # ---------------------------------------------------------------------------

@@ -1110,7 +1110,7 @@ class MfManualIngestFile(Base):
             "channel IN ('upload', 'folder', 'email')", name="ck_manual_ingest_files_channel"
         ),
         CheckConstraint(
-            "status IN ('pending', 'parsed', 'failed', 'duplicate', 'unsupported')",
+            "status IN ('pending', 'parsed', 'failed', 'duplicate', 'unsupported', 'archived')",
             name="ck_manual_ingest_files_status",
         ),
         Index("ix_mf_manual_ingest_files_received_at", "received_at"),

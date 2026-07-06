@@ -22,6 +22,7 @@ import {
   useUploadDisclosureFiles,
   type ManualIngestFileRow,
   type ManualIngestUploadResult,
+  type ManualIngestSkippedResult,
 } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ const STATUS_LABELS: Record<ManualIngestFileRow['status'], string> = {
   failed: 'Failed',
   duplicate: 'Already have this one',
   unsupported: "Couldn't read this file",
+  archived: 'Saved for later — PDF parsing coming',
 };
 
 const STATUS_COLOR: Record<ManualIngestFileRow['status'], string> = {
@@ -47,6 +49,7 @@ const STATUS_COLOR: Record<ManualIngestFileRow['status'], string> = {
   failed: 'text-red',
   duplicate: 'text-amber',
   unsupported: 'text-red',
+  archived: 'text-ink-muted',
 };
 
 /** period_detected is an ISO first-of-month date, e.g. "2026-06-01" → "Jun 2026". */
@@ -65,8 +68,9 @@ function formatPeriod(iso: string | null): string {
 
 /** Translate the backend's raw upload-error detail codes into plain English. */
 function friendlyUploadError(message: string): string {
-  if (message === 'unsupported_file_type') return "One of those files isn't a .xls or .xlsx file.";
+  if (message === 'unsupported_file_type') return "One of those files isn't a .xls, .xlsx, .pdf, or .zip file.";
   if (message === 'too_many_files') return 'You can upload up to 10 files at a time.';
+  if (message === 'zip_no_eligible_members') return "That .zip file didn't contain any .xls, .xlsx, or .pdf files.";
   return message;
 }
 
@@ -129,7 +133,13 @@ function RecentFilesTable({ rows }: { rows: ManualIngestFileRow[] }) {
 // ---------------------------------------------------------------------------
 // Just-uploaded result list
 // ---------------------------------------------------------------------------
-function UploadResultList({ results }: { results: ManualIngestUploadResult[] }) {
+function UploadResultList({
+  results,
+  skipped,
+}: {
+  results: ManualIngestUploadResult[];
+  skipped: ManualIngestSkippedResult[];
+}) {
   return (
     <div className="rounded-lg border border-line bg-surface-2 p-4">
       <p className="text-caption uppercase tracking-wide font-medium text-ink-faint mb-2">Just uploaded</p>
@@ -143,6 +153,21 @@ function UploadResultList({ results }: { results: ManualIngestUploadResult[] }) 
           </li>
         ))}
       </ul>
+      {skipped.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-line">
+          <p className="text-caption text-ink-muted mb-1.5">
+            {skipped.length} file{skipped.length > 1 ? 's' : ''} inside a .zip{' '}
+            {skipped.length > 1 ? 'were' : 'was'} skipped
+          </p>
+          <ul className="flex flex-col gap-1">
+            {skipped.map((s, i) => (
+              <li key={`${s.filename}-${i}`} className="text-caption text-ink-faint truncate" title={s.reason}>
+                {s.filename} — {s.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -156,13 +181,18 @@ export function ManualIngestPanel() {
 
   const [dragging, setDragging] = React.useState(false);
   const [lastResults, setLastResults] = React.useState<ManualIngestUploadResult[] | null>(null);
+  const [lastSkipped, setLastSkipped] = React.useState<ManualIngestSkippedResult[]>([]);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
     setLastResults(null);
+    setLastSkipped([]);
     upload.mutate(Array.from(fileList), {
-      onSuccess: (data) => setLastResults(data.results),
+      onSuccess: (data) => {
+        setLastResults(data.results);
+        setLastSkipped(data.skipped);
+      },
     });
   }
 
@@ -211,11 +241,11 @@ export function ManualIngestPanel() {
           </p>
           <p className="text-small text-ink-muted mt-1">or click to choose files (up to 10 at a time)</p>
         </div>
-        <p className="text-caption text-ink-muted">Accepts .xls and .xlsx only</p>
+        <p className="text-caption text-ink-muted">Accepts .xls, .xlsx, .pdf and .zip</p>
         <input
           ref={inputRef}
           type="file"
-          accept=".xls,.xlsx"
+          accept=".xls,.xlsx,.pdf,.zip"
           multiple
           className="sr-only"
           aria-hidden="true"
@@ -231,7 +261,9 @@ export function ManualIngestPanel() {
         </p>
       )}
 
-      {lastResults && lastResults.length > 0 && <UploadResultList results={lastResults} />}
+      {lastResults && lastResults.length > 0 && (
+        <UploadResultList results={lastResults} skipped={lastSkipped} />
+      )}
 
       {/* Recent files table */}
       <div>

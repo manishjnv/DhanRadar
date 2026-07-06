@@ -1190,7 +1190,7 @@ export interface ManualIngestFileRow {
   id: string;
   original_filename: string;
   channel: 'upload' | 'folder' | 'email';
-  status: 'pending' | 'parsed' | 'failed' | 'duplicate' | 'unsupported';
+  status: 'pending' | 'parsed' | 'failed' | 'duplicate' | 'unsupported' | 'archived';
   amc_detected: string | null;
   period_detected: string | null;
   rows_ingested: number | null;
@@ -1205,8 +1205,14 @@ export interface ManualIngestUploadResult {
   status: 'pending' | 'duplicate';
 }
 
+export interface ManualIngestSkippedResult {
+  filename: string;
+  reason: string;
+}
+
 export interface ManualIngestUploadResponse {
   results: ManualIngestUploadResult[];
+  skipped: ManualIngestSkippedResult[];
 }
 
 /** Recent rows for the Manual Disclosure Inbox table. Polled faster than the
