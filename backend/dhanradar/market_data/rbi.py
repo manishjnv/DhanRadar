@@ -53,9 +53,14 @@ _RBI_DBIE_BASE = "https://data.rbi.org.in"
 # Known DBIE CSV export path (best-effort; subject to change without notice).
 # The path is the standard DBIE "Handbook of Statistics on Indian Economy" macro
 # download. If this 404s, ProviderError propagates and the source is unreachable.
+#
+# **CONFIRMED DEAD as of 2026-07-06**: This URL returns "Not Found" on direct probe.
+# The five indicator keys (repo_rate, cpi_inflation, wpi_inflation, gdp_growth,
+# m3_money_supply) sourced from this endpoint have NO working replacement yet. The
+# Ops console (Sources → rbi_dbie) will show status='failed' for every run until
+# RBI DBIE is restored or an alternative source is found (out of scope for Block 0.8).
 _RBI_MACRO_CSV_URL = (
-    "https://data.rbi.org.in/DBIE/dbie.rbi?site=publications"
-    "&type=2&subtype=9&publicationID=1091"
+    "https://data.rbi.org.in/DBIE/dbie.rbi?site=publications&type=2&subtype=9&publicationID=1091"
 )
 
 # RBI DBIE accepts browser-like UA; bare urllib tends to be redirected.
@@ -69,6 +74,14 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 # ---------------------------------------------------------------------------
 # Canonical indicator key registry
 # Exactly these strings are accepted by parse_macro(); anything else is skipped.
+# NOTE: tbill_91d_yield_pct (Block 0.8) is NOT part of this set — it is never
+# parsed via parse_macro()/this DBIE CSV path at all. It comes from a separate
+# RBI press-release fetcher (market_data/rbi_tbill.py::fetch_tbill_yield, which
+# builds its own MacroRow directly) and flows into the SAME mf.macro_indicators
+# table under its own indicator_key. Keeping it OUT of this frozenset preserves
+# the existing invariant tested by test_rbi_macro.py (parse_macro's own output
+# keys == CANONICAL_INDICATOR_KEYS) — this set is scoped to what THIS parser
+# actually produces, not every indicator_key the table as a whole can hold.
 # ---------------------------------------------------------------------------
 
 CANONICAL_INDICATOR_KEYS: frozenset[str] = frozenset({

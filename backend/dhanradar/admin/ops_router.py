@@ -203,6 +203,17 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
         "beat_key": "macro-data-refresh",
     },
     {
+        "source_key": "rbi_tbill",
+        "name": "RBI 91-Day T-Bill Yield",
+        "tier": "Macro",
+        "description": "Sovereign risk-free rate from weekly T-bill auctions",
+        "method": "HTML extraction from press-release detail pages",
+        "schedule_display": "Weekly Wed 17:00 IST",
+        "cost": "Free",
+        "celery_task": "dhanradar.tasks.mf.rbi_tbill_refresh",
+        "beat_key": "rbi-tbill-refresh",
+    },
+    {
         "source_key": "rbi_rss",
         "name": "RBI RSS Feeds",
         "tier": "News",

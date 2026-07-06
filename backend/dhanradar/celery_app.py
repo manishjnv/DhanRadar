@@ -56,6 +56,8 @@ celery_app = Celery(
         # docs/project-state/DATA_SOURCES.md.
         "dhanradar.tasks.mf_cap_classification",
         "dhanradar.tasks.mf_category_flows",
+        # Block 0.8 — real T-bill risk-free rate source (RBI press releases).
+        "dhanradar.tasks.rbi_tbill",
         # BSE Star MF 2.0 webhook async processing (misc queue).
         "dhanradar.tasks.bse",
     ],
@@ -320,6 +322,13 @@ celery_app.conf.beat_schedule = {
     "macro-data-refresh": {
         "task": "dhanradar.tasks.mf.macro_data_refresh",
         "schedule": crontab(day_of_week=0, hour=6, minute=0),
+    },
+    # RBI 91-day T-bill yield — weekly Wednesday 17:00 IST. Sovereign risk-free rate
+    # from weekly T-bill auctions (typically held Wednesday; results published same day).
+    # Feeds resolve_risk_free_rate() for Sharpe/Sortino denominators (mf/risk.py).
+    "rbi-tbill-refresh": {
+        "task": "dhanradar.tasks.mf.rbi_tbill_refresh",
+        "schedule": crontab(day_of_week=3, hour=17, minute=0),
     },
     # W3 — AMFI half-yearly Large/Mid/Small Cap classification. DAILY 04:15 IST
     # (not monthly cron) — freshness addendum: the task itself checks whether the
