@@ -432,6 +432,12 @@ export interface FundManager {
   name: string;
   start_date: string;
   tenure_years: number;
+  /** Return from the NAV on/before start_date to the latest NAV. Present only
+   * for a current manager whose start_date is covered by NAV history —
+   * omitted (not zero) otherwise. Facts only, no advisory framing. */
+  tenure_return_pct?: number;
+  /** ISO date of the latest NAV used for tenure_return_pct. */
+  tenure_return_as_of?: string;
 }
 export interface FundPeople {
   managers: FundManager[];

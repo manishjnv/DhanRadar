@@ -22,12 +22,18 @@ BOT_BLOCKED_AMCS: frozenset[str] = frozenset(
 # Best-effort factsheet landing pages for AMCs that DO serve parseable pages.
 # (Bot-blocked AMCs above are intentionally excluded — including them just guarantees
 # a failed fetch every run.) Extend as more AMCs are verified scrapeable.
+#
+# UTI and NIPPON are intentionally NOT listed here (Phase 6 rebuild, 2026-07):
+# neither serves delimited rows this generic factsheet-HTML parser understands.
+# UTI has a dedicated JSON-API fetcher (amc_managers_uti.fetch_uti_fund_managers)
+# and NIPPON has a dedicated factsheet-PDF fetcher
+# (amc_managers_nippon.fetch_nippon_fund_managers) — both wired directly into
+# tasks/mf_fund_manager.py alongside this generic list, so they are not
+# double-counted (once as format_mismatch here, once as ok there).
 AMC_FACTSHEET_SOURCES: list[dict[str, str]] = [
-    {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"},
     {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/factsheet"},
     {"name": "DSP", "url": "https://www.dspim.com/downloads"},
     {"name": "FRANKLIN", "url": "https://www.franklintempletonindia.com/investor/factsheet"},
-    {"name": "UTI", "url": "https://www.utimf.com/forms-and-downloads/factsheet"},
 ]
 
 

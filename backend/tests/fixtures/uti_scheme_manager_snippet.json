@@ -1,0 +1,21 @@
+{
+  "_source": "Real response captured 2026-07-06 from https://www.utimf.com/api/scheme_mangaer/567 (a live browser network call, not invented). Endpoint name is spelled 'scheme_mangaer' by the AMC (typo preserved verbatim, not ours). Trimmed to 2 rows for a co-managed scheme; field names/values are verbatim from the real payload.",
+  "rows": [
+    {
+      "title": "UTI Aggressive Hybrid Fund",
+      "field_name_fund": "V. Srivatsa",
+      "field_type_primary_comanage_desc": "Fund Manager (Equity Portion)",
+      "field_from_date": "11-01-2009",
+      "nid": "567",
+      "funds_managed_id": "2169"
+    },
+    {
+      "title": "UTI Aggressive Hybrid Fund",
+      "field_name_fund": "Jaydeep Bhowal",
+      "field_type_primary_comanage_desc": "Fund Manager (Debt Portion)",
+      "field_from_date": "10-15-2025",
+      "nid": "567",
+      "funds_managed_id": "2178"
+    }
+  ]
+}

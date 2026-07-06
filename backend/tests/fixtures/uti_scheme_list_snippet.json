@@ -1,0 +1,38 @@
+{
+  "_source": "Real response captured 2026-07-06 from https://www.utimf.com/api/get_investor_scheme_fund (a live browser network call, not invented). Trimmed from the full ~77-scheme payload to 3 entries.",
+  "data": [
+    {
+      "field_fund_name": "UTI Aggressive Hybrid Fund",
+      "nid": "567",
+      "field_dofa_schcode": "066",
+      "field_scheme_code": "BA",
+      "field_scheme_fund_category": "Hybrid",
+      "fund_manager_info": [
+        {"field_manager_name": "V. Srivatsa", "field_manager_desgntion": "Fund Manager (Equity Portion)"},
+        {"field_manager_name": "Jaydeep Bhowal", "field_manager_desgntion": "Fund Manager (Debt Portion)"}
+      ]
+    },
+    {
+      "field_fund_name": "UTI Arbitrage Fund",
+      "nid": "569",
+      "field_dofa_schcode": "070",
+      "field_scheme_code": "AR",
+      "field_scheme_fund_category": "Hybrid",
+      "fund_manager_info": [
+        {"field_manager_name": "Sharwan Kumar Goyal", "field_manager_desgntion": "Fund Manager - Equity"},
+        {"field_manager_name": "Amit Sharma", "field_manager_desgntion": "Fund Manager - Debt"}
+      ]
+    },
+    {
+      "field_fund_name": "UTI Balanced Advantage Fund",
+      "nid": "2345",
+      "field_dofa_schcode": "091",
+      "field_scheme_code": "BAF",
+      "field_scheme_fund_category": "Hybrid",
+      "fund_manager_info": [
+        {"field_manager_name": "Sachin Trivedi", "field_manager_desgntion": "Fund Manager"},
+        {"field_manager_name": "Anurag Mittal", "field_manager_desgntion": "Fund Manager"}
+      ]
+    }
+  ]
+}

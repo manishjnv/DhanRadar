@@ -20,15 +20,20 @@ What this task does
    (PK=id Identity + non-unique index only), so ON CONFLICT cannot be used.
    The pattern makes re-runs safe without a DB constraint (idempotent).
 4. Bulk-INSERTs new rows in chunks of 2 000, stamping run_id + source.
-5. Records bot-blocked / unreachable AMC metadata in the ingestion_run row so
-   the Ops console surfaces the partial-data reality.
+5. Records bot-blocked / unreachable / format_mismatch AMC metadata in the
+   ingestion_run row so the Ops console can tell "site down" from "site up,
+   parser wrong" instead of collapsing both into one opaque failure bucket.
 
 Bot-block handling (§12 Q3)
 ---------------------------
-All-blocked / all-unreachable path: stats.reachable=False,
-stats.status_override="partial" so the source flips Planned → Failed (not
-Healthy) and an operator can review. If SOME rows arrived, reachable=True and
-metadata still records the blocked AMCs for the run-detail view.
+All-blocked / all-unreachable path (zero AMCs reported format_mismatch
+either): stats.reachable=False, stats.status_override="partial" so the
+source flips Planned → Failed (not Healthy) and an operator can review. If
+at least one AMC returned HTTP 200 with 0 parseable rows (format_mismatch),
+stats.reachable=True even though zero rows were written — the site itself
+is reachable, only the parser needs attention. If SOME rows arrived,
+reachable=True and metadata still records the blocked/mismatched AMCs for
+the run-detail view.
 
 Compliance
 ----------
@@ -71,45 +76,138 @@ def mf_fund_manager_fetch() -> str:
 async def _mf_fund_manager_pipeline() -> str:
     """Async pipeline: fetch → validate → dedup vs DB → insert."""
     from dhanradar.market_data.amc_managers import fetch_fund_managers
+    from dhanradar.market_data.amc_managers_nippon import fetch_nippon_fund_managers
+    from dhanradar.market_data.amc_managers_uti import fetch_uti_fund_managers
     from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
 
     if await is_source_paused(_SOURCE):
         return "mf_fund_manager_fetch: skipped (paused)"
 
     async with ingestion_run(_TASK_NAME, _SOURCE) as (run_id, stats):
-        await _run(run_id, stats, fetch_fund_managers)
+        await _run(
+            run_id,
+            stats,
+            fetch_fund_managers,
+            uti_fetch_fn=fetch_uti_fund_managers,
+            nippon_fetch_fn=fetch_nippon_fund_managers,
+        )
 
     return f"mf_fund_manager_fetch: {stats.written} written, {stats.failed} failed"
 
 
-async def _run(run_id: int, stats, fetch_fn) -> None:
-    """Core pipeline body — separated so integration tests can inject fetch_fn."""
+def _merge_status(*status_dicts: dict) -> dict:
+    """Merge several {"bot_blocked": [...], "unreachable": [...],
+    "format_mismatch": [...], "ok": [...]} status dicts (one per source) into
+    one, concatenating each bucket. Shared by the generic factsheet fetch +
+    the UTI JSON-API fetch + the NIPPON PDF fetch."""
+    merged: dict[str, list[str]] = {"bot_blocked": [], "unreachable": [], "format_mismatch": [], "ok": []}
+    for d in status_dicts:
+        for key in merged:
+            merged[key].extend(d.get(key, []))
+    return merged
+
+
+async def _resolve_raw_manager_rows(amc_name: str, raw_rows: list) -> list:
+    """Resolve scheme-NAME-keyed rows (UTI JSON, NIPPON PDF) to `FundManagerRow`
+    (scheme_uid=ISIN) via the SAME pg_trgm fuzzy matcher the constituents
+    pipeline uses — never a second matcher. A scheme name that doesn't resolve
+    to an ISIN with sufficient similarity is dropped (fail-closed, never
+    guessed); see `dhanradar.tasks.mf._resolve_scheme_isins`."""
+    from dhanradar.market_data.amc_managers import FundManagerRow
+    from dhanradar.tasks.mf import _resolve_scheme_isins
+
+    if not raw_rows:
+        return []
+
+    scheme_names = {r.scheme_name for r in raw_rows}
+    scheme_isin_map = await _resolve_scheme_isins(scheme_names, amc_name)
+
+    resolved: list[FundManagerRow] = []
+    for r in raw_rows:
+        isin = scheme_isin_map.get(r.scheme_name)
+        if isin is None:
+            logger.debug(
+                "mf_fund_manager: %s scheme %r did not resolve to an ISIN — dropping row",
+                amc_name,
+                r.scheme_name,
+            )
+            continue
+        resolved.append(
+            FundManagerRow(
+                scheme_uid=isin,
+                manager_name=r.manager_name,
+                start_date=r.start_date,
+                end_date=None,
+            )
+        )
+    return resolved
+
+
+async def _run(
+    run_id: int,
+    stats,
+    fetch_fn,
+    *,
+    uti_fetch_fn=None,
+    nippon_fetch_fn=None,
+) -> None:
+    """Core pipeline body — separated so integration tests can inject fetch_fn
+    (+ optional uti_fetch_fn / nippon_fetch_fn; both default to no-op sources
+    that return zero rows so existing tests that don't pass them keep working
+    unchanged)."""
+    async def _noop_fetch(client):
+        return [], {"bot_blocked": [], "unreachable": [], "format_mismatch": [], "ok": []}
+
+    uti_fetch_fn = uti_fetch_fn or _noop_fetch
+    nippon_fetch_fn = nippon_fetch_fn or _noop_fetch
+
     async with httpx.AsyncClient(
         headers={"User-Agent": "DhanRadar/1.0 data-pipeline"},
         follow_redirects=True,
     ) as client:
         rows, status = await fetch_fn(client)
+        uti_raw_rows, uti_status = await uti_fetch_fn(client)
+        nippon_raw_rows, nippon_status = await nippon_fetch_fn(client)
+
+    uti_rows = await _resolve_raw_manager_rows("UTI", uti_raw_rows)
+    nippon_rows = await _resolve_raw_manager_rows("NIPPON", nippon_raw_rows)
+    rows = list(rows) + uti_rows + nippon_rows
+    status = _merge_status(status, uti_status, nippon_status)
 
     bot_blocked: list[str] = status.get("bot_blocked", [])
     unreachable: list[str] = status.get("unreachable", [])
+    format_mismatch: list[str] = status.get("format_mismatch", [])
     ok_amcs: list[str] = status.get("ok", [])
 
     stats.metadata = {
         "bot_blocked": bot_blocked,
         "unreachable": unreachable,
+        "format_mismatch": format_mismatch,
         "ok": ok_amcs,
     }
 
     if not rows:
-        # No rows fetched — all AMCs were bot-blocked or unreachable.
-        blocked_names = ", ".join(bot_blocked + unreachable) or "all"
-        stats.reachable = False
-        stats.last_error = f"bot_blocked: {blocked_names}"
+        # No rows fetched this run — reachable depends on WHY, so Ops can tell
+        # "site down" (unreachable/bot_blocked) from "site up, parser wrong"
+        # (format_mismatch — HTTP 200, 0 rows matched). An AMC that only ever
+        # produces format_mismatch is still reachable; the fix is a parser
+        # rewrite, not a network/access escalation.
+        stats.reachable = bool(format_mismatch)
+        parts = []
+        if unreachable:
+            parts.append(f"unreachable: {', '.join(unreachable)}")
+        if bot_blocked:
+            parts.append(f"bot_blocked: {', '.join(bot_blocked)}")
+        if format_mismatch:
+            parts.append(f"format_mismatch: {', '.join(format_mismatch)}")
+        stats.last_error = "; ".join(parts) or "no AMC sources configured"
         stats.status_override = "partial"
         logger.warning(
-            "mf_fund_manager: zero rows fetched (bot_blocked=%s unreachable=%s)",
+            "mf_fund_manager: zero rows fetched (bot_blocked=%s unreachable=%s "
+            "format_mismatch=%s)",
             bot_blocked,
             unreachable,
+            format_mismatch,
         )
         return
 

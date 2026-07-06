@@ -315,6 +315,15 @@ export function ManagerSection({ isin }: { isin: string }) {
   const tenureYears = managers.length ? Math.max(...managers.map((m) => m.tenure_years)) : null;
   const sub = managers.length > 1 ? `Co-managing · ${managers.length} managers` : managers.length === 1 ? 'Fund manager' : undefined;
 
+  // The longest-tenured manager with a computed tenure_return_pct (facts only,
+  // no advisory framing) — omitted server-side when NAV history doesn't reach
+  // back to their start_date (fail-closed), so this may be undefined.
+  const tenureReturnManager = managers.length
+    ? managers.reduce((longest, m) => (m.tenure_years > longest.tenure_years ? m : longest), managers[0])
+    : null;
+  const tenureReturnPct = tenureReturnManager?.tenure_return_pct;
+  const tenureReturnAsOf = tenureReturnManager?.tenure_return_as_of;
+
   const stats = [
     { v: tenureYears != null ? `${tenureYears.toFixed(1)}y` : '—', l: 'Tenure' },
     { v: '—', l: 'Avg tracking err' },
@@ -365,6 +374,19 @@ export function ManagerSection({ isin }: { isin: string }) {
             ))}
           </div>
         </div>
+
+        {tenureReturnPct != null && tenureReturnManager && (
+          <div className="mt-3 text-small text-ink">
+            Return since {tenureReturnManager.name} took over:{' '}
+            <span className="font-mono font-semibold">
+              {tenureReturnPct > 0 ? '+' : ''}
+              {tenureReturnPct.toFixed(1)}%
+            </span>
+            {tenureReturnAsOf && (
+              <span className="text-ink-muted"> (as of {tenureReturnAsOf})</span>
+            )}
+          </div>
+        )}
 
         <WhatThisMeans>{meaning}</WhatThisMeans>
       </DataState>

@@ -6,6 +6,14 @@ Only AMCs that serve parseable, non-bot-blocked pages are fetched; the five
 bot-blocked AMCs (HDFC/SBI/ICICI_PRU/KOTAK/AXIS) are skipped with a recorded
 status entry rather than a crash or a retry loop.
 
+Status buckets (see `fetch_fund_managers` return value): "bot_blocked",
+"unreachable" (network/HTTP failure — site is actually down/blocked),
+"format_mismatch" (HTTP 200 but 0 parseable rows — site is up, the parser
+just doesn't match this page's layout), "ok". Keeping "unreachable" and
+"format_mismatch" distinct matters for Ops: the fix for one is "wait/escalate
+network access"; the fix for the other is "rewrite the parser" — collapsing
+them previously masked every real parser bug as a fake network outage.
+
 Public surface
 --------------
 FundManagerRow                          — pure dataclass
@@ -80,6 +88,22 @@ def _parse_date(raw: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+@dataclass
+class RawManagerRow:
+    """A fund-manager tenure record keyed by scheme NAME rather than ISIN.
+
+    Used by sources that expose scheme names but no ISIN (UTI's JSON API,
+    NIPPON's factsheet PDF text) -- the caller (tasks/mf_fund_manager.py)
+    resolves scheme_name -> ISIN via the SAME pg_trgm fuzzy-matcher the
+    constituents pipeline uses (`dhanradar.tasks.mf._resolve_scheme_isins`),
+    never a second matcher, then builds a `FundManagerRow` from the result.
+    """
+
+    scheme_name: str
+    manager_name: str
+    start_date: date
 
 
 @dataclass
@@ -175,14 +199,21 @@ async def fetch_fund_managers(
 
     Returns:
         (all_rows, status_dict) where status_dict has keys:
-            "bot_blocked"  — list of AMC names skipped due to bot protection
-            "unreachable"  — list of AMC names where GET/parse failed
-            "ok"           — list of AMC names that returned >= 1 row
+            "bot_blocked"      — list of AMC names skipped due to bot protection
+            "unreachable"      — list of AMC names where GET/network failed
+                                 (non-200, timeout, transport error)
+            "format_mismatch"  — list of AMC names where the GET succeeded
+                                 (HTTP 200) but 0 rows matched the parser — the
+                                 site is up, the parser just doesn't match this
+                                 page's layout. Distinct from "unreachable" so
+                                 Ops can tell "site down" from "site up, parser
+                                 wrong" (these require completely different fixes).
+            "ok"               — list of AMC names that returned >= 1 row
 
     Contract:
     - Never raises; best-effort per AMC (a single AMC failure does NOT abort
       the rest). This is the §20 resilience rule: a failed source is recorded
-      as unreachable, never a silent drop or a crash.
+      as unreachable/format_mismatch, never a silent drop or a crash.
     - Does NOT retry on failure or timeout — one attempt per AMC per run.
     - Does NOT fetch bot-blocked AMCs even if they appear in `sources`.
     """
@@ -192,6 +223,7 @@ async def fetch_fund_managers(
     all_rows: list[FundManagerRow] = []
     bot_blocked: list[str] = []
     unreachable: list[str] = []
+    format_mismatch: list[str] = []
     ok: list[str] = []
 
     for amc in sources:
@@ -214,8 +246,16 @@ async def fetch_fund_managers(
 
             parsed = parse_fund_managers(resp.text)
             if not parsed:
-                logger.info("fetch_fund_managers: %s returned 0 parseable rows", name)
-                unreachable.append(name)
+                # HTTP 200 + 0 parsed rows = the site is up but the parser doesn't
+                # match this page's format. NOT the same failure mode as a network
+                # error — must not be bucketed as unreachable (that bug is why this
+                # branch exists: it previously masked "parser is wrong" as "site down").
+                logger.info(
+                    "fetch_fund_managers: %s returned HTTP 200 but 0 parseable rows "
+                    "(format_mismatch, not unreachable)",
+                    name,
+                )
+                format_mismatch.append(name)
                 continue
 
             all_rows.extend(parsed)
@@ -234,6 +274,7 @@ async def fetch_fund_managers(
     status: dict[str, list[str]] = {
         "bot_blocked": bot_blocked,
         "unreachable": unreachable,
+        "format_mismatch": format_mismatch,
         "ok": ok,
     }
     return all_rows, status
