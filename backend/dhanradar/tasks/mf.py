@@ -3976,6 +3976,15 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         _kw_hits = [
                             v for v in non_empty if any(kw in v.lower() for kw in _scheme_kws)
                         ]
+                        # ICICI's per-scheme files pair a "Figures as on <date>"
+                        # cell with a "Fund Size Rs. <n> in Lakhs" cell (confirmed
+                        # 2026-07-09, 134 files) — "Fund Size" contains the same
+                        # "fund" keyword a real scheme name would, so it wins the
+                        # single-keyword-hit check below and overwrites the
+                        # correctly-detected current_scheme from an earlier row.
+                        # It is never itself a scheme name, so exclude it before
+                        # the keyword-hit disambiguation runs.
+                        _kw_hits = [v for v in _kw_hits if not _FUND_SIZE_BANNER_RE.match(v)]
                         if len(_kw_hits) == 1:
                             candidate = _kw_hits[0]
                         else:
@@ -3985,7 +3994,11 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             # to whitespace: a fund code is always a single
                             # space-free token; a real AMFI/SEBI scheme name
                             # always has spaces.
-                            _spaced = [v for v in non_empty if " " in v.strip()]
+                            _spaced = [
+                                v
+                                for v in non_empty
+                                if " " in v.strip() and not _FUND_SIZE_BANNER_RE.match(v)
+                            ]
                             if len(_spaced) == 1:
                                 candidate = _spaced[0]
             else:
@@ -4047,8 +4060,15 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     # function-local name elsewhere in this function (other branches
                     # do `import re` inline), so the module-level import can't be
                     # relied on here; alias avoids re-triggering that shadowing.
+                    # Close-ended schemes are correctly written "(A Close
+                    # Ended...)" not "(An Close Ended...)" per English grammar
+                    # (a/an depends on the following word's sound) — confirmed
+                    # 2026-07-09 in HDFC's FMP and "Charity Fund for Cancer
+                    # Cure" close-ended disclosures, where the literal "an"
+                    # requirement left the whole tenure/risk disclaimer
+                    # attached and broke pg_trgm scheme-name resolution.
                     candidate = _re_local.sub(
-                        r"\s*\(an\s+(open|close)[\s-]*ended.*$",
+                        r"\s*\((?:a|an)\s+(open|close)[\s-]*ended.*$",
                         "",
                         candidate,
                         flags=_re_local.IGNORECASE,
@@ -4236,6 +4256,14 @@ _SECTION_HEADER_RE = re.compile(
 # overwrites the real (correctly-detected, earlier-row) current_scheme with
 # the scheme's TYPE description instead of its NAME.
 _SCHEME_TYPE_DESCRIPTION_RE = re.compile(r"^\s*an?\s+(open|close)[\s-]*ended\b", re.IGNORECASE)
+
+# ICICI's per-scheme portfolio sheets always pair an "as on <date>" cell with a
+# "Fund Size Rs. <amount> in Lakhs" / "AUM of the Scheme as on <date> ..." cell
+# in the same 2-value row (confirmed 2026-07-09, 134 files) — this is AUM
+# metadata, never a scheme name, but contains the same "fund" keyword the
+# 2-value scheme-name-vs-fund-code disambiguation (see ABSL comment below)
+# looks for, so it must be excluded before that check runs.
+_FUND_SIZE_BANNER_RE = re.compile(r"^(fund\s+size|aum\s+of\s+the\s+scheme)\b", re.IGNORECASE)
 
 # SEBI sheets sometimes prefix "Name of Instrument" with a short instrument-type
 # code, e.g. UTI writes "EQ - ABB INDIA LTD.". 2-4 caps + " - " is never how a
