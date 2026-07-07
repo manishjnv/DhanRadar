@@ -1150,6 +1150,160 @@ def test_parse_sebi_xlsx_closed_ended_series_name_left_unmangled():
     assert rows[0]["scheme_name"] == "SBI Debt Fund Series C-16"
 
 
+def test_parse_sebi_xlsx_xlrd_fallback_for_legacy_binary_xls(monkeypatch):
+    """A genuine legacy binary .xls (openpyxl raises BadZipFile trying to read
+    it as a zip container — confirmed 2026-07-08 against ABSL's real
+    ~107-sheet monthly portfolio) falls back to xlrd via the module's shim
+    classes, so the SAME parsing loop runs unchanged. Mirrors ABSL's real
+    per-scheme banner: a 2-distinct-value row pairing a short fund CODE with
+    the real scheme name, followed by a bare scheme-TYPE description row that
+    must NOT overwrite the correctly-detected name."""
+    import xlrd
+
+    from dhanradar.tasks.mf import _parse_sebi_xlsx as target_fn
+
+    class _FakeSheet:
+        def __init__(self, rows: list[list]) -> None:
+            self._rows = rows
+            self.nrows = len(rows)
+
+        def row_values(self, r: int) -> list:
+            return list(self._rows[r])
+
+    class _FakeBook:
+        def __init__(self, sheets: dict[str, list[list]]) -> None:
+            self._sheets = sheets
+
+        def sheet_names(self) -> list[str]:
+            return list(self._sheets)
+
+        def sheet_by_name(self, name: str) -> _FakeSheet:
+            return _FakeSheet(self._sheets[name])
+
+    scheme_rows = [
+        [
+            "ABBSEIIF",
+            "ADITYA BIRLA SUN LIFE BSE INDIA INFRASTRUCTURE INDEX FUND",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "",
+            "An open ended Index Fund replicating the BSE India Infrastructure Total Return Index",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        ["", "Portfolio Statement as on May 31,2026", "", "", "", "", "", "", ""],
+        [
+            "",
+            "Name of the Instrument",
+            "ISIN",
+            "Industry^ / Rating",
+            "Quantity",
+            "Market/Fair Value\n(Rs.in Lacs)",
+            "% to Net Assets",
+            "Yield",
+            "Yield to Call",
+        ],
+        ["", "Larsen & Toubro Limited", "INE018A01030", "Construction", 8218.0, 335.02, 0.0989, "", ""],
+    ]
+    fake_book = _FakeBook({"Index": [["Sr", "Code", "Name"]], "ABBSEIIF": scheme_rows})
+    monkeypatch.setattr(xlrd, "open_workbook", lambda file_contents: fake_book)
+
+    # Not a real xlsx — openpyxl raises BadZipFile, triggering the xlrd fallback.
+    rows = target_fn(b"not a real xlsx file", "ABSL")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ADITYA BIRLA SUN LIFE BSE INDIA INFRASTRUCTURE INDEX FUND"
+    assert rows[0]["constituent_isin"] == "INE018A01030"
+
+
+def test_parse_sebi_xlsx_2value_banner_disambiguates_via_whitespace(monkeypatch):
+    """A fund CODE can coincidentally contain a scheme-name keyword as a bare
+    substring (e.g. ABSL's 'C10YGETF' ends in 'ETF' — confirmed 2026-07-08),
+    making the keyword-match rule ambiguous (both values match). The
+    whitespace tie-breaker must still pick the real (spaced) name, since a
+    fund code is always a single space-free token."""
+    import xlrd
+
+    from dhanradar.tasks.mf import _parse_sebi_xlsx as target_fn
+
+    class _FakeSheet:
+        def __init__(self, rows: list[list]) -> None:
+            self._rows = rows
+            self.nrows = len(rows)
+
+        def row_values(self, r: int) -> list:
+            return list(self._rows[r])
+
+    class _FakeBook:
+        def __init__(self, sheets: dict[str, list[list]]) -> None:
+            self._sheets = sheets
+
+        def sheet_names(self) -> list[str]:
+            return list(self._sheets)
+
+        def sheet_by_name(self, name: str) -> _FakeSheet:
+            return _FakeSheet(self._sheets[name])
+
+    scheme_rows = [
+        ["C10YGETF", "ADITYA BIRLA SUN LIFE CRISIL 10 YEAR GILT ETF", "", "", "", "", "", "", ""],
+        [
+            "",
+            "An open ended Debt Exchange Traded Fund tracking the CRISIL 10 Year Gilt Index.",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        ["", "Portfolio Statement as on May 31,2026", "", "", "", "", "", "", ""],
+        [
+            "",
+            "Name of the Instrument",
+            "ISIN",
+            "Rating",
+            "Quantity",
+            "Market/Fair Value\n(Rs.in Lacs)",
+            "% to Net Assets",
+            "Yield",
+            "Yield to Call",
+        ],
+        ["", "Government of India (06/10/2035)", "IN0020250091", "Sovereign", 3145000.0, 3032.87, 0.9577, "", ""],
+    ]
+    fake_book = _FakeBook({"Index": [["Sr", "Code", "Name"]], "C10YGETF": scheme_rows})
+    monkeypatch.setattr(xlrd, "open_workbook", lambda file_contents: fake_book)
+
+    rows = target_fn(b"not a real xlsx file", "ABSL")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ADITYA BIRLA SUN LIFE CRISIL 10 YEAR GILT ETF"
+
+
+def test_parse_sebi_xlsx_reraises_when_neither_format_readable():
+    """A file that is NEITHER a real .xlsx NOR a real legacy binary .xls —
+    e.g. an AMC website 'Fund Details' page saved with a misleading .xls
+    extension (confirmed 2026-07-08: ~52 SBI files are plain HTML, not a
+    spreadsheet at all — a different data source entirely, tracked
+    separately) — must raise, not silently return zero rows. The caller
+    (tasks/manual_ingest.py) then marks the file failed with an honest parse
+    error instead of the misleading zero_rows_upserted_scheme_unresolved."""
+    with pytest.raises(Exception):  # noqa: B017 — exact type varies (xlrd's own error)
+        _parse_sebi_xlsx(b"<html><body>not a spreadsheet</body></html>", "SBI")
+
+
 def test_drop_over_covered_funds_skips_fund_over_105_pct():
     """ADR-0039 fail-closed guard: a fund whose weight_pct rows already sum past
     105% is dropped entirely rather than written half-garbage."""
