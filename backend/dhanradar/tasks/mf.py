@@ -3837,6 +3837,8 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 "direct",
                 "regular",
                 "portfolio",
+                "fmp",
+                "fof",
             )
         ):
             sheet_scheme = sheet
@@ -3972,6 +3974,8 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             "idcw",
                             "direct",
                             "regular",
+                            "fmp",
+                            "fof",
                         )
                         _kw_hits = [
                             v for v in non_empty if any(kw in v.lower() for kw in _scheme_kws)
@@ -4099,7 +4103,13 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # 2026-07-09 -- without it, a correctly-stripped FOF name
                 # failed this gate and silently fell back to whatever
                 # current_scheme an EARLIER row had set, e.g. the AMC's own
-                # "ICICI Prudential Mutual Fund" banner).
+                # "ICICI Prudential Mutual Fund" banner). Same problem for
+                # "FMP" (Fixed Maturity Plan) -- e.g. "HDFC FMP 1269D March
+                # 2023" -- confirmed 2026-07-09: 10 HDFC FMP files sat in
+                # status='unsupported' (0 rows extracted at all, a stricter
+                # failure than the zero_rows_upserted_scheme_unresolved B83
+                # fixed) because "fmp" alone matches none of the other
+                # keywords either.
                 if candidate and any(
                     kw in candidate.lower()
                     for kw in (
@@ -4113,6 +4123,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         "direct",
                         "regular",
                         "fof",
+                        "fmp",
                     )
                 ):
                     current_scheme = candidate
@@ -4238,6 +4249,8 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                     "idcw",
                     "direct",
                     "regular",
+                    "fmp",
+                    "fof",
                 )
             ):
                 current_scheme = candidate

@@ -1087,6 +1087,38 @@ def test_parse_sebi_xlsx_icici_fof_disclaimer_without_wrapping_parens():
     assert rows[0]["scheme_name"] == "ICICI Prudential Thematic Advantage Fund (FOF)"
 
 
+def test_parse_sebi_xlsx_hdfc_fmp_keyword_accepted():
+    """HDFC's Fixed Maturity Plan (FMP) close-ended scheme banners correctly
+    strip the "(A Close Ended ...)" disclaimer (B83, PR #508) down to a bare
+    name like "HDFC FMP 1269D March 2023" -- but "fmp" alone matched none of
+    the scheme-type keywords ("fund"/"scheme"/"plan"/"etf"/"index"/"growth"/
+    "idcw"/"direct"/"regular"/"fof"), so the correctly-stripped candidate
+    failed the final acceptance gate and `current_scheme` was never set at
+    all -- a stricter failure (status='unsupported', ZERO rows extracted)
+    than the zero_rows_upserted_scheme_unresolved bug B83 fixed. Confirmed
+    2026-07-09 against 10 real HDFC FMP files sitting in the unsupported
+    bucket despite the B83 fix already being deployed."""
+    banner = (
+        "HDFC FMP 1269D March 2023 (A Close Ended Income Scheme With Tenure "
+        "1269 Days. A Relatively High Interest Rate Risk And Relatively Low "
+        "Credit Risk)"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append([banner] * 10 + ["Income", "Hybrid"])
+    ws.append(["Portfolio as on 15-Jun-2026"])
+    ws.append([None])
+    ws.append(["ISIN", "Name Of the Instrument", "Quantity", "Market/Fair Value(Rs. In Lacs)"])
+    ws.append(["IN1520220097", "7.49% Gujarat SDL Mat 280926", 10000000, 10052.77])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "HDFC")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "HDFC FMP 1269D March 2023"
+
+
 def test_pick_canonical_plan_isin_prefers_direct_growth_among_tied_candidates():
     """A single-scheme portfolio disclosure never states which plan/option ISIN
     its holdings belong to (holdings are identical across all Direct/Regular x
