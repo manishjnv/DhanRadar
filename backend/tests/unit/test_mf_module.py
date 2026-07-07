@@ -966,6 +966,190 @@ def test_parse_sebi_xlsx_hdfc_per_scheme_merged_title_banner():
     assert rows[0]["market_value_cr"] == pytest.approx(280.1641)
 
 
+def test_parse_sebi_xlsx_sbi_scheme_name_label_value_row():
+    """SBI's per-scheme manual-ingest files (B80, 2026-07-07 triage — 461 files)
+    put the real scheme name in a SEPARATE cell from its "SCHEME NAME :" label,
+    inside a "Portfolio Details" sheet:
+        ['', '', 'SCHEME NAME :', 'SBI Test Equity Fund', ...]
+    Before the fix this row's 2 distinct non-empty values failed the
+    merged-banner heuristic (candidate stayed ""), so `current_scheme` was never
+    set from the real name — and because the sheet is literally named
+    "Portfolio Details" (which contains the "portfolio" keyword), the per-scheme
+    sheet-name FALLBACK kicked in and used the sheet name itself as the scheme,
+    producing scheme_name="Portfolio Details" for every row (never resolves in
+    mf_funds, however good the pg_trgm threshold). This test proves the label
+    row is recovered and the sheet-name fallback never fires.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SBI MUTUAL FUND", "101", "", "", "", ""])
+    ws.append(["", "", "SCHEME NAME :", "SBI Test Equity Fund", "", "", "", ""])
+    ws.append(["", "", "Portfolio as on Mar 31, 2020", "", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry ^",
+            "Quantity",
+            "Market value (Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        ["", "100006", "HDFC Bank Ltd.", "INE040A01034", "Banks", "64293567", "554146.25", "10.42"]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "SBI Test Equity Fund"
+    assert rows[0]["as_of_month"] == date(2020, 3, 1)
+
+
+def test_parse_sebi_xlsx_rejects_section_header_as_scheme_name_midfile():
+    """A SEBI section-header row ("a) Mutual Fund Units / Exchange Traded
+    Funds") appearing between two asset-class blocks of the SAME scheme must
+    never overwrite `current_scheme` — confirmed 2026-07-07 in a real SBI
+    multi-asset-allocation file, where this exact row satisfied the
+    single-value scheme-name-candidate heuristic (and the "fund" keyword gate)
+    and silently became the new scheme_name for every subsequent holding row.
+    Reuses the existing `_SECTION_HEADER_RE` (already used to keep these rows
+    out of constituent_name) as the rejection gate for scheme-name candidates.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SCHEME NAME :", "SBI Test Multi Asset Fund", "", "", "", ""])
+    ws.append(["", "", "Portfolio as on Mar 31, 2020", "", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry ^",
+            "Quantity",
+            "Market value (Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        ["", "100006", "HDFC Bank Ltd.", "INE040A01034", "Banks", "64293567", "554146.25", "10.42"]
+    )
+    ws.append(["", "", "", "", "", "", "", ""])  # blank row — resets col_map
+    ws.append(["", "", "a) Mutual Fund Units / Exchange Traded Funds", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry ^",
+            "Quantity",
+            "Market value (Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(
+        ["", "100010", "SBI Liquid Fund - Direct - Growth", "INE123A01011", "MF", "1000", "100.0", "1.0"]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+
+    assert len(rows) == 2
+    assert all(r["scheme_name"] == "SBI Test Multi Asset Fund" for r in rows)
+
+
+def test_parse_sebi_xlsx_month_dd_yyyy_no_space_after_comma():
+    """ICICI_PRU's per-scheme manual-ingest files (B80, 2026-07-07 triage — 269
+    files) banner the as-of date WITHOUT a space after the comma:
+    "Portfolio as on May 31,2026" / "Figures as on Mar 31,2026" — the prior
+    `,?\\s+` regex required at least one space there and never matched, so
+    every row kept as_of_month=None and `_upsert_constituents` silently drops
+    any row with no as_of_month (zero_rows_upserted_scheme_unresolved), even
+    though the scheme name itself resolves fine via pg_trgm."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["", "ICICI Prudential Mutual Fund", "", "", "", "", "", "", "", ""])
+    ws.append(["", "ICICI Prudential Test ETF", "", "", "", "", "", "", "", ""])
+    ws.append(["", "Portfolio as on May 31,2026", "", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "Company/Issuer/Instrument Name",
+            "ISIN",
+            "Coupon",
+            "Industry/Rating",
+            "Quantity",
+            "Exposure/Market Value(Rs.Lakh)",
+            "% to Nav",
+            "",
+            "",
+        ]
+    )
+    ws.append(
+        ["", "ITC Ltd.", "INE154A01025", "", "Diversified Fmcg", "7208379", "20680.84", "26.98", "", ""]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["as_of_month"] == date(2026, 5, 1)
+
+
+def test_parse_sebi_xlsx_closed_ended_series_name_left_unmangled():
+    """A genuinely closed-ended/matured scheme name (no live ISIN in mf_funds —
+    verified 2026-07-07 against live prod: 'SBI Debt Fund Series C-16' /
+    'SBI Debt Fund Series B-35' score <0.27 similarity against every SBI fund,
+    confirming these are not in the catalog at all, not a formatting mismatch)
+    must be extracted EXACTLY as written — the "SCHEME NAME :" label-row
+    recovery must not mangle or truncate a real name it doesn't specifically
+    target, so a downstream fuzzy match (or its correct absence) never gets a
+    false positive from over-eager cleanup."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SCHEME NAME :", "SBI Debt Fund Series C-16", "", "", "", ""])
+    ws.append(["", "", "Portfolio as on Aug 16, 2018", "", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry ^",
+            "Quantity",
+            "Market value (Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", "", ""])
+    ws.append(
+        ["", "100006", "HDFC Bank Ltd.", "INE040A01034", "Banks", "64293567", "554146.25", "10.42"]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "SBI Debt Fund Series C-16"
+
+
 def test_drop_over_covered_funds_skips_fund_over_105_pct():
     """ADR-0039 fail-closed guard: a fund whose weight_pct rows already sum past
     105% is dropped entirely rather than written half-garbage."""

@@ -3835,8 +3835,17 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         except ValueError:
                             pass
                 # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
+                # ICICI_PRU's own banners omit the space after the comma
+                # ("Portfolio as on May 31,2026" / "Figures as on Mar 31,2026" —
+                # confirmed 2026-07-07 across every sampled ICICI per-scheme
+                # file), which the strict `,?\s+` used to reject outright —
+                # every row in the file then kept `as_of_month=None` and
+                # `_upsert_constituents` silently drops any row with no
+                # as_of_month, producing zero_rows_upserted_scheme_unresolved
+                # even though the scheme name resolves fine. `,?\s*` accepts
+                # both the spaced (MIRAE) and unspaced (ICICI) comma form.
                 if as_of_month is None:
-                    month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs))
+                    month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})", " ".join(row_strs))
                     if month_m:
                         try:
                             from datetime import datetime as _dt
@@ -3873,7 +3882,41 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     candidate = _top_val
                 else:
                     candidate = ""
+                    # SBI's per-scheme "Portfolio Details" sheets (manual-ingest
+                    # inbox, confirmed 2026-07-07 — 461 files) put the scheme
+                    # name in a SEPARATE cell from its "SCHEME NAME :" label
+                    # (e.g. row = ['', '', 'SCHEME NAME :', 'SBI-ETF Nifty 50',
+                    # ...]) rather than UTI's single-cell "SCHEME:<name>" form
+                    # already handled above — a genuine 2-distinct-value row,
+                    # so the merged-banner heuristic above correctly rejects it
+                    # (candidate stays ""). Recover it explicitly: find the
+                    # label cell and take the next non-empty cell in the row.
+                    import re as _re_schemename  # local import — `re` is shadowed as a
+                    # function-local name elsewhere in this function (other branches
+                    # do `import re` inline), so the module-level import can't be
+                    # relied on here; alias avoids re-triggering that shadowing.
+
+                    for _ci, _cell in enumerate(row_strs):
+                        if _re_schemename.fullmatch(
+                            r"scheme\s*name\s*:?", _cell.strip(), _re_schemename.IGNORECASE
+                        ):
+                            for _nv in row_strs[_ci + 1 :]:
+                                if _nv and _nv.lower() not in ("none", ""):
+                                    candidate = _nv.strip()
+                                    break
+                            break
             else:
+                candidate = ""
+            # Reject a candidate that is itself a SEBI section-header /
+            # subtotal marker ("a) Listed/awaiting listing...", "Sub Total",
+            # etc. — same _SECTION_HEADER_RE already used to keep these out of
+            # constituent rows below). Without this, a genuine section header
+            # inside a multi-asset-class SBI file (e.g. "a) Mutual Fund Units /
+            # Exchange Traded Funds") satisfies the single-value + keyword
+            # ("fund") checks below and silently OVERWRITES the real
+            # current_scheme mid-file (confirmed 2026-07-07, SBI Multi Asset
+            # Allocation Fund.xlsx).
+            if candidate and _SECTION_HEADER_RE.search(candidate):
                 candidate = ""
             if candidate:
                 # Strip "SCHEME:" prefix used by UTI and some other AMCs.
@@ -4024,8 +4067,12 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                 except ValueError:
                     pass
             # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
+            # `,?\s*` (not `,?\s+`) so an unspaced comma form (ICICI_PRU's own
+            # banners: "Portfolio as on May 31,2026") still matches — see the
+            # matching comment in _parse_sebi_xlsx above, same fix mirrored here
+            # for CSV-format disclosures.
             if as_of_month is None:
-                month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs))
+                month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})", " ".join(row_strs))
                 if month_m:
                     try:
                         from datetime import datetime as _dt
