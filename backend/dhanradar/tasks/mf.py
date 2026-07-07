@@ -110,6 +110,16 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
         "url": "https://www.miraeassetmf.co.in/downloads/portfolio",
         "static_multi": True,
     },
+    # PPFAS (added 2026-07-07, verified from KVM4): static page with direct
+    # per-month .xls links ("Monthly-Portfolio-<month>-<year>.xls"); no WAF on
+    # homepage or this page; ONE consolidated file per month — the month/year
+    # filter in the static discovery picks the current one. Resolver override
+    # "Parag Parikh%" required (scheme names don't carry the AMC brand).
+    {
+        "name": "PPFAS",
+        "url": "https://amc.ppfas.com/downloads/portfolio-disclosure/",
+        "static_multi": True,
+    },
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
     {
         "name": "FRANKLIN",
@@ -4287,7 +4297,7 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
         return {}
 
     scheme_isin_map: dict[str, str] = {}
-    amc_prefix_map = {"MIRAE": "Mirae Asset%"}
+    amc_prefix_map = {"MIRAE": "Mirae Asset%", "PPFAS": "Parag Parikh%"}
     amc_prefix = amc_prefix_map.get(amc_name) or (
         amc_name.split("_")[0] + "%"
     )  # "ICICI_PRU" → "ICICI%"
