@@ -332,10 +332,20 @@ async def _apply_file_class(
 
     if file_class == "riskometer":
         band_pairs = parse_riskometer_annual(data, ext)
-        if not band_pairs:
+        # A file NAMED/classified "riskometer" can still carry a usable
+        # benchmark table even when its own risk-o-meter LEVEL column is
+        # blank (confirmed 2026-07-08: Kotak's annual riskometer file is a
+        # change-COUNT disclosure, not a current-level one, but the same
+        # workbook has a plain scheme->benchmark table) — try both parsers
+        # on the same bytes rather than leaving that data stranded behind
+        # the wrong file-class label.
+        bench_pairs = parse_scheme_performance(data, ext)
+        if not band_pairs and not bench_pairs:
             return None, None, 0
-        isin_map = await _resolve_scheme_isins({name for name, _b in band_pairs}, amc_name)
-        resolved = sum(1 for name, _b in band_pairs if name in isin_map)
+
+        all_names = {name for name, _b in band_pairs} | {name for name, _b in bench_pairs}
+        isin_map = await _resolve_scheme_isins(all_names, amc_name)
+        resolved = sum(1 for name in all_names if name in isin_map)
         updates = 0
         async with TaskSessionLocal() as db:
             for name, band in band_pairs:
@@ -345,6 +355,15 @@ async def _apply_file_class(
                 result = await db.execute(
                     sa_text("UPDATE mf.mf_funds SET risk_o_meter = :b WHERE isin = :i"),
                     {"b": band, "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            for name, bench in bench_pairs:
+                isin = isin_map.get(name)
+                if not isin:
+                    continue
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET benchmark_index = :b WHERE isin = :i"),
+                    {"b": bench, "i": isin},
                 )
                 updates += int(getattr(result, "rowcount", 0) or 0)
             await db.commit()
