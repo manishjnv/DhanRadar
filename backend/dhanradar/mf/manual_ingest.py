@@ -290,6 +290,9 @@ _AMC_KEYWORDS: dict[str, str] = {
     # registry, a separate (unverified, out-of-scope) concern from manual-ingest AMC
     # recognition.
     "edel": "EDELWEISS",
+    # PPFAS files/folders say "PPFAS" or "Parag Parikh" — scheme names only the latter.
+    "ppfas": "PPFAS",
+    "parag": "PPFAS",
 }
 
 

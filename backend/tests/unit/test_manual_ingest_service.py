@@ -98,6 +98,27 @@ def test_detect_amc_matches_edelweiss_filename_prefix_and_folder_hint():
     assert detect_amc("Edelweiss Mutual Fund disclosure") == "EDELWEISS"
 
 
+def test_detect_amc_matches_ppfas_filename_and_scheme_name():
+    """PPFAS files say 'PPFAS' or 'Monthly-Portfolio' on amc.ppfas.com, but the
+    SCHEMES are named 'Parag Parikh ...' — both forms must resolve (2026-07-07,
+    PPFAS added to the automated scraper roots)."""
+    assert detect_amc("PPFAS_Monthly-Portfolio-june-2026.xls") == "PPFAS"
+    assert detect_amc("Parag Parikh Flexi Cap Fund") == "PPFAS"
+
+
+def test_ppfas_registered_in_scraper_roots_with_resolver_prefix():
+    """The scraper root + the resolver's name-prefix override must stay in sync —
+    a root without the 'Parag Parikh%' prefix would resolve zero schemes."""
+    import inspect
+
+    from dhanradar.tasks.mf import _AMC_DISCLOSURE_ROOTS, _resolve_scheme_isins  # noqa: F401
+
+    roots = {r["name"] for r in _AMC_DISCLOSURE_ROOTS}
+    assert "PPFAS" in roots
+    src = inspect.getsource(_resolve_scheme_isins)
+    assert "Parag Parikh%" in src
+
+
 # ---------------------------------------------------------------------------
 # detect_amc_and_parse — real .xlsx bytes through the EXISTING SEBI parser
 # (_parse_sebi_xlsx, dhanradar/tasks/mf.py) — never a second parser.
