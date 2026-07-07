@@ -4507,6 +4507,67 @@ def _pick_canonical_plan_isin(rows: Sequence[Any], tie_margin: float) -> str:
     return rows[0][0]
 
 
+async def _resolve_scheme_isins_by_plan(
+    scheme_name: str, amc_name: str
+) -> tuple[list[str], list[str]]:
+    """Resolve a BARE scheme name to ALL its option-variant ISINs, split by
+    plan: (regular_isins, direct_isins). Used for TER (Total Expense Ratio)
+    writes — TER is a PLAN-level fee (identical across Growth/IDCW/Bonus/etc.
+    options of the same plan), so it must be written to every option-variant
+    ISIN under a plan, never a single top-1 fuzzy match like
+    `_resolve_scheme_isins`.
+
+    A real AMFI/SEBI plan variant's `scheme_name` always literally starts
+    with its bare base name followed by a separator ("<bare> - Growth",
+    "<bare> Plan A - Growth", or the bare name alone) — confirmed across
+    every AMC sampled this session — so an ILIKE prefix match is precise and
+    safe here, unlike fuzzy pg_trgm similarity (which risks pulling in a
+    different-but-similar scheme when fetching MULTIPLE rows instead of a
+    single best match). Falls back to a stricter similarity threshold (0.6,
+    above `_resolve_scheme_isins`'s 0.35) only if the prefix match finds
+    nothing, to tolerate minor AMC spelling drift between the TER file's own
+    name and `mf_funds.scheme_name`.
+    """
+    from sqlalchemy import text as sa_text
+
+    from dhanradar.db import TaskSessionLocal
+
+    amc_prefix_map = {
+        "MIRAE": "Mirae Asset%",
+        "PPFAS": "Parag Parikh%",
+        "ABSL": "Aditya Birla%",
+    }
+    amc_prefix = amc_prefix_map.get(amc_name) or (amc_name.split("_")[0] + "%")
+
+    async with TaskSessionLocal() as db:
+        result = await db.execute(
+            sa_text(
+                "SELECT isin, scheme_name FROM mf.mf_funds "
+                "WHERE scheme_name ILIKE :prefix AND scheme_name ILIKE :bare_prefix"
+            ),
+            {"prefix": amc_prefix, "bare_prefix": f"{scheme_name}%"},
+        )
+        rows = result.fetchall()
+        if not rows:
+            result = await db.execute(
+                sa_text(
+                    "SELECT isin, scheme_name FROM mf.mf_funds "
+                    "WHERE scheme_name ILIKE :prefix AND similarity(scheme_name, :sname) > 0.6"
+                ),
+                {"prefix": amc_prefix, "sname": scheme_name},
+            )
+            rows = result.fetchall()
+
+    regular_isins: list[str] = []
+    direct_isins: list[str] = []
+    for isin, matched_name in rows:
+        if "direct" in matched_name.lower():
+            direct_isins.append(isin)
+        else:
+            regular_isins.append(isin)
+    return regular_isins, direct_isins
+
+
 async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[str, str]:
     """Resolve a set of scheme NAMES → ISINs via pg_trgm fuzzy match, restricted
     to the same AMC's funds (by name prefix) to avoid cross-AMC false positives

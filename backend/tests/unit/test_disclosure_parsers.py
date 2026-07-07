@@ -23,6 +23,7 @@ from dhanradar.mf.disclosure_parsers import (
     parse_riskometer_annual,
     parse_scheme_master_details,
     parse_scheme_performance,
+    parse_ter_disclosure,
 )
 
 
@@ -368,3 +369,262 @@ def test_scheme_master_unavailable_benchmark_is_none_not_literal_na():
     data = _build_scheme_master_html().replace(b"NIFTY 1D Rate Index", b"NA")
     parsed = parse_scheme_master_details(data)
     assert parsed["benchmark_tier1"] is None
+
+
+# ---------------------------------------------------------------------------
+# parse_ter_disclosure — TER (Total Expense Ratio) disclosure, 2026-07-09
+# ---------------------------------------------------------------------------
+
+
+def test_classify_ter_real_filenames():
+    assert classify_file_class("TotalExpenseRatio-2026-2027.xlsx") == "ter"
+    assert classify_file_class("SBIcurrent-year-ter.xlsx") == "ter"
+    assert classify_file_class("SBIhistorical-ter-march2026.xlsx") == "ter"
+    assert classify_file_class("Expense Ratio.xlsx") == "ter"
+    assert classify_file_class("HDFCMF_SCHEMES_TER_02-06-2026_1.xls") == "ter"
+
+
+def test_parse_ter_disclosure_edelweiss_2row_group_title_layout():
+    """Edelweiss's real layout: a free-text title banner row, a group-title
+    row ("Regular Plan"/"Direct Plan") whose cells sit at arbitrary columns
+    (NOT spanning the actual sub-column block), then the real 13-column
+    sub-header row ending each plan's block with "Total TER (%)"."""
+
+    def build(wb):
+        ws = wb.active
+        ws.append(["Total Expense Ratio Of Mutual Fund Scheme:-2026-2027"])
+        ws.append([])
+        ws.append(["Regular Plan", "Direct Plan"])
+        ws.append(
+            [
+                "Scheme Name",
+                "Date",
+                "Base Expense Ratio (BER) (%)1",
+                "Brokerage cost (%)2",
+                "Transaction Cost incurred for the purpose of execution of trade (%)3",
+                "Statutory Levies (including GST) (%)4",
+                "Total TER (%)",
+                "Base Expense Ratio (BER) (%)1",
+                "Brokerage cost (%)2",
+                "Transaction Cost incurred for the purpose of execution of trade (%)3",
+                "Statutory Levies (including GST) (%)4",
+                "Total TER (%)",
+                "NSDL Scheme Code",
+            ]
+        )
+        ws.append(
+            [
+                "Edelweiss Aggressive Hybrid Fund",
+                "01/04/2026",
+                1.63,
+                0,
+                0,
+                0.25,
+                1.88,
+                0.39,
+                0,
+                0,
+                0.07,
+                0.46,
+                "EDEL/O/H/AHF/09/04/0007",
+            ]
+        )
+        ws.append(
+            [
+                "Edelweiss Aggressive Hybrid Fund",
+                "01/05/2026",
+                1.60,
+                0,
+                0,
+                0.24,
+                1.84,
+                0.38,
+                0,
+                0,
+                0.07,
+                0.45,
+                "EDEL/O/H/AHF/09/04/0007",
+            ]
+        )
+
+    data = _xlsx(build)
+    result = parse_ter_disclosure(data, ".xlsx")
+
+    assert result == [("Edelweiss Aggressive Hybrid Fund", date(2026, 5, 1), 1.84, 0.45)]
+
+
+def test_parse_ter_disclosure_sbi_single_row_prefixed_layout():
+    """SBI's layout: ONE header row, every column literally prefixed
+    "Regular Plan - " / "Direct Plan - "."""
+
+    def build(wb):
+        ws = wb.active
+        ws.append(
+            [
+                "NSDL Scheme Code",
+                "Scheme Name",
+                "TER Date\n(DD/MM/\nYYYY)",
+                "Regular Plan - Base Expense Ratio (BER) (%)",
+                "Regular Plan - Brokerage cost (%)",
+                "Regular Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Regular Plan - Statutory Levies (including GST) (%)",
+                "Regular Plan - Total TER (%)",
+                "Direct Plan - Base Expense Ratio (BER) (%)",
+                "Direct Plan - Brokerage cost (%)",
+                "Direct Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Direct Plan - Statutory Levies (including GST) (%)",
+                "Direct Plan - Total TER (%)",
+            ]
+        )
+        ws.append(
+            [
+                "SBIM/O/E/THE/97/01/0001",
+                "SBI ESG Exclusionary Strategy Fund",
+                "01/04/2026",
+                1.61,
+                0,
+                0,
+                0.28,
+                1.89,
+                1.1,
+                0,
+                0,
+                0.19,
+                1.29,
+            ]
+        )
+
+    data = _xlsx(build)
+    result = parse_ter_disclosure(data, ".xlsx")
+
+    assert result == [("SBI ESG Exclusionary Strategy Fund", date(2026, 4, 1), 1.89, 1.29)]
+
+
+def test_parse_ter_disclosure_absl_2row_bare_group_title_layout():
+    """ABSL's layout: a 2-row header with BARE group titles ("Regular"/
+    "Direct", no "Plan" suffix) sitting at their REAL (non-contiguous)
+    column offsets — confirmed 2026-07-09 against the real file: "Regular"
+    at column 3, "Direct" at column 8, with the sub-label row's cells
+    correctly aligned underneath (not at columns 0-9) — and value cells
+    stored as numeric-looking STRINGS (not genuine floats)."""
+
+    def build(wb):
+        ws = wb.active
+        ws.append(
+            [
+                "NSDL Scheme Code",
+                "Name of the scheme",
+                "Date",
+                "Regular",
+                None,
+                None,
+                None,
+                None,
+                "Direct",
+            ]
+        )
+        ws.append(
+            [
+                None,
+                None,
+                None,
+                "Base TER(%)1",
+                "Additional Expense as per Regulation 52(6A)(b)( %)2",
+                "Additional Expense as per Regulation 52(6A)(c)( %)3",
+                "GST (%)4",
+                "Total TER (%)",
+                "Base TER(%)1",
+                "Additional Expense as per Regulation 52(6A)(b)( %)2",
+                "Additional Expense as per Regulation 52(6A)(c)( %)3",
+                "GST (%)4",
+                "Total TER (%)",
+            ]
+        )
+        ws.append(
+            [
+                "ABSL/O/O/DIN/23/11/0157",
+                "ABSL CRISIL IBX GILT JUNE 2027 INDEX FUND",
+                "01-JAN-2026",
+                "0.56",
+                "0",
+                "0",
+                "0",
+                "0.56",
+                "0.26",
+                "0",
+                "0",
+                "0",
+                "0.26",
+            ]
+        )
+
+    data = _xlsx(build)
+    result = parse_ter_disclosure(data, ".xlsx")
+
+    assert result == [("ABSL CRISIL IBX GILT JUNE 2027 INDEX FUND", date(2026, 1, 1), 0.56, 0.26)]
+
+
+def test_parse_ter_disclosure_ignores_freetext_title_banner_total_ter_match():
+    """HDFC's real file titles its single sheet "Total Expense Ratio (TER)
+    for Mutual Fund Schemes" — this ONE-cell banner row contains both
+    "total" and "ter" as prose, which must NOT be mistaken for a genuine
+    "Total TER" column header (confirmed 2026-07-09: without the >2-non-
+    empty-cells guard, this produced a spurious 3rd "total ter" match and
+    the whole file failed to parse)."""
+
+    def build(wb):
+        ws = wb.active
+        ws.append(["Total Expense Ratio (TER) for Mutual Fund Schemes"])
+        ws.append(["Regular Plan", "Direct Plan"])
+        ws.append(
+            [
+                "Scheme Name",
+                "NSDL Scheme Code",
+                "Date (DD/MM/YYYY)",
+                "Base Expense Ratio (BER) (%)",
+                "Brokerage Cost (%)",
+                "Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Statutory Levies (Including GST) (%)",
+                "Total TER (%)",
+                "Base Expense Ratio (BER) (%)",
+                "Brokerage Cost (%)",
+                "Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Statutory Levies (Including GST) (%)",
+                "Total TER (%)",
+            ]
+        )
+        ws.append(
+            [
+                "HDFC Arbitrage Fund",
+                "HDFC/O/H/ARB/07/08/0017",
+                "01-Jun-2026",
+                0.79,
+                0.06,
+                0.09,
+                1.09,
+                2.03,
+                0.34,
+                0.06,
+                0.09,
+                1.02,
+                1.51,
+            ]
+        )
+
+    data = _xlsx(build)
+    result = parse_ter_disclosure(data, ".xlsx")
+
+    assert result == [("HDFC Arbitrage Fund", date(2026, 6, 1), 2.03, 1.51)]
+
+
+def test_parse_ter_disclosure_unrecognized_layout_returns_empty():
+    """A file with no Regular/Direct TER structure at all fails closed —
+    never a guess."""
+
+    def build(wb):
+        ws = wb.active
+        ws.append(["Just some notes about the fund house"])
+        ws.append(["Nothing resembling a TER table here"])
+
+    data = _xlsx(build)
+    assert parse_ter_disclosure(data, ".xlsx") == []

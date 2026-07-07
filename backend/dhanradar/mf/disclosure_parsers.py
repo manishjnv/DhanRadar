@@ -20,6 +20,13 @@ first-batch files):
     is deliberately NOT extracted — free-form multi-tier text that would need
     lossy guessing to fit a single (pct, days) pair; a wrong compliance-
     adjacent fee figure is worse than none, per §8.4 verbatim-only.)
+  - TER (Total Expense Ratio) disclosure (2026-07-09 — SBI/ABSL/Edelweiss/
+    HDFC all publish a Regular-Plan-vs-Direct-Plan table, one row per scheme
+    per date; header depth/labels vary but every layout shares one invariant:
+    a "Regular"-labelled column group and a "Direct"-labelled group, each
+    ending in its own "Total TER (%)" column). Only the LATEST date's row per
+    scheme is kept — TER changes over time and only the current effective
+    rate should ever be written.
 
 All parsers are PURE (bytes in, tuples out — no DB, no network) so they unit-
 test without fixtures beyond in-memory workbooks. Writers live in
@@ -55,8 +62,8 @@ _BANDS_LOWER = {b.lower(): b for b in RISKOMETER_BANDS}
 
 
 def classify_file_class(filename: str, data: bytes | None = None) -> str:
-    """'aaum' | 'riskometer' | 'performance' | 'scheme_master' | 'portfolio'
-    (default) — pure.
+    """'aaum' | 'riskometer' | 'ter' | 'performance' | 'scheme_master' |
+    'portfolio' (default) — pure.
 
     Keyed off the disclosure-type words AMCs put in their own filenames
     (verified against the founder's real batch: "Average_Assets_Under_
@@ -77,33 +84,122 @@ def classify_file_class(filename: str, data: bytes | None = None) -> str:
         return "aaum"
     if "riskometer" in low or "risk-o-meter" in low or "risk o meter" in low:
         return "riskometer"
+    if (
+        "expense ratio" in low
+        or "expenseratio" in low
+        or "_ter_" in low
+        or "-ter-" in low
+        or "_ter." in low
+        or "-ter." in low
+    ):
+        return "ter"
     if "performance" in low:
         return "performance"
     return "portfolio"
 
 
+def _repair_corrupted_stylesheet_xlsx(data: bytes) -> bytes:
+    """Patch a malformed `xl/styles.xml` `rgb="..."` color value in-place and
+    return corrected xlsx bytes, unchanged if nothing needed fixing.
+
+    Confirmed 2026-07-09 (Edelweiss's real "TotalExpenseRatio-2026-2027.xlsx"
+    and its siblings): openpyxl raises `ValueError: Unable to read workbook:
+    could not read stylesheet ... Colors must be aRGB hex values` because one
+    `<color rgb="0000000"/>` element has a 7-character hex value — a genuinely
+    truncated 8-char aRGB value (should be e.g. "00000000"), not a different
+    color format. Zero-padding any `rgb="..."` value that is neither 6 nor 8
+    hex characters (the only two valid lengths — plain RGB or aRGB) to 8
+    chars recovers the file without altering any VALID color, and this is a
+    zip-level, in-memory patch — never touches the on-disk stored original.
+    """
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(data)) as zin:
+        if "xl/styles.xml" not in zin.namelist():
+            return data
+        styles = zin.read("xl/styles.xml").decode("utf-8")
+
+        def _pad(m: re.Match[str]) -> str:
+            hexval = m.group(1)
+            return m.group(0) if len(hexval) in (6, 8) else f'rgb="{hexval.zfill(8)}"'
+
+        fixed = re.sub(r'rgb="([0-9A-Fa-f]+)"', _pad, styles)
+        if fixed == styles:
+            return data
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                content = (
+                    fixed.encode("utf-8")
+                    if item.filename == "xl/styles.xml"
+                    else zin.read(item.filename)
+                )
+                zout.writestr(item, content)
+        return buf.getvalue()
+
+
 def _iter_sheets(data: bytes, ext: str) -> Iterator[tuple[str, list[list[Any]]]]:
     """Yield (sheet_name, rows-of-raw-values) — openpyxl for .xlsx, xlrd for
     legacy OLE2 .xls (xlrd>=2.0 reads ONLY .xls; already a dependency via the
-    CAMS legacy parser). Raw values (not str) — AAUM needs the floats."""
-    if ext == ".xls":
-        import xlrd
+    CAMS legacy parser). Raw values (not str) — AAUM needs the floats.
 
-        book = xlrd.open_workbook(file_contents=data)
+    The file EXTENSION is a hint, never trusted blindly both ways (confirmed
+    2026-07-09, HDFC's own "...TER_02-06-2026_1.xls" — the opposite mismatch
+    of the earlier SBI "Fund Details" HTML-saved-as-.xls case: this one is a
+    genuine, valid XLSX zip that someone saved with a legacy ".xls"
+    extension). If the extension-suggested reader fails with the SPECIFIC
+    "wrong container format" error, retry with the other reader once before
+    giving up — never guess data, just don't let a mislabeled extension mask
+    a file that's perfectly readable under its real format.
+    """
+    import xlrd
+
+    if ext == ".xls":
+        try:
+            book = xlrd.open_workbook(file_contents=data)
+        except xlrd.XLRDError as exc:
+            if "not supported" not in str(exc):
+                raise
+            yield from _iter_sheets_xlsx(data)
+            return
         for sheet in book.sheets():
             rows = [
                 [sheet.cell_value(r, c) for c in range(sheet.ncols)] for r in range(sheet.nrows)
             ]
             yield sheet.name, rows
     else:
-        import openpyxl
+        import zipfile
 
-        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         try:
-            for name in wb.sheetnames:
-                yield name, [list(row) for row in wb[name].iter_rows(values_only=True)]
-        finally:
-            wb.close()
+            yield from _iter_sheets_xlsx(data)
+        except zipfile.BadZipFile:
+            book = xlrd.open_workbook(file_contents=data)
+            for sheet in book.sheets():
+                rows = [
+                    [sheet.cell_value(r, c) for c in range(sheet.ncols)] for r in range(sheet.nrows)
+                ]
+                yield sheet.name, rows
+
+
+def _iter_sheets_xlsx(data: bytes) -> Iterator[tuple[str, list[list[Any]]]]:
+    """The .xlsx branch of `_iter_sheets`, split out so it can be retried with
+    repaired bytes on a stylesheet-corruption ValueError without duplicating
+    the openpyxl-open-and-iterate logic."""
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except ValueError as exc:
+        if "could not read stylesheet" not in str(exc):
+            raise
+        repaired = _repair_corrupted_stylesheet_xlsx(data)
+        wb = openpyxl.load_workbook(io.BytesIO(repaired), read_only=True, data_only=True)
+    try:
+        for name in wb.sheetnames:
+            yield name, [list(row) for row in wb[name].iter_rows(values_only=True)]
+    finally:
+        wb.close()
 
 
 def _s(v: Any) -> str:
@@ -322,6 +418,149 @@ def parse_scheme_performance(data: bytes, ext: str) -> list[tuple[str, str]]:
                 after_scheme_row = False
 
     return out
+
+
+def _parse_ter_date(v: Any) -> date | None:
+    """A TER-date cell is either a real `datetime` (openpyxl auto-converts a
+    genuine Excel date cell) or a string in one of the two conventions AMCs
+    actually use in these files (DD-MON-YYYY / DD/MM/YYYY — Indian date
+    order, never US MM/DD)."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = _s(v)
+    if not s:
+        return None
+    for fmt in ("%d-%b-%Y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_ter_number(v: Any) -> float | None:
+    """A TER percentage cell can be a real float/int OR a numeric-looking
+    string (confirmed 2026-07-09, Edelweiss: every value cell is text like
+    "0.0000", not a genuine number) — accept either, never guess on anything
+    else."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = _s(v)
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_ter_disclosure(data: bytes, ext: str) -> list[tuple[str, date, float, float]]:
+    """Total Expense Ratio (TER) disclosure -> [(scheme_name, ter_date,
+    regular_total_ter_pct, direct_total_ter_pct)], ONE row per scheme (the
+    LATEST date only — TER changes over time and only the current effective
+    rate should ever be written).
+
+    Confirmed 2026-07-09 across 3 real AMC layouts (SBI, ABSL, Edelweiss) that
+    all share one structural invariant despite differing header shapes: a
+    "Regular"-labelled column GROUP and a "Direct"-labelled column group
+    (Regular always precedes Direct left-to-right), each ending in its own
+    "Total TER (%)" sub-column — the all-in number; the BER/brokerage/
+    transaction-cost/GST components that precede it are deliberately NOT
+    extracted (§8.4 verbatim-only — we want the one number the AMC itself
+    calls the total, never a recomputation). Header depth varies (SBI: one
+    row, every column literally prefixed "Regular Plan - " / "Direct Plan -";
+    Edelweiss: a group-title row ["Regular Plan", "Direct Plan"] followed by
+    a shared 5-label sub-header row; ABSL: the same 2-row shape with bare
+    "Regular"/"Direct" group titles) — detected generically by locating the
+    "regular"/"direct" group-start columns and every "total ter" column,
+    rather than hardcoding 3 separate branches.
+
+    A scheme's holdings are IDENTICAL across Regular and Direct plans (TER is
+    a plan-level, not option-level, fee) — the resolver in manual_ingest.py
+    applies these two values to ALL option-variant ISINs (Growth/IDCW/Bonus/
+    etc.) under each plan, never a single top-1 fuzzy match.
+    """
+    latest: dict[str, tuple[date, float, float]] = {}
+
+    for _name, rows in _iter_sheets(data, ext):
+        header_rows = rows[:4]
+        has_regular = False
+        has_direct = False
+        name_ci: int | None = None
+        date_ci: int | None = None
+        total_ter_cols: list[int] = []
+        header_end = 0
+
+        for ri, hr in enumerate(header_rows):
+            non_empty_count = sum(1 for c in hr if _s(c))
+            row_has_total_ter = False
+            for ci, cell in enumerate(hr):
+                s = _s(cell).lower()
+                if not s:
+                    continue
+                if "regular" in s:
+                    has_regular = True
+                if "direct" in s:
+                    has_direct = True
+                if "name" in s and name_ci is None:
+                    name_ci = ci
+                if "date" in s and date_ci is None:
+                    date_ci = ci
+                # A free-text title banner ("Total Expense Ratio (TER) for
+                # Mutual Fund Schemes") can spell out both "total" and "ter"
+                # in prose — confirmed 2026-07-09, HDFC's TER file — and is
+                # never a real multi-column header row (always <=2 non-empty
+                # cells: either the single banner cell itself, or the
+                # 2-cell "Regular Plan"/"Direct Plan" group-title row, which
+                # never contains "total"/"ter" anyway). Require >2 non-empty
+                # cells so only a genuine tabular header row can contribute.
+                if non_empty_count > 2 and "total" in s and "ter" in s:
+                    total_ter_cols.append(ci)
+                    row_has_total_ter = True
+            if row_has_total_ter:
+                header_end = ri
+
+        # Every real layout has EXACTLY one "Total TER" column per plan — the
+        # group-TITLE cells ("Regular Plan" / "Direct Plan") are not reliably
+        # positioned at the START of their own column block (confirmed
+        # 2026-07-09, Edelweiss: title cells sit at columns 0/1 while the
+        # actual Regular/Direct sub-column blocks are 2-6/7-11), so bucketing
+        # by title-column proximity is unreliable. Left-to-right POSITION
+        # order is: every real AMC lists the Regular block before the Direct
+        # block, so with exactly 2 "Total TER" columns the smaller index is
+        # always Regular's and the larger is always Direct's — simpler and
+        # correct across all 3 known layouts (SBI/ABSL/Edelweiss). More or
+        # fewer than 2 is an unrecognized layout — skip the sheet, never
+        # guess which column is which.
+        if (
+            not has_regular
+            or not has_direct
+            or name_ci is None
+            or date_ci is None
+            or len(total_ter_cols) != 2
+        ):
+            continue
+
+        regular_total_ci, direct_total_ci = sorted(total_ter_cols)
+
+        for row in rows[header_end + 1 :]:
+            if max(name_ci, date_ci, regular_total_ci, direct_total_ci) >= len(row):
+                continue
+            name = _s(row[name_ci])
+            if not name:
+                continue
+            ter_date = _parse_ter_date(row[date_ci])
+            reg_val = _parse_ter_number(row[regular_total_ci])
+            dir_val = _parse_ter_number(row[direct_total_ci])
+            if ter_date is None or reg_val is None or dir_val is None:
+                continue
+            prior = latest.get(name)
+            if prior is None or ter_date > prior[0]:
+                latest[name] = (ter_date, round(float(reg_val), 4), round(float(dir_val), 4))
+
+    return [(name, d, reg, dirv) for name, (d, reg, dirv) in latest.items()]
 
 
 # ---------------------------------------------------------------------------

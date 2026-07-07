@@ -280,6 +280,15 @@ async def _apply_file_class(
         row per manager, deduped against already-stored (scheme_uid,
         manager_name, start_date) tuples — the exact pattern
         `tasks/mf_fund_manager.py` already uses, never a second one).
+      - ter (2026-07-09 — Total Expense Ratio disclosures: SBI/ABSL/
+        Edelweiss/HDFC all publish a Regular-Plan-vs-Direct-Plan TER table)
+        → `expense_ratio_pct`, written to EVERY option-variant ISIN
+        (Growth/IDCW/Bonus/etc.) under each resolved plan — TER is a
+        plan-level fee, identical across every option of the same plan, so
+        a single top-1 fuzzy match (like other classes use) would silently
+        leave sibling option ISINs stale. A simple overwrite (not fill-only)
+        mirrors the scheme_master rule above: no `expense_ratio_history` row
+        (no honest "effective from" date to attribute one to, §8.4).
     """
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -290,9 +299,10 @@ async def _apply_file_class(
         parse_riskometer_annual,
         parse_scheme_master_details,
         parse_scheme_performance,
+        parse_ter_disclosure,
     )
     from dhanradar.models.mf import MfAumHistory, MfFundManagerHistory
-    from dhanradar.tasks.mf import _resolve_scheme_isins
+    from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
 
     if file_class == "aaum":
         period, pairs = parse_aaum_annexure(data, ext)
@@ -453,6 +463,39 @@ async def _apply_file_class(
                     updates += len(new_rows)
             await db.commit()
         return None, updates, resolved
+
+    if file_class == "ter":
+        ter_rows = parse_ter_disclosure(data, ext)
+        if not ter_rows:
+            return None, None, 0
+
+        resolved = 0
+        updates = 0
+        latest_period: date | None = None
+        async with TaskSessionLocal() as db:
+            for scheme_name, ter_date, regular_pct, direct_pct in ter_rows:
+                if latest_period is None or ter_date > latest_period:
+                    latest_period = ter_date
+                regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(
+                    scheme_name, amc_name
+                )
+                if not regular_isins and not direct_isins:
+                    continue
+                resolved += 1
+                for isin in regular_isins:
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
+                        {"v": regular_pct, "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+                for isin in direct_isins:
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
+                        {"v": direct_pct, "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return latest_period, updates, resolved
 
     raise ValueError(f"unknown file_class: {file_class}")  # unreachable by construction
 
