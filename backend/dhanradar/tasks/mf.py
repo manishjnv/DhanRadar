@@ -97,14 +97,24 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     {"name": "SBI", "url": "https://www.sbimf.com/portfolios"},
     {"name": "ICICI_PRU", "url": "https://www.icicipruamc.com/portfolio-disclosure"},
     # Nippon publishes .xls (legacy Excel 97-2004) via its download centre.
-    {"name": "NIPPON", "url": "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures"},
+    {
+        "name": "NIPPON",
+        "url": "https://mf.nipponindiaim.com/investor-service/downloads/factsheet-portfolio-and-other-disclosures",
+    },
     {"name": "KOTAK", "url": "https://www.kotakmf.com/portfolio-disclosure"},
     # Axis: correct path is /downloads/portfolio-disclosure (not /portfolio-disclosure which 404s).
     {"name": "AXIS", "url": "https://www.axismf.com/downloads/portfolio-disclosure"},
     # Mirae: static HTML page; one XLSX per scheme — discover all links via plain HTTP.
-    {"name": "MIRAE", "url": "https://www.miraeassetmf.co.in/downloads/portfolio", "static_multi": True},
+    {
+        "name": "MIRAE",
+        "url": "https://www.miraeassetmf.co.in/downloads/portfolio",
+        "static_multi": True,
+    },
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
-    {"name": "FRANKLIN", "url": "https://www.franklintempletonindia.com/investor/portfolio-disclosure"},
+    {
+        "name": "FRANKLIN",
+        "url": "https://www.franklintempletonindia.com/investor/portfolio-disclosure",
+    },
     # DSP: domain moved from dspmf.com (GoDaddy) to dspim.com; disclosure page is JS-rendered.
     {"name": "DSP", "url": "https://www.dspim.com/downloads"},
 ]
@@ -154,6 +164,7 @@ def parsed_to_snapshot_holdings(
 # ---------------------------------------------------------------------------
 # Pure mapping helpers — unit-testable without DB
 # ---------------------------------------------------------------------------
+
 
 def _navrows_to_nav_upserts(rows: Any) -> list[dict]:
     """
@@ -266,9 +277,14 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
 # CAS pipeline helpers (unchanged)
 # ---------------------------------------------------------------------------
 
+
 @celery_app.task(name="dhanradar.tasks.mf.parse_cas_job", bind=True, max_retries=2)
 def parse_cas_job(
-    self, job_id: str, path: str, user_id: str, portfolio_id: str,
+    self,
+    job_id: str,
+    path: str,
+    user_id: str,
+    portfolio_id: str,
     request_id: str | None = None,
 ) -> str:
     """CAS→report worker. Always purges the raw file; marks the job failed with an
@@ -309,8 +325,7 @@ async def _fetch_fund_categories(db: Any, isins: list[str]) -> dict[str, str]:
 
     rows = (
         await db.execute(
-            select(MfFund.isin, MfFund.sebi_category, MfFund.category)
-            .where(MfFund.isin.in_(isins))
+            select(MfFund.isin, MfFund.sebi_category, MfFund.category).where(MfFund.isin.in_(isins))
         )
     ).all()
     return {i: (sc or c) for i, sc, c in rows if (sc or c)}
@@ -357,10 +372,12 @@ async def _store_or_validate_identity(user_id: str, identity: Any) -> str | None
                 _slog.warning(
                     "cas.identity.pan_mismatch",
                     user_ref=hash_user_ref(user_id),
-                    stored_pan_prefix=existing_pan[:5],   # first 5 chars only (DPDP log discipline)
+                    stored_pan_prefix=existing_pan[:5],  # first 5 chars only (DPDP log discipline)
                     new_pan_prefix=identity.pan[:5],
                 )
-                return existing_pan  # don't update anything on a mismatch; existing PAN still governs
+                return (
+                    existing_pan  # don't update anything on a mismatch; existing PAN still governs
+                )
 
             update_vals: dict[str, Any] = {}
             if not existing_pan and identity.pan:
@@ -419,19 +436,23 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
     )
 
     ledger_rows = (
-        await db.execute(
-            sa_select(
-                MfPortfolioTransaction.instrument_id,
-                MfPortfolioTransaction.units,
-                MfPortfolioTransaction.amount,
-                MfPortfolioTransaction.txn_type,
-                MfPortfolioTransaction.txn_date,
-                # nav_or_price feeds the replay's synthetic price seeding (the +212% RCA fix:
-                # units are valued at their txn price until real NAV coverage begins).
-                MfPortfolioTransaction.nav_or_price,
-            ).where(MfPortfolioTransaction.portfolio_id == portfolio_id)
+        (
+            await db.execute(
+                sa_select(
+                    MfPortfolioTransaction.instrument_id,
+                    MfPortfolioTransaction.units,
+                    MfPortfolioTransaction.amount,
+                    MfPortfolioTransaction.txn_type,
+                    MfPortfolioTransaction.txn_date,
+                    # nav_or_price feeds the replay's synthetic price seeding (the +212% RCA fix:
+                    # units are valued at their txn price until real NAV coverage begins).
+                    MfPortfolioTransaction.nav_or_price,
+                ).where(MfPortfolioTransaction.portfolio_id == portfolio_id)
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     if ledger_rows:
         today = date.today()
@@ -480,8 +501,9 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
         # unchanged from the pre-replay behaviour — seed exactly today's row.
         holdings = (
             await db.execute(
-                sa_select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
-                .where(MfUserHolding.portfolio_id == portfolio_id)
+                sa_select(
+                    MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount
+                ).where(MfUserHolding.portfolio_id == portfolio_id)
             )
         ).all()
         if holdings:
@@ -512,7 +534,10 @@ async def _reset_valuation_series(db: Any, user_id: str, portfolio_id: str) -> N
 
 
 async def _run_pipeline(
-    job_id: str, path: str, user_id: str, portfolio_id: str,
+    job_id: str,
+    path: str,
+    user_id: str,
+    portfolio_id: str,
     request_id: str | None = None,
 ) -> str:
     from sqlalchemy import select, text, update
@@ -613,8 +638,10 @@ async def _run_pipeline(
             update(MfCasJob)
             .where(MfCasJob.job_id == job_id)
             .values(
-                status="parsing", progress_pct=40,
-                stmt_from=identity.stmt_from, stmt_to=identity.stmt_to,
+                status="parsing",
+                progress_pct=40,
+                stmt_from=identity.stmt_from,
+                stmt_to=identity.stmt_to,
                 excluded_folios=excluded_folios,
             )
         )
@@ -636,7 +663,9 @@ async def _run_pipeline(
         # connection anyway, mirroring why rls_user_session re-applies its GUC per-transaction too) —
         # _project_and_write_holdings and the nightly compute_portfolio_daily_valuations task each
         # re-acquire the SAME lock at the start of their own write transaction.
-        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id})
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:pid))"), {"pid": portfolio_id}
+        )
 
         # Fix 3 (2026-07-04 blank-folio double-count): resolve any blank-folio holding (a
         # holdings-only valuation file, or a demat/CDSL section within a consolidated CAS) against
@@ -713,7 +742,9 @@ async def _run_pipeline(
         # Format-specific parser_version: the ledger's natural-key dedup scopes itself to
         # CROSS-format matches only (same-format rows can be legitimate same-day twins).
         ledger_rows = build_cas_ledger_rows(
-            ledger_input, user_id=user_id, portfolio_id=portfolio_id,
+            ledger_input,
+            user_id=user_id,
+            portfolio_id=portfolio_id,
             parser_version=parser_version_for(path),
         )
         ledger_inserted, ledger_skipped = await append_transactions(db, ledger_rows)
@@ -729,7 +760,9 @@ async def _run_pipeline(
         # B3: holdings are now a PROJECTION of the ledger (units + net-invested), not a direct copy of
         # the parsed file. B86: capture the net-invested map so the fresh report/snapshot use the SAME
         # invested as the holdings table (one invested definition everywhere).
-        invested_map, projected = await _project_and_write_holdings(db, user_id, parsed, portfolio_id)
+        invested_map, projected = await _project_and_write_holdings(
+            db, user_id, parsed, portfolio_id
+        )
 
         # §39.4 — persist this upload's statement-checkpoint evidence (stated vs ledger units).
         # Never mutates the ledger (I12); a mismatch is flagged + logged, not corrected.
@@ -737,6 +770,7 @@ async def _run_pipeline(
 
         # Persist SIP transactions so get_sip_day() can infer the user's SIP date
         from dhanradar.models.mf import MfSipTransaction
+
         sip_rows = [
             MfSipTransaction(
                 portfolio_id=portfolio_id,
@@ -753,12 +787,15 @@ async def _run_pipeline(
             from sqlalchemy import delete
 
             from dhanradar.models.mf import MfSipTransaction as _Sip
+
             await db.execute(delete(_Sip).where(_Sip.portfolio_id == portfolio_id))
             db.add_all(sip_rows)
             await db.flush()
 
         await db.execute(
-            update(MfCasJob).where(MfCasJob.job_id == job_id).values(status="scoring", progress_pct=70)
+            update(MfCasJob)
+            .where(MfCasJob.job_id == job_id)
+            .values(status="scoring", progress_pct=70)
         )
         await db.commit()
 
@@ -857,22 +894,29 @@ async def _run_pipeline(
                 confidence_band=result.confidence_band.value,
                 request_id=request_id,
             )
-            funds_payload.append({
-                "isin": p.isin, "scheme_name": p.scheme_name, "folio_number": p.folio_number,
-                # Display-only clean name from the CAS scheme name (same derivation
-                # as the master). scheme_name (official) is still carried + shown.
-                "fund_name_short": derive_short_name(p.scheme_name, p.isin),
-                "idcw_frequency": parse_idcw_frequency(p.scheme_name),
-                "category": category_map.get(p.isin),
-                "units": p.units,
-                "invested_amount": invested_map.get((p.isin, normalize_folio(p.folio_number)), p.cost),
-                "current_value": p.value,
-                "verb_label": result.verb_label.value, "confidence_band": result.confidence_band.value,
-                "contributing_signals": result.contributing_signals,
-                "contradicting_signals": result.contradicting_signals,
-                "previous_label": prior_labels.get(p.isin),
-                "confidence_factors": dict(result.confidence_factors),
-            })
+            funds_payload.append(
+                {
+                    "isin": p.isin,
+                    "scheme_name": p.scheme_name,
+                    "folio_number": p.folio_number,
+                    # Display-only clean name from the CAS scheme name (same derivation
+                    # as the master). scheme_name (official) is still carried + shown.
+                    "fund_name_short": derive_short_name(p.scheme_name, p.isin),
+                    "idcw_frequency": parse_idcw_frequency(p.scheme_name),
+                    "category": category_map.get(p.isin),
+                    "units": p.units,
+                    "invested_amount": invested_map.get(
+                        (p.isin, normalize_folio(p.folio_number)), p.cost
+                    ),
+                    "current_value": p.value,
+                    "verb_label": result.verb_label.value,
+                    "confidence_band": result.confidence_band.value,
+                    "contributing_signals": result.contributing_signals,
+                    "contradicting_signals": result.contradicting_signals,
+                    "previous_label": prior_labels.get(p.isin),
+                    "confidence_factors": dict(result.confidence_factors),
+                }
+            )
         # Commit all fund scores + history rows in one transaction.
         await db.commit()
 
@@ -887,13 +931,17 @@ async def _run_pipeline(
             )
 
         report_payload = {
-            "job_id": job_id, "status": "done",
+            "job_id": job_id,
+            "status": "done",
             "snapshot": {
-                "total_invested": snap.total_invested, "current_value": snap.current_value,
-                "xirr_pct": snap.xirr_pct, "category_allocation": snap.category_allocation,
+                "total_invested": snap.total_invested,
+                "current_value": snap.current_value,
+                "xirr_pct": snap.xirr_pct,
+                "category_allocation": snap.category_allocation,
                 "overlap_matrix": snap.overlap_matrix,
             },
-            "funds": funds_payload, "model_version": rengine.model_version,
+            "funds": funds_payload,
+            "model_version": rengine.model_version,
             "generated_at": datetime.now(UTC).isoformat(),
             # Stamp the in-force disclaimer version on the served + cached report so
             # it matches the audit rows written above (B26 tie-to-version).
@@ -910,13 +958,20 @@ async def _run_pipeline(
                 # Cap AI commentary at 12 s — prevents a slow model from blocking the whole pipeline.
                 report_payload["commentary"] = await asyncio.wait_for(
                     generate_commentary(
-                        OpenRouterGateway(), user_id=user_id, db=db, snapshot=snap, funds=funds_payload,
+                        OpenRouterGateway(),
+                        user_id=user_id,
+                        db=db,
+                        snapshot=snap,
+                        funds=funds_payload,
                         request_id=request_id,
                     ),
                     timeout=12.0,
                 )
             else:
-                report_payload["commentary"] = {"state": "upgrade_required", "reason": "plus_feature"}
+                report_payload["commentary"] = {
+                    "state": "upgrade_required",
+                    "reason": "plus_feature",
+                }
         except TimeoutError:
             logger.warning("AI commentary timed out after 12 s job=%s", job_id)
             report_payload["commentary"] = {"state": "unavailable", "reason": "timeout"}
@@ -928,15 +983,16 @@ async def _run_pipeline(
             f"{service._REPORT_PREFIX}{job_id}", json.dumps(report_payload), ex=service._REPORT_TTL
         )
         await db.execute(
-            update(MfCasJob).where(MfCasJob.job_id == job_id).values(
-                status="done", progress_pct=100, completed_at=datetime.now(UTC)
-            )
+            update(MfCasJob)
+            .where(MfCasJob.job_id == job_id)
+            .values(status="done", progress_pct=100, completed_at=datetime.now(UTC))
         )
         # Stamp latest_job_id on the portfolio so GET /mf/portfolio/latest works
         # and the daily refresh task knows which job to rebuild. Portfolio lifecycle fix.
         import uuid as _uuid
 
         from dhanradar.models.mf import MfPortfolio as _MfPortfolio
+
         await db.execute(
             update(_MfPortfolio)
             .where(_MfPortfolio.id == _uuid.UUID(portfolio_id))
@@ -996,17 +1052,21 @@ async def _project_and_write_holdings(
 
     pid = _uuid.UUID(portfolio_id)
     ledger_rows = (
-        await db.execute(
-            select(
-                MfPortfolioTransaction.instrument_id,
-                MfPortfolioTransaction.folio_number,
-                MfPortfolioTransaction.units,
-                MfPortfolioTransaction.amount,
-                MfPortfolioTransaction.txn_type,
-                MfPortfolioTransaction.txn_date,
-            ).where(MfPortfolioTransaction.portfolio_id == pid)
+        (
+            await db.execute(
+                select(
+                    MfPortfolioTransaction.instrument_id,
+                    MfPortfolioTransaction.folio_number,
+                    MfPortfolioTransaction.units,
+                    MfPortfolioTransaction.amount,
+                    MfPortfolioTransaction.txn_type,
+                    MfPortfolioTransaction.txn_date,
+                ).where(MfPortfolioTransaction.portfolio_id == pid)
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     projected = project_holdings_from_ledger(ledger_rows)
 
     # B86: the FINAL invested written per (isin, CANONICAL folio) — net-invested where the ledger
@@ -1035,14 +1095,29 @@ async def _project_and_write_holdings(
                     cas_close=p.units,
                 )
             units, invested, as_of = p.units, p.cost, p.as_of_date
-        stmt = insert(MfUserHolding).values(
-            user_id=user_id, portfolio_id=portfolio_id, isin=p.isin,
-            folio_number=folio_norm, units=units,
-            avg_cost_nav=p.nav, invested_amount=invested, source="cas", as_of_date=as_of,
-        ).on_conflict_do_update(
-            constraint="uq_mf_holding",
-            set_={"units": units, "invested_amount": invested, "source": "cas",
-                  "as_of_date": as_of, "updated_at": func.now()},
+        stmt = (
+            insert(MfUserHolding)
+            .values(
+                user_id=user_id,
+                portfolio_id=portfolio_id,
+                isin=p.isin,
+                folio_number=folio_norm,
+                units=units,
+                avg_cost_nav=p.nav,
+                invested_amount=invested,
+                source="cas",
+                as_of_date=as_of,
+            )
+            .on_conflict_do_update(
+                constraint="uq_mf_holding",
+                set_={
+                    "units": units,
+                    "invested_amount": invested,
+                    "source": "cas",
+                    "as_of_date": as_of,
+                    "updated_at": func.now(),
+                },
+            )
         )
         await db.execute(stmt)
         # float for the report/snapshot; 0.0 for a None-cost holding (every reader coerces
@@ -1284,16 +1359,10 @@ async def _build_cohort_context(
     #    KNOWN-uncohorted → it carries an honest "no canonical category" context
     #    (B71), distinct from a genuine matching-category on_track.
     cat_rows = (
-        await db.execute(
-            select(MfFund.isin, group_col).where(MfFund.isin.in_(target_isins))
-        )
+        await db.execute(select(MfFund.isin, group_col).where(MfFund.isin.in_(target_isins)))
     ).all()
-    target_category: dict[str, str] = {
-        i: c for i, c in cat_rows if c and c != "uncategorized"
-    }
-    uncategorized = frozenset(
-        i for i, c in cat_rows if not (c and c != "uncategorized")
-    )
+    target_category: dict[str, str] = {i: c for i, c in cat_rows if c and c != "uncategorized"}
+    uncategorized = frozenset(i for i, c in cat_rows if not (c and c != "uncategorized"))
     categories = set(target_category.values())
     if not categories:
         # No target has a cohort key — still surface the known-uncohorted ones (B71).
@@ -1301,9 +1370,7 @@ async def _build_cohort_context(
 
     # 2. All peers in those cohorts (SQL ``IN`` excludes NULL-keyed funds).
     peer_rows = (
-        await db.execute(
-            select(MfFund.isin, group_col).where(group_col.in_(categories))
-        )
+        await db.execute(select(MfFund.isin, group_col).where(group_col.in_(categories)))
     ).all()
     peers_by_cat: dict[str, list[str]] = {}
     all_peer_isins: list[str] = []
@@ -1335,7 +1402,9 @@ async def _build_cohort_context(
         ).all()
         if metric_rows:
             found_any = True
-        row_map = {r.isin: (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in metric_rows}
+        row_map = {
+            r.isin: (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in metric_rows
+        }
         seen_isins.update(row_map.keys())
         for i in batch:
             stats_by_isin[i] = row_map.get(i, (None, None, None))
@@ -1350,7 +1419,9 @@ async def _build_cohort_context(
                 "_build_cohort_context: %d/%d peers have no mf_fund_metrics row "
                 "(possibly new funds added since last nightly refresh). "
                 "Category benchmark may be slightly skewed. Sample: %s",
-                len(no_row), len(unique_peers), no_row[:5],
+                len(no_row),
+                len(unique_peers),
+                no_row[:5],
             )
 
     # Empty-table safety net: if mf_fund_metrics has NO row for ANY peer (a fresh
@@ -1363,7 +1434,8 @@ async def _build_cohort_context(
 
         logger.critical(
             "mf_fund_metrics empty for %d peers — falling back to live cohort "
-            "computation; run mf_metrics_refresh to populate", len(unique_peers),
+            "computation; run mf_metrics_refresh to populate",
+            len(unique_peers),
         )
         # NOTE: as_of mismatch vs precomputed path — mf_metrics_refresh computes
         # stats with as_of=date.today(); this fallback honors the caller's as_of.
@@ -1437,9 +1509,9 @@ async def _mark_failed(job_id: str, message: str) -> None:
 
     async with admin_task_session() as db:
         await db.execute(
-            update(MfCasJob).where(MfCasJob.job_id == job_id).values(
-                status="failed", error_message=message[:500]
-            )
+            update(MfCasJob)
+            .where(MfCasJob.job_id == job_id)
+            .values(status="failed", error_message=message[:500])
         )
         await db.commit()
 
@@ -1455,6 +1527,7 @@ def _purge(path: str) -> None:
 # ---------------------------------------------------------------------------
 # NAV ingestion tasks
 # ---------------------------------------------------------------------------
+
 
 @celery_app.task(name="dhanradar.tasks.mf.nav_daily_fetch")
 def nav_daily_fetch() -> str:
@@ -1489,8 +1562,7 @@ async def _nav_daily_pipeline() -> str:
         )
         if summary.counts.get("unknown", 0) > 0 or summary.counts.get("legacy", 0) > 0:
             logger.warning(
-                "nav_daily_fetch: taxonomy drift detected — "
-                "unknown_samples=%r legacy_samples=%r",
+                "nav_daily_fetch: taxonomy drift detected — unknown_samples=%r legacy_samples=%r",
                 summary.unknown_samples,
                 summary.legacy_samples,
             )
@@ -1507,13 +1579,17 @@ async def _nav_daily_pipeline() -> str:
             chunk = nav_dicts[i : i + _UPSERT_CHUNK]
             if not chunk:
                 continue
-            stmt = insert(MfNavHistory).values(chunk).on_conflict_do_update(
-                constraint="uq_mf_nav_isin_date",
-                set_={
-                    "nav": insert(MfNavHistory).excluded.nav,
-                    "source": "amfi",
-                    "ingested_at": func.now(),
-                },
+            stmt = (
+                insert(MfNavHistory)
+                .values(chunk)
+                .on_conflict_do_update(
+                    constraint="uq_mf_nav_isin_date",
+                    set_={
+                        "nav": insert(MfNavHistory).excluded.nav,
+                        "source": "amfi",
+                        "ingested_at": func.now(),
+                    },
+                )
             )
             await db.execute(stmt)
             n_nav += len(chunk)
@@ -1524,25 +1600,29 @@ async def _nav_daily_pipeline() -> str:
             chunk = fund_dicts[i : i + _UPSERT_CHUNK]
             if not chunk:
                 continue
-            stmt = insert(MfFund).values(chunk).on_conflict_do_update(
-                index_elements=["isin"],
-                set_={
-                    "amfi_code": insert(MfFund).excluded.amfi_code,
-                    "scheme_name": insert(MfFund).excluded.scheme_name,
-                    "category": insert(MfFund).excluded.category,
-                    "sebi_category": insert(MfFund).excluded.sebi_category,
-                    "plan_type": insert(MfFund).excluded.plan_type,
-                    "option_type": insert(MfFund).excluded.option_type,
-                    "fund_name_short": insert(MfFund).excluded.fund_name_short,
-                    "idcw_frequency": insert(MfFund).excluded.idcw_frequency,
-                    "is_segregated": insert(MfFund).excluded.is_segregated,
-                    "benchmark_index": insert(MfFund).excluded.benchmark_index,
-                    # Keep the earliest date seen — LEAST ignores NULL so a NULL
-                    # existing launch_date gets replaced by the incoming nav_date.
-                    "launch_date": func.least(
-                        MfFund.launch_date, insert(MfFund).excluded.launch_date
-                    ),
-                },
+            stmt = (
+                insert(MfFund)
+                .values(chunk)
+                .on_conflict_do_update(
+                    index_elements=["isin"],
+                    set_={
+                        "amfi_code": insert(MfFund).excluded.amfi_code,
+                        "scheme_name": insert(MfFund).excluded.scheme_name,
+                        "category": insert(MfFund).excluded.category,
+                        "sebi_category": insert(MfFund).excluded.sebi_category,
+                        "plan_type": insert(MfFund).excluded.plan_type,
+                        "option_type": insert(MfFund).excluded.option_type,
+                        "fund_name_short": insert(MfFund).excluded.fund_name_short,
+                        "idcw_frequency": insert(MfFund).excluded.idcw_frequency,
+                        "is_segregated": insert(MfFund).excluded.is_segregated,
+                        "benchmark_index": insert(MfFund).excluded.benchmark_index,
+                        # Keep the earliest date seen — LEAST ignores NULL so a NULL
+                        # existing launch_date gets replaced by the incoming nav_date.
+                        "launch_date": func.least(
+                            MfFund.launch_date, insert(MfFund).excluded.launch_date
+                        ),
+                    },
+                )
             )
             await db.execute(stmt)
             n_funds += len(chunk)
@@ -1595,7 +1675,10 @@ async def _nav_backfill_pipeline(years: int) -> str:
 
     logger.info(
         "nav_backfill: years=%d, windows=%d, start=%s, end=%s",
-        years, len(windows), start, today,
+        years,
+        len(windows),
+        start,
+        today,
     )
 
     total_rows = 0
@@ -1611,13 +1694,17 @@ async def _nav_backfill_pipeline(years: int) -> str:
             # upsert-dict batches as rows arrive, so peak memory is O(batch).
             async for nav_dicts in _batch_nav_upserts(amfi.stream_nav_history(frmdt, todt)):
                 async with TaskSessionLocal() as db:
-                    stmt = insert(MfNavHistory).values(nav_dicts).on_conflict_do_update(
-                        constraint="uq_mf_nav_isin_date",
-                        set_={
-                            "nav": insert(MfNavHistory).excluded.nav,
-                            "source": "amfi",
-                            "ingested_at": func.now(),
-                        },
+                    stmt = (
+                        insert(MfNavHistory)
+                        .values(nav_dicts)
+                        .on_conflict_do_update(
+                            constraint="uq_mf_nav_isin_date",
+                            set_={
+                                "nav": insert(MfNavHistory).excluded.nav,
+                                "source": "amfi",
+                                "ingested_at": func.now(),
+                            },
+                        )
                     )
                     await db.execute(stmt)
                     await db.commit()
@@ -1625,7 +1712,11 @@ async def _nav_backfill_pipeline(years: int) -> str:
         except ProviderError as exc:
             logger.warning(
                 "nav_backfill: window %d/%d (%s–%s) fetch failed: %s",
-                idx, len(windows), frmdt, todt, exc,
+                idx,
+                len(windows),
+                frmdt,
+                todt,
+                exc,
             )
             await _asyncio.sleep(1)
             continue
@@ -1635,7 +1726,12 @@ async def _nav_backfill_pipeline(years: int) -> str:
         windows_fetched += 1
         logger.info(
             "nav_backfill: window %d/%d (%s–%s) → %d rows (total so far: %d)",
-            idx, len(windows), frmdt, todt, window_rows, total_rows,
+            idx,
+            len(windows),
+            frmdt,
+            todt,
+            window_rows,
+            total_rows,
         )
         await _asyncio.sleep(1)
 
@@ -1728,11 +1824,7 @@ async def _metrics_refresh_pipeline() -> str:
 
     async with TaskSessionLocal() as db:
         # Load all ISINs that have any NAV data.
-        isin_rows = (
-            await db.execute(
-                select(MfNavHistory.isin).distinct()
-            )
-        ).all()
+        isin_rows = (await db.execute(select(MfNavHistory.isin).distinct())).all()
         all_isins = [r[0] for r in isin_rows]
 
     logger.info("mf_metrics_refresh: %d ISINs to process", len(all_isins))
@@ -1757,8 +1849,9 @@ async def _metrics_refresh_pipeline() -> str:
             # chunk, scoped to the ISINs already loaded above.
             bm_rows = (
                 await db.execute(
-                    select(MfFund.isin, MfFund.benchmark_index)
-                    .where(MfFund.isin.in_(chunk), MfFund.benchmark_index.isnot(None))
+                    select(MfFund.isin, MfFund.benchmark_index).where(
+                        MfFund.isin.in_(chunk), MfFund.benchmark_index.isnot(None)
+                    )
                 )
             ).all()
             benchmark_by_isin: dict[str, str] = {r.isin: r.benchmark_index for r in bm_rows}
@@ -1827,72 +1920,82 @@ async def _metrics_refresh_pipeline() -> str:
                 # deeper calendar-year history is ever needed.
                 cy_returns_by_isin[isin] = calendar_year_returns(series.get(isin, []), as_of=today)
 
-                upsert_dicts.append({
-                    "isin": isin,
-                    "return_3m_pct": r3m,
-                    "return_6m_pct": r6m,
-                    "return_1y_pct": r1,
-                    "return_3y_pct": r3,
-                    "return_5y_pct": r5,
-                    "max_drawdown_pct": dd,
-                    "nav_points": len(series.get(isin, [])),
-                    "as_of_date": today,
-                    "source_run_id": run_id,
-                    # Risk-adjusted metrics (migration 0042).
-                    "sharpe_ratio": rs.sharpe_ratio,
-                    "sortino_ratio": rs.sortino_ratio,
-                    "volatility_pct": rs.volatility_pct,
-                    "rolling_1y_avg_pct": rs.rolling_1y_avg_pct,
-                    "rolling_1y_min_pct": rs.rolling_1y_min_pct,
-                    "rolling_1y_max_pct": rs.rolling_1y_max_pct,
-                    "rolling_1y_pct_positive": rs.rolling_1y_pct_positive,
-                    # Rolling 3Y stats (migration 0065).
-                    "rolling_3y_avg_pct": r3y_avg,
-                    "rolling_3y_min_pct": r3y_min,
-                    "rolling_3y_max_pct": r3y_max,
-                    "rolling_3y_pct_positive": r3y_pct_pos,
-                    # Benchmark-relative stats (migration 0071, Block 0.7).
-                    "alpha_1y": alpha_1y,
-                    "beta_1y": beta_1y,
-                    "tracking_error_pct": te_pct,
-                })
+                upsert_dicts.append(
+                    {
+                        "isin": isin,
+                        "return_3m_pct": r3m,
+                        "return_6m_pct": r6m,
+                        "return_1y_pct": r1,
+                        "return_3y_pct": r3,
+                        "return_5y_pct": r5,
+                        "max_drawdown_pct": dd,
+                        "nav_points": len(series.get(isin, [])),
+                        "as_of_date": today,
+                        "source_run_id": run_id,
+                        # Risk-adjusted metrics (migration 0042).
+                        "sharpe_ratio": rs.sharpe_ratio,
+                        "sortino_ratio": rs.sortino_ratio,
+                        "volatility_pct": rs.volatility_pct,
+                        "rolling_1y_avg_pct": rs.rolling_1y_avg_pct,
+                        "rolling_1y_min_pct": rs.rolling_1y_min_pct,
+                        "rolling_1y_max_pct": rs.rolling_1y_max_pct,
+                        "rolling_1y_pct_positive": rs.rolling_1y_pct_positive,
+                        # Rolling 3Y stats (migration 0065).
+                        "rolling_3y_avg_pct": r3y_avg,
+                        "rolling_3y_min_pct": r3y_min,
+                        "rolling_3y_max_pct": r3y_max,
+                        "rolling_3y_pct_positive": r3y_pct_pos,
+                        # Benchmark-relative stats (migration 0071, Block 0.7).
+                        "alpha_1y": alpha_1y,
+                        "beta_1y": beta_1y,
+                        "tracking_error_pct": te_pct,
+                    }
+                )
 
             # Bulk upsert in sub-chunks to bound statement size.
             for i in range(0, len(upsert_dicts), _UPSERT_CHUNK):
                 sub = upsert_dicts[i : i + _UPSERT_CHUNK]
                 if not sub:
                     continue
-                stmt = insert(MfFundMetrics).values(sub).on_conflict_do_update(
-                    index_elements=["isin"],
-                    set_={
-                        "return_3m_pct": insert(MfFundMetrics).excluded.return_3m_pct,
-                        "return_6m_pct": insert(MfFundMetrics).excluded.return_6m_pct,
-                        "return_1y_pct": insert(MfFundMetrics).excluded.return_1y_pct,
-                        "return_3y_pct": insert(MfFundMetrics).excluded.return_3y_pct,
-                        "return_5y_pct": insert(MfFundMetrics).excluded.return_5y_pct,
-                        "max_drawdown_pct": insert(MfFundMetrics).excluded.max_drawdown_pct,
-                        "nav_points": insert(MfFundMetrics).excluded.nav_points,
-                        "as_of_date": insert(MfFundMetrics).excluded.as_of_date,
-                        "source_run_id": insert(MfFundMetrics).excluded.source_run_id,
-                        "computed_at": func.now(),
-                        # Risk-adjusted metrics (migration 0042).
-                        "sharpe_ratio": insert(MfFundMetrics).excluded.sharpe_ratio,
-                        "sortino_ratio": insert(MfFundMetrics).excluded.sortino_ratio,
-                        "volatility_pct": insert(MfFundMetrics).excluded.volatility_pct,
-                        "rolling_1y_avg_pct": insert(MfFundMetrics).excluded.rolling_1y_avg_pct,
-                        "rolling_1y_min_pct": insert(MfFundMetrics).excluded.rolling_1y_min_pct,
-                        "rolling_1y_max_pct": insert(MfFundMetrics).excluded.rolling_1y_max_pct,
-                        "rolling_1y_pct_positive": insert(MfFundMetrics).excluded.rolling_1y_pct_positive,
-                        # Rolling 3Y stats (migration 0065).
-                        "rolling_3y_avg_pct": insert(MfFundMetrics).excluded.rolling_3y_avg_pct,
-                        "rolling_3y_min_pct": insert(MfFundMetrics).excluded.rolling_3y_min_pct,
-                        "rolling_3y_max_pct": insert(MfFundMetrics).excluded.rolling_3y_max_pct,
-                        "rolling_3y_pct_positive": insert(MfFundMetrics).excluded.rolling_3y_pct_positive,
-                        # Benchmark-relative stats (migration 0071, Block 0.7).
-                        "alpha_1y": insert(MfFundMetrics).excluded.alpha_1y,
-                        "beta_1y": insert(MfFundMetrics).excluded.beta_1y,
-                        "tracking_error_pct": insert(MfFundMetrics).excluded.tracking_error_pct,
-                    },
+                stmt = (
+                    insert(MfFundMetrics)
+                    .values(sub)
+                    .on_conflict_do_update(
+                        index_elements=["isin"],
+                        set_={
+                            "return_3m_pct": insert(MfFundMetrics).excluded.return_3m_pct,
+                            "return_6m_pct": insert(MfFundMetrics).excluded.return_6m_pct,
+                            "return_1y_pct": insert(MfFundMetrics).excluded.return_1y_pct,
+                            "return_3y_pct": insert(MfFundMetrics).excluded.return_3y_pct,
+                            "return_5y_pct": insert(MfFundMetrics).excluded.return_5y_pct,
+                            "max_drawdown_pct": insert(MfFundMetrics).excluded.max_drawdown_pct,
+                            "nav_points": insert(MfFundMetrics).excluded.nav_points,
+                            "as_of_date": insert(MfFundMetrics).excluded.as_of_date,
+                            "source_run_id": insert(MfFundMetrics).excluded.source_run_id,
+                            "computed_at": func.now(),
+                            # Risk-adjusted metrics (migration 0042).
+                            "sharpe_ratio": insert(MfFundMetrics).excluded.sharpe_ratio,
+                            "sortino_ratio": insert(MfFundMetrics).excluded.sortino_ratio,
+                            "volatility_pct": insert(MfFundMetrics).excluded.volatility_pct,
+                            "rolling_1y_avg_pct": insert(MfFundMetrics).excluded.rolling_1y_avg_pct,
+                            "rolling_1y_min_pct": insert(MfFundMetrics).excluded.rolling_1y_min_pct,
+                            "rolling_1y_max_pct": insert(MfFundMetrics).excluded.rolling_1y_max_pct,
+                            "rolling_1y_pct_positive": insert(
+                                MfFundMetrics
+                            ).excluded.rolling_1y_pct_positive,
+                            # Rolling 3Y stats (migration 0065).
+                            "rolling_3y_avg_pct": insert(MfFundMetrics).excluded.rolling_3y_avg_pct,
+                            "rolling_3y_min_pct": insert(MfFundMetrics).excluded.rolling_3y_min_pct,
+                            "rolling_3y_max_pct": insert(MfFundMetrics).excluded.rolling_3y_max_pct,
+                            "rolling_3y_pct_positive": insert(
+                                MfFundMetrics
+                            ).excluded.rolling_3y_pct_positive,
+                            # Benchmark-relative stats (migration 0071, Block 0.7).
+                            "alpha_1y": insert(MfFundMetrics).excluded.alpha_1y,
+                            "beta_1y": insert(MfFundMetrics).excluded.beta_1y,
+                            "tracking_error_pct": insert(MfFundMetrics).excluded.tracking_error_pct,
+                        },
+                    )
                 )
                 await db.execute(stmt)
             await db.commit()
@@ -1944,29 +2047,33 @@ async def _metrics_refresh_pipeline() -> str:
             if len(valid) < _MIN_CATEGORY_FUNDS:
                 # Too few funds — skip; noisy percentiles are worse than None.
                 continue
-            cat_stat_upserts.append({
-                "sebi_category": cat,
-                "metric_key": metric_key,
-                "p25": percentile(valid, 25.0),
-                "p50": percentile(valid, 50.0),
-                "p75": percentile(valid, 75.0),
-                "p90": percentile(valid, 90.0),
-                "as_of": today,
-            })
+            cat_stat_upserts.append(
+                {
+                    "sebi_category": cat,
+                    "metric_key": metric_key,
+                    "p25": percentile(valid, 25.0),
+                    "p50": percentile(valid, 50.0),
+                    "p75": percentile(valid, 75.0),
+                    "p90": percentile(valid, 90.0),
+                    "as_of": today,
+                }
+            )
     for cat, year_map in by_cat_cy.items():
         for year, cy_values in year_map.items():
             valid_cy = sorted(cy_values)
             if len(valid_cy) < _MIN_CATEGORY_FUNDS:
                 continue
-            cat_stat_upserts.append({
-                "sebi_category": cat,
-                "metric_key": f"return_cy_{year}",
-                "p25": percentile(valid_cy, 25.0),
-                "p50": percentile(valid_cy, 50.0),
-                "p75": percentile(valid_cy, 75.0),
-                "p90": percentile(valid_cy, 90.0),
-                "as_of": today,
-            })
+            cat_stat_upserts.append(
+                {
+                    "sebi_category": cat,
+                    "metric_key": f"return_cy_{year}",
+                    "p25": percentile(valid_cy, 25.0),
+                    "p50": percentile(valid_cy, 50.0),
+                    "p75": percentile(valid_cy, 75.0),
+                    "p90": percentile(valid_cy, 90.0),
+                    "as_of": today,
+                }
+            )
 
     n_cat_stats = 0
     if cat_stat_upserts:
@@ -1975,15 +2082,19 @@ async def _metrics_refresh_pipeline() -> str:
                 chunk_cs = cat_stat_upserts[i : i + _UPSERT_CHUNK]
                 if not chunk_cs:
                     continue
-                stmt_cs = insert(MfCategoryStats).values(chunk_cs).on_conflict_do_update(
-                    index_elements=["sebi_category", "metric_key", "as_of"],
-                    set_={
-                        "p25": insert(MfCategoryStats).excluded.p25,
-                        "p50": insert(MfCategoryStats).excluded.p50,
-                        "p75": insert(MfCategoryStats).excluded.p75,
-                        "p90": insert(MfCategoryStats).excluded.p90,
-                        "computed_at": func.now(),
-                    },
+                stmt_cs = (
+                    insert(MfCategoryStats)
+                    .values(chunk_cs)
+                    .on_conflict_do_update(
+                        index_elements=["sebi_category", "metric_key", "as_of"],
+                        set_={
+                            "p25": insert(MfCategoryStats).excluded.p25,
+                            "p50": insert(MfCategoryStats).excluded.p50,
+                            "p75": insert(MfCategoryStats).excluded.p75,
+                            "p90": insert(MfCategoryStats).excluded.p90,
+                            "computed_at": func.now(),
+                        },
+                    )
                 )
                 await db.execute(stmt_cs)
             await db.commit()
@@ -2070,9 +2181,7 @@ async def _compute_market_ranks_pipeline() -> str:
 
     for cat, cat_rows in by_cat.items():
         # Build the category benchmark from precomputed long-horizon stats (no NAV loads).
-        stats_list = [
-            (r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in cat_rows
-        ]
+        stats_list = [(r.return_1y_pct, r.return_3y_pct, r.max_drawdown_pct) for r in cat_rows]
         benchmark = build_benchmark(cat, stats_list)
 
         # Score each fund on its OWN 400-day NAV window (same loader + default
@@ -2098,34 +2207,44 @@ async def _compute_market_ranks_pipeline() -> str:
                 # never re-derive. insufficient_data has no rateable band/factors
                 # (non-neg #4 fail-safe); signals may still carry the honest reason.
                 refused = result.verb_label == VerbLabel.insufficient_data
-                scored.append((
-                    r.isin,
-                    result.unified_score or 0,
-                    result.verb_label.value,
-                    None if refused else result.confidence_band.value,
-                    None if refused else dict(result.confidence_factors),
-                    list(result.contributing_signals),
-                    list(result.contradicting_signals),
-                ))
+                scored.append(
+                    (
+                        r.isin,
+                        result.unified_score or 0,
+                        result.verb_label.value,
+                        None if refused else result.confidence_band.value,
+                        None if refused else dict(result.confidence_factors),
+                        list(result.contributing_signals),
+                        list(result.contradicting_signals),
+                    )
+                )
 
         # Sort: highest unified_score first; isin alphabetically as deterministic tiebreaker.
         scored.sort(key=lambda x: (-x[1], x[0]))
         total = len(scored)
-        for rank, (isin, _score, verb_label, band, factors, contributing, contradicting) in enumerate(
-            scored, start=1
-        ):
-            all_upserts.append({
-                "isin": isin,
-                "sebi_category": cat,
-                "rank": rank,
-                "total_in_cat": total,
-                "verb_label": verb_label,
-                "confidence_band": band,
-                "confidence_factors": factors,
-                "contributing_signals": contributing,
-                "contradicting_signals": contradicting,
-                "as_of_date": today,
-            })
+        for rank, (
+            isin,
+            _score,
+            verb_label,
+            band,
+            factors,
+            contributing,
+            contradicting,
+        ) in enumerate(scored, start=1):
+            all_upserts.append(
+                {
+                    "isin": isin,
+                    "sebi_category": cat,
+                    "rank": rank,
+                    "total_in_cat": total,
+                    "verb_label": verb_label,
+                    "confidence_band": band,
+                    "confidence_factors": factors,
+                    "contributing_signals": contributing,
+                    "contradicting_signals": contradicting,
+                    "as_of_date": today,
+                }
+            )
 
     # Bulk upsert — idempotent on (isin, as_of_date) PK.
     async with TaskSessionLocal() as db:
@@ -2133,26 +2252,28 @@ async def _compute_market_ranks_pipeline() -> str:
             chunk = all_upserts[i : i + _UPSERT_CHUNK]
             if not chunk:
                 continue
-            stmt = insert(MfFundRanks).values(chunk).on_conflict_do_update(
-                index_elements=["isin", "as_of_date"],
-                set_={
-                    "sebi_category": insert(MfFundRanks).excluded.sebi_category,
-                    "rank": insert(MfFundRanks).excluded.rank,
-                    "total_in_cat": insert(MfFundRanks).excluded.total_in_cat,
-                    "verb_label": insert(MfFundRanks).excluded.verb_label,
-                    "confidence_band": insert(MfFundRanks).excluded.confidence_band,
-                    "confidence_factors": insert(MfFundRanks).excluded.confidence_factors,
-                    "contributing_signals": insert(MfFundRanks).excluded.contributing_signals,
-                    "contradicting_signals": insert(MfFundRanks).excluded.contradicting_signals,
-                    "computed_at": func.now(),
-                },
+            stmt = (
+                insert(MfFundRanks)
+                .values(chunk)
+                .on_conflict_do_update(
+                    index_elements=["isin", "as_of_date"],
+                    set_={
+                        "sebi_category": insert(MfFundRanks).excluded.sebi_category,
+                        "rank": insert(MfFundRanks).excluded.rank,
+                        "total_in_cat": insert(MfFundRanks).excluded.total_in_cat,
+                        "verb_label": insert(MfFundRanks).excluded.verb_label,
+                        "confidence_band": insert(MfFundRanks).excluded.confidence_band,
+                        "confidence_factors": insert(MfFundRanks).excluded.confidence_factors,
+                        "contributing_signals": insert(MfFundRanks).excluded.contributing_signals,
+                        "contradicting_signals": insert(MfFundRanks).excluded.contradicting_signals,
+                        "computed_at": func.now(),
+                    },
+                )
             )
             await db.execute(stmt)
         await db.commit()
 
-    summary = (
-        f"compute_market_ranks: {len(all_upserts)} ranks across {len(by_cat)} categories"
-    )
+    summary = f"compute_market_ranks: {len(all_upserts)} ranks across {len(by_cat)} categories"
     logger.info(summary)
     return summary
 
@@ -2462,9 +2583,7 @@ async def _monthly_rescore() -> str:
     async with admin_task_session() as db:
         # All distinct (portfolio, isin) pairs that currently have holdings.
         pid_isin_rows = (
-            await db.execute(
-                select(MfUserHolding.portfolio_id, MfUserHolding.isin).distinct()
-            )
+            await db.execute(select(MfUserHolding.portfolio_id, MfUserHolding.isin).distinct())
         ).all()
         isins_by_pid: dict[str, set[str]] = {}
         raw_pids: list[Any] = []  # native UUIDs for the owner query — no str round-trip
@@ -2483,9 +2602,7 @@ async def _monthly_rescore() -> str:
         # the same honest fail-safe as an uncategorized fund.
         owner_rows = (
             await db.execute(
-                select(MfPortfolio.id, MfPortfolio.user_id).where(
-                    MfPortfolio.id.in_(raw_pids)
-                )
+                select(MfPortfolio.id, MfPortfolio.user_id).where(MfPortfolio.id.in_(raw_pids))
             )
         ).all()
         uid_by_pid = {str(r[0]): str(r[1]) for r in owner_rows}
@@ -2525,12 +2642,16 @@ async def _monthly_rescore() -> str:
 
                 # Load holding rows for this portfolio.
                 holding_rows = (
-                    await db.execute(
-                        select(MfUserHolding).where(
-                            MfUserHolding.portfolio_id == pid  # type: ignore[arg-type]
+                    (
+                        await db.execute(
+                            select(MfUserHolding).where(
+                                MfUserHolding.portfolio_id == pid  # type: ignore[arg-type]
+                            )
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
 
                 if not holding_rows:
                     continue
@@ -2543,13 +2664,9 @@ async def _monthly_rescore() -> str:
 
                 # Batch-fetch scheme names for alert copy (never scores or numerics).
                 scheme_rows = await db.execute(
-                    select(MfFund.isin, MfFund.scheme_name).where(
-                        MfFund.isin.in_(isins)
-                    )
+                    select(MfFund.isin, MfFund.scheme_name).where(MfFund.isin.in_(isins))
                 )
-                scheme_by_isin: dict[str, str] = {
-                    i: n for i, n in scheme_rows.all()
-                }
+                scheme_by_isin: dict[str, str] = {i: n for i, n in scheme_rows.all()}
 
                 # Score each fund via the bridge (never recompute the engine directly).
                 for h_row in holding_rows:
@@ -2607,10 +2724,10 @@ async def _monthly_rescore() -> str:
                 holdings: list[_Holding] = []
                 for h_row in holding_rows:
                     nav = latest_nav.get(h_row.isin)
-                    current_value = (
-                        float(h_row.units) * nav if nav is not None else 0.0
+                    current_value = float(h_row.units) * nav if nav is not None else 0.0
+                    invested = (
+                        float(h_row.invested_amount) if h_row.invested_amount is not None else 0.0
                     )
-                    invested = float(h_row.invested_amount) if h_row.invested_amount is not None else 0.0
                     holdings.append(
                         _Holding(
                             isin=h_row.isin,
@@ -2698,8 +2815,9 @@ async def _reap_stuck_cas_jobs() -> str:
     async with admin_task_session() as db:
         # SELECT the rows we are about to reap so we can clear their dedup keys.
         result = await db.execute(
-            select(MfCasJob.job_id, MfCasJob.user_id, MfCasJob.portfolio_id, MfCasJob.source_hash)
-            .where(
+            select(
+                MfCasJob.job_id, MfCasJob.user_id, MfCasJob.portfolio_id, MfCasJob.source_hash
+            ).where(
                 MfCasJob.status.in_(["queued", "parsing", "scoring"]),
                 MfCasJob.created_at < cutoff,
                 MfCasJob.completed_at.is_(None),
@@ -2769,10 +2887,10 @@ async def _daily_portfolio_refresh_pipeline() -> str:
 
     async with admin_task_session() as db:
         portfolios = (
-            await db.execute(
-                select(MfPortfolio).where(MfPortfolio.latest_job_id.isnot(None))
-            )
-        ).scalars().all()
+            (await db.execute(select(MfPortfolio).where(MfPortfolio.latest_job_id.isnot(None))))
+            .scalars()
+            .all()
+        )
 
         for portfolio in portfolios:
             try:
@@ -2850,8 +2968,9 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
     async with TaskSessionLocal() as db:
         min_date_rows = (
             await db.execute(
-                select(MfNavHistory.isin, sa_func.min(MfNavHistory.nav_date).label("min_date"))
-                .group_by(MfNavHistory.isin)
+                select(
+                    MfNavHistory.isin, sa_func.min(MfNavHistory.nav_date).label("min_date")
+                ).group_by(MfNavHistory.isin)
             )
         ).all()
         min_date_map: dict[str, Any] = {r.isin: r.min_date for r in min_date_rows}
@@ -2867,15 +2986,17 @@ async def _mf_fund_metadata_backfill_pipeline() -> str:
             for fund in chunk:
                 plan_type, option_type = parse_plan_option(fund.scheme_name)
                 name = (fund.scheme_name or "").lower()
-                params.append({
-                    "b_isin": fund.isin,
-                    "b_plan_type": plan_type,
-                    "b_option_type": option_type,
-                    "b_fund_name_short": derive_short_name(fund.scheme_name, fund.isin),
-                    "b_idcw_frequency": parse_idcw_frequency(fund.scheme_name),
-                    "b_is_segregated": "segregated portfolio" in name,
-                    "b_launch_date": min_date_map.get(fund.isin),
-                })
+                params.append(
+                    {
+                        "b_isin": fund.isin,
+                        "b_plan_type": plan_type,
+                        "b_option_type": option_type,
+                        "b_fund_name_short": derive_short_name(fund.scheme_name, fund.isin),
+                        "b_idcw_frequency": parse_idcw_frequency(fund.scheme_name),
+                        "b_is_segregated": "segregated portfolio" in name,
+                        "b_launch_date": min_date_map.get(fund.isin),
+                    }
+                )
             await db.execute(update_stmt, params, execution_options={"synchronize_session": False})
             n += len(chunk)
         await db.commit()
@@ -2913,7 +3034,8 @@ async def _mf_constituents_pipeline() -> str:
     json_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("json_api_url_template")]
     static_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("static_multi")]
     playwright_amcs = [
-        a for a in _AMC_DISCLOSURE_ROOTS
+        a
+        for a in _AMC_DISCLOSURE_ROOTS
         if not a.get("direct_url_template")
         and not a.get("json_api_url_template")
         and not a.get("static_multi")
@@ -2924,10 +3046,14 @@ async def _mf_constituents_pipeline() -> str:
         for amc in template_amcs:
             amc_name: str = amc["name"]
             try:
-                rows, aum_cnt = await _process_amc_direct(client, amc_name, amc["direct_url_template"])
+                rows, aum_cnt = await _process_amc_direct(
+                    client, amc_name, amc["direct_url_template"]
+                )
                 total_rows += rows
                 aum_updates += aum_cnt
-                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
@@ -2943,7 +3069,9 @@ async def _mf_constituents_pipeline() -> str:
                 )
                 total_rows += rows
                 aum_updates += aum_cnt
-                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
@@ -2954,7 +3082,9 @@ async def _mf_constituents_pipeline() -> str:
                 rows, aum_cnt = await _process_amc_static_multi(client, amc_name, amc["url"])
                 total_rows += rows
                 aum_updates += aum_cnt
-                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
@@ -2985,12 +3115,21 @@ async def _mf_constituents_pipeline() -> str:
                                 await asyncio.sleep(10)
                             first_amc = False
                             try:
-                                rows, aum_cnt = await _process_amc(client, browser, amc_name, amc["url"])
+                                rows, aum_cnt = await _process_amc(
+                                    client, browser, amc_name, amc["url"]
+                                )
                                 total_rows += rows
                                 aum_updates += aum_cnt
-                                logger.info("mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt)
+                                logger.info(
+                                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
+                                    amc_name,
+                                    rows,
+                                    aum_cnt,
+                                )
                             except Exception:  # noqa: BLE001
-                                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+                                logger.exception(
+                                    "mf_constituents_fetch amc=%s failed — skipping", amc_name
+                                )
                     finally:
                         await browser.close()
             except Exception as e:  # noqa: BLE001
@@ -3066,7 +3205,9 @@ async def _process_amc_direct(
 
         return await _upsert_constituents(parsed, amc_name)
 
-    logger.warning("mf_constituents_fetch amc=%s no disclosure file found (tried template)", amc_name)
+    logger.warning(
+        "mf_constituents_fetch amc=%s no disclosure file found (tried template)", amc_name
+    )
     return 0, 0
 
 
@@ -3091,8 +3232,8 @@ async def _process_amc_json_api(
     now = datetime.now(UTC)
     for months_back in (1, 2):
         target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
-        target_month = target.strftime("%B")   # e.g. "May"
-        target_year = target.strftime("%Y")    # e.g. "2026"
+        target_month = target.strftime("%B")  # e.g. "May"
+        target_year = target.strftime("%Y")  # e.g. "2026"
 
         api_url = api_url_template.format(year=target_year)
         try:
@@ -3102,13 +3243,22 @@ async def _process_amc_json_api(
             )
             resp.raise_for_status()
         except Exception:  # noqa: BLE001
-            logger.debug("mf_constituents_fetch amc=%s json-api call failed url=%s", amc_name, api_url, exc_info=True)
+            logger.debug(
+                "mf_constituents_fetch amc=%s json-api call failed url=%s",
+                amc_name,
+                api_url,
+                exc_info=True,
+            )
             continue
 
         try:
             data = resp.json()
         except Exception:  # noqa: BLE001
-            logger.warning("mf_constituents_fetch amc=%s json-api response is not JSON url=%s", amc_name, api_url)
+            logger.warning(
+                "mf_constituents_fetch amc=%s json-api response is not JSON url=%s",
+                amc_name,
+                api_url,
+            )
             continue
 
         # UTI (and possibly others) wrap the rows list under a top-level key.
@@ -3116,7 +3266,11 @@ async def _process_amc_json_api(
             data = data.get("rows", data.get("data", []))
 
         if not isinstance(data, list):
-            logger.warning("mf_constituents_fetch amc=%s json-api returned non-list type=%s", amc_name, type(data))
+            logger.warning(
+                "mf_constituents_fetch amc=%s json-api returned non-list type=%s",
+                amc_name,
+                type(data),
+            )
             continue
 
         rows_json: list[dict] = data
@@ -3132,7 +3286,10 @@ async def _process_amc_json_api(
         if not zip_url:
             logger.debug(
                 "mf_constituents_fetch amc=%s json-api: no row for month=%s year=%s (rows=%d)",
-                amc_name, target_month, target_year, len(rows_json),
+                amc_name,
+                target_month,
+                target_year,
+                len(rows_json),
             )
             continue
 
@@ -3145,7 +3302,12 @@ async def _process_amc_json_api(
             )
             zip_resp.raise_for_status()
         except Exception:  # noqa: BLE001
-            logger.warning("mf_constituents_fetch amc=%s zip download failed url=%s", amc_name, zip_url, exc_info=True)
+            logger.warning(
+                "mf_constituents_fetch amc=%s zip download failed url=%s",
+                amc_name,
+                zip_url,
+                exc_info=True,
+            )
             continue
 
         # Extract the target XLSX member from the ZIP.
@@ -3154,7 +3316,9 @@ async def _process_amc_json_api(
                 member_names = zf.namelist()
                 target_member: str | None = None
                 for name in member_names:
-                    if zip_member_pattern.lower() in name.lower() and name.lower().endswith((".xlsx", ".xls")):
+                    if zip_member_pattern.lower() in name.lower() and name.lower().endswith(
+                        (".xlsx", ".xls")
+                    ):
                         target_member = name
                         break
                 if target_member is None:
@@ -3166,22 +3330,33 @@ async def _process_amc_json_api(
                 if target_member is None:
                     logger.warning(
                         "mf_constituents_fetch amc=%s zip has no xlsx member (members=%s)",
-                        amc_name, member_names,
+                        amc_name,
+                        member_names,
                     )
                     continue
                 file_bytes = zf.read(target_member)
         except zipfile.BadZipFile:
-            logger.warning("mf_constituents_fetch amc=%s zip response is not a valid ZIP url=%s", amc_name, zip_url)
+            logger.warning(
+                "mf_constituents_fetch amc=%s zip response is not a valid ZIP url=%s",
+                amc_name,
+                zip_url,
+            )
             continue
 
         parsed = _parse_sebi_xlsx(file_bytes, amc_name)
         if not parsed:
-            logger.warning("mf_constituents_fetch amc=%s parsed 0 rows from zip member=%s", amc_name, target_member)
+            logger.warning(
+                "mf_constituents_fetch amc=%s parsed 0 rows from zip member=%s",
+                amc_name,
+                target_member,
+            )
             return 0, 0
 
         return await _upsert_constituents(parsed, amc_name)
 
-    logger.warning("mf_constituents_fetch amc=%s no disclosure file found (tried json-api)", amc_name)
+    logger.warning(
+        "mf_constituents_fetch amc=%s no disclosure file found (tried json-api)", amc_name
+    )
     return 0, 0
 
 
@@ -3229,9 +3404,7 @@ async def _process_amc(
     return await _upsert_constituents(parsed, amc_name)
 
 
-async def _discover_url_playwright(
-    browser: Any, discovery_url: str, amc_name: str
-) -> str | None:
+async def _discover_url_playwright(browser: Any, discovery_url: str, amc_name: str) -> str | None:
     """Render the AMC disclosure SPA with Playwright and extract the latest XLSX/CSV URL.
 
     Caches the discovered URL in Redis for 25 days (key mf:disclosure_url:{amc}:{YYYY-MM})
@@ -3255,7 +3428,8 @@ async def _discover_url_playwright(
         )
         # Prefer links labelled portfolio/disclosure; fall back to any xlsx/xls/csv.
         candidates = [
-            h for h in hrefs
+            h
+            for h in hrefs
             if h.lower().endswith((".xlsx", ".xls", ".csv"))
             and ("portfolio" in h.lower() or "disclosure" in h.lower())
         ]
@@ -3314,7 +3488,8 @@ async def _discover_all_urls_playwright(
             "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href)"
         )
         candidates = [
-            h for h in hrefs
+            h
+            for h in hrefs
             if h.lower().endswith((".xlsx", ".xls", ".csv"))
             and ("portfolio" in h.lower() or "disclosure" in h.lower())
         ]
@@ -3388,9 +3563,7 @@ async def _process_amc_multi(
                 parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
 
         if not parsed:
-            logger.debug(
-                "mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url
-            )
+            logger.debug("mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url)
             continue
 
         rows, aum_cnt = await _upsert_constituents(parsed, amc_name)
@@ -3428,7 +3601,10 @@ async def _discover_all_urls_static(
         resp.raise_for_status()
     except Exception:  # noqa: BLE001
         logger.warning(
-            "mf_constituents_fetch amc=%s static discovery failed url=%s", amc_name, url, exc_info=True
+            "mf_constituents_fetch amc=%s static discovery failed url=%s",
+            amc_name,
+            url,
+            exc_info=True,
         )
         return []
 
@@ -3437,7 +3613,7 @@ async def _discover_all_urls_static(
 
     if target_month and links:
         month_abbr = target_month.strftime("%b").lower()  # e.g. "may"
-        year_str = target_month.strftime("%Y")            # e.g. "2026"
+        year_str = target_month.strftime("%Y")  # e.g. "2026"
         filtered = [lnk for lnk in links if month_abbr in lnk.lower() and year_str in lnk]
         if filtered:
             links = filtered
@@ -3532,9 +3708,7 @@ async def _process_amc_static_multi(
         )
         return total_rows, total_aum
 
-    logger.warning(
-        "mf_constituents_fetch amc=%s static multi: no disclosure files found", amc_name
-    )
+    logger.warning("mf_constituents_fetch amc=%s static multi: no disclosure files found", amc_name)
     return 0, 0
 
 
@@ -3561,6 +3735,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
         for sn in wb.sheetnames:
             if sn.lower() == "index":
                 import re as _re
+
                 for irow in wb[sn].iter_rows(values_only=True):
                     cells = [str(c).strip() if c is not None else "" for c in irow]
                     non_empty = [c for c in cells if c and c.lower() not in ("none", "")]
@@ -3568,9 +3743,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         nippon_code_map[non_empty[0].upper()] = non_empty[1]
                 break
         if nippon_code_map:
-            logger.info(
-                "mf_constituents_fetch NIPPON index map: %d entries", len(nippon_code_map)
-            )
+            logger.info("mf_constituents_fetch NIPPON index map: %d entries", len(nippon_code_map))
 
     for sheet in wb.sheetnames:
         # Skip NIPPON's "Index" sheet — it's a code→name lookup, not portfolio data.
@@ -3582,6 +3755,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             continue
 
         col_map: dict[str, int] = {}
+        rows_since_header = 0  # holdings extracted since col_map was (re)built
         current_scheme: str | None = None  # Reset per sheet for per-scheme files.
 
         # For per-scheme files (e.g. MIRAE), infer scheme name from sheet name
@@ -3615,8 +3789,11 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # or "AS OF 31/05/2026").
             joined = " ".join(row_strs).lower()
             if as_of_month is None and (
-                "portfolio as on" in joined or "as at" in joined or "month end" in joined
-                or "as of" in joined or "as on" in joined
+                "portfolio as on" in joined
+                or "as at" in joined
+                or "month end" in joined
+                or "as of" in joined
+                or "as on" in joined
             ):
                 import re
 
@@ -3630,9 +3807,11 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     try:
                         from datetime import datetime as _dt
 
-                        as_of_month = _dt.strptime(
-                            f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y"
-                        ).date().replace(day=1)
+                        as_of_month = (
+                            _dt.strptime(f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y")
+                            .date()
+                            .replace(day=1)
+                        )
                     except ValueError:
                         pass
                 # Fallback: "DD/MM/YYYY" format (UTI style).
@@ -3641,22 +3820,24 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     if slash_m:
                         try:
                             from datetime import date as _date
-                            as_of_month = _date(
-                                int(slash_m.group(3)), int(slash_m.group(2)), 1
-                            )
+
+                            as_of_month = _date(int(slash_m.group(3)), int(slash_m.group(2)), 1)
                         except ValueError:
                             pass
                 # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
                 if as_of_month is None:
-                    month_m = re.search(
-                        r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs)
-                    )
+                    month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs))
                     if month_m:
                         try:
                             from datetime import datetime as _dt
-                            as_of_month = _dt.strptime(
-                                f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
-                            ).date().replace(day=1)
+
+                            as_of_month = (
+                                _dt.strptime(
+                                    f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
+                                )
+                                .date()
+                                .replace(day=1)
+                            )
                         except ValueError:
                             pass
 
@@ -3688,6 +3869,23 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # Strip "SCHEME:" prefix used by UTI and some other AMCs.
                 if candidate.upper().startswith("SCHEME:"):
                     candidate = candidate[7:].strip()
+                # Strip "Portfolio of ..." / "Portfolio statement of ..." banner
+                # prefixes (KOTAK/EDELWEISS sheet titles, 2026-07-07) so the
+                # pg_trgm scheme-name resolution matches the bare scheme name.
+                low_candidate = candidate.lower()
+                for banner in ("portfolio statement of ", "portfolio of "):
+                    if low_candidate.startswith(banner):
+                        candidate = candidate[len(banner) :].strip()
+                        break
+                # Strip a trailing "as on <date>" clause from the same banners
+                # ("Kotak X Fund as on 31-May-2026" / "EDELWEISS Y AS ON MAY 31,
+                # 2026") — the date is period metadata, not part of the scheme
+                # name the pg_trgm ISIN resolution should match.
+                import re as _re_ason
+
+                candidate = _re_ason.sub(
+                    r"\s+as\s+on\s+.+$", "", candidate, flags=_re_ason.IGNORECASE
+                ).strip()
                 # Reject noise rows like "SCHEME CODE002STARTS" that aren't real names.
                 if any(kw in candidate.upper() for kw in ("CODE002", "STARTS", "ENDS")):
                     candidate = ""
@@ -3735,25 +3933,26 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             if not current_scheme and sheet_scheme and col_map:
                 current_scheme = sheet_scheme
                 if amc_name == "MIRAE":
-                    logger.info("mf_constituents_fetch MIRAE using sheet_scheme: '%s'", current_scheme)
+                    logger.info(
+                        "mf_constituents_fetch MIRAE using sheet_scheme: '%s'", current_scheme
+                    )
             # For MIRAE specifically, if we have a header but still no scheme name,
             # and the sheet looks like a scheme name, use the sheet name directly.
             if not current_scheme and amc_name == "MIRAE" and sheet and col_map:
                 current_scheme = sheet
-                logger.info("mf_constituents_fetch MIRAE fallback using sheet name directly: '%s'", sheet)
+                logger.info(
+                    "mf_constituents_fetch MIRAE fallback using sheet name directly: '%s'", sheet
+                )
 
             # Detect header row (contains "Name of Instrument" or similar).
             if not col_map and any(
                 "name" in s.lower()
-                and (
-                    "instrument" in s.lower()
-                    or "security" in s.lower()
-                    or "stock" in s.lower()
-                )
+                and ("instrument" in s.lower() or "security" in s.lower() or "stock" in s.lower())
                 for s in row_strs
             ):
                 for ci, cell in enumerate(row_strs):
                     col_map[_normalize_col(cell)] = ci
+                rows_since_header = 0
                 continue
 
             # Data rows — only after header detected.
@@ -3763,10 +3962,17 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 )
                 if row_dict:
                     result.append(row_dict)
+                    rows_since_header += 1
 
-                # Reset on blank rows (new scheme section upcoming).
+                # Reset on blank rows (new scheme section upcoming) — but only
+                # AFTER at least one holding was extracted under this header.
+                # EDELWEISS (2026-07-07) pads 1-2 blank rows between the header
+                # and the first holding; resetting on those wiped col_map before
+                # any data row was ever read (whole workbook parsed to 0 rows).
                 if not any(s for s in row_strs if s and s.lower() not in ("none", "")):
-                    col_map = {}
+                    if rows_since_header:
+                        col_map = {}
+                        rows_since_header = 0
 
     return result
 
@@ -3787,34 +3993,40 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
 
         joined = " ".join(row_strs).lower()
         if as_of_month is None and (
-            "portfolio as on" in joined or "as at" in joined
-            or "as of" in joined or "as on" in joined or "month end" in joined
+            "portfolio as on" in joined
+            or "as at" in joined
+            or "as of" in joined
+            or "as on" in joined
+            or "month end" in joined
         ):
             import re
 
-            date_m = re.search(
-                r"(\d{1,2})[- ](\w+)[- ](\d{4})", " ".join(row_strs), re.IGNORECASE
-            )
+            date_m = re.search(r"(\d{1,2})[- ](\w+)[- ](\d{4})", " ".join(row_strs), re.IGNORECASE)
             if date_m:
                 try:
                     from datetime import datetime as _dt
 
-                    as_of_month = _dt.strptime(
-                        f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y"
-                    ).date().replace(day=1)
+                    as_of_month = (
+                        _dt.strptime(f"01-{date_m.group(2)[:3]}-{date_m.group(3)}", "%d-%b-%Y")
+                        .date()
+                        .replace(day=1)
+                    )
                 except ValueError:
                     pass
             # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
             if as_of_month is None:
-                month_m = re.search(
-                    r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs)
-                )
+                month_m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", " ".join(row_strs))
                 if month_m:
                     try:
                         from datetime import datetime as _dt
-                        as_of_month = _dt.strptime(
-                            f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
-                        ).date().replace(day=1)
+
+                        as_of_month = (
+                            _dt.strptime(
+                                f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
+                            )
+                            .date()
+                            .replace(day=1)
+                        )
                     except ValueError:
                         pass
 
@@ -3838,8 +4050,7 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                 current_scheme = candidate
 
         if not col_map and any(
-            "name" in s.lower()
-            and ("instrument" in s.lower() or "security" in s.lower())
+            "name" in s.lower() and ("instrument" in s.lower() or "security" in s.lower())
             for s in row_strs
         ):
             for ci, cell in enumerate(row_strs):
@@ -3847,9 +4058,7 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
             continue
 
         if col_map and current_scheme:
-            row_dict = _extract_sebi_row(
-                row_strs, col_map, current_scheme, amc_name, as_of_month
-            )
+            row_dict = _extract_sebi_row(row_strs, col_map, current_scheme, amc_name, as_of_month)
             if row_dict:
                 result.append(row_dict)
 
@@ -3891,6 +4100,7 @@ def _extract_sebi_row(
     §8.4: market_value_cr and weight_pct are taken directly from the file — never computed
     from AMC-level totals.
     """
+
     # amc_name is carried through for source provenance on the returned dict.
     def _get(keys: list[str]) -> str:
         for key in keys:
@@ -3909,6 +4119,22 @@ def _extract_sebi_row(
             "name of the instrument",
         ]
     )
+    if not constituent_name:
+        # KOTAK (2026-07-07): the name header sits in a merged block whose LABEL
+        # lands in col 0 while every VALUE lands 2 cols right (openpyxl read-only
+        # gives the label to the first merged cell only). Generic recovery: when
+        # the mapped name column is empty but the row carries a plausible ISIN,
+        # the holding's name is the nearest non-empty cell LEFT of the ISIN cell
+        # (the SEBI format always places the name immediately before the ISIN).
+        isin_ci = next((ci for col_name, ci in col_map.items() if "isin" in col_name), None)
+        if isin_ci is not None and isin_ci < len(row_strs):
+            isin_val = row_strs[isin_ci].strip().upper()
+            if len(isin_val) == 12 and isin_val[:2].isalpha():
+                for ci in range(isin_ci - 1, -1, -1):
+                    cell = row_strs[ci].strip()
+                    if cell and cell.lower() not in ("none", "n/a", "-"):
+                        constituent_name = cell
+                        break
     if not constituent_name:
         return None
 
@@ -3933,15 +4159,11 @@ def _extract_sebi_row(
     # so UTI schemes correctly get no aum_map entry from this source rather than
     # a wrong one). NIPPON's literal "GRAND TOTAL" row IS in the same table shape
     # as real holdings and is captured correctly by this narrower match.
-    is_total_row = any(
-        kw in constituent_name.lower() for kw in ("grand total", "net assets")
-    )
+    is_total_row = any(kw in constituent_name.lower() for kw in ("grand total", "net assets"))
 
     isin_col = _get(["isin", "isin code"])
 
-    weight_pct_raw = _get(
-        ["% to nav", "% of net assets", "% to net assets", "weight", "% of nav"]
-    )
+    weight_pct_raw = _get(["% to nav", "% of net assets", "% to net assets", "weight", "% of nav"])
     weight_pct: float | None = None
     if weight_pct_raw:
         try:
@@ -4066,7 +4288,9 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
 
     scheme_isin_map: dict[str, str] = {}
     amc_prefix_map = {"MIRAE": "Mirae Asset%"}
-    amc_prefix = amc_prefix_map.get(amc_name) or (amc_name.split("_")[0] + "%")  # "ICICI_PRU" → "ICICI%"
+    amc_prefix = amc_prefix_map.get(amc_name) or (
+        amc_name.split("_")[0] + "%"
+    )  # "ICICI_PRU" → "ICICI%"
     async with TaskSessionLocal() as db:
         for sname in scheme_names:
             # Use pg_trgm similarity to fuzzy-match scheme names, restricted to
@@ -4087,7 +4311,7 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
                     logger.info(
                         "mf_constituents_fetch amc=MIRAE scheme='%s' matches: %s",
                         sname,
-                        [(r[1], f"{r[2]:.2f}") for r in rows]
+                        [(r[1], f"{r[2]:.2f}") for r in rows],
                     )
                 # Use first match if similarity > 0.35
                 if rows[0][2] > 0.35:
@@ -4103,12 +4327,16 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
                 else:
                     logger.debug(
                         "mf_constituents_fetch amc=%s scheme '%s' top match similarity=%.2f (too low)",
-                        amc_name, sname, rows[0][2]
+                        amc_name,
+                        sname,
+                        rows[0][2],
                     )
             else:
                 logger.debug(
                     "mf_constituents_fetch amc=%s no matches for scheme '%s' with prefix '%s'",
-                    amc_name, sname, amc_prefix
+                    amc_name,
+                    sname,
+                    amc_prefix,
                 )
     return scheme_isin_map
 
@@ -4213,15 +4441,11 @@ async def _upsert_constituents(
                 .on_conflict_do_update(
                     index_elements=["isin", "constituent_name", "as_of_month"],
                     set_={
-                        "constituent_isin": pg_insert(
-                            MfFundConstituent
-                        ).excluded.constituent_isin,
+                        "constituent_isin": pg_insert(MfFundConstituent).excluded.constituent_isin,
                         "sector": pg_insert(MfFundConstituent).excluded.sector,
                         "rating": pg_insert(MfFundConstituent).excluded.rating,
                         "weight_pct": pg_insert(MfFundConstituent).excluded.weight_pct,
-                        "market_value_cr": pg_insert(
-                            MfFundConstituent
-                        ).excluded.market_value_cr,
+                        "market_value_cr": pg_insert(MfFundConstituent).excluded.market_value_cr,
                         "source_amc": pg_insert(MfFundConstituent).excluded.source_amc,
                         "ingested_at": func.now(),
                     },
@@ -4235,8 +4459,7 @@ async def _upsert_constituents(
         for isin, (net_assets_cr, as_of_month) in aum_map.items():
             await db.execute(
                 sa_text(
-                    "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :as_of "
-                    "WHERE isin = :isin"
+                    "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :as_of WHERE isin = :isin"
                 ),
                 {"v": net_assets_cr, "as_of": as_of_month, "isin": isin},
             )
@@ -4328,9 +4551,7 @@ async def _kite_login_and_get_token() -> str:
 
         # 3. Follow redirect chain from connect/login (with active session cookies)
         #    until the callback URL carries ?request_token=...
-        location: str | None = (
-            f"{base}/connect/login?api_key={_s.KITE_API_KEY}&v=3"
-        )
+        location: str | None = f"{base}/connect/login?api_key={_s.KITE_API_KEY}&v=3"
         request_token: str | None = None
         for _ in range(8):
             if not location:
@@ -4343,9 +4564,7 @@ async def _kite_login_and_get_token() -> str:
             location = rn.headers.get("location")
 
         if request_token is None:
-            raise RuntimeError(
-                "Kite TOTP login: request_token not found in redirect chain"
-            )
+            raise RuntimeError("Kite TOTP login: request_token not found in redirect chain")
 
         # 4. Exchange for access_token (synchronous SDK call is fine here)
         session = kite.generate_session(request_token, api_secret=_s.KITE_API_SECRET)
@@ -4395,6 +4614,7 @@ async def _kite_get_access_token() -> str:
 def _kite_norm_name(name: str) -> str:
     """Lowercase + collapse whitespace for scheme-name matching."""
     import re
+
     return re.sub(r"\s+", " ", name.lower().strip())
 
 
@@ -4418,8 +4638,15 @@ async def _mf_kite_enrich_pipeline() -> str:
     from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
 
-    if not all([_s.KITE_API_KEY, _s.KITE_API_SECRET, _s.KITE_TOTP_SECRET,
-                _s.KITE_USER_ID, _s.KITE_USER_PASSWORD]):
+    if not all(
+        [
+            _s.KITE_API_KEY,
+            _s.KITE_API_SECRET,
+            _s.KITE_TOTP_SECRET,
+            _s.KITE_USER_ID,
+            _s.KITE_USER_PASSWORD,
+        ]
+    ):
         logger.info("mf_kite_enrich: Kite credentials not configured, skipping")
         return "mf_kite_enrich: skipped (credentials not configured)"
 
@@ -4471,7 +4698,7 @@ async def _mf_kite_enrich_pipeline() -> str:
 
     if updates:
         async with TaskSessionLocal() as db:
-            for chunk in [updates[i:i + 500] for i in range(0, len(updates), 500)]:
+            for chunk in [updates[i : i + 500] for i in range(0, len(updates), 500)]:
                 for row in chunk:
                     await db.execute(
                         sa_text(
@@ -4499,6 +4726,7 @@ async def _mf_kite_enrich_pipeline() -> str:
 # ---------------------------------------------------------------------------
 # M2.2 — daily portfolio valuation series
 # ---------------------------------------------------------------------------
+
 
 @celery_app.task(
     name="dhanradar.tasks.mf.compute_portfolio_daily_valuations",
@@ -4545,9 +4773,7 @@ async def _compute_portfolio_daily_valuations_async() -> str:
 
     async with admin_task_session() as db:
         # Fetch all portfolio ids (BYPASSRLS — spans all users).
-        portfolio_rows = (
-            await db.execute(select(MfPortfolio.id, MfPortfolio.user_id))
-        ).all()
+        portfolio_rows = (await db.execute(select(MfPortfolio.id, MfPortfolio.user_id))).all()
 
     for portfolio_id, user_id in portfolio_rows:
         try:
@@ -4561,8 +4787,9 @@ async def _compute_portfolio_daily_valuations_async() -> str:
                 # Holdings for this portfolio.
                 holdings = (
                     await db.execute(
-                        select(MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount)
-                        .where(MfUserHolding.portfolio_id == portfolio_id)
+                        select(
+                            MfUserHolding.isin, MfUserHolding.units, MfUserHolding.invested_amount
+                        ).where(MfUserHolding.portfolio_id == portfolio_id)
                     )
                 ).all()
 
@@ -4584,30 +4811,31 @@ async def _compute_portfolio_daily_valuations_async() -> str:
                 )
                 nav_map: dict[str, float] = {r.isin: float(r.nav) for r in nav_rows}
 
-                total_invested = sum(
-                    float(h.invested_amount or 0) for h in holdings
-                )
+                total_invested = sum(float(h.invested_amount or 0) for h in holdings)
                 units_nav_pairs = [
-                    (float(h.units or 0), nav_map.get(h.isin, 0.0))
-                    for h in holdings
+                    (float(h.units or 0), nav_map.get(h.isin, 0.0)) for h in holdings
                 ]
 
                 point = compute_daily_value(units_nav_pairs, total_invested, today)
 
                 # Upsert: update value + invested if a row for today already exists.
-                stmt = pg_insert(MfPortfolioDailyValue).values(
-                    portfolio_id=portfolio_id,
-                    user_id=user_id,
-                    valuation_date=point.valuation_date,
-                    total_value=point.total_value,
-                    total_invested=point.total_invested,
-                ).on_conflict_do_update(
-                    constraint="uq_mf_portfolio_daily_value",
-                    set_={
-                        "total_value": point.total_value,
-                        "total_invested": point.total_invested,
-                        "computed_at": text("now()"),
-                    },
+                stmt = (
+                    pg_insert(MfPortfolioDailyValue)
+                    .values(
+                        portfolio_id=portfolio_id,
+                        user_id=user_id,
+                        valuation_date=point.valuation_date,
+                        total_value=point.total_value,
+                        total_invested=point.total_invested,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_mf_portfolio_daily_value",
+                        set_={
+                            "total_value": point.total_value,
+                            "total_invested": point.total_invested,
+                            "computed_at": text("now()"),
+                        },
+                    )
                 )
                 await db.execute(stmt)
                 await db.commit()
@@ -4746,12 +4974,7 @@ async def _upsert_benchmark_rows(
     async with task_session() as db:
         stmt = (
             pg_insert(MfBenchmarkDaily)
-            .values(
-                [
-                    {"benchmark": benchmark, "close_date": d, "close_value": v}
-                    for d, v in rows
-                ]
-            )
+            .values([{"benchmark": benchmark, "close_date": d, "close_value": v} for d, v in rows])
             .on_conflict_do_update(
                 constraint="uq_mf_benchmark_daily",
                 set_={"close_value": pg_insert(MfBenchmarkDaily).excluded.close_value},
@@ -4924,5 +5147,3 @@ def backfill_nifty_close_series_task(benchmark: str = "all", years: int = 10) ->
         celery -A dhanradar.celery_app call dhanradar.tasks.mf.backfill_nifty_close_series_task
     """
     return backfill_nifty_close_series(benchmark=benchmark, years=years)
-
-
