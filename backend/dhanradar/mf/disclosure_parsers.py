@@ -12,6 +12,14 @@ first-batch files):
     scheme, explicit "SCHEME NAME :" and "Scheme Benchmark: <name>" cells) —
     parsed ONLY for the per-scheme BENCHMARK NAME (the `mf_funds.benchmark_index`
     unblock, plan §11); returns are NOT extracted (we compute our own from NAV).
+  - Scheme master details (2026-07-08 — SBI's per-scheme "Fund Details" page
+    from their own website, saved with a misleading `.xls` extension: it's
+    plain HTML, not a spreadsheet at all. Confirmed identical label/value
+    TEMPLATE across every real sample — riskometer band, primary benchmark
+    name, fund-manager name(s) + tenure start, and the stated TER. Exit load
+    is deliberately NOT extracted — free-form multi-tier text that would need
+    lossy guessing to fit a single (pct, days) pair; a wrong compliance-
+    adjacent fee figure is worse than none, per §8.4 verbatim-only.)
 
 All parsers are PURE (bytes in, tuples out — no DB, no network) so they unit-
 test without fixtures beyond in-memory workbooks. Writers live in
@@ -23,11 +31,12 @@ against the 6 regulatory words, AAUM never derived or imputed (ADR-0035).
 
 from __future__ import annotations
 
+import html
 import io
 import logging
 import re
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -45,15 +54,24 @@ RISKOMETER_BANDS: tuple[str, ...] = (
 _BANDS_LOWER = {b.lower(): b for b in RISKOMETER_BANDS}
 
 
-def classify_file_class(filename: str) -> str:
-    """'aaum' | 'riskometer' | 'performance' | 'portfolio' (default) — pure.
+def classify_file_class(filename: str, data: bytes | None = None) -> str:
+    """'aaum' | 'riskometer' | 'performance' | 'scheme_master' | 'portfolio'
+    (default) — pure.
 
     Keyed off the disclosure-type words AMCs put in their own filenames
     (verified against the founder's real batch: "Average_Assets_Under_
     Management", "Monthly AAUM_May 2026", "monthly-average-asset-under-
     management", "Annual Disclosure of Scheme Riskometer", "Scheme
     Performance Disclosure", "scheme-performance---may-2026").
+
+    `data`, when provided, is CONTENT-sniffed first for `scheme_master` — SBI's
+    "Fund Details" page (confirmed 2026-07-08) is saved with a normal
+    per-scheme filename indistinguishable from a real portfolio disclosure
+    (e.g. "SBI Multicap Fund.xls"), so filename keywords alone can't
+    recognize it; content sniffing is the only reliable signal.
     """
+    if data is not None and _looks_like_scheme_master_html(data):
+        return "scheme_master"
     low = filename.lower()
     if "aaum" in low or "average asset" in low or "average_asset" in low or "average-asset" in low:
         return "aaum"
@@ -270,3 +288,159 @@ def parse_scheme_performance(data: bytes, ext: str) -> list[tuple[str, str]]:
                 after_scheme_row = False
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Scheme master details — SBI's per-scheme "Fund Details" HTML page
+# (confirmed 2026-07-08, ~52 files — saved with a misleading ".xls"
+# extension, plain HTML, not a spreadsheet at all).
+# ---------------------------------------------------------------------------
+
+# The AMC's OWN template schema — every real sample carries this identical
+# label list in this identical order. This is a generic template shared by
+# EVERY scheme (like RISKOMETER_BANDS' 6 fixed words), never a per-scheme
+# lookup table: used only to find where one label's value ENDS (the position
+# of whichever label comes next), not to hardcode any scheme's own data.
+_FUND_DETAILS_LABELS: tuple[str, ...] = (
+    "Fund Name",
+    "Options Names",
+    "Fund Type",
+    "Riskometer At Launch",
+    "Riskometer As on Date",
+    "Category as per SEBI categorization Circular",
+    "Potential Risk Class",
+    "Description",
+    "Stated Asset Allocation",
+    "Face Value",
+    "NFO Open Date",
+    "NFO Close Date",
+    "Allotment Date",
+    "Reopen Date",
+    "Maturity Date",
+    "Benchmark(Tier 1)",
+    "Benchmark(Tier 2)",
+    "Fund Manager",
+    "Fund Manager Type",
+    "Fund Manager From Date",
+    "Annual Expense (Stated Maximum)",
+    "Exit Load",
+    "Custodian",
+    "Auditor",
+    "Registrar",
+    "RTA Code",
+    "Swing Pricing",
+    "Side-Pocketing",
+    "Listing Details",
+    "ISIN",
+)
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_MANAGER_DATE_RE = re.compile(r"((?:Mr|Ms|Mrs)\.?[^:]+?):\s*(\d{1,2}-[A-Za-z]{3}-\d{4})")
+
+
+def _looks_like_scheme_master_html(data: bytes) -> bool:
+    """Content sniff — the file's own filename looks like a normal per-scheme
+    portfolio file (e.g. "SBI Multicap Fund.xls"), so only the BYTES reveal
+    this is actually an AMC website page, not a spreadsheet."""
+    head = data[:4000].decode("utf-8", errors="ignore").lower()
+    return "<html" in head and "fund details for" in head
+
+
+def _flatten_html(data: bytes) -> str:
+    """Strip every tag to a single space (collapsing nested tables' cell
+    values into the surrounding text stream) and unescape entities — turns
+    the label/value table into one flat, whitespace-normalized string that
+    `_value_after` can slice by label position."""
+    text = data.decode("utf-8", errors="replace")
+    text = _TAG_RE.sub(" ", text)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_all_labels(flat_text: str) -> dict[str, str]:
+    """ONE sequential pass through the known label order (each label
+    searched for starting only AFTER the previous label's own match ends),
+    extracting every label's value as the text up to the NEXT label found in
+    sequence. Sequential, monotonically-advancing search means an EARLIER
+    label's name reappearing INSIDE a LATER value can never be mistaken for
+    a boundary (confirmed 2026-07-08: a co-manager designation "(Co-Fund
+    Manager)" literally contains the substring "Fund Manager", which a
+    whole-list re-scan from position 0 wrongly matched as the next section
+    start, truncating "Fund Manager From Date"'s real value)."""
+    positions: list[tuple[str, int]] = []
+    search_from = 0
+    for label in _FUND_DETAILS_LABELS:
+        idx = flat_text.find(label, search_from)
+        if idx < 0:
+            continue
+        positions.append((label, idx))
+        search_from = idx + len(label)
+
+    values: dict[str, str] = {}
+    for i, (label, idx) in enumerate(positions):
+        start = idx + len(label)
+        end = positions[i + 1][1] if i + 1 < len(positions) else len(flat_text)
+        values[label] = flat_text[start:end].strip(" :")
+    return values
+
+
+def parse_scheme_master_details(data: bytes) -> dict[str, Any]:
+    """SBI's per-scheme "Fund Details" page → one dict (ONE file = ONE
+    scheme). Returns {} if the file doesn't even carry a Fund Name (fail-
+    closed — caller marks 'unsupported', never guesses).
+
+    Keys (any may be absent/None if the file omits a label):
+      scheme_name: str
+      risk_band: str | None — validated VERBATIM against the 6 regulatory
+        words (RISKOMETER_BANDS), same rule as the dedicated riskometer parser.
+      benchmark_tier1: str | None — the scheme's PRIMARY benchmark name.
+      ter_pct: float | None — "Annual Expense (Stated Maximum)"'s number.
+      manager_pairs: list[tuple[str, date]] — (manager_name, tenure start),
+        parsed from "Fund Manager From Date"'s own "Name:DD-Mon-YYYY" pairs
+        (NOT the separate "Fund Manager" list — that field has no per-name
+        date, so pairing off this field is the only way to attribute the
+        right start date to the right manager when a scheme has more than one).
+
+    Exit load is deliberately NOT extracted (see module docstring).
+    """
+    flat = _flatten_html(data)
+    labels = _extract_all_labels(flat)
+
+    scheme_name = labels.get("Fund Name", "")
+    if not scheme_name:
+        return {}
+
+    risk_raw = labels.get("Riskometer As on Date", "")
+    risk_band = _BANDS_LOWER.get(risk_raw.strip().lower())
+
+    benchmark_raw = labels.get("Benchmark(Tier 1)", "").strip()
+    benchmark: str | None = (
+        benchmark_raw if benchmark_raw.upper() not in ("", "NA", "N/A", "-") else None
+    )
+
+    expense_raw = labels.get("Annual Expense (Stated Maximum)", "")
+    ter_pct: float | None = None
+    ter_m = re.search(r"(\d+(?:\.\d+)?)", expense_raw)
+    if ter_m:
+        try:
+            ter_pct = float(ter_m.group(1))
+        except ValueError:
+            ter_pct = None
+
+    since_raw = labels.get("Fund Manager From Date", "")
+    manager_pairs: list[tuple[str, date]] = []
+    for name_part, date_str in _MANAGER_DATE_RE.findall(since_raw):
+        try:
+            manager_pairs.append(
+                (name_part.strip(), datetime.strptime(date_str, "%d-%b-%Y").date())
+            )
+        except ValueError:
+            continue
+
+    return {
+        "scheme_name": scheme_name,
+        "risk_band": risk_band,
+        "benchmark_tier1": benchmark,
+        "ter_pct": ter_pct,
+        "manager_pairs": manager_pairs,
+    }

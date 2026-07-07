@@ -146,7 +146,10 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
     # routing them through the constituents parser is what left them
     # 'unsupported' in the founder's first batch. Each class has its own pure
     # parser (mf/disclosure_parsers.py) and a targeted mf_funds writer below.
-    file_class = classify_file_class(original_filename)
+    # `data` is passed (2026-07-08) so scheme_master can be CONTENT-sniffed —
+    # SBI's "Fund Details" HTML page uses a normal per-scheme filename
+    # indistinguishable from a real portfolio disclosure by name alone.
+    file_class = classify_file_class(original_filename, data)
     if file_class != "portfolio":
         return await _parse_special_class(file_id, file_class, data, original_filename, amc_hint)
 
@@ -268,6 +271,15 @@ async def _apply_file_class(
         against the 6 official values by the parser).
       - performance → `benchmark_index` (the scheme's PRIMARY benchmark name —
         the plan §11 unblock for per-fund benchmark mapping).
+      - scheme_master (SBI's per-scheme "Fund Details" HTML page, 2026-07-08)
+        → `risk_o_meter` + `benchmark_index` (same fields as above, same
+        rules) + `expense_ratio_pct` (a single current snapshot, no history
+        row — the file states no "effective from" date we could honestly
+        attribute to `expense_ratio_history`, so writing that table here
+        would fabricate a date §8.4 forbids) + `fund_manager_history` (one
+        row per manager, deduped against already-stored (scheme_uid,
+        manager_name, start_date) tuples — the exact pattern
+        `tasks/mf_fund_manager.py` already uses, never a second one).
     """
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -276,9 +288,10 @@ async def _apply_file_class(
     from dhanradar.mf.disclosure_parsers import (
         parse_aaum_annexure,
         parse_riskometer_annual,
+        parse_scheme_master_details,
         parse_scheme_performance,
     )
-    from dhanradar.models.mf import MfAumHistory
+    from dhanradar.models.mf import MfAumHistory, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins
 
     if file_class == "aaum":
@@ -354,6 +367,71 @@ async def _apply_file_class(
                     {"b": bench, "i": isin},
                 )
                 updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return None, updates, resolved
+
+    if file_class == "scheme_master":
+        parsed = parse_scheme_master_details(data)
+        scheme_name = parsed.get("scheme_name")
+        if not scheme_name:
+            return None, None, 0
+        isin_map = await _resolve_scheme_isins({scheme_name}, amc_name)
+        isin = isin_map.get(scheme_name)
+        resolved = 1 if isin else 0
+        if not isin:
+            return None, 0, 0
+
+        updates = 0
+        async with TaskSessionLocal() as db:
+            if parsed.get("risk_band"):
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET risk_o_meter = :b WHERE isin = :i"),
+                    {"b": parsed["risk_band"], "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("benchmark_tier1"):
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET benchmark_index = :b WHERE isin = :i"),
+                    {"b": parsed["benchmark_tier1"], "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("ter_pct") is not None:
+                # Single current-snapshot mirror onto mf_funds — same field
+                # `mf_expense_ratio_fetch` maintains from factsheets, so a
+                # simple overwrite (not fill-only) keeps whichever source ran
+                # most recently as the current value. No `expense_ratio_history`
+                # row: this file states no "effective from" date to honestly
+                # attribute one to (§8.4 — never fabricate a date).
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
+                    {"v": parsed["ter_pct"], "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            manager_pairs = parsed.get("manager_pairs") or []
+            if manager_pairs:
+                existing = await db.execute(
+                    sa_text(
+                        "SELECT manager_name, start_date FROM mf.fund_manager_history "
+                        "WHERE scheme_uid = :i"
+                    ),
+                    {"i": isin},
+                )
+                existing_tuples = {(row[0], row[1]) for row in existing}
+                new_rows = [
+                    {
+                        "scheme_uid": isin,
+                        "manager_name": name,
+                        "start_date": start,
+                        "end_date": None,
+                        "source": amc_name,
+                        "run_id": run_id,
+                    }
+                    for name, start in manager_pairs
+                    if (name, start) not in existing_tuples
+                ]
+                if new_rows:
+                    await db.execute(pg_insert(MfFundManagerHistory).values(new_rows))
+                    updates += len(new_rows)
             await db.commit()
         return None, updates, resolved
 
