@@ -33,6 +33,7 @@ import {
   ShieldAlert,
   ThumbsUp,
   DollarSign,
+  Building2,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -50,6 +51,7 @@ interface AdminNavItem {
 const ADMIN_NAV: AdminNavItem[] = [
   { href: '/admin',            label: 'Overview',          icon: LayoutDashboard, live: true  },
   { href: '/admin/operations', label: 'Data Operations',   icon: Activity,        live: true  },
+  { href: '/admin/amc',        label: 'AMC Coverage',      icon: Building2,       live: true  },
   { href: '/admin/users',      label: 'Users',             icon: Users,           live: true  },
   { href: '/admin/billing',    label: 'Billing',           icon: CreditCard,      live: true  },
   { href: '/admin/scoring',    label: 'Scoring',           icon: BarChart3,       live: true  },
