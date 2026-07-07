@@ -966,6 +966,61 @@ def test_parse_sebi_xlsx_hdfc_per_scheme_merged_title_banner():
     assert rows[0]["market_value_cr"] == pytest.approx(280.1641)
 
 
+def test_parse_sebi_xlsx_hdfc_close_ended_a_not_an_grammar():
+    """HDFC's close-ended scheme banners are grammatically correct English --
+    "(A Close Ended ...)" not "(An Close Ended ...)" -- e.g. real files "HDFC
+    Charity Fund for Cancer Cure" and every HDFC FMP (confirmed 2026-07-09, 13
+    residual manual-ingest failures). The strip regex only matched literal "an",
+    so the whole tenure/risk-rating disclaimer stayed attached to the scheme
+    name and pg_trgm resolution against the bare fund name in mf_funds failed."""
+    banner = (
+        "HDFC Charity Fund for Cancer Cure (A Close Ended Income Scheme With "
+        "Tenure 1196 Days. A Relatively High Interest Rate Risk and Relatively "
+        "Low Credit Risk.)"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append([banner] * 10 + ["Income", "Hybrid"])
+    ws.append(["Portfolio as on 15-Jun-2026"])
+    ws.append([None])
+    ws.append(["ISIN", "Name Of the Instrument", "Quantity", "Market/Fair Value(Rs. In Lacs)"])
+    ws.append(["IN1520220097", "7.49% Gujarat SDL Mat 280926", 10000000, 10052.77])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "HDFC")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "HDFC Charity Fund for Cancer Cure"
+
+
+def test_parse_sebi_xlsx_icici_fund_size_banner_not_scheme_name():
+    """ICICI's per-scheme files (confirmed 2026-07-09, 134 residual manual-
+    ingest failures) pair a "Figures as on <date>" cell with a "Fund Size Rs.
+    <n> in Lakhs" cell in the same 2-value row, immediately after the real
+    scheme-name banner row. "Fund Size" contains the same "fund" keyword a
+    real scheme name would, so before the fix it won the single-keyword-hit
+    disambiguation used for ABSL-style fund-code/name rows and silently
+    overwrote the already-correctly-detected current_scheme."""
+    banner = "ICICI PRUDENTIAL HOUSING OPPORTUNITIES FUND (An open ended equity scheme)"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append([banner])
+    ws.append([None])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 242353.39 in Lakhs"])
+    ws.append([None])
+    ws.append(["Company/Issuer/Instrument Name", "ISIN", "Quantity", "Exposure/Market Value (Rs. In Lakhs)"])
+    ws.append(["NTPC Ltd.", "INE733E01010", 5467947, 20266.95])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI PRUDENTIAL HOUSING OPPORTUNITIES FUND"
+
+
 def test_parse_sebi_xlsx_sbi_scheme_name_label_value_row():
     """SBI's per-scheme manual-ingest files (B80, 2026-07-07 triage — 461 files)
     put the real scheme name in a SEPARATE cell from its "SCHEME NAME :" label,
