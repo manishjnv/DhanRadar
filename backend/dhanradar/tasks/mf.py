@@ -3722,6 +3722,36 @@ async def _process_amc_static_multi(
     return 0, 0
 
 
+class _XlrdSheetShim:
+    """Wraps one xlrd `Sheet` to expose the single openpyxl worksheet method
+    `_parse_sebi_xlsx` actually calls — `iter_rows(values_only=True)` — so the
+    SAME row-parsing loop below runs unchanged for legacy binary .xls files.
+    xlrd already returns "" (not None) for a blank cell and raw numbers as
+    floats (not formatted strings); both convert identically through the
+    loop's own `str(c).strip() if c is not None else ""` either way.
+    """
+
+    def __init__(self, sheet: Any) -> None:
+        self._sheet = sheet
+
+    def iter_rows(self, values_only: bool = True) -> Any:
+        for r in range(self._sheet.nrows):
+            yield tuple(self._sheet.row_values(r))
+
+
+class _XlrdWorkbookShim:
+    """Wraps an xlrd `Book` to expose the two openpyxl workbook surfaces
+    `_parse_sebi_xlsx` actually uses — `.sheetnames` and `wb[name]` — so the
+    xlrd (legacy binary .xls) and openpyxl (.xlsx) code paths share one parser."""
+
+    def __init__(self, book: Any) -> None:
+        self._book = book
+        self.sheetnames = book.sheet_names()
+
+    def __getitem__(self, name: str) -> _XlrdSheetShim:
+        return _XlrdSheetShim(self._book.sheet_by_name(name))
+
+
 def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
     """Parse a SEBI-format monthly portfolio disclosure XLSX.
 
@@ -3734,8 +3764,27 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
     """
     import openpyxl  # lazily imported — not installed everywhere
 
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    try:
+        wb: Any = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    except zipfile.BadZipFile:
+        # openpyxl only reads the zip-based .xlsx container. A genuine legacy
+        # binary .xls (OLE2/CFBF magic `D0 CF 11 E0` — e.g. ABSL's ~107-sheet
+        # monthly portfolio, confirmed 2026-07-08) raises BadZipFile here.
+        # Fall back to xlrd via the shim above so this SAME parsing loop runs
+        # unchanged for both formats — never a second parser. A file that is
+        # NEITHER real format (confirmed 2026-07-08: ~52 SBI files are an AMC
+        # website "Fund Details" HTML page mislabeled ".xls", not a
+        # spreadsheet at all — a DIFFERENT data source, tracked separately,
+        # not a portfolio disclosure) fails xlrd too and re-raises, so the
+        # caller marks the file failed with an honest parse error instead of
+        # silently extracting zero rows.
+        import xlrd
+
+        book = xlrd.open_workbook(file_contents=file_bytes)
+        wb = _XlrdWorkbookShim(book)
+
     result: list[dict] = []
+
     current_scheme: str | None = None
     as_of_month: date | None = None
 
@@ -3905,6 +3954,40 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                                     candidate = _nv.strip()
                                     break
                             break
+                    # ABSL's Index-sheet-style per-scheme banner (confirmed
+                    # 2026-07-08, ~103 schemes): a genuine 2-distinct-value row
+                    # pairing a short fund CODE with the real scheme name
+                    # (e.g. ['ABBSEIIF', 'ADITYA BIRLA SUN LIFE BSE INDIA
+                    # INFRASTRUCTURE INDEX FUND', ...]) — a fund code never
+                    # contains a scheme-name keyword, so when exactly ONE of
+                    # the two values does, that one is unambiguously the name.
+                    if not candidate and len(non_empty) == 2:
+                        _scheme_kws = (
+                            "fund",
+                            "scheme",
+                            "plan",
+                            "etf",
+                            "index",
+                            "growth",
+                            "idcw",
+                            "direct",
+                            "regular",
+                        )
+                        _kw_hits = [
+                            v for v in non_empty if any(kw in v.lower() for kw in _scheme_kws)
+                        ]
+                        if len(_kw_hits) == 1:
+                            candidate = _kw_hits[0]
+                        else:
+                            # Ambiguous (0 or both matched) — e.g. a fund CODE
+                            # can coincidentally contain "ETF"/"FUND" as a bare
+                            # substring ("C10YGETF" ends in "ETF"). Fall back
+                            # to whitespace: a fund code is always a single
+                            # space-free token; a real AMFI/SEBI scheme name
+                            # always has spaces.
+                            _spaced = [v for v in non_empty if " " in v.strip()]
+                            if len(_spaced) == 1:
+                                candidate = _spaced[0]
             else:
                 candidate = ""
             # Reject a candidate that is itself a SEBI section-header /
@@ -3917,6 +4000,12 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # current_scheme mid-file (confirmed 2026-07-07, SBI Multi Asset
             # Allocation Fund.xlsx).
             if candidate and _SECTION_HEADER_RE.search(candidate):
+                candidate = ""
+            # Reject a bare scheme-TYPE description row (see
+            # _SCHEME_TYPE_DESCRIPTION_RE docstring) — confirmed 2026-07-08 in
+            # ABSL's legacy .xls files, same overwrite-current_scheme failure
+            # mode as the section-header case just above.
+            if candidate and _SCHEME_TYPE_DESCRIPTION_RE.search(candidate):
                 candidate = ""
             if candidate:
                 # Strip "SCHEME:" prefix used by UTI and some other AMCs.
@@ -4135,6 +4224,18 @@ _SECTION_HEADER_RE = re.compile(
     r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$",
     re.IGNORECASE,
 )
+
+# A bare SEBI scheme-TYPE description row — e.g. ABSL's "An open ended Index
+# Fund replicating the BSE India Infrastructure Total Return Index" (its own
+# row, no scheme name attached) or SBI's "An Open Ended Exchange Traded
+# Scheme" — every SEBI-format scheme-type description starts with this exact
+# "An open/close ended ..." phrasing per the mandated circular wording; a real
+# scheme name never starts this way (it starts with the AMC's own brand name).
+# Confirmed 2026-07-08: this row satisfies the single-value candidate check
+# below AND contains "fund"/"scheme", so without this rejection it silently
+# overwrites the real (correctly-detected, earlier-row) current_scheme with
+# the scheme's TYPE description instead of its NAME.
+_SCHEME_TYPE_DESCRIPTION_RE = re.compile(r"^\s*an?\s+(open|close)[\s-]*ended\b", re.IGNORECASE)
 
 # SEBI sheets sometimes prefix "Name of Instrument" with a short instrument-type
 # code, e.g. UTI writes "EQ - ABB INDIA LTD.". 2-4 caps + " - " is never how a
