@@ -4007,6 +4007,17 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # mode as the section-header case just above.
             if candidate and _SCHEME_TYPE_DESCRIPTION_RE.search(candidate):
                 candidate = ""
+            # Reject an AUM/fund-size metadata fragment (see
+            # _FUND_SIZE_METADATA_RE docstring) — confirmed 2026-07-08: ICICI's
+            # own "Figures as on Mar 31,2026" / "Fund Size Rs. X in Lakhs" row
+            # pair is a genuine 2-distinct-value row whose second value
+            # contains the bare substring "fund", which the ABSL fund-code+name
+            # fallback just above mistakes for the real scheme name — silently
+            # OVERWRITING the correct current_scheme already set from the
+            # file's own earlier banner row (same overwrite failure mode as
+            # the two rejects above, different trigger).
+            if candidate and _FUND_SIZE_METADATA_RE.search(candidate):
+                candidate = ""
             if candidate:
                 # Strip "SCHEME:" prefix used by UTI and some other AMCs.
                 if candidate.upper().startswith("SCHEME:"):
@@ -4236,6 +4247,19 @@ _SECTION_HEADER_RE = re.compile(
 # overwrites the real (correctly-detected, earlier-row) current_scheme with
 # the scheme's TYPE description instead of its NAME.
 _SCHEME_TYPE_DESCRIPTION_RE = re.compile(r"^\s*an?\s+(open|close)[\s-]*ended\b", re.IGNORECASE)
+
+# An AUM/fund-size disclosure fragment — e.g. ICICI_PRU's own "Fund Size Rs.
+# 259948.40 in Lakhs" (paired in the same row with "Figures as on Mar
+# 31,2026", a genuine 2-distinct-value row). Never a real scheme name (a real
+# name is the AMC's own brand + fund type, never "Fund Size Rs. ... in
+# Lakhs"/"AUM Rs. ... Crore"), but it contains the bare substring "fund",
+# which satisfies the ABSL fund-code+name 2-value fallback's keyword check
+# and gets picked as the scheme name — confirmed 2026-07-08 (ICICI Prudential
+# Nifty Bank ETF / Balanced Advantage Fund per-scheme files silently lost
+# their real scheme name to this row, then failed ISIN resolution with
+# `zero_rows_upserted_scheme_unresolved` despite the correct name resolving
+# at pg_trgm similarity 1.0).
+_FUND_SIZE_METADATA_RE = re.compile(r"\bfund\s+size\b|\baum\s*(?:rs\.?|\(rs)", re.IGNORECASE)
 
 # SEBI sheets sometimes prefix "Name of Instrument" with a short instrument-type
 # code, e.g. UTI writes "EQ - ABB INDIA LTD.". 2-4 caps + " - " is never how a

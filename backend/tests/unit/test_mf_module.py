@@ -1110,6 +1110,50 @@ def test_parse_sebi_xlsx_month_dd_yyyy_no_space_after_comma():
     assert rows[0]["as_of_month"] == date(2026, 5, 1)
 
 
+def test_parse_sebi_xlsx_fund_size_row_does_not_overwrite_scheme_name():
+    """ICICI_PRU per-scheme files sometimes carry a second banner row pairing
+    the as-of date with the fund's AUM: "Figures as on Mar 31,2026" / "Fund
+    Size Rs. 259948.40 in Lakhs" — a genuine 2-distinct-value row. Confirmed
+    2026-07-08 (real prod files, 'ICICI Prudential Nifty Bank ETF.xlsx' and
+    'ICICI Prudential Balanced Advantage Fund.xlsx'): the ABSL fund-code+name
+    2-value fallback picks "Fund Size Rs. ... in Lakhs" as the scheme name
+    (it contains the bare substring "fund"), silently OVERWRITING the correct
+    name already set from the file's own earlier single-cell banner row —
+    every row then keeps this bogus scheme_name and fails ISIN resolution
+    (zero_rows_upserted_scheme_unresolved) even though the real name resolves
+    at pg_trgm similarity 1.0."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append(
+        [
+            "ICICI Prudential Nifty Bank ETF  (An open-ended Exchange Traded "
+            "Fund tracking Nifty Bank Index)"
+        ]
+    )
+    ws.append([])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 259948.40 in Lakhs"])
+    ws.append([])
+    ws.append(
+        [
+            "Company/Issuer/Instrument Name",
+            "ISIN",
+            "Coupon",
+            "Industry/Rating",
+            "Quantity",
+            "Exposure/Market Value (Rs. In Lakhs)",
+        ]
+    )
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "", "Banks", "6753367", "49404.26"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI Prudential Nifty Bank ETF"
+
+
 def test_parse_sebi_xlsx_closed_ended_series_name_left_unmangled():
     """A genuinely closed-ended/matured scheme name (no live ISIN in mf_funds —
     verified 2026-07-07 against live prod: 'SBI Debt Fund Series C-16' /
