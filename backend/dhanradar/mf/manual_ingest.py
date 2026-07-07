@@ -33,10 +33,11 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -49,8 +50,14 @@ ALLOWED_EXTENSIONS: tuple[str, ...] = (".xls", ".xlsx", ".pdf")
 MAX_BYTES = 25 * 1024 * 1024  # 25 MB cap — applies per file AND per zip member
 
 ZIP_EXTENSION = ".zip"
-MAX_ZIP_MEMBERS = 50  # counts every zip entry incl. directories — cheap, safe cap
-MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024  # 100 MB uncompressed total across all members
+# Raised 50 → 1000 (2026-07-07): SBI's real per-scheme portfolio zips carry 441/57/156
+# members — the original cap whole-rejected all three. The bomb guard is the TOTAL
+# uncompressed budget below (checked against central-directory sizes BEFORE any
+# decompression), not the member count; 1000 is a runaway backstop, not the defense.
+MAX_ZIP_MEMBERS = 1000  # counts every zip entry incl. directories — cheap, safe cap
+# Raised 100 MB → 300 MB (2026-07-07): 441 per-scheme xlsx members at ~0.2–0.7 MB each
+# brush the old budget; members are still read one at a time, each ≤ MAX_BYTES.
+MAX_ZIP_TOTAL_BYTES = 300 * 1024 * 1024  # uncompressed total across all members
 
 
 @dataclass(frozen=True)
@@ -295,6 +302,44 @@ def detect_amc(text: str) -> str | None:
     return None
 
 
+_MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+# Filename period patterns, tried in order (most specific first). Real evidence
+# (2026-07-07): several AMCs put the disclosure month ONLY in the filename —
+# KOTAK "…PortfolioMay2026.xlsx", "…PortfolioJune302026.xlsx",
+# EDEL "…Notes 31-May-2026_….xlsx" — while their sheets carry no as-on line the
+# sheet-level detection can find. Fail-closed: an unparseable match yields None.
+_FILENAME_PERIOD_RES = (
+    # 31-May-2026 · 30Jun2026 · 15_06 handled by sheet parse; this is DD-Mon-YYYY
+    re.compile(rf"(\d{{1,2}})[-_ ]?({_MONTHS})[a-z]*[-_ ]?(\d{{4}})", re.IGNORECASE),
+    # June302026 (month name directly followed by day+year)
+    re.compile(rf"({_MONTHS})[a-z]*[-_ ]?(\d{{1,2}})[-_ ]?(\d{{4}})", re.IGNORECASE),
+    # May2026 · May_2026 · May 2026 (month name + year, no day)
+    re.compile(rf"({_MONTHS})[a-z]*[-_ ]?(\d{{4}})", re.IGNORECASE),
+)
+
+
+def detect_period_from_filename(filename: str) -> date | None:
+    """Extract the disclosure month from a filename — pure, fail-closed.
+
+    Used ONLY as a fallback when the sheet parse found rows but no as-on date
+    (`detect_amc_and_parse` below). Returns the first day of the month.
+    """
+    for pattern in _FILENAME_PERIOD_RES:
+        m = pattern.search(filename)
+        if not m:
+            continue
+        groups = m.groups()
+        month_str = next(g for g in groups if g and g[0].isalpha())
+        year_str = groups[-1]
+        try:
+            parsed = datetime.strptime(f"01-{month_str[:3]}-{year_str}", "%d-%b-%Y")
+        except ValueError:
+            continue
+        if 2000 <= parsed.year <= 2100:
+            return parsed.date().replace(day=1)
+    return None
+
+
 def detect_amc_and_parse(
     data: bytes, original_filename: str, amc_hint: str | None = None
 ) -> tuple[str | None, date | None, list[dict]]:
@@ -333,4 +378,13 @@ def detect_amc_and_parse(
             logger.info("manual_ingest: unknown AMC subfolder hint=%r — ignoring", amc_hint)
 
     period = next((r["as_of_month"] for r in rows if r.get("as_of_month")), None)
+    if period is None:
+        # Filename fallback (KOTAK/EDEL evidence 2026-07-07): sheets carry no
+        # as-on line but the filename names the month. Stamp it onto the rows
+        # too — _upsert_constituents keys history on as_of_month.
+        period = detect_period_from_filename(original_filename)
+        if period is not None:
+            for row in rows:
+                if not row.get("as_of_month"):
+                    row["as_of_month"] = period
     return amc_name, period, rows

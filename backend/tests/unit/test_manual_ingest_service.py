@@ -22,6 +22,7 @@ from dhanradar.mf.manual_ingest import (
     MAX_ZIP_TOTAL_BYTES,
     detect_amc,
     detect_amc_and_parse,
+    detect_period_from_filename,
     expand_zip,
     sha256_bytes,
     stored_path_for,
@@ -271,14 +272,17 @@ def test_expand_zip_skips_oversized_member():
 
 
 def test_expand_zip_skips_when_total_uncompressed_exceeds_cap():
-    # 5 members, each well under the 25MB per-file cap, but summing past the
+    # Members each well under the 25MB per-file cap, but summing past the
     # total cap — each is all-zero bytes so the ACTUAL zip stays tiny (this is
-    # the zip-bomb shape the total-cap guard exists for).
-    member_size = MAX_ZIP_TOTAL_BYTES // 5 + (1024 * 1024)  # 5x this > total cap
-    members = {f"member_{i}.xlsx": b"0" * member_size for i in range(5)}
+    # the zip-bomb shape the total-cap guard exists for). Member size is pinned
+    # under MAX_BYTES and the count derived from the budget so the test tracks
+    # the constants (300MB budget as of 2026-07-07, not the original 100MB).
+    member_size = 20 * 1024 * 1024  # 20MB — under the per-member cap
+    count = MAX_ZIP_TOTAL_BYTES // member_size + 2  # cumulative > total cap
+    members = {f"member_{i}.xlsx": b"0" * member_size for i in range(count)}
     data = _zip_bytes(members)
     result = expand_zip(data, "bundle.zip")
-    assert 0 < len(result.eligible) < 5  # some fit the budget, the rest don't
+    assert 0 < len(result.eligible) < count  # some fit the budget, the rest don't
     reasons = {reason for _name, reason in result.skipped}
     assert "zip_total_size_exceeded" in reasons
 
@@ -304,3 +308,119 @@ def test_expand_zip_skips_unsupported_extension_member():
     names = {name for name, _data in result.eligible}
     assert names == {"ok.xlsx"}
     assert ("readme.txt", "unsupported_extension:.txt") in result.skipped
+
+
+# ---------------------------------------------------------------------------
+# Parser-tolerance fixes (2026-07-07) — real-file evidence from the founder's
+# first 120-file manual-ingest run: KOTAK consolidated, EDELWEISS monthly, and
+# filename-only periods all parsed to 0 rows before these fixes.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_period_from_filename_variants():
+    # KOTAK consolidated: month name + year, no separator.
+    assert detect_period_from_filename("KOTAKConsolidatedSEBIPortfolioMay2026.xlsx") == date(
+        2026, 5, 1
+    )
+    # KOTAK fortnightly: month name + day + year, no separator.
+    assert detect_period_from_filename("KotakFortnightlyPortfolioJune302026.xlsx") == date(
+        2026, 6, 1
+    )
+    # EDELWEISS: DD-Mon-YYYY with trailing upload timestamp noise.
+    assert detect_period_from_filename(
+        "EDEL_Portfolio Monthly Notes 31-May-2026_10062026_021941_PM.xlsx"
+    ) == date(2026, 5, 1)
+    # Underscore-separated month + year.
+    assert detect_period_from_filename("Monthly AAUM_May 2026_09062026.xlsx") == date(2026, 5, 1)
+    # No period present — fail closed.
+    assert detect_period_from_filename("SBIcurrent-year-ter.xlsx") is None
+
+
+def _build_edel_style_xlsx() -> bytes:
+    """EDELWEISS layout: banner title, header row, then BLANK rows before the
+    first holding — the blank rows must NOT wipe the freshly-built col_map."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["PORTFOLIO STATEMENT OF EDELWEISS BANKING AND PSU DEBT FUND"])
+    ws.append(["(An open-ended debt scheme)"])
+    ws.append(
+        [
+            "Name of the Instrument",
+            "ISIN",
+            "Rating/Industry",
+            "Quantity",
+            "Market/Fair Value(Rs. In Lacs)",
+            "% to Net Assets",
+        ]
+    )
+    ws.append([])
+    ws.append([])
+    ws.append(["7.18% GOI 2033", "IN0020230085", "Sovereign", "500000", "512.34", "8.10"])
+    ws.append(["HDFC Bank Ltd", "INE040A01034", "Banks", "1000", "234.56", "3.70"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_blank_rows_after_header_do_not_reset_col_map():
+    amc, period, rows = detect_amc_and_parse(
+        _build_edel_style_xlsx(),
+        "EDEL_Portfolio Monthly Notes 31-May-2026_10062026_021941_PM.xlsx",
+    )
+    assert amc == "EDELWEISS"
+    assert len(rows) == 2
+    # Banner prefix stripped from the scheme name.
+    assert rows[0]["scheme_name"] == "EDELWEISS BANKING AND PSU DEBT FUND"
+    # Period recovered from the filename (sheet has no as-on line) and stamped on rows.
+    assert period == date(2026, 5, 1)
+    assert all(r["as_of_month"] == date(2026, 5, 1) for r in rows)
+
+
+def _build_kotak_style_xlsx() -> bytes:
+    """KOTAK layout: name header label in col 0 but every VALUE in col 2 (merged
+    name block), ISIN labeled "ISIN Code" in col 3."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append([None, None, "Portfolio of Kotak Nifty India Tourism Index Fund"])
+    ws.append(["Name of Instrument", None, None, "ISIN Code", "Industry", "Yield", "Quantity"])
+    ws.append(["Equity & Equity related"])
+    ws.append(
+        [None, " ", "INDIAN HOTELS CO LTD", "INE053A01029", "Leisure Services", None, "103736"]
+    )
+    ws.append(
+        [
+            None,
+            " ",
+            "GMR AIRPORTS LIMITED",
+            "INE776C01039",
+            "Transport Infrastructure",
+            None,
+            "570973",
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_offset_name_column_recovered_via_isin_and_banner_stripped():
+    amc, period, rows = detect_amc_and_parse(
+        _build_kotak_style_xlsx(), "KOTAKConsolidatedSEBIPortfolioMay2026.xlsx"
+    )
+    assert amc == "KOTAK"
+    assert period == date(2026, 5, 1)
+    names = {r["constituent_name"] for r in rows}
+    assert "INDIAN HOTELS CO LTD" in names
+    assert "GMR AIRPORTS LIMITED" in names
+    # "Portfolio of " banner prefix stripped for scheme-name resolution.
+    assert all(r["scheme_name"] == "Kotak Nifty India Tourism Index Fund" for r in rows)
+
+
+def test_zip_member_cap_admits_real_sbi_sized_bundles():
+    """SBI's real zips carry 441/57/156 members — the cap must admit them; the
+    bomb guard is the total-uncompressed budget, not the member count."""
+    assert MAX_ZIP_MEMBERS >= 500
+    members = {f"scheme_{i}.xlsx": b"x" for i in range(441)}
+    result = expand_zip(_zip_bytes(members), "SBIopen_ended_schemes.zip")
+    assert len(result.eligible) == 441
+    assert result.skipped == []
