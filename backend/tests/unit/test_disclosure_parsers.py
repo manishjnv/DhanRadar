@@ -21,6 +21,7 @@ from dhanradar.mf.disclosure_parsers import (
     classify_file_class,
     parse_aaum_annexure,
     parse_riskometer_annual,
+    parse_scheme_master_details,
     parse_scheme_performance,
 )
 
@@ -210,3 +211,111 @@ def test_performance_unrecognized_layout_fails_closed():
         ws.append(["Random", "Data"])
 
     assert parse_scheme_performance(_xlsx(build), ".xlsx") == []
+
+
+# ---------------------------------------------------------------------------
+# parse_scheme_master_details — SBI's "Fund Details" HTML page (2026-07-08)
+# ---------------------------------------------------------------------------
+
+
+def _build_scheme_master_html(
+    *, co_manager: bool = False, salutation_no_period: bool = False
+) -> bytes:
+    """Trimmed synthetic reproduction of the REAL label/value HTML shape
+    (single scheme, no real customer data) — mirrors the exact tag nesting
+    (a nested <table> inside the 'Options Names' value) that a naive
+    <td>...</td> regex would mis-pair, which is why the real parser flattens
+    tags to text instead of trying to walk the DOM."""
+    if co_manager:
+        manager_block = (
+            "<tr><td>Fund Manager</td><td><table border=1>"
+            "<tr><td>Mr. Ardhendu Bhattacharya (Co-Fund Manager)</td></tr>"
+            "<tr><td>Ms. Nidhi Chawla</td></tr></table></td></tr>"
+            "<tr><td>Fund Manager Type</td><td><table border=1>"
+            "<tr><td>Mr. Ardhendu Bhattacharya (Co-Fund Manager):Primary Debt</td></tr>"
+            "<tr><td>Ms. Nidhi Chawla:Primary Equity</td></tr></table></td></tr>"
+            "<tr><td>Fund Manager From Date</td><td><table border=1>"
+            "<tr><td>Mr. Ardhendu Bhattacharya (Co-Fund Manager):15-Sep-2025</td></tr>"
+            "<tr><td>Ms. Nidhi Chawla:15-Sep-2025</td></tr></table></td></tr>"
+        )
+    else:
+        salutation = "Ms" if salutation_no_period else "Ms."
+        manager_block = (
+            f"<tr><td>Fund Manager</td><td><table border=1><tr><td>{salutation} Ranjana Gupta</td></tr>"
+            "</table></td></tr>"
+            f"<tr><td>Fund Manager Type</td><td><table border=1><tr><td>{salutation} Ranjana Gupta:</td></tr>"
+            "</table></td></tr>"
+            "<tr><td>Fund Manager From Date</td><td><table border=1>"
+            f"<tr><td>{salutation} Ranjana Gupta:27-Dec-2024</td></tr></table></td></tr>"
+        )
+
+    return (
+        "\r\n<html><head></head><body>"
+        "<div><h2>Fund Details For SBI Test Overnight Fund </h2></div>"
+        "<table border=1 align='center'>"
+        "<tr><td>Fund Name</td><td>SBI Test Overnight Fund</td></tr>"
+        "<tr><td>Options Names</td><td><table border=1>"
+        "<tr><td>Regular Plan - Growth</td></tr><tr><td>Direct Plan - Growth</td></tr>"
+        "</table></td></tr>"
+        "<tr><td>Fund Type</td><td>An open ended debt scheme investing in overnight securities</td></tr>"
+        "<tr><td>Riskometer At Launch</td><td>Low</td></tr>"
+        "<tr><td>Riskometer As on Date</td><td>LOW</td></tr>"
+        "<tr><td>Category as per SEBI categorization Circular</td><td>DEBT</td></tr>"
+        "<tr><td>Benchmark(Tier 1)</td><td>NIFTY 1D Rate Index</td></tr>"
+        "<tr><td>Benchmark(Tier 2)</td><td>NA</td></tr>"
+        f"{manager_block}"
+        "<tr><td>Annual Expense (Stated Maximum)</td><td>Regular Plan: 0.13 Direct Plan : 0.07</td></tr>"
+        "<tr><td>Exit Load ( If Applicable)</td><td>NIL</td></tr>"
+        "<tr><td>Custodian</td><td>Test Custodian Ltd</td></tr>"
+        "</table></body></html>"
+    ).encode()
+
+
+def test_classify_scheme_master_by_content_not_filename():
+    """A per-scheme filename indistinguishable from a real portfolio
+    disclosure (e.g. 'SBI Test Overnight Fund.xls') must classify as
+    scheme_master when the BYTES are the Fund Details HTML page — filename
+    keywords alone can't tell these apart."""
+    data = _build_scheme_master_html()
+    assert classify_file_class("SBI Test Overnight Fund.xls", data) == "scheme_master"
+    # Without content, filename-only classification is unaffected (existing behavior).
+    assert classify_file_class("SBI Test Overnight Fund.xls") == "portfolio"
+
+
+def test_scheme_master_extracts_all_fields():
+    parsed = parse_scheme_master_details(_build_scheme_master_html())
+    assert parsed["scheme_name"] == "SBI Test Overnight Fund"
+    assert parsed["risk_band"] == "Low"
+    assert parsed["benchmark_tier1"] == "NIFTY 1D Rate Index"
+    assert parsed["ter_pct"] == 0.13
+    assert parsed["manager_pairs"] == [("Ms. Ranjana Gupta", date(2024, 12, 27))]
+
+
+def test_scheme_master_salutation_without_trailing_period():
+    """A real sample used 'Ms Ranjana Gupta' (no period after 'Ms') — the
+    manager/date pairing regex must still match."""
+    parsed = parse_scheme_master_details(_build_scheme_master_html(salutation_no_period=True))
+    assert parsed["manager_pairs"] == [("Ms Ranjana Gupta", date(2024, 12, 27))]
+
+
+def test_scheme_master_co_manager_designation_not_mistaken_for_next_label():
+    """A co-manager designation like '(Co-Fund Manager)' literally contains
+    the substring 'Fund Manager' — a naive whole-list boundary re-scan wrongly
+    matches it as the next section start, truncating the real value. Both
+    managers' own distinct start dates must survive intact."""
+    parsed = parse_scheme_master_details(_build_scheme_master_html(co_manager=True))
+    assert parsed["manager_pairs"] == [
+        ("Mr. Ardhendu Bhattacharya (Co-Fund Manager)", date(2025, 9, 15)),
+        ("Ms. Nidhi Chawla", date(2025, 9, 15)),
+    ]
+
+
+def test_scheme_master_missing_fund_name_fails_closed():
+    data = b"<html><body><h2>Fund Details For nothing useful</h2><p>no table here</p></body></html>"
+    assert parse_scheme_master_details(data) == {}
+
+
+def test_scheme_master_unavailable_benchmark_is_none_not_literal_na():
+    data = _build_scheme_master_html().replace(b"NIFTY 1D Rate Index", b"NA")
+    parsed = parse_scheme_master_details(data)
+    assert parsed["benchmark_tier1"] is None
