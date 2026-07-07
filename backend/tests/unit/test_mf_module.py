@@ -25,6 +25,7 @@ from dhanradar.tasks.mf import (
     _drop_over_covered_funds,
     _extract_sebi_row,
     _parse_sebi_xlsx,
+    _pick_canonical_plan_isin,
     parsed_to_snapshot_holdings,
 )
 
@@ -1019,6 +1020,109 @@ def test_parse_sebi_xlsx_icici_fund_size_banner_not_scheme_name():
 
     assert len(rows) == 1
     assert rows[0]["scheme_name"] == "ICICI PRUDENTIAL HOUSING OPPORTUNITIES FUND"
+
+
+def test_parse_sebi_xlsx_icici_fof_disclaimer_with_embedded_newline():
+    """ICICI's Fund-of-Funds scheme banners can wrap the boilerplate disclaimer
+    onto a second line WITHIN the same cell (confirmed 2026-07-09, e.g. real
+    file "ICICI Prudential Multi Sector Passive FOF.xlsx"). `.` never matches
+    `\\n` without re.DOTALL, so the strip regex silently failed to match past
+    the embedded newline, leaving the entire multi-line disclaimer attached.
+    Also covers the "fof" scheme-type keyword: once the disclaimer (which
+    contained "Fund of Funds", the only occurrence of the "fund" keyword) is
+    correctly stripped, a bare "... FOF" name no longer contains "fund" at
+    all, so "fof" must be its own accepted keyword or the correctly-stripped
+    name is silently discarded."""
+    banner = (
+        "ICICI Prudential Multi Sector Passive FOF  (An open ended Fund of "
+        "Funds scheme investing predominantly in Units of passive domestic "
+        "sector/multi sector based \nEquity Oriented Exchange Traded Funds (ETFs))"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append([banner])
+    ws.append([None])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 1000.00 in Lakhs"])
+    ws.append([None])
+    ws.append(["Company/Issuer/Instrument Name", "ISIN", "Quantity", "Exposure/Market Value (Rs. In Lakhs)"])
+    ws.append(["NTPC Ltd.", "INE733E01010", 5467947, 20266.95])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI Prudential Multi Sector Passive FOF"
+
+
+def test_parse_sebi_xlsx_icici_fof_disclaimer_without_wrapping_parens():
+    """Some ICICI FOF banners state the scheme-type disclaimer with NO
+    wrapping parens of its own (confirmed 2026-07-09, real file "ICICI
+    Prudential Thematic Advantage Fund (FOF).xlsx") -- the "(FOF)" paren
+    belongs to the real scheme name, and "An open ended ..." simply follows
+    with no parens around it. The strip regex previously required a literal
+    opening paren immediately before "a|an", so this shape was never
+    stripped at all."""
+    banner = (
+        "ICICI Prudential Thematic Advantage Fund (FOF)  An open ended fund "
+        "of funds scheme investing predominantly in Sectoral / Thematic "
+        "Schemes)\nschemes)"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append([banner])
+    ws.append([None])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 1000.00 in Lakhs"])
+    ws.append([None])
+    ws.append(["Company/Issuer/Instrument Name", "ISIN", "Quantity", "Exposure/Market Value (Rs. In Lakhs)"])
+    ws.append(["NTPC Ltd.", "INE733E01010", 5467947, 20266.95])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI Prudential Thematic Advantage Fund (FOF)"
+
+
+def test_pick_canonical_plan_isin_prefers_direct_growth_among_tied_candidates():
+    """A single-scheme portfolio disclosure never states which plan/option ISIN
+    its holdings belong to (holdings are identical across all Direct/Regular x
+    Growth/IDCW/Bonus variants of the same base scheme). Among near-tied pg_trgm
+    candidates, prefer Direct Plan + Growth over a same-score Regular/Bonus/IDCW
+    variant -- e.g. confirmed 2026-07-09 real case where a "Bonus" plan (sim
+    0.925) outscored "Growth" (sim 0.841) purely due to shorter-suffix string
+    similarity, both matches for the SAME underlying scheme."""
+    rows = [
+        ("ISIN_BONUS", "ICICI Prudential Medium Term Bond Fund - Bonus", 0.925),
+        ("ISIN_GROWTH", "ICICI Prudential Medium Term Bond Fund - Growth", 0.841),
+        ("ISIN_DIRECT_GROWTH", "ICICI Prudential Medium Term Bond Fund - Direct Plan - Growth", 0.673),
+        ("ISIN_IDCW", "ICICI Prudential Medium Term Bond Fund - Annual IDCW", 0.787),
+    ]
+    assert _pick_canonical_plan_isin(rows, tie_margin=0.30) == "ISIN_DIRECT_GROWTH"
+
+
+def test_pick_canonical_plan_isin_falls_back_to_growth_only_when_no_direct_tied():
+    """When no Direct-Plan-Growth variant is among the tied candidates, fall
+    back to any plain Growth variant rather than the raw top (possibly
+    Bonus/IDCW) match."""
+    rows = [
+        ("ISIN_BONUS", "ICICI Prudential Multi Sector Passive FOF - Bonus", 0.90),
+        ("ISIN_GROWTH", "ICICI Prudential Multi Sector Passive FOF - Growth", 0.85),
+    ]
+    assert _pick_canonical_plan_isin(rows, tie_margin=0.10) == "ISIN_GROWTH"
+
+
+def test_pick_canonical_plan_isin_returns_raw_top_when_no_tie():
+    """When the top candidate is not tied with anything else (a clear, unique
+    best match), return it unchanged -- never second-guess a decisive match."""
+    rows = [
+        ("ISIN_EXACT", "ICICI Prudential Bluechip Fund - Growth", 0.99),
+        ("ISIN_UNRELATED", "ICICI Prudential Value Discovery Fund - Growth", 0.20),
+    ]
+    assert _pick_canonical_plan_isin(rows, tie_margin=0.10) == "ISIN_EXACT"
 
 
 def test_parse_sebi_xlsx_sbi_scheme_name_label_value_row():

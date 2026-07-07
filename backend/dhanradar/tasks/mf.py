@@ -31,7 +31,7 @@ import re
 import time
 import zipfile
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -4067,13 +4067,39 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     # Cure" close-ended disclosures, where the literal "an"
                     # requirement left the whole tenure/risk disclaimer
                     # attached and broke pg_trgm scheme-name resolution.
+                    # ICICI's Fund-of-Funds disclaimers wrap onto a second
+                    # line inside the SAME cell (confirmed 2026-07-09, e.g.
+                    # "...investing predominantly in Units of passive domestic
+                    # sector/multi sector based \nEquity Oriented Exchange
+                    # Traded Funds (ETFs)") — `.` never matches `\n` without
+                    # DOTALL, so `.*$` silently failed to match past the
+                    # embedded newline and the sub() did nothing at all,
+                    # leaving the ENTIRE multi-line disclaimer attached (worse
+                    # than a partial strip — pg_trgm similarity against the
+                    # bare fund name in mf_funds dropped to near zero).
+                    # ICICI's "Fund of Funds" scheme banners sometimes state
+                    # the disclaimer WITHOUT wrapping it in its own parens at
+                    # all (confirmed 2026-07-09, e.g. "... Fund (FOF)  An open
+                    # ended fund of funds scheme investing ..." -- the "(FOF)"
+                    # paren belongs to the real name, and "An open ended..."
+                    # simply follows with no parens of its own). The leading
+                    # `\(` is therefore optional, not mandatory.
                     candidate = _re_local.sub(
-                        r"\s*\((?:a|an)\s+(open|close)[\s-]*ended.*$",
+                        r"\s*\(?(?:a|an)\s+(open|close)[\s-]*ended.*$",
                         "",
                         candidate,
-                        flags=_re_local.IGNORECASE,
+                        flags=_re_local.IGNORECASE | _re_local.DOTALL,
                     ).strip()
-                # Scheme rows often start with scheme-type keywords.
+                # Scheme rows often start with scheme-type keywords. "fof"
+                # (Fund of Funds) is its own SEBI category abbreviation, e.g.
+                # "ICICI Prudential Multi Sector Passive FOF" -- it never
+                # spells out "fund" once its own disclaimer clause (which DID
+                # contain "fund", via "Fund of Funds") is correctly stripped
+                # above, so it needs its own keyword entry here (confirmed
+                # 2026-07-09 -- without it, a correctly-stripped FOF name
+                # failed this gate and silently fell back to whatever
+                # current_scheme an EARLIER row had set, e.g. the AMC's own
+                # "ICICI Prudential Mutual Fund" banner).
                 if candidate and any(
                     kw in candidate.lower()
                     for kw in (
@@ -4086,6 +4112,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         "idcw",
                         "direct",
                         "regular",
+                        "fof",
                     )
                 ):
                     current_scheme = candidate
@@ -4450,6 +4477,23 @@ def _drop_over_covered_funds(constituent_batch: list[dict], amc_name: str) -> li
     return [r for r in constituent_batch if r["isin"] not in bad_isins]
 
 
+def _pick_canonical_plan_isin(rows: Sequence[Any], tie_margin: float) -> str:
+    """Pick the canonical ISIN among pg_trgm candidate rows `(isin, scheme_name, sim)`
+    ordered by similarity DESC. Among rows within `tie_margin` of the top score
+    (same-scheme plan/option variants — see `_resolve_scheme_isins` docstring),
+    prefer Direct Plan + Growth, then any Growth, else the raw top match."""
+    top_sim = rows[0][2]
+    tied = [r for r in rows if top_sim - r[2] <= tie_margin]
+    for r in tied:
+        name_lower = r[1].lower()
+        if "direct" in name_lower and "growth" in name_lower:
+            return r[0]
+    for r in tied:
+        if "growth" in r[1].lower():
+            return r[0]
+    return rows[0][0]
+
+
 async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[str, str]:
     """Resolve a set of scheme NAMES → ISINs via pg_trgm fuzzy match, restricted
     to the same AMC's funds (by name prefix) to avoid cross-AMC false positives
@@ -4464,6 +4508,19 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
     Returns {scheme_name: isin} for names that matched with similarity > 0.35
     (or > 0.25 for MIRAE's shorter extracted names); unmatched names are simply
     absent from the returned dict (never guessed).
+
+    A single-scheme portfolio disclosure never states which plan/option ISIN
+    its holdings belong to (holdings are identical across all Direct/Regular x
+    Growth/IDCW/Bonus variants of the same base scheme — only NAV/expense
+    ratio differ per plan), so when several variants of the SAME scheme tie
+    within a small margin of the top raw trigram score, picking whichever one
+    happens to score marginally highest is arbitrary (e.g. a rarely-used
+    "Bonus" or "Quarterly IDCW" plan can outscore "Growth" purely because its
+    suffix is shorter and closer in length to the bare query — confirmed
+    2026-07-09 against real ICICI residual-failure funds). Prefer the
+    Direct-Plan-Growth variant as the canonical ISIN among near-tied
+    candidates — it's the representative variant AMCs/investors reference by
+    default — falling back to any Growth variant, then the raw top match.
     """
     from sqlalchemy import text as sa_text
 
@@ -4481,16 +4538,25 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
     amc_prefix = amc_prefix_map.get(amc_name) or (
         amc_name.split("_")[0] + "%"
     )  # "ICICI_PRU" → "ICICI%"
+    # Margin within which two candidates are considered a genuine tie (not one
+    # correct match beating an unrelated fund) — same-scheme plan-variant rows
+    # cluster within a few hundredths of each other in practice (e.g. 0.925 vs
+    # 0.841 for Bonus vs Growth of the same scheme); an unrelated DIFFERENT
+    # scheme is never this close to the true top match.
+    _TIE_MARGIN = 0.10
     async with TaskSessionLocal() as db:
         for sname in scheme_names:
             # Use pg_trgm similarity to fuzzy-match scheme names, restricted to
             # same-AMC funds to prevent false positives across AMC name overlap.
+            # LIMIT 10 (not 3) so same-scheme plan/option variants (Direct,
+            # Regular, Growth, IDCW, Bonus, ...) are all visible for the
+            # canonical-plan tie-break below, not just the top 3 by raw score.
             result = await db.execute(
                 sa_text(
                     "SELECT isin, scheme_name, similarity(scheme_name, :sname) as sim FROM mf.mf_funds "
                     "WHERE scheme_name ILIKE :prefix "
                     "ORDER BY similarity(scheme_name, :sname) DESC "
-                    "LIMIT 3"
+                    "LIMIT 10"
                 ),
                 {"sname": sname, "prefix": amc_prefix},
             )
@@ -4505,7 +4571,7 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
                     )
                 # Use first match if similarity > 0.35
                 if rows[0][2] > 0.35:
-                    scheme_isin_map[sname] = rows[0][0]
+                    scheme_isin_map[sname] = _pick_canonical_plan_isin(rows, _TIE_MARGIN)
                 elif amc_name == "MIRAE" and rows[0][2] > 0.25:
                     # MIRAE per-scheme files produce shorter extracted names; relax threshold.
                     logger.info(
@@ -4513,7 +4579,7 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
                         sname,
                         [(r[1], f"{r[2]:.2f}") for r in rows[:3]],
                     )
-                    scheme_isin_map[sname] = rows[0][0]
+                    scheme_isin_map[sname] = _pick_canonical_plan_isin(rows, _TIE_MARGIN)
                 else:
                     logger.debug(
                         "mf_constituents_fetch amc=%s scheme '%s' top match similarity=%.2f (too low)",
