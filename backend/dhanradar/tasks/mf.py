@@ -4297,7 +4297,11 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
         return {}
 
     scheme_isin_map: dict[str, str] = {}
-    amc_prefix_map = {"MIRAE": "Mirae Asset%", "PPFAS": "Parag Parikh%"}
+    amc_prefix_map = {
+        "MIRAE": "Mirae Asset%",
+        "PPFAS": "Parag Parikh%",
+        "ABSL": "Aditya Birla%",
+    }
     amc_prefix = amc_prefix_map.get(amc_name) or (
         amc_name.split("_")[0] + "%"
     )  # "ICICI_PRU" → "ICICI%"

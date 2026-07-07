@@ -106,6 +106,13 @@ def test_detect_amc_matches_ppfas_filename_and_scheme_name():
     assert detect_amc("Parag Parikh Flexi Cap Fund") == "PPFAS"
 
 
+def test_detect_amc_matches_absl_filename_and_scheme_name():
+    """ABSL files say 'ABSLMF'; schemes say 'Aditya Birla Sun Life ...' (2026-07-07,
+    founder's manual batch)."""
+    assert detect_amc("31052026_ABSLMF_Monthly-Portfolio.zip") == "ABSL"
+    assert detect_amc("Aditya Birla Sun Life Frontline Equity Fund") == "ABSL"
+
+
 def test_ppfas_registered_in_scraper_roots_with_resolver_prefix():
     """The scraper root + the resolver's name-prefix override must stay in sync —
     a root without the 'Parag Parikh%' prefix would resolve zero schemes."""

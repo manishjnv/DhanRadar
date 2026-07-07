@@ -293,6 +293,10 @@ _AMC_KEYWORDS: dict[str, str] = {
     # PPFAS files/folders say "PPFAS" or "Parag Parikh" — scheme names only the latter.
     "ppfas": "PPFAS",
     "parag": "PPFAS",
+    # ABSL files say "ABSLMF"; scheme names say "Aditya Birla Sun Life ..." —
+    # two keywords cover filenames, folder hints, AND the scheme-name fallback.
+    "absl": "ABSL",
+    "birla": "ABSL",
 }
 
 
