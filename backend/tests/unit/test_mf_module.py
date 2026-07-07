@@ -1021,6 +1021,77 @@ def test_parse_sebi_xlsx_icici_fund_size_banner_not_scheme_name():
     assert rows[0]["scheme_name"] == "ICICI PRUDENTIAL HOUSING OPPORTUNITIES FUND"
 
 
+def test_parse_sebi_xlsx_multiline_scheme_type_description_stripped():
+    """ICICI's own scheme-type descriptions sometimes span MULTIPLE sentences
+    with an embedded newline mid-clause (confirmed 2026-07-08, real prod file
+    'ICICI Prudential Medium Term Bond Fund.xlsx' and 2 others): e.g.
+    "...(An open ended medium term debt scheme investing in instruments such
+    that the Macaulay duration of the portfolio is between 3 Years and 4
+    Years.\\nThe Macaulay duration of the portfolio is 1 Year to 4 years under
+    anticipated adverse situation.)". Without `re.DOTALL` on the boilerplate-
+    strip regex, `.` refuses to cross the embedded newline, `.*$` can never
+    reach the string's true end, and the WHOLE substitution silently no-ops —
+    leaving the full multi-sentence disclaimer attached and diluting the
+    pg_trgm scheme-name similarity below the resolution threshold even though
+    the real fund exists in the catalog at similarity 0.84+."""
+    banner = (
+        "ICICI Prudential Medium Term Bond Fund  (An open ended medium term debt "
+        "scheme investing in instruments such that the Macaulay duration of the "
+        "portfolio is between 3 Years and 4 Years.\n"
+        "The Macaulay duration of the portfolio is 1 Year to 4 years under "
+        "anticipated adverse situation.)"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append([banner])
+    ws.append([None])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 552443.91 in Lakhs"])
+    ws.append([None])
+    ws.append(["Company/Issuer/Instrument Name", "ISIN", "Quantity", "Exposure/Market Value (Rs. In Lakhs)"])
+    ws.append(["7.18% GOI 2033", "IN0020230018", 5000000, 4900.0])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI Prudential Medium Term Bond Fund"
+
+
+def test_parse_sebi_xlsx_fof_suffixed_scheme_name_accepted():
+    """A scheme name ending in the bare "FOF" (Fund of Funds) abbreviation —
+    e.g. "ICICI Prudential Multi Sector Passive FOF" — contains none of the
+    other scheme-keyword hints ("fund"/"scheme"/"plan"/"etf"/"index"/
+    "growth"/"idcw"/"direct"/"regular") once its boilerplate description is
+    correctly stripped. Confirmed 2026-07-08 (real prod file): without "fof"
+    in the keyword set, the clean candidate fails the final acceptance gate
+    and `current_scheme` silently keeps whatever an EARLIER row set it to
+    (here, the AMC's own "ICICI Prudential Mutual Fund" banner row) — never
+    resolving to the real ISIN despite it existing in the catalog."""
+    banner = (
+        "ICICI Prudential Multi Sector Passive FOF  (An open ended Fund of "
+        "Funds scheme investing predominantly in Units of passive domestic "
+        "sector/multi sector based Equity Oriented Exchange Traded Funds (ETFs))"
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["ICICI Prudential Mutual Fund"])
+    ws.append([banner])
+    ws.append([None])
+    ws.append(["Figures as on Mar 31,2026", "Fund Size Rs. 19863.13 in Lakhs"])
+    ws.append([None])
+    ws.append(["Company/Issuer/Instrument Name", "ISIN", "Quantity", "Exposure/Market Value(Rs.Lakh)"])
+    ws.append(["ICICI Prudential Nifty Private Bank ETF", "INF109KC18U7", 21062963, 5135.15])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ICICI_PRU")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "ICICI Prudential Multi Sector Passive FOF"
+
+
 def test_parse_sebi_xlsx_sbi_scheme_name_label_value_row():
     """SBI's per-scheme manual-ingest files (B80, 2026-07-07 triage — 461 files)
     put the real scheme name in a SEPARATE cell from its "SCHEME NAME :" label,

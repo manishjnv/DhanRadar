@@ -3837,6 +3837,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 "direct",
                 "regular",
                 "portfolio",
+                "fof",
             )
         ):
             sheet_scheme = sheet
@@ -3972,6 +3973,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             "idcw",
                             "direct",
                             "regular",
+                            "fof",
                         )
                         _kw_hits = [
                             v for v in non_empty if any(kw in v.lower() for kw in _scheme_kws)
@@ -4067,13 +4069,30 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                     # Cure" close-ended disclosures, where the literal "an"
                     # requirement left the whole tenure/risk disclaimer
                     # attached and broke pg_trgm scheme-name resolution.
+                    # `re.DOTALL` (2026-07-08, ICICI's own multi-sentence
+                    # descriptions — e.g. "(An open ended medium term debt
+                    # scheme investing... 4 Years.\nThe Macaulay duration...
+                    # adverse situation.)") — without it, `.` refuses to
+                    # cross the EMBEDDED NEWLINE mid-description, so `.*$`
+                    # cannot reach the string's true end and the whole
+                    # substitution silently NO-OPS, leaving the full
+                    # multi-sentence disclaimer attached and diluting the
+                    # pg_trgm similarity below the resolution threshold.
                     candidate = _re_local.sub(
                         r"\s*\((?:a|an)\s+(open|close)[\s-]*ended.*$",
                         "",
                         candidate,
-                        flags=_re_local.IGNORECASE,
+                        flags=_re_local.IGNORECASE | _re_local.DOTALL,
                     ).strip()
-                # Scheme rows often start with scheme-type keywords.
+                # Scheme rows often start with scheme-type keywords. "fof"
+                # (Fund of Funds) is a common ICICI/other-AMC scheme-name
+                # SUFFIX that contains none of the other keywords — e.g.
+                # "ICICI Prudential Multi Sector Passive FOF" — confirmed
+                # 2026-07-08: without it, a clean FOF-suffixed candidate
+                # (correctly stripped of its boilerplate description) fails
+                # this gate and current_scheme silently keeps whatever a
+                # PRIOR row set it to (e.g. the AMC's own "ICICI Prudential
+                # Mutual Fund" banner row), never resolving to a real ISIN.
                 if candidate and any(
                     kw in candidate.lower()
                     for kw in (
@@ -4086,6 +4105,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         "idcw",
                         "direct",
                         "regular",
+                        "fof",
                     )
                 ):
                     current_scheme = candidate
@@ -4211,6 +4231,7 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                     "idcw",
                     "direct",
                     "regular",
+                    "fof",
                 )
             ):
                 current_scheme = candidate
