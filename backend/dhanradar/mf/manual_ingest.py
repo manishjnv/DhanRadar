@@ -297,6 +297,10 @@ _AMC_KEYWORDS: dict[str, str] = {
     # two keywords cover filenames, folder hints, AND the scheme-name fallback.
     "absl": "ABSL",
     "birla": "ABSL",
+    # HSBC (KVM4-unreachable site -> manual-only AMC; founder's 49 per-scheme
+    # May-2026 files, 2026-07-07). Master scheme names start "HSBC ..." so the
+    # resolver's default prefix works without an override.
+    "hsbc": "HSBC",
 }
 
 

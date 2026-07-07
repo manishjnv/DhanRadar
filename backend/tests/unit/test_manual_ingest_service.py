@@ -113,6 +113,13 @@ def test_detect_amc_matches_absl_filename_and_scheme_name():
     assert detect_amc("Aditya Birla Sun Life Frontline Equity Fund") == "ABSL"
 
 
+def test_detect_amc_matches_hsbc_filename_and_folder_hint():
+    """HSBC is manual-only (site unreachable from KVM4); founder files are
+    'hsbc-<scheme>-31-may-2026.xlsx' in an incoming/HSBC/ folder (2026-07-07)."""
+    assert detect_amc("hsbc-multi-cap-fund-31-may-2026.xlsx") == "HSBC"
+    assert detect_amc("HSBC") == "HSBC"
+
+
 def test_ppfas_registered_in_scraper_roots_with_resolver_prefix():
     """The scraper root + the resolver's name-prefix override must stay in sync —
     a root without the 'Parag Parikh%' prefix would resolve zero schemes."""
