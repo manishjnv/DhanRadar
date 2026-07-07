@@ -32,10 +32,13 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from dhanradar.celery_app import celery_app
+from dhanradar.mf.disclosure_parsers import classify_file_class
 from dhanradar.mf.manual_ingest import (
     ALLOWED_EXTENSIONS,
     ZIP_EXTENSION,
+    detect_amc,
     detect_amc_and_parse,
+    detect_period_from_filename,
     intake_upload,
 )
 
@@ -138,6 +141,15 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
 
     data = path.read_bytes()
 
+    # File-class dispatch (2026-07-07): AAUM annexures, annual riskometer
+    # disclosures, and scheme-performance files are NOT portfolio disclosures —
+    # routing them through the constituents parser is what left them
+    # 'unsupported' in the founder's first batch. Each class has its own pure
+    # parser (mf/disclosure_parsers.py) and a targeted mf_funds writer below.
+    file_class = classify_file_class(original_filename)
+    if file_class != "portfolio":
+        return await _parse_special_class(file_id, file_class, data, original_filename, amc_hint)
+
     async with ingestion_run(TASK_PARSE, SOURCE) as (run_id, stats):
         stats.fetched = 1
         stats.reachable = True  # a local file read is never a reachability issue
@@ -171,6 +183,181 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
 
         await _mark(file_id, "parsed", amc=amc_name, period=period, rows=rows_upserted)
         return f"parsed: {rows_upserted} rows amc={amc_name}"
+
+
+async def _parse_special_class(
+    file_id: str, file_class: str, data: bytes, original_filename: str, amc_hint: str | None
+) -> str:
+    """Parse + apply a non-portfolio disclosure class (aaum / riskometer /
+    performance). Same fail-closed contract as the portfolio path: layout not
+    recognized → 'unsupported'; parsed but zero schemes resolved to ISINs →
+    'failed' (the file is kept for a resolution-tuning re-run); parser
+    exception → 'failed: parse_error'.
+    """
+    from dhanradar.tasks.ingestion_run import ingestion_run
+
+    ext = Path(original_filename).suffix.lower()
+    amc_name = detect_amc(original_filename) or (detect_amc(amc_hint) if amc_hint else None)
+
+    async with ingestion_run(TASK_PARSE, SOURCE) as (run_id, stats):
+        stats.fetched = 1
+        stats.reachable = True
+
+        if amc_name is None:
+            stats.status_override = "skipped"
+            await _mark(file_id, "unsupported", error="amc_undetectable")
+            return "unsupported: amc_undetectable"
+
+        try:
+            period, updates, resolved = await _apply_file_class(
+                file_class, data, ext, original_filename, amc_name, run_id
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-closed, never partial-silent
+            stats.failed = 1
+            stats.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            await _mark(file_id, "failed", amc=amc_name, error=f"parse_error:{type(exc).__name__}")
+            return "failed: parse_error"
+
+        if updates is None:
+            stats.status_override = "skipped"
+            await _mark(
+                file_id, "unsupported", amc=amc_name, error=f"{file_class}_layout_unrecognized"
+            )
+            return f"unsupported: {file_class}_layout_unrecognized"
+        if resolved == 0:
+            stats.failed = 1
+            stats.last_error = "zero_schemes_resolved"
+            await _mark(
+                file_id,
+                "failed",
+                amc=amc_name,
+                period=period,
+                error="zero_rows_upserted_scheme_unresolved",
+            )
+            return f"failed: {file_class} zero_schemes_resolved"
+
+        stats.written = updates
+        await _mark(file_id, "parsed", amc=amc_name, period=period, rows=updates)
+        return f"parsed: {file_class} updates={updates} amc={amc_name}"
+
+
+async def _apply_file_class(
+    file_class: str,
+    data: bytes,
+    ext: str,
+    original_filename: str,
+    amc_name: str,
+    run_id: int | None,
+) -> tuple[date | None, int | None, int]:
+    """Parse one special file class and write its mf_funds fields.
+
+    Returns (period, updates, resolved). updates=None means the layout was not
+    recognized (caller marks 'unsupported'). resolved counts scheme names that
+    matched an ISIN — resolved=0 is the honest failure ('nothing matched our
+    master'), while resolved>0 with updates=0 is a legitimate no-op (e.g. every
+    fund already carries a fresher net-assets AUM; the fill-only rule skipped
+    all writes).
+
+    Write rules (all values VERBATIM from the file, never derived):
+      - aaum → `aum_crore`/`aum_as_of`, but only where NULL or OLDER — the
+        monthly portfolio disclosure's stated net-assets figure (same field,
+        written by `_upsert_constituents`) always wins over an average-AUM
+        figure for the same or newer month. History rows use
+        on_conflict_do_nothing for the same reason (ADR-0035: stated only).
+      - riskometer → `risk_o_meter` (regulatory band word, pre-validated
+        against the 6 official values by the parser).
+      - performance → `benchmark_index` (the scheme's PRIMARY benchmark name —
+        the plan §11 unblock for per-fund benchmark mapping).
+    """
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.disclosure_parsers import (
+        parse_aaum_annexure,
+        parse_riskometer_annual,
+        parse_scheme_performance,
+    )
+    from dhanradar.models.mf import MfAumHistory
+    from dhanradar.tasks.mf import _resolve_scheme_isins
+
+    if file_class == "aaum":
+        period, pairs = parse_aaum_annexure(data, ext)
+        period = period or detect_period_from_filename(original_filename)
+        if not pairs:
+            return period, None, 0
+        isin_map = await _resolve_scheme_isins({name for name, _v in pairs}, amc_name)
+        resolved = sum(1 for name, _v in pairs if name in isin_map)
+        updates = 0
+        async with TaskSessionLocal() as db:
+            for name, aaum_cr in pairs:
+                isin = isin_map.get(name)
+                if not isin:
+                    continue
+                result = await db.execute(
+                    sa_text(
+                        "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :p "
+                        "WHERE isin = :i AND (aum_as_of IS NULL OR aum_as_of < :p)"
+                    ),
+                    {"v": aaum_cr, "p": period, "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+                if period is not None:
+                    await db.execute(
+                        pg_insert(MfAumHistory)
+                        .values(
+                            isin=isin,
+                            aum_crore=aaum_cr,
+                            as_of_month=period,
+                            source=amc_name,
+                            run_id=run_id,
+                        )
+                        .on_conflict_do_nothing(index_elements=["isin", "as_of_month"])
+                    )
+            await db.commit()
+        return period, updates, resolved
+
+    if file_class == "riskometer":
+        band_pairs = parse_riskometer_annual(data, ext)
+        if not band_pairs:
+            return None, None, 0
+        isin_map = await _resolve_scheme_isins({name for name, _b in band_pairs}, amc_name)
+        resolved = sum(1 for name, _b in band_pairs if name in isin_map)
+        updates = 0
+        async with TaskSessionLocal() as db:
+            for name, band in band_pairs:
+                isin = isin_map.get(name)
+                if not isin:
+                    continue
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET risk_o_meter = :b WHERE isin = :i"),
+                    {"b": band, "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return None, updates, resolved
+
+    if file_class == "performance":
+        bench_pairs = parse_scheme_performance(data, ext)
+        if not bench_pairs:
+            return None, None, 0
+        isin_map = await _resolve_scheme_isins({name for name, _b in bench_pairs}, amc_name)
+        resolved = sum(1 for name, _b in bench_pairs if name in isin_map)
+        updates = 0
+        async with TaskSessionLocal() as db:
+            for name, bench in bench_pairs:
+                isin = isin_map.get(name)
+                if not isin:
+                    continue
+                result = await db.execute(
+                    sa_text("UPDATE mf.mf_funds SET benchmark_index = :b WHERE isin = :i"),
+                    {"b": bench, "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return None, updates, resolved
+
+    raise ValueError(f"unknown file_class: {file_class}")  # unreachable by construction
 
 
 # ---------------------------------------------------------------------------

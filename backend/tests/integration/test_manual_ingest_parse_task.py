@@ -258,3 +258,177 @@ async def test_parse_pipeline_skips_already_terminal_row(db_session):
 
     result = await mi._parse_pipeline(str(file_id))
     assert result == "skip:parsed"
+
+
+# ---------------------------------------------------------------------------
+# File-class dispatcher (2026-07-07) — aaum / riskometer / performance files
+# route to their own parsers + mf_funds writers, never the constituents path.
+# Real DB writes asserted (no false positives): the actual mf_funds columns
+# must change value.
+# ---------------------------------------------------------------------------
+
+
+def _build_riskometer_xlsx() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "SR No.",
+            "Scheme name",
+            "Risk-o-meter level as on March 31, 2025",
+            "Risk-o-meter level as on March 31, 2026",
+            "Changes",
+        ]
+    )
+    ws.append(["1", "ICICI Prudential Multicap Fund", "High", "Very High", "1"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _build_aaum_xlsx() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "AAUM disclosure"
+    ws.append([])
+    ws.append(
+        [
+            "Sl. No.",
+            "Scheme Category/ Scheme Name",
+            "ICICI Mutual Fund : Net AAUM as on  2026-05-31",
+            None,
+            "GRAND TOTAL",
+        ]
+    )
+    ws.append(["A)", "EQUITY SCHEMES", None, None, None])
+    ws.append([None, "ICICI Prudential Multicap Fund", 1.0, 2.0, 15432.10])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def _seed_fund(db_session, isin: str, name: str) -> None:
+    from dhanradar.models.mf import MfFund
+
+    db_session.add(MfFund(isin=isin, scheme_name=name, amc_name="ICICI Prudential Mutual Fund"))
+    await db_session.commit()
+
+
+async def _insert_pending_bytes(db_session, *, filename: str, data: bytes) -> str:
+    from dhanradar.mf.manual_ingest import sha256_bytes
+
+    file_id = uuid.uuid4()
+    db_session.add(
+        MfManualIngestFile(
+            id=file_id,
+            sha256=sha256_bytes(data),
+            original_filename=filename,
+            channel="folder",
+            status="pending",
+        )
+    )
+    await db_session.commit()
+    stored_path_for(str(file_id), filename).write_bytes(data)
+    return str(file_id)
+
+
+async def test_dispatcher_riskometer_writes_mf_funds_band(db_session, monkeypatch):
+    isin = "INF109KTEST1"
+    await _seed_fund(db_session, isin, "ICICI Prudential Multicap Fund")
+    data = _build_riskometer_xlsx()
+    file_id = await _insert_pending_bytes(
+        db_session,
+        filename="ICICIAnnual Disclosure of Scheme Riskometer_FY 2025-26.xlsx",
+        data=data,
+    )
+
+    async def _fake_resolve(names, amc_name):
+        assert amc_name == "ICICI_PRU"
+        return {"ICICI Prudential Multicap Fund": isin}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: riskometer")
+
+    db_session.expire_all()
+    from dhanradar.models.mf import MfFund
+
+    fund = await db_session.get(MfFund, isin)
+    assert fund.risk_o_meter == "Very High"  # LATEST FY column, verbatim regulatory band
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "parsed"
+    assert row.rows_ingested == 1
+
+
+async def test_dispatcher_aaum_fills_null_aum_and_history(db_session, monkeypatch):
+    from datetime import date as _date
+
+    isin = "INF109KTEST2"
+    await _seed_fund(db_session, isin, "ICICI Prudential Multicap Fund")
+    data = _build_aaum_xlsx()
+    file_id = await _insert_pending_bytes(
+        db_session, filename="ICICI Monthly AAUM Disclosure - May 2026.xlsx", data=data
+    )
+
+    async def _fake_resolve(names, amc_name):
+        return {"ICICI Prudential Multicap Fund": isin}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: aaum")
+
+    db_session.expire_all()
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfAumHistory, MfFund
+
+    fund = await db_session.get(MfFund, isin)
+    assert float(fund.aum_crore) == 15432.10
+    assert fund.aum_as_of == _date(2026, 5, 1)
+    hist = (
+        (await db_session.execute(select(MfAumHistory).where(MfAumHistory.isin == isin)))
+        .scalars()
+        .all()
+    )
+    assert len(hist) == 1 and float(hist[0].aum_crore) == 15432.10
+
+
+async def test_dispatcher_aaum_never_clobbers_fresher_net_assets(db_session, monkeypatch):
+    """The portfolio disclosure's stated net-assets (same field, fresher month)
+    must win over an AAUM figure — fill-if-null-or-older only."""
+    from datetime import date as _date
+
+    from dhanradar.models.mf import MfFund
+
+    isin = "INF109KTEST3"
+    db_session.add(
+        MfFund(
+            isin=isin,
+            scheme_name="ICICI Prudential Multicap Fund",
+            amc_name="ICICI Prudential Mutual Fund",
+            aum_crore=16000.00,
+            aum_as_of=_date(2026, 6, 1),  # fresher than the AAUM file's May
+        )
+    )
+    await db_session.commit()
+    data = _build_aaum_xlsx()
+    file_id = await _insert_pending_bytes(
+        db_session, filename="ICICI Monthly AAUM Disclosure - May 2026 v2.xlsx", data=data
+    )
+
+    async def _fake_resolve(names, amc_name):
+        return {"ICICI Prudential Multicap Fund": isin}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+    # Schemes RESOLVED but zero rows eligible to write (fresher figure already
+    # in place) -> a legitimate parsed no-op, never a failure.
+    assert result.startswith("parsed: aaum updates=0")
+
+    db_session.expire_all()
+    fund = await db_session.get(MfFund, isin)
+    assert float(fund.aum_crore) == 16000.00  # untouched
+    assert fund.aum_as_of == _date(2026, 6, 1)
