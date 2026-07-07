@@ -22,6 +22,7 @@ export const adminKeys = {
   quality:    () => ['admin', 'quality'] as const,
   moodStatus: () => ['admin', 'mood-status'] as const,
   manualIngestFiles: (limit?: number) => ['admin', 'manual-ingest', 'files', limit] as const,
+  amcCoverage: () => ['admin', 'amc', 'coverage'] as const,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -1252,5 +1253,67 @@ export function useUploadDisclosureFiles() {
       // limit the currently-mounted table query used.
       qc.invalidateQueries({ queryKey: ['admin', 'manual-ingest', 'files'] });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin AMC data-coverage aggregation — GET /admin/amc/coverage
+// ---------------------------------------------------------------------------
+
+export type CoverageField =
+  | 'constituents'
+  | 'aum'
+  | 'ter'
+  | 'riskometer'
+  | 'benchmark'
+  | 'manager'
+  | 'exit_load';
+
+export interface CoverageCell {
+  covered_count: number;
+  mode: 'A' | 'M' | '-';
+  freq: 'Y' | 'W' | 'M' | 'D' | 'O' | '-';
+}
+
+export interface AmcCoverageRow {
+  amc_name: string;
+  short_name: string;
+  fund_count: number;
+  fields: Record<CoverageField, CoverageCell>;
+  completeness_pct: number;
+}
+
+export interface CoverageSummary {
+  total_amcs: number;
+  total_funds: number;
+  nfo_count: number;
+  accuracy_pct: number;
+  overall_completeness_pct: number;
+  as_of: string;
+}
+
+export interface CoverageMeta {
+  field_labels: Record<CoverageField, string>;
+  field_order: CoverageField[];
+  nfo_definition: string;
+  accuracy_definition: string;
+  completeness_definition: string;
+  mode_definition: string;
+  freq_definition: string;
+  disclaimer: string;
+}
+
+export interface AmcCoverageResponse {
+  summary: CoverageSummary;
+  rows: AmcCoverageRow[];
+  meta: CoverageMeta;
+}
+
+export function useAmcCoverage() {
+  return useQuery({
+    queryKey: adminKeys.amcCoverage(),
+    queryFn: () => api.get<AmcCoverageResponse>('/admin/amc/coverage'),
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 }
