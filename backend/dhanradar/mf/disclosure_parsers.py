@@ -88,10 +88,17 @@ def classify_file_class(filename: str, data: bytes | None = None) -> str:
         "expense ratio" in low
         or "expenseratio" in low
         or "_ter_" in low
-        or "-ter-" in low
         or "_ter." in low
-        or "-ter." in low
+        or re.search(r"\bter\b", low)
     ):
+        # `_`/`-` are `\w` for `\b` purposes, so a bare word-boundary regex
+        # alone can't catch an underscore-delimited "_ter_"/"_ter." (e.g.
+        # "HDFCMF_SCHEMES_TER_02-06-2026_1.xls") — those need the explicit
+        # checks above. `\bter\b` then covers every hyphen/space-delimited
+        # form (e.g. HSBC's real "...HSBC MF Total Exp Ter Report_
+        # 06072026.xlsx", confirmed 2026-07-09) in one pattern instead of
+        # enumerating every separator combination — never matches inside a
+        # real word like "water"/"after".
         return "ter"
     if "performance" in low:
         return "performance"

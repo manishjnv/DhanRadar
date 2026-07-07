@@ -382,6 +382,18 @@ def test_classify_ter_real_filenames():
     assert classify_file_class("SBIhistorical-ter-march2026.xlsx") == "ter"
     assert classify_file_class("Expense Ratio.xlsx") == "ter"
     assert classify_file_class("HDFCMF_SCHEMES_TER_02-06-2026_1.xls") == "ter"
+    # HSBC's real filename uses a plain space to delimit "Ter" (confirmed
+    # 2026-07-09) — no underscore/hyphen at all, unlike every other AMC's
+    # convention, so it needs the `\bter\b` word-boundary fallback.
+    assert (
+        classify_file_class(
+            "D__Camsonline_www_HSBCFiles_Final_HSBC MF Total Exp TER Report_06072026.xlsx"
+        )
+        == "ter"
+    )
+    # "ter" must never match as a bare substring inside an unrelated word.
+    assert classify_file_class("water_treatment.xlsx") == "portfolio"
+    assert classify_file_class("after_hours_trading.xlsx") == "portfolio"
 
 
 def test_parse_ter_disclosure_edelweiss_2row_group_title_layout():
