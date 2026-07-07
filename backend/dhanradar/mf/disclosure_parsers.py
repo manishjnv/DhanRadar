@@ -214,12 +214,20 @@ _TRAILING_BENCH_RE = re.compile(r"\s*\(benchmark\)?\s*$", re.IGNORECASE)
 def parse_scheme_performance(data: bytes, ext: str) -> list[tuple[str, str]]:
     """Scheme-performance disclosure → [(scheme_name, benchmark_name)].
 
-    Handles both real layouts (2026-07-07):
+    Handles THREE real layouts (2026-07-07/08):
       - SBI: one sheet per scheme; a 'SCHEME NAME :' label row (name in the
         next non-empty cell) + an explicit 'Scheme Benchmark: <name>' cell.
       - ICICI: repeating blocks in one sheet; block header = the scheme name
         repeated across >=2 cells, then a 'Scheme' particulars row, then the
         benchmark row whose first cell is '<index name> (Benchmark)'.
+      - Kotak: a plain table — one header row literally naming its own
+        columns ("Scheme name" / "Benchmark Name (Tier 1)"), one scheme per
+        row after that. Found inside Kotak's OWN "riskometer" disclosure
+        file (its risk-o-meter LEVEL column is genuinely blank in every row —
+        a change-COUNT disclosure, not a current-level one — but the same
+        file carries this usable benchmark table instead); the caller tries
+        this parser on any `riskometer`-classified file too, not only ones
+        named/classified `performance`.
     Additional benchmarks ('Additional Benchmark: ...') are deliberately
     ignored — `benchmark_index` holds the scheme's PRIMARY benchmark.
     """
@@ -230,11 +238,37 @@ def parse_scheme_performance(data: bytes, ext: str) -> list[tuple[str, str]]:
         sheet_scheme: str | None = None
         block_scheme: str | None = None
         after_scheme_row = False
+        table_name_ci: int | None = None
+        table_bench_ci: int | None = None
 
         for row in rows:
             cells = [_s(c) for c in row]
             non_empty = [c for c in cells if c]
             if not non_empty:
+                continue
+
+            # Kotak-style plain table: a header row literally naming its own
+            # columns. Once found, every later row in THIS sheet is read by
+            # column position directly — this shape never satisfies the
+            # SBI/ICICI heuristics below, so skip straight past them.
+            if table_name_ci is None:
+                low_cells = [c.lower() for c in cells]
+                name_hits = [ci for ci, c in enumerate(low_cells) if "scheme name" in c]
+                bench_hits = [ci for ci, c in enumerate(low_cells) if "benchmark name" in c]
+                if name_hits and bench_hits:
+                    table_name_ci, table_bench_ci = name_hits[0], bench_hits[0]
+                    continue
+            if table_name_ci is not None and table_bench_ci is not None:
+                if table_name_ci < len(cells) and table_bench_ci < len(cells):
+                    # Strip a trailing footnote marker ("Kotak Active Momentum
+                    # Fund^") — Kotak (and several AMCs) mark ~1 in 7 scheme
+                    # names this way in this exact table; never touches a real
+                    # scheme name, which always ends alphanumeric.
+                    name = cells[table_name_ci].rstrip("^*#†‡ ")
+                    bench = cells[table_bench_ci]
+                    if name and bench and name not in seen:
+                        out.append((name, bench))
+                        seen.add(name)
                 continue
 
             # SBI: "SCHEME NAME :" label — the scheme is the next non-empty cell.

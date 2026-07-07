@@ -182,6 +182,55 @@ def test_performance_icici_block_layout():
     assert d["ICICI Prudential Liquid Fund"] == "CRISIL Liquid Debt A-I Index"
     # The repeated 'CAGR (%)' header row must never be captured as a scheme.
     assert not any("cagr" in name.lower() for name in d)
+    assert d["ICICI Prudential Multicap Fund"] == "NIFTY 500 Multicap 50:25:25 TRI"
+    assert d["ICICI Prudential Liquid Fund"] == "CRISIL Liquid Debt A-I Index"
+    # The repeated 'CAGR (%)' header row must never be captured as a scheme.
+
+
+def _build_kotak_benchmark_table() -> bytes:
+    """Trimmed reproduction of Kotak's real annual riskometer file (2026-07-08):
+    a plain table with a literal 'Scheme name' + 'Benchmark Name (Tier 1)'
+    header — the risk-o-meter LEVEL column is genuinely blank in every real
+    row (a change-COUNT disclosure, not a current-level one), but the
+    benchmark column is fully populated."""
+
+    def build(wb: Workbook) -> None:
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws.append(["", "Disclosure of Scheme wise change in Risk-o-meter", "", "", "", ""])
+        ws.append(
+            [
+                "Sl No.",
+                "Scheme name",
+                "Scheme Risk-o-meter level",
+                "Changes",
+                "Benchmark Name (Tier 1)",
+                "Benchmark Risk-o-meter",
+            ]
+        )
+        ws.append(["1", "Kotak Contra Fund", None, "0", "Nifty 500 TRI", None])
+        ws.append(["2", "Kotak Active Momentum Fund^", None, "2", "Nifty 500 TRI", None])
+
+    return _xlsx(build)
+
+
+def test_performance_kotak_table_layout_from_a_riskometer_named_file():
+    """The Kotak table shape lives inside a file classified 'riskometer' by
+    filename, but its own risk-level column is blank — this parser must
+    still extract the benchmark data from the SAME bytes."""
+    pairs = parse_scheme_performance(_build_kotak_benchmark_table(), ".xlsx")
+    d = dict(pairs)
+    assert d["Kotak Contra Fund"] == "Nifty 500 TRI"
+    # A trailing footnote marker ("^") must be stripped — never part of the real name.
+    assert d["Kotak Active Momentum Fund"] == "Nifty 500 TRI"
+    assert "Kotak Active Momentum Fund^" not in d
+
+
+def test_riskometer_annual_returns_empty_when_level_column_blank():
+    """Confirms the riskometer parser itself correctly returns no bands for
+    this file (never fabricates one) — the benchmark data above is recovered
+    by a SEPARATE parser on the same bytes, not by relaxing this one."""
+    assert parse_riskometer_annual(_build_kotak_benchmark_table(), ".xlsx") == []
 
 
 def _build_sbi_performance() -> bytes:
