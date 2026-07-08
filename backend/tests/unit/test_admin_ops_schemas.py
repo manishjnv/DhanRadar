@@ -11,7 +11,7 @@ Tests:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 # ---------------------------------------------------------------------------
 # is_admin computation — mirrors RequireAdmin normalisation
@@ -157,6 +157,48 @@ def test_source_to_task_map_non_empty():
     from dhanradar.admin.ops_router import _SOURCE_TO_TASK
 
     assert len(_SOURCE_TO_TASK) > 0
+
+
+# ---------------------------------------------------------------------------
+# _is_stale — staleness detection for the Sources dashboard
+# ---------------------------------------------------------------------------
+
+
+def test_is_stale_false_when_within_threshold():
+    from dhanradar.admin.ops_router import _is_stale
+
+    recent = datetime.now(UTC) - timedelta(hours=1)
+    assert _is_stale("amfi_nav", recent) is False
+
+
+def test_is_stale_true_when_past_threshold():
+    from dhanradar.admin.ops_router import _is_stale
+
+    old = datetime.now(UTC) - timedelta(hours=48)
+    assert _is_stale("amfi_nav", old) is True
+
+
+def test_is_stale_false_for_source_with_no_cadence():
+    """Sources with no entry in _SOURCE_STALENESS_HOURS (on-demand/fallback-only)
+    are never marked stale, no matter how old the last run is."""
+    from dhanradar.admin.ops_router import _is_stale
+
+    ancient = datetime.now(UTC) - timedelta(days=3650)
+    assert _is_stale("mfapi", ancient) is False
+
+
+def test_is_stale_false_when_finished_at_is_none():
+    from dhanradar.admin.ops_router import _is_stale
+
+    assert _is_stale("amfi_nav", None) is False
+
+
+def test_source_staleness_hours_only_covers_scheduled_sources():
+    """Every key in _SOURCE_STALENESS_HOURS must be a real catalog source_key."""
+    from dhanradar.admin.ops_router import _SOURCE_CATALOG, _SOURCE_STALENESS_HOURS
+
+    catalog_keys = {s["source_key"] for s in _SOURCE_CATALOG}
+    assert set(_SOURCE_STALENESS_HOURS.keys()) <= catalog_keys
 
 
 def test_paused_sources_key_constant():

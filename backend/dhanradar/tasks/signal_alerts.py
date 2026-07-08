@@ -195,23 +195,36 @@ def market_data_refresh() -> str:
     import time as _t
 
     from dhanradar.mood import service as mood_service
+    from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
+
+    _SOURCE = "yahoo_finance"
+    _TASK_NAME = "dhanradar.tasks.signal_alerts.market_data_refresh"
 
     async def _go() -> str:
+        if await is_source_paused(_SOURCE):
+            return "market_refresh: skipped (paused)"
+
         start = _t.monotonic()
-        try:
-            vix_out = await mood_service.get_vix()
-            breadth_out = await mood_service.get_breadth()
-            elapsed_ms = round((_t.monotonic() - start) * 1000)
-            log.info(
-                "signal.market_refresh",
-                vix=vix_out.value,
-                ad_ratio=breadth_out.ad_ratio,
-                duration_ms=elapsed_ms,
-            )
-            return f"market_refresh: vix={vix_out.value} ad_ratio={breadth_out.ad_ratio}"
-        except Exception as exc:  # noqa: BLE001
-            log.warning("signal.market_refresh_error", exc_type=type(exc).__name__)
-            return f"market_refresh: error={type(exc).__name__}"
+        async with ingestion_run(_TASK_NAME, _SOURCE) as (run_id, stats):
+            try:
+                vix_out = await mood_service.get_vix()
+                breadth_out = await mood_service.get_breadth()
+                elapsed_ms = round((_t.monotonic() - start) * 1000)
+                stats.fetched = 2
+                stats.written = 2
+                log.info(
+                    "signal.market_refresh",
+                    vix=vix_out.value,
+                    ad_ratio=breadth_out.ad_ratio,
+                    duration_ms=elapsed_ms,
+                )
+                return f"market_refresh: vix={vix_out.value} ad_ratio={breadth_out.ad_ratio}"
+            except Exception as exc:  # noqa: BLE001
+                stats.reachable = False
+                stats.status_override = "failed"
+                stats.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                log.warning("signal.market_refresh_error", exc_type=type(exc).__name__)
+                return f"market_refresh: error={type(exc).__name__}"
 
     return asyncio.run(_go())
 

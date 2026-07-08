@@ -382,10 +382,43 @@ _BEAT_KEY_TO_TASK: dict[str, str] = {t["beat_key"]: t["task_name"] for t in _BEA
 _PAUSED_SOURCES_KEY = "paused_sources"
 _PAUSED_TASKS_KEY = "paused_tasks"
 
-# Sort order for the /admin/sources response: Healthy first, then Planned, Paused, Failed.
-# Unknown statuses sort last (99). Python list.sort is stable so catalog order is
-# preserved within each status group.
-_STATUS_ORDER: dict[str, int] = {"Healthy": 0, "Planned": 1, "Paused": 2, "Failed": 3}
+# Sort order for the /admin/sources response: Healthy first, then Warning (stale),
+# Planned, Paused, Failed. Unknown statuses sort last (99). Python list.sort is
+# stable so catalog order is preserved within each status group.
+_STATUS_ORDER: dict[str, int] = {
+    "Healthy": 0,
+    "Warning": 1,
+    "Planned": 2,
+    "Paused": 3,
+    "Failed": 4,
+}
+
+# Staleness threshold (hours) per source_key — how long after the last successful
+# run before a "Healthy" source flips to "Warning" (stale). Set generously above
+# the source's own cadence to absorb scheduler jitter / AMC publication lag without
+# false-positiving. A source with no entry here has no fixed cadence (on-demand /
+# fallback-only) and is never marked stale by this check.
+_SOURCE_STALENESS_HOURS: dict[str, float] = {
+    "amfi_nav": 30,  # daily 23:30 IST
+    "amfi_scheme_master": 24 * 9,  # weekly Sun 03:00 IST
+    "amc_constituents": 24 * 40,  # monthly 10th — AMC publication lag buffer
+    "amc_expense_ratios": 24 * 40,  # monthly 15th
+    "amc_fund_managers": 24 * 40,  # monthly 15th
+    "sebi_circulars": 24 * 9,  # weekly Wed 05:00 IST
+    "yahoo_finance": 72,  # every 15 min market hours; weekend gap buffer
+    "rbi_dbie": 24 * 9,  # weekly Sun 06:00 IST
+    "rbi_rss": 6,  # every 30 min
+    "upstox_analytics": 30,  # twice daily 09:00 & 16:00 IST
+}
+
+
+def _is_stale(source_key: str, finished_at: datetime | None) -> bool:
+    """True if a source's last successful run is older than its cadence threshold."""
+    max_age_h = _SOURCE_STALENESS_HOURS.get(source_key)
+    if max_age_h is None or finished_at is None:
+        return False
+    age_h = (datetime.now(UTC) - finished_at).total_seconds() / 3600
+    return age_h > max_age_h
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +808,8 @@ async def list_sources(
             computed_status = "Failed"
         elif run.status == "running":
             computed_status = "Healthy"
+        elif _is_stale(sk, run.finished_at):
+            computed_status = "Warning"
         else:
             computed_status = "Healthy"
 
