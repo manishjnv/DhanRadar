@@ -212,6 +212,12 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
+    # autoheal (below) restarts this container if the healthcheck fails
+    # AUTOHEAL_START_PERIOD+retries*interval times — the container-level
+    # backstop alongside the task_time_limit framework-level fix
+    # (celery_app.py) that's the PRIMARY recovery path (2026-07-08 hardening).
+    labels:
+      - "autoheal=true"
     # --concurrency=1: prefork default (= vCPU count = 4) × per-child RSS blew past
     # the cgroup memory limit → OOM-kill loop (RCA 2026-06-09). CAS parse is heavy
     # (casparser+scipy) and infrequent; one worker per queue fits the limit safely.
@@ -241,6 +247,22 @@ services:
           # B63 (push cohort aggregation into SQL), NOT more RAM.
           memory: 640M
           cpus: "0.50"
+    # Confirms the WORKER PROCESS in THIS specific container is responsive
+    # (celery's control/inspect mailbox is served by the main process, separate
+    # from the single prefork child executing a task — so this still answers
+    # while a long-but-healthy scrape is mid-run). Targets THIS container's own
+    # node (`celery@<container-id>`, read from /etc/hostname rather than the
+    # `hostname` binary, which python:3.12-slim does not install) so a sibling
+    # worker replying can never mask THIS container being dead (2026-07-08).
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          celery -A dhanradar.celery_app inspect ping -d "celery@$(cat /etc/hostname)" --timeout 10 | grep -q OK
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
 
   dhanradar-celery-mood:
     build:
@@ -249,6 +271,8 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
+    labels:
+      - "autoheal=true"
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "mood", "--concurrency=1", "--loglevel=info"]
     networks:
       - dhanradar
@@ -268,6 +292,15 @@ services:
           # Bumped to 384M. Total dhanradar budget 3136→3328M, well within ~6 GiB headroom.
           memory: 384M
           cpus: "0.25"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          celery -A dhanradar.celery_app inspect ping -d "celery@$(cat /etc/hostname)" --timeout 10 | grep -q OK
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
 
   dhanradar-celery-misc:
     build:
@@ -276,6 +309,8 @@ services:
     restart: unless-stopped
     logging: *default-logging
     env_file: .env
+    labels:
+      - "autoheal=true"
     command: ["celery", "-A", "dhanradar.celery_app", "worker", "-Q", "misc", "--concurrency=1", "--loglevel=info"]
     networks:
       - dhanradar
@@ -292,6 +327,15 @@ services:
           # +64M is funded entirely by mood's slack (192→128), so total stays 3072M.
           memory: 192M
           cpus: "0.25"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >
+          celery -A dhanradar.celery_app inspect ping -d "celery@$(cat /etc/hostname)" --timeout 10 | grep -q OK
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
 
   dhanradar-celery-beat:
     build:
@@ -319,6 +363,37 @@ services:
           # 64M was too tight and OOM-crash-looped (RCA 2026-06-09). 128M funded by
           # trimming mood+misc (now concurrency=1). Net compose memory unchanged-ish.
           memory: 128M
+          cpus: "0.10"
+
+  # ---------------------------------------------------------------------------
+  # Autoheal (2026-07-08, celery-resilience hardening) — plain `docker compose`
+  # (not Swarm) never auto-restarts a container just because its healthcheck
+  # reports "unhealthy"; this tiny, widely-used companion watches Docker's own
+  # health status and restarts any container labeled `autoheal=true` when it
+  # goes unhealthy. Scoped ONLY to the 3 celery workers via the label (NOT
+  # "all containers" — must never touch postgres/redis/fastapi/nextjs/
+  # cloudflared, let alone any co-tenant etip_* container on the shared box).
+  # This is the container-level backstop; the PRIMARY recovery mechanism is
+  # the task_time_limit hard-kill in celery_app.py, which self-heals the
+  # worker process WITHOUT needing a container restart at all — autoheal only
+  # matters if the worker's own main process (not just a task) wedges.
+  # Read-only docker.sock mount — autoheal only calls restart on labeled
+  # containers, never inspects/touches anything else on the shared host.
+  # ---------------------------------------------------------------------------
+  dhanradar-autoheal:
+    image: willfarrell/autoheal:latest
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 30
+      AUTOHEAL_START_PERIOD: 60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      resources:
+        limits:
+          memory: 32M
           cpus: "0.10"
 
   # ---------------------------------------------------------------------------

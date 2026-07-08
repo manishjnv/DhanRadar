@@ -145,6 +145,130 @@ celery_app.conf.task_routes = {
 }
 
 # ---------------------------------------------------------------------------
+# Task time limits — the resilience fix for "a hung task blocks the whole
+# single-concurrency queue forever" (found 2026-07-08: a scraper task hung
+# mid-run with zero progress for 20+ minutes; nothing detected it, nothing
+# recovered it — no task_time_limit existed anywhere, so the worker just sat
+# wedged; every other task queued behind it, INCLUDING the beat-scheduled
+# reap_stuck_cas_jobs reaper, which never got a turn to run).
+#
+# `soft_time_limit` raises SoftTimeLimitExceeded INSIDE the task (a normal,
+# catchable Python exception — cooperative, lets a task log/clean-up before
+# exiting); `time_limit` (hard) SIGKILLs the worker's child process a little
+# later if the task hasn't exited by then. This worker runs the default
+# PREFORK pool (no `--pool=solo`/`--pool=threads` anywhere in docker-compose),
+# so the hard kill is real process-level enforcement, not best-effort — the
+# worker's main process detects the dead child and immediately respawns a
+# fresh one, so the QUEUE self-heals with NO container restart required.
+# This is the primary auto-recovery mechanism (the docker-compose healthcheck
+# added alongside this is for visibility/alerting only, not recovery).
+#
+# Two tiers, both bounding EVERY task uniformly (no scraper/extractor is ever
+# exempt from a bound) — see docs/rca/README.md (2026-07-08) for the full
+# incident + docs/project-state/ARCHITECTURE_DECISIONS.md for the policy ADR:
+#
+#   1. Global default ('*') — 25 min soft / 30 min hard. Covers every
+#      multi-source scraper/extractor task (mf_constituents_fetch and the
+#      Phase-6 AMC scrapers: expense-ratio/fund-manager/scheme-master/
+#      sebi-circulars/macro-data/tbill/cap-classification/category-flows/
+#      kite-enrich/nav-daily-fetch) — these legitimately loop over many
+#      AMCs/sources with per-source timeouts and backoff, so they need real
+#      headroom, but NONE of them has ever taken anywhere near 30 min when
+#      working correctly; 30 min is a genuine "this is now abnormal" bound,
+#      not a tight one.
+#   2. Named fast-bucket overrides — 4 min soft / 5 min hard. Every task here
+#      is DB-only, a single lightweight HTTP call, or a per-request parse
+#      that observably completes in well under a minute on real prod data;
+#      5 min hard-bounds a hang far sooner than the 30-min default would,
+#      so the queue recovers faster for the tasks that run most frequently
+#      (some are scheduled every 1/15/30 min — a 30-min bound on those would
+#      let a hang starve 2+ scheduled runs before self-healing).
+#
+# Update this list when adding a new task: default to the global 30-min bound
+# (safe for anything) and only add a fast-bucket entry once its real-world
+# duration is observed to be short — never guess a task into the fast bucket.
+# ---------------------------------------------------------------------------
+_FAST_BUCKET_TASKS = {
+    # DB-only nightly/monthly compute — no network calls.
+    "dhanradar.tasks.mf.mf_metrics_refresh",
+    "dhanradar.tasks.mf.compute_market_ranks",
+    "dhanradar.tasks.mf.fund_events_refresh",
+    "dhanradar.tasks.mf.monthly_rescore_plus_users",
+    "dhanradar.tasks.mf.daily_portfolio_refresh",
+    "dhanradar.tasks.mf.purge_cas_files",
+    "dhanradar.tasks.mf.mf_fund_metadata_backfill",
+    "dhanradar.tasks.mf.compute_portfolio_daily_valuations",
+    # Reapers/housekeeping — must self-bound tightly; they exist specifically
+    # to unblock OTHER stuck work, so they can never be allowed to become the
+    # next thing blocking the queue.
+    "dhanradar.tasks.mf.reap_stuck_cas_jobs",
+    "dhanradar.tasks.manual_ingest.reap_stuck_manual_ingest_files",
+    "dhanradar.tasks.manual_ingest.scan_incoming_folder",
+    "dhanradar.tasks.manual_ingest.poll_email_inbox",
+    # Per-request parses — real prod timing is sub-second-to-low-seconds per file.
+    "dhanradar.tasks.mf.parse_cas_job",
+    "dhanradar.tasks.manual_ingest.parse_manual_disclosure_file",
+    # Single-index/single-file fetches — one HTTP call, not a multi-source loop.
+    "dhanradar.tasks.mf.nifty_close_daily",
+    # Mood/misc/signal-alerts/compliance/news/bse/legacy-batch — DB-only or a
+    # single lightweight external call each; several run every few minutes, so
+    # they need the tight bound (see policy note above).
+    "dhanradar.tasks.mood.compute_mood_snapshot",
+    "dhanradar.tasks.mood.mood_history_snapshot",
+    "dhanradar.tasks.mood.run_sentiment_analysis",
+    "dhanradar.tasks.misc.send_notification",
+    "dhanradar.tasks.misc.drain_notifications",
+    "dhanradar.tasks.signal_alerts.daily_signal_alert",
+    "dhanradar.tasks.signal_alerts.market_data_refresh",
+    "dhanradar.tasks.signal_alerts.auto_log_no_action",
+    "dhanradar.tasks.signal_alerts.sip_reminder",
+    "dhanradar.tasks.signal_alerts.check_achievements",
+    "dhanradar.tasks.compliance.archive_audit_daily",
+    "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
+    "dhanradar.tasks.news.refresh_market_news",
+    "dhanradar.tasks.bse.process_webhook_event",
+    "dhanradar.tasks.batch.run_nav_ingestion",
+}
+
+# Long, rare, manual multi-year historical backfill (ops runbook: normally
+# invoked as a one-off `docker run`, but also directly callable via celery —
+# the global 30-min default would kill a legitimate run partway through).
+_LONG_RUNNING_TASKS = {
+    "dhanradar.tasks.mf.nav_backfill": (6300, 6600),  # 105 min / 110 min
+}
+
+
+class _TaskTimeLimits:
+    """Custom `task_annotations` object — NOT a plain dict.
+
+    Celery's plain-dict annotation form has a confirmed footgun (celery 5.6.3,
+    reproduced empirically 2026-07-08): a combined `{'*': {...}, 'task_name':
+    {...}}` dict resolves BOTH the exact-name match AND the '*' wildcard match
+    for every task, then applies them via `setattr` in the fixed order
+    (specific FIRST, wildcard SECOND — see `celery.app.annotations.resolve_all`
+    and `Task.annotate()`), so the wildcard UNCONDITIONALLY overwrites any
+    task-specific entry that sets the same keys. A task-specific
+    `soft_time_limit`/`time_limit` override therefore silently never took
+    effect when tried as a plain dict — every task showed the global default.
+    A custom object implementing only `annotate(task)` (no `annotate_any`)
+    sidesteps this entirely: Celery calls `.annotate(task)` once per task and
+    uses that single return value, no merge/overwrite step at all. This is the
+    documented escape hatch for exactly this case (Celery docs: `task_annotations`
+    may be a class instance/string import path implementing `annotate`).
+    """
+
+    def annotate(self, task):
+        if task.name in _LONG_RUNNING_TASKS:
+            soft, hard = _LONG_RUNNING_TASKS[task.name]
+            return {"soft_time_limit": soft, "time_limit": hard}
+        if task.name in _FAST_BUCKET_TASKS:
+            return {"soft_time_limit": 240, "time_limit": 300}  # 4 min / 5 min
+        return {"soft_time_limit": 1500, "time_limit": 1800}  # 25 min / 30 min
+
+
+celery_app.conf.task_annotations = _TaskTimeLimits()
+
+# ---------------------------------------------------------------------------
 # Beat schedule (timezone = Asia/Kolkata, enable_utc=False above)
 # ---------------------------------------------------------------------------
 from celery.schedules import crontab  # noqa: E402
@@ -237,6 +361,15 @@ celery_app.conf.beat_schedule = {
     # clean re-upload reprocesses.  Idempotent (completed_at IS NULL guard).
     "mf-reap-stuck-cas": {
         "task": "dhanradar.tasks.mf.reap_stuck_cas_jobs",
+        "schedule": crontab(minute="*/5"),
+    },
+    # Stuck-file reaper (2026-07-08, celery-resilience hardening) — every 5 min.
+    # Marks manual_ingest_files rows orphaned at status='pending' for more than
+    # 30 min as failed='stuck_timeout' — the manual-ingest-inbox counterpart to
+    # mf-reap-stuck-cas above (parse_manual_disclosure_file has no other
+    # self-heal path if hard-killed mid-flight by the new task_time_limit).
+    "manual-ingest-reap-stuck": {
+        "task": "dhanradar.tasks.manual_ingest.reap_stuck_manual_ingest_files",
         "schedule": crontab(minute="*/5"),
     },
     # Signal daily alert — 09:15 IST on weekdays. Creates in-app notification for

@@ -28,7 +28,7 @@ import imaplib
 import logging
 import shutil
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from dhanradar.celery_app import celery_app
@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 TASK_PARSE = "dhanradar.tasks.manual_ingest.parse_manual_disclosure_file"
 TASK_SCAN_FOLDER = "dhanradar.tasks.manual_ingest.scan_incoming_folder"
 TASK_POLL_EMAIL = "dhanradar.tasks.manual_ingest.poll_email_inbox"
+TASK_REAP_STUCK = "dhanradar.tasks.manual_ingest.reap_stuck_manual_ingest_files"
 SOURCE = "manual_disclosure_inbox"
 
 
@@ -592,6 +593,67 @@ async def _scan_incoming_pipeline() -> str:
             logger.warning("manual_ingest: could not move %s to %s", path.name, dest_dir)
 
     return f"scanned: ok={n_ok} dup={n_dup} unsupported={n_bad} zip_skipped={n_skipped}"
+
+
+# ---------------------------------------------------------------------------
+# Stuck-file reaper (2026-07-08, celery-resilience hardening) — beat, every 5 min.
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(name=TASK_REAP_STUCK)
+def reap_stuck_manual_ingest_files() -> str:
+    """Beat task: mark manual_ingest_files rows stuck in 'pending' for more than
+    30 minutes as failed='stuck_timeout'.
+
+    Complements the celery-wide task_time_limit safety net (celery_app.py): if
+    parse_manual_disclosure_file is ever hard-killed mid-flight (task_time_limit
+    SIGKILL, worker OOM, host restart), the row is left at 'pending' forever
+    with no automatic self-heal — unlike CAS jobs, which already have
+    reap_stuck_cas_jobs (tasks/mf.py). 30 min is generous: real prod parses
+    complete in sub-second-to-low-seconds per file; a reaped row is a plain
+    'status=pending, error=NULL' reset away from being re-processed (see the
+    runbook footgun note in MANUAL_DATA_DOWNLOAD_RUNBOOK.md for the correct
+    re-enqueue pattern).
+
+    Safe to run every few minutes — idempotent (WHERE status='pending' guards
+    against re-touching an already-terminal row).
+    """
+    try:
+        return asyncio.run(_reap_stuck_manual_ingest_files())
+    except Exception:  # noqa: BLE001
+        logger.exception("reap_stuck_manual_ingest_files pipeline error")
+        return "reap_stuck_manual_ingest_files: failed — see worker logs"
+
+
+async def _reap_stuck_manual_ingest_files() -> str:
+    from sqlalchemy import select, update
+
+    from dhanradar.db import admin_task_session
+    from dhanradar.models.mf import MfManualIngestFile
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=30)
+
+    async with admin_task_session() as db:
+        result = await db.execute(
+            select(MfManualIngestFile.id).where(
+                MfManualIngestFile.status == "pending",
+                MfManualIngestFile.received_at < cutoff,
+            )
+        )
+        ids = [r[0] for r in result.all()]
+
+        if not ids:
+            logger.debug("reap_stuck_manual_ingest_files: nothing to reap")
+            return "reaped 0 stuck manual-ingest files"
+
+        await db.execute(
+            update(MfManualIngestFile)
+            .where(MfManualIngestFile.id.in_(ids))  # type: ignore[arg-type]
+            .values(status="failed", error="stuck_timeout")
+        )
+        await db.commit()
+
+    return f"reaped {len(ids)} stuck manual-ingest file(s)"
 
 
 # ---------------------------------------------------------------------------

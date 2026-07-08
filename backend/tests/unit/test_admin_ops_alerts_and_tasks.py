@@ -16,6 +16,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _no_real_celery_inspect(monkeypatch):
+    """None of these tests should depend on a real celery broker connection —
+    _derive_admin_alerts now also calls _check_stuck_tasks (2026-07-08
+    celery-resilience hardening), which probes
+    celery_app.control.inspect().active(). Default to "no active tasks" so
+    every existing alert test in this file stays a pure unit test with zero
+    network I/O; the dedicated stuck-task tests below override this
+    explicitly to exercise the real alerting logic."""
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", lambda: None)
+
+
 # ---------------------------------------------------------------------------
 # Task 2 — _next_run_at
 # ---------------------------------------------------------------------------
@@ -201,6 +214,109 @@ async def test_derive_admin_alerts_no_alerts_when_healthy():
     alerts = await _derive_admin_alerts(db)
 
     assert alerts == [], f"Expected no alerts when system is healthy, got: {alerts}"
+
+
+# ---------------------------------------------------------------------------
+# Item 4 — _check_stuck_tasks (2026-07-08 celery-resilience hardening).
+#
+# `_inspect_active_tasks` is the ONLY point of contact with the real celery
+# broker (a blocking `control.inspect().active()` RPC) — patched directly so
+# these tests exercise the real alerting/threshold logic with zero network I/O.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_stuck_tasks_no_active_tasks_produces_no_alert(monkeypatch):
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", lambda: None)
+
+    from dhanradar.admin.ops_router import _check_stuck_tasks
+
+    assert await _check_stuck_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_check_stuck_tasks_recent_task_produces_no_alert(monkeypatch):
+    """A task that started 30 s ago (well within any real time_limit) must not alert."""
+    import time
+
+    active = {
+        "celery@abc123": [
+            {
+                "id": "task-1",
+                "name": "dhanradar.tasks.mf.mf_constituents_fetch",
+                "time_start": time.time() - 30,
+            }
+        ]
+    }
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", lambda: active)
+
+    from dhanradar.admin.ops_router import _check_stuck_tasks
+
+    assert await _check_stuck_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_check_stuck_tasks_task_past_its_hard_limit_produces_critical_alert(monkeypatch):
+    """A fast-bucket task (5-min hard limit) still 'active' 40 min later is the
+    exact incident this alert exists to catch — must fire critical."""
+    import time
+
+    active = {
+        "celery@abc123": [
+            {
+                "id": "task-stuck-1",
+                "name": "dhanradar.tasks.mf.mf_metrics_refresh",  # fast-bucket: 300s hard
+                "time_start": time.time() - (40 * 60),
+            }
+        ]
+    }
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", lambda: active)
+
+    from dhanradar.admin.ops_router import _check_stuck_tasks
+
+    alerts = await _check_stuck_tasks()
+
+    assert len(alerts) == 1
+    assert alerts[0].severity == "critical"
+    assert alerts[0].key == "task_stuck_task-stuck-1"
+    assert "mf_metrics_refresh" in alerts[0].title
+
+
+@pytest.mark.asyncio
+async def test_check_stuck_tasks_long_scraper_within_its_own_limit_produces_no_alert(monkeypatch):
+    """A scraper task (30-min default hard limit) running 20 min is NORMAL for
+    that task — must NOT alert, even though 20 min would be abnormal for a
+    fast-bucket task. The threshold is per-task, not a single universal cutoff."""
+    import time
+
+    active = {
+        "celery@abc123": [
+            {
+                "id": "task-2",
+                "name": "dhanradar.tasks.mf.mf_constituents_fetch",  # default: 1800s hard
+                "time_start": time.time() - (20 * 60),
+            }
+        ]
+    }
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", lambda: active)
+
+    from dhanradar.admin.ops_router import _check_stuck_tasks
+
+    assert await _check_stuck_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_check_stuck_tasks_broker_error_returns_empty_never_raises(monkeypatch):
+    """A broker hiccup/timeout must never break the whole /admin/alerts response."""
+
+    def _raise():
+        raise ConnectionError("broker unreachable")
+
+    monkeypatch.setattr("dhanradar.admin.ops_router._inspect_active_tasks", _raise)
+
+    from dhanradar.admin.ops_router import _check_stuck_tasks
+
+    assert await _check_stuck_tasks() == []
 
 
 def test_get_health_recent_alerts_mapping():
