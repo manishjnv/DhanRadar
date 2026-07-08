@@ -24,6 +24,8 @@ Reads auth.users counts via raw SQL (aggregate only — no user PII surfaces her
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -619,7 +621,80 @@ async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
             )
         )
 
+    # 4) Stuck celery tasks (2026-07-08 celery-resilience hardening) — a task
+    # that has been ACTIVELY RUNNING (not finished, not failed — so item 2
+    # above can never see it) for meaningfully longer than its OWN configured
+    # task_time_limit (celery_app.py) is abnormal: the hard kill should have
+    # already fired. Catches the exact incident that prompted this alert (a
+    # scraper hung with zero progress for 20+ minutes, invisible to every
+    # other check here) for anything that somehow evades/predates the
+    # time-limit fix — e.g. a task enqueued by a worker running stale code
+    # just before a deploy. Never raises: a broker hiccup or inspect timeout
+    # fails silently (this is a best-effort LIVE probe, not a source of truth).
+    alerts.extend(await _check_stuck_tasks())
+
     return alerts
+
+
+async def _check_stuck_tasks() -> list[AdminAlert]:
+    """Best-effort live probe: any celery task active longer than its own
+    configured hard `time_limit` + a grace period is flagged critical.
+
+    Runs `celery_app.control.inspect().active()` (a blocking broker RPC) in a
+    thread so it never blocks the FastAPI event loop, bounded by an outer
+    `asyncio.wait_for` so a broker hiccup can't hang the whole /admin/alerts
+    response — on any failure/timeout this returns an empty list rather than
+    raising, matching the "derived from current state, never breaks the
+    handler" contract every other alert in this function follows.
+    """
+    try:
+        active = await asyncio.wait_for(asyncio.to_thread(_inspect_active_tasks), timeout=8.0)
+    except Exception:  # noqa: BLE001 — best-effort probe, never breaks /admin/alerts
+        return []
+
+    if not active:
+        return []
+
+    from dhanradar.celery_app import celery_app
+
+    now = time.time()
+    alerts: list[AdminAlert] = []
+    for worker, running in active.items():
+        for entry in running:
+            started = entry.get("time_start")
+            if started is None:
+                continue
+            task_name = entry.get("name") or "unknown"
+            task_obj = celery_app.tasks.get(task_name)
+            # Same 30-min default this task would get from _TaskTimeLimits if
+            # somehow unregistered (defensive — every real task is registered).
+            hard_limit = (task_obj.time_limit if task_obj else None) or 1800
+            grace_s = 60  # allow the SIGKILL a moment to actually land
+            age_s = now - started
+            if age_s > hard_limit + grace_s:
+                task_id = entry.get("id") or "unknown"
+                alerts.append(
+                    AdminAlert(
+                        key=f"task_stuck_{task_id}",
+                        severity="critical",
+                        title=f"{task_name} has been running {int(age_s / 60)} min",
+                        detail=(
+                            f"Worker {worker}, task_id={task_id} — longer than its "
+                            f"{int(hard_limit / 60)}-min hard time limit; the worker "
+                            "may be wedged."
+                        ),
+                        href="/admin",
+                    )
+                )
+    return alerts
+
+
+def _inspect_active_tasks() -> dict | None:
+    """Blocking celery broker RPC — call ONLY from a thread (see
+    `_check_stuck_tasks`), never directly from an async context."""
+    from dhanradar.celery_app import celery_app
+
+    return celery_app.control.inspect(timeout=5).active()
 
 
 # ---------------------------------------------------------------------------
