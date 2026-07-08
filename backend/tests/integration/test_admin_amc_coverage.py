@@ -8,7 +8,7 @@ Covers:
   - 404 surface-hiding for authenticated non-admins.
   - 200 for admin; response shape (summary/rows/meta).
   - Definitions math on seeded fixtures: covered_count per field, per-AMC
-    completeness_pct (equal-weighted average across 7 fields), overall
+    completeness_pct (equal-weighted average across 8 fields), overall
     completeness_pct (fund-weighted average), NFO count, and accuracy_pct —
     all asserted against real computed numbers from the seeded rows, never a
     mock of the endpoint itself.
@@ -88,9 +88,10 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
 
     today = datetime.date.today()
 
-    # One AMC, 2 funds: fund A has aum_crore + a launch within the NFO window;
-    # fund B has neither. Neither has constituents/ter/riskometer/benchmark/
-    # manager/exit_load — every other field's covered_count must be 0.
+    # One AMC, 2 funds: fund A has aum_crore (+ aum_as_of), a sebi_category, and
+    # a launch within the NFO window; fund B has none of those. Neither has
+    # ter/riskometer/benchmark/manager/exit_load — every other field's
+    # covered_count must be 0.
     db_session.add(
         MfFund(
             isin="INF900A00001",
@@ -100,6 +101,8 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
             option_type="growth",
             is_segregated=False,
             aum_crore=100.0,
+            aum_as_of=today.replace(day=1),
+            sebi_category="Equity: Large Cap Fund",
             launch_date=today,
         )
     )
@@ -162,6 +165,7 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
     fields = row["fields"]
     assert fields["constituents"]["covered_count"] == 1  # only fund A
     assert fields["aum"]["covered_count"] == 1  # only fund A
+    assert fields["category"]["covered_count"] == 1  # only fund A
     for f in ("ter", "riskometer", "benchmark", "manager", "exit_load"):
         assert fields[f]["covered_count"] == 0
 
@@ -169,9 +173,14 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
     # "-" (no known source yet), so the overall per-AMC badge is "none".
     assert row["source_tag"] == "none"
 
+    # Staleness: last_updated = the later of MAX(aum_as_of) and MAX(constituents'
+    # as_of_month) across the AMC's schemes -- both are today.replace(day=1) here.
+    assert row["last_updated"] == today.replace(day=1).isoformat()
+    assert row["staleness_days"] == (today - today.replace(day=1)).days
+
     # completeness_pct: equal-weighted average of per-field covered-fraction
-    # across the 7 fields = ((1/2) + (1/2) + 0 + 0 + 0 + 0 + 0) / 7 * 100.
-    expected_completeness = round(100.0 * ((0.5 + 0.5) / 7), 1)
+    # across the 8 fields = ((1/2)*3 [constituents, aum, category] + 0*5) / 8.
+    expected_completeness = round(100.0 * ((0.5 + 0.5 + 0.5) / 8), 1)
     assert row["completeness_pct"] == expected_completeness
 
     # Single-AMC universe → overall (fund-weighted) equals the one row's value.
@@ -186,10 +195,13 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
         "benchmark",
         "manager",
         "exit_load",
+        "category",
     ]
     assert "nfo_definition" in meta
     assert "accuracy_definition" in meta
     assert "completeness_definition" in meta
+    assert "category_definition" in meta
+    assert "staleness_definition" in meta
 
 
 # ---------------------------------------------------------------------------
@@ -259,5 +271,5 @@ async def test_amc_coverage_dedupes_plan_variant_isins_of_same_scheme(
     # 3 ISINs but ONE scheme (shared fund_name_short) — fund_count must be 1, not 3.
     assert row["fund_count"] == 1
     assert row["fields"]["aum"]["covered_count"] == 1
-    # completeness for this AMC: aum covered (1/1), all other 6 fields 0/1.
-    assert row["completeness_pct"] == round(100.0 * (1 / 7), 1)
+    # completeness for this AMC: aum covered (1/1), all other 7 fields 0/1.
+    assert row["completeness_pct"] == round(100.0 * (1 / 8), 1)
