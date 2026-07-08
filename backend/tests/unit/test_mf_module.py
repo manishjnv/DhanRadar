@@ -24,6 +24,7 @@ from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
 from dhanradar.tasks.mf import (
     _drop_over_covered_funds,
     _extract_sebi_row,
+    _fiscal_year_str,
     _parse_sebi_xlsx,
     _pick_canonical_plan_isin,
     parsed_to_snapshot_holdings,
@@ -1673,3 +1674,67 @@ def test_drop_over_covered_funds_skips_fund_over_105_pct():
     assert "INF789F01WY2" not in isins
     assert "INF000OTHER" in isins
     assert len(result) == 2
+
+
+# --- B90 (7-AMC enrichment): MOTILAL_OSWAL fixes ------------------------------
+def test_extract_sebi_row_motilal_oswal_singular_percent_header_scaled():
+    """MOTILAL_OSWAL's header reads singular "% to Net Asset" (every other AMC
+    uses a plural/NAV variant already recognized), AND its cell stores the
+    underlying Excel percentage-NUMBER-FORMAT fraction (e.g. 0.008 for a
+    displayed 0.80%) rather than a plain-typed percentage number. Both must be
+    handled, and ONLY for this AMC — a genuinely tiny, plainly-typed
+    percentage from another AMC must not be multiplied by 100."""
+    col_map = _col_map("Name of the Instrument", "ISIN", "% to Net Asset", "Market Value")
+    row = ["HDFC Bank Ltd.", "INE040A01034", "0.0079873241569103", "1234.56"]
+    result = _extract_sebi_row(row, col_map, "Motilal Oswal Nifty 50 ETF", "MOTILAL_OSWAL", date(2026, 6, 1))
+    assert result is not None
+    assert result["weight_pct"] == pytest.approx(0.79873241569103)
+
+
+def test_extract_sebi_row_other_amc_plain_percent_not_scaled():
+    """A different AMC's plainly-typed, genuinely small weight_pct must NOT be
+    multiplied by 100 — the ×100 fix is scoped to MOTILAL_OSWAL only."""
+    col_map = _col_map("Name of the Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["Net Receivables/(Payables)", "", "0.42", "1234.56"]
+    result = _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 6, 1))
+    assert result is not None
+    assert result["weight_pct"] == 0.42
+
+
+def test_parse_sebi_xlsx_motilal_oswal_back_to_index_banner_not_scheme_name():
+    """MOTILAL_OSWAL's per-scheme sheet banner row literally reads "Back To
+    Index" paired with the real scheme name in the same 2-value row — "index"
+    is itself an accepted scheme-name keyword, so BOTH values satisfy the
+    keyword-hit AND whitespace-fallback disambiguation before the fix,
+    leaving `current_scheme` unset and the whole sheet silently skipped."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Motilal Oswal Mutual Fund"])
+    ws.append(["Back To Index", "Motilal Oswal Nifty 50 ETF"])
+    ws.append([None])
+    ws.append(["Portfolio Statement as on Jun 30,2026"])
+    ws.append([None])
+    ws.append(["Name of the Instrument", "ISIN", "% to Net Asset", "Market Value"])
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "0.05", "1234.56"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "MOTILAL_OSWAL")
+
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "Motilal Oswal Nifty 50 ETF"
+
+
+# --- B90: CANARA_ROBECO fiscal-year helper ------------------------------------
+def test_fiscal_year_str_april_start_same_calendar_year():
+    """India FY starts April 1 — a date in April+ of year Y is inside FY Y-(Y+1)."""
+    assert _fiscal_year_str(date(2026, 5, 31)) == "2026-27"
+    assert _fiscal_year_str(date(2026, 4, 1)) == "2026-27"
+
+
+def test_fiscal_year_str_jan_mar_belongs_to_prior_calendar_years_fy():
+    """A date in Jan-Mar of year Y is still inside the FY that started April
+    of year Y-1."""
+    assert _fiscal_year_str(date(2026, 2, 15)) == "2025-26"
+    assert _fiscal_year_str(date(2026, 3, 31)) == "2025-26"
+

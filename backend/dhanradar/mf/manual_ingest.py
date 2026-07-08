@@ -305,6 +305,13 @@ _AMC_KEYWORDS: dict[str, str] = {
     # all. Master scheme names start "Tata ..." so the resolver's default
     # AMC-name-as-prefix matching works without an override, same as HSBC.
     "tata": "TATA",
+    # B90 (added 2026-07-08/09): 4 new AMCs, all with a plain single-keyword
+    # match against BOTH their real filename convention and their scheme-name
+    # prefix — no abbreviation split needed (unlike ABSL/Edelweiss above).
+    "motilal": "MOTILAL_OSWAL",
+    "canara": "CANARA_ROBECO",
+    "navi": "NAVI",
+    "zerodha": "ZERODHA",
 }
 
 
