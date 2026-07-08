@@ -860,6 +860,39 @@ def test_extract_sebi_row_keeps_net_assets_as_total_row():
     assert result["market_value_cr"] == 967.5
 
 
+def test_extract_sebi_row_keeps_tata_portfolio_total_as_total_row():
+    """TATA's literal "PORTFOLIO TOTAL" row is its true scheme-level grand
+    total (equivalent to NIPPON's "GRAND TOTAL") — must be kept, flagged
+    is_total_row=True, so it can feed the AUM heuristic."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["PORTFOLIO TOTAL", "", "99.93", "1114790.50"]
+    result = _extract_sebi_row(
+        row, col_map, "Tata Silver ETF Fund of Fund", "TATA", date(2026, 5, 1)
+    )
+    assert result is not None
+    assert result["is_total_row"] is True
+
+
+def test_extract_sebi_row_drops_tata_asset_class_subtotal_entirely():
+    """Real production bug found live 2026-07-08 (first prod run of the TATA
+    scraper, B87/B88): TATA labels EVERY asset-class subtotal as a TRAILING
+    "... TOTAL" suffix ("EQUITY & EQUITY RELATED TOTAL") — the opposite shape
+    of UTI's "TOTAL: ..." prefix, which the section-header regex already
+    caught. Without a suffix match, this row was silently counted as a REAL
+    holding for every TATA scheme, inflating weight_pct_sum to 280-400% and
+    tripping `_drop_over_covered_funds`'s >105% fail-closed guard for 66/67
+    real schemes in the real May-2026 file — every constituent row for the
+    fund was discarded, not just the subtotal. Confirmed via a direct
+    weight_pct_sum recompute against the real file: 0/67 schemes exceed 105%
+    after this fix (was 66/67 before)."""
+    col_map = _col_map("Name of Instrument", "ISIN", "% to NAV", "Market Value")
+    row = ["EQUITY & EQUITY RELATED TOTAL", "", "99.93", "1114790.50"]
+    result = _extract_sebi_row(
+        row, col_map, "Tata Silver ETF Fund of Fund", "TATA", date(2026, 5, 1)
+    )
+    assert result is None
+
+
 def test_extract_sebi_row_does_not_flag_bare_subtotal_as_total_row():
     """A bare asset-class subtotal (UTI: "TOTAL: EQUITY AND EQUITY RELATED") must NOT
     be flagged is_total_row — only "grand total"/"net assets" identify the scheme's
