@@ -27,7 +27,7 @@ const RESPONSE: AmcCoverageResponse = {
       fund_count: 200,
       fields: {
         constituents: { covered_count: 100, mode: 'A', freq: 'M' },
-        aum: { covered_count: 50, mode: 'M', freq: 'M' },
+        aum: { covered_count: 50, mode: 'ML', freq: 'M' },
         ter: { covered_count: 0, mode: '-', freq: '-' },
         riskometer: { covered_count: 0, mode: '-', freq: '-' },
         benchmark: { covered_count: 0, mode: '-', freq: '-' },
@@ -35,6 +35,7 @@ const RESPONSE: AmcCoverageResponse = {
         exit_load: { covered_count: 0, mode: '-', freq: '-' },
       },
       completeness_pct: 30.5,
+      source_tag: 'mixed',
     },
     {
       amc_name: 'Beta AMC Limited',
@@ -42,14 +43,15 @@ const RESPONSE: AmcCoverageResponse = {
       fund_count: 50,
       fields: {
         constituents: { covered_count: 50, mode: 'A', freq: 'M' },
-        aum: { covered_count: 50, mode: 'M', freq: 'M' },
-        ter: { covered_count: 10, mode: 'M', freq: 'Y' },
+        aum: { covered_count: 50, mode: 'ML', freq: 'M' },
+        ter: { covered_count: 10, mode: 'ML', freq: 'Y' },
         riskometer: { covered_count: 0, mode: '-', freq: '-' },
         benchmark: { covered_count: 0, mode: '-', freq: '-' },
         manager: { covered_count: 0, mode: '-', freq: '-' },
         exit_load: { covered_count: 0, mode: '-', freq: '-' },
       },
       completeness_pct: 60.0,
+      source_tag: 'mixed',
     },
   ],
   meta: {
@@ -66,8 +68,9 @@ const RESPONSE: AmcCoverageResponse = {
     nfo_definition: 'Funds with a launch_date within the last 180 days.',
     accuracy_definition: 'Ingestion success rate.',
     completeness_definition: 'Per AMC average across 7 fields.',
-    mode_definition: 'A = automatic scraper · M = manual upload · - = no source yet.',
+    mode_definition: 'A = automatic scraper · ML = manual upload · - = no source yet.',
     freq_definition: 'Y = yearly · W = weekly · M = monthly · D = daily · O = once · - = none.',
+    source_tag_definition: 'Badge next to the AMC name indicates overall source.',
     disclaimer: 'Data-coverage counts only.',
   },
 };

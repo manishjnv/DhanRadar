@@ -32,6 +32,15 @@ that already strips plan/option/frequency noise — see `mf/taxonomy.py::
 derive_short_name`), falling back to the ISIN itself for the ~0.3% of rows with
 no short name. A scheme now counts as "covered" for a field if ANY of its
 plan-variant ISINs has that field populated.
+
+Per-AMC source badge (2026-07-08 follow-up): each row also carries a
+`source_tag` ("auto"/"manual"/"mixed"/"none") derived from that AMC's own
+per-field `mode` values (`_source_tag_for`) — a glance-able "is this AMC
+automated or manual overall" badge next to the AMC name, so the FE doesn't
+require scanning every one of the 7 field cells. Manual's short code is "ML"
+(not "M") because "M" is already the frequency code for "Monthly" — a bare
+`mode="M"` cell would have read as "M·M 334" (manual, monthly, 334), ambiguous
+at a glance; "ML·M 334" is unambiguous.
 """
 
 from __future__ import annotations
@@ -147,9 +156,9 @@ def _short_name(amc_name: str) -> str:
 # Unlisted AMC/field combos default to ("-", "-") (no source yet).
 # ---------------------------------------------------------------------------
 _AUTO_MONTHLY = ("A", "M")
-_MANUAL_MONTHLY = ("M", "M")
-_MANUAL_ANNUAL = ("M", "Y")
-_MANUAL_ONCE = ("M", "O")
+_MANUAL_MONTHLY = ("ML", "M")
+_MANUAL_ANNUAL = ("ML", "Y")
+_MANUAL_ONCE = ("ML", "O")
 _NONE = ("-", "-")
 
 _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
@@ -186,6 +195,21 @@ _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
 
 def _class_for(short: str, field: CoverageField) -> tuple[str, str]:
     return _SOURCE_CLASS.get(short, {}).get(field, _NONE)
+
+
+def _source_tag_for(fields: dict[CoverageField, CoverageCell]) -> str:
+    """Overall per-AMC source classification for the AMC-column badge, derived
+    from this row's own field modes (never a separate/parallel source of truth
+    — see AmcCoverageRow.source_tag docstring). Fields with mode "-" (no known
+    source yet) are ignored; only known-source fields vote."""
+    modes = {cell.mode for cell in fields.values() if cell.mode != "-"}
+    if not modes:
+        return "none"
+    if modes == {"A"}:
+        return "auto"
+    if modes == {"ML"}:
+        return "manual"
+    return "mixed"
 
 
 # A scheme group key: the taxonomy-derived clean name (already strips
@@ -313,6 +337,7 @@ async def get_amc_coverage(
                 fund_count=fund_count,
                 fields=fields,
                 completeness_pct=completeness_pct,
+                source_tag=_source_tag_for(fields),  # type: ignore[arg-type]
             )
         )
 

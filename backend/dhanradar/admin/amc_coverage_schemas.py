@@ -52,7 +52,7 @@ class CoverageCell(BaseModel):
     stale classification can never distort the real coverage number."""
 
     covered_count: int
-    mode: Literal["A", "M", "-"]  # Automatic scraper / Manual upload / none
+    mode: Literal["A", "ML", "-"]  # Automatic scraper / Manual upload / none
     freq: Literal["Y", "W", "M", "D", "O", "-"]  # yearly/weekly/monthly/daily/once/none
 
 
@@ -64,6 +64,12 @@ class AmcCoverageRow(BaseModel):
     fund_count: int  # DISTINCT SCHEMES for this AMC (Growth/IDCW/Direct/Regular plan-variant ISINs of the same scheme count once — see amc_coverage_router._SCHEME_KEY)
     fields: dict[CoverageField, CoverageCell]
     completeness_pct: float  # equal-weighted average across the 7 fields, 0-100
+    # Overall per-AMC source classification, derived from this row's own `fields`
+    # modes (see amc_coverage_router._source_tag_for) — shown as a badge next to
+    # the AMC name so "which AMCs are automated vs manual" is a glance, not a
+    # per-cell scan. "none" when no field has a known source yet (e.g. staged
+    # but not yet uploaded).
+    source_tag: Literal["auto", "manual", "mixed", "none"]
 
 
 class CoverageSummary(BaseModel):
@@ -95,9 +101,15 @@ class CoverageMeta(BaseModel):
         "of their ISINs. Overall: the scheme-count-weighted average of every AMC's "
         "completeness_pct."
     )
-    mode_definition: str = "A = automatic scraper · M = manual upload · - = no source yet."
+    mode_definition: str = "A = automatic scraper · ML = manual upload · - = no source yet."
     freq_definition: str = (
         "Y = yearly · W = weekly · M = monthly · D = daily · O = once · - = none."
+    )
+    source_tag_definition: str = (
+        "Badge next to the AMC name: auto = every field with a known source is "
+        "automatic · manual = every field with a known source is a manual upload · "
+        "mixed = some fields automatic and some manual · no badge = no field has a "
+        "known source yet."
     )
     disclaimer: str = (
         "Data-coverage counts only. No fund score, rating, or recommendation is shown "
