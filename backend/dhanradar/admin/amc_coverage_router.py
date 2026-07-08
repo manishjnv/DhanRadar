@@ -16,6 +16,22 @@ accurate as of the request. `mode`/`freq` (source classification) come from the
 static `_SOURCE_CLASS` table below, which must be updated by hand whenever a new
 scraper/manual pipeline is added — it is metadata/context only and never affects
 the covered_count itself, so a stale entry here can't distort the real numbers.
+
+Scheme-level grouping (confirmed 2026-07-08 — a founder-flagged 2.8% overall
+completeness turned out to be a real denominator bug, not just a low number):
+AMFI issues MANY plan-variant ISINs per scheme (Growth/IDCW-Daily/IDCW-Monthly/
+Direct/Regular/...), but the enrichment pipeline (AUM/TER/riskometer/benchmark)
+writes a value to only the ONE ISIN the resolver matched, never to its sibling
+plan-variant ISINs of the same scheme (confirmed: HDFC Liquid Fund has 9
+plan-variant ISINs, only 1 has aum_crore populated). Counting every ISIN as its
+own "fund" therefore inflates the denominator ~2.6x relative to real distinct
+schemes (14,910 ISIN rows vs 5,603 distinct (amc, scheme) pairs) and made the
+metric look far harsher than the actual state of knowledge. `_SCHEME_KEY` below
+groups by `mf_funds.fund_name_short` (the existing taxonomy-derived clean name
+that already strips plan/option/frequency noise — see `mf/taxonomy.py::
+derive_short_name`), falling back to the ISIN itself for the ~0.3% of rows with
+no short name. A scheme now counts as "covered" for a field if ANY of its
+plan-variant ISINs has that field populated.
 """
 
 from __future__ import annotations
@@ -172,9 +188,23 @@ def _class_for(short: str, field: CoverageField) -> tuple[str, str]:
     return _SOURCE_CLASS.get(short, {}).get(field, _NONE)
 
 
+# A scheme group key: the taxonomy-derived clean name (already strips
+# plan/option/frequency noise so Growth/IDCW-Daily/Direct/Regular ISINs of the
+# SAME scheme collapse together), falling back to the ISIN for the rare row
+# with no derived short name — never groups two DIFFERENT schemes together,
+# only variants of the same one.
+_SCHEME_KEY = func.coalesce(MfFund.fund_name_short, MfFund.isin)
+
+
 async def _covered_by_amc(db: AsyncSession, predicate) -> dict[str, int]:
-    """count(*) of `column IS NOT NULL`-style rows in mf_funds, grouped by amc_name."""
-    stmt = select(MfFund.amc_name, func.count()).where(predicate).group_by(MfFund.amc_name)
+    """count(DISTINCT scheme) of rows in mf_funds matching `predicate`, grouped by
+    amc_name — a scheme counts once even if only one of its plan-variant ISINs
+    satisfies the predicate (see _SCHEME_KEY / module docstring)."""
+    stmt = (
+        select(MfFund.amc_name, func.count(func.distinct(_SCHEME_KEY)))
+        .where(predicate)
+        .group_by(MfFund.amc_name)
+    )
     result = await db.execute(stmt)
     return {row[0]: row[1] for row in result.all() if row[0]}
 
@@ -188,18 +218,23 @@ async def get_amc_coverage(
     today = now.date()
     nfo_cutoff = today - timedelta(days=NFO_WINDOW_DAYS)
 
-    # Funds per AMC (also gives total_funds / total_amcs).
-    funds_stmt = select(MfFund.amc_name, func.count()).group_by(MfFund.amc_name)
+    # Distinct schemes per AMC (also gives total_funds / total_amcs) — deduped by
+    # _SCHEME_KEY, NOT a raw ISIN-row count (see module docstring).
+    funds_stmt = select(MfFund.amc_name, func.count(func.distinct(_SCHEME_KEY))).group_by(
+        MfFund.amc_name
+    )
     funds_by_amc: dict[str, int] = {
         row[0]: row[1] for row in (await db.execute(funds_stmt)).all() if row[0]
     }
     total_funds = sum(funds_by_amc.values())
     total_amcs = len(funds_by_amc)
 
-    # NFO count (platform-wide — launch_date within the trailing window).
+    # NFO count (platform-wide — launch_date within the trailing window),
+    # deduped by scheme so a brand-new scheme's Direct+Regular ISINs don't
+    # double-count as 2 NFOs.
     nfo_count = (
         await db.execute(
-            select(func.count()).where(
+            select(func.count(func.distinct(_SCHEME_KEY))).where(
                 MfFund.launch_date.is_not(None), MfFund.launch_date >= nfo_cutoff
             )
         )
@@ -214,9 +249,10 @@ async def get_amc_coverage(
         db, (MfFund.exit_load_pct.is_not(None)) | (MfFund.exit_load_days.is_not(None))
     )
 
-    # Constituents: distinct fund ISIN with >=1 constituent row, grouped by amc_name.
+    # Constituents: distinct SCHEME with >=1 sibling ISIN having a constituent row,
+    # grouped by amc_name (see _SCHEME_KEY / module docstring).
     constituents_stmt = (
-        select(MfFund.amc_name, func.count(func.distinct(MfFundConstituent.isin)))
+        select(MfFund.amc_name, func.count(func.distinct(_SCHEME_KEY)))
         .join(MfFundConstituent, MfFundConstituent.isin == MfFund.isin)
         .group_by(MfFund.amc_name)
     )
@@ -224,9 +260,10 @@ async def get_amc_coverage(
         row[0]: row[1] for row in (await db.execute(constituents_stmt)).all() if row[0]
     }
 
-    # Manager: distinct CURRENT (end_date IS NULL) scheme_uid, grouped by amc_name.
+    # Manager: distinct SCHEME with >=1 sibling ISIN having a CURRENT
+    # (end_date IS NULL) manager row, grouped by amc_name.
     manager_stmt = (
-        select(MfFund.amc_name, func.count(func.distinct(MfFundManagerHistory.scheme_uid)))
+        select(MfFund.amc_name, func.count(func.distinct(_SCHEME_KEY)))
         .join(MfFundManagerHistory, MfFundManagerHistory.scheme_uid == MfFund.isin)
         .where(MfFundManagerHistory.end_date.is_(None))
         .group_by(MfFund.amc_name)
