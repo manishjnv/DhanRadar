@@ -1271,7 +1271,7 @@ export type CoverageField =
 
 export interface CoverageCell {
   covered_count: number;
-  mode: 'A' | 'M' | '-';
+  mode: 'A' | 'ML' | '-';
   freq: 'Y' | 'W' | 'M' | 'D' | 'O' | '-';
 }
 
@@ -1281,6 +1281,7 @@ export interface AmcCoverageRow {
   fund_count: number;
   fields: Record<CoverageField, CoverageCell>;
   completeness_pct: number;
+  source_tag: 'auto' | 'manual' | 'mixed' | 'none';
 }
 
 export interface CoverageSummary {
@@ -1300,6 +1301,7 @@ export interface CoverageMeta {
   completeness_definition: string;
   mode_definition: string;
   freq_definition: string;
+  source_tag_definition: string;
   disclaimer: string;
 }
 

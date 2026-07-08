@@ -97,7 +97,9 @@ export default function AdminAmcCoveragePage() {
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <CardTitle id="amc-coverage-table">Per-AMC Coverage</CardTitle>
-                  <HelpTip tip={`${data.meta.mode_definition} ${data.meta.freq_definition}`} />
+                  <HelpTip
+                    tip={`${data.meta.mode_definition} ${data.meta.freq_definition} ${data.meta.source_tag_definition}`}
+                  />
                 </div>
               </CardHeader>
               <CardBody>

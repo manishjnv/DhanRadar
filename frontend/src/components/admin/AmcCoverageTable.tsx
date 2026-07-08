@@ -19,10 +19,41 @@ import type { AmcCoverageRow, CoverageField } from '@/features/admin/api';
 
 export type AmcSortKey = 'amc' | 'fund_count' | 'completeness' | CoverageField;
 
-function formatCell(mode: 'A' | 'M' | '-', freq: string, count: number): string {
+function formatCell(mode: 'A' | 'ML' | '-', freq: string, count: number): string {
   const n = count.toLocaleString('en-IN');
   if (mode === '-') return n;
   return `${mode}\u00B7${freq} ${n}`;
+}
+
+// Overall per-AMC source badge, rendered next to the short name so "which
+// AMCs are automated vs manual" is a glance, not a per-cell scan. "none" is
+// intentionally not rendered (an untracked AMC gets no badge, not a noisy one).
+const SOURCE_TAG_LABEL: Record<AmcCoverageRow['source_tag'], string> = {
+  auto: 'Auto',
+  manual: 'Manual',
+  mixed: 'Mixed',
+  none: '',
+};
+
+const SOURCE_TAG_CLASSES: Record<AmcCoverageRow['source_tag'], string> = {
+  auto: 'bg-royal/10 text-royal',
+  manual: 'bg-amber/10 text-amber',
+  mixed: 'bg-ink-muted/15 text-ink-muted',
+  none: '',
+};
+
+function SourceTagBadge({ tag }: { tag: AmcCoverageRow['source_tag'] }) {
+  if (tag === 'none') return null;
+  return (
+    <span
+      className={cn(
+        'ml-1.5 inline-block rounded px-1 py-0.5 align-middle font-mono text-[9px] font-semibold uppercase tracking-wide',
+        SOURCE_TAG_CLASSES[tag],
+      )}
+    >
+      {SOURCE_TAG_LABEL[tag]}
+    </span>
+  );
 }
 
 function SortHeader({
@@ -174,7 +205,8 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
                   title={row.amc_name}
                   className="py-1 px-2 text-left font-medium text-ink whitespace-nowrap"
                 >
-                  {row.short_name}
+                  <span>{row.short_name}</span>
+                  <SourceTagBadge tag={row.source_tag} />
                 </th>
                 <td className="py-1 px-2 text-right font-mono tabular-nums text-ink-secondary">
                   {row.fund_count.toLocaleString('en-IN')}
@@ -199,7 +231,8 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
         </table>
       </div>
       <p className="text-caption text-ink-muted">
-        A=auto M=manual &middot; Y/W/M/D/O=frequency &middot; number = funds covered
+        A=auto ML=manual &middot; Y/W/M/D/O=frequency &middot; number = funds covered &middot;
+        Auto/Manual/Mixed badge next to AMC = that AMC&apos;s overall source
       </p>
     </div>
   );

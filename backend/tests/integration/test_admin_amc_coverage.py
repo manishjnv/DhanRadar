@@ -165,6 +165,10 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
     for f in ("ter", "riskometer", "benchmark", "manager", "exit_load"):
         assert fields[f]["covered_count"] == 0
 
+    # "Test AMC Alpha Limited" is not in _SOURCE_CLASS — every field's mode is
+    # "-" (no known source yet), so the overall per-AMC badge is "none".
+    assert row["source_tag"] == "none"
+
     # completeness_pct: equal-weighted average of per-field covered-fraction
     # across the 7 fields = ((1/2) + (1/2) + 0 + 0 + 0 + 0 + 0) / 7 * 100.
     expected_completeness = round(100.0 * ((0.5 + 0.5) / 7), 1)

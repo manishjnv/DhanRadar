@@ -33,6 +33,7 @@ function makeRow(overrides: Partial<AmcCoverageRow>): AmcCoverageRow {
     fund_count: 10,
     fields: emptyFields,
     completeness_pct: 0,
+    source_tag: 'none',
     ...overrides,
   };
 }
@@ -112,6 +113,34 @@ describe('AmcCoverageTable', () => {
 
   it('renders the mode/frequency legend line', () => {
     render(<AmcCoverageTable rows={ROWS} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
-    expect(screen.getByText(/A=auto M=manual/)).toBeInTheDocument();
+    expect(screen.getByText(/A=auto ML=manual/)).toBeInTheDocument();
+  });
+
+  it('renders no source badge for an AMC with no known source (source_tag=none)', () => {
+    render(<AmcCoverageTable rows={ROWS} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument();
+    expect(screen.queryByText('Manual')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mixed')).not.toBeInTheDocument();
+  });
+
+  it('renders an Auto badge next to the AMC name when source_tag=auto', () => {
+    const rows = [makeRow({ short_name: 'Nippon', source_tag: 'auto' })];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.getByText('Nippon')).toBeInTheDocument();
+    expect(screen.getByText('Auto')).toBeInTheDocument();
+  });
+
+  it('renders a Manual badge next to the AMC name when source_tag=manual', () => {
+    const rows = [makeRow({ short_name: 'SBI', source_tag: 'manual' })];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.getByText('SBI')).toBeInTheDocument();
+    expect(screen.getByText('Manual')).toBeInTheDocument();
+  });
+
+  it('renders a Mixed badge next to the AMC name when source_tag=mixed', () => {
+    const rows = [makeRow({ short_name: 'Kotak', source_tag: 'mixed' })];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.getByText('Kotak')).toBeInTheDocument();
+    expect(screen.getByText('Mixed')).toBeInTheDocument();
   });
 });
