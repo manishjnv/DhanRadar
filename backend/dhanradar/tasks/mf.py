@@ -1662,7 +1662,23 @@ def nav_daily_fetch() -> str:
         return "nav_daily_fetch: failed — see worker logs"
 
 
+_NAV_SOURCE = "amfi_nav"
+_NAV_TASK_NAME = "dhanradar.tasks.mf.nav_daily_fetch"
+
+
 async def _nav_daily_pipeline() -> str:
+    from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
+
+    if await is_source_paused(_NAV_SOURCE):
+        return "nav_daily_fetch: skipped (paused)"
+
+    async with ingestion_run(_NAV_TASK_NAME, _NAV_SOURCE) as (_run_id, stats):
+        summary = await _nav_daily_pipeline_body(stats)
+
+    return summary
+
+
+async def _nav_daily_pipeline_body(stats) -> str:
     from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert
 
@@ -1673,6 +1689,14 @@ async def _nav_daily_pipeline() -> str:
     logger.info("nav_daily_fetch: fetching NAVAll.txt from AMFI")
     rows = await amfi.fetch_navall_rows_with_category()
     logger.info("nav_daily_fetch: fetched %d rows", len(rows))
+    stats.fetched = len(rows)
+
+    if not rows:
+        # AMFI returned nothing — likely bot-blocked/unreachable, not a "success".
+        stats.reachable = False
+        stats.last_error = "amfi_navall_zero_rows"
+        stats.status_override = "partial"
+        return "nav_daily_fetch: 0 rows fetched from AMFI — see source_health"
 
     # Taxonomy validation — best-effort; never let logging raise and break ingestion.
     try:
@@ -1750,6 +1774,8 @@ async def _nav_daily_pipeline() -> str:
 
         await db.commit()
 
+    stats.reachable = True
+    stats.written = n_nav
     summary = f"nav_daily_fetch: {n_nav} navs, {n_funds} funds"
     logger.info(summary)
     return summary
@@ -3145,8 +3171,31 @@ def mf_constituents_fetch() -> str:
         return "mf_constituents_fetch: failed — see worker logs"
 
 
+_CONSTITUENTS_SOURCE = "amc_constituents"
+_CONSTITUENTS_TASK_NAME = "dhanradar.tasks.mf.mf_constituents_fetch"
+
+
 async def _mf_constituents_pipeline() -> str:
-    """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents."""
+    from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
+
+    if await is_source_paused(_CONSTITUENTS_SOURCE):
+        return "mf_constituents_fetch: skipped (paused)"
+
+    async with ingestion_run(_CONSTITUENTS_TASK_NAME, _CONSTITUENTS_SOURCE) as (_run_id, stats):
+        summary, total_rows, _aum_updates = await _mf_constituents_pipeline_body()
+        stats.written = total_rows
+        stats.fetched = total_rows
+        stats.reachable = total_rows > 0
+
+    return summary
+
+
+async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
+    """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents.
+
+    Returns (summary, total_rows, aum_updates) so the caller can stamp
+    ingestion_run stats without relying on module-global state.
+    """
     total_rows = 0
     aum_updates = 0
 
@@ -3372,11 +3421,12 @@ async def _mf_constituents_pipeline() -> str:
                         peak / 1_048_576,
                     )
 
-    return (
+    summary = (
         f"mf_constituents_fetch done: "
         f"total_rows={total_rows} aum_updates={aum_updates} "
         f"amcs={len(_AMC_DISCLOSURE_ROOTS)}"
     )
+    return summary, total_rows, aum_updates
 
 
 async def _process_amc_direct(

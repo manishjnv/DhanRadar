@@ -32,45 +32,64 @@ def refresh_market_news() -> str:
     """
     from dhanradar.db import TaskSessionLocal
     from dhanradar.news import service
+    from dhanradar.tasks.ingestion_run import ingestion_run, is_source_paused
+
+    _SOURCE = "rbi_rss"
+    _TASK_NAME = "dhanradar.tasks.news.refresh_market_news"
 
     async def _go() -> str:
-        async with TaskSessionLocal() as db:
-            # Each sanctioned source runs in its own try so one failing source
-            # never blocks the other (RSS feeds are IP-blocked from KVM4; GDELT is
-            # VPS-reachable — they fail independently). GDELT is ADDITIVE.
-            rss_count = 0
-            gdelt_count = 0
+        if await is_source_paused(_SOURCE):
+            return "news: skipped (paused)"
 
-            try:
-                rss_count = await service.fetch_and_upsert_rss_news(db)
-            except Exception:
-                logger.exception("news: RSS ingest failed (isolated) — continuing")
-                await db.rollback()
+        async with ingestion_run(_TASK_NAME, _SOURCE) as (run_id, stats):
+            async with TaskSessionLocal() as db:
+                # Each sanctioned source runs in its own try so one failing source
+                # never blocks the other (RSS feeds are IP-blocked from KVM4; GDELT is
+                # VPS-reachable — they fail independently). GDELT is ADDITIVE.
+                rss_count = 0
+                gdelt_count = 0
+                rss_ok = False
+                gdelt_ok = False
 
-            try:
-                gdelt_count = await service.fetch_and_upsert_gdelt_news(db)
-            except Exception:
-                logger.exception("news: GDELT ingest failed (isolated) — continuing")
-                await db.rollback()
+                try:
+                    rss_count = await service.fetch_and_upsert_rss_news(db)
+                    rss_ok = True
+                except Exception:
+                    logger.exception("news: RSS ingest failed (isolated) — continuing")
+                    await db.rollback()
 
-            total = rss_count + gdelt_count
-            if total > 0:
-                return f"news: upserted {rss_count} RSS + {gdelt_count} GDELT items"
+                try:
+                    gdelt_count = await service.fetch_and_upsert_gdelt_news(db)
+                    gdelt_ok = True
+                except Exception:
+                    logger.exception("news: GDELT ingest failed (isolated) — continuing")
+                    await db.rollback()
 
-            # Both live sources empty — fall back to curated seed so the feed is
-            # never empty.
-            logger.warning(
-                "news: RSS+GDELT returned 0 items — falling back to curated seed"
-            )
-            try:
-                count = await service.upsert_curated_news(db)
-                return f"news: live empty, upserted {count} curated fallback items"
-            except Exception:
-                logger.exception(
-                    "news: refresh failed; last persisted rows untouched"
-                )
-                await db.rollback()
-                return "news: refresh failed (see logs)"
+                total = rss_count + gdelt_count
+                stats.fetched = total
+                stats.written = total
+                stats.reachable = rss_ok or gdelt_ok
+                if not rss_ok:
+                    stats.failed += 1
+                if not gdelt_ok:
+                    stats.failed += 1
+
+                if total > 0:
+                    return f"news: upserted {rss_count} RSS + {gdelt_count} GDELT items"
+
+                # Both live sources empty — fall back to curated seed so the feed is
+                # never empty.
+                logger.warning("news: RSS+GDELT returned 0 items — falling back to curated seed")
+                stats.last_error = "rss_and_gdelt_zero_items"
+                stats.status_override = "partial"
+                try:
+                    count = await service.upsert_curated_news(db)
+                    return f"news: live empty, upserted {count} curated fallback items"
+                except Exception:
+                    logger.exception("news: refresh failed; last persisted rows untouched")
+                    await db.rollback()
+                    stats.status_override = "failed"
+                    return "news: refresh failed (see logs)"
 
     return asyncio.run(_go())
 
