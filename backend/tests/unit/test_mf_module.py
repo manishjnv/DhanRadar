@@ -1214,6 +1214,42 @@ async def test_discover_all_urls_static_matches_embedded_json_not_just_href():
     assert "\\" not in links[0]
 
 
+async def test_discover_all_urls_static_excludes_non_portfolio_same_month_document():
+    """Real production bug found live 2026-07-08 (first deploy of the TATA
+    scraper): TATA's `/schemes-related/portfolio` page's embedded JSON carries
+    OTHER document categories in the SAME payload as the real portfolio files
+    (an "Debt Index Replication Factor" note, AAUM annexures, ...). Once the
+    href=-anchor requirement was dropped (previous test), a same-month/year
+    document that ISN'T a portfolio disclosure at all can false-match the
+    month/year filter and get selected INSTEAD of the real file — confirmed
+    live: a "Debt Index Replication Factor as on 30th Jun 2026.xlsx" beat the
+    real "Monthly Portfolio as on 31st May 2026.xlsx" for a June-2026 target
+    (both "jun" and "2026" appear in its URL), and the real portfolio scraper
+    run silently wrote ZERO rows because that file isn't a SEBI holdings
+    disclosure. Every AMC's real portfolio file has "portfolio" in its own
+    filename — restricting to links containing "portfolio" BEFORE the
+    month/year filter fixes this without dropping any real file."""
+    from dhanradar.tasks.mf import _discover_all_urls_static
+
+    html = (
+        '{"field_media_document":"https://betacms.tatamutualfund.com/system/files/'
+        '2026-07/Debt%20Index%20Replication%20Factor%20as%20on%2030th%20Jun%202026.xlsx"},'
+        '{"field_media_document":"https://betacms.tatamutualfund.com/system/files/'
+        '2026-06/Monthly%20Portfolio%20as%20on%2031st%20May%202026.xlsx"}'
+    ).replace('"', '\\"')
+    client = _FakeStaticClient(html)
+
+    links = await _discover_all_urls_static(
+        client,
+        "https://www.tatamutualfund.com/schemes-related/portfolio",
+        "TATA",
+        target_month=date(2026, 6, 1),
+    )
+
+    assert not any("Debt" in link or "Replication" in link for link in links)
+    assert any("Portfolio" in link and "May" in link for link in links)
+
+
 def test_pick_canonical_plan_isin_prefers_direct_growth_among_tied_candidates():
     """A single-scheme portfolio disclosure never states which plan/option ISIN
     its holdings belong to (holdings are identical across all Direct/Regular x

@@ -3691,6 +3691,23 @@ async def _discover_all_urls_static(
     raw_hrefs = [h.rstrip("\\") for h in raw_hrefs]
     links: list[str] = list(dict.fromkeys(urljoin(url, h) for h in raw_hrefs))
 
+    # Restrict to links whose URL/filename actually says "portfolio" BEFORE the
+    # month/year filter below — required once the match is generalized beyond
+    # href= anchors (TATA, B87): a single "Forms & Downloads" page's embedded
+    # JSON can carry OTHER document categories too (AAUM annexures, a "Debt
+    # Index Replication Factor" note, TER tables) that are dated for the SAME
+    # month/year as the real portfolio file. Verified live 2026-07-08: TATA's
+    # July-2026-dated "Debt Index Replication Factor...xlsx" false-matched the
+    # June-2026 target-month filter below (both "jun" and "2026" appear in its
+    # URL) and was fetched INSTEAD of the real portfolio file, silently writing
+    # zero rows (that file isn't a SEBI holdings disclosure at all). Every
+    # AMC's genuine portfolio file (TATA/PPFAS/MIRAE) has "portfolio" in its
+    # own filename, so this narrows the false-positive surface without
+    # dropping anyone's real files.
+    portfolio_links = [lnk for lnk in links if "portfolio" in lnk.lower()]
+    if portfolio_links:
+        links = portfolio_links
+
     if target_month and links:
         month_abbr = target_month.strftime("%b").lower()  # e.g. "may"
         year_str = target_month.strftime("%Y")  # e.g. "2026"
