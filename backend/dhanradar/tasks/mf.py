@@ -174,6 +174,45 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
         "url": "https://www.tatamutualfund.com/schemes-related/portfolio",
         "static_multi": True,
     },
+    # B90 (2026-07-08) — 4 genuinely NEW AMCs (no prior recognition at all),
+    # investigated real-site-first per the standing discipline. Each uses a
+    # DIFFERENT resolution mechanism — no two of these AMCs share a strategy:
+    #
+    # MOTILAL_OSWAL: a public (no auth/nonce) Adobe-AEM JSON search API.
+    # CANARA_ROBECO: a plain GET whose query string IS the month/year filter
+    #   (searchyear/filteryear/filtermonth) plus GET-addressable pagination —
+    #   no cookie/JS needed once the exact param shape is known.
+    # NAVI: a WordPress REST API gated by a `wp-nonce` header whose value is
+    #   embedded in plain (no-JS) page HTML — a 2-step plain-httpx flow.
+    # ZERODHA: sits in the Playwright bucket (`zerodha_multi`) — its
+    #   "All Schemes" download button fans out to every scheme's file via
+    #   client-side JS with no discoverable static equivalent found.
+    {
+        "name": "MOTILAL_OSWAL",
+        "aem_search_api_url": (
+            "https://www.motilaloswalmf.com/content/aem-cloud-dept-backend-motilal-oswal/"
+            "api/search-documents.json?year={year}&category=month%20end%20portfolio&month=&type=mf"
+        ),
+        "aem_base_url": "https://www.motilaloswalmf.com",
+    },
+    {
+        "name": "CANARA_ROBECO",
+        "paginated_query_url_template": (
+            "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/"
+            "scheme-monthly-portfolio/?searchyear={fy}&filteryear={year}&filtermonth={month:02d}&pagination={page}"
+        ),
+    },
+    {
+        "name": "NAVI",
+        "nonce_page_url": "https://navi.com/mutual-fund/downloads/portfolio",
+        "nonce_api_url": "https://navi.com/wp-json/nv/v1/documents",
+        "nonce_api_category": "884",
+    },
+    {
+        "name": "ZERODHA",
+        "url": "https://www.zerodhafundhouse.com/resources/disclosures",
+        "zerodha_multi": True,
+    },
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
     {
         "name": "FRANKLIN",
@@ -181,6 +220,24 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     },
     # DSP: domain moved from dspmf.com (GoDaddy) to dspim.com; disclosure page is JS-rendered.
     {"name": "DSP", "url": "https://www.dspim.com/downloads"},
+    # B90 investigated-and-blocked (documented, no scraper added — code
+    # comments only, not list entries, since no working strategy exists):
+    #   - BANDHAN: its "Disclosure of Detailed Scheme Portfolios" UI calls
+    #     `pnservices.bandhanmutual.com/.../encdec/...v1/dashboard/cms-call`
+    #     — an ENCRYPTED internal API ("encdec" = encrypt/decrypt). Reverse-
+    #     engineering an undocumented encryption scheme is disproportionate
+    #     effort for a fragile result (breaks silently on any key/scheme
+    #     rotation); genuinely blocked, not a bot-protection case.
+    #   - QUANT: its "Notice of Monthly & Fortnightly Portfolio" page only
+    #     hosts PDF *notices* (announcements that a disclosure was published),
+    #     never the underlying SEBI holdings spreadsheet itself; no other
+    #     nav path or predictable URL template found for the real file.
+    #   - GROWW: "Groww Mutual Fund" (the AMC, SEBI-registered "Groww Asset
+    #     Management Limited") has NO reachable dedicated investor site —
+    #     `growwmf.com` is a parked GoDaddy domain (confirmed via a real
+    #     browser render, not just curl), and groww.in (the broker platform)
+    #     has no AMC-specific statutory-disclosure section, only a
+    #     fund-comparison directory listing THIRD-PARTY AMCs' funds.
 ]
 
 
@@ -3097,12 +3154,22 @@ async def _mf_constituents_pipeline() -> str:
     template_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("direct_url_template")]
     json_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("json_api_url_template")]
     static_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("static_multi")]
+    aem_json_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("aem_search_api_url")]
+    paginated_query_amcs = [
+        a for a in _AMC_DISCLOSURE_ROOTS if a.get("paginated_query_url_template")
+    ]
+    nonce_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("nonce_api_url")]
+    zerodha_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("zerodha_multi")]
     playwright_amcs = [
         a
         for a in _AMC_DISCLOSURE_ROOTS
         if not a.get("direct_url_template")
         and not a.get("json_api_url_template")
         and not a.get("static_multi")
+        and not a.get("aem_search_api_url")
+        and not a.get("paginated_query_url_template")
+        and not a.get("nonce_api_url")
+        and not a.get("zerodha_multi")
     ]
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
@@ -3139,6 +3206,40 @@ async def _mf_constituents_pipeline() -> str:
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
+        # --- AEM JSON-search-API AMCs (B90: MOTILAL_OSWAL — public, no auth) ---
+        for amc in aem_json_amcs:
+            amc_name = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_aem_json_api(
+                    client, amc_name, amc["aem_search_api_url"], amc["aem_base_url"]
+                )
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
+        # --- wp-nonce API AMCs (B90: NAVI — WordPress REST API, nonce from plain HTML) ---
+        for amc in nonce_api_amcs:
+            amc_name = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_nonce_api(
+                    client,
+                    amc_name,
+                    amc["nonce_page_url"],
+                    amc["nonce_api_url"],
+                    amc["nonce_api_category"],
+                )
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
         # --- Static-multi AMCs (plain HTML page, one XLSX per scheme, no JS rendering) ---
         for amc in static_multi_amcs:
             amc_name = amc["name"]
@@ -3153,7 +3254,7 @@ async def _mf_constituents_pipeline() -> str:
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
         # --- Playwright AMCs (JS SPA discovery) ---
-        if playwright_amcs:
+        if playwright_amcs or zerodha_multi_amcs or paginated_query_amcs:
             import tracemalloc
 
             tracemalloc.start()
@@ -3194,15 +3295,68 @@ async def _mf_constituents_pipeline() -> str:
                                 logger.exception(
                                     "mf_constituents_fetch amc=%s failed — skipping", amc_name
                                 )
+                        # --- ZERODHA (B90): dedicated Playwright interaction —
+                        # "All Schemes" + "Download Report" fans out to every
+                        # scheme's file via client-side JS; no discoverable
+                        # static equivalent (see _AMC_DISCLOSURE_ROOTS comment).
+                        for amc in zerodha_multi_amcs:
+                            amc_name = amc["name"]
+                            if not first_amc:
+                                await asyncio.sleep(10)
+                            first_amc = False
+                            try:
+                                rows, aum_cnt = await _process_amc_zerodha(
+                                    client, browser, amc_name, amc["url"]
+                                )
+                                total_rows += rows
+                                aum_updates += aum_cnt
+                                logger.info(
+                                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
+                                    amc_name,
+                                    rows,
+                                    aum_cnt,
+                                )
+                            except Exception:  # noqa: BLE001
+                                logger.exception(
+                                    "mf_constituents_fetch amc=%s failed — skipping", amc_name
+                                )
+                        # --- CANARA_ROBECO (B90): the site's WAF blocks the
+                        # honest DhanRadar UA on plain httpx requests (403);
+                        # a real browser fingerprint (Playwright) is let
+                        # through for the exact same GET-addressable
+                        # month/year/pagination query string — see
+                        # _process_amc_paginated_query docstring.
+                        for amc in paginated_query_amcs:
+                            amc_name = amc["name"]
+                            if not first_amc:
+                                await asyncio.sleep(10)
+                            first_amc = False
+                            try:
+                                rows, aum_cnt = await _process_amc_paginated_query(
+                                    client, browser, amc_name, amc["paginated_query_url_template"]
+                                )
+                                total_rows += rows
+                                aum_updates += aum_cnt
+                                logger.info(
+                                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
+                                    amc_name,
+                                    rows,
+                                    aum_cnt,
+                                )
+                            except Exception:  # noqa: BLE001
+                                logger.exception(
+                                    "mf_constituents_fetch amc=%s failed — skipping", amc_name
+                                )
                     finally:
                         await browser.close()
             except Exception as e:  # noqa: BLE001
+                _all_pw_amcs = playwright_amcs + zerodha_multi_amcs + paginated_query_amcs
                 logger.warning(
                     "mf_constituents_fetch playwright unavailable (%s: %s) — skipping %d JS-SPA AMCs: %s",
                     type(e).__name__,
                     e,
-                    len(playwright_amcs),
-                    [a["name"] for a in playwright_amcs],
+                    len(_all_pw_amcs),
+                    [a["name"] for a in _all_pw_amcs],
                 )
             finally:
                 _, peak = tracemalloc.get_traced_memory()
@@ -3809,6 +3963,367 @@ async def _process_amc_static_multi(
     return 0, 0
 
 
+async def _fetch_parse_upsert_files(
+    client: httpx.AsyncClient, amc_name: str, file_urls: list[str]
+) -> tuple[int, int]:
+    """Shared fetch→parse→upsert loop for a list of already-discovered file URLs.
+
+    Every AMC-specific discovery strategy (B90: MOTILAL_OSWAL/CANARA_ROBECO/
+    NAVI) converges on this ONE download+parse+upsert loop — never a second
+    copy of it — matching the "reuse the existing parser" discipline already
+    enforced for `_parse_sebi_xlsx` itself. A single bad file (network error,
+    unparseable content) is logged and skipped; it never aborts the batch.
+    """
+    total_rows = 0
+    total_aum = 0
+    parsed_files = 0
+
+    for file_url in file_urls:
+        try:
+            resp = await client.get(
+                file_url,
+                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            )
+            resp.raise_for_status()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "mf_constituents_fetch amc=%s failed to fetch %s", amc_name, file_url, exc_info=True
+            )
+            continue
+
+        content_type = resp.headers.get("content-type", "")
+        file_bytes = resp.content
+
+        if "spreadsheetml" in content_type or file_url.lower().endswith((".xlsx", ".xls")):
+            parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+        elif "csv" in content_type or file_url.lower().endswith(".csv"):
+            parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+        else:
+            try:
+                parsed = _parse_sebi_xlsx(file_bytes, amc_name)
+            except Exception:  # noqa: BLE001
+                parsed = _parse_sebi_csv(file_bytes.decode("utf-8", errors="replace"), amc_name)
+
+        if not parsed:
+            logger.debug("mf_constituents_fetch amc=%s parsed 0 rows from %s", amc_name, file_url)
+            continue
+
+        rows, aum_cnt = await _upsert_constituents(parsed, amc_name)
+        total_rows += rows
+        total_aum += aum_cnt
+        parsed_files += 1
+
+    logger.info(
+        "mf_constituents_fetch amc=%s fetch_parse_upsert: parsed %d/%d files rows=%d",
+        amc_name,
+        parsed_files,
+        len(file_urls),
+        total_rows,
+    )
+    return total_rows, total_aum
+
+
+def _fiscal_year_str(target: date) -> str:
+    """India fiscal-year label "YYYY-YY" for a given date (April-start FY).
+
+    E.g. 2026-05-31 -> "2026-27" (FY starts April 2026); 2026-02-15 ->
+    "2025-26" (still inside the FY that started April 2025). Used by
+    CANARA_ROBECO's own site-side fiscal-year query param — confirmed live
+    2026-07-08 that passing a non-matching `searchyear` (e.g. calendar year
+    instead of fiscal year) makes the site return "No documents found" even
+    though the file genuinely exists for that month.
+    """
+    if target.month >= 4:
+        return f"{target.year}-{str(target.year + 1)[2:]}"
+    return f"{target.year - 1}-{str(target.year)[2:]}"
+
+
+async def _process_amc_aem_json_api(
+    client: httpx.AsyncClient, amc_name: str, search_api_url_template: str, base_url: str
+) -> tuple[int, int]:
+    """MOTILAL_OSWAL (B90): a public Adobe-AEM JSON search API — GET, no auth.
+
+    `search_api_url_template` already scopes `category=month end portfolio`
+    (server-side); the API returns ALL years mixed together in one call (a
+    `year=` param exists but empirically does not filter — confirmed live
+    2026-07-08), so this filters client-side by `title` prefix "Scheme
+    Portfolio Details" (the AMC's own consistent naming for the FULL monthly
+    holdings file — distinct from "Fortnightly Portfolio Report", a
+    different, partial disclosure the same API also returns) and takes the
+    single most-recently-published match.
+    """
+    import re as _re_mo
+    from urllib.parse import quote
+
+    now = datetime.now(UTC)
+    url = search_api_url_template.format(year=now.year)
+    try:
+        resp = await client.get(
+            url, headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"}
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "mf_constituents_fetch amc=%s aem-json-api call failed", amc_name, exc_info=True
+        )
+        return 0, 0
+
+    results = data.get("results", []) if isinstance(data, dict) else []
+    candidates = [
+        r
+        for r in results
+        if isinstance(r, dict)
+        and str(r.get("title", "")).strip().lower().startswith("scheme portfolio details")
+    ]
+    if not candidates:
+        logger.warning(
+            "mf_constituents_fetch amc=%s aem-json-api: no 'Scheme Portfolio Details' entries in %d results",
+            amc_name,
+            len(results),
+        )
+        return 0, 0
+
+    def _publish_key(r: dict) -> tuple:
+        # publishDate is "DD-MM-YYYY" — sort lexicographically by (YYYY, MM, DD).
+        m = _re_mo.match(r"(\d{2})-(\d{2})-(\d{4})", str(r.get("publishDate", "")))
+        return (m.group(3), m.group(2), m.group(1)) if m else ("0000", "00", "00")
+
+    latest = max(candidates, key=_publish_key)
+    path = latest.get("path", "")
+    if not path:
+        return 0, 0
+    file_url = base_url + "/".join(quote(seg) for seg in path.split("/"))
+
+    return await _fetch_parse_upsert_files(client, amc_name, [file_url])
+
+
+async def _process_amc_paginated_query(
+    client: httpx.AsyncClient, browser: Any, amc_name: str, url_template: str
+) -> tuple[int, int]:
+    """CANARA_ROBECO (B90): the discovery page's query string IS the
+    month/year filter, plus GET-addressable pagination (`&pagination=N`) —
+    but the site's WAF returns 403 to a plain httpx GET carrying DhanRadar's
+    honest identifying User-Agent (confirmed live 2026-07-08), while the
+    SAME query string succeeds with a real browser fingerprint. The actual
+    `.xlsx` files under `wp-content/uploads/` are NOT behind that WAF rule
+    (confirmed: 200 via plain httpx with the honest UA) — so this uses
+    Playwright ONLY to render the discovery/search page and read the
+    rendered link list, then hands the discovered URLs to the shared
+    `_fetch_parse_upsert_files` (plain httpx) for the actual downloads.
+
+    Tries the previous month first, then 2 months back (SEBI publication
+    lag). Paginates until a page returns no NEW links or a hard cap (20
+    pages — a real safety bound, not a tight one; the AMC's real per-month
+    scheme count is under 60, so even 10 files/page never approaches this).
+    """
+    now = datetime.now(UTC)
+    page = await browser.new_page()
+    try:
+        for months_back in (1, 2):
+            target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
+            fy = _fiscal_year_str(target.date())
+
+            seen: set[str] = set()
+            for page_num in range(1, 21):
+                url = url_template.format(
+                    fy=fy, year=target.year, month=target.month, page=page_num
+                )
+                try:
+                    await page.goto(url, wait_until="networkidle", timeout=30_000)
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "mf_constituents_fetch amc=%s paginated-query page=%d nav failed",
+                        amc_name,
+                        page_num,
+                        exc_info=True,
+                    )
+                    break
+
+                html = await page.content()
+                page_links = set(re.findall(r'href="([^"]+\.xlsx?[^"]*)"', html, re.IGNORECASE))
+                new_links = page_links - seen
+                if not new_links:
+                    break
+                seen |= new_links
+
+            if not seen:
+                logger.debug(
+                    "mf_constituents_fetch amc=%s paginated-query: no links for %s",
+                    amc_name,
+                    target.strftime("%B %Y"),
+                )
+                continue
+
+            logger.info(
+                "mf_constituents_fetch amc=%s paginated-query: %d files for %s",
+                amc_name,
+                len(seen),
+                target.strftime("%B %Y"),
+            )
+            return await _fetch_parse_upsert_files(client, amc_name, sorted(seen))
+    finally:
+        await page.close()
+
+    logger.warning(
+        "mf_constituents_fetch amc=%s paginated-query: no disclosure files found", amc_name
+    )
+    return 0, 0
+
+
+async def _process_amc_nonce_api(
+    client: httpx.AsyncClient,
+    amc_name: str,
+    nonce_page_url: str,
+    nonce_api_url: str,
+    category: str,
+) -> tuple[int, int]:
+    """NAVI (B90): WordPress REST API gated by a `wp-nonce` header — the
+    nonce value is embedded in the PLAIN (no-JS) page HTML
+    (`var navi_property = {...,"nonce":"<value>",...}`), so this is a
+    2-step plain-httpx flow: (1) GET the page, extract the nonce; (2) POST
+    the real query to the API with that nonce as a header. Verified live
+    2026-07-08 — no Playwright/browser session needed at all.
+
+    Tries the previous month first, then 2 months back (SEBI publication lag).
+    """
+    try:
+        page_resp = await client.get(
+            nonce_page_url,
+            headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+        )
+        page_resp.raise_for_status()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "mf_constituents_fetch amc=%s nonce-page fetch failed", amc_name, exc_info=True
+        )
+        return 0, 0
+
+    nonce_m = re.search(r'"nonce"\s*:\s*"([a-f0-9]+)"', page_resp.text)
+    if not nonce_m:
+        logger.warning(
+            "mf_constituents_fetch amc=%s could not find wp-nonce in page HTML", amc_name
+        )
+        return 0, 0
+    nonce = nonce_m.group(1)
+
+    now = datetime.now(UTC)
+    for months_back in (1, 2):
+        target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
+        financial_year = (
+            f"{target.year}-{target.year + 1}"
+            if target.month >= 4
+            else f"{target.year - 1}-{target.year}"
+        )
+        try:
+            api_resp = await client.post(
+                nonce_api_url,
+                data={
+                    "financial_year": financial_year,
+                    "value": target.strftime("%B"),
+                    "category": category,
+                    "type": "Monthly",
+                    "order": "DESC",
+                },
+                headers={
+                    "User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)",
+                    "wp-nonce": nonce,
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            )
+            api_resp.raise_for_status()
+            payload = api_resp.json()
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "mf_constituents_fetch amc=%s nonce-api call failed month=%s",
+                amc_name,
+                target.strftime("%B %Y"),
+                exc_info=True,
+            )
+            continue
+
+        if not payload.get("success"):
+            continue
+        file_urls = [d["url"] for d in payload.get("data", []) if d.get("url")]
+        if not file_urls:
+            logger.debug(
+                "mf_constituents_fetch amc=%s nonce-api: no files for %s",
+                amc_name,
+                target.strftime("%B %Y"),
+            )
+            continue
+
+        logger.info(
+            "mf_constituents_fetch amc=%s nonce-api: %d files for %s",
+            amc_name,
+            len(file_urls),
+            target.strftime("%B %Y"),
+        )
+        return await _fetch_parse_upsert_files(client, amc_name, file_urls)
+
+    logger.warning("mf_constituents_fetch amc=%s nonce-api: no disclosure files found", amc_name)
+    return 0, 0
+
+
+async def _process_amc_zerodha(
+    client: httpx.AsyncClient, browser: Any, amc_name: str, discovery_url: str
+) -> tuple[int, int]:
+    """ZERODHA (B90): the site's "Portfolio Disclosures" widget has no
+    discoverable static/JSON equivalent — its "All Schemes" + "Download
+    Report" action fans out to every scheme's file via client-side JS
+    (confirmed live 2026-07-08: clicking it fires one GET per scheme,
+    matching a real per-scheme URL, but no dynamic scheme-code list is
+    exposed anywhere else on the site to reconstruct those URLs without the
+    click). Reuses the SAME Playwright browser instance as the other
+    JS-SPA AMCs (no second `chromium.launch()`).
+    """
+    page = await browser.new_page()
+    file_urls: list[str] = []
+    try:
+
+        def _on_request(req: Any) -> None:
+            u = req.url
+            if "/statutory-reports/portfolio-disclosures/" in u and u.lower().endswith(
+                (".xlsx", ".xls")
+            ):
+                file_urls.append(u)
+
+        page.on("request", _on_request)
+        await page.goto(discovery_url, wait_until="networkidle", timeout=60_000)
+        await page.evaluate(
+            """() => {
+                const items = Array.from(document.querySelectorAll('*'))
+                    .filter(e => e.children.length === 0 && e.textContent.trim() === 'Portfolio Disclosures');
+                if (items.length) items[0].click();
+            }"""
+        )
+        await page.wait_for_timeout(1500)
+        await page.evaluate(
+            """() => {
+                const btns = Array.from(document.querySelectorAll('button'))
+                    .filter(b => b.textContent.trim() === 'Download Report');
+                if (btns.length) btns[0].click();
+            }"""
+        )
+        await page.wait_for_timeout(3000)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "mf_constituents_fetch amc=%s zerodha interaction failed", amc_name, exc_info=True
+        )
+    finally:
+        await page.close()
+
+    file_urls = list(dict.fromkeys(file_urls))
+    if not file_urls:
+        logger.warning("mf_constituents_fetch amc=%s zerodha: no file requests captured", amc_name)
+        return 0, 0
+
+    logger.info(
+        "mf_constituents_fetch amc=%s zerodha: %d scheme files captured", amc_name, len(file_urls)
+    )
+    return await _fetch_parse_upsert_files(client, amc_name, file_urls)
+
+
 class _XlrdSheetShim:
     """Wraps one xlrd `Sheet` to expose the single openpyxl worksheet method
     `_parse_sebi_xlsx` actually calls — `iter_rows(values_only=True)` — so the
@@ -4085,8 +4600,15 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         # single-keyword-hit check below and overwrites the
                         # correctly-detected current_scheme from an earlier row.
                         # It is never itself a scheme name, so exclude it before
-                        # the keyword-hit disambiguation runs.
-                        _kw_hits = [v for v in _kw_hits if not _FUND_SIZE_BANNER_RE.match(v)]
+                        # the keyword-hit disambiguation runs. Same treatment for
+                        # MOTILAL_OSWAL's "Back To Index" nav-link label (see
+                        # _BACK_TO_INDEX_RE docstring above).
+                        _kw_hits = [
+                            v
+                            for v in _kw_hits
+                            if not _FUND_SIZE_BANNER_RE.match(v)
+                            and not _BACK_TO_INDEX_RE.match(v.strip())
+                        ]
                         if len(_kw_hits) == 1:
                             candidate = _kw_hits[0]
                         else:
@@ -4099,7 +4621,9 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             _spaced = [
                                 v
                                 for v in non_empty
-                                if " " in v.strip() and not _FUND_SIZE_BANNER_RE.match(v)
+                                if " " in v.strip()
+                                and not _FUND_SIZE_BANNER_RE.match(v)
+                                and not _BACK_TO_INDEX_RE.match(v.strip())
                             ]
                             if len(_spaced) == 1:
                                 candidate = _spaced[0]
@@ -4412,6 +4936,17 @@ _SCHEME_TYPE_DESCRIPTION_RE = re.compile(r"^\s*an?\s+(open|close)[\s-]*ended\b",
 # looks for, so it must be excluded before that check runs.
 _FUND_SIZE_BANNER_RE = re.compile(r"^(fund\s+size|aum\s+of\s+the\s+scheme)\b", re.IGNORECASE)
 
+# MOTILAL_OSWAL's per-scheme sheets pair a "Back To Index" navigation-link
+# label with the real scheme name in the SAME 2-value banner row (confirmed
+# 2026-07-08, e.g. ['Back To Index', 'Motilal Oswal Nifty 50 ETF']) — "Back To
+# INDEX" itself contains the "index" scheme-type keyword (a real scheme name
+# can legitimately be "... Index Fund"), so both values satisfied the
+# keyword-hit disambiguation below and the row stayed ambiguous — every
+# per-scheme sheet in the real file extracted ZERO rows (col_map/current_scheme
+# never got set) despite each sheet's data being otherwise perfectly
+# SEBI-standard. Never a scheme name; exclude before the keyword-hit check.
+_BACK_TO_INDEX_RE = re.compile(r"^back\s+to\s+index$", re.IGNORECASE)
+
 # SEBI sheets sometimes prefix "Name of Instrument" with a short instrument-type
 # code, e.g. UTI writes "EQ - ABB INDIA LTD.". 2-4 caps + " - " is never how a
 # real company name starts, so this can't over-strip a genuine holding name.
@@ -4509,11 +5044,30 @@ def _extract_sebi_row(
 
     isin_col = _get(["isin", "isin code"])
 
-    weight_pct_raw = _get(["% to nav", "% of net assets", "% to net assets", "weight", "% of nav"])
+    # MOTILAL_OSWAL's header reads "% to Net Asset" (singular "Asset", every
+    # other AMC's header says "Assets" plural or "NAV") — add the singular
+    # form explicitly rather than a substring match that could accidentally
+    # widen to unrelated headers.
+    weight_pct_raw = _get(
+        ["% to nav", "% of net assets", "% to net assets", "% to net asset", "weight", "% of nav"]
+    )
     weight_pct: float | None = None
     if weight_pct_raw:
         try:
             weight_pct = float(weight_pct_raw.replace(",", "").replace("%", "").strip())
+            # MOTILAL_OSWAL's "% to Net Asset" column is a genuine Excel
+            # percentage-NUMBER-FORMAT cell — openpyxl (data_only=True) returns
+            # the underlying fraction (e.g. 0.0079873241569103 for a displayed
+            # "0.80%"), not the displayed percentage number every other AMC's
+            # plain-typed weight column already is. Confirmed 2026-07-08
+            # against the real June-2026 file: every row's raw value is < 1
+            # with 10+ decimal digits of float noise, consistent with a
+            # stored fraction, never a manually-typed 2-decimal percentage.
+            # Scoped to this AMC only — do NOT widen to a bare "< 1" check for
+            # every AMC (a genuinely tiny <1% holding, plainly typed, is
+            # common and must NOT be multiplied by 100).
+            if amc_name == "MOTILAL_OSWAL" and weight_pct is not None:
+                weight_pct *= 100
         except ValueError:
             pass
 

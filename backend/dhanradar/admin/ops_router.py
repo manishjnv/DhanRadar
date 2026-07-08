@@ -98,7 +98,7 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
         "source_key": "amc_constituents",
         "name": "AMC Portfolio Disclosures",
         "tier": "2",
-        "description": "Monthly constituent holdings (top-10 AMCs)",
+        "description": "Monthly constituent holdings (16 AMCs)",
         "method": "Playwright scrape",
         "schedule_display": "Monthly 10th 04:00 IST",
         "cost": "Free",
