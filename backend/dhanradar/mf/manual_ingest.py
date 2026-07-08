@@ -301,6 +301,10 @@ _AMC_KEYWORDS: dict[str, str] = {
     # May-2026 files, 2026-07-07). Master scheme names start "HSBC ..." so the
     # resolver's default prefix works without an override.
     "hsbc": "HSBC",
+    # TATA (B87, added 2026-07-08): genuinely new AMC — no prior recognition at
+    # all. Master scheme names start "Tata ..." so the resolver's default
+    # AMC-name-as-prefix matching works without an override, same as HSBC.
+    "tata": "TATA",
 }
 
 
