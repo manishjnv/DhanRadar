@@ -17,12 +17,30 @@ import * as React from 'react';
 import { cn } from '@/lib/cn';
 import type { AmcCoverageRow, CoverageField } from '@/features/admin/api';
 
-export type AmcSortKey = 'amc' | 'fund_count' | 'completeness' | CoverageField;
+export type AmcSortKey = 'amc' | 'fund_count' | 'staleness' | 'completeness' | CoverageField;
 
 function formatCell(mode: 'A' | 'ML' | '-', freq: string, count: number): string {
   const n = count.toLocaleString('en-IN');
   if (mode === '-') return n;
   return `${mode}\u00B7${freq} ${n}`;
+}
+
+// Staleness ("Updated") column: how current the DISCLOSED data is for this AMC
+// (see backend CoverageMeta.staleness_definition), not whether the pipeline ran
+// today. Thresholds are a judgement call, not a hard SEBI/SLA rule: SEBI monthly
+// disclosures normally lag ~10-15 days after month-end, so <=45d is routine;
+// 46-90d is worth a look; >90d (roughly 2 missed monthly cycles) is flagged red.
+function formatStaleness(days: number | null): string {
+  if (days === null) return '\u2014';
+  if (days < 60) return `${days}d`;
+  return `${Math.floor(days / 30)}mo`;
+}
+
+function stalenessClass(days: number | null): string {
+  if (days === null) return 'text-ink-muted';
+  if (days > 90) return 'text-red font-semibold';
+  if (days > 45) return 'text-amber font-semibold';
+  return 'text-ink-secondary';
 }
 
 // Overall per-AMC source badge, rendered next to the short name so "which
@@ -136,6 +154,12 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
       } else if (sortKey === 'fund_count') {
         av = a.fund_count;
         bv = b.fund_count;
+      } else if (sortKey === 'staleness') {
+        // null (never updated) sorts as the most-stale extreme, regardless of
+        // direction — an AMC with no data yet is never "fresher" than one that
+        // is merely old.
+        av = a.staleness_days ?? Number.POSITIVE_INFINITY;
+        bv = b.staleness_days ?? Number.POSITIVE_INFINITY;
       } else if (sortKey === 'completeness') {
         av = a.completeness_pct;
         bv = b.completeness_pct;
@@ -171,6 +195,13 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
               <SortHeader
                 label="Funds"
                 sortKey="fund_count"
+                activeSort={sortKey}
+                sortDir={sortDir}
+                onSort={onSort}
+              />
+              <SortHeader
+                label="Updated"
+                sortKey="staleness"
                 activeSort={sortKey}
                 sortDir={sortDir}
                 onSort={onSort}
@@ -211,6 +242,15 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
                 <td className="py-1 px-2 text-right font-mono tabular-nums text-ink-secondary">
                   {row.fund_count.toLocaleString('en-IN')}
                 </td>
+                <td
+                  title={row.last_updated ?? 'No disclosure data yet'}
+                  className={cn(
+                    'py-1 px-2 text-right font-mono tabular-nums whitespace-nowrap',
+                    stalenessClass(row.staleness_days),
+                  )}
+                >
+                  {formatStaleness(row.staleness_days)}
+                </td>
                 {fieldOrder.map((f) => {
                   const cell = row.fields[f];
                   return (
@@ -232,7 +272,9 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
       </div>
       <p className="text-caption text-ink-muted">
         A=auto ML=manual &middot; Y/W/M/D/O=frequency &middot; number = funds covered &middot;
-        Auto/Manual/Mixed badge next to AMC = that AMC&apos;s overall source
+        Auto/Manual/Mixed badge next to AMC = that AMC&apos;s overall source &middot; Updated =
+        days/months since the latest disclosure we hold (amber &gt;45d, red &gt;90d) &middot;
+        Category = sebi_category coverage (platform-wide, no mode/freq tag)
       </p>
     </div>
   );

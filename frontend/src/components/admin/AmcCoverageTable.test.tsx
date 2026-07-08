@@ -11,6 +11,7 @@ const FIELD_ORDER: CoverageField[] = [
   'benchmark',
   'manager',
   'exit_load',
+  'category',
 ];
 
 const FIELD_LABELS: Record<CoverageField, string> = {
@@ -21,6 +22,7 @@ const FIELD_LABELS: Record<CoverageField, string> = {
   benchmark: 'Benchmark',
   manager: 'Manager',
   exit_load: 'Exit load',
+  category: 'Category',
 };
 
 function makeRow(overrides: Partial<AmcCoverageRow>): AmcCoverageRow {
@@ -34,6 +36,8 @@ function makeRow(overrides: Partial<AmcCoverageRow>): AmcCoverageRow {
     fields: emptyFields,
     completeness_pct: 0,
     source_tag: 'none',
+    last_updated: null,
+    staleness_days: null,
     ...overrides,
   };
 }
@@ -142,5 +146,32 @@ describe('AmcCoverageTable', () => {
     render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
     expect(screen.getByText('Kotak')).toBeInTheDocument();
     expect(screen.getByText('Mixed')).toBeInTheDocument();
+  });
+
+  it('renders an em-dash for an AMC with no staleness signal yet', () => {
+    const rows = [makeRow({ short_name: 'NoData', staleness_days: null })];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.getByText('\u2014')).toBeInTheDocument();
+  });
+
+  it('renders staleness in days under 60 and in months at/above 60', () => {
+    const rows = [
+      makeRow({ amc_name: 'Fresh AMC', short_name: 'Fresh', staleness_days: 12 }),
+      makeRow({ amc_name: 'Old AMC', short_name: 'Old', staleness_days: 90 }),
+    ];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    expect(screen.getByText('12d')).toBeInTheDocument();
+    expect(screen.getByText('3mo')).toBeInTheDocument();
+  });
+
+  it('clicking the Updated header sorts most-stale first (nulls sort as most stale)', () => {
+    const rows = [
+      makeRow({ amc_name: 'Fresh AMC', short_name: 'Fresh', staleness_days: 5 }),
+      makeRow({ amc_name: 'Never AMC', short_name: 'NeverUpdated', staleness_days: null }),
+      makeRow({ amc_name: 'Stale AMC', short_name: 'Stale', staleness_days: 100 }),
+    ];
+    render(<AmcCoverageTable rows={rows} fieldOrder={FIELD_ORDER} fieldLabels={FIELD_LABELS} />);
+    fireEvent.click(screen.getByRole('columnheader', { name: /Updated/ }));
+    expect(firstColumnOrder()).toEqual(['NeverUpdated', 'Stale', 'Fresh']);
   });
 });

@@ -3,8 +3,8 @@ DhanRadar — Admin AMC data-coverage router.
 
 GET /admin/amc/coverage (RequireAdmin) — ONE aggregation endpoint reporting, per
 AMC and per tracked enrichment field (Constituents/AUM/TER/Riskometer/Benchmark/
-Manager/Exit load), how many of that AMC's funds have a real value — plus a
-platform-wide summary strip.
+Manager/Exit load/Category), how many of that AMC's funds have a real value —
+plus a platform-wide summary strip.
 
 Compliance boundary (binding): this endpoint reports DATA COVERAGE only — row
 counts and percentages of how populated the catalog is. It never computes or
@@ -41,11 +41,23 @@ require scanning every one of the 7 field cells. Manual's short code is "ML"
 (not "M") because "M" is already the frequency code for "Monthly" — a bare
 `mode="M"` cell would have read as "M·M 334" (manual, monthly, 334), ambiguous
 at a glance; "ML·M 334" is unambiguous.
+
+Staleness / last-updated (2026-07-08, same follow-up) + an 8th tracked field
+"category": each row also carries `last_updated`/`staleness_days` — the later
+of MAX(aum_as_of) and MAX(constituents' as_of_month) across the AMC's schemes
+(`_compute_staleness`), i.e. "how current is the DISCLOSED data we hold", not
+"did our pipeline run today" — a wedged/dead scraper for an AMC shows up here
+as a growing staleness_days even though covered_count stays whatever it last
+was. "category" tracks `mf_funds.sebi_category` coverage (the validated
+cohort-grouping field, ADR-0034) — unlike the other 7 fields it is populated
+by ONE platform-wide pipeline (AMFI scheme master), not a per-AMC scraper/
+manual upload, so it never gets a mode/freq tag (always renders as a bare
+count) and never influences the source_tag badge.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -212,6 +224,20 @@ def _source_tag_for(fields: dict[CoverageField, CoverageCell]) -> str:
     return "mixed"
 
 
+def _compute_staleness(
+    today: date, aum_as_of: date | None, constituents_as_of: date | None
+) -> tuple[str | None, int | None]:
+    """Derive (last_updated ISO date, staleness_days) for the AMC-column
+    staleness indicator — see AmcCoverageRow.last_updated/staleness_days
+    docstring. Takes the LATER of the two disclosure-freshness signals
+    available (aum_as_of, constituents' as_of_month); either may be None."""
+    candidates = [d for d in (aum_as_of, constituents_as_of) if d is not None]
+    if not candidates:
+        return None, None
+    latest = max(candidates)
+    return latest.isoformat(), (today - latest).days
+
+
 # A scheme group key: the taxonomy-derived clean name (already strips
 # plan/option/frequency noise so Growth/IDCW-Daily/Direct/Regular ISINs of the
 # SAME scheme collapse together), falling back to the ISIN for the rare row
@@ -272,6 +298,7 @@ async def get_amc_coverage(
     exit_by_amc = await _covered_by_amc(
         db, (MfFund.exit_load_pct.is_not(None)) | (MfFund.exit_load_days.is_not(None))
     )
+    category_by_amc = await _covered_by_amc(db, MfFund.sebi_category.is_not(None))
 
     # Constituents: distinct SCHEME with >=1 sibling ISIN having a constituent row,
     # grouped by amc_name (see _SCHEME_KEY / module docstring).
@@ -302,6 +329,26 @@ async def get_amc_coverage(
         "benchmark": bench_by_amc,
         "manager": manager_by_amc,
         "exit_load": exit_by_amc,
+        "category": category_by_amc,
+    }
+
+    # Staleness inputs (2026-07-08): MAX(aum_as_of) and MAX(constituents' own
+    # as_of_month) per AMC — the later of the two is that AMC's `last_updated`
+    # (see _compute_staleness / AmcCoverageRow docstring).
+    aum_asof_stmt = (
+        select(MfFund.amc_name, func.max(MfFund.aum_as_of))
+        .where(MfFund.aum_as_of.is_not(None))
+        .group_by(MfFund.amc_name)
+    )
+    aum_asof_by_amc = {row[0]: row[1] for row in (await db.execute(aum_asof_stmt)).all() if row[0]}
+
+    constituents_asof_stmt = (
+        select(MfFund.amc_name, func.max(MfFundConstituent.as_of_month))
+        .join(MfFundConstituent, MfFundConstituent.isin == MfFund.isin)
+        .group_by(MfFund.amc_name)
+    )
+    constituents_asof_by_amc = {
+        row[0]: row[1] for row in (await db.execute(constituents_asof_stmt)).all() if row[0]
     }
 
     # Ingestion accuracy (platform-wide, manual-ingest inbox): parsed / (parsed + failed).
@@ -330,6 +377,9 @@ async def get_amc_coverage(
             fraction_sum += (covered / fund_count) if fund_count else 0.0
         completeness_pct = round(100.0 * fraction_sum / len(FIELD_ORDER), 1)
         weighted_completeness_sum += completeness_pct * fund_count
+        last_updated, staleness_days = _compute_staleness(
+            today, aum_asof_by_amc.get(amc_name), constituents_asof_by_amc.get(amc_name)
+        )
         rows.append(
             AmcCoverageRow(
                 amc_name=amc_name,
@@ -338,6 +388,8 @@ async def get_amc_coverage(
                 fields=fields,
                 completeness_pct=completeness_pct,
                 source_tag=_source_tag_for(fields),  # type: ignore[arg-type]
+                last_updated=last_updated,
+                staleness_days=staleness_days,
             )
         )
 

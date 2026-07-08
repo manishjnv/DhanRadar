@@ -1267,7 +1267,8 @@ export type CoverageField =
   | 'riskometer'
   | 'benchmark'
   | 'manager'
-  | 'exit_load';
+  | 'exit_load'
+  | 'category';
 
 export interface CoverageCell {
   covered_count: number;
@@ -1282,6 +1283,8 @@ export interface AmcCoverageRow {
   fields: Record<CoverageField, CoverageCell>;
   completeness_pct: number;
   source_tag: 'auto' | 'manual' | 'mixed' | 'none';
+  last_updated: string | null;
+  staleness_days: number | null;
 }
 
 export interface CoverageSummary {
@@ -1302,6 +1305,8 @@ export interface CoverageMeta {
   mode_definition: string;
   freq_definition: string;
   source_tag_definition: string;
+  category_definition: string;
+  staleness_definition: string;
   disclaimer: string;
 }
 
