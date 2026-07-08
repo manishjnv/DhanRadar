@@ -186,3 +186,74 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
     assert "nfo_definition" in meta
     assert "accuracy_definition" in meta
     assert "completeness_definition" in meta
+
+
+# ---------------------------------------------------------------------------
+# 3. Plan-variant ISINs of the SAME scheme must count once, not once-per-ISIN
+#    (2026-07-08 fix — founder-flagged 2.8% overall completeness turned out to
+#    be real denominator inflation: AMFI issues many plan-variant ISINs per
+#    scheme, but the enrichment pipeline only writes a field to the ONE ISIN
+#    the resolver matched, never to sibling plan variants of the same scheme).
+# ---------------------------------------------------------------------------
+
+
+async def test_amc_coverage_dedupes_plan_variant_isins_of_same_scheme(
+    async_client, db_session, monkeypatch
+):
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    # 3 plan-variant ISINs of the SAME scheme (shared fund_name_short) — only
+    # ONE has aum_crore populated, mirroring the real HDFC Liquid Fund case
+    # (9 plan-variant ISINs, only 1 with aum_crore). This must count as ONE
+    # scheme with AUM covered, not "1 covered out of 3" (33%).
+    db_session.add(
+        MfFund(
+            isin="INF900B00001",
+            scheme_name="Test AMC Beta Fund",
+            amc_name="Test AMC Beta Limited",
+            fund_name_short="Test AMC Beta Fund",
+            plan_type="direct",
+            option_type="growth",
+            is_segregated=False,
+            aum_crore=500.0,
+        )
+    )
+    db_session.add(
+        MfFund(
+            isin="INF900B00002",
+            scheme_name="Test AMC Beta Fund - IDCW Daily",
+            amc_name="Test AMC Beta Limited",
+            fund_name_short="Test AMC Beta Fund",
+            plan_type="direct",
+            option_type="idcw",
+            is_segregated=False,
+        )
+    )
+    db_session.add(
+        MfFund(
+            isin="INF900B00003",
+            scheme_name="Test AMC Beta Fund - Regular Plan",
+            amc_name="Test AMC Beta Limited",
+            fund_name_short="Test AMC Beta Fund",
+            plan_type="regular",
+            option_type="growth",
+            is_segregated=False,
+        )
+    )
+    await db_session.commit()
+
+    user_id, access = await _signup(async_client, "admin_amc_dedupe@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", user_id)
+    headers = make_auth_headers(access_token=access)
+
+    r = await async_client.get("/api/v1/admin/amc/coverage", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    row = next(r for r in body["rows"] if r["amc_name"] == "Test AMC Beta Limited")
+    # 3 ISINs but ONE scheme (shared fund_name_short) — fund_count must be 1, not 3.
+    assert row["fund_count"] == 1
+    assert row["fields"]["aum"]["covered_count"] == 1
+    # completeness for this AMC: aum covered (1/1), all other 6 fields 0/1.
+    assert row["completeness_pct"] == round(100.0 * (1 / 7), 1)
