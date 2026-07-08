@@ -4378,8 +4378,17 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
 # 2026-07 INF789F01WY2 incident (docs/rca/README.md) — structural detection in
 # _extract_sebi_row (missing ISIN + no numbers) is the primary guard; this
 # catches header rows that DO carry a subtotal weight/value of their own.
+# TATA (B87/B88, 2026-07-08) labels EVERY asset-class subtotal as a TRAILING
+# "... TOTAL" suffix instead ("EQUITY & EQUITY RELATED TOTAL") — the opposite
+# shape of UTI's "TOTAL: ..." prefix already matched above; without this,
+# every TATA scheme's asset-class subtotals were silently counted as real
+# holdings (weight_pct_sum inflated to 280-400%, tripping
+# `_drop_over_covered_funds`'s >105% guard for 66/67 real schemes in the real
+# May-2026 file). "... total$" also catches "PORTFOLIO TOTAL" — handled by
+# the is_total_row keyword list above so it's kept (not dropped) when it
+# carries a market_value_cr.
 _SECTION_HEADER_RE = re.compile(
-    r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$",
+    r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$|total\s*$",
     re.IGNORECASE,
 )
 
@@ -4483,7 +4492,20 @@ def _extract_sebi_row(
     # so UTI schemes correctly get no aum_map entry from this source rather than
     # a wrong one). NIPPON's literal "GRAND TOTAL" row IS in the same table shape
     # as real holdings and is captured correctly by this narrower match.
-    is_total_row = any(kw in constituent_name.lower() for kw in ("grand total", "net assets"))
+    #
+    # B87/B88 (2026-07-08): TATA's own per-scheme sheets literally spell the
+    # scheme's true grand total "PORTFOLIO TOTAL" (a real, high-confidence
+    # marker equivalent to NIPPON's "GRAND TOTAL" above) -- add it alongside.
+    # TATA's OTHER, ambiguous asset-class subtotals ("EQUITY & EQUITY RELATED
+    # TOTAL", "CASH / NET CURRENT ASSET", ...) are handled separately below by
+    # widening `_SECTION_HEADER_RE` to also catch a trailing "... TOTAL"
+    # suffix (TATA's shape) alongside the existing "TOTAL ..." prefix shape
+    # (UTI's) -- those get dropped ENTIRELY (never held, never counted toward
+    # AUM), not promoted into this AUM-eligible category, matching how a bare
+    # "Sub Total" already behaves.
+    is_total_row = any(
+        kw in constituent_name.lower() for kw in ("grand total", "net assets", "portfolio total")
+    )
 
     isin_col = _get(["isin", "isin code"])
 
