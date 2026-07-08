@@ -1119,6 +1119,101 @@ def test_parse_sebi_xlsx_hdfc_fmp_keyword_accepted():
     assert rows[0]["scheme_name"] == "HDFC FMP 1269D March 2023"
 
 
+def test_parse_sebi_xlsx_tata_two_digit_year_as_of_date():
+    """TATA's own per-scheme sheet banner ("Portfolio as on 31/05/26" — real
+    May-2026 disclosure file, confirmed 2026-07-08, B87) uses a 2-DIGIT year in
+    the DD/MM/YY slash format. The DD/MM/YYYY fallback regex previously
+    required a strict 4-digit year, so this never matched -- as_of_month
+    stayed None for every row with zero error, and _upsert_constituents drops
+    any row with no as_of_month (a silent zero-rows-written failure even
+    though the scheme name resolves fine, the same failure shape as the ICICI
+    comma-format bug). `(\\d{2,4})` accepts both; a 2-digit year widens to the
+    2000s."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["TATA SILVER ETF FUND OF FUND"])
+    ws.append(["Portfolio as on 31/05/26"])
+    ws.append([None])
+    ws.append(["ISIN", "Name Of the Instrument", "Quantity", "Market/Fair Value(Rs. In Lacs)"])
+    ws.append(["INF277KA1984", "TATA SILVER EXCHANGE TRADED FUND", 100000, 5000.0])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "TATA")
+
+    assert len(rows) == 1
+    assert rows[0]["as_of_month"] == date(2026, 5, 1)
+
+
+class _FakeStaticResponse:
+    def __init__(self, text: str, status_code: int = 200):
+        self.text = text
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code != 200:
+            raise RuntimeError(f"status={self.status_code}")
+
+
+class _FakeStaticClient:
+    """Minimal stand-in for httpx.AsyncClient — _discover_all_urls_static only
+    calls `await client.get(url, headers=...)`."""
+
+    def __init__(self, html: str):
+        self._html = html
+
+    async def get(self, url, headers=None):  # noqa: ANN001 — test double
+        return _FakeStaticResponse(self._html)
+
+
+async def test_discover_all_urls_static_matches_both_xlsx_and_xls():
+    """PPFAS (B87) mixes .xlsx and .xls extensions for different scheme/month
+    files on the SAME archive page. The discovery regex previously matched
+    only .xlsx (`href=["\\']([^"\\']+\\.xlsx...`), silently dropping every
+    .xls link with zero error — confirmed 2026-07-08 against the real May-2026
+    PPFAS_Monthly_Portfolio_Report file, which is .xls while its sibling
+    scheme files that same month are .xlsx."""
+    from dhanradar.tasks.mf import _discover_all_urls_static
+
+    html = (
+        '<a href="/downloads/PPFAS_Monthly_Portfolio_Report_May_31_2026.xls?09062026">May .xls</a>'
+        '<a href="/downloads/PPFCF_PPFAS_Monthly_Portfolio_Report_May_31_2026.xlsx?09062026">May .xlsx</a>'
+    )
+    client = _FakeStaticClient(html)
+
+    links = await _discover_all_urls_static(client, "https://amc.ppfas.com/downloads/", "PPFAS")
+
+    assert any(link.endswith(".xls?09062026") for link in links)
+    assert any(link.endswith(".xlsx?09062026") for link in links)
+
+
+async def test_discover_all_urls_static_matches_embedded_json_not_just_href():
+    """TATA (B87) is a Next.js SSR page whose disclosure links are NOT real
+    <a href> anchors at all — they only appear inside an embedded, HTML-escaped
+    JSON payload (`\\"field_media_document\\":\\"https://...xlsx\\"`). An
+    href=-anchored regex finds zero links here even though a plain GET (no JS)
+    returns the URLs as literal text (confirmed live 2026-07-08). The escaped
+    JSON also risks a trailing backslash being captured from the closing
+    `\\"` — must be stripped."""
+    from dhanradar.tasks.mf import _discover_all_urls_static
+
+    html = (
+        '{"field_description":"Portfolio as on 31st May, 2026",'
+        '"field_media_document":"https://betacms.tatamutualfund.com/system/files/'
+        '2026-06/Monthly%20Portfolio%20as%20on%2031st%20May%202026.xlsx",'
+        '"field_section_flag":"On"}'
+    ).replace('"', '\\"')
+    client = _FakeStaticClient(html)
+
+    links = await _discover_all_urls_static(
+        client, "https://www.tatamutualfund.com/schemes-related/portfolio", "TATA"
+    )
+
+    assert len(links) == 1
+    assert links[0].endswith(".xlsx")
+    assert "\\" not in links[0]
+
+
 def test_pick_canonical_plan_isin_prefers_direct_growth_among_tied_candidates():
     """A single-scheme portfolio disclosure never states which plan/option ISIN
     its holdings belong to (holdings are identical across all Direct/Regular x

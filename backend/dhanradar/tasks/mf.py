@@ -80,6 +80,46 @@ _UPSERT_CHUNK = 2000
 # These are the SEBI-mandated scheme-portfolio disclosure landing pages.
 # Each AMC publishes monthly disclosure XLSX/CSV under these paths.
 # Format: name (for source_amc provenance) + discovery URL.
+#
+# B87 coverage-expansion wave (2026-07-08) — 4 AMCs already recognized by
+# manual_ingest._AMC_KEYWORDS (ABSL, PPFAS, EDELWEISS, HSBC) investigated for an
+# automated scraper entry. Real findings, verified live (never guessed — see
+# /memories/repo/dhanradar.md on why a scraper must never be written from
+# "similar AMC" assumptions):
+#   - PPFAS: WORKING, added below (static_multi). Its own /downloads/portfolio-
+#     disclosure/ archive page is reachable with a plain GET (the site's
+#     ConfirmCitizenship.php gate only fronts the top-level nav page, NOT this
+#     deep link) and needs BOTH .xlsx and .xls matched (see
+#     _discover_all_urls_static) — real May-2026 file parsed 900 rows with the
+#     existing _parse_sebi_xlsx, zero new parser code.
+#   - ABSL: NOT added. Its own Sitecore JSON API
+#     (postlogin/CustomApi/Resources/FactsheetAccordionById) is live and returns
+#     a correctly-shaped AccordionList, but EVERY pdfUrl in it points at
+#     abcscprod.azureedge.net — a legacy Azure CDN "classic" endpoint that no
+#     longer resolves ANYWHERE (confirmed via Google's public DNS: NXDOMAIN,
+#     not a local/network block). This is a live bug on ABSL's own production
+#     site, not bot-protection — no scraper fix can route around a domain that
+#     doesn't exist. Documented gap; revisit only if ABSL republishes with a
+#     working CDN domain.
+#   - EDELWEISS: NOT added to a working strategy — confirmed genuinely
+#     Akamai-blocked at the edge (403 "Access Denied" / errors.edgesuite.net on
+#     a plain HTTP GET), matching the HDFC/ICICI_PRU/KOTAK/AXIS pattern below.
+#     A real headless-Chromium fetch DOES pass the edge (unlike curl), but the
+#     Angular app's own backend call
+#     (api.edelweissmf.com/.../getSingleStatutory) 500s even inside a real
+#     browser session — a second, independent live bug on their side. Kept out
+#     of the Playwright list for now (would burn a browser cycle every run for
+#     a guaranteed 0-row result); revisit if their API is fixed.
+#   - HSBC: NOT added. No monthly-portfolio-holdings disclosure link could be
+#     found in the site's real rendered nav (checked via headless Chromium,
+#     which DOES reach the KVM4-reachable assetmanagement.hsbc.co.in — the
+#     manual_ingest.py comment's "KVM4-unreachable" note is now stale, the site
+#     is reachable). The one downloadable link discovered (camsonline.com
+#     COL_HSBCDownload.aspx, linked as "Daily TER") is confirmed (by content)
+#     to be the TER workbook, not portfolio holdings — out of scope here and
+#     already covered by B85/B86's TER work. HSBC's constituents stay
+#     manual-ingest-only pending founder identification of the real disclosure
+#     URL.
 _AMC_DISCLOSURE_ROOTS: list[dict] = [
     # json_api_url_template: Drupal/CMS JSON API returning rows with ZIP download URLs.
     # {year} = 4-digit year.  zip_xlsx_member_pattern = filename substring to match inside the ZIP.
@@ -118,6 +158,20 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     {
         "name": "PPFAS",
         "url": "https://amc.ppfas.com/downloads/portfolio-disclosure/",
+        "static_multi": True,
+    },
+    # TATA (B87, added 2026-07-08, verified live): plain GET (no cookie/consent
+    # gate, no bot-protection observed) returns the file links because they
+    # are server-rendered into an embedded Next.js JSON payload, not real
+    # <a href> anchors — _discover_all_urls_static's generalized quote-match
+    # (not href=-scoped) is required for this AMC specifically. ONE
+    # consolidated file per month (not per-scheme). Real May-2026 file parsed
+    # 3699 rows with the existing _parse_sebi_xlsx once the "DD/MM/YY"
+    # (2-digit year) as-of-date fallback was added — see _extract_sebi_row.
+    # No resolver prefix override needed; scheme names start "Tata ...".
+    {
+        "name": "TATA",
+        "url": "https://www.tatamutualfund.com/schemes-related/portfolio",
         "static_multi": True,
     },
     # Franklin: Angular SPA; domain corrected from franklintempletonmutualfund.com (blocked/parked).
@@ -3594,11 +3648,26 @@ async def _discover_all_urls_static(
     amc_name: str,
     target_month: date | None = None,
 ) -> list[str]:
-    """Discover all XLSX download links from a plain HTML disclosure page.
+    """Discover all XLSX/XLS download links from a plain HTML disclosure page.
 
     Used for AMCs like MIRAE whose landing page renders static HTML (no JS).
     If target_month is provided, links are filtered to those whose URL contains
     the abbreviated month name and year (e.g. "may" + "2026").
+
+    Matches BOTH .xlsx and .xls — PPFAS (B87) mixes both extensions across
+    months/schemes within the SAME disclosure-archive page (e.g. a scheme's
+    May-2026 file is .xlsx while its February-2026 file is .xls); a
+    .xlsx-only match silently drops the .xls half with zero error.
+
+    Matches ANY quoted string, not just ``href="..."`` attributes — TATA (B87)
+    is a Next.js SSR page whose file links are NOT real ``<a href>`` anchors at
+    all; they live only inside a `__NEXT_DATA__`-style embedded JSON payload
+    (`"field_media_document":"https://.../Monthly...xlsx"`) that a plain GET
+    (no JS execution) still returns as literal text in the response body. An
+    `href=`-anchored regex silently finds zero links here (verified live
+    2026-07-08) even though the URLs are present. The embedded JSON is itself
+    HTML-escaped (`\"..\"`), so a captured URL can pick up one trailing
+    backslash from the closing `\"` — stripped below before use.
     """
     import re
     from urllib.parse import urljoin
@@ -3618,7 +3687,8 @@ async def _discover_all_urls_static(
         )
         return []
 
-    raw_hrefs = re.findall(r'href=["\']([^"\']+\.xlsx[^"\']*)["\']', resp.text, re.IGNORECASE)
+    raw_hrefs = re.findall(r'["\']([^"\']+\.xlsx?[^"\']*)["\']', resp.text, re.IGNORECASE)
+    raw_hrefs = [h.rstrip("\\") for h in raw_hrefs]
     links: list[str] = list(dict.fromkeys(urljoin(url, h) for h in raw_hrefs))
 
     if target_month and links:
@@ -3875,14 +3945,25 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         )
                     except ValueError:
                         pass
-                # Fallback: "DD/MM/YYYY" format (UTI style).
+                # Fallback: "DD/MM/YYYY" format (UTI style). TATA's own banner
+                # ("Portfolio as on 31/05/26", confirmed 2026-07-08 — every
+                # per-scheme sheet in the real May-2026 file) uses a 2-DIGIT
+                # year instead; the strict `(\d{4})` silently never matched it
+                # (no error, just as_of_month staying None forever), and
+                # _upsert_constituents drops every row with no as_of_month —
+                # a zero-rows-written failure with a scheme name that resolves
+                # fine, the same failure shape as the ICICI comma-format bug
+                # above. `(\d{2,4})` accepts both; a 2-digit year is widened to
+                # the 2000s (the only era any live disclosure file can be in).
                 if as_of_month is None:
-                    slash_m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", " ".join(row_strs))
+                    slash_m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", " ".join(row_strs))
                     if slash_m:
                         try:
                             from datetime import date as _date
 
-                            as_of_month = _date(int(slash_m.group(3)), int(slash_m.group(2)), 1)
+                            yr_raw = int(slash_m.group(3))
+                            yr = yr_raw if yr_raw >= 100 else 2000 + yr_raw
+                            as_of_month = _date(yr, int(slash_m.group(2)), 1)
                         except ValueError:
                             pass
                 # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
