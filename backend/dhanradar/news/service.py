@@ -42,27 +42,32 @@ logger = logging.getLogger(__name__)
 # recency filter (they are "always-fresh" featured content, not dated news).
 # Update the URLs below whenever more-current content is available.
 # ---------------------------------------------------------------------------
+# All three URLs re-verified HTTP 200 on 2026-07-10 (the previous set died in
+# the AMFI site redesign; founder-reported 404s). When replacing a URL here,
+# also deactivate the old row in news.news_items — the upsert keys on
+# canonical_url, so a dead URL's row otherwise keeps serving until the 30-day
+# recency window ages it out.
 _CURATED_ITEMS: list[dict] = [
     {
         "scope": "market",
         "category": "mutual_funds",
-        "title": "AMFI monthly SIP data — industry inflow statistics",
+        "title": "AMFI monthly data — SIP contributions and industry flows",
         "source": "AMFI",
-        "canonical_url": "https://www.amfiindia.com/research-information/other-data/sip-data",
+        "canonical_url": "https://www.amfiindia.com/research-information/amfi-monthly",
     },
     {
         "scope": "market",
         "category": "mutual_funds",
-        "title": "AMFI AUM data — total assets under management by category",
+        "title": "AMFI quarterly data — average assets under management (AAUM)",
         "source": "AMFI",
-        "canonical_url": "https://www.amfiindia.com/research-information/other-data/mf-data",
+        "canonical_url": "https://www.amfiindia.com/research-information/amfi-quarterly",
     },
     {
         "scope": "market",
         "category": "regulation",
-        "title": "SEBI Master Circular for Mutual Funds (latest)",
+        "title": "SEBI Master Circular for Mutual Funds (March 2026)",
         "source": "SEBI",
-        "canonical_url": "https://www.sebi.gov.in/legal/master-circulars/may-2024/master-circular-for-mutual-funds_83391.html",
+        "canonical_url": "https://www.sebi.gov.in/legal/master-circulars/mar-2026/master-circular-for-mutual-funds_100491.html",
     },
 ]
 
