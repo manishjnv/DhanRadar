@@ -295,10 +295,12 @@ function MobileNav({ variant }: { variant: AdminShellVariant }) {
 // ---------------------------------------------------------------------------
 export function AdminShell({ children, variant = 'admin' }: AdminShellProps) {
   return (
-    // h-[100dvh] tracks the real mobile viewport (no dead space under the URL
-    // bar); min-w-0 on the flex column lets wide tables scroll inside their own
-    // overflow container instead of stretching the page sideways.
-    <div className="flex h-screen h-[100dvh] overflow-hidden bg-bg">
+    // Viewport frame mirrors AppShell: subtract the fixed dev banner's reserved
+    // top padding and the ticker strip, otherwise the shell overflows the
+    // viewport by exactly that much — a second page scrollbar plus phantom
+    // space below the footer. min-w-0 on the flex column lets wide tables
+    // scroll inside their own overflow container instead of stretching the page.
+    <div className="flex h-[calc(100dvh_-_var(--dev-banner-h,0px)_-_var(--ticker-h,0px))] overflow-hidden bg-bg">
       <AdminSidebar variant={variant} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileNav variant={variant} />
