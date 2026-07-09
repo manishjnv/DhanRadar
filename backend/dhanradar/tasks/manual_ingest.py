@@ -664,7 +664,7 @@ def reap_stuck_manual_ingest_files() -> str:
 
 
 async def _reap_stuck_manual_ingest_files() -> str:
-    from sqlalchemy import select, update
+    from sqlalchemy import or_, select, update
 
     from dhanradar.db import admin_task_session
     from dhanradar.models.mf import MfManualIngestFile
@@ -672,10 +672,21 @@ async def _reap_stuck_manual_ingest_files() -> str:
     cutoff = datetime.now(UTC) - timedelta(minutes=30)
 
     async with admin_task_session() as db:
+        # A pending row is stuck only when it shows NO recent activity on
+        # EITHER timestamp. Keying on received_at alone killed every bulk
+        # RE-PARSE (2026-07-10: 454 of 477 reset rows reaped mid-drain —
+        # reset rows are days old by received_at, and this beat fires every
+        # 5 min). The runbook's re-parse reset stamps parsed_at=now() so each
+        # reset row gets a fresh 30-min window; genuinely fresh files have
+        # parsed_at NULL and keep the original received_at behavior.
         result = await db.execute(
             select(MfManualIngestFile.id).where(
                 MfManualIngestFile.status == "pending",
                 MfManualIngestFile.received_at < cutoff,
+                or_(
+                    MfManualIngestFile.parsed_at.is_(None),
+                    MfManualIngestFile.parsed_at < cutoff,
+                ),
             )
         )
         ids = [r[0] for r in result.all()]
