@@ -683,7 +683,52 @@ def parse_scheme_master_details(data: bytes) -> dict[str, Any]:
 
     Exit load is deliberately NOT extracted (see module docstring).
     """
-    flat = _flatten_html(data)
+    return _scheme_master_from_flat(_flatten_html(data))
+
+
+def _flatten_pdf(data: bytes) -> str:
+    """pypdf text extraction across all pages, whitespace-normalized into the
+    same flat "Label Value Label Value" stream `_extract_all_labels` slices.
+    pypdf is already a declared dependency (NIPPON factsheet parser)."""
+    import io
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+    text = " ".join(page.extract_text() or "" for page in reader.pages)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def looks_like_scheme_master_pdf(data: bytes) -> bool:
+    """Content sniff for SBI's per-scheme "Fund Details" PDF (2026-07-10:
+    the founder's 52 SBI uploads are this page rendered to PDF — they sat
+    'archived' while carrying CURRENT riskometer/TER/benchmark/manager/exit
+    load). First page only — cheap enough for the intake dispatch path."""
+    if not data.startswith(b"%PDF"):
+        return False
+    try:
+        import io
+
+        from pypdf import PdfReader
+
+        first = PdfReader(io.BytesIO(data)).pages[0].extract_text() or ""
+    except Exception:  # noqa: BLE001 — a corrupt PDF is simply not this class
+        return False
+    return "fund details for" in first.lower()
+
+
+def parse_scheme_master_pdf(data: bytes) -> dict[str, Any]:
+    """PDF twin of `parse_scheme_master_details` — same labels, same output
+    dict (the AMC renders the same Fund-Details page to both HTML and PDF).
+    Fail-closed {} when no Fund Name is found."""
+    try:
+        flat = _flatten_pdf(data)
+    except Exception:  # noqa: BLE001 — unreadable PDF → unsupported, never a guess
+        return {}
+    return _scheme_master_from_flat(flat)
+
+
+def _scheme_master_from_flat(flat: str) -> dict[str, Any]:
     labels = _extract_all_labels(flat)
 
     scheme_name = labels.get("Fund Name", "")
@@ -717,10 +762,55 @@ def parse_scheme_master_details(data: bytes) -> dict[str, Any]:
         except ValueError:
             continue
 
+    exit_load_pct, exit_load_days = _parse_exit_load_text(labels.get("Exit Load", ""))
+
     return {
         "scheme_name": scheme_name,
         "risk_band": risk_band,
         "benchmark_tier1": benchmark,
         "ter_pct": ter_pct,
         "manager_pairs": manager_pairs,
+        "exit_load_pct": exit_load_pct,
+        "exit_load_days": exit_load_days,
     }
+
+
+_EXIT_PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_EXIT_PERIOD_RES = (
+    (re.compile(r"(\d+)\s*day", re.IGNORECASE), 1),
+    (re.compile(r"(\d+)\s*month", re.IGNORECASE), 30),
+    (re.compile(r"(\d+)\s*year", re.IGNORECASE), 365),
+)
+
+
+def _parse_exit_load_text(text: str) -> tuple[float | None, int | None]:
+    """Exit-load prose → (pct, days) — fail-closed (None, None) when unstated.
+
+    Real SBI Fund-Details form (2026-07-10): "For exit within 30 days from
+    the date of allotment - 1%. For exit after 30 days - Nil." → (1.0, 30).
+    A bare "Nil"/"NIL" is a REAL fact (no exit load) → (0.0, None). The pct
+    is the FIRST percentage stated (the binding near-term tier); days is the
+    longest period mentioned. Historically this label was deliberately
+    skipped; extracting it now (founder-directed, 2026-07-10) because the
+    BSE StAR source stays dormant until prod creds."""
+    cleaned = text.strip()
+    if not cleaned:
+        return None, None
+    m = _EXIT_PCT_RE.search(cleaned)
+    if m is None:
+        if re.fullmatch(r"nil\.?", cleaned, re.IGNORECASE):
+            return 0.0, None
+        return None, None
+    try:
+        pct = float(m.group(1))
+    except ValueError:
+        return None, None
+    if not 0 <= pct <= 20:
+        return None, None
+    periods = [
+        int(pm.group(1)) * mult
+        for pattern, mult in _EXIT_PERIOD_RES
+        for pm in pattern.finditer(cleaned)
+        if 0 < int(pm.group(1)) * mult <= 3650
+    ]
+    return pct, (max(periods) if periods else None)
