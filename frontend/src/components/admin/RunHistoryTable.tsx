@@ -5,6 +5,7 @@ import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatRelative, formatDuration } from './utils';
 import { displayLabel, titleCase } from '@/lib/displayLabel';
+import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
 
 export interface AdminRun {
@@ -25,9 +26,29 @@ interface RunHistoryTableProps {
   onViewDetail: (runId: string) => void;
 }
 
-const HEADERS = ['Run ID', 'Source', 'Started', 'Duration', 'Records OK', 'Records Failed', 'Status', ''];
+const HEADERS: Array<{ label: string; sortKey?: string; right?: boolean }> = [
+  { label: 'Run', sortKey: 'run_id' },
+  { label: 'Source', sortKey: 'source' },
+  { label: 'Started', sortKey: 'started' },
+  { label: 'Duration', sortKey: 'duration', right: true },
+  { label: 'Records OK', sortKey: 'ok', right: true },
+  { label: 'Records Failed', sortKey: 'failed', right: true },
+  { label: 'Status', sortKey: 'status' },
+  { label: '' },
+];
+
+const RUN_ACCESSORS: Record<string, SortAccessor<AdminRun>> = {
+  run_id: (r) => r.run_id,
+  source: (r) => displayLabel(r.source, 'source'),
+  started: (r) => r.started_at,
+  duration: (r) => r.duration_s,
+  ok: (r) => r.records_written,
+  failed: (r) => r.records_failed,
+  status: (r) => r.status,
+};
 
 export function RunHistoryTable({ runs, onViewDetail }: RunHistoryTableProps) {
+  const { sorted, sort, toggle } = useSort(runs, RUN_ACCESSORS);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-small">
@@ -35,23 +56,19 @@ export function RunHistoryTable({ runs, onViewDetail }: RunHistoryTableProps) {
         <thead>
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className={cn(
-                  'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
-                  h === 'Records OK' || h === 'Records Failed' || h === 'Duration'
-                    ? 'text-right'
-                    : 'text-left',
-                )}
-              >
-                {h}
-              </th>
+              <SortableTh
+                key={h.label || 'actions'}
+                label={h.label}
+                sortKey={h.sortKey}
+                sort={sort}
+                onToggle={toggle}
+                className={cn(h.right && 'text-right')}
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {runs.map((run) => {
+          {sorted.map((run) => {
             // Friendly error_class text — raw Python class names surfaced via title tooltip.
             const errorText = run.error_class
               ? titleCase(run.error_class.split('.').pop() ?? run.error_class)
@@ -66,8 +83,8 @@ export function RunHistoryTable({ runs, onViewDetail }: RunHistoryTableProps) {
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
                   #{run.run_id}
                 </td>
-                <td className="py-2.5 pr-4 text-ink font-medium">
-                  {displayLabel(run.source)}
+                <td className="py-2.5 pr-4 text-ink font-medium" title={run.source}>
+                  {displayLabel(run.source, 'source')}
                 </td>
                 <td className="py-2.5 pr-4 text-ink-muted font-mono text-[11px]">{formatRelative(run.started_at)}</td>
                 <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-ink-secondary">

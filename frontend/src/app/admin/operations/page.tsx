@@ -41,7 +41,7 @@ import {
   useQualityAcknowledge,
 } from '@/features/admin/api';
 import { formatDateTime, formatDuration, formatRelative } from '@/components/admin/utils';
-import { displayLabel } from '@/lib/displayLabel';
+import { displayLabel, titleCase } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -105,16 +105,18 @@ function RunDetailContent({ runId }: { runId: string }) {
   }
 
   const rows: Array<{ label: string; value: React.ReactNode }> = [
-    { label: 'Run ID',         value: <span className="font-mono text-[11px]">{data.run_id}</span> },
-    { label: 'Source',         value: data.source },
-    { label: 'Task',           value: displayLabel(data.task_name, 'task') },
+    { label: 'Run number',     value: <span className="font-mono text-[11px]">{data.run_id}</span> },
+    { label: 'Data source',    value: displayLabel(data.source, 'source') },
+    { label: 'Job',            value: displayLabel(data.task_name, 'task') },
     { label: 'Status',         value: displayLabel(data.status, 'runStatus') },
     { label: 'Started',        value: formatDateTime(data.started_at) },
     { label: 'Finished',       value: formatDateTime(data.finished_at) },
     { label: 'Duration',       value: formatDuration(data.duration_s) },
     { label: 'Records written',value: data.records_written?.toLocaleString('en-IN') ?? '—' },
     { label: 'Records failed', value: data.records_failed?.toLocaleString('en-IN') ?? '—' },
-    { label: 'Raw file path',  value: data.raw_file_path ?? '—' },
+    ...(data.raw_file_path
+      ? [{ label: 'Downloaded file', value: <span className="font-mono text-[11px]" title="Where the fetched file is stored on the server.">{data.raw_file_path}</span> }]
+      : []),
   ];
 
   return (
@@ -130,7 +132,7 @@ function RunDetailContent({ runId }: { runId: string }) {
 
       {data.error_detail && (
         <div className="rounded-lg bg-red/5 border border-red/20 p-4">
-          <p className="text-small font-medium text-red mb-1">Error detail</p>
+          <p className="text-small font-medium text-red mb-1">What went wrong</p>
           <pre className="text-[11px] text-red/80 whitespace-pre-wrap break-all font-mono">
             {data.error_detail}
           </pre>
@@ -138,12 +140,14 @@ function RunDetailContent({ runId }: { runId: string }) {
       )}
 
       {data.run_metadata && Object.keys(data.run_metadata).length > 0 && (
-        <div className="rounded-lg bg-surface-2 p-4">
-          <p className="text-small font-medium text-ink mb-2">Run metadata</p>
-          <pre className="text-[11px] text-ink-muted whitespace-pre-wrap break-all font-mono">
+        <details className="rounded-lg bg-surface-2 p-4">
+          <summary className="cursor-pointer text-small font-medium text-ink">
+            Technical details <span className="font-normal text-ink-muted">(raw run data, for debugging)</span>
+          </summary>
+          <pre className="mt-2 text-[11px] text-ink-muted whitespace-pre-wrap break-all font-mono">
             {JSON.stringify(data.run_metadata, null, 2)}
           </pre>
-        </div>
+        </details>
       )}
     </div>
   );
@@ -195,8 +199,8 @@ function SourceLogsContent({ sourceKey }: { sourceKey: string }) {
             <span>{formatDuration(run.duration_s)}</span>
             <span>{run.records_written?.toLocaleString('en-IN') ?? '—'} written</span>
             {run.error_class && (
-              <span className="text-red" title={run.error_class}>
-                {run.error_class.split('.').pop() ?? run.error_class}
+              <span className="text-red" title={`Error type: ${run.error_class}`}>
+                {titleCase(run.error_class)}
               </span>
             )}
           </div>
@@ -234,7 +238,7 @@ function MoodCoveragePanel() {
         <span className="text-small text-ink-muted">signals available</span>
         {degraded ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber/10 px-2 py-0.5 text-caption font-medium text-amber">
-            Degraded — {data.data_quality ?? 'check data quality'}
+            {data.data_quality ? displayLabel(data.data_quality, 'mood') : 'Check data quality'}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald/10 px-2 py-0.5 text-caption font-medium text-emerald">
@@ -251,7 +255,7 @@ function MoodCoveragePanel() {
           <span>Last snapshot: not yet computed</span>
         )}
         {data.regime && (
-          <span>Regime: <span className="font-medium text-ink capitalize">{data.regime.replace(/_/g, ' ')}</span></span>
+          <span>Current mood: <span className="font-medium text-ink">{displayLabel(data.regime, 'mood')}</span></span>
         )}
       </div>
 
@@ -290,9 +294,10 @@ function MoodCoveragePanel() {
             {data.signals_present.map((sig) => (
               <span
                 key={sig}
-                className="inline-block rounded bg-surface-2 border border-line px-2 py-0.5 text-caption text-ink-muted font-mono"
+                title={sig}
+                className="inline-block rounded bg-surface-2 border border-line px-2 py-0.5 text-caption text-ink-muted"
               >
-                {sig}
+                {displayLabel(sig, 'signal')}
               </span>
             ))}
           </div>
@@ -315,8 +320,9 @@ function SettingsStub() {
       <div className="rounded-lg border border-line bg-surface-2 p-4">
         <p className="text-caption uppercase tracking-wide font-medium text-ink-faint mb-2">Admin Users</p>
         <p className="text-small text-ink-secondary">
-          Authorization is UUID-only, configured via <code className="font-mono text-[11px] bg-surface-3 px-1 rounded">ADMIN_USER_IDS</code> env var.
-          Changes require a container restart — no UI mutation (protects allowlist integrity).
+          The list of admin accounts is fixed in the server configuration and cannot be
+          changed from this screen — changing it requires a server restart. This protects
+          the admin list from being altered through a compromised admin session.
         </p>
       </div>
     </div>
@@ -427,7 +433,7 @@ export default function AdminOperationsPage() {
       <Section
         id="section-jobs"
         title="Scheduled Jobs"
-        subtitle="Celery beat background tasks — each job refreshes a dataset or performs a housekeeping action on a fixed schedule."
+        subtitle="Background jobs that run automatically — each one refreshes a dataset or performs housekeeping on a fixed schedule. Click a column heading to sort."
       >
         {tasksQ.isLoading && <TableSkeleton rows={8} />}
         {tasksQ.isError && (
@@ -503,10 +509,6 @@ export default function AdminOperationsPage() {
         {qualityQ.data && qualityQ.data.length > 0 && (
           <QualityIssueTable
             issues={qualityQ.data}
-            onReview={(key) => {
-              // Phase 2: open filtered audit table
-              console.log('Review quality metric:', key);
-            }}
             onAcknowledge={async (key, days) => {
               await qualityAck.mutateAsync({ metricKey: key, durationDays: days });
             }}

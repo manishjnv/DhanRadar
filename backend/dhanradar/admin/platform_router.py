@@ -45,6 +45,7 @@ from dhanradar.notifications.service import (
     list_templates,
 )
 
+from ._people import resolve_user_emails
 from .platform_schemas import (
     AnalyticsOverviewResponse,
     BroadcastRequest,
@@ -134,10 +135,15 @@ async def get_cas_failures(
 
     Results come from mf.service.list_recent_cas_failures (module isolation).
     Each record includes any ``support_notes`` an operator has set via
-    POST /admin/support/cas-failures/{job_id}/notes (None when unset).
+    POST /admin/support/cas-failures/{job_id}/notes (None when unset), plus
+    the owning user's email (display-only enrichment).
     """
     rows = await list_recent_cas_failures(db, limit=limit)
-    return [CasFailureRecord(**row) for row in rows]
+    emails = await resolve_user_emails(db, {row.get("user_id") for row in rows})
+    return [
+        CasFailureRecord(**row, email=emails.get(str(row.get("user_id"))))
+        for row in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -257,6 +257,10 @@ _SOURCE_TO_TASK: dict[str, str] = {
     if s["celery_task"]
 }
 
+# Map source_key → human display name; used by other admin routers (e.g. the
+# audit log) to label source targets without duplicating the catalog.
+SOURCE_NAMES: dict[str, str] = {s["source_key"]: s["name"] for s in _SOURCE_CATALOG}
+
 # ---------------------------------------------------------------------------
 # Celery beat task registry (mirrors celery_app.py beat_schedule).
 # Used by GET /admin/tasks to produce the task list without importing celery_app

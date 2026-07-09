@@ -167,13 +167,13 @@ function ComplianceGlance({
       </div>
       <div>
         <StatCard
-          title="Low-groundedness flags (7d)"
+          title="Low-accuracy AI answers (7d)"
           value={flagsCount}
           status="neutral"
           sub="Not yet measured — this 0 is not a clean pass"
         />
         <p className="mt-1.5 text-caption text-ink-faint px-1">
-          Will count AI responses below the groundedness threshold over 7 days — a rising number indicates answer quality issues.
+          Will count AI answers that were poorly supported by their source data over 7 days — a rising number means answer quality issues.
         </p>
       </div>
     </div>

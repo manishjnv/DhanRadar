@@ -30,6 +30,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { SubscriptionTable } from '@/components/admin/SubscriptionTable';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative, formatDateTime, formatCurrency } from '@/components/admin/utils';
+import { matchesQuery, SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminBillingOverview,
@@ -116,11 +117,24 @@ interface RefundTarget {
   idempotencyKey: string;
 }
 
+const PAYMENT_ACCESSORS: Record<string, SortAccessor<AdminPaymentRow>> = {
+  user: (p) => p.email ?? p.user_id,
+  reference: (p) => p.razorpay_payment_id,
+  status: (p) => displayLabel(p.status, 'payment'),
+  ts: (p) => p.ts,
+};
+
 function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
   const refundMutation = useAdminRefund();
   const [refundTarget, setRefundTarget] = React.useState<RefundTarget | null>(null);
   const [refundAmount, setRefundAmount] = React.useState('');
   const [refundReason, setRefundReason] = React.useState('');
+  const [search, setSearch] = React.useState('');
+
+  const filtered = payments.filter((p) =>
+    matchesQuery(search, p.email, p.razorpay_payment_id, displayLabel(p.status, 'payment')),
+  );
+  const { sorted, sort, toggle } = useSort(filtered, PAYMENT_ACCESSORS, { key: 'ts', dir: 'desc' });
 
   function openRefund(payment: AdminPaymentRow) {
     setRefundAmount('');
@@ -134,43 +148,56 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
   if (payments.length === 0) {
     return (
       <EmptyState
-        title="No payments found"
-        description="Recent payments will appear here."
+        title="No payments yet"
+        description="Payments will appear here as soon as a user pays."
         className="py-8"
       />
     );
   }
 
-  const HEADERS = ['User ID', 'Payment ID', 'Status', 'Timestamp', 'Request ID', ''];
-
   return (
     <>
+      <div className="mb-3">
+        <input
+          type="text"
+          placeholder="Search email, payment reference, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-72 max-w-full rounded-md border border-line bg-surface px-3 text-small text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-royal/40"
+        />
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No matching payments"
+          description="No payments match your search. Try different words."
+          className="py-8"
+        />
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full text-small">
           <caption className="sr-only">Recent payment transactions</caption>
           <thead>
             <tr className="border-b border-line">
-              {HEADERS.map((h) => (
-                <th
-                  key={h || 'action'}
-                  scope="col"
-                  className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-                >
-                  {h}
-                </th>
-              ))}
+              <SortableTh label="User" sortKey="user" sort={sort} onToggle={toggle} />
+              <SortableTh label="Payment Reference" sortKey="reference" sort={sort} onToggle={toggle} />
+              <SortableTh label="Status" sortKey="status" sort={sort} onToggle={toggle} />
+              <SortableTh label="When" sortKey="ts" sort={sort} onToggle={toggle} />
+              <SortableTh label="" sort={sort} onToggle={toggle} />
             </tr>
           </thead>
           <tbody>
-            {payments.map((p, i) => (
+            {sorted.map((p, i) => (
               <tr
                 key={`${p.user_id}-${i}`}
                 className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
               >
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                  {p.user_id.slice(0, 8)}…
+                <td className="py-2.5 pr-4 text-ink" title={`User ID: ${p.user_id}`}>
+                  {p.email ?? `${p.user_id.slice(0, 8)}…`}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-secondary">
+                <td
+                  className="py-2.5 pr-4 font-mono text-[11px] text-ink-secondary"
+                  title="Razorpay payment reference — use this when looking the payment up in the Razorpay dashboard."
+                >
                   {p.razorpay_payment_id ?? '—'}
                 </td>
                 <td className="py-2.5 pr-4">
@@ -188,11 +215,11 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
                     </span>
                   </div>
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                <td
+                  className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap"
+                  title={p.request_id ? `Support reference: ${p.request_id}` : undefined}
+                >
                   {formatDateTime(p.ts)}
-                </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                  {p.request_id ? p.request_id.slice(0, 8) + '…' : '—'}
                 </td>
                 <td className="py-2.5">
                   {p.status === 'captured' && p.razorpay_payment_id ? (
@@ -212,6 +239,7 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Refund dialog */}
       {refundTarget && (
@@ -221,8 +249,9 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
           title="Issue refund"
           description={
             <>
-              Refund payment <code className="font-mono text-caption bg-surface-2 px-1 rounded">{refundTarget.payment.razorpay_payment_id}</code>.
-              A fresh idempotency key is generated on each submit and on Retry.
+              Refund payment <code className="font-mono text-caption bg-surface-2 px-1 rounded">{refundTarget.payment.razorpay_payment_id}</code>
+              {refundTarget.payment.email ? <> for <strong>{refundTarget.payment.email}</strong></> : null}.
+              If the first attempt fails it is safe to press Retry — the same refund will never be issued twice.
               Enter the amount (₹) and reason, then type <strong>REFUND</strong> to confirm.
             </>
           }
@@ -288,6 +317,7 @@ function PaymentsTable({ payments }: { payments: AdminPaymentRow[] }) {
 interface PlanChangeTarget {
   userId: string;
   currentTier: string;
+  email: string;
 }
 
 const TIER_OPTIONS = ['free', 'trial', 'plus', 'founder_lifetime'];
@@ -313,11 +343,11 @@ function SubscriptionsWithPlanChange({ subscriptions }: { subscriptions: AdminSu
     <>
       <SubscriptionTable
         subscriptions={subscriptions}
-        onPlanChange={(userId, currentTier) => {
+        onPlanChange={(userId, currentTier, email) => {
           setNewTier('plus');
           setGrantUntil('');
           setReason('');
-          setPlanTarget({ userId, currentTier });
+          setPlanTarget({ userId, currentTier, email });
         }}
       />
       {planTarget && (
@@ -327,8 +357,9 @@ function SubscriptionsWithPlanChange({ subscriptions }: { subscriptions: AdminSu
           title="Change user plan"
           description={
             <>
-              Change plan for user <code className="font-mono text-caption bg-surface-2 px-1 rounded">{planTarget.userId.slice(0, 8)}…</code>{' '}
-              from <strong>{planTarget.currentTier}</strong>. Select the new tier and enter a reason to confirm.
+              Change plan for <strong>{planTarget.email}</strong>{' '}
+              (currently on <strong>{displayLabel(planTarget.currentTier, 'tier')}</strong>).
+              Select the new plan and enter a reason to confirm.
             </>
           }
           confirmLabel="Change Plan"
@@ -348,7 +379,7 @@ function SubscriptionsWithPlanChange({ subscriptions }: { subscriptions: AdminSu
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="plan-tier" className="text-small font-medium text-ink">
-                New tier <span className="text-red">*</span>
+                New plan <span className="text-red">*</span>
               </label>
               <select
                 id="plan-tier"
@@ -478,7 +509,7 @@ export default function AdminBillingPage() {
         <div>
           <h1 className="text-h2 font-medium text-ink">Billing Ops</h1>
           <p className="mt-1 text-small text-ink-muted">
-            MRR · subscriptions · payments · webhook health · refunds · plan changes (Phase 5 live)
+            Revenue · subscriptions · payments · refunds · plan changes
           </p>
         </div>
         <div className="flex flex-col items-end gap-0.5">
@@ -544,7 +575,7 @@ export default function AdminBillingPage() {
       <Section
         id="section-subscriptions"
         title="Subscriptions"
-        subtitle="All active and recent subscriptions. Price in ₹. [Change Plan] is live (Phase 5)."
+        subtitle="All active and recent subscriptions, with prices in ₹. Use [Change Plan] to move a user to a different plan."
       >
         {subscriptionsQ.isLoading && <TableSkeleton rows={8} />}
         {subscriptionsQ.isError && (
@@ -562,7 +593,7 @@ export default function AdminBillingPage() {
       <Section
         id="section-payments"
         title="Payments"
-        subtitle="Recent payment transactions. [Refund] available on captured payments (Phase 5 live)."
+        subtitle="Recent payment transactions. [Refund] is available on successfully paid transactions. Click a column heading to sort."
       >
         {paymentsQ.isLoading && <TableSkeleton rows={8} />}
         {paymentsQ.isError && (
@@ -577,8 +608,8 @@ export default function AdminBillingPage() {
       {/* Webhook health */}
       <Section
         id="section-webhook-health"
-        title="Webhook Health"
-        subtitle="Razorpay webhook verify-before-parse: success rate, dedup, last failure."
+        title="Payment Notifications"
+        subtitle="Automatic payment updates received from Razorpay over the last 24 hours — how many arrived and how many succeeded."
       >
         <WebhookHealthCard />
       </Section>

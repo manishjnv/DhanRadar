@@ -18,7 +18,8 @@ export interface AdminQualityIssue {
 
 interface QualityIssueTableProps {
   issues: AdminQualityIssue[];
-  onReview: (key: string) => void;
+  /** Optional — when omitted, no Review button renders (nothing to open yet). */
+  onReview?: (key: string) => void;
   onAcknowledge: (key: string, durationDays: number) => Promise<void>;
 }
 
@@ -92,9 +93,11 @@ export function QualityIssueTable({ issues, onReview, onAcknowledge }: QualityIs
                   </td>
                   <td className="py-3">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <Button size="sm" variant="ghost" onClick={() => onReview(issue.metric_key)}>
-                        Review
-                      </Button>
+                      {onReview && (
+                        <Button size="sm" variant="ghost" onClick={() => onReview(issue.metric_key)}>
+                          Review
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="ghost"

@@ -31,6 +31,7 @@ import { StatCard } from '@/components/admin/StatCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
+import { SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminScoringModel,
@@ -143,22 +144,42 @@ function AxisWeightBars({ weights }: { weights: Record<string, number> }) {
 // ---------------------------------------------------------------------------
 // Registry versions table
 // ---------------------------------------------------------------------------
+const REGISTRY_ACCESSORS: Record<string, SortAccessor<AdminScoringRegistryVersion>> = {
+  version: (v) => v.model_version,
+  created_by: (v) => v.created_by_email ?? v.created_by,
+  approved_by: (v) => v.approved_by_email ?? v.approved_by,
+  two_person: (v) => (v.two_person_ok ? 1 : 0),
+  active: (v) => (v.activated ? 1 : 0),
+  activated_at: (v) => v.activated_at,
+  created_at: (v) => v.created_at,
+};
+
 function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }) {
   const [activateTarget, setActivateTarget] = React.useState<string | null>(null);
   const [backtestPassed, setBacktestPassed] = React.useState(false);
   const activateMutation = useAdminActivateScoringVersion();
+  const { sorted, sort, toggle } = useSort(versions, REGISTRY_ACCESSORS);
 
   if (versions.length === 0) {
     return (
       <EmptyState
-        title="No registry versions"
-        description="Score model registry entries will appear here."
+        title="No scoring versions yet"
+        description="Each registered scoring-model version will appear here."
         className="py-8"
       />
     );
   }
 
-  const HEADERS = ['Version', 'Created by', 'Approved by', 'Approved by Two People', 'Active', 'Activated at', 'Created at', 'Activate'];
+  const HEADERS: Array<{ label: string; sortKey?: string }> = [
+    { label: 'Version', sortKey: 'version' },
+    { label: 'Created by', sortKey: 'created_by' },
+    { label: 'Approved by', sortKey: 'approved_by' },
+    { label: 'Approved by Two People', sortKey: 'two_person' },
+    { label: 'Active', sortKey: 'active' },
+    { label: 'Activated at', sortKey: 'activated_at' },
+    { label: 'Created at', sortKey: 'created_at' },
+    { label: 'Activate' },
+  ];
 
   return (
     <>
@@ -168,18 +189,18 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
           <thead>
             <tr className="border-b border-line">
               {HEADERS.map((h) => (
-                <th
-                  key={h}
-                  scope="col"
-                  className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-                >
-                  {h}
-                </th>
+                <SortableTh
+                  key={h.label}
+                  label={h.label}
+                  sortKey={h.sortKey}
+                  sort={sort}
+                  onToggle={toggle}
+                />
               ))}
             </tr>
           </thead>
           <tbody>
-            {versions.map((v) => (
+            {sorted.map((v) => (
               <tr
                 key={v.model_version}
                 className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
@@ -187,13 +208,15 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
                 <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
                   {v.model_version}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted" title={v.created_by}>
-                  {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
+                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={`ID: ${v.created_by}`}>
+                  {v.created_by_email
+                    ?? (v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by)}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted" title={v.approved_by ?? undefined}>
-                  {v.approved_by
-                    ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
-                    : '—'}
+                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={v.approved_by ? `ID: ${v.approved_by}` : undefined}>
+                  {v.approved_by_email
+                    ?? (v.approved_by
+                      ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
+                      : '—')}
                 </td>
                 <td className="py-2.5 pr-4">
                   <span title="Whether a second reviewer approved this scoring version (separate from who created it).">
@@ -350,12 +373,13 @@ export default function AdminScoringPage() {
               <div className="flex flex-col gap-1.5">
                 <span className="text-caption uppercase tracking-wide text-ink-muted">Created by</span>
                 <span
-                  className="font-mono text-small text-ink"
-                  title={modelQ.data.created_by}
+                  className="text-small text-ink"
+                  title={`ID: ${modelQ.data.created_by}`}
                 >
-                  {modelQ.data.created_by.length > 12
-                    ? modelQ.data.created_by.slice(0, 12) + '…'
-                    : modelQ.data.created_by}
+                  {modelQ.data.created_by_email
+                    ?? (modelQ.data.created_by.length > 12
+                      ? modelQ.data.created_by.slice(0, 12) + '…'
+                      : modelQ.data.created_by)}
                 </span>
               </div>
               {modelQ.data.methodology_url && (
@@ -422,8 +446,8 @@ export default function AdminScoringPage() {
       {/* Section D — Registry versions */}
       <Section
         id="section-registry"
-        title="Registry Versions"
-        subtitle="All model versions in the ranking_configs registry. Use the Activate button on a row to promote a version to active."
+        title="Version History"
+        subtitle="Every scoring-model version ever registered, newest first. Use [Activate] on a row to make that version live. Click a column heading to sort."
       >
         {modelQ.isLoading && <TableSkeleton rows={4} />}
         {modelQ.isError && (

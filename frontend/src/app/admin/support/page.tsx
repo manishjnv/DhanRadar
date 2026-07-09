@@ -25,6 +25,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import { Input } from '@/components/ui/Input';
 import { useAdminCasFailures, useSetCasNotes, type AdminCasFailure } from '@/features/admin/api';
+import { matchesQuery, SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -72,11 +73,11 @@ function CasFailureRow({ f, badgeStatus }: { f: AdminCasFailure; badgeStatus: Ba
 
   return (
     <tr className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
-      <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
-        {f.job_id.length > 12 ? f.job_id.slice(0, 12) + '…' : f.job_id}
-      </td>
-      <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-        {f.user_id.length > 8 ? f.user_id.slice(0, 8) + '…' : f.user_id}
+      <td
+        className="py-2.5 pr-4 text-ink"
+        title={`User ID: ${f.user_id}\nUpload job: ${f.job_id}`}
+      >
+        {f.email ?? `${f.user_id.slice(0, 8)}…`}
       </td>
       <td className="py-2.5 pr-4">
         <HealthBadge status={badgeStatus} />
@@ -162,53 +163,81 @@ function CasFailureRow({ f, badgeStatus }: { f: AdminCasFailure; badgeStatus: Ba
 // ---------------------------------------------------------------------------
 // CAS failures table
 // ---------------------------------------------------------------------------
+// Derive badge status from job status string
+function jobBadgeStatus(status: string): 'Failed' | 'Running' | 'Success' | 'Warning' | 'Paused' {
+  const s = status.toLowerCase();
+  if (s === 'failed' || s === 'error') return 'Failed';
+  if (s === 'running' || s === 'processing') return 'Running';
+  if (s === 'done' || s === 'success' || s === 'complete' || s === 'completed') return 'Success';
+  if (s === 'stuck' || s === 'timeout') return 'Warning';
+  return 'Paused';
+}
+
+const CAS_ACCESSORS: Record<string, SortAccessor<AdminCasFailure>> = {
+  user: (f) => f.email ?? f.user_id,
+  status: (f) => f.status,
+  error: (f) => f.error_message,
+  created: (f) => f.created_at,
+  completed: (f) => f.completed_at,
+};
+
 function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
+  const [search, setSearch] = React.useState('');
+  const filtered = failures.filter((f) =>
+    matchesQuery(search, f.email, f.error_message, f.status, f.support_notes),
+  );
+  const { sorted, sort, toggle } = useSort(filtered, CAS_ACCESSORS, { key: 'created', dir: 'desc' });
+
   if (failures.length === 0) {
     return (
       <EmptyState
-        title="No CAS parse failures"
-        description="Failed CAS upload jobs will appear here once they are recorded."
+        title="No failed uploads"
+        description="Statement uploads that fail or get stuck will appear here. Nothing has failed so far."
         className="py-10"
       />
     );
   }
 
-  const HEADERS = ['Upload Job', 'User ID', 'Status', 'Error', 'Created', 'Completed', 'Support Note'];
-
-  // Derive badge status from job status string
-  function jobBadgeStatus(status: string): 'Failed' | 'Running' | 'Success' | 'Warning' | 'Paused' {
-    const s = status.toLowerCase();
-    if (s === 'failed' || s === 'error') return 'Failed';
-    if (s === 'running' || s === 'processing') return 'Running';
-    if (s === 'done' || s === 'success' || s === 'complete' || s === 'completed') return 'Success';
-    if (s === 'stuck' || s === 'timeout') return 'Warning';
-    return 'Paused';
-  }
-
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-small">
-        <caption className="sr-only">Failed CAS upload jobs — job ID, status, error, and timestamps</caption>
-        <thead>
-          <tr className="border-b border-line">
-            {HEADERS.map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {failures.map((f) => (
-            <CasFailureRow key={f.job_id} f={f} badgeStatus={jobBadgeStatus(f.status)} />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="mb-3">
+        <input
+          type="text"
+          placeholder="Search email, error, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-72 max-w-full rounded-md border border-line bg-surface px-3 text-small text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-royal/40"
+        />
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No matching uploads"
+          description="No failed uploads match your search. Try different words."
+          className="py-10"
+        />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-small">
+            <caption className="sr-only">Failed CAS upload jobs — user, status, error, and timestamps</caption>
+            <thead>
+              <tr className="border-b border-line">
+                <SortableTh label="User" sortKey="user" sort={sort} onToggle={toggle} />
+                <SortableTh label="Status" sortKey="status" sort={sort} onToggle={toggle} />
+                <SortableTh label="Error" sortKey="error" sort={sort} onToggle={toggle} />
+                <SortableTh label="Uploaded" sortKey="created" sort={sort} onToggle={toggle} />
+                <SortableTh label="Finished" sortKey="completed" sort={sort} onToggle={toggle} />
+                <SortableTh label="Support Note" sort={sort} onToggle={toggle} />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((f) => (
+                <CasFailureRow key={f.job_id} f={f} badgeStatus={jobBadgeStatus(f.status)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -257,10 +286,10 @@ export default function AdminSupportPage() {
           </CardHeader>
           <CardBody>
             <p className="mb-4 text-small text-ink-muted">
-              A CAS upload failure means the system could not parse or process a user&apos;s
-              mutual-fund statement (CAS). To triage: find the matching user via the
-              Users &amp; Audit page using the User ID below.
-              Stuck jobs (no completion time) are held by the reaper until manually cleared.
+              A failed upload means the system could not read or process a user&apos;s
+              mutual-fund statement (CAS). The user&apos;s email identifies each row.
+              Uploads that got stuck (no finish time) are cleaned up automatically after a
+              timeout. Click a column heading to sort.
             </p>
             {casQ.isLoading && <TableSkeleton rows={6} />}
             {casQ.isError && (

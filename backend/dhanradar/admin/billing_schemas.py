@@ -77,9 +77,14 @@ class SubscriptionMetricsResponse(BaseModel):
 
 
 class PaymentEventItem(BaseModel):
-    """One row from audit.payment_events."""
+    """One row from audit.payment_events.
+
+    ``email`` is a display-only enrichment (user_id → auth.users.email),
+    resolved by the router; None when the user no longer exists.
+    """
 
     user_id: str
+    email: str | None = None
     order_id: str | None = None
     razorpay_payment_id: str | None = None
     status: str

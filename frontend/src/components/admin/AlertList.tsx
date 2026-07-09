@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { displayLabel } from '@/lib/displayLabel';
 import { formatRelative } from '@/components/admin/utils';
 
 export interface AdminAlert {
@@ -47,7 +48,7 @@ export function AlertList({ alerts }: AlertListProps) {
             <div className="flex-1 min-w-0">
               <p className="text-small font-medium leading-snug">{alert.message}</p>
               <p className="text-caption mt-0.5 opacity-70">
-                {alert.type} · {formatRelative(alert.created_at)}
+                {displayLabel(alert.type, 'alertType')} · {formatRelative(alert.created_at)}
               </p>
             </div>
           </li>

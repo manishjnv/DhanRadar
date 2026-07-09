@@ -121,7 +121,10 @@ export default function AdminAIPromptsPage() {
                 />
               )}
               {q.data && q.data.registry && (
-                <p className="text-small text-ink-muted">Registry is available.</p>
+                <p className="text-small text-ink-muted">
+                  Prompt templates are stored on the server. Use the version list below to
+                  see which prompt versions have been used.
+                </p>
               )}
             </CardBody>
           </Card>

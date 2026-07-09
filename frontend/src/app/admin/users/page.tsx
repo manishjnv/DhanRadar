@@ -43,7 +43,8 @@ import {
   type AdminUserDetail,
   type AdminActivityEvent,
 } from '@/features/admin/api';
-import { displayLabel } from '@/lib/displayLabel';
+import { displayLabel, titleCase } from '@/lib/displayLabel';
+import { matchesQuery, SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -416,12 +417,64 @@ function RecentLoginsTable({ rows }: { rows: AdminActivityEvent[] }) {
 // ---------------------------------------------------------------------------
 // Audit table (Section D)
 // ---------------------------------------------------------------------------
-function AuditTable({ rows }: { rows: AdminAuditRow[] }) {
+
+// Who performed the action — email when resolvable, else a shortened id.
+function auditActor(row: AdminAuditRow): string {
+  return row.admin_email ?? `Admin ${row.admin_id.slice(0, 8)}…`;
+}
+
+// What the action was applied to, in plain words:
+// "User · someone@example.com", "Data source · AMFI Daily NAV", "Scoring model · v1.2".
+function auditEntity(row: AdminAuditRow): string {
+  if (!row.target_type) return '—';
+  const typeLabel = displayLabel(row.target_type, 'targetType');
+  let detail = row.target_label;
+  if (!detail && row.target_id) {
+    if (row.target_type === 'task') detail = displayLabel(row.target_id, 'task');
+    else if (row.target_type === 'source') detail = displayLabel(row.target_id, 'source');
+    else if (row.target_type === 'ai_budget') detail = null; // always "global" — adds nothing
+    else if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(row.target_id)) detail = row.target_id.slice(0, 8) + '…';
+    else if (/^[a-z0-9_]+$/.test(row.target_id)) detail = titleCase(row.target_id);
+    else detail = row.target_id; // already human (version strings, keys with dots)
+  }
+  return detail ? `${typeLabel} · ${detail}` : typeLabel;
+}
+
+// The outcome column is free-form text; only genuinely failed outcomes are red.
+function auditResult(row: AdminAuditRow): { label: string; failed: boolean } {
+  const raw = row.result ?? '';
+  if (raw === 'ok' || raw === 'success') return { label: 'Success', failed: false };
+  return { label: titleCase(raw), failed: /fail|error|denied|reject/i.test(raw) };
+}
+
+const AUDIT_ACCESSORS: Record<string, SortAccessor<AdminAuditRow>> = {
+  ts: (r) => r.ts,
+  actor: (r) => auditActor(r),
+  action: (r) => displayLabel(r.action, 'audit'),
+  entity: (r) => auditEntity(r),
+  result: (r) => auditResult(r).label,
+};
+
+function AuditTable({ rows, query }: { rows: AdminAuditRow[]; query: string }) {
+  const filtered = rows.filter((r) =>
+    matchesQuery(query, auditActor(r), displayLabel(r.action, 'audit'), auditEntity(r), auditResult(r).label),
+  );
+  const { sorted, sort, toggle } = useSort(filtered, AUDIT_ACCESSORS, { key: 'ts', dir: 'desc' });
+
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No audit entries"
-        description="Admin actions will appear here once recorded."
+        title="No admin actions recorded yet"
+        description="Every admin action (plan changes, refunds, data-source refreshes, …) will be listed here."
+        className="py-8"
+      />
+    );
+  }
+  if (filtered.length === 0) {
+    return (
+      <EmptyState
+        title="No matching entries"
+        description="No audit entries match your search. Try different words."
         className="py-8"
       />
     );
@@ -432,57 +485,38 @@ function AuditTable({ rows }: { rows: AdminAuditRow[] }) {
         <caption className="sr-only">Admin audit log — recent admin actions and their outcomes</caption>
         <thead>
           <tr className="border-b border-line">
-            {['Timestamp', 'Actor', 'Action', 'Entity', 'Result'].map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-              >
-                {h}
-              </th>
-            ))}
+            <SortableTh label="When" sortKey="ts" sort={sort} onToggle={toggle} />
+            <SortableTh label="Who" sortKey="actor" sort={sort} onToggle={toggle} />
+            <SortableTh label="Action" sortKey="action" sort={sort} onToggle={toggle} />
+            <SortableTh label="Applied To" sortKey="entity" sort={sort} onToggle={toggle} />
+            <SortableTh label="Outcome" sortKey="result" sort={sort} onToggle={toggle} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
-            // Normalize ok/success both to "Success"
-            const resultLabel = (row.result === 'ok' || row.result === 'success') ? 'Success' : row.result;
-            const resultOk    = row.result === 'ok' || row.result === 'success';
-
-            // Entity: "user:uuid" → "User {uuid8}…" with full-id tooltip
-            let entityDisplay: React.ReactNode = '—';
-            if (row.target_type && row.target_id) {
-              const short = row.target_id.length > 8 ? row.target_id.slice(0, 8) + '…' : row.target_id;
-              const fullId = `${row.target_type}:${row.target_id}`;
-              const typeLabel = row.target_type.charAt(0).toUpperCase() + row.target_type.slice(1);
-              entityDisplay = (
-                <span title={fullId} className="cursor-default">
-                  {typeLabel} {short}
-                </span>
-              );
-            } else if (row.target_type) {
-              entityDisplay = row.target_type;
-            }
-
+          {sorted.map((row) => {
+            const { label: resultLabel, failed } = auditResult(row);
             return (
               <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                   {formatDateTime(row.ts)}
                 </td>
-                <td className="py-2.5 pr-4 font-mono text-[11px] text-ink">
-                  {row.admin_id.slice(0, 8)}…
+                <td className="py-2.5 pr-4 text-ink" title={`Admin ID: ${row.admin_id}`}>
+                  {auditActor(row)}
                 </td>
                 <td className="py-2.5 pr-4 font-medium text-ink">
                   {displayLabel(row.action, 'audit')}
                 </td>
-                <td className="py-2.5 pr-4 text-ink-secondary text-[11px]">
-                  {entityDisplay}
+                <td
+                  className="py-2.5 pr-4 text-ink-secondary"
+                  title={row.target_type && row.target_id ? `${row.target_type}: ${row.target_id}` : undefined}
+                >
+                  {auditEntity(row)}
                 </td>
                 <td className="py-2.5">
                   <span
                     className={cn(
                       'rounded-full px-2 py-0.5 text-caption font-medium',
-                      resultOk ? 'bg-emerald/10 text-emerald' : 'bg-red/10 text-red',
+                      failed ? 'bg-red/10 text-red' : 'bg-emerald/10 text-emerald',
                     )}
                   >
                     {resultLabel}
@@ -513,7 +547,7 @@ function AuditFilters({
     <div className="flex flex-wrap items-center gap-2">
       <input
         type="text"
-        placeholder="Filter by action…"
+        placeholder="Search who, action, outcome…"
         value={actionFilter}
         onChange={(e) => setActionFilter(e.target.value)}
         className="h-8 rounded-md border border-line bg-surface px-3 text-small text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-royal/40"
@@ -558,10 +592,9 @@ export default function AdminUsersPage() {
   });
   const subMetricsQ    = useAdminBillingSubMetrics();
   const activityQ      = useAdminUserActivity();
-  const auditQ         = useAdminAudit({
-    action: auditAction || undefined,
-    limit: 100,
-  });
+  // Search is client-side over the fetched rows (the server filter is an
+  // exact raw-action match, which never matches what an operator would type).
+  const auditQ         = useAdminAudit({ limit: 100 });
 
   const PLAN_OPTIONS   = ['', 'free', 'trial', 'plus', 'founder_lifetime'];
   // 'blocked' is not a valid backend status; map to 'deletion_requested' with label "Deletion Requested"
@@ -775,8 +808,8 @@ export default function AdminUsersPage() {
       {/* Section D — Activity & Audit Log */}
       <Section
         id="section-audit"
-        title="Activity & Audit Log"
-        subtitle="Recent user activity is shown above. This table lists admin actions and their outcomes."
+        title="Admin Action Log"
+        subtitle="Every action taken from this admin panel — who did it, what it was applied to, and the outcome. Click a column heading to sort."
         action={
           <AuditFilters
             actionFilter={auditAction}
@@ -792,7 +825,7 @@ export default function AdminUsersPage() {
             onRetry={() => auditQ.refetch()}
           />
         )}
-        {auditQ.data && <AuditTable rows={auditQ.data} />}
+        {auditQ.data && <AuditTable rows={auditQ.data} query={auditAction} />}
       </Section>
 
       {/* User detail drawer */}

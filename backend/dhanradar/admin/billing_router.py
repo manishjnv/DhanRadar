@@ -42,6 +42,7 @@ from dhanradar.billing.service import (
 from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 
+from ._people import resolve_user_emails
 from .billing_schemas import (
     BillingOverviewResponse,
     PaymentEventItem,
@@ -106,9 +107,17 @@ async def get_payments(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PaymentEventItem]:
-    """Paginated payment events from audit.payment_events (all users)."""
+    """Paginated payment events from audit.payment_events (all users).
+
+    Each row carries the payer's email (display-only enrichment) so the
+    operator never has to cross-reference a raw user UUID.
+    """
     rows = await list_payment_events(db, user_id=None, limit=limit, offset=offset)
-    return [PaymentEventItem(**row) for row in rows]
+    emails = await resolve_user_emails(db, {row.get("user_id") for row in rows})
+    return [
+        PaymentEventItem(**row, email=emails.get(str(row.get("user_id"))))
+        for row in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

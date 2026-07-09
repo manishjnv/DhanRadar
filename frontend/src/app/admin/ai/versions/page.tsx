@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
+import { SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import { displayLabel } from '@/lib/displayLabel';
 import {
   useAdminAIVersions,
@@ -45,16 +46,35 @@ function TableSkeleton() {
 // ---------------------------------------------------------------------------
 // Registry versions table
 // ---------------------------------------------------------------------------
-const VERSION_HEADERS = [
-  'Version', 'Created by', 'Approved by', 'Approved by Two People', 'Backtest', 'Currently Live', 'Activated at', 'Created at',
+const VERSION_ACCESSORS: Record<string, SortAccessor<AdminAIRegistryVersion>> = {
+  version: (v) => v.model_version,
+  created_by: (v) => v.created_by_email ?? v.created_by,
+  approved_by: (v) => v.approved_by_email ?? v.approved_by,
+  two_person: (v) => (v.two_person_ok ? 1 : 0),
+  backtest: (v) => (typeof v.backtest?.passed === 'boolean' ? (v.backtest.passed ? 2 : 1) : 0),
+  live: (v) => (v.activated ? 1 : 0),
+  activated_at: (v) => v.activated_at,
+  created_at: (v) => v.created_at,
+};
+
+const VERSION_HEADERS: Array<{ label: string; sortKey?: string; title?: string }> = [
+  { label: 'Version', sortKey: 'version' },
+  { label: 'Created by', sortKey: 'created_by' },
+  { label: 'Approved by', sortKey: 'approved_by' },
+  { label: 'Approved by Two People', sortKey: 'two_person' },
+  { label: 'Backtest', sortKey: 'backtest' },
+  { label: 'Currently Live', sortKey: 'live' },
+  { label: 'Activated at', sortKey: 'activated_at' },
+  { label: 'Created at', sortKey: 'created_at' },
 ];
 
 function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
+  const { sorted, sort, toggle } = useSort(versions, VERSION_ACCESSORS);
   if (versions.length === 0) {
     return (
       <EmptyState
-        title="No registry versions"
-        description="Score model registry entries will appear here once model versions are registered."
+        title="No scoring versions yet"
+        description="Each registered scoring-model version will appear here."
         className="py-8"
       />
     );
@@ -67,18 +87,18 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
         <thead>
           <tr className="border-b border-line">
             {VERSION_HEADERS.map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-              >
-                {h}
-              </th>
+              <SortableTh
+                key={h.label}
+                label={h.label}
+                sortKey={h.sortKey}
+                sort={sort}
+                onToggle={toggle}
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {versions.map((v) => (
+          {sorted.map((v) => (
             <tr
               key={v.model_version}
               className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
@@ -86,17 +106,19 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
               <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
                 {v.model_version}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {v.created_by ? (
-                  <span title={v.created_by}>
-                    {v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by}
+                  <span title={`ID: ${v.created_by}`}>
+                    {v.created_by_email
+                      ?? (v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by)}
                   </span>
                 ) : '—'}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {v.approved_by ? (
-                  <span title={v.approved_by}>
-                    {v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by}
+                  <span title={`ID: ${v.approved_by}`}>
+                    {v.approved_by_email
+                      ?? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)}
                   </span>
                 ) : '—'}
               </td>
@@ -105,8 +127,8 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
               </td>
               <td className="py-2.5 pr-4">
                 {v.backtest == null || typeof v.backtest.passed !== 'boolean' ? (
-                  <span className="font-mono text-[11px] text-ink-muted" title="§8 backtest gate not asserted for this version">
-                    not asserted
+                  <span className="text-[11px] text-ink-muted" title="No historical test result was recorded for this version.">
+                    not recorded
                   </span>
                 ) : (
                   <HealthBadge status={v.backtest.passed ? 'Success' : 'Warning'} />
@@ -201,32 +223,33 @@ export default function AdminAIVersionsPage() {
             <div className="flex flex-col gap-2">
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                 <div className="flex items-center gap-2 mb-1">
-                  <p className="font-medium text-ink">Backtest gate</p>
+                  <p className="font-medium text-ink">Backtest check</p>
                   <HealthBadge status={q.data.backtest.instrumented ? 'Healthy' : 'Planned'} />
                 </div>
                 <p>
-                  The §8 backtest pass-gate outcome is recorded per version (see the
-                  Backtest column above). {q.data.backtest.versions_with_backtest} of{' '}
+                  A backtest checks a scoring version against past data before it goes live.
+                  The pass/fail outcome is recorded per version (see the Backtest column
+                  above). {q.data.backtest.versions_with_backtest} of{' '}
                   {q.data.versions.length} shown versions carry a recorded outcome.
-                  DhanRadar records the activation-gate pass/fail, not a historical-accuracy score.
                 </p>
               </div>
               <div className="rounded-lg border border-line bg-surface p-4 text-small text-ink-muted">
                 <div className="flex items-center gap-2 mb-1">
-                  <p className="font-medium text-ink">Label drift</p>
+                  <p className="font-medium text-ink">Answer consistency</p>
                   <HealthBadge status={q.data.drift.instrumented ? 'Healthy' : 'Planned'} />
                 </div>
                 {q.data.drift.instrumented ? (
                   <p>
-                    Label churn for the live scoring version:{' '}
                     <span className="font-mono text-ink">{(q.data.drift.churn * 100).toFixed(1)}%</span>{' '}
-                    of funds changed label ({displayLabel(q.data.drift.decision, 'decision')})
-                    {q.data.drift.requires_human_review ? ' · review needed' : ''}. High churn ⇒ review the methodology.
+                    of funds changed their label under the live scoring version
+                    ({displayLabel(q.data.drift.decision, 'decision')})
+                    {q.data.drift.requires_human_review ? ' · review needed' : ''}.
+                    If many funds keep changing labels, the scoring method should be reviewed.
                   </p>
                 ) : (
                   <p>
-                    Not enough labelled history yet to measure drift — a churn reading appears
-                    once the live scoring version has labelled funds across more than one window.
+                    Not enough history yet to measure this — a reading appears once the live
+                    scoring version has labelled funds across more than one period.
                   </p>
                 )}
               </div>
