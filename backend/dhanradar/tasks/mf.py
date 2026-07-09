@@ -5143,9 +5143,19 @@ def _extract_sebi_row(
     # MOTILAL_OSWAL's header reads "% to Net Asset" (singular "Asset", every
     # other AMC's header says "Assets" plural or "NAV") — add the singular
     # form explicitly rather than a substring match that could accidentally
-    # widen to unrelated headers.
+    # widen to unrelated headers. SBI's per-scheme "Portfolio Details" sheets
+    # header it "% to AUM" (confirmed 2026-07-10 — the reason every SBI
+    # constituent row carried weight_pct NULL).
     weight_pct_raw = _get(
-        ["% to nav", "% of net assets", "% to net assets", "% to net asset", "weight", "% of nav"]
+        [
+            "% to nav",
+            "% of net assets",
+            "% to net assets",
+            "% to net asset",
+            "% to aum",
+            "weight",
+            "% of nav",
+        ]
     )
     weight_pct: float | None = None
     if weight_pct_raw:
@@ -5230,6 +5240,49 @@ def _extract_sebi_row(
         "source_amc": amc_name,
         "is_total_row": is_total_row,
     }
+
+
+def _normalize_fraction_weight_groups(constituent_batch: list[dict], amc_name: str) -> list[dict]:
+    """Make `weight_pct` PERCENT-semantics for every written row — pure.
+
+    Several AMCs publish "% to NAV" as a FRACTION (0.153 = 15.3%): measured
+    live 2026-07-10, ABSL/EDELWEISS/ICICI_PRU/MIRAE/NIPPON portfolios all sum
+    to ~1.0 while HDFC/KOTAK/TATA/UTI sum to ~100 — the fund pages rendered
+    the fraction AMCs' weights 100× too small. Decide per (isin, as_of_month)
+    GROUP by its summed weight: a real full portfolio can only sum near 1
+    under fraction semantics, so ×100 the whole group. Deliberately NOT a
+    per-row `< 1` check — a genuinely tiny plainly-typed <1% holding inside a
+    percent-semantics portfolio must never be multiplied (same trap the
+    MOTILAL_OSWAL percentage-number-format special case in _extract_sebi_row
+    documents). Guards: ≥5 weighted rows (partial/garbage groups left alone)
+    and 0.2 ≤ sum ≤ 1.5 (percent portfolios sum ~95–105, far outside).
+    """
+    sums: dict[tuple, tuple[float, int]] = {}
+    for r in constituent_batch:
+        if r["weight_pct"] is not None:
+            key = (r["isin"], r["as_of_month"])
+            s, n = sums.get(key, (0.0, 0))
+            sums[key] = (s + r["weight_pct"], n + 1)
+
+    fraction_groups = {k for k, (s, n) in sums.items() if n >= 5 and 0.2 <= s <= 1.5}
+    if not fraction_groups:
+        return constituent_batch
+    for k in fraction_groups:
+        logger.info(
+            "mf_constituents_fetch amc=%s isin=%s month=%s: fraction-semantics weights "
+            "(sum=%.3f over %d rows) normalized ×100 to percent",
+            amc_name,
+            k[0],
+            k[1],
+            sums[k][0],
+            sums[k][1],
+        )
+    for r in constituent_batch:
+        if r["weight_pct"] is not None and (r["isin"], r["as_of_month"]) in fraction_groups:
+            # round: the FE renders this raw — 0.153*100 must land 15.3, not
+            # 15.299999999999999 (binary float artifact).
+            r["weight_pct"] = round(r["weight_pct"] * 100, 4)
+    return constituent_batch
 
 
 def _drop_over_covered_funds(constituent_batch: list[dict], amc_name: str) -> list[dict]:
@@ -5582,6 +5635,9 @@ async def _upsert_constituents(
                 "source_amc": amc_name,
             }
         )
+
+    # Fraction→percent weight normalization — see _normalize_fraction_weight_groups.
+    constituent_batch = _normalize_fraction_weight_groups(constituent_batch, amc_name)
 
     # Deduplicate by ON CONFLICT key — some AMC files (e.g. NIPPON) have duplicate
     # rows for the same (isin, constituent_name, as_of_month); a single upsert
