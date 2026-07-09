@@ -318,6 +318,10 @@ _AMC_KEYWORDS: dict[str, str] = {
     # amc_undetectable). Resolver-side, `_amc_scheme_prefixes` in tasks/mf.py
     # pairs this with a "BHARAT 22%" prefix for ICICI_PRU.
     "bharat 22": "ICICI_PRU",
+    # QUANTUM (2026-07-10, joins the automated scraper): filenames and scheme
+    # names both say "Quantum". NOTE: deliberately the full word — "quant"
+    # would collide with Quant MF (a different AMC, manual-download list).
+    "quantum": "QUANTUM",
 }
 
 
