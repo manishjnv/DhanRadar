@@ -155,6 +155,16 @@ def test_candidates_formerly_known_as_paren_form():
     assert got[0] == "SBI ELSS Tax Saver Fund"
 
 
+def test_candidates_previously_known_as_with_embedded_newline():
+    # Real banner, verbatim from the one residual failed file (Mar-2020 SBI
+    # Taxgain): "Previously" (not formerly/earlier) + an embedded newline
+    # before the paren.
+    got = _resolution_candidates(
+        "SBI Long Term Equity Fund\n(Previously known as SBI Magnum Taxgain Scheme)"
+    )
+    assert got[0] == "SBI ELSS Tax Saver Fund"
+
+
 def test_candidates_never_query_the_wrong_sibling_fund():
     """MUST-NOT-match: master holds BOTH "SBI Flexicap Fund" (renamed Magnum
     Multicap) and "SBI Multicap Fund" (different fund, 2022 NFO). No candidate

@@ -5290,7 +5290,7 @@ _SCHEME_RENAME_ALIASES: dict[str, str] = {
 # (real evidence 2026-07-10: "SBI Flexicap Fund [earlier known as SBI Magnum
 # Multicap Fund]"). The clause dilutes trigram similarity below threshold.
 _FORMERLY_KNOWN_RE = re.compile(
-    r"[(\[]\s*(?:formerly|earlier)\s+known\s+as\s+([^)\]]+)[)\]]", re.IGNORECASE
+    r"[(\[]\s*(?:formerly|earlier|previously)\s+known\s+as\s+([^)\]]+)[)\]]", re.IGNORECASE
 )
 
 
