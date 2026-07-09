@@ -458,3 +458,68 @@ def test_zip_member_cap_admits_real_sbi_sized_bundles():
     result = expand_zip(_zip_bytes(members), "SBIopen_ended_schemes.zip")
     assert len(result.eligible) == 441
     assert result.skipped == []
+
+
+def test_quantum_keyword_and_banner_strips():
+    """QUANTUM joins the automated scraper (2026-07-10). Banner is verbatim
+    from the real June-2026 consolidated file; the full-word keyword must
+    never collide with Quant MF (a different AMC)."""
+    from dhanradar.tasks.mf import _AMC_DISCLOSURE_ROOTS
+
+    assert detect_amc("quantum-portfolio-june-2026.xlsx") == "QUANTUM"
+    assert detect_amc("Quantum ELSS Tax Saver Fund") == "QUANTUM"
+    assert detect_amc("quantmutual-downloads.xlsx") != "QUANTUM"  # Quant MF ≠ Quantum
+
+    quantum_roots = [a for a in _AMC_DISCLOSURE_ROOTS if a["name"] == "QUANTUM"]
+    assert len(quantum_roots) == 1
+    assert quantum_roots[0]["static_multi"] is True
+    assert quantum_roots[0]["static_max_files"] == 3  # opaque UUID links — cap the history
+
+
+def test_quantum_banner_strips_to_bare_scheme_name():
+    import io as _io
+
+    from openpyxl import Workbook
+
+    from dhanradar.tasks.mf import _parse_sebi_xlsx
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "Monthly Portfolio Statement of the Quantum ELSS Tax Saver Fund "
+            "for the period ended June 30, 2026"
+        ]
+    )
+    ws.append(["Name of the Instrument", "ISIN", "Quantity", "Market Value", "% to NAV"])
+    ws.append(["HDFC Bank Ltd", "INE040A01034", "100", "230.25", "6.15"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    rows = [r for r in _parse_sebi_xlsx(buf.getvalue(), "QUANTUM") if not r.get("is_total_row")]
+    assert rows
+    assert rows[0]["scheme_name"] == "Quantum ELSS Tax Saver Fund"
+
+
+def test_kotak_edelweiss_banner_prefixes_still_strip():
+    """Regression: the generalized prefix regex must keep covering the
+    original KOTAK/EDELWEISS forms."""
+    import io as _io
+
+    from openpyxl import Workbook
+
+    from dhanradar.tasks.mf import _parse_sebi_xlsx
+
+    for banner, expected in (
+        ("Portfolio Statement of Kotak Bluechip Fund as on 31-May-2026", "Kotak Bluechip Fund"),
+        ("Portfolio of EDELWEISS LIQUID FUND AS ON MAY 31, 2026", "EDELWEISS LIQUID FUND"),
+    ):
+        wb = Workbook()
+        ws = wb.active
+        ws.append([banner])
+        ws.append(["Name of the Instrument", "ISIN", "Quantity", "Market Value", "% to NAV"])
+        ws.append(["HDFC Bank Ltd", "INE040A01034", "100", "230.25", "6.15"])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        rows = [r for r in _parse_sebi_xlsx(buf.getvalue(), "KOTAK") if not r.get("is_total_row")]
+        assert rows, banner
+        assert rows[0]["scheme_name"] == expected

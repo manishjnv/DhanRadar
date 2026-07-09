@@ -174,6 +174,21 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
         "url": "https://www.tatamutualfund.com/schemes-related/portfolio",
         "static_multi": True,
     },
+    # QUANTUM (added 2026-07-10, verified live from KVM4): server-rendered
+    # portfolio page with direct FileCDN .xlsx links — ONE consolidated
+    # all-schemes workbook per month, newest first. The links are opaque
+    # UUIDs (no month/"portfolio" text in the URL), so BOTH discovery
+    # filters fall through to the full list — static_max_files caps the
+    # fetch to the newest few (real June-2026 file parsed 337 rows with the
+    # existing parser once the "Monthly Portfolio Statement of the X for
+    # the period ended <date>" banner strips were generalized). Scheme
+    # names start "Quantum ..." — default resolver prefix works.
+    {
+        "name": "QUANTUM",
+        "url": "https://www.quantumamc.com/portfolio/combined/-1/1/0/0",
+        "static_multi": True,
+        "static_max_files": 3,
+    },
     # B90 (2026-07-08) — 4 genuinely NEW AMCs (no prior recognition at all),
     # investigated real-site-first per the standing discipline. Each uses a
     # DIFFERENT resolution mechanism — no two of these AMCs share a strategy:
@@ -3293,7 +3308,9 @@ async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
         for amc in static_multi_amcs:
             amc_name = amc["name"]
             try:
-                rows, aum_cnt = await _process_amc_static_multi(client, amc_name, amc["url"])
+                rows, aum_cnt = await _process_amc_static_multi(
+                    client, amc_name, amc["url"], max_files=amc.get("static_max_files")
+                )
                 total_rows += rows
                 aum_updates += aum_cnt
                 logger.info(
@@ -3947,12 +3964,18 @@ async def _discover_all_urls_static(
 
 
 async def _process_amc_static_multi(
-    client: httpx.AsyncClient, amc_name: str, discovery_url: str
+    client: httpx.AsyncClient, amc_name: str, discovery_url: str, max_files: int | None = None
 ) -> tuple[int, int]:
     """Download and parse all disclosure files for an AMC with a plain HTML index page.
 
     Tries the previous month first, then 2 months back (SEBI publication lag).
     Used for MIRAE, which publishes one XLSX per scheme on a static page.
+
+    `max_files` (root-config `static_max_files`): cap on how many discovered
+    links are fetched, for AMCs whose link URLs carry no month text so the
+    month filter falls through to the FULL history list (QUANTUM: opaque
+    FileCDN UUIDs, ~40 links newest-first — without the cap every monthly
+    beat would re-download years of history).
     """
     now = datetime.now(UTC)
     for months_back in (1, 2):
@@ -3960,6 +3983,14 @@ async def _process_amc_static_multi(
         file_urls = await _discover_all_urls_static(
             client, discovery_url, amc_name, target_month=target.date()
         )
+        if max_files and len(file_urls) > max_files:
+            logger.info(
+                "mf_constituents_fetch amc=%s static multi: capping %d links to newest %d",
+                amc_name,
+                len(file_urls),
+                max_files,
+            )
+            file_urls = file_urls[:max_files]
         if not file_urls:
             logger.debug(
                 "mf_constituents_fetch amc=%s static multi: no links for month=%s",
@@ -4732,11 +4763,18 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # Strip "Portfolio of ..." / "Portfolio statement of ..." banner
                 # prefixes (KOTAK/EDELWEISS sheet titles, 2026-07-07) so the
                 # pg_trgm scheme-name resolution matches the bare scheme name.
-                low_candidate = candidate.lower()
-                for banner in ("portfolio statement of ", "portfolio of "):
-                    if low_candidate.startswith(banner):
-                        candidate = candidate[len(banner) :].strip()
-                        break
+                # QUANTUM (2026-07-10) prefixes a frequency word and a "the"
+                # ("Monthly Portfolio Statement of the Quantum X Fund ...") —
+                # generalized from the fixed KOTAK/EDELWEISS prefix pair.
+                import re as _re_banner  # local alias — `re` is function-shadowed here
+
+                candidate = _re_banner.sub(
+                    r"^(?:(?:monthly|fortnightly|half[- ]?yearly|annual)\s+)?"
+                    r"portfolio(?:\s+statement)?\s+of\s+(?:the\s+)?",
+                    "",
+                    candidate,
+                    flags=_re_banner.IGNORECASE,
+                ).strip()
                 # Strip a trailing "as on <date>" clause from the same banners
                 # ("Kotak X Fund as on 31-May-2026" / "EDELWEISS Y AS ON MAY 31,
                 # 2026") — the date is period metadata, not part of the scheme
@@ -4745,6 +4783,14 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
 
                 candidate = _re_ason.sub(
                     r"\s+as\s+on\s+.+$", "", candidate, flags=_re_ason.IGNORECASE
+                ).strip()
+                # "... for the period ended June 30, 2026" (QUANTUM) — same
+                # period-metadata class as the "as on" clause above.
+                candidate = _re_ason.sub(
+                    r"\s+for\s+the\s+period\s+ended\s+.+$",
+                    "",
+                    candidate,
+                    flags=_re_ason.IGNORECASE,
                 ).strip()
                 # Reject noise rows like "SCHEME CODE002STARTS" that aren't real names.
                 if any(kw in candidate.upper() for kw in ("CODE002", "STARTS", "ENDS")):
