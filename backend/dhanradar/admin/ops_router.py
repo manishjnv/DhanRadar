@@ -828,6 +828,7 @@ async def get_health(
             source=r.source,
             reason=r.error_class or r.error_detail or "unknown",
             failed_at=_iso(r.started_at) or "",
+            status=r.status or "failed",
         )
         for r in failure_rows
     ]

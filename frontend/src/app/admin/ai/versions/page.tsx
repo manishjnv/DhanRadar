@@ -24,7 +24,7 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import { SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
-import { displayLabel } from '@/lib/displayLabel';
+import { displayLabel, personLabel } from '@/lib/displayLabel';
 import {
   useAdminAIVersions,
   type AdminAIRegistryVersion,
@@ -108,17 +108,15 @@ function VersionsTable({ versions }: { versions: AdminAIRegistryVersion[] }) {
               </td>
               <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {v.created_by ? (
-                  <span title={`ID: ${v.created_by}`}>
-                    {v.created_by_email
-                      ?? (v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by)}
+                  <span title={`Recorded as: ${v.created_by}`}>
+                    {personLabel(v.created_by, v.created_by_email)}
                   </span>
                 ) : '—'}
               </td>
               <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {v.approved_by ? (
-                  <span title={`ID: ${v.approved_by}`}>
-                    {v.approved_by_email
-                      ?? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)}
+                  <span title={`Recorded as: ${v.approved_by}`}>
+                    {personLabel(v.approved_by, v.approved_by_email)}
                   </span>
                 ) : '—'}
               </td>

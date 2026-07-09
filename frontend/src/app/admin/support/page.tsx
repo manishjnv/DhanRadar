@@ -26,7 +26,14 @@ import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import { Input } from '@/components/ui/Input';
 import { useAdminCasFailures, useSetCasNotes, type AdminCasFailure } from '@/features/admin/api';
 import { matchesQuery, SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
+import { CAS_ERROR_LABELS } from '@/lib/displayLabel';
 import { cn } from '@/lib/cn';
+
+// Known machine codes get plain words; anything else is already a real message.
+function casErrorLabel(raw: string | null): string {
+  if (!raw) return '—';
+  return CAS_ERROR_LABELS[raw] ?? raw;
+}
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -83,19 +90,13 @@ function CasFailureRow({ f, badgeStatus }: { f: AdminCasFailure; badgeStatus: Ba
         <HealthBadge status={badgeStatus} />
       </td>
       <td
-        className="py-2.5 pr-4 text-small text-ink-secondary max-w-[260px] truncate"
-        title={f.error_message ?? undefined}
+        className="py-2.5 pr-4 text-small text-ink-secondary max-w-[280px] truncate"
+        title={f.error_message ? `Code: ${f.error_message}` : undefined}
       >
-        {f.error_message ?? '—'}
+        {casErrorLabel(f.error_message)}
       </td>
       <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
         {formatDateTime(f.created_at)}
-      </td>
-      <td
-        className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap"
-        title={f.completed_at ? undefined : 'Stuck jobs have no completion time — this is expected.'}
-      >
-        {f.completed_at ? formatDateTime(f.completed_at) : '—'}
       </td>
       <td className="py-2.5 align-top min-w-[220px]">
         {editing ? (
@@ -176,15 +177,14 @@ function jobBadgeStatus(status: string): 'Failed' | 'Running' | 'Success' | 'War
 const CAS_ACCESSORS: Record<string, SortAccessor<AdminCasFailure>> = {
   user: (f) => f.email ?? f.user_id,
   status: (f) => f.status,
-  error: (f) => f.error_message,
+  error: (f) => casErrorLabel(f.error_message),
   created: (f) => f.created_at,
-  completed: (f) => f.completed_at,
 };
 
 function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
   const [search, setSearch] = React.useState('');
   const filtered = failures.filter((f) =>
-    matchesQuery(search, f.email, f.error_message, f.status, f.support_notes),
+    matchesQuery(search, f.email, casErrorLabel(f.error_message), f.status, f.support_notes),
   );
   const { sorted, sort, toggle } = useSort(filtered, CAS_ACCESSORS, { key: 'created', dir: 'desc' });
 
@@ -223,9 +223,8 @@ function CasFailuresTable({ failures }: { failures: AdminCasFailure[] }) {
               <tr className="border-b border-line">
                 <SortableTh label="User" sortKey="user" sort={sort} onToggle={toggle} />
                 <SortableTh label="Status" sortKey="status" sort={sort} onToggle={toggle} />
-                <SortableTh label="Error" sortKey="error" sort={sort} onToggle={toggle} />
+                <SortableTh label="What Went Wrong" sortKey="error" sort={sort} onToggle={toggle} />
                 <SortableTh label="Uploaded" sortKey="created" sort={sort} onToggle={toggle} />
-                <SortableTh label="Finished" sortKey="completed" sort={sort} onToggle={toggle} />
                 <SortableTh label="Support Note" sort={sort} onToggle={toggle} />
               </tr>
             </thead>
@@ -287,9 +286,9 @@ export default function AdminSupportPage() {
           <CardBody>
             <p className="mb-4 text-small text-ink-muted">
               A failed upload means the system could not read or process a user&apos;s
-              mutual-fund statement (CAS). The user&apos;s email identifies each row.
-              Uploads that got stuck (no finish time) are cleaned up automatically after a
-              timeout. Click a column heading to sort.
+              mutual-fund statement (CAS). Only failures are listed here — successful
+              uploads appear on the Users page. Uploads that get stuck are marked failed
+              automatically after 10 minutes. Click a column heading to sort.
             </p>
             {casQ.isLoading && <TableSkeleton rows={6} />}
             {casQ.isError && (
