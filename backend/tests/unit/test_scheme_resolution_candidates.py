@@ -242,3 +242,20 @@ def test_past_as_of_month_still_parses():
     rows = _parse_sebi_xlsx(data, "ICICI_PRU")
     assert rows
     assert all(r["as_of_month"] == date(2026, 5, 1) for r in rows)
+
+
+def test_newline_wrapped_and_spelled_out_weight_headers_extract():
+    """2026-07-10: AXIS wraps '% to Net\n Assets' with an embedded newline;
+    HSBC spells out 'Percentage to Net Assets' — both left every row's
+    weight_pct NULL (3,126 AXIS + 2,086 HSBC rows)."""
+    for header in ("% to Net\n Assets", "Percentage to Net Assets"):
+        data = _xlsx(
+            [
+                ["HSBC Large Cap Fund", "Portfolio as on 31-May-2026"],
+                ["Name of the Instrument", "ISIN", "Quantity", "Market Value", header],
+                ["HDFC Bank Ltd.", "INE040A01034", "1000", "230.25", "6.15"],
+            ]
+        )
+        rows = [r for r in _parse_sebi_xlsx(data, "HSBC") if not r.get("is_total_row")]
+        assert rows, header
+        assert rows[0]["weight_pct"] == 6.15, header

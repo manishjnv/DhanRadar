@@ -3842,8 +3842,14 @@ async def _process_amc_multi(
 
 
 def _normalize_col(name: str) -> str:
-    """Lowercase + strip a column header for loose matching."""
-    return name.lower().strip()
+    """Lowercase + collapse ALL whitespace for loose matching. AMCs wrap
+       header cells with embedded newlines ("% to Net
+    Assets" — AXIS
+       fortnightly, confirmed 2026-07-10; also NIPPON/HDFC market-value
+       headers), which silently broke every substring key that spans the
+       wrap point — 3,126 AXIS rows carried weight_pct NULL because of one
+       newline."""
+    return " ".join(name.split()).lower()
 
 
 def _max_disclosure_month() -> date:
@@ -5153,6 +5159,10 @@ def _extract_sebi_row(
             "% to net assets",
             "% to net asset",
             "% to aum",
+            # HSBC spells it out with no % symbol ("Percentage to Net
+            # Assets", confirmed 2026-07-10 — all 45 HSBC funds carried
+            # weight_pct NULL).
+            "percentage to net assets",
             "weight",
             "% of nav",
         ]
