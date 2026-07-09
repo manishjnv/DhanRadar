@@ -28,7 +28,9 @@ Operational discipline (all from the verified BSE guide):
   * login = ONE attempt, never retried (lockout risk on a valid username);
   * data requests retry ≤3 times on gateway-level failures only
     (timeout/502/503/504) — never on a definitive API error;
-  * gentle paging (10k/page, small pause) — no tight loops.
+  * gentle paging (2k/page, small pause) — no tight loops; each raw page is
+    mapped and DISCARDED before the next fetch (a full-master accumulation
+    OOM-killed the 640 MB worker on the first live dry run).
 
 Provenance: the whole run rides ``ingestion_run()`` (source key
 "bse_scheme_master"), so failures surface through the existing admin
@@ -54,7 +56,10 @@ _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
-_PAGE_SIZE = 10_000  # documented per-call max; 28k schemes = 3 pages
+_PAGE_SIZE = 2_000  # deliberately far below the 10k API max: one page of
+# records (with the nested lumpsum/systematic blocks) must fit the 640 MB
+# celery-batch cgroup alongside its baseline — 10k pages OOM-killed the live
+# dry run (exit 137, 2026-07-10). ~15 gentle pages for the 28k master.
 _PAGE_PAUSE_S = 2.0  # gentle — the WAF does bot/rate-based blocking
 _GATEWAY_RETRY = 3  # timeout/502/503/504 only, never definitive API errors
 _WRITE_CHUNK = 500
@@ -224,29 +229,37 @@ async def _login(client: Any, username: str, password: str) -> str:
     return str(token)
 
 
-async def _fetch_all_schemes(client: Any, token: str) -> list[dict]:
-    records: list[dict] = []
-    start = 0
-    while True:
-        parsed = await _post(
-            client,
-            "/master_scheme_list",
-            {
-                "data": {
-                    "fields": ["ALL"],
-                    "count_only": False,
-                    "start": start,
-                    "length": _PAGE_SIZE,
-                }
-            },
-            token,
-        )
-        page = (parsed.get("data") or {}).get("lists") or []
-        records.extend(page)
-        if len(page) < _PAGE_SIZE:
-            return records
-        start += _PAGE_SIZE
-        await asyncio.sleep(_PAGE_PAUSE_S)
+# Only the fields the mapper consumes — the API honors field selection
+# (verified 2026-07-10: unrequested fields come back empty), and requesting
+# ALL made 28k deeply-nested records big enough to OOM-kill the worker
+# (exit 137 on the live dry run; celery-batch has a 640 MB cgroup cap).
+_FIELDS = [
+    "scheme_isin",
+    "scheme_exit_load",
+    "scheme_exit_load_remarks",
+    "scheme_benchmark",
+    "lumpsum",
+    "systematic",
+]
+
+
+async def _fetch_page(client: Any, token: str, start: int) -> list[dict]:
+    """One page of scheme records. Callers map+discard each page before
+    fetching the next — the FULL raw set must never be held in memory."""
+    parsed = await _post(
+        client,
+        "/master_scheme_list",
+        {
+            "data": {
+                "fields": _FIELDS,
+                "count_only": False,
+                "start": start,
+                "length": _PAGE_SIZE,
+            }
+        },
+        token,
+    )
+    return (parsed.get("data") or {}).get("lists") or []
 
 
 # ---------------------------------------------------------------------------
@@ -289,21 +302,32 @@ async def _enrich_pipeline() -> str:
 
     async with ingestion_run(TASK_ENRICH, SOURCE) as (_run_id, stats):
         started = time.monotonic()
+        fetched = 0
+        mapped: list[dict] = []
         try:
             async with httpx.AsyncClient(base_url=base_url, timeout=90.0) as client:
                 token = await _login(
                     client, settings.BSE_LOGIN_USERNAME, settings.BSE_LOGIN_PASSWORD
                 )
                 stats.reachable = True
-                records = await _fetch_all_schemes(client, token)
+                start = 0
+                while True:
+                    # Map + discard each raw page immediately — only the tiny
+                    # mapped dicts (~200 B each) are accumulated (OOM guard).
+                    page = await _fetch_page(client, token, start)
+                    fetched += len(page)
+                    mapped.extend(m for m in (map_scheme_record(r) for r in page) if m is not None)
+                    if len(page) < _PAGE_SIZE:
+                        break
+                    start += _PAGE_SIZE
+                    await asyncio.sleep(_PAGE_PAUSE_S)
         except BseApiError as exc:
             stats.failed = 1
             stats.last_error = str(exc)[:200]
             logger.warning("bse_enrich: fetch failed: %s", exc)
             return f"failed: {exc}"
 
-        stats.fetched = len(records)
-        mapped = [m for m in (map_scheme_record(r) for r in records) if m is not None]
+        stats.fetched = fetched
         with_data = [
             m
             for m in mapped
@@ -363,7 +387,7 @@ async def _enrich_pipeline() -> str:
         elapsed = time.monotonic() - started
         summary = (
             f"{'DRY-RUN (env != prod, zero writes)' if dry_run else 'enriched'}: "
-            f"fetched={len(records)} mapped={len(mapped)} with_data={len(with_data)} "
+            f"fetched={fetched} mapped={len(mapped)} with_data={len(with_data)} "
             f"matched_in_master={matched} updated={updates} in {elapsed:.0f}s"
         )
         logger.info("bse_enrich: %s", summary)

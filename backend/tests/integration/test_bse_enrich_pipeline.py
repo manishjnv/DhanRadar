@@ -62,11 +62,12 @@ def arm(monkeypatch: pytest.MonkeyPatch):
         async def _fake_login(client, username, password):
             return "token"
 
-        async def _fake_fetch(client, token):
-            return [_record(isin)]
+        async def _fake_fetch_page(client, token, start):
+            # One short page (< _PAGE_SIZE) ends the paging loop immediately.
+            return [_record(isin)] if start == 0 else []
 
         monkeypatch.setattr(bse_enrich, "_login", _fake_login)
-        monkeypatch.setattr(bse_enrich, "_fetch_all_schemes", _fake_fetch)
+        monkeypatch.setattr(bse_enrich, "_fetch_page", _fake_fetch_page)
 
     return _arm
 
