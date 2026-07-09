@@ -18,6 +18,9 @@ class EngineVersionRecord(BaseModel):
     model_version: str
     created_by: str | None
     approved_by: str | None
+    # Display-only enrichments (UUID → auth.users.email); None if unresolvable.
+    created_by_email: str | None = None
+    approved_by_email: str | None = None
     two_person_ok: bool
     activated: bool
     activated_at: datetime | None
@@ -34,6 +37,8 @@ class ScoringModelResponse(BaseModel):
     provisional: bool  # True when current version is NOT registry-activated
     methodology_url: str | None
     created_by: str | None
+    # Display-only enrichment (UUID → auth.users.email); None if unresolvable.
+    created_by_email: str | None = None
     axis_weights: dict[str, float]
     coverage: CoverageInfo
     registry_versions: list[EngineVersionRecord]

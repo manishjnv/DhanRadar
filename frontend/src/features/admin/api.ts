@@ -389,6 +389,8 @@ export interface AdminSubscriptionRow {
 
 export interface AdminPaymentRow {
   user_id: string;
+  /** Payer email (display enrichment); null if the user no longer exists. */
+  email: string | null;
   razorpay_payment_id: string | null;
   status: string;
   ts: string;
@@ -424,6 +426,10 @@ export interface AdminAuditRow {
   target_id: string | null;
   result: string;
   request_id: string | null;
+  /** Actor email (display enrichment); null if unresolvable. */
+  admin_email: string | null;
+  /** Human name for the target (user email, source name, …); null if none. */
+  target_label: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -551,6 +557,9 @@ export interface AdminScoringRegistryVersion {
   model_version: string;
   created_by: string;
   approved_by: string | null;
+  /** Creator/approver emails (display enrichment); null if unresolvable. */
+  created_by_email: string | null;
+  approved_by_email: string | null;
   two_person_ok: boolean;
   activated: boolean;
   activated_at: string | null;
@@ -563,6 +572,8 @@ export interface AdminScoringModel {
   provisional: boolean;
   methodology_url: string;
   created_by: string;
+  /** Creator email (display enrichment); null if unresolvable. */
+  created_by_email: string | null;
   axis_weights: Record<string, number>;
   coverage: { total_funds: number };
   registry_versions: AdminScoringRegistryVersion[];
@@ -587,6 +598,8 @@ export interface AdminFlag {
 export interface AdminCasFailure {
   job_id: string;
   user_id: string;
+  /** Owner email (display enrichment); null if the user no longer exists. */
+  email: string | null;
   status: string;
   error_message: string | null;
   created_at: string;
@@ -794,6 +807,9 @@ export interface AdminAIRegistryVersion {
   model_version: string;
   created_by: string | null;
   approved_by: string | null;
+  /** Creator/approver emails (display enrichment); null if unresolvable. */
+  created_by_email: string | null;
+  approved_by_email: string | null;
   two_person_ok: boolean;
   activated: boolean;
   activated_at: string | null;

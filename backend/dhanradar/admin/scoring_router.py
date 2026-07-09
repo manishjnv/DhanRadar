@@ -24,6 +24,7 @@ from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.mf import MfFund
 from dhanradar.scoring.engine.config import get_config
 
+from ._people import resolve_user_emails
 from .scoring_read_schemas import CoverageInfo, EngineVersionRecord, ScoringModelResponse
 
 router = APIRouter(prefix="/admin", tags=["admin-scoring-read"])
@@ -48,8 +49,18 @@ async def get_scoring_model(
     registry_activated = await is_engine_version_activated(db, cfg.model_version)
     provisional = not registry_activated
 
-    # 2. Changelog history (newest first, limit 50)
+    # 2. Changelog history (newest first, limit 50) — enrich the created_by /
+    # approved_by UUIDs with emails so the operator sees people, not ids.
     version_rows = await list_engine_versions(db, limit=50)
+    emails = await resolve_user_emails(
+        db,
+        {cfg.created_by}
+        | {row.get("created_by") for row in version_rows}
+        | {row.get("approved_by") for row in version_rows},
+    )
+    for row in version_rows:
+        row["created_by_email"] = emails.get(str(row.get("created_by")))
+        row["approved_by_email"] = emails.get(str(row.get("approved_by")))
 
     # 3. MF fund coverage count
     total_funds = (await db.scalar(select(func.count()).select_from(MfFund))) or 0
@@ -63,6 +74,7 @@ async def get_scoring_model(
         provisional=provisional,
         methodology_url=cfg.methodology_url or None,
         created_by=cfg.created_by or None,
+        created_by_email=emails.get(str(cfg.created_by)) if cfg.created_by else None,
         axis_weights=axis_weights,
         coverage=CoverageInfo(total_funds=total_funds),
         registry_versions=[EngineVersionRecord(**row) for row in version_rows],

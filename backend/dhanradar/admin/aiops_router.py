@@ -65,6 +65,7 @@ from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.redis_client import get_redis
 from dhanradar.scoring.engine.config import get_config
 
+from ._people import resolve_user_emails
 from .aiops_schemas import (
     AdviceBoundaryBreachesInfo,
     AiCostResponse,
@@ -226,7 +227,19 @@ async def get_ai_versions(
     a future drift engine).
     """
     raw_versions = await list_engine_versions(db, limit=limit)
-    versions = [EngineVersionRow(**row) for row in raw_versions]
+    emails = await resolve_user_emails(
+        db,
+        {row.get("created_by") for row in raw_versions}
+        | {row.get("approved_by") for row in raw_versions},
+    )
+    versions = [
+        EngineVersionRow(
+            **row,
+            created_by_email=emails.get(str(row.get("created_by"))),
+            approved_by_email=emails.get(str(row.get("approved_by"))),
+        )
+        for row in raw_versions
+    ]
 
     backtest = BacktestStatus(
         versions_with_backtest=sum(1 for v in versions if v.backtest is not None)

@@ -24,6 +24,8 @@ class FeatureFlagResponse(BaseModel):
 class CasFailureRecord(BaseModel):
     job_id: str
     user_id: str
+    # Display-only enrichment (user_id → auth.users.email); None if user gone.
+    email: str | None = None
     status: str
     error_message: str | None
     created_at: datetime | None

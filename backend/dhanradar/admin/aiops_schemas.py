@@ -129,6 +129,9 @@ class EngineVersionRow(BaseModel):
     model_version: str
     created_by: str | None
     approved_by: str | None
+    # Display-only enrichments (UUID → auth.users.email); None if unresolvable.
+    created_by_email: str | None = None
+    approved_by_email: str | None = None
     two_person_ok: bool
     activated: bool
     activated_at: str | None  # ISO-8601 or null

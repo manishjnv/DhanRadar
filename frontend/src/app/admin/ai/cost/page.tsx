@@ -26,6 +26,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { StatCard } from '@/components/admin/StatCard';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatRelative } from '@/components/admin/utils';
+import { modelLabel } from '@/lib/displayLabel';
 import { useAdminAICost, useAdminSetBudgetCaps } from '@/features/admin/api';
 
 // ---------------------------------------------------------------------------
@@ -153,8 +154,8 @@ export default function AdminAICostPage() {
           <div>
             <h1 className="text-h2 font-medium text-ink">Cost &amp; Usage</h1>
             <p className="mt-1 text-small text-ink-muted">
-              AI budget-governor spend, free-tier call usage, and cap status.
-              Governed OpenRouter gateway only (Admin.md §15).
+              What the AI features cost — spend so far, free-call usage, and how close
+              spending is to the daily limits. All AI calls go through one controlled gateway.
               {q.dataUpdatedAt ? (
                 <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
               ) : null}
@@ -337,7 +338,9 @@ export default function AdminAICostPage() {
                           <tbody className="font-mono">
                             {q.data.per_model.models.map((m) => (
                               <tr key={m.model} className="border-t border-line">
-                                <td className="py-1 pr-2 break-all text-ink">{m.model}</td>
+                                <td className="py-1 pr-2 break-all text-ink font-sans" title={m.model}>
+                                  {modelLabel(m.model)}
+                                </td>
                                 <td className="py-1 text-right tabular-nums">
                                   {m.calls.toLocaleString('en-IN')}
                                 </td>

@@ -4,6 +4,7 @@ import * as React from 'react';
 import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatRelative } from './utils';
+import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
 
 export interface AdminSource {
@@ -28,10 +29,31 @@ interface SourceTableProps {
   onViewLogs: (key: string) => void;
 }
 
-const HEADERS = ['Source', 'Tier', 'Method', 'Schedule', 'Cost', 'Last Success', 'Records', 'Status', 'Actions'];
+const HEADERS: Array<{ label: string; sortKey?: string; right?: boolean }> = [
+  { label: 'Source', sortKey: 'name' },
+  { label: 'Tier', sortKey: 'tier' },
+  { label: 'Method', sortKey: 'method' },
+  { label: 'Schedule' },
+  { label: 'Cost', sortKey: 'cost' },
+  { label: 'Last Success', sortKey: 'last_success' },
+  { label: 'Records', sortKey: 'records', right: true },
+  { label: 'Status', sortKey: 'status' },
+  { label: 'Actions' },
+];
+
+const SOURCE_ACCESSORS: Record<string, SortAccessor<AdminSource>> = {
+  name: (s) => s.name,
+  tier: (s) => s.tier,
+  method: (s) => s.method,
+  cost: (s) => s.cost,
+  last_success: (s) => s.last_success_at,
+  records: (s) => s.last_records,
+  status: (s) => (s.paused ? 'Paused' : s.status),
+};
 
 export function SourceTable({ sources, onSync, onPause, onResume, onViewLogs }: SourceTableProps) {
   const [pending, setPending] = React.useState<Record<string, string>>({});
+  const { sorted, sort, toggle } = useSort(sources, SOURCE_ACCESSORS);
 
   async function handle(key: string, action: 'sync' | 'pause' | 'resume') {
     setPending((p) => ({ ...p, [key]: action }));
@@ -51,21 +73,19 @@ export function SourceTable({ sources, onSync, onPause, onResume, onViewLogs }: 
         <thead>
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className={cn(
-                  'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
-                  h === 'Records' ? 'text-right' : 'text-left',
-                )}
-              >
-                {h}
-              </th>
+              <SortableTh
+                key={h.label}
+                label={h.label}
+                sortKey={h.sortKey}
+                sort={sort}
+                onToggle={toggle}
+                className={cn(h.right && 'text-right')}
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {sources.map((src) => (
+          {sorted.map((src) => (
             <tr key={src.source_key} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
               <td className="py-3 pr-4">
                 <p className="font-medium text-ink">{src.name}</p>

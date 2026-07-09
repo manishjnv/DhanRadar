@@ -11,7 +11,7 @@ frontend/src/app/admin/flags/page.tsx|{flagsQ.data && <FlagsTable flags={flagsQ.
 frontend/src/app/admin/scoring/page.tsx|{modelQ.data && <RegistryTable versions={modelQ.data.registry_versions} />}
 frontend/src/app/admin/support/page.tsx|{casQ.data && <CasFailuresTable failures={casQ.data} />}
 frontend/src/app/admin/users/page.tsx|{activityQ.data && <RecentLoginsTable rows={activityQ.data} />}
-frontend/src/app/admin/users/page.tsx|{auditQ.data && <AuditTable rows={auditQ.data} />}
+frontend/src/app/admin/users/page.tsx|{auditQ.data && <AuditTable rows={auditQ.data} query={auditAction} />}
 frontend/src/app/mood/page.tsx|if (!history.length) return null;
 frontend/src/components/changes/WhatChangedPanel.tsx|if (reasons.length === 0) return null;
 frontend/src/components/mf/explore/MarketMoodSection.tsx|if (!items.length) return null;

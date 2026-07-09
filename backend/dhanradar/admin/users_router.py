@@ -42,6 +42,8 @@ from dhanradar.models.auth import User, UserActivityLog, UserTierEnum
 from dhanradar.models.mf import MfCasJob
 from dhanradar.redis_client import get_redis
 
+from ._people import resolve_user_emails
+from .ops_router import SOURCE_NAMES
 from .users_schemas import (
     ActivityEventRow,
     AuditLogItem,
@@ -543,7 +545,12 @@ async def get_audit_log(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AuditLogItem]:
-    """Read audit.admin_actions with optional filters."""
+    """Read audit.admin_actions with optional filters.
+
+    Rows are enriched display-only: admin_email (actor UUID → email) and
+    target_label (a human name for the target where one is cheaply
+    resolvable — user email, CAS-job owner email, data-source display name).
+    """
     rows = await list_admin_actions(
         db,
         since=since,
@@ -553,4 +560,49 @@ async def get_audit_log(
         limit=limit,
         offset=offset,
     )
-    return [AuditLogItem(**row) for row in rows]
+
+    # CAS jobs have no filename — the human handle is the owning user.
+    cas_job_ids: set[UUID] = set()
+    for row in rows:
+        if row.get("target_type") == "cas_job" and row.get("target_id"):
+            try:
+                cas_job_ids.add(UUID(str(row["target_id"])))
+            except ValueError:
+                pass
+    job_owner: dict[str, str] = {}
+    if cas_job_ids:
+        job_rows = await db.execute(
+            select(MfCasJob.job_id, MfCasJob.user_id).where(
+                MfCasJob.job_id.in_(cas_job_ids)
+            )
+        )
+        job_owner = {str(jid): str(uid) for jid, uid in job_rows.all()}
+
+    ids_to_resolve: set[str | None] = {row.get("admin_id") for row in rows}
+    ids_to_resolve.update(
+        row.get("target_id") for row in rows if row.get("target_type") == "user"
+    )
+    ids_to_resolve.update(job_owner.values())
+    emails = await resolve_user_emails(db, ids_to_resolve)
+
+    items: list[AuditLogItem] = []
+    for row in rows:
+        target_type = row.get("target_type")
+        target_id = row.get("target_id")
+        target_label: str | None = None
+        if target_type == "user" and target_id:
+            target_label = emails.get(str(target_id))
+        elif target_type == "cas_job" and target_id:
+            owner = job_owner.get(str(target_id))
+            owner_email = emails.get(owner) if owner else None
+            target_label = f"Upload by {owner_email}" if owner_email else None
+        elif target_type == "source" and target_id:
+            target_label = SOURCE_NAMES.get(str(target_id))
+        items.append(
+            AuditLogItem(
+                **row,
+                admin_email=emails.get(str(row.get("admin_id"))),
+                target_label=target_label,
+            )
+        )
+    return items

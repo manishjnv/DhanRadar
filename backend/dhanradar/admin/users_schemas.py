@@ -124,7 +124,12 @@ class ActivityEventRow(BaseModel):
 
 
 class AuditLogItem(BaseModel):
-    """One row from audit.admin_actions."""
+    """One row from audit.admin_actions.
+
+    admin_email / target_label are display-only enrichments resolved by the
+    router (audit.admin_actions itself stores raw ids and stays isolated).
+    Either may be None when the id no longer resolves (e.g. deleted user).
+    """
 
     id: str
     ts: datetime
@@ -134,6 +139,8 @@ class AuditLogItem(BaseModel):
     target_id: str | None = None
     result: str | None = None
     request_id: str | None = None
+    admin_email: str | None = None
+    target_label: str | None = None
 
 
 # ---------------------------------------------------------------------------

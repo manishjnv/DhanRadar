@@ -216,7 +216,7 @@ export default function AdminAIEvalPage() {
               </div>
               {q.data.groundedness.instrumented && q.data.groundedness.value !== null ? (
                 <p className="text-small text-ink-muted">
-                  Average groundedness{' '}
+                  Average accuracy score{' '}
                   <span className="font-mono text-ink">
                     {(q.data.groundedness.value * 100).toFixed(0)}%
                   </span>{' '}

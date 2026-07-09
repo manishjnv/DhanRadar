@@ -113,7 +113,7 @@ export default function AdminAIDashboardPage() {
                 <StatCard
                   title="Model Version"
                   value={`Model: ${d.model_version}`}
-                  sub={d.activated ? 'activated' : 'not activated'}
+                  sub={d.activated ? 'live' : 'not live yet'}
                   status={d.activated ? 'healthy' : 'warning'}
                 />
                 {/* Budget — free calls */}
@@ -177,9 +177,9 @@ export default function AdminAIDashboardPage() {
                 />
                 {/* Label churn */}
                 <StatCard
-                  title="Label Churn"
+                  title="Answer Consistency"
                   value={displayLabel(d.label_churn.decision, 'decision')}
-                  sub={`How often the same fund's label changed — high churn means review needed · ${(d.label_churn.churn * 100).toFixed(1)}%${d.label_churn.requires_human_review ? ' · review needed' : ''}`}
+                  sub={`How often the same fund's label changed — frequent changes mean review needed · ${(d.label_churn.churn * 100).toFixed(1)}%${d.label_churn.requires_human_review ? ' · review needed' : ''}`}
                   status={
                     d.label_churn.requires_human_review
                       ? 'warning'
@@ -205,7 +205,7 @@ export default function AdminAIDashboardPage() {
                 />
                 {/* Groundedness eval score (7d) */}
                 <StatCard
-                  title="Groundedness (7d)"
+                  title="AI Output Accuracy (7d)"
                   value={
                     d.eval_score.instrumented && d.eval_score.value !== null
                       ? `${(d.eval_score.value * 100).toFixed(0)}%`

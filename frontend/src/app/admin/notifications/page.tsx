@@ -334,7 +334,8 @@ export default function AdminNotificationsPage() {
           <CardHeader>
             <CardTitle id="section-templates">Notification Templates</CardTitle>
             <p className="mt-1 text-small text-ink-muted">
-              In-code template IDs registered with the notification system.
+              The kinds of notifications the system can send. Each is defined in code —
+              this list is informational.
             </p>
           </CardHeader>
           <CardBody>
@@ -356,7 +357,9 @@ export default function AdminNotificationsPage() {
                     key={t.id}
                     className="flex items-center justify-between rounded-md border border-line bg-surface-2 px-4 py-2.5"
                   >
-                    <span className="font-mono text-small text-ink">{t.id}</span>
+                    <span className="text-small text-ink" title={`Template ID: ${t.id}`}>
+                      {displayLabel(t.id)}
+                    </span>
                     <HealthBadge status="Healthy" />
                   </li>
                 ))}

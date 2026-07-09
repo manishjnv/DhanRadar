@@ -3,7 +3,8 @@
 /**
  * SubscriptionTable — compact table of billing subscription rows.
  *
- * Columns: User ID · Email · Plan · Status · Renews · Price (₹)
+ * Columns: Email · Plan · Status · Renews · Price (₹) — sortable.
+ * The raw user UUID stays available as a tooltip on the email cell.
  * No advisory verbs. Numeric values allowed (admin-only, Admin.md §16).
  */
 
@@ -12,13 +13,14 @@ import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatDateTime, formatCurrency } from './utils';
 import { displayLabel } from '@/lib/displayLabel';
+import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
 import type { AdminSubscriptionRow } from '@/features/admin/api';
 
 interface SubscriptionTableProps {
   subscriptions: AdminSubscriptionRow[];
-  /** When provided, renders a [Change Plan] button per row (Phase 5). */
-  onPlanChange?: (userId: string, currentTier: string) => void;
+  /** When provided, renders a [Change Plan] button per row. */
+  onPlanChange?: (userId: string, currentTier: string, email: string) => void;
 }
 
 function subStatusBadge(status: string): React.ReactNode {
@@ -32,8 +34,16 @@ function subStatusBadge(status: string): React.ReactNode {
   return <HealthBadge status={map[status] ?? 'Planned'} />;
 }
 
+const SUB_ACCESSORS: Record<string, SortAccessor<AdminSubscriptionRow>> = {
+  email: (s) => s.email,
+  plan: (s) => displayLabel(s.plan, 'tier'),
+  status: (s) => displayLabel(s.status, 'subscription'),
+  renews: (s) => s.current_period_end,
+  price: (s) => s.price_inr,
+};
+
 export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionTableProps) {
-  const HEADERS = ['User ID', 'Email', 'Plan', 'Status', 'Renews', 'Price', ...(onPlanChange ? [''] : [])];
+  const { sorted, sort, toggle } = useSort(subscriptions, SUB_ACCESSORS);
 
   return (
     <div className="overflow-x-auto">
@@ -41,30 +51,24 @@ export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionT
         <caption className="sr-only">Active and recent subscriptions</caption>
         <thead>
           <tr className="border-b border-line">
-            {HEADERS.map((h) => (
-              <th
-                key={h || 'action'}
-                scope="col"
-                className={cn(
-                  'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
-                  h === 'Price' ? 'text-right' : 'text-left',
-                )}
-              >
-                {h}
-              </th>
-            ))}
+            <SortableTh label="User" sortKey="email" sort={sort} onToggle={toggle} />
+            <SortableTh label="Plan" sortKey="plan" sort={sort} onToggle={toggle} />
+            <SortableTh label="Status" sortKey="status" sort={sort} onToggle={toggle} />
+            <SortableTh label="Renews" sortKey="renews" sort={sort} onToggle={toggle} />
+            <SortableTh label="Price" sortKey="price" sort={sort} onToggle={toggle} className={cn('text-right')} />
+            {onPlanChange && <SortableTh label="" sort={sort} onToggle={toggle} />}
           </tr>
         </thead>
         <tbody>
-          {subscriptions.map((sub, i) => (
+          {sorted.map((sub, i) => (
             <tr
               key={`${sub.user_id}-${i}`}
               className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
             >
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
-                {sub.user_id ? sub.user_id.slice(0, 8) + '…' : '—'}
-              </td>
-              <td className="py-2.5 pr-4 text-ink-secondary text-[11px]">
+              <td
+                className="py-2.5 pr-4 text-ink"
+                title={sub.user_id ? `User ID: ${sub.user_id}` : undefined}
+              >
                 {sub.email}
               </td>
               <td className="py-2.5 pr-4 font-medium text-ink">
@@ -87,7 +91,7 @@ export function SubscriptionTable({ subscriptions, onPlanChange }: SubscriptionT
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => onPlanChange(sub.user_id, sub.plan)}
+                    onClick={() => onPlanChange(sub.user_id, sub.plan, sub.email)}
                   >
                     Change Plan
                   </Button>

@@ -18,6 +18,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 import { formatRelative, formatDateTime } from './utils';
 import { displayLabel } from '@/lib/displayLabel';
+import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
 import {
   useSuspendUser,
@@ -47,7 +48,24 @@ function tierBadgeClass(tier: string): string {
   return 'bg-surface-2 text-ink-muted';
 }
 
-const HEADERS = ['Name', 'Email', 'Plan', 'Status', 'Last Login', 'Joined', ''];
+const HEADERS: Array<{ label: string; sortKey?: string }> = [
+  { label: 'Name', sortKey: 'name' },
+  { label: 'Email', sortKey: 'email' },
+  { label: 'Plan', sortKey: 'plan' },
+  { label: 'Status', sortKey: 'status' },
+  { label: 'Last Login', sortKey: 'last_login' },
+  { label: 'Joined', sortKey: 'joined' },
+  { label: '' },
+];
+
+const USER_ACCESSORS: Record<string, SortAccessor<AdminUserRow>> = {
+  name: (u) => u.display_name || null,
+  email: (u) => u.email,
+  plan: (u) => displayLabel(u.tier, 'tier'),
+  status: (u) => u.status,
+  last_login: (u) => u.last_login_at,
+  joined: (u) => u.created_at,
+};
 
 // ---------------------------------------------------------------------------
 // Per-row action dialog state
@@ -79,6 +97,7 @@ export function UserTable({ users, onView }: UserTableProps) {
   }
 
   const activeUser = activeAction.user;
+  const { sorted, sort, toggle } = useSort(users, USER_ACCESSORS);
 
   return (
     <>
@@ -88,18 +107,18 @@ export function UserTable({ users, onView }: UserTableProps) {
           <thead>
             <tr className="border-b border-line">
               {HEADERS.map((h) => (
-                <th
-                  key={h || 'actions'}
-                  scope="col"
-                  className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono"
-                >
-                  {h}
-                </th>
+                <SortableTh
+                  key={h.label || 'actions'}
+                  label={h.label}
+                  sortKey={h.sortKey}
+                  sort={sort}
+                  onToggle={toggle}
+                />
               ))}
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {sorted.map((user) => (
               <tr
                 key={user.id}
                 className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
@@ -246,9 +265,10 @@ export function UserTable({ users, onView }: UserTableProps) {
         title="Reset user access"
         description={
           <>
-            This will reset any manual access grants for <strong>{activeUser.email}</strong>.
-            Note: this does <strong>not</strong> revoke active sessions — the user remains
-            logged in until their current JWT expires. Type the user&apos;s email to confirm.
+            Clears the login lockout counters for <strong>{activeUser.email}</strong> (the
+            brute-force limits for authenticator-app and email codes). It does not change the
+            user&apos;s plan, access grants, or account status, and does not log the user out.
+            Type the user&apos;s email to confirm.
           </>
         }
         confirmLabel="Reset Access"

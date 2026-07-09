@@ -92,7 +92,7 @@ export const SUB_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
-// Admin audit actions.
+// Admin audit actions (full domain of audit.admin_actions.action).
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   suspend_user: 'Suspend User',
   unsuspend_user: 'Unsuspend User',
@@ -106,8 +106,95 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   resume_task: 'Resume Job',
   acknowledge_quality_issue: 'Snooze Quality Alert',
   activate_disclaimer: 'Activate Disclaimer',
-  refund: 'Issue Refund',
+  refund_payment: 'Issue Refund',
   set_budget_caps: 'Update AI Budget Caps',
+  activate_scoring_model: 'Activate Scoring Model',
+  create_prompt_version: 'Create AI Prompt Version',
+  activate_prompt_version: 'Activate AI Prompt Version',
+  broadcast: 'Send Broadcast',
+  set_cas_support_notes: 'Add Support Note',
+  upload_disclosure_files: 'Upload Disclosure Files',
+  create_news_item: 'Create News Item',
+  update_news_item: 'Edit News Item',
+  delete_news_item: 'Delete News Item',
+};
+
+// Admin audit target types (what an admin action was applied to).
+export const TARGET_TYPE_LABELS: Record<string, string> = {
+  user: 'User',
+  payment: 'Payment',
+  source: 'Data source',
+  task: 'Background job',
+  data_quality: 'Data-quality alert',
+  disclaimer: 'Disclaimer',
+  scoring_model: 'Scoring model',
+  prompt_template: 'AI prompt',
+  ai_budget: 'AI spending limit',
+  cas_job: 'CAS upload',
+  notification: 'Broadcast',
+  manual_ingest: 'Disclosure files',
+  news_item: 'News item',
+};
+
+// Data-source keys (mirrors the backend source catalog; titleCase fallback
+// covers any key added on the backend before this map is updated).
+export const SOURCE_LABELS: Record<string, string> = {
+  amfi_nav: 'AMFI Daily NAV',
+  amfi_scheme_master: 'AMFI Scheme Master',
+  amc_constituents: 'AMC Portfolio Disclosures',
+  amc_expense_ratios: 'AMC Expense Ratios',
+  amc_fund_managers: 'AMC Fund Managers',
+  sebi_circulars: 'SEBI Circulars',
+  amfi_cap_classification: 'AMFI Cap Classification',
+  amfi_category_flows: 'AMFI Category Flows',
+  mfapi: 'MFAPI NAV History',
+  yahoo_finance: 'Yahoo Finance',
+  nse_india: 'NSE India',
+  rbi_dbie: 'RBI Macro Data',
+  rbi_tbill: 'RBI T-Bill Yields',
+  rbi_rss: 'RBI News Feed',
+  manual_disclosure_inbox: 'Manual Disclosure Inbox',
+  upstox_analytics: 'Upstox Market Analytics',
+  nifty_close_daily: 'Nifty 50 Daily Close',
+};
+
+// Ops health-alert types (Overview page alert feed).
+export const ALERT_TYPE_LABELS: Record<string, string> = {
+  mood_missing: 'Market Mood missing',
+  mood_stale: 'Market Mood outdated',
+  mood_degraded: 'Market Mood incomplete',
+  ingestion_failures: 'Data refresh failures',
+  sources_unhealthy: 'Data sources unhealthy',
+  stuck_tasks: 'Stuck background jobs',
+};
+
+// Market-mood signal keys (Mood coverage panel).
+export const SIGNAL_LABELS: Record<string, string> = {
+  nifty_trend: 'Nifty trend',
+  market_breadth: 'Market breadth',
+  india_vix: 'India VIX',
+  fii_flows: 'FII flows',
+  global_indices: 'Global indices',
+  dii_flows: 'DII flows',
+  us_bond_10y: 'US 10-yr bond',
+  oil_brent: 'Brent crude oil',
+  usd_inr: 'USD-INR rate',
+  put_call_ratio: 'Put-call ratio',
+  news_sentiment: 'News sentiment',
+};
+
+// Market-mood regime buckets + data-quality states.
+export const MOOD_LABELS: Record<string, string> = {
+  extreme_fear: 'Extreme Fear',
+  fear: 'Fear',
+  neutral: 'Neutral',
+  greed: 'Greed',
+  extreme_greed: 'Extreme Greed',
+  data_unavailable: 'No Data',
+  insufficient_data: 'Not Enough Data',
+  ok: 'Complete',
+  degraded: 'Incomplete (some inputs missing)',
+  unavailable: 'Unavailable',
 };
 
 // Feature flag keys.
@@ -126,11 +213,20 @@ export const EDU_LABELS: Record<string, string> = {
   insufficient_data: 'Not Enough Data',
 };
 
-// Recommendation/output category (AI audit).
+// Recommendation/output category + AI surface keys (AI audit "Category" and
+// "Where Shown" columns share one vocabulary).
 export const RECO_TYPE_LABELS: Record<string, string> = {
   educational_label: 'Fund Evaluation',
   mood_regime: 'Market Mood',
   portfolio_commentary: 'Portfolio Commentary',
+  mf_report: 'Fund Report',
+  mf_research: 'Fund Research',
+  mf_commentary: 'Fund Commentary',
+  mood_commentary: 'Market Mood Commentary',
+  notification_telegram: 'Telegram Alert',
+  mf_pick: 'Fund Spotlight',
+  stock_pick: 'Stock Spotlight',
+  earnings_summary: 'Earnings Summary',
 };
 
 // Confidence band.
@@ -178,9 +274,15 @@ const DOMAINS: Record<string, Record<string, string>> = {
   payment: PAYMENT_STATUS_LABELS,
   subscription: SUB_STATUS_LABELS,
   audit: AUDIT_ACTION_LABELS,
+  targetType: TARGET_TYPE_LABELS,
+  source: SOURCE_LABELS,
+  alertType: ALERT_TYPE_LABELS,
+  signal: SIGNAL_LABELS,
+  mood: MOOD_LABELS,
   flag: FLAG_LABELS,
   label: EDU_LABELS,
   recoType: RECO_TYPE_LABELS,
+  surface: RECO_TYPE_LABELS,
   band: CONFIDENCE_BAND_LABELS,
   runStatus: RUN_STATUS_LABELS,
   decision: DECISION_LABELS,
@@ -208,4 +310,16 @@ export function displayLabel(
     }
   }
   return titleCase(key);
+}
+
+/**
+ * Humanize an AI model slug ("deepseek/deepseek-chat" → "Deepseek Chat"):
+ * drop the provider prefix, title-case the model segment. The raw slug should
+ * stay available in a tooltip wherever this is used.
+ */
+export function modelLabel(raw: string | null | undefined): string {
+  if (raw == null || raw === '') return '—';
+  const key = String(raw);
+  const segment = key.includes('/') ? key.split('/').pop()! : key;
+  return titleCase(segment.replace(/:/g, ' '));
 }

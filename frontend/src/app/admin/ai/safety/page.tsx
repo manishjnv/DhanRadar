@@ -31,7 +31,8 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { HealthBadge } from '@/components/admin/HealthBadge';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
-import { displayLabel } from '@/lib/displayLabel';
+import { displayLabel, modelLabel, titleCase } from '@/lib/displayLabel';
+import { SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
 import {
   useAdminAISafety,
   type AdminAILabelChurn,
@@ -109,9 +110,17 @@ function DictTable({
 // ---------------------------------------------------------------------------
 // Recent audit rows table
 // ---------------------------------------------------------------------------
-const AUDIT_HEADERS = ['Served at', 'Category', 'Label', 'Certainty', 'AI Model', 'Where Shown'];
+const AUDIT_ACCESSORS: Record<string, SortAccessor<AdminAIAuditRow>> = {
+  served_at: (r) => r.served_at,
+  category: (r) => displayLabel(r.recommendation_type, 'recoType'),
+  label: (r) => (r.label ? displayLabel(r.label, 'label') : null),
+  band: (r) => r.confidence_band,
+  model: (r) => (r.model ? modelLabel(r.model) : null),
+  surface: (r) => (r.surface ? displayLabel(r.surface, 'surface') : null),
+};
 
 function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
+  const { sorted, sort, toggle } = useSort(rows, AUDIT_ACCESSORS, { key: 'served_at', dir: 'desc' });
   if (rows.length === 0) {
     return (
       <EmptyState title="No recent outputs" description="Recent served AI outputs will appear here." className="py-6" />
@@ -125,15 +134,16 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
         </caption>
         <thead>
           <tr className="border-b border-line">
-            {AUDIT_HEADERS.map((h) => (
-              <th key={h} scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
-                {h}
-              </th>
-            ))}
+            <SortableTh label="Served at" sortKey="served_at" sort={sort} onToggle={toggle} />
+            <SortableTh label="Category" sortKey="category" sort={sort} onToggle={toggle} />
+            <SortableTh label="Label" sortKey="label" sort={sort} onToggle={toggle} />
+            <SortableTh label="Certainty" sortKey="band" sort={sort} onToggle={toggle} />
+            <SortableTh label="AI Model" sortKey="model" sort={sort} onToggle={toggle} />
+            <SortableTh label="Where Shown" sortKey="surface" sort={sort} onToggle={toggle} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {sorted.map((row) => (
             <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(row.served_at)}
@@ -147,10 +157,12 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
               <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {row.confidence_band ? displayLabel(row.confidence_band, 'band') : '—'}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted truncate max-w-[100px]">
-                {row.model ?? '—'}
+              <td className="py-2.5 pr-4 text-[11px] text-ink-muted truncate max-w-[120px]" title={row.model ?? undefined}>
+                {row.model ? modelLabel(row.model) : '—'}
               </td>
-              <td className="py-2.5 text-[11px] text-ink-muted">{row.surface ?? '—'}</td>
+              <td className="py-2.5 text-[11px] text-ink-muted" title={row.surface ?? undefined}>
+                {row.surface ? displayLabel(row.surface, 'surface') : '—'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -162,12 +174,19 @@ function AuditTable({ rows }: { rows: AdminAIAuditRow[] }) {
 // ---------------------------------------------------------------------------
 // Low-confidence log table
 // ---------------------------------------------------------------------------
-const LOW_CONF_HEADERS = ['Logged at', 'Where Shown', 'Certainty', 'Score', 'Reason'];
+const LOW_CONF_ACCESSORS: Record<string, SortAccessor<AdminAILowConfRow>> = {
+  logged_at: (r) => r.logged_at,
+  surface: (r) => (r.surface ? displayLabel(r.surface, 'surface') : null),
+  band: (r) => r.confidence_band,
+  score: (r) => r.confidence_score,
+  reason: (r) => r.reason,
+};
 
 function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
+  const { sorted, sort, toggle } = useSort(rows, LOW_CONF_ACCESSORS, { key: 'logged_at', dir: 'desc' });
   if (rows.length === 0) {
     return (
-      <EmptyState title="No low-confidence entries" description="Low-confidence output refusals will appear here." className="py-6" />
+      <EmptyState title="No refusals recorded" description="Every time the AI declines to answer because it is not certain enough, the refusal is logged here." className="py-6" />
     );
   }
   return (
@@ -175,27 +194,34 @@ function LowConfTable({ rows }: { rows: AdminAILowConfRow[] }) {
       <table className="w-full text-small">
         <thead>
           <tr className="border-b border-line">
-            {LOW_CONF_HEADERS.map((h) => (
-              <th key={h} scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">
-                {h}
-              </th>
-            ))}
+            <SortableTh label="Logged at" sortKey="logged_at" sort={sort} onToggle={toggle} />
+            <SortableTh label="Where Shown" sortKey="surface" sort={sort} onToggle={toggle} />
+            <SortableTh label="Certainty" sortKey="band" sort={sort} onToggle={toggle} />
+            <SortableTh label="Certainty Score" sortKey="score" sort={sort} onToggle={toggle} />
+            <SortableTh label="Reason" sortKey="reason" sort={sort} onToggle={toggle} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {sorted.map((row) => (
             <tr key={row.id} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
               <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
                 {formatDateTime(row.logged_at)}
               </td>
-              <td className="py-2.5 pr-4 text-[11px] text-ink">{row.surface ?? '—'}</td>
+              <td className="py-2.5 pr-4 text-[11px] text-ink" title={row.surface ?? undefined}>
+                {row.surface ? displayLabel(row.surface, 'surface') : '—'}
+              </td>
               <td className="py-2.5 pr-4 text-[11px] text-ink-muted">
                 {row.confidence_band ? displayLabel(row.confidence_band, 'band') : '—'}
               </td>
-              <td className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-ink-muted">
-                {row.confidence_score != null ? row.confidence_score.toFixed(3) : '—'}
+              <td
+                className="py-2.5 pr-4 font-mono text-[11px] tabular-nums text-ink-muted"
+                title={row.confidence_score != null ? `Raw score: ${row.confidence_score.toFixed(3)} (0 = no certainty, 1 = full certainty)` : undefined}
+              >
+                {row.confidence_score != null ? `${Math.round(row.confidence_score * 100)}%` : '—'}
               </td>
-              <td className="py-2.5 text-[11px] text-ink-muted">{row.reason ?? '—'}</td>
+              <td className="py-2.5 text-[11px] text-ink-muted" title={row.reason ?? undefined}>
+                {row.reason ? titleCase(row.reason) : '—'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -242,7 +268,7 @@ export default function AdminAISafetyPage() {
           <div>
             <h1 className="text-h2 font-medium text-ink">Safety Monitor</h1>
             <p className="mt-1 text-small text-ink-muted">
-              Primary compliance-ops surface — operationalises the SEBI educational, non-advisory boundary.
+              The main compliance page — it checks that every AI output stays educational and never gives investment advice (the SEBI boundary).
               Sourced from the AI output log and the low-confidence refusal log.
               {q.dataUpdatedAt ? (
                 <> Last updated {formatRelative(new Date(q.dataUpdatedAt).toISOString())}.</>
@@ -402,7 +428,7 @@ export default function AdminAISafetyPage() {
                 </h2>
                 <p className="mb-3 text-small text-ink-muted">
                   How consistently AI outputs agree across consecutive runs. High change rates may
-                  indicate data volatility or model drift — not necessarily an error.
+                  indicate unstable input data or a shift in how the model scores — not necessarily an error.
                 </p>
                 <div className="flex flex-wrap gap-4">
                   <StabilityCard label="Fund evaluation consistency" churn={d.label_churn_educational} />
@@ -419,7 +445,7 @@ export default function AdminAISafetyPage() {
                   </div>
                   {d.groundedness.instrumented && d.groundedness.value !== null ? (
                     <p>
-                      Average groundedness{' '}
+                      Average accuracy score{' '}
                       <span className="font-mono text-ink">
                         {(d.groundedness.value * 100).toFixed(0)}%
                       </span>{' '}

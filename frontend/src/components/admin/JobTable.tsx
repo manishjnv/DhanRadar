@@ -5,6 +5,7 @@ import { HealthBadge } from './HealthBadge';
 import { Button } from '@/components/ui/Button';
 import { formatRelative, formatDuration } from './utils';
 import { displayLabel } from '@/lib/displayLabel';
+import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
 
 export interface AdminTask {
@@ -25,10 +26,28 @@ interface JobTableProps {
   onResume:  (name: string) => Promise<void>;
 }
 
-const HEADERS = ['Job', 'Schedule', 'Last Run', 'Next Run', 'Status', 'Duration', 'Rows', 'Actions'];
+const HEADERS: Array<{ label: string; sortKey?: string; right?: boolean }> = [
+  { label: 'Job', sortKey: 'job' },
+  { label: 'Schedule' },
+  { label: 'Last Run', sortKey: 'last_run' },
+  { label: 'Next Run' },
+  { label: 'Status', sortKey: 'status' },
+  { label: 'Duration', sortKey: 'duration', right: true },
+  { label: 'Rows', sortKey: 'rows', right: true },
+  { label: 'Actions' },
+];
+
+const JOB_ACCESSORS: Record<string, SortAccessor<AdminTask>> = {
+  job: (j) => displayLabel(j.task_name, 'task'),
+  last_run: (j) => j.last_run_at,
+  status: (j) => (j.paused ? 'Paused' : j.last_status),
+  duration: (j) => j.last_duration_s,
+  rows: (j) => j.last_rows,
+};
 
 export function JobTable({ jobs, onTrigger, onPause, onResume }: JobTableProps) {
   const [pending, setPending] = React.useState<Record<string, string>>({});
+  const { sorted, sort, toggle } = useSort(jobs, JOB_ACCESSORS);
 
   async function handle(name: string, action: 'trigger' | 'pause' | 'resume') {
     setPending((p) => ({ ...p, [name]: action }));
@@ -48,29 +67,20 @@ export function JobTable({ jobs, onTrigger, onPause, onResume }: JobTableProps) 
         <thead>
           <tr className="border-b border-line">
             {HEADERS.map((h) => (
-              <th
-                key={h}
-                scope="col"
-                className={cn(
-                  'pb-2 pr-4 text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono',
-                  h === 'Duration' || h === 'Rows' ? 'text-right' : 'text-left',
-                )}
-              >
-                {h === 'Next Run' ? (
-                  <span title="Next-run times are not yet computed by the backend">
-                    Next Run
-                  </span>
-                ) : h}
-              </th>
+              <SortableTh
+                key={h.label}
+                label={h.label}
+                sortKey={h.sortKey}
+                sort={sort}
+                onToggle={toggle}
+                className={cn(h.right && 'text-right')}
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {jobs.map((job) => {
-            const humanName   = displayLabel(job.task_name, 'task');
-            const humanStatus = job.last_status
-              ? displayLabel(job.last_status, 'runStatus')
-              : null;
+          {sorted.map((job) => {
+            const humanName = displayLabel(job.task_name, 'task');
 
             return (
               <tr key={job.task_name} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
