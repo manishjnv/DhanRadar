@@ -8,8 +8,11 @@
  *                    but spec says #EA580C; we use Tailwind arbitrary value
  *                    scoped to the shell since no amber-aiops token exists)
  *
- * Sidebar: always visible ≥lg; icon-only collapse at md; hidden on mobile.
- * No bottom tab bar (desktop-first per Admin.md §9).
+ * Sidebar: always visible ≥md. On mobile a slim header carries the brand and a
+ * hamburger that opens the same nav as a slide-over panel (founder 2026-07-10:
+ * mobile previously had NO admin navigation at all).
+ * The old desktop topbar ("Internal · audited session" / "role: Admin") was
+ * removed to reclaim vertical space (founder 2026-07-10).
  * Shell-switching link in footer ("↔ AI Ops" / "↔ Admin").
  */
 
@@ -34,8 +37,11 @@ import {
   ThumbsUp,
   DollarSign,
   Building2,
+  Menu,
+  X,
   type LucideIcon,
 } from 'lucide-react';
+import { SiteFooter } from '@/components/site/SiteFooter';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -90,9 +96,6 @@ function accentClasses(variant: AdminShellVariant) {
       activeItem:    'bg-amber/10 text-amber font-medium',
       topBorder:     'border-t-[3px] border-t-amber',
       badgeText:     'text-amber',
-      badgeBg:       'bg-amber/10',
-      roleBadge:     'bg-amber/10 text-amber',
-      contextText:   'Internal · ML ops',
       roleLabelText: 'AI Ops',
     };
   }
@@ -100,9 +103,6 @@ function accentClasses(variant: AdminShellVariant) {
     activeItem:    'bg-red/10 text-red font-medium',
     topBorder:     'border-t-[3px] border-t-red',
     badgeText:     'text-red',
-    badgeBg:       'bg-red/10',
-    roleBadge:     'bg-red/10 text-red',
-    contextText:   'Internal · audited session',
     roleLabelText: 'Admin',
   };
 }
@@ -226,22 +226,67 @@ function AdminSidebar({ variant }: { variant: AdminShellVariant }) {
 }
 
 // ---------------------------------------------------------------------------
-// Topbar
+// Mobile header + slide-over nav (the sidebar is hidden below md)
 // ---------------------------------------------------------------------------
-function AdminTopbar({ variant }: { variant: AdminShellVariant }) {
+function MobileNav({ variant }: { variant: AdminShellVariant }) {
+  const pathname = usePathname();
   const accent = accentClasses(variant);
+  const nav = variant === 'aiops' ? AIOPS_NAV : ADMIN_NAV;
+  const switchHref  = variant === 'aiops' ? '/admin' : '/admin/ai';
+  const switchLabel = variant === 'aiops' ? '↔ Admin shell' : '↔ AI Ops shell';
+  const [open, setOpen] = React.useState(false);
+
+  // Close the panel whenever the route changes (a nav link was tapped).
+  React.useEffect(() => { setOpen(false); }, [pathname]);
+
   return (
-    <header className={cn(
-      'flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface px-6',
-      accent.topBorder,
-    )}>
-      <div className="flex items-center gap-3">
-        <span className="text-small text-ink-muted">{accent.contextText}</span>
-      </div>
-      <span className={cn('rounded-md px-2.5 py-1 text-caption font-medium', accent.roleBadge)}>
-        role: {accent.roleLabelText}
-      </span>
-    </header>
+    <div className="md:hidden">
+      <header className={cn(
+        'flex h-12 items-center justify-between border-b border-line bg-surface px-4',
+        accent.topBorder,
+      )}>
+        <Link href="/" className="flex items-center gap-2" aria-label="DhanRadar home">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/icon.svg" alt="" width={20} height={20} />
+          <span className="text-body font-medium text-navy">DhanRadar</span>
+          <span className={cn('text-caption font-medium', accent.badgeText)}>
+            {accent.roleLabelText}
+          </span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? 'Close menu' : 'Open menu'}
+          className="rounded-md p-2 text-ink-secondary hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+        >
+          {open ? <X size={18} strokeWidth={2} /> : <Menu size={18} strokeWidth={2} />}
+        </button>
+      </header>
+      {open && (
+        <nav
+          className="border-b border-line bg-surface px-3 py-2 shadow-md"
+          aria-label={`${accent.roleLabelText} navigation`}
+        >
+          {nav.map((item) => {
+            const active =
+              item.href === '/admin' || item.href === '/admin/ai'
+                ? pathname === item.href
+                : pathname === item.href || pathname.startsWith(item.href + '/');
+            return <NavItem key={item.href} item={item} active={active} variant={variant} />;
+          })}
+          <div className="mt-1 border-t border-line pt-1">
+            <Link href={switchHref} className="flex items-center gap-2 rounded-md px-3 py-2 text-small text-ink-secondary hover:bg-surface-2">
+              <Bot size={14} strokeWidth={2} aria-hidden="true" />
+              {switchLabel}
+            </Link>
+            <Link href="/mf/portfolio" className="flex items-center gap-2 rounded-md px-3 py-2 text-small text-ink-secondary hover:bg-surface-2">
+              ← Back to app
+            </Link>
+          </div>
+        </nav>
+      )}
+    </div>
   );
 }
 
@@ -250,12 +295,18 @@ function AdminTopbar({ variant }: { variant: AdminShellVariant }) {
 // ---------------------------------------------------------------------------
 export function AdminShell({ children, variant = 'admin' }: AdminShellProps) {
   return (
-    <div className="flex h-screen overflow-hidden bg-bg">
+    // h-[100dvh] tracks the real mobile viewport (no dead space under the URL
+    // bar); min-w-0 on the flex column lets wide tables scroll inside their own
+    // overflow container instead of stretching the page sideways.
+    <div className="flex h-screen h-[100dvh] overflow-hidden bg-bg">
       <AdminSidebar variant={variant} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <AdminTopbar variant={variant} />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <MobileNav variant={variant} />
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="min-w-0 p-4 md:p-6">
+            {children}
+          </div>
+          <SiteFooter />
         </main>
       </div>
     </div>

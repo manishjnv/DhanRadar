@@ -32,7 +32,7 @@ import { HealthBadge } from '@/components/admin/HealthBadge';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { formatDateTime, formatRelative } from '@/components/admin/utils';
 import { SortableTh, useSort, type SortAccessor } from '@/components/admin/sortable';
-import { displayLabel } from '@/lib/displayLabel';
+import { displayLabel, personLabel } from '@/lib/displayLabel';
 import {
   useAdminScoringModel,
   useAdminActivateScoringVersion,
@@ -208,15 +208,11 @@ function RegistryTable({ versions }: { versions: AdminScoringRegistryVersion[] }
                 <td className="py-2.5 pr-4 font-mono text-[11px] font-medium text-ink whitespace-nowrap">
                   {v.model_version}
                 </td>
-                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={`ID: ${v.created_by}`}>
-                  {v.created_by_email
-                    ?? (v.created_by.length > 8 ? v.created_by.slice(0, 8) + '…' : v.created_by)}
+                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={`Recorded as: ${v.created_by}`}>
+                  {personLabel(v.created_by, v.created_by_email)}
                 </td>
-                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={v.approved_by ? `ID: ${v.approved_by}` : undefined}>
-                  {v.approved_by_email
-                    ?? (v.approved_by
-                      ? (v.approved_by.length > 8 ? v.approved_by.slice(0, 8) + '…' : v.approved_by)
-                      : '—')}
+                <td className="py-2.5 pr-4 text-[11px] text-ink-muted" title={v.approved_by ? `Recorded as: ${v.approved_by}` : undefined}>
+                  {personLabel(v.approved_by, v.approved_by_email)}
                 </td>
                 <td className="py-2.5 pr-4">
                   <span title="Whether a second reviewer approved this scoring version (separate from who created it).">
@@ -374,12 +370,9 @@ export default function AdminScoringPage() {
                 <span className="text-caption uppercase tracking-wide text-ink-muted">Created by</span>
                 <span
                   className="text-small text-ink"
-                  title={`ID: ${modelQ.data.created_by}`}
+                  title={`Recorded as: ${modelQ.data.created_by}`}
                 >
-                  {modelQ.data.created_by_email
-                    ?? (modelQ.data.created_by.length > 12
-                      ? modelQ.data.created_by.slice(0, 12) + '…'
-                      : modelQ.data.created_by)}
+                  {personLabel(modelQ.data.created_by, modelQ.data.created_by_email)}
                 </span>
               </div>
               {modelQ.data.methodology_url && (
@@ -433,11 +426,24 @@ export default function AdminScoringPage() {
           <ErrorCard title="Could not load coverage" onRetry={() => modelQ.refetch()} className="max-w-xs" />
         )}
         {modelQ.data && (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard
-              title="Funds Scored"
+              title="Fund Records in Master"
               value={modelQ.data.coverage.total_funds.toLocaleString('en-IN')}
               status="neutral"
+              sub="One per plan variant (Direct/Regular etc.)"
+            />
+            <StatCard
+              title="Distinct Schemes"
+              value={modelQ.data.coverage.total_schemes.toLocaleString('en-IN')}
+              status="neutral"
+              sub="Plan variants collapsed — matches the AMC Coverage page"
+            />
+            <StatCard
+              title="Funds With a Current Label"
+              value={modelQ.data.coverage.labelled_funds.toLocaleString('en-IN')}
+              status={modelQ.data.coverage.labelled_funds > 0 ? 'healthy' : 'warning'}
+              sub="Labelled in the latest nightly scoring run"
             />
           </div>
         )}
@@ -447,7 +453,7 @@ export default function AdminScoringPage() {
       <Section
         id="section-registry"
         title="Version History"
-        subtitle="Every scoring-model version ever registered, newest first. Use [Activate] on a row to make that version live. Click a column heading to sort."
+        subtitle="Every scoring-model version ever registered, newest first. Created by = who registered the version's configuration; Approved by = the second person who signed off before activation. Use [Activate] on a row to make a version live. Click a column heading to sort."
       >
         {modelQ.isLoading && <TableSkeleton rows={4} />}
         {modelQ.isError && (

@@ -21,7 +21,6 @@ import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
-import { StatCard } from '@/components/admin/StatCard';
 import { useAdminAnalyticsOverview } from '@/features/admin/api';
 import { formatRelative } from '@/components/admin/utils';
 
@@ -127,62 +126,48 @@ export default function AdminAnalyticsPage() {
             className="max-w-md"
           />
         )}
-        {analyticsQ.data && (
-          <>
-            {/* Row 1: Signups + CAS uploads */}
-            <div className={`grid grid-cols-2 gap-3 sm:${GRID_COLS_4} mb-3`}>
-              <StatCard
-                title="Signups (total)"
-                value={analyticsQ.data.signups_total.toLocaleString('en-IN')}
-                status="neutral"
-              />
-              <StatCard
-                title="Signups (30d)"
-                value={analyticsQ.data.signups_30d.toLocaleString('en-IN')}
-                status={analyticsQ.data.signups_30d > 0 ? 'healthy' : 'neutral'}
-              />
-              <div className="flex flex-col gap-1">
-                <StatCard
-                  title="CAS Uploads (total)"
-                  value={analyticsQ.data.cas_uploads_total.toLocaleString('en-IN')}
-                  status="neutral"
-                />
-                <p className="text-caption text-ink-muted">Includes failed uploads.</p>
-              </div>
-              <StatCard
-                title="CAS Uploads (30d)"
-                value={analyticsQ.data.cas_uploads_30d.toLocaleString('en-IN')}
-                status={analyticsQ.data.cas_uploads_30d > 0 ? 'healthy' : 'neutral'}
-              />
+        {analyticsQ.data && (() => {
+          const d = analyticsQ.data;
+          const n = (v: number) => v.toLocaleString('en-IN');
+          const tiles: Array<{ title: string; value: string; sub: string }> = [
+            {
+              title: 'Signups',
+              value: n(d.signups_total),
+              sub: `${n(d.signups_30d)} in the last 30 days`,
+            },
+            {
+              title: 'Statement Uploads',
+              value: n(d.cas_uploads_total),
+              sub: `${n(d.cas_uploads_30d)} in 30 days · includes failed`,
+            },
+            {
+              title: 'Portfolios',
+              value: n(d.portfolios_created),
+              sub: 'Created from uploads',
+            },
+            {
+              title: 'Reports',
+              value: n(d.reports_generated),
+              sub: 'Approximate — one per portfolio refresh',
+            },
+            {
+              title: 'Paid Plans',
+              value: n(d.premium_conversions),
+              sub: 'All non-free records ever, incl. cancelled',
+            },
+          ];
+          return (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {tiles.map((t) => (
+                <div key={t.title} className="rounded-lg border border-line bg-surface p-3">
+                  <p className="text-caption uppercase tracking-wide text-ink-muted">{t.title}</p>
+                  <p className="mt-1 font-mono text-h3 font-medium tabular-nums text-ink">{t.value}</p>
+                  <p className="mt-0.5 text-caption text-ink-muted leading-snug">{t.sub}</p>
+                </div>
+              ))}
             </div>
-            {/* Row 2: Portfolios, reports, conversions */}
-            <div className={`grid grid-cols-2 gap-3 sm:${GRID_COLS_3}`}>
-              <StatCard
-                title="Portfolios Created"
-                value={analyticsQ.data.portfolios_created.toLocaleString('en-IN')}
-                status="neutral"
-              />
-              <div className="flex flex-col gap-1">
-                <StatCard
-                  title="Reports Generated"
-                  value={analyticsQ.data.reports_generated.toLocaleString('en-IN')}
-                  status="neutral"
-                />
-                <p className="text-caption text-ink-muted">Approximate (one per portfolio refresh).</p>
-              </div>
-              <div className="flex flex-col gap-1">
-                <StatCard
-                  title="Premium Conversions"
-                  value={analyticsQ.data.premium_conversions.toLocaleString('en-IN')}
-                  status={analyticsQ.data.premium_conversions > 0 ? 'healthy' : 'neutral'}
-                />
-                <p className="text-caption text-ink-muted">
-                  Counts all non-free plan records, including past or cancelled — not only active paying users.
-                </p>
-              </div>
-            </div>
-          </>
-        )}
+          );
+        })()}
       </section>
 
       {/* Section B — Conversion funnel */}

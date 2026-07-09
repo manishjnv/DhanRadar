@@ -47,7 +47,7 @@ function KPIRowSkeleton() {
 function RecentFailuresTable({
   failures,
 }: {
-  failures: Array<{ source: string; reason: string; failed_at: string }>;
+  failures: Array<{ source: string; reason: string; failed_at: string; status: string }>;
 }) {
   if (failures.length === 0) {
     return (
@@ -65,7 +65,7 @@ function RecentFailuresTable({
         <caption className="sr-only">Recent ingestion failures — source, reason, and time</caption>
         <thead>
           <tr className="border-b border-line">
-            {['Source', 'Reason', 'Time'].map((h) => (
+            {['Source', 'What Happened', 'Severity', 'Time'].map((h) => (
               <th
                 key={h}
                 scope="col"
@@ -77,15 +77,36 @@ function RecentFailuresTable({
           </tr>
         </thead>
         <tbody>
-          {failures.map((f, i) => (
-            <tr key={i} className="border-b border-line last:border-0">
-              <td className="py-2.5 pr-4 font-medium text-ink">{displayLabel(f.source)}</td>
-              <td className="py-2.5 pr-4 text-red">{f.reason}</td>
-              <td className="py-2.5 font-mono text-[11px] text-ink-muted">
-                {formatRelative(f.failed_at)}
-              </td>
-            </tr>
-          ))}
+          {failures.map((f, i) => {
+            const partial = f.status === 'partial';
+            return (
+              <tr key={i} className="border-b border-line last:border-0">
+                <td className="py-2.5 pr-4 font-medium text-ink">{displayLabel(f.source, 'source')}</td>
+                <td
+                  className={cn('py-2.5 pr-4', partial ? 'text-amber' : 'text-red')}
+                  title={`Code: ${f.reason}`}
+                >
+                  {displayLabel(f.reason, 'failureReason')}
+                </td>
+                <td className="py-2.5 pr-4">
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-caption font-medium',
+                      partial ? 'bg-amber/10 text-amber' : 'bg-red/10 text-red',
+                    )}
+                    title={partial
+                      ? 'The run was degraded but a fallback or subset still succeeded.'
+                      : 'The run produced nothing.'}
+                  >
+                    {partial ? 'Degraded' : 'Failed'}
+                  </span>
+                </td>
+                <td className="py-2.5 font-mono text-[11px] text-ink-muted">
+                  {formatRelative(f.failed_at)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

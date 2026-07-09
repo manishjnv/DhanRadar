@@ -38,7 +38,7 @@ export interface AdminHealthResponse {
   premium_users: number;
   advice_boundary_breaches_today: number;
   low_groundedness_flags_7d: number;
-  recent_failures: Array<{ source: string; reason: string; failed_at: string }>;
+  recent_failures: Array<{ source: string; reason: string; failed_at: string; status: string }>;
   recent_signups: Array<{ display_name: string; plan: string; joined_at: string }>;
   recent_alerts: Array<{ type: string; message: string; severity: 'info' | 'warning' | 'critical'; created_at: string }>;
 }
@@ -575,7 +575,7 @@ export interface AdminScoringModel {
   /** Creator email (display enrichment); null if unresolvable. */
   created_by_email: string | null;
   axis_weights: Record<string, number>;
-  coverage: { total_funds: number };
+  coverage: { total_funds: number; total_schemes: number; labelled_funds: number };
   registry_versions: AdminScoringRegistryVersion[];
 }
 

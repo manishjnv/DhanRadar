@@ -22,6 +22,9 @@ class RecentFailure(BaseModel):
     source: str
     reason: str
     failed_at: str
+    # "failed" = the run produced nothing; "partial" = degraded but a fallback
+    # or subset succeeded. Display-only distinction for the overview feed.
+    status: str = "failed"
 
 
 class RecentSignup(BaseModel):

@@ -21,10 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.compliance.service import is_engine_version_activated, list_engine_versions
 from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
-from dhanradar.models.mf import MfFund
+from dhanradar.models.mf import MfFund, MfFundRanks
 from dhanradar.scoring.engine.config import get_config
 
 from ._people import resolve_user_emails
+from .amc_coverage_router import _SCHEME_KEY
 from .scoring_read_schemas import CoverageInfo, EngineVersionRecord, ScoringModelResponse
 
 router = APIRouter(prefix="/admin", tags=["admin-scoring-read"])
@@ -62,8 +63,22 @@ async def get_scoring_model(
         row["created_by_email"] = emails.get(str(row.get("created_by")))
         row["approved_by_email"] = emails.get(str(row.get("approved_by")))
 
-    # 3. MF fund coverage count
+    # 3. MF fund coverage counts.
+    #    total_funds  — every mf_funds row (one per plan-variant ISIN)
+    #    total_schemes — distinct schemes (same dedup key as the AMC Coverage page)
+    #    labelled_funds — distinct ISINs labelled in the latest ranking run
     total_funds = (await db.scalar(select(func.count()).select_from(MfFund))) or 0
+    total_schemes = (
+        await db.scalar(select(func.count(func.distinct(_SCHEME_KEY))))
+    ) or 0
+    latest_rank_date = select(func.max(MfFundRanks.as_of_date)).scalar_subquery()
+    labelled_funds = (
+        await db.scalar(
+            select(func.count(func.distinct(MfFundRanks.isin))).where(
+                MfFundRanks.as_of_date == latest_rank_date
+            )
+        )
+    ) or 0
 
     # 4. axis_weights: convert Axis enum keys to their string values
     axis_weights = {axis.value: weight for axis, weight in cfg.axis_weights.items()}
@@ -76,6 +91,10 @@ async def get_scoring_model(
         created_by=cfg.created_by or None,
         created_by_email=emails.get(str(cfg.created_by)) if cfg.created_by else None,
         axis_weights=axis_weights,
-        coverage=CoverageInfo(total_funds=total_funds),
+        coverage=CoverageInfo(
+            total_funds=total_funds,
+            total_schemes=total_schemes,
+            labelled_funds=labelled_funds,
+        ),
         registry_versions=[EngineVersionRecord(**row) for row in version_rows],
     )

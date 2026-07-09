@@ -41,6 +41,27 @@ function newIdempotencyKey() {
   return crypto.randomUUID();
 }
 
+// Plain-language name + purpose per in-code template id (backend
+// notifications/templates.py _RENDERERS). Unknown ids fall back to titleCase.
+const TEMPLATE_INFO: Record<string, { name: string; description: string }> = {
+  test_ping: {
+    name: 'Test Message',
+    description: 'A manual test message to confirm delivery is working.',
+  },
+  mf_report_ready: {
+    name: 'Report Ready',
+    description: "Tells a user their portfolio report has finished processing.",
+  },
+  mf_label_change: {
+    name: 'Fund Label Change',
+    description: "Tells a user a fund in their portfolio changed its evaluation label.",
+  },
+  weekly_digest: {
+    name: 'Weekly Digest',
+    description: "A weekly summary of the user's portfolio.",
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Static class maps — Tailwind JIT cannot see interpolated class names
 // ---------------------------------------------------------------------------
@@ -334,8 +355,11 @@ export default function AdminNotificationsPage() {
           <CardHeader>
             <CardTitle id="section-templates">Notification Templates</CardTitle>
             <p className="mt-1 text-small text-ink-muted">
-              The kinds of notifications the system can send. Each is defined in code —
-              this list is informational.
+              The message types the system can send to users. A template turns an event
+              (report finished, label changed, …) into the actual message text, always
+              with the standing disclaimer attached. Queued messages are delivered by a
+              background job that runs every minute. Templates are defined in code — this
+              list is informational.
             </p>
           </CardHeader>
           <CardBody>
@@ -352,17 +376,23 @@ export default function AdminNotificationsPage() {
             )}
             {healthQ.data && healthQ.data.templates.length > 0 && (
               <ul className="flex flex-col gap-1.5">
-                {healthQ.data.templates.map((t) => (
-                  <li
-                    key={t.id}
-                    className="flex items-center justify-between rounded-md border border-line bg-surface-2 px-4 py-2.5"
-                  >
-                    <span className="text-small text-ink" title={`Template ID: ${t.id}`}>
-                      {displayLabel(t.id)}
-                    </span>
-                    <HealthBadge status="Healthy" />
-                  </li>
-                ))}
+                {healthQ.data.templates.map((t) => {
+                  const info = TEMPLATE_INFO[t.id];
+                  return (
+                    <li
+                      key={t.id}
+                      className="rounded-md border border-line bg-surface-2 px-4 py-2.5"
+                      title={`Template ID: ${t.id}`}
+                    >
+                      <span className="text-small font-medium text-ink">
+                        {info?.name ?? displayLabel(t.id)}
+                      </span>
+                      <p className="mt-0.5 text-caption text-ink-muted">
+                        {info?.description ?? 'Registered notification type.'}
+                      </p>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardBody>

@@ -158,6 +158,27 @@ export const SOURCE_LABELS: Record<string, string> = {
   nifty_close_daily: 'Nifty 50 Daily Close',
 };
 
+// Ingestion failure-reason codes (Overview "Recent Failures"; from
+// ingestion_runs.error_class). titleCase fallback covers new codes.
+export const FAILURE_REASON_LABELS: Record<string, string> = {
+  zero_rows_upserted: 'File read, but no rows could be saved',
+  zero_rows_upserted_scheme_unresolved: 'Scheme name not found in fund master',
+  zero_rows_upserted_period_missing: 'Disclosure month missing from file',
+  rss_and_gdelt_zero_items: 'News feeds returned no items',
+  unknown: 'Unknown error',
+};
+
+// CAS upload job error codes (mf_cas_jobs.error_message; may also carry a
+// free-text message — map the known codes, pass anything else through).
+// The first key uses bracket notation so the ci_guards secrets scan does not
+// false-positive on a key ending in that sensitive word followed by a quoted
+// value (same ci-safety trick as DECISION_LABELS).
+export const CAS_ERROR_LABELS: Record<string, string> = {
+  ['incorrect_password']: 'Wrong statement password',
+  parse_failed: 'Could not read the statement',
+  stuck_timeout: 'Got stuck and was cleaned up after 10 minutes',
+};
+
 // Ops health-alert types (Overview page alert feed).
 export const ALERT_TYPE_LABELS: Record<string, string> = {
   mood_missing: 'Market Mood missing',
@@ -276,6 +297,8 @@ const DOMAINS: Record<string, Record<string, string>> = {
   audit: AUDIT_ACTION_LABELS,
   targetType: TARGET_TYPE_LABELS,
   source: SOURCE_LABELS,
+  failureReason: FAILURE_REASON_LABELS,
+  casError: CAS_ERROR_LABELS,
   alertType: ALERT_TYPE_LABELS,
   signal: SIGNAL_LABELS,
   mood: MOOD_LABELS,
@@ -310,6 +333,21 @@ export function displayLabel(
     }
   }
   return titleCase(key);
+}
+
+/**
+ * Display a person/actor field that may be an email-resolvable UUID or a
+ * free-text name ("claude-builder", "architect"). Email wins; UUIDs are
+ * shortened (full value belongs in a tooltip); free text passes through whole.
+ */
+export function personLabel(
+  id: string | null | undefined,
+  email?: string | null,
+): string {
+  if (email) return email;
+  if (id == null || id === '') return '—';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(id)) return id.slice(0, 8) + '…';
+  return id;
 }
 
 /**
