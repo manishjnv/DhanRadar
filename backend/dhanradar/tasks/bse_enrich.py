@@ -104,17 +104,31 @@ def _parse_exit_load_days(remarks: Any) -> int | None:
     return max(plausible) if plausible else None
 
 
+def _as_dicts(value: Any) -> list[dict]:
+    """Real records vary per scheme: nested detail nodes arrive as a dict in
+    some records and a LIST of dicts in others (live UAT evidence 2026-07-10 —
+    the first full-master dry run crashed on the list form). Normalize both."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, dict)]
+    return []
+
+
 def _min_amt_of(block: dict) -> float | None:
-    amt = (
-        (block.get("scheme_transaction_single_details") or {}).get("scheme_transaction_amt") or {}
-    ).get("scheme_transaction_min_amt")
-    if amt is None:
-        return None
-    try:
-        val = float(amt)
-    except (TypeError, ValueError):
-        return None
-    return val if val > 0 else None
+    best: float | None = None
+    for details in _as_dicts(block.get("scheme_transaction_single_details")):
+        for amt_obj in _as_dicts(details.get("scheme_transaction_amt")):
+            amt = amt_obj.get("scheme_transaction_min_amt")
+            if amt is None:
+                continue
+            try:
+                val = float(amt)
+            except (TypeError, ValueError):
+                continue
+            if val > 0 and (best is None or val < best):
+                best = val
+    return best
 
 
 def _extract_min_amounts(record: dict) -> tuple[float | None, float | None]:
