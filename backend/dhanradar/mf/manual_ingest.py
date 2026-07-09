@@ -312,6 +312,12 @@ _AMC_KEYWORDS: dict[str, str] = {
     "canara": "CANARA_ROBECO",
     "navi": "NAVI",
     "zerodha": "ZERODHA",
+    # BHARAT 22 ETF is an ICICI Prudential-managed CPSE scheme whose file AND
+    # master name (`mf_funds` "BHARAT 22 ETF", INF109KB15Y7) carry no "ICICI"
+    # anywhere (confirmed 2026-07-10 — 2 real inbox files failed
+    # amc_undetectable). Resolver-side, `_amc_scheme_prefixes` in tasks/mf.py
+    # pairs this with a "BHARAT 22%" prefix for ICICI_PRU.
+    "bharat 22": "ICICI_PRU",
 }
 
 
@@ -345,21 +351,50 @@ def detect_period_from_filename(filename: str) -> date | None:
 
     Used ONLY as a fallback when the sheet parse found rows but no as-on date
     (`detect_amc_and_parse` below). Returns the first day of the month.
+
+    A disclosure always describes a PAST (or at most the current) month, so a
+    match beyond next month is rejected and scanning continues — target-maturity
+    scheme names ("ICICI Prudential Nifty SDL Sep 2027 Index Fund.xlsx") embed
+    their MATURITY month, which this fallback used to stamp onto every holding
+    as the as-of month (244 future-dated constituent rows in prod, 2026-07-10).
     """
+    today = datetime.now().date()
+    max_month = date(today.year + (today.month // 12), (today.month % 12) + 1, 1)
     for pattern in _FILENAME_PERIOD_RES:
-        m = pattern.search(filename)
-        if not m:
-            continue
-        groups = m.groups()
-        month_str = next(g for g in groups if g and g[0].isalpha())
-        year_str = groups[-1]
-        try:
-            parsed = datetime.strptime(f"01-{month_str[:3]}-{year_str}", "%d-%b-%Y")
-        except ValueError:
-            continue
-        if 2000 <= parsed.year <= 2100:
-            return parsed.date().replace(day=1)
+        for m in pattern.finditer(filename):
+            groups = m.groups()
+            month_str = next(g for g in groups if g and g[0].isalpha())
+            year_str = groups[-1]
+            try:
+                parsed = datetime.strptime(f"01-{month_str[:3]}-{year_str}", "%d-%b-%Y")
+            except ValueError:
+                continue
+            candidate = parsed.date().replace(day=1)
+            if 2000 <= candidate.year and candidate <= max_month:
+                return candidate
     return None
+
+
+# Closed-ended / matured scheme markers — FMPs, fixed-term series, dual-advantage
+# and capital-protection series wind up and leave the AMFI master; their
+# disclosure files can NEVER resolve to an ISIN. Word-boundary matched so
+# open-ended names are untouched (real evidence 2026-07-10: "SBI Debt Fund
+# Series C - 1", "SBI Dual Advantage Fund Series – XIII", "SBI Tax Advantage
+# Fund - Series I", "HDFC FMP 1269D March 2023", folder prefix
+# "close_ended_schemes\\...").
+_CLOSED_ENDED_RE = re.compile(
+    r"\b(fmp|fixed\s+maturity|fixed\s+term|series|dual\s+advantage"
+    r"|capital\s+protection|interval\s+fund|segregated)\b|close[_\s-]*ended",
+    re.IGNORECASE,
+)
+
+
+def looks_closed_ended(text: str) -> bool:
+    """True when a filename or scheme banner names a closed-ended/matured
+    scheme class (FMP / Series / Dual Advantage / ...). Pure — combined by the
+    parse task with a FAILED ISIN lookup to mark files 'scheme_not_in_master'
+    (honest terminal outcome) instead of an endlessly retryable failure."""
+    return bool(_CLOSED_ENDED_RE.search(text))
 
 
 def detect_amc_and_parse(

@@ -122,15 +122,14 @@ def test_detect_amc_matches_hsbc_filename_and_folder_hint():
 
 def test_ppfas_registered_in_scraper_roots_with_resolver_prefix():
     """The scraper root + the resolver's name-prefix override must stay in sync —
-    a root without the 'Parag Parikh%' prefix would resolve zero schemes."""
-    import inspect
-
-    from dhanradar.tasks.mf import _AMC_DISCLOSURE_ROOTS, _resolve_scheme_isins  # noqa: F401
+    a root without the 'Parag Parikh%' prefix would resolve zero schemes.
+    (2026-07-10: the inline prefix map became the shared _amc_scheme_prefixes
+    helper — assert the helper both resolvers now use.)"""
+    from dhanradar.tasks.mf import _AMC_DISCLOSURE_ROOTS, _amc_scheme_prefixes
 
     roots = {r["name"] for r in _AMC_DISCLOSURE_ROOTS}
     assert "PPFAS" in roots
-    src = inspect.getsource(_resolve_scheme_isins)
-    assert "Parag Parikh%" in src
+    assert _amc_scheme_prefixes("PPFAS") == ["Parag Parikh%"]
 
 
 # ---------------------------------------------------------------------------

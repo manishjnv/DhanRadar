@@ -3846,6 +3846,18 @@ def _normalize_col(name: str) -> str:
     return name.lower().strip()
 
 
+def _max_disclosure_month() -> date:
+    """Latest plausible as-of month for a disclosure: next month's first day.
+
+    A disclosure always describes a past (or the current) month. Target-maturity
+    scheme names/banners embed their MATURITY month ("Nifty SDL Sep 2027 Index
+    Fund") — without this bound the date detection stamped that future month
+    onto every holding (244 future-dated constituent rows in prod, 2026-07-10).
+    """
+    today = date.today()
+    return date(today.year + (today.month // 12), (today.month % 12) + 1, 1)
+
+
 async def _discover_all_urls_static(
     client: httpx.AsyncClient,
     url: str,
@@ -4573,6 +4585,17 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             )
                         except ValueError:
                             pass
+                # Fail-closed future guard (see _max_disclosure_month): reject
+                # and keep scanning later rows for a plausible as-of instead.
+                if as_of_month is not None and as_of_month > _max_disclosure_month():
+                    logger.info(
+                        "mf_constituents_fetch amc=%s rejecting implausible future "
+                        "as-of %s (row %d)",
+                        amc_name,
+                        as_of_month,
+                        idx,
+                    )
+                    as_of_month = None
 
             # Detect scheme name rows (usually bold / standalone text rows).
             # HDFC's per-scheme disclosure files (manual-ingest inbox, ~88 files) title
@@ -4719,6 +4742,23 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 ).strip()
                 # Reject noise rows like "SCHEME CODE002STARTS" that aren't real names.
                 if any(kw in candidate.upper() for kw in ("CODE002", "STARTS", "ENDS")):
+                    candidate = ""
+                # Reject AMC HOUSE banners ("SBI MUTUAL FUND", "ICICI Prudential
+                # Mutual Fund") — a letterhead row, never a scheme. It contains
+                # "fund" so it passes the keyword gate below and then enters
+                # fuzzy ISIN resolution as a garbage query (confirmed 2026-07-10:
+                # SBI Tax Advantage Series files resolved banner "SBI MUTUAL
+                # FUND", top master similarity 0.263 — one master rename away
+                # from a wrong-fund write). No real master scheme name ends in
+                # the bare words "mutual fund".
+                import re as _re_house  # local alias — `re` is shadowed as a
+                # function-local name elsewhere in this function (other
+                # branches do `import re` inline), same workaround as
+                # _re_ason/_re_local below.
+
+                if candidate and _re_house.fullmatch(
+                    r"[\w&.\- ]*mutual\s+fund\s*", candidate, flags=_re_house.IGNORECASE
+                ):
                     candidate = ""
                 # Reject rows starting with parentheses or other indicators of descriptions (e.g. MIRAE).
                 if candidate and not candidate[0].isalnum():
@@ -4885,6 +4925,10 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                     )
                 except ValueError:
                     pass
+            # Fail-closed future guard (see _max_disclosure_month) — same
+            # target-maturity-name trap as the XLSX path, mirrored here.
+            if as_of_month is not None and as_of_month > _max_disclosure_month():
+                as_of_month = None
             # Fallback: "Month DD, YYYY" format (MIRAE style: "May 31, 2026").
             # `,?\s*` (not `,?\s+`) so an unspaced comma form (ICICI_PRU's own
             # banners: "Portfolio as on May 31,2026") still matches — see the
@@ -4905,6 +4949,8 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
                         )
                     except ValueError:
                         pass
+            if as_of_month is not None and as_of_month > _max_disclosure_month():
+                as_of_month = None
 
         non_empty = [s for s in row_strs if s]
         if len(non_empty) == 1 and not col_map:
@@ -5214,6 +5260,97 @@ def _drop_over_covered_funds(constituent_batch: list[dict], amc_name: str) -> li
     return [r for r in constituent_batch if r["isin"] not in bad_isins]
 
 
+# Scheme RENAMES — historical disclosure files carry a scheme's OLD name while
+# `mf_funds` (AMFI master) carries only the CURRENT name, so pg_trgm similarity
+# can never bridge them (measured 2026-07-10: "SBI Blue Chip Fund" vs its
+# renamed master rows tops out at 0.233). Keys are casefolded old names as they
+# appear in real disclosure banners; values are the current master name, each
+# VERIFIED against live `mf_funds.scheme_name` on 2026-07-10. Extend only with
+# pairs verified the same way — a wrong alias writes another fund's holdings,
+# which is worse than none. NOTE the trap this map exists to avoid: master has
+# BOTH "SBI Flexicap Fund" (= renamed Magnum Multicap) AND "SBI Multicap Fund"
+# (a different fund, 2022 NFO) — fuzzy matching the old name would risk the
+# wrong one.
+_SCHEME_RENAME_ALIASES: dict[str, str] = {
+    "sbi blue chip fund": "SBI Large Cap Fund",
+    "sbi bluechip fund": "SBI Large Cap Fund",
+    "sbi magnum global fund": "SBI MNC Fund",
+    "sbi magnum income fund": "SBI Medium to Long Duration Fund",
+    "sbi magnum low duration fund": "SBI Low Duration Fund",
+    "sbi long term equity fund": "SBI ELSS Tax Saver Fund",
+    "sbi magnum taxgain scheme": "SBI ELSS Tax Saver Fund",
+    "sbi magnum equity esg fund": "SBI ESG Exclusionary Strategy Fund",
+    "sbi magnum multicap fund": "SBI Flexicap Fund",
+    "sbi magnum children's benefit fund": "SBI Children's Fund - Savings Plan",
+    "sbi magnum children's benefit plan": "SBI Children's Fund - Savings Plan",
+}
+
+# "<Current Name> (formerly known as <Old Name>)" / "<Current> [earlier known
+# as <Old>]" — AMCs document their own renames inline in scheme banners
+# (real evidence 2026-07-10: "SBI Flexicap Fund [earlier known as SBI Magnum
+# Multicap Fund]"). The clause dilutes trigram similarity below threshold.
+_FORMERLY_KNOWN_RE = re.compile(
+    r"[(\[]\s*(?:formerly|earlier)\s+known\s+as\s+([^)\]]+)[)\]]", re.IGNORECASE
+)
+
+
+def _resolution_candidates(sname: str) -> list[str]:
+    """Ordered pg_trgm query candidates for one disclosure scheme name — pure.
+
+    1. When a "(formerly/earlier known as X)" clause is present: the bare
+       current name (clause stripped), then the old name X — each redirected
+       through `_SCHEME_RENAME_ALIASES` when listed there.
+    2. The name itself (alias-redirected when listed).
+    3. The raw string last, preserving pre-2026-07-10 behavior for any name
+       none of the above transformed.
+    Every candidate still goes through the SAME similarity threshold — this
+    widens what is TRIED, never what is ACCEPTED.
+    """
+    out: list[str] = []
+
+    def _add(name: str) -> None:
+        name = " ".join(name.split())
+        if not name:
+            return
+        name = _SCHEME_RENAME_ALIASES.get(name.casefold(), name)
+        if name not in out:
+            out.append(name)
+
+    m = _FORMERLY_KNOWN_RE.search(sname)
+    if m:
+        _add(_FORMERLY_KNOWN_RE.sub(" ", sname))
+        _add(m.group(1))
+    _add(sname)
+    raw = " ".join(sname.split())
+    if raw and raw not in out:
+        out.append(raw)  # un-aliased raw form last — fallback if an alias goes stale
+    return out
+
+
+# AMC → master scheme-name ILIKE prefixes. Most AMCs' scheme names start with
+# the AMC's short name (the `split("_")[0] + "%"` default below); the entries
+# here are the verified exceptions. ICICI_PRU additionally owns "BHARAT 22 ETF"
+# (INF109KB15Y7) — a CPSE scheme named without any "ICICI" prefix.
+_AMC_PREFIX_OVERRIDES: dict[str, list[str]] = {
+    "MIRAE": ["Mirae Asset%"],
+    "PPFAS": ["Parag Parikh%"],
+    "ABSL": ["Aditya Birla%"],
+    "ICICI_PRU": ["ICICI%", "BHARAT 22%"],
+}
+
+
+def _amc_scheme_prefixes(amc_name: str) -> list[str]:
+    """Master scheme-name prefixes for one AMC — pure. "ICICI_PRU" → ICICI%."""
+    return _AMC_PREFIX_OVERRIDES.get(amc_name) or [amc_name.split("_")[0] + "%"]
+
+
+def _prefix_where_clause(prefixes: list[str]) -> tuple[str, dict[str, str]]:
+    """('(scheme_name ILIKE :p0 OR ...)', {'p0': ...}) — explicit per-prefix
+    binds rather than an array ANY() so plain sa_text() needs no array typing."""
+    parts = " OR ".join(f"scheme_name ILIKE :p{i}" for i in range(len(prefixes)))
+    return f"({parts})", {f"p{i}": p for i, p in enumerate(prefixes)}
+
+
 def _pick_canonical_plan_isin(rows: Sequence[Any], tie_margin: float) -> str:
     """Pick the canonical ISIN among pg_trgm candidate rows `(isin, scheme_name, sim)`
     ordered by similarity DESC. Among rows within `tie_margin` of the top score
@@ -5256,29 +5393,24 @@ async def _resolve_scheme_isins_by_plan(
 
     from dhanradar.db import TaskSessionLocal
 
-    amc_prefix_map = {
-        "MIRAE": "Mirae Asset%",
-        "PPFAS": "Parag Parikh%",
-        "ABSL": "Aditya Birla%",
-    }
-    amc_prefix = amc_prefix_map.get(amc_name) or (amc_name.split("_")[0] + "%")
+    prefix_sql, prefix_binds = _prefix_where_clause(_amc_scheme_prefixes(amc_name))
 
     async with TaskSessionLocal() as db:
         result = await db.execute(
             sa_text(
                 "SELECT isin, scheme_name FROM mf.mf_funds "
-                "WHERE scheme_name ILIKE :prefix AND scheme_name ILIKE :bare_prefix"
+                f"WHERE {prefix_sql} AND scheme_name ILIKE :bare_prefix"
             ),
-            {"prefix": amc_prefix, "bare_prefix": f"{scheme_name}%"},
+            {"bare_prefix": f"{scheme_name}%", **prefix_binds},
         )
         rows = result.fetchall()
         if not rows:
             result = await db.execute(
                 sa_text(
                     "SELECT isin, scheme_name FROM mf.mf_funds "
-                    "WHERE scheme_name ILIKE :prefix AND similarity(scheme_name, :sname) > 0.6"
+                    f"WHERE {prefix_sql} AND similarity(scheme_name, :sname) > 0.6"
                 ),
-                {"prefix": amc_prefix, "sname": scheme_name},
+                {"sname": scheme_name, **prefix_binds},
             )
             rows = result.fetchall()
 
@@ -5328,69 +5460,59 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
         return {}
 
     scheme_isin_map: dict[str, str] = {}
-    amc_prefix_map = {
-        "MIRAE": "Mirae Asset%",
-        "PPFAS": "Parag Parikh%",
-        "ABSL": "Aditya Birla%",
-    }
-    amc_prefix = amc_prefix_map.get(amc_name) or (
-        amc_name.split("_")[0] + "%"
-    )  # "ICICI_PRU" → "ICICI%"
+    prefixes = _amc_scheme_prefixes(amc_name)
+    prefix_sql, prefix_binds = _prefix_where_clause(prefixes)
     # Margin within which two candidates are considered a genuine tie (not one
     # correct match beating an unrelated fund) — same-scheme plan-variant rows
     # cluster within a few hundredths of each other in practice (e.g. 0.925 vs
     # 0.841 for Bonus vs Growth of the same scheme); an unrelated DIFFERENT
     # scheme is never this close to the true top match.
     _TIE_MARGIN = 0.10
+    threshold = 0.25 if amc_name == "MIRAE" else 0.35  # MIRAE: shorter extracted names
     async with TaskSessionLocal() as db:
         for sname in scheme_names:
-            # Use pg_trgm similarity to fuzzy-match scheme names, restricted to
-            # same-AMC funds to prevent false positives across AMC name overlap.
-            # LIMIT 10 (not 3) so same-scheme plan/option variants (Direct,
-            # Regular, Growth, IDCW, Bonus, ...) are all visible for the
-            # canonical-plan tie-break below, not just the top 3 by raw score.
-            result = await db.execute(
-                sa_text(
-                    "SELECT isin, scheme_name, similarity(scheme_name, :sname) as sim FROM mf.mf_funds "
-                    "WHERE scheme_name ILIKE :prefix "
-                    "ORDER BY similarity(scheme_name, :sname) DESC "
-                    "LIMIT 10"
-                ),
-                {"sname": sname, "prefix": amc_prefix},
-            )
-            rows = result.fetchall()
-            if rows:
-                # Log top matches for debugging
-                if amc_name == "MIRAE":
+            # Each candidate (rename alias / "(formerly known as)" split — see
+            # _resolution_candidates) is tried through the SAME pg_trgm
+            # similarity + threshold, restricted to same-AMC funds to prevent
+            # false positives across AMC name overlap. LIMIT 10 (not 3) so
+            # same-scheme plan/option variants (Direct, Regular, Growth, IDCW,
+            # Bonus, ...) are all visible for the canonical-plan tie-break,
+            # not just the top 3 by raw score.
+            for query_name in _resolution_candidates(sname):
+                result = await db.execute(
+                    sa_text(
+                        "SELECT isin, scheme_name, similarity(scheme_name, :sname) as sim "
+                        f"FROM mf.mf_funds WHERE {prefix_sql} "
+                        "ORDER BY similarity(scheme_name, :sname) DESC "
+                        "LIMIT 10"
+                    ),
+                    {"sname": query_name, **prefix_binds},
+                )
+                rows = result.fetchall()
+                if amc_name == "MIRAE" and rows:
                     logger.info(
                         "mf_constituents_fetch amc=MIRAE scheme='%s' matches: %s",
                         sname,
                         [(r[1], f"{r[2]:.2f}") for r in rows],
                     )
-                # Use first match if similarity > 0.35
-                if rows[0][2] > 0.35:
+                if rows and rows[0][2] > threshold:
                     scheme_isin_map[sname] = _pick_canonical_plan_isin(rows, _TIE_MARGIN)
-                elif amc_name == "MIRAE" and rows[0][2] > 0.25:
-                    # MIRAE per-scheme files produce shorter extracted names; relax threshold.
-                    logger.info(
-                        "mf_constituents_fetch MIRAE scheme '%s' matched via relaxed threshold: %s",
-                        sname,
-                        [(r[1], f"{r[2]:.2f}") for r in rows[:3]],
-                    )
-                    scheme_isin_map[sname] = _pick_canonical_plan_isin(rows, _TIE_MARGIN)
-                else:
-                    logger.debug(
-                        "mf_constituents_fetch amc=%s scheme '%s' top match similarity=%.2f (too low)",
-                        amc_name,
-                        sname,
-                        rows[0][2],
-                    )
+                    if query_name != sname:
+                        logger.info(
+                            "mf_constituents_fetch amc=%s scheme '%s' resolved via "
+                            "candidate '%s' (sim=%.2f)",
+                            amc_name,
+                            sname,
+                            query_name,
+                            rows[0][2],
+                        )
+                    break
             else:
                 logger.debug(
-                    "mf_constituents_fetch amc=%s no matches for scheme '%s' with prefix '%s'",
+                    "mf_constituents_fetch amc=%s scheme '%s' unresolved (prefixes %s)",
                     amc_name,
                     sname,
-                    amc_prefix,
+                    prefixes,
                 )
     return scheme_isin_map
 
