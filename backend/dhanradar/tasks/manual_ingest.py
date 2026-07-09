@@ -40,6 +40,7 @@ from dhanradar.mf.manual_ingest import (
     detect_amc_and_parse,
     detect_period_from_filename,
     intake_upload,
+    looks_closed_ended,
 )
 
 # NoReferencedTableError guard — MfManualIngestFile.uploaded_by (models/mf.py) has a
@@ -167,6 +168,20 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
             return "failed: parse_error"
 
         if amc_name is None or not rows:
+            # A recognizably closed-ended file (FMP / Series / Dual Advantage —
+            # see looks_closed_ended) that yields nothing is a matured scheme
+            # absent from the AMFI master, not a parser defect: honest terminal
+            # outcome, never re-queued by failed-row resets.
+            if amc_name is not None and looks_closed_ended(original_filename):
+                stats.status_override = "skipped"
+                await _mark(
+                    file_id,
+                    "unsupported",
+                    amc=amc_name,
+                    period=period,
+                    error="scheme_not_in_master",
+                )
+                return "unsupported: scheme_not_in_master"
             stats.status_override = "skipped"  # undetectable ≠ a pipeline failure
             await _mark(file_id, "unsupported", period=period, error="amc_or_period_undetectable")
             return "unsupported: amc_or_period_undetectable"
@@ -174,15 +189,38 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
         rows_upserted, _aum_updates = await _upsert_constituents(rows, amc_name, run_id=run_id)
         stats.written = rows_upserted
         if rows_upserted == 0:
+            # Distinguish the three honest causes of an empty upsert:
+            #   1. Closed-ended scheme genuinely absent from the master
+            #      (name lookup RE-CHECKED here, never assumed) → terminal
+            #      'scheme_not_in_master', not an endlessly retryable failure.
+            #   2. Names resolve but rows carried no usable as-of month →
+            #      period problem, not a resolution problem — say so.
+            #   3. Anything else → the pre-existing scheme-unresolved failure.
+            from dhanradar.tasks.mf import _resolve_scheme_isins
+
+            names = {r["scheme_name"] for r in rows if r.get("scheme_name")}
+            resolved = await _resolve_scheme_isins(names, amc_name) if names else {}
+            if not resolved and (
+                looks_closed_ended(original_filename)
+                or (names and all(looks_closed_ended(n) for n in names))
+            ):
+                stats.status_override = "skipped"
+                await _mark(
+                    file_id,
+                    "unsupported",
+                    amc=amc_name,
+                    period=period,
+                    error="scheme_not_in_master",
+                )
+                return "unsupported: scheme_not_in_master"
             stats.failed = 1
             stats.last_error = "zero_rows_upserted"
-            await _mark(
-                file_id,
-                "failed",
-                amc=amc_name,
-                period=period,
-                error="zero_rows_upserted_scheme_unresolved",
+            error = (
+                "zero_rows_upserted_period_missing"
+                if resolved
+                else "zero_rows_upserted_scheme_unresolved"
             )
+            await _mark(file_id, "failed", amc=amc_name, period=period, error=error)
             return "failed: zero_rows_upserted"
 
         await _mark(file_id, "parsed", amc=amc_name, period=period, rows=rows_upserted)

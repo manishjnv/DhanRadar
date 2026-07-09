@@ -432,3 +432,135 @@ async def test_dispatcher_aaum_never_clobbers_fresher_net_assets(db_session, mon
     fund = await db_session.get(MfFund, isin)
     assert float(fund.aum_crore) == 16000.00  # untouched
     assert fund.aum_as_of == _date(2026, 6, 1)
+
+
+# ---------------------------------------------------------------------------
+# scheme_not_in_master (2026-07-10) — closed-ended/matured schemes classify as
+# an HONEST TERMINAL outcome ('unsupported'), never an endlessly retryable
+# 'failed' row. Fixture names are real prod failures (93-row tail, 2026-07-10).
+# ---------------------------------------------------------------------------
+
+
+def _build_series_xlsx(banner: str) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["SBI MUTUAL FUND"])
+    ws.append(["SCHEME NAME :", banner])
+    ws.append(["PORTFOLIO STATEMENT AS ON :", "2018-08-31"])
+    ws.append(["Name of the Instrument / Issuer", "ISIN", "Quantity", "Market value", "% to AUM"])
+    ws.append(["Govt Stock", "IN0020180058", "1000", "230.25", "5.10"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_zero_rows_closed_ended_marks_scheme_not_in_master(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """Series banner + failed lookup (re-checked, not assumed) → terminal
+    'unsupported: scheme_not_in_master'."""
+    data = _build_series_xlsx("SBI Debt Fund Series C-1")
+    file_id = await _insert_pending_bytes(
+        db_session, filename="SBI Debt Fund Series C - 1.xlsx", data=data
+    )
+
+    async def _fake_upsert(rows, amc_name, run_id=None):
+        return 0, 0
+
+    async def _fake_resolve(names, amc_name):
+        return {}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._upsert_constituents", _fake_upsert)
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "unsupported: scheme_not_in_master"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "unsupported"  # terminal — failed-row resets skip it
+    assert row.error == "scheme_not_in_master"
+    assert row.amc_detected == "SBI"
+
+
+async def test_zero_rows_open_ended_stays_retryable_failed(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """Same zero-rows outcome for an OPEN-ended scheme → the pre-existing
+    retryable failure, never silently reclassified."""
+    data = _build_series_xlsx("SBI Corporate Bond Fund")
+    file_id = await _insert_pending_bytes(
+        db_session, filename="SBI Corporate Bond Fund.xlsx", data=data
+    )
+
+    async def _fake_upsert(rows, amc_name, run_id=None):
+        return 0, 0
+
+    async def _fake_resolve(names, amc_name):
+        return {}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._upsert_constituents", _fake_upsert)
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "failed: zero_rows_upserted"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "failed"
+    assert row.error == "zero_rows_upserted_scheme_unresolved"
+
+
+async def test_zero_rows_with_resolvable_names_reports_period_missing(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """Names resolve but nothing landed → the honest diagnosis is a period
+    problem, not 'scheme_unresolved' (real ICICI failure shape, 2026-07-07)."""
+    data = _build_series_xlsx("SBI Corporate Bond Fund")
+    file_id = await _insert_pending_bytes(
+        db_session, filename="SBI Corporate Bond Fund v2.xlsx", data=data
+    )
+
+    async def _fake_upsert(rows, amc_name, run_id=None):
+        return 0, 0
+
+    async def _fake_resolve(names, amc_name):
+        return {"SBI Corporate Bond Fund": "INF200TEST99"}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._upsert_constituents", _fake_upsert)
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "failed: zero_rows_upserted"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.error == "zero_rows_upserted_period_missing"
+
+
+async def test_no_rows_closed_ended_filename_marks_scheme_not_in_master(
+    db_session, monkeypatch: pytest.MonkeyPatch
+):
+    """A recognizably closed-ended FILE that parses to zero rows (garbled
+    legacy layout) is also terminal — detect_amc works off the filename."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["HDFC MUTUAL FUND"])  # letterhead only, no header/data rows
+    buf = io.BytesIO()
+    wb.save(buf)
+    file_id = await _insert_pending_bytes(
+        db_session, filename="HDFC FMP 1269D March 2023.xlsx", data=buf.getvalue()
+    )
+
+    async def _boom(*_a, **_kw):
+        raise AssertionError("_upsert_constituents must never run for zero parsed rows")
+
+    monkeypatch.setattr("dhanradar.tasks.mf._upsert_constituents", _boom)
+
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "unsupported: scheme_not_in_master"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "unsupported"
+    assert row.error == "scheme_not_in_master"
