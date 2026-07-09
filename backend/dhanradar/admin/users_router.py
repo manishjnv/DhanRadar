@@ -593,7 +593,12 @@ async def get_audit_log(
         if target_type == "user" and target_id:
             target_label = emails.get(str(target_id))
         elif target_type == "cas_job" and target_id:
-            owner = job_owner.get(str(target_id))
+            # Normalize: target_id is TEXT and may not be in canonical UUID form.
+            try:
+                canonical = str(UUID(str(target_id)))
+            except ValueError:
+                canonical = str(target_id)
+            owner = job_owner.get(canonical)
             owner_email = emails.get(owner) if owner else None
             target_label = f"Upload by {owner_email}" if owner_email else None
         elif target_type == "source" and target_id:
