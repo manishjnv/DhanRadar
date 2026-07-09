@@ -60,6 +60,9 @@ celery_app = Celery(
         "dhanradar.tasks.rbi_tbill",
         # BSE Star MF 2.0 webhook async processing (misc queue).
         "dhanradar.tasks.bse",
+        # BSE StAR scheme-master enrichment (exit load / min amounts) —
+        # dormant-safe (flag+creds+prod gates inside the task itself).
+        "dhanradar.tasks.bse_enrich",
         # Manual disclosure ingestion inbox (ADR-0033(a) human side-channel for
         # HDFC/SBI/ICICI-Pru/Kotak/Axis, which block the scraper).
         "dhanradar.tasks.manual_ingest",
@@ -129,9 +132,9 @@ celery_app.conf.enable_utc = False
 # ---------------------------------------------------------------------------
 celery_app.conf.task_routes = {
     "dhanradar.tasks.batch.*": {"queue": "batch"},
-    "dhanradar.tasks.mood.*":  {"queue": "mood"},
-    "dhanradar.tasks.misc.*":  {"queue": "misc"},
-    "dhanradar.tasks.mf.*":    {"queue": "batch"},
+    "dhanradar.tasks.mood.*": {"queue": "mood"},
+    "dhanradar.tasks.misc.*": {"queue": "misc"},
+    "dhanradar.tasks.mf.*": {"queue": "batch"},
     "dhanradar.tasks.compliance.*": {"queue": "batch"},
     # Route news refresh to the existing batch worker (no dedicated news worker).
     "dhanradar.tasks.news.*": {"queue": "batch"},
@@ -368,6 +371,14 @@ celery_app.conf.beat_schedule = {
     # 30 min as failed='stuck_timeout' — the manual-ingest-inbox counterpart to
     # mf-reap-stuck-cas above (parse_manual_disclosure_file has no other
     # self-heal path if hard-killed mid-flight by the new task_time_limit).
+    # BSE StAR scheme-master enrichment — weekly Sun 05:30 IST (guide: pull
+    # gently, weekly is plenty; runs AFTER the 03:00 AMFI scheme-master refresh
+    # so freshly listed ISINs exist before BSE fields land on them). Dormant
+    # no-op until BSE_ENRICH_ENABLED + credentials (+ BSE_ENV=prod for writes).
+    "bse-scheme-master-enrich": {
+        "task": "dhanradar.tasks.bse_enrich.bse_scheme_master_enrich",
+        "schedule": crontab(hour=5, minute=30, day_of_week="0"),
+    },
     "manual-ingest-reap-stuck": {
         "task": "dhanradar.tasks.manual_ingest.reap_stuck_manual_ingest_files",
         "schedule": crontab(minute="*/5"),

@@ -143,14 +143,14 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY: str = ""
     JWT_PRIVATE_KEY_FILE: str = ""
     JWT_PUBLIC_KEY_FILE: str = ""
-    JWT_ALGORITHM: str = "RS256"   # Hard-coded to RS256; env override is informational only
-    ACCESS_TTL_MIN: int = 15       # Access token TTL in minutes
-    REFRESH_TTL_DAYS: int = 7      # Refresh token TTL in days
+    JWT_ALGORITHM: str = "RS256"  # Hard-coded to RS256; env override is informational only
+    ACCESS_TTL_MIN: int = 15  # Access token TTL in minutes
+    REFRESH_TTL_DAYS: int = 7  # Refresh token TTL in days
 
     # ------------------------------------------------------------------
     # Cookie
     # ------------------------------------------------------------------
-    COOKIE_SECURE: bool = True     # Set False only in dev without HTTPS
+    COOKIE_SECURE: bool = True  # Set False only in dev without HTTPS
 
     # ------------------------------------------------------------------
     # Kite Connect (MF instrument enrichment — ADR-0033 extension)
@@ -225,6 +225,11 @@ class Settings(BaseSettings):
     BSE_ENV: str = "uat"
     BSE_API_BASE_URL_UAT: str = "https://starmfv2demo.bseindia.com/api/"
     BSE_API_BASE_URL_PROD: str = "https://v2.bsestarmf.in/api/"
+    # Scheme-master enrichment (tasks/bse_enrich.py) — dedicated arm flag, NOT
+    # inferred from BSE_ENV (mirrors BSE_WEBHOOK_ALLOW_PLAINTEXT: an unrelated
+    # ops change must never arm it). Even when True, writes require
+    # BSE_ENV=prod + credentials; anything else is a dry run.
+    BSE_ENRICH_ENABLED: bool = False
     # Our BSE member code + the X-API-Org-ID header value BSE assigns at onboarding
     # (member/<org-code>:<fingerprint>). Empty until BSE provisions us.
     BSE_MEMBER_CODE: str = ""
@@ -300,9 +305,7 @@ class Settings(BaseSettings):
     # (billing_go_live + 30d) at go-live). Signup stamps pro_access_until
     # to this while now < it.
     # ------------------------------------------------------------------
-    FOUNDING_ACCESS_UNTIL: datetime | None = datetime(
-        2026, 12, 31, 23, 59, 59, tzinfo=UTC
-    )
+    FOUNDING_ACCESS_UNTIL: datetime | None = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
 
     # ------------------------------------------------------------------
     # Risk-free rate proxy (Sharpe / Sortino denominators)
@@ -399,9 +402,7 @@ class Settings(BaseSettings):
     def bse_webhook_source_ips(self) -> frozenset[str]:
         """Optional allowlist of BSE webhook source IPs (defence in depth). Empty
         set ⇒ no IP gate (the JOSE signature is the real authentication)."""
-        return frozenset(
-            ip.strip() for ip in self.BSE_WEBHOOK_SOURCE_IPS.split(",") if ip.strip()
-        )
+        return frozenset(ip.strip() for ip in self.BSE_WEBHOOK_SOURCE_IPS.split(",") if ip.strip())
 
     @computed_field  # type: ignore[misc]
     @property

@@ -76,6 +76,10 @@ class MfFund(Base):
     expense_ratio_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     exit_load_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     exit_load_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Transactability minimums from the BSE StAR scheme master (tasks/bse_enrich.py,
+    # migration 0074) — the one source that carries them; per plan×option ISIN.
+    min_lumpsum_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    min_sip_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     benchmark_index: Mapped[str | None] = mapped_column(Text, nullable=True)
     sebi_category: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_o_meter: Mapped[str | None] = mapped_column(Text, nullable=True)

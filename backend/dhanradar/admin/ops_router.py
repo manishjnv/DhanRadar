@@ -227,6 +227,17 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
         "beat_key": "news-refresh-market",
     },
     {
+        "source_key": "bse_scheme_master",
+        "name": "BSE StAR Scheme Master",
+        "tier": "2",
+        "description": "Exit load + min lumpsum/SIP amounts per plan-option ISIN (28k schemes) — dormant until BSE prod creds",
+        "method": "BSE StAR MF v2 read API (plaintext + Bearer)",
+        "schedule_display": "Weekly Sun 05:30 IST (dormant-safe no-op until armed)",
+        "cost": "Free (member account)",
+        "celery_task": "dhanradar.tasks.bse_enrich.bse_scheme_master_enrich",
+        "beat_key": "bse-scheme-master-enrich",
+    },
+    {
         "source_key": "manual_disclosure_inbox",
         "name": "Manual Disclosure Inbox",
         "tier": "2",
@@ -252,9 +263,7 @@ _SOURCE_CATALOG: list[dict[str, str]] = [
 
 # Map source_key → celery task name for sync/trigger endpoints
 _SOURCE_TO_TASK: dict[str, str] = {
-    s["source_key"]: s["celery_task"]
-    for s in _SOURCE_CATALOG
-    if s["celery_task"]
+    s["source_key"]: s["celery_task"] for s in _SOURCE_CATALOG if s["celery_task"]
 }
 
 # Map source_key → human display name; used by other admin routers (e.g. the
@@ -958,11 +967,7 @@ async def list_sources(
                 method=src["method"],
                 schedule_display=src["schedule_display"],
                 cost=src["cost"],
-                last_success_at=_iso(
-                    run.finished_at
-                    if run and run.status == "success"
-                    else None
-                ),
+                last_success_at=_iso(run.finished_at if run and run.status == "success" else None),
                 last_records=run.records_written if run else None,
                 status=computed_status,
                 paused=paused,
@@ -1109,9 +1114,7 @@ async def list_tasks(
                 last_run_at=_iso(run.started_at) if run else None,
                 next_run_at=_next_run_at(t.get("cron"), _CELERY_TZ),
                 last_status=run.status if run else None,
-                last_duration_s=(
-                    _duration_s(run.started_at, run.finished_at) if run else None
-                ),
+                last_duration_s=(_duration_s(run.started_at, run.finished_at) if run else None),
                 last_rows=run.records_written if run else None,
                 paused=paused,
             )
@@ -1322,8 +1325,14 @@ async def list_quality(
         "holdings_coverage": {"label": "Holdings coverage (% top-100)", "unit": "%"},
         "duplicate_scheme_codes": {"label": "Duplicate scheme codes", "unit": "count"},
         "nav_out_of_range": {"label": "NAV out of range (NAV ≤ 0)", "unit": "count"},
-        "expense_ratio_out_of_range": {"label": "Expense ratio out of range (>10%)", "unit": "count"},
-        "holdings_weight_deviation": {"label": "Holdings weight sum deviation (>5%)", "unit": "count"},
+        "expense_ratio_out_of_range": {
+            "label": "Expense ratio out of range (>10%)",
+            "unit": "count",
+        },
+        "holdings_weight_deviation": {
+            "label": "Holdings weight sum deviation (>5%)",
+            "unit": "count",
+        },
         "aum_data_age": {"label": "AUM data age", "unit": "months"},
         "scheme_master_age": {"label": "Scheme master age", "unit": "days"},
     }
