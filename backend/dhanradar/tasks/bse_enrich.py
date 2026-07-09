@@ -56,10 +56,12 @@ _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
-_PAGE_SIZE = 2_000  # deliberately far below the 10k API max: one page of
-# records (with the nested lumpsum/systematic blocks) must fit the 640 MB
-# celery-batch cgroup alongside its baseline — 10k pages OOM-killed the live
-# dry run (exit 137, 2026-07-10). ~15 gentle pages for the 28k master.
+_PAGE_SIZE = 500  # measured 2026-07-10: the response envelope carries ALL
+# record keys regardless of field selection (~19 KB/record raw), so a 2k page
+# still json.loads into hundreds of MB of dicts and OOM-killed BOTH the
+# 448 MB fastapi and 640 MB celery-batch cgroups (exit 137, twice). 500/page
+# ≈ 10 MB raw ≈ well under 100 MB parsed; ~57 gentle pages for the 28k
+# master — a few minutes, weekly.
 _PAGE_PAUSE_S = 2.0  # gentle — the WAF does bot/rate-based blocking
 _GATEWAY_RETRY = 3  # timeout/502/503/504 only, never definitive API errors
 _WRITE_CHUNK = 500
