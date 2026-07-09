@@ -84,6 +84,24 @@ def test_min_amounts_pick_fresh_purchase_and_smallest_sip():
     assert _extract_min_amounts(record) == (5000.0, 500.0)
 
 
+def test_min_amounts_handle_list_form_detail_nodes():
+    """Live UAT evidence 2026-07-10: scheme_transaction_single_details is a
+    LIST in some records (dict in others) — the dry run crashed on it."""
+    record = {
+        "lumpsum": [
+            {
+                "scheme_transaction_type": "Purchase",
+                "scheme_transaction_single_details": [
+                    {"scheme_transaction_amt": {"scheme_transaction_min_amt": 5000}},
+                    {"scheme_transaction_amt": {"scheme_transaction_min_amt": 1000}},
+                ],
+            }
+        ],
+        "systematic": [],
+    }
+    assert _extract_min_amounts(record) == (1000.0, None)
+
+
 def test_min_amounts_fail_closed_on_missing_blocks():
     assert _extract_min_amounts({}) == (None, None)
     assert _extract_min_amounts({"lumpsum": [_amt_block("Purchase", 0)]}) == (None, None)
