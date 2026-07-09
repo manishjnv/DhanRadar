@@ -564,3 +564,75 @@ async def test_no_rows_closed_ended_filename_marks_scheme_not_in_master(
     row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
     assert row.status == "unsupported"
     assert row.error == "scheme_not_in_master"
+
+
+# ---------------------------------------------------------------------------
+# scheme_master_pdf (2026-07-10) — SBI "Fund Details" PDFs parse instead of
+# archiving; all other PDFs keep the contract-§2 archive behavior.
+# ---------------------------------------------------------------------------
+
+
+async def test_fund_details_pdf_routes_to_scheme_master_writer(db_session, monkeypatch):
+    from dhanradar.mf import disclosure_parsers as dp
+    from dhanradar.models.mf import MfFund
+
+    isin = "INF200KPDF01"
+    db_session.add(
+        MfFund(
+            isin=isin,
+            scheme_name="SBI Automotive Opportunities Fund - Direct Plan - Growth",
+            amc_name="SBI MUTUAL FUND",
+        )
+    )
+    await db_session.commit()
+
+    flat = (
+        "Fund Details For SBI Automotive Opportunities Fund "
+        "Fund Name SBI Automotive Opportunities Fund "
+        "Riskometer As on Date VERY HIGH "
+        "Benchmark(Tier 1) Nifty Auto Tri "
+        "Fund Manager From Date Mr. Tanmaya Desai:05-Jun-2024 "
+        "Annual Expense (Stated Maximum) Direct Plan - 0.65 "
+        "Exit Load ( If Applicable) For exit within 30 days - 1%. After - Nil. "
+        "Custodian X"
+    )
+    # Real pypdf extraction is exercised by unit sniff tests; here the PDF
+    # byte-decoding seam is patched so the DISPATCH + WRITER path runs real.
+    monkeypatch.setattr(dp, "looks_like_scheme_master_pdf", lambda data: True)
+    monkeypatch.setattr(dp, "_flatten_pdf", lambda data: flat)
+
+    async def _fake_resolve(names, amc_name):
+        return {"SBI Automotive Opportunities Fund": isin}
+
+    monkeypatch.setattr("dhanradar.tasks.mf._resolve_scheme_isins", _fake_resolve)
+
+    file_id = await _insert_pending_bytes(
+        db_session, filename="SBI Automotive Opportunities Fund.pdf", data=b"%PDF-fake"
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result.startswith("parsed: scheme_master_pdf")
+    db_session.expire_all()
+    fund = await db_session.get(MfFund, isin)
+    assert fund.risk_o_meter == "Very High"
+    assert fund.benchmark_index == "Nifty Auto Tri"
+    assert float(fund.expense_ratio_pct) == 0.65
+    assert float(fund.exit_load_pct) == 1.0
+    assert fund.exit_load_days == 30
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "parsed"
+
+
+async def test_other_pdfs_still_archive(db_session, monkeypatch):
+    from dhanradar.mf import disclosure_parsers as dp
+
+    monkeypatch.setattr(dp, "looks_like_scheme_master_pdf", lambda data: False)
+    file_id = await _insert_pending_bytes(
+        db_session, filename="Complete Factsheet May 2026.pdf", data=b"%PDF-fake2"
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "archived: pdf_saved_for_later"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "archived"

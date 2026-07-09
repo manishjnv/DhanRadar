@@ -135,9 +135,18 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
         return "failed: stored_file_missing"
 
     if Path(original_filename).suffix.lower() == ".pdf":
-        # Contract §2 — the SEBI parser is xlsx-only; factsheet-PDF parsing is
-        # a future wave. Archive: keep the file on disk + the row, no fake
-        # parsing, no OCR. Never even reads the bytes past the exists() check.
+        # SBI's per-scheme "Fund Details" page rendered to PDF (2026-07-10 —
+        # 52 founder uploads sat 'archived' while carrying CURRENT riskometer/
+        # TER/benchmark/manager/exit-load) parses via the scheme_master
+        # writer; every OTHER PDF keeps the contract-§2 archive behavior
+        # (no fake parsing, no OCR).
+        from dhanradar.mf.disclosure_parsers import looks_like_scheme_master_pdf
+
+        data = path.read_bytes()
+        if looks_like_scheme_master_pdf(data):
+            return await _parse_special_class(
+                file_id, "scheme_master_pdf", data, original_filename, amc_hint
+            )
         await _mark(file_id, "archived")
         return "archived: pdf_saved_for_later"
 
@@ -438,8 +447,13 @@ async def _apply_file_class(
             await db.commit()
         return None, updates, resolved
 
-    if file_class == "scheme_master":
-        parsed = parse_scheme_master_details(data)
+    if file_class in ("scheme_master", "scheme_master_pdf"):
+        if file_class == "scheme_master_pdf":
+            from dhanradar.mf.disclosure_parsers import parse_scheme_master_pdf
+
+            parsed = parse_scheme_master_pdf(data)
+        else:
+            parsed = parse_scheme_master_details(data)
         scheme_name = parsed.get("scheme_name")
         if not scheme_name:
             return None, None, 0
@@ -461,6 +475,19 @@ async def _apply_file_class(
                 result = await db.execute(
                     sa_text("UPDATE mf.mf_funds SET benchmark_index = :b WHERE isin = :i"),
                     {"b": parsed["benchmark_tier1"], "i": isin},
+                )
+                updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("exit_load_pct") is not None:
+                result = await db.execute(
+                    sa_text(
+                        "UPDATE mf.mf_funds SET exit_load_pct = :p, "
+                        "exit_load_days = COALESCE(:d, exit_load_days) WHERE isin = :i"
+                    ),
+                    {
+                        "p": parsed["exit_load_pct"],
+                        "d": parsed.get("exit_load_days"),
+                        "i": isin,
+                    },
                 )
                 updates += int(getattr(result, "rowcount", 0) or 0)
             if parsed.get("ter_pct") is not None:
