@@ -70,3 +70,19 @@ async def test_reap_stuck_manual_ingest_does_not_touch_recent_file(monkeypatch):
     assert "0" in summary
     # Only the SELECT should have been issued (early return after empty-rows check).
     assert len(calls) == 1
+
+
+async def test_reap_select_requires_stale_parsed_at_too(monkeypatch):
+    """2026-07-10: keying on received_at alone reaped 454 of 477 RESET rows
+    mid-re-parse (reset rows are days old by received_at; the beat fires every
+    5 min). The SELECT must also require parsed_at NULL-or-stale so the
+    runbook's reset (which stamps parsed_at=now()) gets a fresh window."""
+    sess, calls = _make_reaper_session([])
+    monkeypatch.setattr("dhanradar.db.admin_task_session", lambda: sess)
+
+    await _reap_stuck_manual_ingest_files()
+
+    select_sql = str(calls[0])
+    assert "received_at" in select_sql
+    assert "parsed_at" in select_sql
+    assert "OR" in select_sql.upper()
