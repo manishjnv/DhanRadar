@@ -254,7 +254,10 @@ async def _parse_special_class(
         stats.fetched = 1
         stats.reachable = True
 
-        if amc_name is None:
+        # 'amfi_aaum' is a MULTI-AMC file by design (AMFI's consolidated
+        # scheme-wise workbook) — it joins on amfi_code, so AMC detection is
+        # neither possible nor needed; every other class still requires it.
+        if amc_name is None and file_class != "amfi_aaum":
             stats.status_override = "skipped"
             await _mark(file_id, "unsupported", error="amc_undetectable")
             return "unsupported: amc_undetectable"
@@ -297,7 +300,7 @@ async def _apply_file_class(
     data: bytes,
     ext: str,
     original_filename: str,
-    amc_name: str,
+    amc_name: str | None,  # None only for the multi-AMC 'amfi_aaum' class
     run_id: int | None,
 ) -> tuple[date | None, int | None, int]:
     """Parse one special file class and write its mf_funds fields.
@@ -337,6 +340,17 @@ async def _apply_file_class(
         leave sibling option ISINs stale. A simple overwrite (not fill-only)
         mirrors the scheme_master rule above: no `expense_ratio_history` row
         (no honest "effective from" date to attribute one to, §8.4).
+      - amfi_aaum (2026-07-10 — AMFI's consolidated quarterly scheme-wise
+        AAUM workbook, all AMCs in one file) → same fields + same
+        fill-if-null-or-older rules as 'aaum' above, but resolved by EXACT
+        `mf_funds.amfi_code` join (the file carries the AMFI code per
+        scheme) — zero fuzzy name resolution. One AMFI code maps to 1–2
+        ISINs (growth/reinvest NAV rows); every matching ISIN is written.
+        History rows use source='AMFI' (the publisher — this file has no
+        single AMC). A period-less file (title AND filename both silent)
+        fills `aum_crore` only where the fund has NO dated figure at all,
+        and writes NO `aum_as_of` and NO history row (§8.4 — a history row
+        needs a real as_of_month, never a fabricated one).
     """
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -344,13 +358,80 @@ async def _apply_file_class(
     from dhanradar.db import TaskSessionLocal
     from dhanradar.mf.disclosure_parsers import (
         parse_aaum_annexure,
+        parse_amfi_aaum,
         parse_riskometer_annual,
         parse_scheme_master_details,
         parse_scheme_performance,
         parse_ter_disclosure,
     )
-    from dhanradar.models.mf import MfAumHistory, MfFundManagerHistory
+    from dhanradar.models.mf import MfAumHistory, MfFund, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
+
+    if file_class == "amfi_aaum":
+        period, triples = parse_amfi_aaum(data, ext)
+        period = period or detect_period_from_filename(original_filename)
+        if not triples:
+            return period, None, 0
+
+        from sqlalchemy import select as sa_select
+
+        codes = {code for code, _n, _v in triples}
+        resolved = 0
+        updates = 0
+        async with TaskSessionLocal() as db:
+            # One exact-code lookup for the whole file — amfi_code is indexed
+            # (ix_mf_funds_amfi) and populated by the nightly NAV feed.
+            code_isins: dict[str, list[str]] = {}
+            rows_ = await db.execute(
+                sa_select(MfFund.amfi_code, MfFund.isin).where(MfFund.amfi_code.in_(codes))
+            )
+            for code, isin in rows_.all():
+                code_isins.setdefault(code, []).append(isin)
+
+            for code, _scheme_name, aaum_cr in triples:
+                isins = code_isins.get(code)
+                if not isins:
+                    continue
+                resolved += 1
+                for isin in isins:
+                    if period is not None:
+                        result = await db.execute(
+                            sa_text(
+                                "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :p "
+                                "WHERE isin = :i AND (aum_as_of IS NULL OR aum_as_of < :p)"
+                            ),
+                            {"v": aaum_cr, "p": period, "i": isin},
+                        )
+                        updates += int(getattr(result, "rowcount", 0) or 0)
+                        await db.execute(
+                            pg_insert(MfAumHistory)
+                            .values(
+                                isin=isin,
+                                aum_crore=aaum_cr,
+                                as_of_month=period,
+                                source="AMFI",
+                                run_id=run_id,
+                            )
+                            .on_conflict_do_nothing(index_elements=["isin", "as_of_month"])
+                        )
+                    else:
+                        # §8.4: no honest period → fill only funds with no
+                        # dated figure at all; never touch aum_as_of, never
+                        # write a history row.
+                        result = await db.execute(
+                            sa_text(
+                                "UPDATE mf.mf_funds SET aum_crore = :v "
+                                "WHERE isin = :i AND aum_crore IS NULL AND aum_as_of IS NULL"
+                            ),
+                            {"v": aaum_cr, "i": isin},
+                        )
+                        updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return period, updates, resolved
+
+    # Every class below is AMC-gated by _parse_special_class (amfi_aaum is the
+    # only one that may arrive with amc_name=None) — narrow the type once.
+    assert amc_name is not None
 
     if file_class == "aaum":
         period, pairs = parse_aaum_annexure(data, ext)

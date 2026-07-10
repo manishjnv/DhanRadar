@@ -435,6 +435,143 @@ async def test_dispatcher_aaum_never_clobbers_fresher_net_assets(db_session, mon
 
 
 # ---------------------------------------------------------------------------
+# amfi_aaum (2026-07-10) — AMFI's consolidated quarterly scheme-wise AAUM
+# workbook: exact amfi_code join (zero fuzzy resolution), multi-AMC (no AMC
+# gate), same fill-if-null-or-older + history rules as 'aaum'.
+# ---------------------------------------------------------------------------
+
+
+def _build_amfi_aaum_xlsx(
+    title: str = (
+        "Average Assets under Management (AAUM) for the quarter of April - June 2026 (Rs in Lakhs)"
+    ),
+) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append([title])
+    ws.append(
+        [
+            "AMFI Code",
+            "Scheme NAV Name",
+            "Excluding Fund of Funds - Domestic but including Fund of Funds - Overseas",
+            "Fund Of Funds - Domestic",
+        ]
+    )
+    ws.append(["360 ONE Mutual Fund"])  # AMC section row
+    ws.append(["Other Scheme - Other  ETFs"])  # category section row
+    ws.append(["154366", "360 ONE MSCI India ETF", "277.38", "0"])
+    ws.append(["888888", "Scheme Not In Our Master", "1000.0", "0"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def _seed_fund_with_code(db_session, isin: str, name: str, amfi_code: str, **kwargs) -> None:
+    from dhanradar.models.mf import MfFund
+
+    db_session.add(
+        MfFund(
+            isin=isin,
+            scheme_name=name,
+            amc_name="360 ONE Mutual Fund",
+            amfi_code=amfi_code,
+            **kwargs,
+        )
+    )
+    await db_session.commit()
+
+
+async def test_dispatcher_amfi_aaum_joins_by_code_and_writes_every_isin(db_session):
+    """The AMFI code joins exactly on mf_funds.amfi_code — BOTH plan-variant
+    ISINs under one code get the value; no name resolution is involved; the
+    multi-AMC file needs no detectable AMC in its filename."""
+    from datetime import date as _date
+
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfAumHistory, MfFund
+
+    await _seed_fund_with_code(db_session, "INF579MTEST1", "360 ONE MSCI India ETF", "154366")
+    await _seed_fund_with_code(
+        db_session, "INF579MTEST2", "360 ONE MSCI India ETF - IDCW", "154366"
+    )
+    data = _build_amfi_aaum_xlsx()
+    file_id = await _insert_pending_bytes(db_session, filename="average-aum2.xlsx", data=data)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: amfi_aaum updates=2")
+
+    db_session.expire_all()
+    for isin in ("INF579MTEST1", "INF579MTEST2"):
+        fund = await db_session.get(MfFund, isin)
+        assert float(fund.aum_crore) == 2.77  # 277.38 lakhs → 2.7738 cr (col is 2dp)
+        assert fund.aum_as_of == _date(2026, 6, 1)  # quarter END month, day 1
+        hist = (
+            (await db_session.execute(select(MfAumHistory).where(MfAumHistory.isin == isin)))
+            .scalars()
+            .all()
+        )
+        assert len(hist) == 1
+        assert hist[0].source == "AMFI"
+        assert hist[0].run_id is not None
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "parsed"
+
+
+async def test_dispatcher_amfi_aaum_never_clobbers_fresher_net_assets(db_session):
+    """A fund whose stated net-assets figure is FRESHER than the AAUM quarter
+    is never overwritten — parsed no-op, exactly like the 'aaum' class."""
+    from datetime import date as _date
+
+    from dhanradar.models.mf import MfFund
+
+    await _seed_fund_with_code(
+        db_session,
+        "INF579MTEST3",
+        "360 ONE MSCI India ETF",
+        "154366",
+        aum_crore=999.99,
+        aum_as_of=_date(2026, 7, 1),  # fresher than the file's June quarter-end
+    )
+    data = _build_amfi_aaum_xlsx()
+    file_id = await _insert_pending_bytes(db_session, filename="average-aum2 (1).xlsx", data=data)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: amfi_aaum updates=0")
+
+    db_session.expire_all()
+    fund = await db_session.get(MfFund, "INF579MTEST3")
+    assert float(fund.aum_crore) == 999.99  # untouched
+    assert fund.aum_as_of == _date(2026, 7, 1)
+
+
+async def test_dispatcher_amfi_aaum_periodless_writes_no_as_of_and_no_history(db_session):
+    """Title AND filename both period-less → aum_crore fills only truly-empty
+    funds; aum_as_of stays NULL and no history row is written (§8.4)."""
+    from sqlalchemy import select
+
+    from dhanradar.models.mf import MfAumHistory, MfFund
+
+    await _seed_fund_with_code(db_session, "INF579MTEST4", "360 ONE MSCI India ETF", "154366")
+    data = _build_amfi_aaum_xlsx(title="Average Assets under Management (AAUM) (Rs in Lakhs)")
+    file_id = await _insert_pending_bytes(db_session, filename="average-aum-x.xlsx", data=data)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: amfi_aaum updates=1")
+
+    db_session.expire_all()
+    fund = await db_session.get(MfFund, "INF579MTEST4")
+    assert float(fund.aum_crore) == 2.77
+    assert fund.aum_as_of is None  # never fabricated
+    hist = (
+        (await db_session.execute(select(MfAumHistory).where(MfAumHistory.isin == "INF579MTEST4")))
+        .scalars()
+        .all()
+    )
+    assert hist == []  # a history row needs a real as_of_month
+
+
+# ---------------------------------------------------------------------------
 # scheme_not_in_master (2026-07-10) — closed-ended/matured schemes classify as
 # an HONEST TERMINAL outcome ('unsupported'), never an endlessly retryable
 # 'failed' row. Fixture names are real prod failures (93-row tail, 2026-07-10).
