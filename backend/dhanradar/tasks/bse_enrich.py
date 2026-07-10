@@ -15,11 +15,12 @@ gates, all fail-closed:
   1. ``BSE_ENRICH_ENABLED`` (default False) — a dedicated flag, never inferred
      from BSE_ENV, so an unrelated ops change can't arm it.
   2. ``BSE_LOGIN_USERNAME`` + ``BSE_LOGIN_PASSWORD`` present.
-  3. Writes happen ONLY when ``BSE_ENV == "prod"``. Any other env runs the full
-     fetch+map as a DRY RUN (counts logged, zero writes) — enforcing the
-     documented policy that UAT/demo data must NEVER enrich the production
-     master (demo `scheme_bse_code`s may differ in prod; see the BSE guide,
-     "Enrichment policy — DEV-ONLY").
+  3. Writes happen when ``BSE_ENV == "prod"`` — or, off prod, ONLY behind the
+     second explicit flag ``BSE_ENRICH_ALLOW_DEMO`` (founder decision
+     2026-07-10, ADR-0042 addendum: the demo master is verified CURRENT —
+     2024-25 NFOs present, demo NAV cross-checked equal to AMFI — and the
+     fields written are slow-changing; `scheme_bse_code` is still NEVER
+     written from demo). Default remains a zero-write DRY RUN.
 
 Operational discipline (all from the verified BSE guide):
   * browser User-Agent always — the Radware WAF blocks python UAs, and a WAF
@@ -309,11 +310,14 @@ async def _enrich_pipeline() -> str:
         logger.info("bse_enrich: no BSE credentials configured — dormant, skipping")
         return "skipped: no_credentials"
 
-    # Gate 3 — writes are structurally impossible off prod (demo data must
-    # never enrich the real master; demo values are UAT-specific).
-    dry_run = settings.BSE_ENV.strip().lower() != "prod"
+    # Gate 3 — writes require prod, OR the founder's explicit demo override
+    # (ADR-0042 addendum 2026-07-10: demo master verified CURRENT — 2024-25
+    # NFOs present, NAV cross-checked to AMFI — so slow-changing fields may
+    # be written from it; prod supersedes automatically once creds land).
+    env_is_prod = settings.BSE_ENV.strip().lower() == "prod"
+    dry_run = not env_is_prod and not settings.BSE_ENRICH_ALLOW_DEMO
     base_url = (
-        settings.BSE_API_BASE_URL_PROD if not dry_run else settings.BSE_API_BASE_URL_UAT
+        settings.BSE_API_BASE_URL_PROD if env_is_prod else settings.BSE_API_BASE_URL_UAT
     ).rstrip("/")
 
     async with ingestion_run(TASK_ENRICH, SOURCE) as (_run_id, stats):
@@ -401,8 +405,13 @@ async def _enrich_pipeline() -> str:
 
         stats.written = updates
         elapsed = time.monotonic() - started
+        mode = (
+            "DRY-RUN (env != prod, zero writes)"
+            if dry_run
+            else ("enriched" if env_is_prod else "enriched (DEMO source, founder-approved)")
+        )
         summary = (
-            f"{'DRY-RUN (env != prod, zero writes)' if dry_run else 'enriched'}: "
+            f"{mode}: "
             f"fetched={fetched} mapped={len(mapped)} with_data={len(with_data)} "
             f"matched_in_master={matched} updated={updates} in {elapsed:.0f}s"
         )

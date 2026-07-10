@@ -230,6 +230,12 @@ class Settings(BaseSettings):
     # ops change must never arm it). Even when True, writes require
     # BSE_ENV=prod + credentials; anything else is a dry run.
     BSE_ENRICH_ENABLED: bool = False
+    # Founder decision 2026-07-10 (ADR-0042 addendum): the DEMO master is
+    # verified CURRENT (2024-25 NFOs present; demo NAV cross-checked equal to
+    # AMFI), so slow-changing fields (exit load / min amounts / benchmark
+    # fill) may be written from it behind this SECOND explicit flag. Off by
+    # default; irrelevant once BSE_ENV=prod.
+    BSE_ENRICH_ALLOW_DEMO: bool = False
     # Our BSE member code + the X-API-Org-ID header value BSE assigns at onboarding
     # (member/<org-code>:<fingerprint>). Empty until BSE provisions us.
     BSE_MEMBER_CODE: str = ""
