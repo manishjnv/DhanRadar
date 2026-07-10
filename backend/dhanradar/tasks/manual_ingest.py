@@ -254,10 +254,14 @@ async def _parse_special_class(
         stats.fetched = 1
         stats.reachable = True
 
-        # 'amfi_aaum' is a MULTI-AMC file by design (AMFI's consolidated
-        # scheme-wise workbook) — it joins on amfi_code, so AMC detection is
-        # neither possible nor needed; every other class still requires it.
-        if amc_name is None and file_class != "amfi_aaum":
+        # Two classes may arrive as MULTI-AMC files with no detectable AMC:
+        # 'amfi_aaum' (joins on amfi_code — needs no AMC at all) and 'ter'
+        # (AMFI's consolidated TER workbook, 2026-07-10 — scheme names are
+        # full bare names that inherently carry the AMC brand, and the
+        # plan-resolver's bare-prefix strategy stays precise with no AMC
+        # scope; see _resolve_scheme_isins_by_plan). Every other class still
+        # requires a detected AMC.
+        if amc_name is None and file_class not in ("amfi_aaum", "ter"):
             stats.status_override = "skipped"
             await _mark(file_id, "unsupported", error="amc_undetectable")
             return "unsupported: amc_undetectable"
@@ -429,8 +433,45 @@ async def _apply_file_class(
             await db.commit()
         return period, updates, resolved
 
-    # Every class below is AMC-gated by _parse_special_class (amfi_aaum is the
-    # only one that may arrive with amc_name=None) — narrow the type once.
+    if file_class == "ter":
+        # May run with amc_name=None (AMFI's consolidated multi-AMC TER
+        # workbook) — the plan resolver's bare-prefix strategy needs no AMC
+        # scope; see _resolve_scheme_isins_by_plan.
+        ter_rows = parse_ter_disclosure(data, ext)
+        if not ter_rows:
+            return None, None, 0
+
+        resolved = 0
+        updates = 0
+        latest_period: date | None = None
+        async with TaskSessionLocal() as db:
+            for scheme_name, ter_date, regular_pct, direct_pct in ter_rows:
+                if latest_period is None or ter_date > latest_period:
+                    latest_period = ter_date
+                regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(
+                    scheme_name, amc_name
+                )
+                if not regular_isins and not direct_isins:
+                    continue
+                resolved += 1
+                for isin in regular_isins:
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
+                        {"v": regular_pct, "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+                for isin in direct_isins:
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
+                        {"v": direct_pct, "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return latest_period, updates, resolved
+
+    # Every class below is AMC-gated by _parse_special_class ('amfi_aaum' and
+    # 'ter' above are the only ones that may arrive with amc_name=None) —
+    # narrow the type once.
     assert amc_name is not None
 
     if file_class == "aaum":
@@ -610,39 +651,6 @@ async def _apply_file_class(
                     updates += len(new_rows)
             await db.commit()
         return None, updates, resolved
-
-    if file_class == "ter":
-        ter_rows = parse_ter_disclosure(data, ext)
-        if not ter_rows:
-            return None, None, 0
-
-        resolved = 0
-        updates = 0
-        latest_period: date | None = None
-        async with TaskSessionLocal() as db:
-            for scheme_name, ter_date, regular_pct, direct_pct in ter_rows:
-                if latest_period is None or ter_date > latest_period:
-                    latest_period = ter_date
-                regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(
-                    scheme_name, amc_name
-                )
-                if not regular_isins and not direct_isins:
-                    continue
-                resolved += 1
-                for isin in regular_isins:
-                    result = await db.execute(
-                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
-                        {"v": regular_pct, "i": isin},
-                    )
-                    updates += int(getattr(result, "rowcount", 0) or 0)
-                for isin in direct_isins:
-                    result = await db.execute(
-                        sa_text("UPDATE mf.mf_funds SET expense_ratio_pct = :v WHERE isin = :i"),
-                        {"v": direct_pct, "i": isin},
-                    )
-                    updates += int(getattr(result, "rowcount", 0) or 0)
-            await db.commit()
-        return latest_period, updates, resolved
 
     raise ValueError(f"unknown file_class: {file_class}")  # unreachable by construction
 

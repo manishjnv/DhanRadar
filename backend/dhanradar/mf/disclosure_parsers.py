@@ -649,6 +649,15 @@ def parse_ter_disclosure(data: bytes, ext: str) -> list[tuple[str, date, float, 
     a plan-level, not option-level, fee) — the resolver in manual_ingest.py
     applies these two values to ALL option-variant ISINs (Growth/IDCW/Bonus/
     etc.) under each plan, never a single top-1 fuzzy match.
+
+    AMFI's consolidated all-AMC TER workbook (2026-07-10, 'TER_Revised'
+    sheet, one row per scheme per DAY, 15 columns "Regular Plan - ..." /
+    "Direct Plan - ..." each ending in "Total TER (%)") is covered by this
+    SAME generic detection with no extra branch — verified against the real
+    portal download: 1,813 schemes, latest-date dedupe correct. Only the
+    per-plan Total TER (all-in incl. GST) is extracted, matching every other
+    layout. That file is multi-AMC: its writer path runs with amc_name=None
+    (see _resolve_scheme_isins_by_plan's None handling).
     """
     latest: dict[str, tuple[date, float, float]] = {}
 
