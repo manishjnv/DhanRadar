@@ -27,6 +27,11 @@ first-batch files):
     ending in its own "Total TER (%)" column). Only the LATEST date's row per
     scheme is kept — TER changes over time and only the current effective
     rate should ever be written.
+  - AMFI consolidated scheme-wise AAUM (2026-07-10 — the quarterly all-AMC
+    workbook from the AMFI portal: one row per scheme carrying its AMFI CODE,
+    which joins exactly on mf_funds.amfi_code — the one disclosure class that
+    needs ZERO name resolution. Multi-AMC by design, so its file class
+    ('amfi_aaum') is content-sniffed and bypasses AMC detection.)
 
 All parsers are PURE (bytes in, tuples out — no DB, no network) so they unit-
 test without fixtures beyond in-memory workbooks. Writers live in
@@ -62,8 +67,8 @@ _BANDS_LOWER = {b.lower(): b for b in RISKOMETER_BANDS}
 
 
 def classify_file_class(filename: str, data: bytes | None = None) -> str:
-    """'aaum' | 'riskometer' | 'ter' | 'performance' | 'scheme_master' |
-    'portfolio' (default) — pure.
+    """'aaum' | 'amfi_aaum' | 'riskometer' | 'ter' | 'performance' |
+    'scheme_master' | 'portfolio' (default) — pure.
 
     Keyed off the disclosure-type words AMCs put in their own filenames
     (verified against the founder's real batch: "Average_Assets_Under_
@@ -79,6 +84,11 @@ def classify_file_class(filename: str, data: bytes | None = None) -> str:
     """
     if data is not None and _looks_like_scheme_master_html(data):
         return "scheme_master"
+    # AMFI's consolidated scheme-wise AAUM download has an arbitrary filename
+    # ("average-aum2.xlsx" from the portal) that matches NO keyword below —
+    # content is the only reliable signal, same reasoning as scheme_master.
+    if data is not None and _looks_like_amfi_aaum(data):
+        return "amfi_aaum"
     low = filename.lower()
     if "aaum" in low or "average asset" in low or "average_asset" in low or "average-asset" in low:
         return "aaum"
@@ -270,6 +280,157 @@ def parse_aaum_annexure(data: bytes, ext: str) -> tuple[date | None, list[tuple[
             if not isinstance(value, (int, float)) or value <= 0:
                 continue  # category headers / blank rows have no grand total
             out.append((name, round(float(value) * scale, 2)))
+        if out:
+            return period, out
+    return None, []
+
+
+def _looks_like_amfi_aaum(data: bytes) -> bool:
+    """CONTENT sniff for the AMFI consolidated scheme-wise AAUM workbook:
+    a header row carrying BOTH 'AMFI Code' and 'Scheme NAV Name' plus an
+    'Average Assets' title within the first few rows. xlsx-only (the portal
+    serves xlsx; the check needs to open the zip) — anything unreadable is
+    simply not this class, never an error.
+    """
+    if not data.startswith(b"PK\x03\x04"):
+        return False
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            ws = wb[wb.sheetnames[0]]
+            head: list[str] = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= 6:
+                    break
+                head.extend(_s(c).lower() for c in row if c is not None)
+        finally:
+            wb.close()
+    except Exception:  # noqa: BLE001 — a sniff must never break classification
+        return False
+    return (
+        any("average assets" in c for c in head)
+        and any(c == "amfi code" for c in head)
+        and any("scheme nav name" in c for c in head)
+    )
+
+
+_MONTH_NUMBERS = {
+    name: num
+    for num, name in enumerate(
+        (
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ),
+        start=1,
+    )
+}
+_AMFI_AAUM_QUARTER_RE = re.compile(
+    r"quarter of\s+[a-z]+\s*[-–]\s*([a-z]+)\s+(\d{4})", re.IGNORECASE
+)
+
+
+def parse_amfi_aaum(data: bytes, ext: str) -> tuple[date | None, list[tuple[str, str, float]]]:
+    """AMFI consolidated scheme-wise AAUM workbook →
+    (period, [(amfi_code, scheme_name, aaum_crore)]).
+
+    Layout (verified against the real portal download 2026-07-10 — 8,545
+    scheme rows): r0 title "Average Assets under Management (AAUM) for the
+    quarter of April - June 2026 (Rs in Lakhs)"; r1 header ['AMFI Code',
+    'Scheme NAV Name', 'Excluding Fund of Funds - Domestic but including
+    Fund of Funds - Overseas', 'Fund Of Funds - Domestic']; below that, AMC
+    section rows and category section rows (single-cell, no numeric code)
+    interleave with scheme rows (numeric AMFI code + name + a value in
+    exactly ONE of the two value columns — verified: no scheme carries
+    both). Scheme AAUM = sum of the value columns.
+
+    Units MUST be stated in the title block: 'lakh' → /100, 'crore' → as-is;
+    an unstated unit FAILS CLOSED (a silent crore default would 100×-inflate
+    every fund if AMFI ever dropped the suffix). Period comes from the
+    "quarter of <M1> - <M2> <year>" title as month-start of the quarter's
+    END month (the as_of_month convention used everywhere else); the caller
+    may fall back to the filename, and a period-less result must never
+    invent one (§8.4).
+    """
+    for _name, rows in _iter_sheets(data, ext):
+        header_idx = None
+        code_ci = None
+        name_ci = None
+        val_cis: list[int] = []
+        for idx, row in enumerate(rows[:8]):
+            lows = [_s(c).lower() for c in row]
+            if "amfi code" in lows and any("scheme nav name" in c for c in lows):
+                header_idx = idx
+                code_ci = lows.index("amfi code")
+                name_ci = next(ci for ci, c in enumerate(lows) if "scheme nav name" in c)
+                val_cis = [ci for ci, c in enumerate(lows) if c and ci not in (code_ci, name_ci)]
+                break
+        if header_idx is None or code_ci is None or name_ci is None or not val_cis:
+            continue
+
+        head_text = " ".join(_s(c) for row in rows[: header_idx + 1] for c in row).lower()
+        if "average assets" not in head_text:
+            continue
+        if "lakh" in head_text:
+            scale = 0.01
+        elif "crore" in head_text or "cr." in head_text:
+            scale = 1.0
+        else:
+            continue  # unstated units → fail closed, never guess a 100× factor
+
+        period: date | None = None
+        m = _AMFI_AAUM_QUARTER_RE.search(head_text)
+        if m:
+            month = _MONTH_NUMBERS.get(m.group(1).lower())
+            if month:
+                try:
+                    period = date(int(m.group(2)), month, 1)
+                except ValueError:
+                    period = None
+
+        out: list[tuple[str, str, float]] = []
+        for row in rows[header_idx + 1 :]:
+            if code_ci >= len(row) or name_ci >= len(row):
+                continue
+            code = _s(row[code_ci])
+            if code.endswith(".0"):
+                code = code[:-2]  # xlrd renders integer cells as floats
+            if not code.isdigit():
+                continue  # AMC / category section rows carry no numeric code
+            name = _s(row[name_ci])
+            if not name:
+                continue
+            total = 0.0
+            seen = False
+            for ci in val_cis:
+                if ci >= len(row):
+                    continue
+                v = row[ci]
+                if isinstance(v, bool):
+                    continue
+                if isinstance(v, (int, float)):
+                    total += float(v)
+                    seen = True
+                elif isinstance(v, str):
+                    try:
+                        total += float(v.replace(",", ""))
+                        seen = True
+                    except ValueError:
+                        pass
+            if not seen or total <= 0:
+                continue  # a scheme with no/zero AAUM is skipped, never written as 0
+            out.append((code, name, round(total * scale, 4)))
         if out:
             return period, out
     return None, []

@@ -20,6 +20,7 @@ from dhanradar.mf.disclosure_parsers import (
     RISKOMETER_BANDS,
     classify_file_class,
     parse_aaum_annexure,
+    parse_amfi_aaum,
     parse_riskometer_annual,
     parse_scheme_master_details,
     parse_scheme_performance,
@@ -114,6 +115,90 @@ def test_aaum_unrecognized_layout_fails_closed():
     period, pairs = parse_aaum_annexure(_xlsx(build), ".xlsx")
     assert period is None
     assert pairs == []
+
+
+# ---------------------------------------------------------------------------
+# parse_amfi_aaum — AMFI consolidated scheme-wise quarterly AAUM
+# (structure mirrors the real portal download, verified 2026-07-10)
+# ---------------------------------------------------------------------------
+
+
+def _build_amfi_aaum(
+    title: str = (
+        "Average Assets under Management (AAUM) for the quarter of April - June 2026 (Rs in Lakhs)"
+    ),
+) -> bytes:
+    def build(wb: Workbook) -> None:
+        ws = wb.active
+        ws.append([title])
+        ws.append(
+            [
+                "AMFI Code",
+                "Scheme NAV Name",
+                "Excluding Fund of Funds - Domestic but including Fund of Funds - Overseas",
+                "Fund Of Funds - Domestic",
+            ]
+        )
+        ws.append(["360 ONE Mutual Fund"])  # AMC section row — never a scheme
+        ws.append(["Other Scheme - Other  ETFs"])  # category section row — never a scheme
+        ws.append(["154366", "360 ONE MSCI India ETF", "277.38", "0"])
+        ws.append([153415, "360 ONE Silver ETF", 4784.48, 0])  # numeric cells too
+        ws.append(["Hybrid Scheme - Multi Asset Allocation"])
+        # FoF scheme: value sits in the LAST column only
+        ws.append([132175, "ABSL Aggressive Hybrid Omni FOF - Regular - IDCW", 0, 449.2])
+        ws.append(["999999", "Zero AAUM Scheme", 0, 0])  # zero → skipped, never written
+
+    return _xlsx(build)
+
+
+def test_amfi_aaum_classified_by_content_not_filename():
+    data = _build_amfi_aaum()
+    # The portal filename is arbitrary and matches no keyword — content wins.
+    assert classify_file_class("average-aum2.xlsx", data) == "amfi_aaum"
+    # Without bytes there is nothing to sniff — falls through to 'portfolio'.
+    assert classify_file_class("average-aum2.xlsx") == "portfolio"
+
+
+def test_amfi_aaum_parses_codes_lakhs_and_quarter_period():
+    period, triples = parse_amfi_aaum(_build_amfi_aaum(), ".xlsx")
+    assert period == date(2026, 6, 1)  # quarter Apr–Jun → END month, day 1
+    by_code = {c: (n, v) for c, n, v in triples}
+    # 277.38 lakhs → 2.7738 crore (string cell)
+    assert by_code["154366"] == ("360 ONE MSCI India ETF", 2.7738)
+    # numeric cells parse identically
+    assert by_code["153415"][1] == round(4784.48 * 0.01, 4)
+    # FoF value comes from the domestic-FoF column
+    assert by_code["132175"][1] == round(449.2 * 0.01, 4)
+    # AMC / category section rows never parse as schemes; zero-AAUM skipped
+    names = {n for _c, n, _v in triples}
+    assert "360 ONE Mutual Fund" not in names
+    assert "Other Scheme - Other  ETFs" not in names
+    assert "999999" not in by_code
+
+
+def test_amfi_aaum_unstated_units_fail_closed():
+    data = _build_amfi_aaum(title="Average Assets under Management (AAUM)")
+    period, triples = parse_amfi_aaum(data, ".xlsx")
+    assert triples == []  # no 'lakh'/'crore' in the title → never guess 100×
+    assert period is None
+
+
+def test_amfi_aaum_periodless_title_returns_none_period():
+    data = _build_amfi_aaum(title="Average Assets under Management (AAUM) (Rs in Lakhs)")
+    period, triples = parse_amfi_aaum(data, ".xlsx")
+    assert period is None  # caller must NOT fabricate aum_as_of (§8.4)
+    assert len(triples) == 3
+
+
+def test_amfi_aaum_wrong_layout_fails_closed():
+    def build(wb: Workbook) -> None:
+        ws = wb.active
+        ws.append(["Some", "Other", "Sheet"])
+        ws.append(["154366", "A Fund", 100.0])
+
+    period, triples = parse_amfi_aaum(_xlsx(build), ".xlsx")
+    assert period is None
+    assert triples == []
 
 
 # ---------------------------------------------------------------------------
