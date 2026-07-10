@@ -283,15 +283,15 @@ def test_summarize_empty_iterable() -> None:
 
 def test_summarize_mixed_batch() -> None:
     batch: list[str | None] = [
-        "Equity Scheme - Large Cap Fund",   # canonical
-        "Debt Scheme - Liquid Fund",         # canonical
-        "ELSS",                              # canonical (via legacy map)
-        "Gilt",                              # legacy
-        "Growth",                            # legacy
-        "Equity Scheme - Banana Fund",       # unknown
-        None,                                # empty
-        "",                                  # empty
-        "   ",                               # empty
+        "Equity Scheme - Large Cap Fund",  # canonical
+        "Debt Scheme - Liquid Fund",  # canonical
+        "ELSS",  # canonical (via legacy map)
+        "Gilt",  # legacy
+        "Growth",  # legacy
+        "Equity Scheme - Banana Fund",  # unknown
+        None,  # empty
+        "",  # empty
+        "   ",  # empty
     ]
     s = summarize(batch)
     assert s.total == 9
@@ -384,9 +384,7 @@ class TestParsePlanOption:
     def test_direct_wins_over_regular_in_fund_name(self) -> None:
         """'ICICI Prudential Regular Savings Fund - Direct Plan - Growth'
         has 'regular' in the fund name but 'direct' in the plan tag."""
-        pt, _ = parse_plan_option(
-            "ICICI Prudential Regular Savings Fund - Direct Plan - Growth"
-        )
+        pt, _ = parse_plan_option("ICICI Prudential Regular Savings Fund - Direct Plan - Growth")
         assert pt == "direct"
 
     # --- plan_type: None --------------------------------------------------
@@ -476,17 +474,13 @@ class TestParsePlanOption:
 
     def test_full_name_direct_growth(self) -> None:
         """End-to-end: typical modern Direct Growth name."""
-        pt, ot = parse_plan_option(
-            "SBI Bluechip Fund - Direct Plan - Growth"
-        )
+        pt, ot = parse_plan_option("SBI Bluechip Fund - Direct Plan - Growth")
         assert pt == "direct"
         assert ot == "growth"
 
     def test_full_name_regular_idcw(self) -> None:
         """End-to-end: Regular IDCW."""
-        pt, ot = parse_plan_option(
-            "Kotak Bluechip Fund - Regular Plan - IDCW"
-        )
+        pt, ot = parse_plan_option("Kotak Bluechip Fund - Regular Plan - IDCW")
         assert pt == "regular"
         assert ot == "idcw"
 
@@ -551,12 +545,13 @@ def test_navrows_to_fund_upserts_cohort_key_invariant() -> None:
     )
     assert d_canonical["sebi_category"] == "Equity Scheme - Large Cap Fund"
 
-    # Legacy/unmappable row
+    # Legacy/umbrella row: the raw cohort key stays untouched, and since the
+    # B66 extension (2026-07-10) the writer infers the SEBI leaf from the
+    # scheme NAME when the header alone is ambiguous ("...Gilt Fund..." is
+    # unambiguous even though the bare "Gilt" header is not).
     d_legacy = by_isin["INF209K01YQ6"]
-    assert d_legacy["category"] == "Gilt", (
-        "Raw category cohort key must not be mutated"
-    )
-    assert d_legacy["sebi_category"] is None
+    assert d_legacy["category"] == "Gilt", "Raw category cohort key must not be mutated"
+    assert d_legacy["sebi_category"] == "Debt Scheme - Gilt Fund"
 
 
 # ---------------------------------------------------------------------------
@@ -579,9 +574,7 @@ class TestParsePlanOptionRetailInstitutional:
         assert pt == "direct"
 
     def test_regular_wins_over_institutional(self) -> None:
-        pt, _ = parse_plan_option(
-            "Some Institutional Series Fund - Regular Plan - Growth"
-        )
+        pt, _ = parse_plan_option("Some Institutional Series Fund - Regular Plan - Growth")
         assert pt == "regular"
 
     def test_institutional_fits_widened_column(self) -> None:
@@ -689,9 +682,7 @@ class TestDeriveShortName:
         """'Regular Savings' / 'Growth' inside the brand must survive (first
         segment is always kept; trailing-trim stops at the first brand word)."""
         assert (
-            derive_short_name(
-                "ICICI Prudential Regular Savings Fund - Direct Plan - Growth"
-            )
+            derive_short_name("ICICI Prudential Regular Savings Fund - Direct Plan - Growth")
             == "ICICI Prudential Regular Savings Fund"
         )
         # 'Growth' as a brand word at the end is kept (no plan/option context).
@@ -778,9 +769,7 @@ class TestDeriveShortName:
             == "Messy Raw Scheme Name"
         )
 
-    def test_override_by_scheme_name_normalized(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_override_by_scheme_name_normalized(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Scheme-name override matches after normalize() (case/whitespace-folded)."""
         import dhanradar.mf.taxonomy as tax
 
@@ -793,10 +782,7 @@ class TestDeriveShortName:
             },
         )
         # Different spacing + case still hits the normalized key.
-        assert (
-            derive_short_name("Weird  Fund - Direct - Growth")
-            == "Weird Fund (Pinned)"
-        )
+        assert derive_short_name("Weird  Fund - Direct - Growth") == "Weird Fund (Pinned)"
 
     def test_override_file_loads_without_error(self) -> None:
         """The shipped JSON override file parses and yields the expected shape."""
@@ -850,21 +836,27 @@ def test_navrows_to_fund_upserts_populates_short_name_and_frequency() -> None:
 # AMFI scheme name does.
 _FUZZ_BRANDS: tuple[str, ...] = (
     "Nippon India Large Cap Fund",
-    "ICICI Prudential Regular Savings Fund",   # 'Regular' inside the brand
-    "Reliance Growth Fund",                    # 'Growth' inside the brand
-    "SBI Magnum Income Fund",                  # 'Income' inside the brand
+    "ICICI Prudential Regular Savings Fund",  # 'Regular' inside the brand
+    "Reliance Growth Fund",  # 'Growth' inside the brand
+    "SBI Magnum Income Fund",  # 'Income' inside the brand
     "Aditya Birla Sun Life Frontline Equity Fund",
     "Quant Small Cap Fund",
     "UTI Nifty 50 Index Fund",
     "HDFC Mid-Cap Opportunities Fund",
     "Mirae Asset Aggressive Hybrid Fund",
-    "Axis Banking & PSU Debt Fund",            # '&' in the brand
+    "Axis Banking & PSU Debt Fund",  # '&' in the brand
     "Kotak Gold ETF",
 )
 _FUZZ_PLANS = ("", "Direct", "Regular", "Retail", "Institutional")
 _FUZZ_OPTIONS = (
-    "", "Growth", "IDCW", "Dividend", "IDCW Reinvestment", "IDCW Payout",
-    "Dividend Reinvestment", "Dividend Payout",
+    "",
+    "Growth",
+    "IDCW",
+    "Dividend",
+    "IDCW Reinvestment",
+    "IDCW Payout",
+    "Dividend Reinvestment",
+    "Dividend Payout",
 )
 _FUZZ_FREQS = ("", "Daily", "Weekly", "Monthly", "Quarterly", "Half Yearly", "Annual")
 
@@ -908,3 +900,93 @@ def test_derive_short_name_never_mangles_brand_property() -> None:
         checked += 1
     # Sanity: the space actually got enumerated (guards a silently-empty generator).
     assert checked > 1500, f"fuzz space too small: {checked}"
+
+
+# ---------------------------------------------------------------------------
+# B66 extension (2026-07-10): prefix-variant classification + name inference.
+# Fixture names are VERBATIM live-DB rows (sebi_category-NULL tally).
+# ---------------------------------------------------------------------------
+
+
+class TestPrefixVariants:
+    def test_income_debt_oriented_prefix_maps_to_debt_scheme(self):
+        from dhanradar.mf.taxonomy import classify
+
+        r = classify("Income/Debt Oriented Schemes - Liquid Fund")
+        assert r.status == "canonical"
+        assert r.canonical == "Debt Scheme - Liquid Fund"
+
+    def test_variant_oddballs_map_exactly(self):
+        from dhanradar.mf.taxonomy import canonical_for
+
+        assert canonical_for("Index Funds - Equity Funds") == "Other Scheme - Index Funds"
+        assert (
+            canonical_for("Exchange Traded Funds (ETFs) - Equity ETF")
+            == "Other Scheme - Other ETFs"
+        )
+        assert (
+            canonical_for("Fund of Funds Scheme (Domestic) - Fund of Funds Scheme (Domestic)")
+            == "Other Scheme - FoF Domestic"
+        )
+
+    def test_alias_prefix_never_invents_a_leaf(self):
+        from dhanradar.mf.taxonomy import canonical_for
+
+        # Rewrite must land on a REAL leaf or classify as unknown — never a guess.
+        assert canonical_for("Income/Debt Oriented Schemes - Made Up Fund") is None
+
+
+class TestNameInference:
+    def test_real_umbrella_header_funds_infer_correctly(self):
+        from dhanradar.mf.taxonomy import infer_category_from_name
+
+        cases = {
+            "Kotak Corporate Bond Fund": "Debt Scheme - Corporate Bond Fund",
+            "Sahara Midcap Fund": "Equity Scheme - Mid Cap Fund",
+            "SBI Magnum Gilt Fund - Direct Plan - Growth": "Debt Scheme - Gilt Fund",
+            "HDFC Liquid Fund - Growth": "Debt Scheme - Liquid Fund",
+            "ICICI Prudential Aggressive Hybrid Active FOF": "Other Scheme - FoF Domestic",
+            "Franklin India Taxshield ELSS": "Equity Scheme - ELSS",
+        }
+        for name, expected in cases.items():
+            assert infer_category_from_name(name) == expected, name
+
+    def test_etf_and_index_shadow_debt_tokens(self):
+        from dhanradar.mf.taxonomy import infer_category_from_name
+
+        # "Liquid"/"Gilt" inside ETF/index names must classify as ETF/index.
+        assert (
+            infer_category_from_name("ICICI Prudential BSE Liquid Rate ETF - Growth")
+            == "Other Scheme - Other ETFs"
+        )
+        assert (
+            infer_category_from_name("SBI CRISIL IBX Gilt Index- June 2036 Fund")
+            == "Other Scheme - Index Funds"
+        )
+        assert (
+            infer_category_from_name("HDFC Nifty G-Sec Jun 2027 Index Fund")
+            == "Other Scheme - Index Funds"
+        )
+
+    def test_must_not_infer(self):
+        from dhanradar.mf.taxonomy import infer_category_from_name
+
+        # Closed-ended series (no open-ended SEBI category exists) and
+        # sectoral/thematic equity (never inferred) must yield None.
+        for name in (
+            "SBI Fixed Maturity Plan (FMP) - Series 50 (1843 Days) - Regular Plan - Growth",
+            "ICICI Prudential Capital Protection Oriented Fund Series VI- 1825 Days Plan C",
+            "Reliance Fixed Horizon Fund XXVIII- Series 18- Growth Option",
+            "UTI Fixed Interval Income Fund (Annual Interval Plan) Series IV",
+            "SBI Banking & Financial Services Fund",  # equity sectoral, NOT Banking&PSU debt
+            "Nippon India Pharma Fund",
+        ):
+            assert infer_category_from_name(name) is None, name
+
+    def test_overseas_fof_markers(self):
+        from dhanradar.mf.taxonomy import infer_category_from_name
+
+        assert (
+            infer_category_from_name("PGIM India Global Equity Opportunities FOF")
+            == "Other Scheme - FoF Overseas"
+        )
