@@ -99,12 +99,39 @@ _LEGACY_MAP: dict[str, str] = {
     "ELSS": "Equity Scheme - ELSS",
 }
 
-# Recognized old/ambiguous bare headers that we deliberately do NOT auto-map.
-# "Gilt" is ambiguous between two SEBI Gilt leaves; "Growth" / "Income" /
-# "Money Market" are pre-rationalization umbrella names with no single mapping.
-_LEGACY_UNMAPPABLE: frozenset[str] = frozenset(
-    {"Gilt", "Growth", "Income", "Money Market"}
-)
+# Recognized old/ambiguous bare headers that we deliberately do NOT auto-map
+# FROM THE HEADER ALONE. "Gilt" is ambiguous between two SEBI Gilt leaves;
+# "Growth" / "Income" / "Money Market" are pre-rationalization umbrella names
+# with no single mapping. B66 extension (2026-07-10): the nightly writer now
+# falls back to infer_category_from_name() for these — the SCHEME NAME usually
+# states the category unambiguously even when the header is an umbrella.
+_LEGACY_UNMAPPABLE: frozenset[str] = frozenset({"Gilt", "Growth", "Income", "Money Market"})
+
+# AMFI presentation variants: the feed sometimes emits a different CLASS
+# prefix for the same SEBI leaf ("Income/Debt Oriented Schemes - Liquid Fund",
+# live DB evidence 2026-07-10). Rewritten to the canonical class prefix and
+# re-checked against the leaf set — never a guess.
+_CLASS_PREFIX_ALIASES: dict[str, str] = {
+    "Income/Debt Oriented Schemes": "Debt Scheme",
+    "Growth/Equity Oriented Schemes": "Equity Scheme",
+    "Hybrid Schemes": "Hybrid Scheme",
+    "Solution Oriented Schemes": "Solution Oriented Scheme",
+    "Other Schemes": "Other Scheme",
+}
+
+# Exact-string oddball variants seen in the live DB (2026-07-10 tally of
+# sebi_category-NULL rows) that don't follow the "<class> - <leaf>" shape.
+_VARIANT_MAP: dict[str, str] = {
+    "Index Funds - Equity Funds": "Other Scheme - Index Funds",
+    "Exchange Traded Funds (ETFs) - Equity ETF": "Other Scheme - Other ETFs",
+    "Exchange Traded Funds (ETFs) - Gold ETF": "Other Scheme - Gold ETF",
+    "Fund of Funds Scheme (Domestic) - Fund of Funds Scheme (Domestic)": (
+        "Other Scheme - FoF Domestic"
+    ),
+    "Fund of Funds Scheme (Overseas) - Fund of Funds Scheme (Overseas)": (
+        "Other Scheme - FoF Overseas"
+    ),
+}
 
 # Pre-compiled pattern: any run of whitespace (tabs, double spaces, etc.)
 _WS_RUN = re.compile(r"\s+")
@@ -228,6 +255,31 @@ def classify(raw: str | None) -> CategoryValidation:
             scheme_class=scheme_class,
         )
 
+    # Presentation-variant class prefix ("Income/Debt Oriented Schemes - X")
+    # → canonical prefix, accepted ONLY when the rewrite lands on a real leaf.
+    if " - " in norm:
+        prefix, leaf = norm.split(" - ", 1)
+        alias = _CLASS_PREFIX_ALIASES.get(prefix)
+        if alias:
+            candidate = f"{alias} - {leaf}"
+            if candidate in _CANONICAL_LEAVES:
+                return CategoryValidation(
+                    raw=raw,
+                    normalized=norm,
+                    status="canonical",
+                    canonical=candidate,
+                    scheme_class=alias,
+                )
+    if norm in _VARIANT_MAP:
+        canonical = _VARIANT_MAP[norm]
+        return CategoryValidation(
+            raw=raw,
+            normalized=norm,
+            status="canonical",
+            canonical=canonical,
+            scheme_class=canonical.split(" - ", 1)[0],
+        )
+
     # Recognized unmappable bare header (ambiguous legacy)
     if norm in _LEGACY_UNMAPPABLE:
         return CategoryValidation(
@@ -246,6 +298,128 @@ def classify(raw: str | None) -> CategoryValidation:
         canonical=None,
         scheme_class=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Name-based category inference (B66 extension, 2026-07-10)
+# ---------------------------------------------------------------------------
+# For funds whose HEADER is a pre-2018 umbrella ("Income": 5,220 live rows,
+# "Growth": 299) the scheme NAME usually states the category unambiguously.
+# Deliberately CONSERVATIVE: only tokens that map to exactly one SEBI leaf are
+# listed; anything ambiguous (sectoral themes, bare "value", FoF direction
+# without an overseas marker) yields None. ORDER MATTERS — ETF/index checks
+# run FIRST so "BSE Liquid Rate ETF" never hits the "liquid" debt token, and
+# multi-word debt tokens run before their single-word substrings.
+
+_NAME_RULES: tuple[tuple[str, str], ...] = (
+    # ETFs / index funds first — their names often contain debt-like words.
+    ("gold etf", "Other Scheme - Gold ETF"),
+    ("silver etf", "Other Scheme - Other ETFs"),
+    ("etf", "Other Scheme - Other ETFs"),
+    ("index fund", "Other Scheme - Index Funds"),
+    ("fund of fund", "__FOF__"),
+    ("fof", "__FOF__"),
+    # Solution oriented
+    ("retirement", "Solution Oriented Scheme - Retirement Fund"),
+    ("children", "Solution Oriented Scheme - Children's Fund"),
+    # Hybrid (multi-word, unambiguous)
+    ("arbitrage", "Hybrid Scheme - Arbitrage Fund"),
+    ("balanced advantage", "Hybrid Scheme - Dynamic Asset Allocation or Balanced Advantage"),
+    ("dynamic asset allocation", "Hybrid Scheme - Dynamic Asset Allocation or Balanced Advantage"),
+    ("equity savings", "Hybrid Scheme - Equity Savings"),
+    ("aggressive hybrid", "Hybrid Scheme - Aggressive Hybrid Fund"),
+    ("equity hybrid", "Hybrid Scheme - Aggressive Hybrid Fund"),
+    ("conservative hybrid", "Hybrid Scheme - Conservative Hybrid Fund"),
+    ("debt hybrid", "Hybrid Scheme - Conservative Hybrid Fund"),
+    ("multi asset", "Hybrid Scheme - Multi Asset Allocation"),
+    # Debt (multi-word before single-word)
+    ("banking and psu", "Debt Scheme - Banking and PSU Fund"),
+    ("banking & psu", "Debt Scheme - Banking and PSU Fund"),
+    ("corporate bond", "Debt Scheme - Corporate Bond Fund"),
+    ("credit risk", "Debt Scheme - Credit Risk Fund"),
+    ("dynamic bond", "Debt Scheme - Dynamic Bond"),
+    ("floating rate", "Debt Scheme - Floater Fund"),
+    ("floater", "Debt Scheme - Floater Fund"),
+    ("money market", "Debt Scheme - Money Market Fund"),
+    ("ultra short", "Debt Scheme - Ultra Short Duration Fund"),
+    ("low duration", "Debt Scheme - Low Duration Fund"),
+    ("medium to long duration", "Debt Scheme - Medium to Long Duration Fund"),
+    ("medium duration", "Debt Scheme - Medium Duration Fund"),
+    ("medium term", "Debt Scheme - Medium Duration Fund"),
+    ("long duration", "Debt Scheme - Long Duration Fund"),
+    ("short duration", "Debt Scheme - Short Duration Fund"),
+    ("short term fund", "Debt Scheme - Short Duration Fund"),
+    ("short term debt", "Debt Scheme - Short Duration Fund"),
+    ("constant maturity gilt", "Debt Scheme - Gilt Fund with 10 year constant duration"),
+    ("gilt fund with 10 year", "Debt Scheme - Gilt Fund with 10 year constant duration"),
+    # Target-maturity "Gilt Index"/"SDL Index" funds are INDEX funds, not
+    # actively-managed gilt (their names rarely say "index fund" contiguously:
+    # "SBI CRISIL IBX Gilt Index- June 2036 Fund").
+    ("gilt index", "Other Scheme - Index Funds"),
+    ("sdl index", "Other Scheme - Index Funds"),
+    ("g-sec index", "Other Scheme - Index Funds"),
+    ("gilt", "Debt Scheme - Gilt Fund"),
+    ("overnight", "Debt Scheme - Overnight Fund"),
+    ("liquid", "Debt Scheme - Liquid Fund"),
+    # Equity (unambiguous cap-style / mandate tokens only — sectoral is NEVER
+    # inferred; theme names are open-ended)
+    ("elss", "Equity Scheme - ELSS"),
+    ("tax saver", "Equity Scheme - ELSS"),
+    ("taxgain", "Equity Scheme - ELSS"),
+    ("large & mid cap", "Equity Scheme - Large & Mid Cap Fund"),
+    ("large and mid cap", "Equity Scheme - Large & Mid Cap Fund"),
+    ("large cap", "Equity Scheme - Large Cap Fund"),
+    ("largecap", "Equity Scheme - Large Cap Fund"),
+    ("mid cap", "Equity Scheme - Mid Cap Fund"),
+    ("midcap", "Equity Scheme - Mid Cap Fund"),
+    ("small cap", "Equity Scheme - Small Cap Fund"),
+    ("smallcap", "Equity Scheme - Small Cap Fund"),
+    ("flexi cap", "Equity Scheme - Flexi Cap Fund"),
+    ("flexicap", "Equity Scheme - Flexi Cap Fund"),
+    ("multi cap", "Equity Scheme - Multi Cap Fund"),
+    ("multicap", "Equity Scheme - Multi Cap Fund"),
+    ("focused", "Equity Scheme - Focused Fund"),
+    ("contra", "Equity Scheme - Contra Fund"),
+    ("dividend yield", "Equity Scheme - Dividend Yield Fund"),
+)
+
+_OVERSEAS_MARKERS = (
+    "overseas",
+    "global",
+    "international",
+    "world",
+    "nasdaq",
+    "us equity",
+    "u.s.",
+    "s&p 500",
+    "emerging market",
+    "foreign",
+    "brazil",
+    "china",
+    "japan",
+    "europe",
+)
+
+
+def infer_category_from_name(scheme_name: str | None) -> str | None:
+    """Infer the SEBI leaf from a scheme NAME — pure, conservative, fail-closed.
+
+    Used by the nightly writer ONLY when the raw header did not classify
+    (pre-2018 umbrella headers — B66). First matching rule wins; rules are
+    ordered so ETF/index tokens shadow debt words inside ETF names and
+    multi-word tokens shadow their substrings. Returns None when nothing
+    unambiguous matches (sectoral/thematic equity is never inferred).
+    """
+    if not isinstance(scheme_name, str) or not scheme_name.strip():
+        return None
+    lower = " ".join(scheme_name.lower().split())
+    for token, leaf in _NAME_RULES:
+        if token in lower:
+            if leaf == "__FOF__":
+                overseas = any(m in lower for m in _OVERSEAS_MARKERS)
+                return "Other Scheme - FoF Overseas" if overseas else "Other Scheme - FoF Domestic"
+            return leaf
+    return None
 
 
 def canonical_for(raw: str | None) -> str | None:
@@ -267,15 +441,15 @@ def canonical_for(raw: str | None) -> str | None:
 # "growth" is last — it appears in many fund names (e.g. "Growth Fund"); we
 # only fall through to it when no IDCW/dividend variant is present.
 _OPTION_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("idcw reinvest",    "dividend_reinvest"),
-    ("idcw re-invest",   "dividend_reinvest"),
-    ("idcw payout",      "dividend_payout"),
-    ("idcw",             "idcw"),
-    ("dividend reinvest","dividend_reinvest"),
-    ("dividend re-invest","dividend_reinvest"),
-    ("dividend payout",  "dividend_payout"),
-    ("dividend",         "idcw"),   # bare 'dividend' → idcw (post-2021 SEBI rename)
-    ("growth",           "growth"),
+    ("idcw reinvest", "dividend_reinvest"),
+    ("idcw re-invest", "dividend_reinvest"),
+    ("idcw payout", "dividend_payout"),
+    ("idcw", "idcw"),
+    ("dividend reinvest", "dividend_reinvest"),
+    ("dividend re-invest", "dividend_reinvest"),
+    ("dividend payout", "dividend_payout"),
+    ("dividend", "idcw"),  # bare 'dividend' → idcw (post-2021 SEBI rename)
+    ("growth", "growth"),
 )
 
 
@@ -334,18 +508,18 @@ def parse_plan_option(scheme_name: str | None) -> tuple[str | None, str | None]:
 # These words essentially never appear in a fund's brand name except as the
 # payout cadence of an income-distribution option, so a standalone match is safe.
 _FREQUENCY_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("half yearly",  "half_yearly"),
-    ("half-yearly",  "half_yearly"),
-    ("semi annual",  "half_yearly"),
-    ("semi-annual",  "half_yearly"),
-    ("fortnightly",  "fortnightly"),
-    ("quarterly",    "quarterly"),
-    ("monthly",      "monthly"),
-    ("weekly",       "weekly"),
-    ("daily",        "daily"),
-    ("annually",     "annual"),
-    ("annual",       "annual"),
-    ("yearly",       "annual"),
+    ("half yearly", "half_yearly"),
+    ("half-yearly", "half_yearly"),
+    ("semi annual", "half_yearly"),
+    ("semi-annual", "half_yearly"),
+    ("fortnightly", "fortnightly"),
+    ("quarterly", "quarterly"),
+    ("monthly", "monthly"),
+    ("weekly", "weekly"),
+    ("daily", "daily"),
+    ("annually", "annual"),
+    ("annual", "annual"),
+    ("yearly", "annual"),
 )
 
 
@@ -376,15 +550,40 @@ def parse_idcw_frequency(scheme_name: str | None) -> str | None:
 _NOISE_TOKENS: frozenset[str] = frozenset(
     {
         # plan
-        "direct", "regular", "retail", "institutional", "plan", "option",
+        "direct",
+        "regular",
+        "retail",
+        "institutional",
+        "plan",
+        "option",
         # option
-        "growth", "idcw", "dividend", "reinvestment", "reinvest", "re-invest",
-        "payout", "bonus",
+        "growth",
+        "idcw",
+        "dividend",
+        "reinvestment",
+        "reinvest",
+        "re-invest",
+        "payout",
+        "bonus",
         # income-distribution-cum-capital-withdrawal long form
-        "income", "distribution", "cum", "capital", "withdrawal",
+        "income",
+        "distribution",
+        "cum",
+        "capital",
+        "withdrawal",
         # frequency
-        "daily", "weekly", "fortnightly", "monthly", "quarterly",
-        "half", "yearly", "half-yearly", "annual", "annually", "semi", "semi-annual",
+        "daily",
+        "weekly",
+        "fortnightly",
+        "monthly",
+        "quarterly",
+        "half",
+        "yearly",
+        "half-yearly",
+        "annual",
+        "annually",
+        "semi",
+        "semi-annual",
     }
 )
 

@@ -63,6 +63,7 @@ from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
 from dhanradar.mf.taxonomy import (
     canonical_for,
     derive_short_name,
+    infer_category_from_name,
     parse_idcw_frequency,
     parse_plan_option,
 )
@@ -388,7 +389,11 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
             continue
         plan_type, option_type = parse_plan_option(row.scheme_name)
         is_segregated = "segregated portfolio" in row.scheme_name.lower()
-        sebi_category = canonical_for(row.category)
+        # B66 (2026-07-10): umbrella legacy headers ("Income"/"Growth", ~5.5k
+        # live rows) can't classify from the header — the scheme NAME usually
+        # states the category; conservative inference fills only when the
+        # header path yields nothing.
+        sebi_category = canonical_for(row.category) or infer_category_from_name(row.scheme_name)
         benchmark_key = map_index_fund_benchmark(row.scheme_name, sebi_category)
         out[isin] = {
             "isin": isin,
