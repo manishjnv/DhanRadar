@@ -90,6 +90,7 @@ async def test_uat_env_is_dry_run_and_writes_nothing(db_session, arm, monkeypatc
     isin = "INF200KBSE01"
     arm(isin)
     monkeypatch.setattr(settings, "BSE_ENV", "uat")
+    monkeypatch.setattr(settings, "BSE_ENRICH_ALLOW_DEMO", False)
     await _seed_fund(db_session, isin)
 
     summary = await bse_enrich._enrich_pipeline()
@@ -102,6 +103,28 @@ async def test_uat_env_is_dry_run_and_writes_nothing(db_session, arm, monkeypatc
     assert fund.exit_load_pct is None
     assert fund.min_lumpsum_amount is None
     assert fund.benchmark_index is None
+
+
+async def test_demo_override_flag_enables_writes_off_prod(db_session, arm, monkeypatch):
+    """Founder decision 2026-07-10 (ADR-0042 addendum): BSE_ENRICH_ALLOW_DEMO
+    permits writes from the (verified-current) demo master while prod creds
+    are pending. Flag off stays a dry run (asserted above)."""
+    from dhanradar.config import settings
+
+    isin = "INF200KBSE05"
+    arm(isin)
+    monkeypatch.setattr(settings, "BSE_ENV", "uat")
+    monkeypatch.setattr(settings, "BSE_ENRICH_ALLOW_DEMO", True)
+    await _seed_fund(db_session, isin)
+
+    summary = await bse_enrich._enrich_pipeline()
+
+    assert "enriched (DEMO source" in summary
+    assert "updated=1" in summary
+    db_session.expire_all()
+    fund = await db_session.get(MfFund, isin)
+    assert float(fund.exit_load_pct) == 1.0
+    assert float(fund.min_sip_amount) == 500.0
 
 
 async def test_prod_env_writes_all_fields_exact_isin(db_session, arm, monkeypatch):

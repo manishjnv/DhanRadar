@@ -201,7 +201,54 @@ _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
     "ABSL": {"constituents": _MANUAL_MONTHLY},
     "DSP": {"ter": _MANUAL_ONCE},
     "Franklin": {"ter": _MANUAL_ONCE},
-    "HSBC": {},  # staged locally, not yet uploaded — see BLOCKERS.md B82
+    "HSBC": {"constituents": _MANUAL_MONTHLY},  # founder's 45 per-scheme files parsed 2026-07-10
+    # Automated scraper roots added #517/#523/#538 (Canara/Navi/Zerodha are
+    # built but currently 0-yield — the staleness column shows it honestly).
+    "Tata": {"constituents": _AUTO_MONTHLY},
+    "Motilal": {"constituents": _AUTO_MONTHLY},
+    "Quantum": {"constituents": _AUTO_MONTHLY},
+    "Canara": {"constituents": _AUTO_MONTHLY},
+    "Navi": {"constituents": _AUTO_MONTHLY},
+    "Zerodha": {"constituents": _AUTO_MONTHLY},
+    # Browser-only sites (file-layer probed 2026-07-10) — designated route is
+    # the founder's manual monthly download (runbook rows 6-8).
+    "Quant": {"constituents": _MANUAL_MONTHLY},
+    "Bandhan": {"constituents": _MANUAL_MONTHLY},
+    "Groww": {"constituents": _MANUAL_MONTHLY},
+    # Long tail — designated route is a manual one-off download if/when a
+    # user asks (runbook: "manual-only until someone asks"). Tagged ML·O so
+    # every AMC row carries an honest source classification.
+    "Sundaram": {"constituents": _MANUAL_ONCE},
+    "LIC": {"constituents": _MANUAL_ONCE},
+    "Union": {"constituents": _MANUAL_ONCE},
+    "Baroda": {"constituents": _MANUAL_ONCE},
+    "Invesco": {"constituents": _MANUAL_ONCE},
+    "ITI": {"constituents": _MANUAL_ONCE},
+    "JM": {"constituents": _MANUAL_ONCE},
+    "Mahindra": {"constituents": _MANUAL_ONCE},
+    "WhiteOak": {"constituents": _MANUAL_ONCE},
+    "Bajaj": {"constituents": _MANUAL_ONCE},
+    "Samco": {"constituents": _MANUAL_ONCE},
+    "Trust": {"constituents": _MANUAL_ONCE},
+    "Shriram": {"constituents": _MANUAL_ONCE},
+    "Taurus": {"constituents": _MANUAL_ONCE},
+    "Helios": {"constituents": _MANUAL_ONCE},
+    "PGIM": {"constituents": _MANUAL_ONCE},
+    "Bank": {"constituents": _MANUAL_ONCE},
+    "360": {"constituents": _MANUAL_ONCE},
+    "Sahara": {"constituents": _MANUAL_ONCE},
+    "Wealth": {"constituents": _MANUAL_ONCE},
+    "NJ": {"constituents": _MANUAL_ONCE},
+    "Abakkus": {"constituents": _MANUAL_ONCE},
+    "AlphaGrep": {"constituents": _MANUAL_ONCE},
+    "IL&FS": {"constituents": _MANUAL_ONCE},
+    "IIFCL": {"constituents": _MANUAL_ONCE},
+    "Old Bridge": {"constituents": _MANUAL_ONCE},
+    "Unifi": {"constituents": _MANUAL_ONCE},
+    "Choice": {"constituents": _MANUAL_ONCE},
+    "Angel One": {"constituents": _MANUAL_ONCE},
+    "Capitalmind": {"constituents": _MANUAL_ONCE},
+    "Jio BlackRock": {"constituents": _MANUAL_ONCE},
 }
 
 
