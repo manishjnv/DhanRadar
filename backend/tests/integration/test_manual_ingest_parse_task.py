@@ -572,6 +572,121 @@ async def test_dispatcher_amfi_aaum_periodless_writes_no_as_of_and_no_history(db
 
 
 # ---------------------------------------------------------------------------
+# AMFI consolidated TER (2026-07-10) — the multi-AMC 'ter' file runs with
+# amc_name=None; the REAL plan resolver (no monkeypatch) routes Regular vs
+# Direct values to the right seeded plan-variant ISINs via bare-prefix ILIKE.
+# ---------------------------------------------------------------------------
+
+
+def _build_amfi_ter_xlsx() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "TER_Revised"
+    ws.append(
+        [
+            "NSDL Scheme Code",
+            "Scheme Name",
+            "Scheme Type",
+            "Scheme Category",
+            "TER Date",
+            "Regular Plan - Base Expense Ratio (BER) (%)",
+            "Regular Plan - Brokerage cost (%)",
+            "Regular Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+            "Regular Plan - Statutory Levies (including GST) (%)",
+            "Regular Plan - Total TER (%)",
+            "Direct Plan - Base Expense Ratio (BER) (%)",
+            "Direct Plan - Brokerage cost (%)",
+            "Direct Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+            "Direct Plan - Statutory Levies (including GST) (%)",
+            "Direct Plan - Total TER (%)",
+        ]
+    )
+    from datetime import datetime as _dt
+
+    # Two days for the same scheme — the LATEST (07-08) must win. TER Date
+    # cells are genuine Excel dates (as in the real portal file).
+    for day, reg_total, dir_total in (
+        (_dt(2026, 7, 1), "2.00", "0.50"),
+        (_dt(2026, 7, 8), "2.19", "0.62"),
+    ):
+        ws.append(
+            [
+                "AMFT/O/H/ALP/23/07/0001",
+                "AMFITEST Alpha Fund",
+                "Open Ended",
+                "Hybrid Scheme - Balanced Hybrid ",
+                day,
+                "1.78",
+                "0.03",
+                "0",
+                "0.38",
+                reg_total,
+                "0.46",
+                "0.03",
+                "0",
+                "0.14",
+                dir_total,
+            ]
+        )
+    # A scheme absent from our master — must write nothing, never guess.
+    ws.append(
+        [
+            "AMFT/O/H/GHO/23/07/0002",
+            "AMFITEST Ghost Fund",
+            "Open Ended",
+            "Equity Scheme",
+            _dt(2026, 7, 8),
+            "1.00",
+            "0",
+            "0",
+            "0.18",
+            "1.18",
+            "0.50",
+            "0",
+            "0",
+            "0.09",
+            "0.59",
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_dispatcher_amfi_ter_plan_routing_with_no_amc(db_session):
+    """End-to-end on the REAL resolver: the AMC-less consolidated TER file
+    writes the Regular value to every Regular plan-variant ISIN and the
+    Direct value to the Direct one; latest TER Date wins; a scheme absent
+    from the master writes nothing."""
+    from dhanradar.models.mf import MfFund
+
+    for isin, name in (
+        ("INFAMFTTER01", "AMFITEST Alpha Fund - Regular Plan - Growth"),
+        ("INFAMFTTER02", "AMFITEST Alpha Fund - Regular Plan - IDCW"),
+        ("INFAMFTTER03", "AMFITEST Alpha Fund - Direct Plan - Growth"),
+    ):
+        db_session.add(MfFund(isin=isin, scheme_name=name, amc_name="AMFITEST Mutual Fund"))
+    await db_session.commit()
+
+    data = _build_amfi_ter_xlsx()
+    # The real portal filename: matches \bter\b (class 'ter') but names no AMC.
+    file_id = await _insert_pending_bytes(db_session, filename="ter-of-mf-schemes.xlsx", data=data)
+
+    result = await mi._parse_pipeline(file_id)
+    assert result.startswith("parsed: ter")
+
+    db_session.expire_all()
+    for isin in ("INFAMFTTER01", "INFAMFTTER02"):
+        fund = await db_session.get(MfFund, isin)
+        assert float(fund.expense_ratio_pct) == 2.19  # Regular Total TER, latest date
+    direct = await db_session.get(MfFund, "INFAMFTTER03")
+    assert float(direct.expense_ratio_pct) == 0.62  # Direct Total TER, latest date
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "parsed"
+    assert row.amc_detected is None  # honestly multi-AMC — never a guessed AMC
+
+
+# ---------------------------------------------------------------------------
 # scheme_not_in_master (2026-07-10) — closed-ended/matured schemes classify as
 # an HONEST TERMINAL outcome ('unsupported'), never an endlessly retryable
 # 'failed' row. Fixture names are real prod failures (93-row tail, 2026-07-10).

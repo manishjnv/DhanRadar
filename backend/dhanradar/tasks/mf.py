@@ -5483,7 +5483,7 @@ def _pick_canonical_plan_isin(rows: Sequence[Any], tie_margin: float) -> str:
 
 
 async def _resolve_scheme_isins_by_plan(
-    scheme_name: str, amc_name: str
+    scheme_name: str, amc_name: str | None
 ) -> tuple[list[str], list[str]]:
     """Resolve a BARE scheme name to ALL its option-variant ISINs, split by
     plan: (regular_isins, direct_isins). Used for TER (Total Expense Ratio)
@@ -5507,7 +5507,14 @@ async def _resolve_scheme_isins_by_plan(
 
     from dhanradar.db import TaskSessionLocal
 
-    prefix_sql, prefix_binds = _prefix_where_clause(_amc_scheme_prefixes(amc_name))
+    if amc_name is None:
+        # Multi-AMC source (AMFI's consolidated TER workbook, 2026-07-10):
+        # there is no AMC to scope by, but the file's names are full bare
+        # names that inherently start with the AMC's own brand, so the bare
+        # ILIKE prefix alone stays precise against the whole master.
+        prefix_sql, prefix_binds = "TRUE", {}
+    else:
+        prefix_sql, prefix_binds = _prefix_where_clause(_amc_scheme_prefixes(amc_name))
 
     async with TaskSessionLocal() as db:
         result = await db.execute(
@@ -5518,7 +5525,10 @@ async def _resolve_scheme_isins_by_plan(
             {"bare_prefix": f"{scheme_name}%", **prefix_binds},
         )
         rows = result.fetchall()
-        if not rows:
+        if not rows and amc_name is not None:
+            # The looser 0.6-similarity fallback stays AMC-scoped only — with
+            # no AMC filter it could cross-match a different AMC's similar
+            # scheme, so a multi-AMC source fails closed on a prefix miss.
             result = await db.execute(
                 sa_text(
                     "SELECT isin, scheme_name FROM mf.mf_funds "

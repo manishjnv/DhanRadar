@@ -190,6 +190,72 @@ def test_amfi_aaum_periodless_title_returns_none_period():
     assert len(triples) == 3
 
 
+def test_ter_amfi_consolidated_layout_latest_date_wins():
+    """AMFI's all-AMC TER workbook ('TER_Revised': one row per scheme per DAY,
+    15 'Regular Plan - …'/'Direct Plan - …' columns) parses via the SAME
+    generic detection as the per-AMC layouts — per-plan Total TER only, and
+    only the LATEST date's row per scheme survives."""
+
+    def build(wb: Workbook) -> None:
+        ws = wb.active
+        ws.title = "TER_Revised"
+        ws.append(
+            [
+                "NSDL Scheme Code",
+                "Scheme Name",
+                "Scheme Type",
+                "Scheme Category",
+                "TER Date",
+                "Regular Plan - Base Expense Ratio (BER) (%)",
+                "Regular Plan - Brokerage cost (%)",
+                "Regular Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Regular Plan - Statutory Levies (including GST) (%)",
+                "Regular Plan - Total TER (%)",
+                "Direct Plan - Base Expense Ratio (BER) (%)",
+                "Direct Plan - Brokerage cost (%)",
+                "Direct Plan - Transaction Cost incurred for the purpose of execution of trade (%)",
+                "Direct Plan - Statutory Levies (including GST) (%)",
+                "Direct Plan - Total TER (%)",
+            ]
+        )
+        code = "360O/O/H/BHF/23/07/0007"
+        # TER Date cells are genuine Excel dates (openpyxl datetime), as in
+        # the real portal file — not strings.
+        from datetime import datetime as _dt
+
+        for day, reg, direct in (
+            (_dt(2026, 7, 1), "1.78", "0.63"),
+            (_dt(2026, 7, 8), "1.80", "0.62"),
+        ):
+            ws.append(
+                [
+                    code,
+                    "360 ONE Balanced Hybrid Fund",
+                    "Open Ended",
+                    "Hybrid Scheme - Balanced Hybrid ",
+                    day,
+                    reg,
+                    "0.03",
+                    "0",
+                    "0.38",
+                    str(float(reg) + 0.41),
+                    "0.46",
+                    "0.03",
+                    "0",
+                    "0.14",
+                    direct,
+                ]
+            )
+
+    rows = parse_ter_disclosure(_xlsx(build), ".xlsx")
+    assert len(rows) == 1  # latest date only — never one row per day
+    name, ter_date, reg, direct = rows[0]
+    assert name == "360 ONE Balanced Hybrid Fund"
+    assert ter_date == date(2026, 7, 8)
+    assert reg == round(1.80 + 0.41, 4)  # the per-plan TOTAL TER, never the BER
+    assert direct == 0.62
+
+
 def test_amfi_aaum_wrong_layout_fails_closed():
     def build(wb: Workbook) -> None:
         ws = wb.active
