@@ -175,8 +175,10 @@ async def test_amc_coverage_200_shape_and_math(async_client, db_session, monkeyp
 
     # Staleness: last_updated = the later of MAX(aum_as_of) and MAX(constituents'
     # as_of_month) across the AMC's schemes -- both are today.replace(day=1) here.
-    assert row["last_updated"] == today.replace(day=1).isoformat()
-    assert row["staleness_days"] == (today - today.replace(day=1)).days
+    # Since 2026-07-11 a day-1 date is a MONTH MARKER measured from month-end,
+    # clamped to today (June-30 data used to read "40 days stale" on July 11).
+    assert row["last_updated"] == today.isoformat()
+    assert row["staleness_days"] == 0  # current-month marker clamps to today
 
     # completeness_pct: equal-weighted average of per-field covered-fraction
     # across the 8 fields = ((1/2)*3 [constituents, aum, category] + 0*5) / 8.
