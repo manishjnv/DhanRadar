@@ -206,9 +206,9 @@ _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
     # Automated scraper roots added #517/#523/#538 (Canara/Navi/Zerodha are
     # built but currently 0-yield — the staleness column shows it honestly).
     "Tata": {"constituents": _AUTO_MONTHLY},
-    "Motilal": {"constituents": _AUTO_MONTHLY},
+    "Motilal Oswal": {"constituents": _AUTO_MONTHLY},
     "Quantum": {"constituents": _AUTO_MONTHLY},
-    "Canara": {"constituents": _AUTO_MONTHLY},
+    "Canara Robeco": {"constituents": _AUTO_MONTHLY},
     "Navi": {"constituents": _AUTO_MONTHLY},
     "Zerodha": {"constituents": _AUTO_MONTHLY},
     # Browser-only sites (file-layer probed 2026-07-10) — designated route is
@@ -222,23 +222,23 @@ _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
     "Sundaram": {"constituents": _MANUAL_ONCE},
     "LIC": {"constituents": _MANUAL_ONCE},
     "Union": {"constituents": _MANUAL_ONCE},
-    "Baroda": {"constituents": _MANUAL_ONCE},
+    "Baroda BNP": {"constituents": _MANUAL_ONCE},
     "Invesco": {"constituents": _MANUAL_ONCE},
     "ITI": {"constituents": _MANUAL_ONCE},
-    "JM": {"constituents": _MANUAL_ONCE},
-    "Mahindra": {"constituents": _MANUAL_ONCE},
+    "JM Financial": {"constituents": _MANUAL_ONCE},
+    "Mahindra Manulife": {"constituents": _MANUAL_ONCE},
     "WhiteOak": {"constituents": _MANUAL_ONCE},
-    "Bajaj": {"constituents": _MANUAL_ONCE},
+    "Bajaj Finserv": {"constituents": _MANUAL_ONCE},
     "Samco": {"constituents": _MANUAL_ONCE},
     "Trust": {"constituents": _MANUAL_ONCE},
     "Shriram": {"constituents": _MANUAL_ONCE},
     "Taurus": {"constituents": _MANUAL_ONCE},
     "Helios": {"constituents": _MANUAL_ONCE},
     "PGIM": {"constituents": _MANUAL_ONCE},
-    "Bank": {"constituents": _MANUAL_ONCE},
-    "360": {"constituents": _MANUAL_ONCE},
+    "BOI": {"constituents": _MANUAL_ONCE},
+    "360 ONE": {"constituents": _MANUAL_ONCE},
     "Sahara": {"constituents": _MANUAL_ONCE},
-    "Wealth": {"constituents": _MANUAL_ONCE},
+    "Wealth Co": {"constituents": _MANUAL_ONCE},
     "NJ": {"constituents": _MANUAL_ONCE},
     "Abakkus": {"constituents": _MANUAL_ONCE},
     "AlphaGrep": {"constituents": _MANUAL_ONCE},
@@ -253,16 +253,37 @@ _SOURCE_CLASS: dict[str, dict[CoverageField, tuple[str, str]]] = {
 }
 
 
+# Platform-wide AMFI-file defaults (2026-07-11): AUM/TER/riskometer/benchmark
+# are now primarily fed by AMFI's consolidated multi-AMC downloads (scheme-wise
+# AAUM quarterly #542 · TER monthly #543 · Fund-Performance quarterly-ish
+# #544), which cover EVERY AMC — so every row shows the true source cadence
+# instead of a bare untagged count or a stale per-AMC tag. A per-AMC entry in
+# _SOURCE_CLASS still WINS where one exists (that AMC has its own additional
+# pipeline). Like Category, these platform-wide defaults never vote in the
+# per-AMC source_tag badge — the badge answers "does this AMC have its OWN
+# pipeline", which a universal source says nothing about.
+_PLATFORM_WIDE_DEFAULTS: dict[CoverageField, tuple[str, str]] = {
+    "aum": ("ML", "Q"),
+    "ter": ("ML", "M"),
+    "riskometer": ("ML", "Q"),
+    "benchmark": ("ML", "Q"),
+}
+
+
 def _class_for(short: str, field: CoverageField) -> tuple[str, str]:
-    return _SOURCE_CLASS.get(short, {}).get(field, _NONE)
+    explicit = _SOURCE_CLASS.get(short, {}).get(field)
+    if explicit is not None:
+        return explicit
+    return _PLATFORM_WIDE_DEFAULTS.get(field, _NONE)
 
 
-def _source_tag_for(fields: dict[CoverageField, CoverageCell]) -> str:
+def _source_tag_for(short: str) -> str:
     """Overall per-AMC source classification for the AMC-column badge, derived
-    from this row's own field modes (never a separate/parallel source of truth
-    — see AmcCoverageRow.source_tag docstring). Fields with mode "-" (no known
-    source yet) are ignored; only known-source fields vote."""
-    modes = {cell.mode for cell in fields.values() if cell.mode != "-"}
+    ONLY from this AMC's EXPLICIT per-field entries (never a separate/parallel
+    source of truth — see AmcCoverageRow.source_tag docstring). Platform-wide
+    defaults (_PLATFORM_WIDE_DEFAULTS) deliberately don't vote: a universal
+    AMFI feed says nothing about whether THIS AMC has its own pipeline."""
+    modes = {mode for mode, _freq in _SOURCE_CLASS.get(short, {}).values()}
     if not modes:
         return "none"
     if modes == {"A"}:
@@ -283,6 +304,16 @@ def _compute_staleness(
     if not candidates:
         return None, None
     latest = max(candidates)
+    # Disclosure months are stored as the FIRST of the month by convention
+    # (as_of_month), so June-30 data used to read "June 1" = 40 days stale
+    # when it was really ~11 days old (founder-flagged 2026-07-11). A
+    # day-1 date is a month marker, not a day: measure from month-END.
+    if latest.day == 1:
+        import calendar
+
+        latest = latest.replace(day=calendar.monthrange(latest.year, latest.month)[1])
+        if latest > today:
+            latest = today
     return latest.isoformat(), (today - latest).days
 
 
@@ -433,7 +464,7 @@ async def get_amc_coverage(
                 fund_count=fund_count,
                 fields=fields,
                 completeness_pct=completeness_pct,
-                source_tag=_source_tag_for(fields),  # type: ignore[arg-type]
+                source_tag=_source_tag_for(short),  # type: ignore[arg-type]
                 last_updated=last_updated,
                 staleness_days=staleness_days,
             )

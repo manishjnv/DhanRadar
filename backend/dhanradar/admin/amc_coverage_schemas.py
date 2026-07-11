@@ -64,7 +64,9 @@ class CoverageCell(BaseModel):
 
     covered_count: int
     mode: Literal["A", "ML", "-"]  # Automatic scraper / Manual upload / none
-    freq: Literal["Y", "W", "M", "D", "O", "-"]  # yearly/weekly/monthly/daily/once/none
+    freq: Literal[
+        "Y", "Q", "W", "M", "D", "O", "-"
+    ]  # yearly/quarterly/weekly/monthly/daily/once/none
 
 
 class AmcCoverageRow(BaseModel):

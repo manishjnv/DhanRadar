@@ -271,7 +271,7 @@ export function AmcCoverageTable({ rows, fieldOrder, fieldLabels }: AmcCoverageT
         </table>
       </div>
       <p className="text-caption text-ink-muted">
-        A=auto ML=manual &middot; Y/W/M/D/O=frequency &middot; number = funds covered &middot;
+        A=auto ML=manual &middot; Y/Q/W/M/D/O=frequency &middot; number = funds covered &middot;
         Auto/Manual/Mixed badge next to AMC = that AMC&apos;s overall source &middot; Updated =
         days/months since the latest disclosure we hold (amber &gt;45d, red &gt;90d) &middot;
         Category = how many funds have their SEBI category recorded (platform-wide, no mode/freq tag)
