@@ -1126,6 +1126,77 @@ _UTI_SCHEME_B_MULTI = (
 _UTI_NON_SCHEME_PAGE = (
     "UTI MUTUAL FUND IN MEDIA\nAmit Premchandani Senior Vice President and Fund Manager"
 )
+# Real shape (2026-07-12, UTI Balanced Advantage Fund): the "(Equity
+# Portion)"/"(Debt Portion)" role qualifier sits directly after the name with
+# NO comma/hyphen, and the tenure phrase is "Managing THIS scheme since"
+# (not "the scheme").
+_UTI_SCHEME_C_PAREN_QUALIFIER = (
+    "20\n"
+    "Some hybrid objective text.\n"
+    "10th August, 2023\n"
+    "Nifty 50 Hybrid Composite Debt 50:50 Index\n"
+    "Mr. Test Gamma (Equity Portion) B.Com, MMS, CFA. Managing this scheme since Aug 2023\n"
+    "Total Exp: 24 Yrs\n"
+    "Mr. Test Delta (Debt Portion) Bcom, MSc, CA\n"
+    "Managing this scheme since Aug 2023\n"
+    "Total Exp: 15 Yrs\n"
+    "Fund Manager\n"
+    "UTI TEST GAMMA FUND\n"
+    "An open-ended dynamic asset allocation fund\n"
+)
+# Real shape (2026-07-12, UTI Unit Linked Insurance Plan co-managers): bare
+# "Managing since <date>" with neither "this" nor "the scheme" at all, AND a
+# footnote-marker-suffixed banner ("...PLAN*").
+_UTI_SCHEME_G_BARE_MANAGING_SINCE = (
+    "37\n"
+    "Hybrid objective text.\n"
+    "1st October, 1971\n"
+    "NIFTY 50 Hybrid Composite Debt 50:50 Index\n"
+    "Mr. Test Eta (Debt Portion) - Bcom, MSc, CA. Managing since Nov 2025.\n"
+    "Total Exp: 15 Yrs\n"
+    "Fund Manager\n"
+    "UTI TEST ETA PLAN*\n"
+    "An open ended tax saving cum insurance scheme.\n"
+)
+_UTI_SUMMARY_PAGE_MARKERS = (
+    "79\n"
+    "FUND MANAGER SUMMARY\n"
+    "Sr. No Name of the Fund Manager Funds Managed Performance data refer page  no.\n"
+    "1 Mr. Test Epsilon UTI Test Epsilon Fund@ 50\n"
+    "2 Mr. Test Zeta UTI Children's Test Fund 31\n"
+)
+# Real shape (2026-07-12, UTI Banking & PSU Fund): banner carries the SAME
+# trailing footnote marker the annexure footer defines ("@" = a co/assistant
+# fund manager footnote), glued directly to the name with no space.
+_UTI_SCHEME_E_MARKER_BANNER = (
+    "50\n"
+    "Debt objective text.\n"
+    "27th January, 2014\n"
+    "Nifty Banking & PSU Debt Index A-II\n"
+    "Mr. Test Epsilon, Bcom, MSc, CA\n"
+    "Managing the scheme since Dec 2021\n"
+    "Total Exp: 15 Yrs\n"
+    "Fund Manager\n"
+    "UTI TEST EPSILON FUND@ (Erstwhile UTI Test Epsilon Debt Fund)\n"
+    "An open ended debt scheme.\n"
+)
+# Real shape (2026-07-12, UTI Children's Equity Fund): banner uses the CURLY
+# apostrophe (U+2019) while the annexure summary above uses a straight one
+# for the SAME scheme (a real PDF-export inconsistency) — AND "Since" is
+# capitalized with a real month/year (UTI Multi Cap Fund's real shape),
+# exercising the scoped-case-insensitive "since" literal.
+_UTI_SCHEME_F_CURLY_APOSTROPHE = (
+    "31\n"
+    "Equity objective text.\n"
+    "30th January, 2008\n"
+    "Nifty 500 TRI\n"
+    "Mr. Test Zeta, B.Com, CFA\n"
+    "Managing the scheme Since May 2025\n"
+    "Total Exp: 24 Yrs\n"
+    "Fund Manager\n"
+    "UTI CHILDREN’S TEST FUND\n"
+    "An open ended fund for investment for children.\n"
+)
 
 
 class TestFactsheetCompilationUti:
@@ -1165,6 +1236,75 @@ class TestFactsheetCompilationUti:
         lookup = _uti_manager_summary_lookup(_UTI_SUMMARY_PAGE)
         assert lookup["UTI TEST ALPHA FUND"] == "UTI Test Alpha Fund"
         assert lookup["UTI TEST BETA FUND"] == "UTI Test Beta Fund"
+
+    def test_manager_qualifier_in_parens_with_no_separator_still_matches(self) -> None:
+        # Real bug (2026-07-12, UTI Balanced Advantage Fund): the manager's
+        # "(Equity Portion)"/"(Debt Portion)" role qualifier sometimes sits
+        # directly after the name with NO comma/hyphen at all — the old
+        # regex required an immediate comma/hyphen and silently dropped the
+        # whole scheme (manager_pairs stayed empty). "(" is now a valid
+        # separator too.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_C_PAREN_QUALIFIER]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Test Gamma Fund"
+        assert result[0]["manager_pairs"] == [
+            ("Test Gamma", date(2023, 8, 1)),
+            ("Test Delta", date(2023, 8, 1)),
+        ]
+
+    def test_managing_this_scheme_and_bare_managing_since_both_match(self) -> None:
+        # Real wording variants (2026-07-12): most pages say "Managing the
+        # scheme since <date>", but real pages also say "Managing this
+        # scheme since <date>" (Balanced Advantage) and bare "Managing since
+        # <date>" with neither "this" nor "the scheme" (ULIP co-managers).
+        # Reuses the same fixture as the paren-separator test for "this
+        # scheme"; a dedicated bare-"Managing since" fixture below.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_G_BARE_MANAGING_SINCE]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Test Eta Plan"
+        assert result[0]["manager_pairs"] == [("Test Eta", date(2025, 11, 1))]
+
+    def test_banner_footnote_marker_no_longer_blocks_the_whole_scheme(self) -> None:
+        # Real bug (2026-07-12, UTI Banking & PSU Fund / UTI Unit Linked
+        # Insurance Plan): the ALL-CAPS banner sometimes carries a trailing
+        # footnote marker glued directly to the name ("UTI BANKING & PSU
+        # FUND@", "...PLAN*") — the SAME markers the FUND MANAGER SUMMARY
+        # footer defines. The old banner regex's char class excluded these,
+        # so the banner was never recognized and the scheme (even though its
+        # manager line matched fine) was silently skipped entirely. The
+        # marker must not leak into the final scheme_name either.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_UTI_SUMMARY_PAGE_MARKERS, _UTI_SCHEME_E_MARKER_BANNER])
+        result = dp._parse_uti_compilation(reader)
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Test Epsilon Fund"
+        assert "@" not in result[0]["scheme_name"]
+        assert result[0]["manager_pairs"] == [("Test Epsilon", date(2021, 12, 1))]
+
+    def test_curly_apostrophe_banner_resolves_via_lookup_not_mangled_title_case(self) -> None:
+        # Real bug (2026-07-12, UTI Children's Equity/Hybrid Fund): the same
+        # scheme name is printed with a STRAIGHT apostrophe in one place and
+        # a CURLY apostrophe (U+2019) in another (a PDF-export
+        # inconsistency, not a code bug) — the old banner regex's char class
+        # excluded the curly glyph entirely (dropped the scheme), and even
+        # once allowed through, an exact-string lookup miss falls back to
+        # `.title()`, which mangles "Children's" -> "Children'S". The lookup
+        # key is now apostrophe-normalized so the annexure's own correct
+        # casing always wins over the fallback.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_UTI_SUMMARY_PAGE_MARKERS, _UTI_SCHEME_F_CURLY_APOSTROPHE])
+        result = dp._parse_uti_compilation(reader)
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Children's Test Fund"
+        # "Since" (capital) with a real month/year must also match — the
+        # literal is scoped case-insensitive.
+        assert result[0]["manager_pairs"] == [("Test Zeta", date(2025, 5, 1))]
 
 
 _AXIS_SCHEME_A_MULTI = (

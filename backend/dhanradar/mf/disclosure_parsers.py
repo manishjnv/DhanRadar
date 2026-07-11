@@ -913,16 +913,32 @@ def _parse_hdfc_compilation(reader: Any) -> list[dict[str, Any]]:
 # pages ~79-80 printed) lists every scheme in the AMC's own Title Case, so
 # it is parsed FIRST into a lookup and used to recover the correct casing;
 # `.title()` is only a fallback for a scheme the summary doesn't cover.
-_UTI_BANNER_LINE_RE = re.compile(r"^UTI\b[A-Z0-9 &\-',.]*$")
+# Char class also allows the SAME footnote markers (@^*) the summary annexure
+# uses ("UTI BANKING & PSU FUND@", "UTI UNIT LINKED INSURANCE PLAN*") and the
+# curly apostrophe U+2019 ("UTI CHILDREN’S EQUITY FUND") — both verified
+# 2026-07-12 against the real file: without them the banner never matched at
+# all, silently dropping the whole scheme (9 of 45 real sections missed).
+_UTI_BANNER_LINE_RE = re.compile(r"^UTI\b[A-Z0-9 &\-',.@^*’]*$")
 _UTI_SUMMARY_TRAILER_RE = re.compile(r"[@^*\s]*(?:-|\d{1,3})\s*$")
 _UTI_PAREN_RE = re.compile(r"\s*\([^)]*\)")
-# "Mr./Ms./Mrs. <Name>[,-]<credentials...>Managing the scheme since <Month>
-# <Year>" — repeated per co-manager (verified 2026-07-11, incl. 3-manager
-# schemes like UTI Flexi Cap Fund). The name char class excludes ',' and '-'
-# so it stops at the credential separator instead of over-consuming.
+# "Mr./Ms./Mrs. <Name>[,-(]<credentials...>Managing [this/the scheme ]since
+# <Month> <Year>" — repeated per co-manager (verified 2026-07-11, incl.
+# 3-manager schemes like UTI Flexi Cap Fund). The name char class excludes
+# ',' '-' '(' so it stops at the credential separator instead of
+# over-consuming; '(' is a valid separator too (verified 2026-07-12: some
+# real pages put the "(Equity Portion)"/"(Debt Portion)" qualifier directly
+# after the name with no comma/hyphen at all, e.g. "Mr. Sachin Trivedi
+# (Equity Portion) B.Com..." on UTI Balanced Advantage Fund — silently
+# dropped the whole scheme under the old comma/hyphen-only separator). The
+# "since" literal is scoped case-insensitive (real pages mix "Managing the
+# scheme since Dec 2021" and "Managing the scheme Since May 2025" for the
+# exact same phrase) and "this scheme"/"the scheme" is optional (real pages
+# also just say "Managing since Nov 2025" with neither word, e.g. UTI Unit
+# Linked Insurance Plan's co-managers) — all 3 wording variants verified
+# against the real file, never a guess.
 _UTI_MANAGER_RE = re.compile(
-    r"Mr\.?\s+([A-Z][A-Za-z.’' ]{1,40}?)\s*[,\-].{0,120}?"
-    r"Managing the scheme since\s+([A-Za-z]+)[\s-]+(\d{4})",
+    r"Mr\.?\s+([A-Z][A-Za-z.’' ]{1,40}?)\s*[,\-(]\s*.{0,120}?"
+    r"Managing\s+(?:(?:this|the)\s+scheme\s+)?(?i:since)\s+([A-Za-z]+)[\s-]+(\d{4})",
 )
 _UTI_DISCLAIMER_START = "Past performance may or may not be sustained"
 
@@ -948,7 +964,16 @@ def _uti_manager_summary_lookup(text: str) -> dict[str, str]:
         line = _UTI_SUMMARY_TRAILER_RE.sub("", line)
         name = _UTI_PAREN_RE.sub("", line).strip(" @^*")
         if name:
-            lookup[name.upper()] = name
+            # Straight vs curly apostrophe (U+2019) key normalization: the
+            # real annexure prints the SAME scheme with different apostrophe
+            # glyphs across entries ("Children's" here, "Children’s" a few
+            # lines later — verified 2026-07-12, a PDF-export inconsistency,
+            # not a code bug) — normalize the lookup KEY only, so whichever
+            # glyph the per-scheme banner later uses still resolves to this
+            # annexure's own (correctly cased) spelling instead of falling
+            # through to the `.title()` fallback, which mangles apostrophes
+            # ("Children's" -> "Children'S").
+            lookup[name.upper().replace("’", "'")] = name
     return lookup
 
 
@@ -1016,14 +1041,23 @@ def _parse_uti_compilation(reader: Any) -> list[dict[str, Any]]:
         banner = _uti_banner_line(lines)
         if not banner:
             continue
-        clean_banner = _UTI_PAREN_RE.sub("", banner).strip()
+        # Strip the SAME footnote markers (@^*) the annexure lookup keys
+        # already strip (2026-07-12: banner char class now allows them
+        # through so the ALL-CAPS match succeeds, e.g. "UTI BANKING & PSU
+        # FUND@" / "UTI UNIT LINKED INSURANCE PLAN*" — but the trailing
+        # marker itself is never part of the real scheme name).
+        clean_banner = _UTI_PAREN_RE.sub("", banner).strip(" @^*")
         # Fallback only (the summary lookup misses a genuine scheme-name
         # spelling difference between the annexure and the banner, e.g.
         # "and" vs "&"): plain `.title()` mangles "UTI" -> "Uti" since it
-        # treats the whole ALL-CAPS run as one word (caught 2026-07-11).
-        # The banner is guaranteed (by _UTI_BANNER_LINE_RE) to start with
-        # the literal "UTI" token, so keep it and title-case only the rest.
-        scheme_name = name_lookup.get(clean_banner.upper()) or (
+        # treats the whole ALL-CAPS run as one word (caught 2026-07-11), and
+        # mangles a mid-name apostrophe too ("Children's" -> "Children'S",
+        # caught 2026-07-12). The banner is guaranteed (by
+        # _UTI_BANNER_LINE_RE) to start with the literal "UTI" token, so keep
+        # it and title-case only the rest. The lookup key is apostrophe-
+        # normalized (see `_uti_manager_summary_lookup`) so the same
+        # normalization is applied here before querying.
+        scheme_name = name_lookup.get(clean_banner.upper().replace("’", "'")) or (
             "UTI " + clean_banner[3:].strip().title()
         )
         if scheme_name in seen:
