@@ -379,6 +379,15 @@ async def _apply_file_class(
         fills `aum_crore` only where the fund has NO dated figure at all,
         and writes NO `aum_as_of` and NO history row (§8.4 — a history row
         needs a real as_of_month, never a fabricated one).
+      - scheme_summary_xls (2026-07-11 — TATA's per-scheme "SCHEME SUMMARY
+        DOCUMENT" workbook) → `exit_load_pct`/`exit_load_days` (unconditional
+        overwrite, same rule as factsheet_pdf) + `min_lumpsum_amount`
+        (unconditional overwrite) + `fund_manager_history` (deduped on
+        (scheme_uid, manager_name, start_date), same pattern as
+        factsheet_pdf), resolved by EXACT ISIN match — the file lists every
+        plan/option ISIN for the one scheme it describes, so all three are
+        written to EVERY one of those ISINs that exists in mf_funds, never
+        just a single "canonical" one.
     """
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -394,6 +403,88 @@ async def _apply_file_class(
     )
     from dhanradar.models.mf import MfAumHistory, MfFund, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
+
+    if file_class == "scheme_summary_xls":
+        # TATA per-scheme "SCHEME SUMMARY DOCUMENT" workbook (2026-07-11):
+        # the file GIVES every plan/option ISIN for the ONE scheme it
+        # describes — resolved by EXACT ISIN lookup, never the fuzzy name
+        # resolver every other class here uses. Exit load, minimum
+        # application amount, and manager history are scheme-level facts
+        # identical across every option variant (same reasoning the 'ter'
+        # class docstring above gives for TER), so all three are written to
+        # EVERY ISIN the file lists that actually exists in mf_funds.
+        from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+
+        parsed = parse_scheme_summary_xls(data)
+        isins = parsed.get("isins") or []
+        if not isins:
+            return None, None, 0
+
+        async with TaskSessionLocal() as db:
+            existing = await db.execute(
+                sa_text("SELECT isin FROM mf.mf_funds WHERE isin = ANY(:isins)"),
+                {"isins": isins},
+            )
+            resolved_isins = [row[0] for row in existing]
+            if not resolved_isins:
+                return None, 0, 0
+
+            updates = 0
+            if parsed.get("exit_load_pct") is not None:
+                for isin in resolved_isins:
+                    result = await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds SET exit_load_pct = :p, "
+                            "exit_load_days = COALESCE(:d, exit_load_days) WHERE isin = :i"
+                        ),
+                        {
+                            "p": parsed["exit_load_pct"],
+                            "d": parsed.get("exit_load_days"),
+                            "i": isin,
+                        },
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("min_lumpsum_amount") is not None:
+                for isin in resolved_isins:
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET min_lumpsum_amount = :v WHERE isin = :i"),
+                        {"v": parsed["min_lumpsum_amount"], "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            # Only pairs with a real, non-fabricated start_date can ever be
+            # written — `fund_manager_history.start_date` is NOT NULL, so a
+            # manager the FM-index correlation couldn't confidently date is
+            # silently skipped here rather than guessing one (§8.4).
+            manager_pairs = [
+                (name, start) for name, start in (parsed.get("manager_pairs") or []) if start
+            ]
+            if manager_pairs:
+                for isin in resolved_isins:
+                    existing_mgr = await db.execute(
+                        sa_text(
+                            "SELECT manager_name, start_date FROM mf.fund_manager_history "
+                            "WHERE scheme_uid = :i"
+                        ),
+                        {"i": isin},
+                    )
+                    existing_tuples = {(row[0], row[1]) for row in existing_mgr}
+                    new_rows = [
+                        {
+                            "scheme_uid": isin,
+                            "manager_name": name,
+                            "start_date": start,
+                            "end_date": None,
+                            "source": amc_name or "TATA",
+                            "run_id": run_id,
+                        }
+                        for name, start in manager_pairs
+                        if (name, start) not in existing_tuples
+                    ]
+                    if new_rows:
+                        await db.execute(pg_insert(MfFundManagerHistory).values(new_rows))
+                        updates += len(new_rows)
+            await db.commit()
+        return None, updates, len(resolved_isins)
 
     if file_class == "factsheet_pdf":
         # Per-scheme factsheet (ICICI layout): manager history + closing AUM

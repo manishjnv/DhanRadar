@@ -1260,3 +1260,175 @@ class TestFactsheetCompilationDispatch:
 
         assert not looks_like_factsheet_compilation(b"PK\x03\x04 xlsx")
         assert not looks_like_factsheet_compilation(b"%PDF-1.7 garbage without markers")
+
+
+# ---------------------------------------------------------------------------
+# scheme_summary_xls (2026-07-11) — TATA's per-scheme "SCHEME SUMMARY
+# DOCUMENT" workbook. Real files are saved with a ".xls" extension but are,
+# byte-for-byte, valid xlsx zips; fixtures below reproduce the real ~54-row
+# label/value layout (trimmed to the fields this class extracts).
+# ---------------------------------------------------------------------------
+
+
+def _build_scheme_summary(
+    *,
+    fund_name: str = "Tata Large Cap Fund",
+    manager_name: str = "FM-1 Abhinav Sharma, FM-2 Hasmukh Vishariya",
+    manager_from: str = "FM-1 05/04/2023, FM-2 01/03/2025",
+    exit_load: str = (
+        "1. On or before 30 days from the date of allotment: 0.50%. "
+        "2. After 30 days from the date of allotment: NIL."
+    ),
+    min_amount: str = "5000",
+    isins: str = "INF277K01931,INF277K01923,INF277K01QY0,INF277K01QZ7",
+) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Fields", "SCHEME SUMMARY DOCUMENT", None])
+    ws.append([1, "Fund Name", fund_name])
+    ws.append([16, "Benchmark (Tier 1)", "Nifty 100 TRI"])
+    ws.append([18, "Fund Manager Name", manager_name])
+    ws.append([20, "Fund Manager From Date", manager_from])
+    ws.append([21, "Annual Expense (Stated maximum)", "Regular 1.96, Direct 0.98"])
+    ws.append([22, "Exit Load (if applicable)", exit_load])
+    ws.append([28, "ISINs", isins])
+    ws.append([31, "Minimum Application Amount", min_amount])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _break_dimension(data: bytes) -> bytes:
+    """Force the same broken `<dimension>` bug TATA's real files carry
+    (declares 'A1' while data spans far further) — patches the zip's
+    `xl/worksheets/sheet1.xml` in place, same technique
+    `_repair_corrupted_stylesheet_xlsx` uses for the styles.xml repair."""
+    import re
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(data)) as zin:
+        sheet_xml = zin.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        patched = re.sub(r'<dimension ref="[^"]+"\s*/>', '<dimension ref="A1"/>', sheet_xml)
+        assert patched != sheet_xml, "fixture's sheet1.xml has no <dimension> to break"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                content = (
+                    patched.encode("utf-8")
+                    if item.filename == "xl/worksheets/sheet1.xml"
+                    else zin.read(item.filename)
+                )
+                zout.writestr(item, content)
+        return buf.getvalue()
+
+
+class TestSchemeSummaryXls:
+    def test_sniff_and_classify(self) -> None:
+        from dhanradar.mf.disclosure_parsers import looks_like_scheme_summary_xls
+
+        data = _build_scheme_summary()
+        assert looks_like_scheme_summary_xls(data)
+        # Filename is a plain per-scheme name, indistinguishable from any
+        # other AMC's portfolio disclosure — only the bytes decide.
+        assert classify_file_class("Tata-Large-Cap-Fund.xls", data) == "scheme_summary_xls"
+
+    def test_non_summary_workbook_yields_nothing_for_this_class(self) -> None:
+        # must-not: an unrelated xlsx (a real portfolio-holdings sheet) must
+        # never be sniffed or parsed as a scheme summary.
+        from dhanradar.mf.disclosure_parsers import (
+            looks_like_scheme_summary_xls,
+            parse_scheme_summary_xls,
+        )
+
+        wb = Workbook()
+        wb.active.append(["Name of the Instrument", "ISIN", "Quantity"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        data = buf.getvalue()
+        assert not looks_like_scheme_summary_xls(data)
+        assert classify_file_class("Tata Large Cap Fund - 31-May-2026.xlsx", data) == "portfolio"
+        assert parse_scheme_summary_xls(data) == {}
+
+    def test_parses_real_layout_managers_exit_load_min_amount_isins(self) -> None:
+        from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+
+        parsed = parse_scheme_summary_xls(_build_scheme_summary())
+        assert parsed["scheme_name"] == "Tata Large Cap Fund"
+        assert parsed["manager_pairs"] == [
+            ("Abhinav Sharma", date(2023, 4, 5)),
+            ("Hasmukh Vishariya", date(2025, 3, 1)),
+        ]
+        assert parsed["exit_load_pct"] == 0.50
+        assert parsed["exit_load_days"] == 30
+        assert parsed["min_lumpsum_amount"] == 5000.0
+        assert parsed["isins"] == [
+            "INF277K01931",
+            "INF277K01923",
+            "INF277K01QY0",
+            "INF277K01QZ7",
+        ]
+
+    def test_positional_pairing_when_neither_field_is_indexed(self) -> None:
+        # Real file shape (verified): no 'FM-N'/'N.' marker at all, plain
+        # comma lists that line up 1:1 by position.
+        from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+
+        data = _build_scheme_summary(
+            manager_name="Tapan Patel, Nitin Bharat Sharma, Rakesh Prajapati",
+            manager_from="19 Jan 2024, 09 March 2026, 09 March 2026",
+        )
+        parsed = parse_scheme_summary_xls(data)
+        assert parsed["manager_pairs"] == [
+            ("Tapan Patel", date(2024, 1, 19)),
+            ("Nitin Bharat Sharma", date(2026, 3, 9)),
+            ("Rakesh Prajapati", date(2026, 3, 9)),
+        ]
+
+    def test_fm_count_mismatch_writes_managers_without_dates_never_fabricated(self) -> None:
+        # Real file shape (verified): 2 managers, ONE shared date with no
+        # index to attribute it to either manager — never guess which one.
+        from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+
+        data = _build_scheme_summary(
+            manager_name="Nitin Sharma, Rakesh Prajapati",
+            manager_from="29-Dec-2025",
+        )
+        parsed = parse_scheme_summary_xls(data)
+        assert parsed["manager_pairs"] == [
+            ("Nitin Sharma", None),
+            ("Rakesh Prajapati", None),
+        ]
+
+    def test_broken_dimension_regression(self) -> None:
+        # Bug A: TATA's real files declare `<dimension ref="A1"/>` while data
+        # spans A1:C60ish — read-only openpyxl trusts it and iter_rows()
+        # truncates to one cell. `_iter_sheets_xlsx` must reset it before
+        # iterating, or NEITHER the sniff NOR the parse can ever see past
+        # the "Fields" banner cell.
+        from dhanradar.mf.disclosure_parsers import (
+            looks_like_scheme_summary_xls,
+            parse_scheme_summary_xls,
+        )
+
+        broken = _break_dimension(_build_scheme_summary())
+        assert looks_like_scheme_summary_xls(broken)
+        parsed = parse_scheme_summary_xls(broken)
+        assert parsed["scheme_name"] == "Tata Large Cap Fund"
+        assert parsed["isins"] == [
+            "INF277K01931",
+            "INF277K01923",
+            "INF277K01QY0",
+            "INF277K01QZ7",
+        ]
+
+    def test_iter_sheets_xlsx_reset_dimensions_no_behavior_change_on_normal_file(self) -> None:
+        # A CORRECTLY-dimensioned file must read identically before/after
+        # the root fix — reset_dimensions() only drops an optimization hint,
+        # it must never change which rows/cells come back.
+        from dhanradar.mf.disclosure_parsers import _iter_sheets_xlsx
+
+        data = _fund_performance_xlsx()
+        _name, rows = next(iter(_iter_sheets_xlsx(data)))
+        assert rows[3] == ["Fund Performance"]
+        assert rows[4][:3] == ["Scheme Name", "Benchmark", "Riskometer Scheme"]
+        assert len(rows) == 8  # 5 header/title rows + 3 data rows
