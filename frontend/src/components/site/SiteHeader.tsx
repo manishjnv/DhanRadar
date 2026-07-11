@@ -62,8 +62,10 @@ export function SiteHeader() {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // sticky top offsets BOTH bars above (fixed dev banner + sticky ticker) so
+  // the pinned ticker is never covered when the header sticks on scroll.
   return (
-    <header className="sticky top-[var(--dev-banner-h,0px)] z-30 border-b border-line bg-surface/95 backdrop-blur-sm">
+    <header className="sticky top-[calc(var(--dev-banner-h,0px)_+_var(--ticker-h,0px))] z-30 border-b border-line bg-surface/95 backdrop-blur-sm">
       <nav
         aria-label="Main navigation"
         className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6"

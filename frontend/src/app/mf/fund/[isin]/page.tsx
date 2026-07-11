@@ -94,21 +94,27 @@ export default async function FundDetailPage({
 
       {/* Server-rendered summary — real content in the initial HTML response,
           verifiable via `curl` without JS execution. Plain text label WORD
-          only (never the ScoreRing/numeric component). */}
-      <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-4">
-        <h1 className="text-h3 text-ink">{fund.scheme_name}</h1>
-        {category && <p className="text-small text-ink-secondary">{category}</p>}
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-secondary">
-          {fund.nav_latest != null && (
-            <span>NAV ₹{fund.nav_latest.toFixed(2)}{fund.nav_date ? ` (as of ${fund.nav_date})` : ''}</span>
-          )}
-          {fund.return_1y_pct != null && <span>1Y return {fund.return_1y_pct.toFixed(1)}%</span>}
-          {fund.return_3y_pct != null && <span>3Y return {fund.return_3y_pct.toFixed(1)}%</span>}
-          {labelWord && <span>DhanRadar educational read: {labelWord}</span>}
-        </div>
-      </div>
-
-      <FundDetailClientView initialFundHead={fund} />
+          only (never the ScoreRing/numeric component). Passed INTO the client
+          view so it renders inside the shell's scroll area and scrolls away
+          with the page — rendered here (outside MaybeShell/AppShell) it sat
+          pinned above the app chrome and never scrolled. */}
+      <FundDetailClientView
+        initialFundHead={fund}
+        ssrSummary={
+          <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-4">
+            <h1 className="text-h3 text-ink">{fund.scheme_name}</h1>
+            {category && <p className="text-small text-ink-secondary">{category}</p>}
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-secondary">
+              {fund.nav_latest != null && (
+                <span>NAV ₹{fund.nav_latest.toFixed(2)}{fund.nav_date ? ` (as of ${fund.nav_date})` : ''}</span>
+              )}
+              {fund.return_1y_pct != null && <span>1Y return {fund.return_1y_pct.toFixed(1)}%</span>}
+              {fund.return_3y_pct != null && <span>3Y return {fund.return_3y_pct.toFixed(1)}%</span>}
+              {labelWord && <span>DhanRadar educational read: {labelWord}</span>}
+            </div>
+          </div>
+        }
+      />
     </>
   );
 }
