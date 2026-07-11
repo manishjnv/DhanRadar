@@ -988,3 +988,275 @@ class TestFactsheetPdf:
 
         assert not looks_like_factsheet_pdf(b"PK\x03\x04 xlsx")
         assert not looks_like_factsheet_pdf(b"%PDF-1.7 garbage without markers")
+
+
+# ---------------------------------------------------------------------------
+# factsheet_compilation (2026-07-11) — whole-AMC factsheet PDFs (HDFC/UTI/
+# AXIS), one file covering every scheme. Each AMC's per-scheme extractor
+# takes a `reader`-shaped object (`.pages`, each with `.extract_text()`) —
+# tested directly against a fake reader built from real-file page-text
+# shapes (verbatim pypdf output from the founder's real May/June 2026 HDFC/
+# UTI/AXIS files) rather than constructing real PDF bytes, mirroring the
+# `_flatten_pdf_lines` monkeypatch seam TestFactsheetPdf uses above.
+# ---------------------------------------------------------------------------
+
+
+class _FakePage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def extract_text(self) -> str:
+        return self._text
+
+
+class _FakeReader:
+    def __init__(self, page_texts: list[str]) -> None:
+        self.pages = [_FakePage(t) for t in page_texts]
+
+
+_HDFC_SCHEME_A = (
+    "For Product label and Riskometers, refer page no: 125-140 \n"
+    "8  |  May 2026 \n"
+    "HDFC Test Alpha Fund \n"
+    "An open ended equity scheme. \n"
+    "INVESTMENT OBJECTIVE: To generate capital appreciation. \n"
+    "FUND MANAGER ¥ \n"
+    "Name Since Total Exp \n"
+    "Amit Ganatra February \n"
+    "01, 2026 Over 19 years \n"
+    " \n"
+    "DATE OF ALLOTMENT/INCEPTION DATE \n"
+    "January 01, 1995"
+)
+# No "¥" footnote marker — the real bug (2026-07-11): without slicing the
+# block strictly AFTER "Name Since Total Exp", the literal "FUND MANAGER"
+# text leaked into the first captured manager name.
+_HDFC_SCHEME_B_MULTI = (
+    "9  |  May 2026 \n"
+    "HDFC Test Beta Fund \n"
+    "An open ended hybrid scheme. \n"
+    "FUND MANAGER \n"
+    "Name Since Total Exp \n"
+    "Rakesh Sethia May 16, \n"
+    "2024 Over 18 years \n"
+    "Anand Laddha July 1, 2021 Over 22 years \n"
+    " \n"
+    "DATE OF ALLOTMENT/INCEPTION DATE \n"
+    "March 01, 2005"
+)
+_HDFC_NON_SCHEME_PAGE = (
+    "6  | May 2026 \n"
+    "Glossary \n"
+    "Sharpe Ratio is a risk to reward ratio, it measures portfolio returns."
+)
+
+
+class TestFactsheetCompilationHdfc:
+    def test_splits_two_schemes_and_skips_non_scheme_page(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_HDFC_NON_SCHEME_PAGE, _HDFC_SCHEME_A, _HDFC_SCHEME_B_MULTI])
+        result = dp._parse_hdfc_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        assert alpha["scheme_name"] == "HDFC Test Alpha Fund"
+        assert alpha["manager_pairs"] == [("Amit Ganatra", date(2026, 2, 1))]
+        assert beta["scheme_name"] == "HDFC Test Beta Fund"
+        assert beta["manager_pairs"] == [
+            ("Rakesh Sethia", date(2024, 5, 1)),
+            ("Anand Laddha", date(2021, 7, 1)),
+        ]
+
+    def test_never_leaks_fund_manager_label_into_name_without_yen_marker(self) -> None:
+        # Regression for the real 2026-07-11 bug: pages that omit the "¥"
+        # footnote must still extract a clean manager name, never
+        # "FUND MANAGER Rakesh Sethia".
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_hdfc_compilation(_FakeReader([_HDFC_SCHEME_B_MULTI]))
+        names = [name for name, _ in result[0]["manager_pairs"]]
+        assert names == ["Rakesh Sethia", "Anand Laddha"]
+        assert not any("FUND MANAGER" in n for n in names)
+
+
+_UTI_SUMMARY_PAGE = (
+    "79\n"
+    "FUND MANAGER SUMMARY\n"
+    "Sr. No Name of the Fund Manager Funds Managed Performance data refer page  no.\n"
+    "1 Mr. Test Manager UTI Test Alpha Fund (Earlier Known as UTI Old Alpha Fund)@ 08\n"
+    "UTI Test Beta Fund 09\n"
+)
+_UTI_SCHEME_A = (
+    "01\n"
+    "The objective of the scheme is to generate long term capital appreciation.\n"
+    "15th October, 1986\n"
+    "BSE 100 TRI\n"
+    "Mr. Test Manager, B.Com, CA\n"
+    "Managing the scheme since Sep 2022\n"
+    "Total Exp: 19 Yrs\n"
+    "Investment Objective\n"
+    "Date of inception/allotment\n"
+    "Benchmark Index\n"
+    "Fund Manager\n"
+    "Plans/Option (Regular/Direct)\n"
+    "UTI TEST ALPHA FUND (Erstwhile UTI Old Alpha Fund)\n"
+    "An open-ended equity scheme.\n"
+    "Past performance may or may not be sustained in future. The Scheme is "
+    "currently managed by Mr. Test Manager since Sep-2022."
+)
+# Two managers, joined with the SAME "Mr. X since <date>, Mr. Y Managing the
+# scheme since <date2>" phrasing the trailing disclaimer paragraph restates —
+# the real 2026-07-11 bug produced a bogus extra "manager" out of that prose.
+_UTI_SCHEME_B_MULTI = (
+    "02\n"
+    "Some other objective.\n"
+    "Mr. Alpha One - B.Com\n"
+    "Managing the scheme since Jan 2020\n"
+    "Total Exp: 10 Yrs\n"
+    "Mr. Beta Two, CFA\n"
+    "Managing the scheme since Feb 2021\n"
+    "Total Exp: 8 Yrs\n"
+    "Fund Manager\n"
+    "UTI TEST BETA FUND\n"
+    "An open ended debt scheme.\n"
+    "Past performance may or may not be sustained in future. The scheme is "
+    "managed by Mr. Alpha One since Jan-2020, Mr. Beta Two Managing the "
+    "scheme since Feb-2021."
+)
+_UTI_NON_SCHEME_PAGE = (
+    "UTI MUTUAL FUND IN MEDIA\nAmit Premchandani Senior Vice President and Fund Manager"
+)
+
+
+class TestFactsheetCompilationUti:
+    def test_splits_two_schemes_using_summary_lookup_and_fallback(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader(
+            [_UTI_SUMMARY_PAGE, _UTI_NON_SCHEME_PAGE, _UTI_SCHEME_A, _UTI_SCHEME_B_MULTI]
+        )
+        result = dp._parse_uti_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        # Summary-table Title Case wins over the ALL-CAPS banner (and the
+        # "(Erstwhile ...)" annotation is stripped) — case matters because
+        # pg_trgm similarity is case-sensitive (2026-07-11 finding).
+        assert alpha["scheme_name"] == "UTI Test Alpha Fund"
+        assert alpha["manager_pairs"] == [("Test Manager", date(2022, 9, 1))]
+        # Not in the summary lookup — falls back to "UTI " + title-cased rest.
+        assert beta["scheme_name"] == "UTI Test Beta Fund"
+        assert beta["manager_pairs"] == [
+            ("Alpha One", date(2020, 1, 1)),
+            ("Beta Two", date(2021, 2, 1)),
+        ]
+
+    def test_disclaimer_prose_never_leaks_a_bogus_manager(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_B_MULTI]))
+        assert len(result[0]["manager_pairs"]) == 2  # not 3+ from the trailing prose
+
+    def test_summary_lookup_handles_manager_prefixed_first_line(self) -> None:
+        # The FIRST scheme under each manager shares its physical line with
+        # "<Sr No> Mr. <Manager Name>" — `.startswith("UTI")` silently
+        # dropped it (real 2026-07-11 bug); `.find("UTI")` must not.
+        from dhanradar.mf.disclosure_parsers import _uti_manager_summary_lookup
+
+        lookup = _uti_manager_summary_lookup(_UTI_SUMMARY_PAGE)
+        assert lookup["UTI TEST ALPHA FUND"] == "UTI Test Alpha Fund"
+        assert lookup["UTI TEST BETA FUND"] == "UTI Test Beta Fund"
+
+
+_AXIS_SCHEME_A_MULTI = (
+    "AXIS TEST ALPHA FUND\n"
+    "INVESTMENT OBJECTIVE: To achieve long term capital appreciation.\n"
+    "Axis Test Alpha Fund - Regular Plan - Growth Option -4.48% 9,553\n"
+    "Past performance may or may not be sustained in future . Different "
+    "plans have different expense structure . Test One is managing the "
+    "scheme since 23rd November 2016 and he manages 6 schemes of Axis "
+    "Mutual Fund & Test Two is managing the scheme since 4th November 2024 "
+    "and he manages 8 schemes of Axis Mutual Fund . Please refer to "
+    "annexure on Page 102 for performance of all schemes managed by the "
+    "fund manager ."
+)
+# No "Regular Plan - Growth Option" row (e.g. a single-NAV ETF) — falls back
+# to the ALL-CAPS banner, Title-Cased.
+_AXIS_SCHEME_B_ETF = (
+    "AXIS TEST GAMMA FUND\n"
+    "Some objective text.\n"
+    "Past performance may or may not be sustained in future. Different "
+    "plans have different expense structure. Test Three is managing the "
+    "scheme since 1st March 2024 and she manages 4 schemes of Axis Mutual "
+    "Fund. Please refer to annexure on Page 102 for performance of all "
+    "schemes managed by the fund manager."
+)
+_AXIS_NON_SCHEME_PAGE = "EQUITY REVIEW\nMarket commentary with no manager information at all."
+
+
+class TestFactsheetCompilationAxis:
+    def test_splits_two_schemes_and_skips_non_scheme_page(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_AXIS_NON_SCHEME_PAGE, _AXIS_SCHEME_A_MULTI, _AXIS_SCHEME_B_ETF])
+        result = dp._parse_axis_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        assert alpha["scheme_name"] == "Axis Test Alpha Fund"
+        assert alpha["manager_pairs"] == [
+            ("Test One", date(2016, 11, 1)),
+            ("Test Two", date(2024, 11, 1)),
+        ]
+        assert beta["scheme_name"] == "Axis Test Gamma Fund"
+        assert beta["manager_pairs"] == [("Test Three", date(2024, 3, 1))]
+
+    def test_disclaimer_prefix_never_leaks_into_first_manager_name(self) -> None:
+        # Regression for the real 2026-07-11 bug: an unbounded name char
+        # class consumed the ENTIRE preceding disclaimer sentence
+        # ("Past performance ... expense structure . <Name>") as part of
+        # the first manager's captured name.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_axis_compilation(_FakeReader([_AXIS_SCHEME_A_MULTI]))
+        first_name = result[0]["manager_pairs"][0][0]
+        assert first_name == "Test One"
+        assert "Past performance" not in first_name
+
+
+class TestFactsheetCompilationDispatch:
+    def test_unrecognized_amc_fails_closed(self, monkeypatch) -> None:
+        import pypdf
+
+        from dhanradar.mf import disclosure_parsers as dp
+
+        monkeypatch.setattr(pypdf, "PdfReader", lambda _buf: _FakeReader([_AXIS_SCHEME_A_MULTI]))
+        assert dp.parse_factsheet_compilation(b"%PDF-fake", "SOME_OTHER_AMC") == []
+        assert dp.parse_factsheet_compilation(b"%PDF-fake", None) == []
+
+    def test_unreadable_pdf_fails_closed(self) -> None:
+        from dhanradar.mf.disclosure_parsers import parse_factsheet_compilation
+
+        assert parse_factsheet_compilation(b"not a pdf at all", "HDFC") == []
+
+    def test_dispatches_to_the_right_amc_extractor(self, monkeypatch) -> None:
+        import pypdf
+
+        from dhanradar.mf import disclosure_parsers as dp
+
+        monkeypatch.setattr(pypdf, "PdfReader", lambda _buf: _FakeReader([_HDFC_SCHEME_A]))
+        result = dp.parse_factsheet_compilation(b"%PDF-fake", "HDFC")
+        assert result and result[0]["scheme_name"] == "HDFC Test Alpha Fund"
+
+    def test_sniff_scans_first_pages_and_recognizes_each_layout(self, monkeypatch) -> None:
+        import pypdf
+
+        from dhanradar.mf.disclosure_parsers import looks_like_factsheet_compilation
+
+        for page_text in (_HDFC_SCHEME_A, _UTI_SCHEME_A, _AXIS_SCHEME_A_MULTI):
+            monkeypatch.setattr(pypdf, "PdfReader", lambda _buf, t=page_text: _FakeReader([t]))
+            assert looks_like_factsheet_compilation(b"%PDF-fake")
+
+    def test_sniff_rejects_non_compilations(self) -> None:
+        from dhanradar.mf.disclosure_parsers import looks_like_factsheet_compilation
+
+        assert not looks_like_factsheet_compilation(b"PK\x03\x04 xlsx")
+        assert not looks_like_factsheet_compilation(b"%PDF-1.7 garbage without markers")

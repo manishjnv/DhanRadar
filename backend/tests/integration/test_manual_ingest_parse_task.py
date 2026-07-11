@@ -934,3 +934,96 @@ async def test_fund_performance_writes_both_fields_to_all_plan_variants(db_sessi
     row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
     assert row.status == "parsed"
     # "FP Unknown Fund" resolved nothing — resolved=1 of 2 is still a parse.
+
+
+# ---------------------------------------------------------------------------
+# factsheet_compilation (2026-07-11) — whole-AMC factsheet PDFs (HDFC/UTI/
+# AXIS): manager history only, looped per scheme the splitter found. Real
+# resolver (pg_trgm) and real writer/dedup run end to end; only the PDF
+# byte-decode seam (parse_factsheet_compilation itself, unit-tested against
+# real-file-shaped fixtures in test_disclosure_parsers.py) is patched, same
+# convention as the scheme_master_pdf tests above.
+# ---------------------------------------------------------------------------
+
+
+async def test_factsheet_compilation_writes_manager_history_and_dedups_on_reingest(
+    db_session, monkeypatch
+):
+    from datetime import date
+
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.mf import disclosure_parsers as dp
+    from dhanradar.models.mf import MfFund, MfFundManagerHistory
+
+    isin = "INF200KCOMP1"
+    db_session.add(
+        MfFund(isin=isin, scheme_name="HDFC Test Alpha Fund", amc_name="HDFC MUTUAL FUND")
+    )
+    await db_session.commit()
+
+    records = [
+        {
+            "scheme_name": "HDFC Test Alpha Fund",
+            "manager_pairs": [("Amit Ganatra", date(2026, 2, 1))],
+        }
+    ]
+    monkeypatch.setattr(dp, "looks_like_factsheet_compilation", lambda data: True)
+    monkeypatch.setattr(dp, "parse_factsheet_compilation", lambda data, amc: records)
+
+    file_id = await _insert_pending_bytes(
+        db_session, filename="HDFC MF Factsheet - May 2026.pdf", data=b"%PDF-fake"
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result.startswith("parsed: factsheet_compilation")
+    db_session.expire_all()
+    rows = (
+        (
+            await db_session.execute(
+                sa_select(MfFundManagerHistory).where(MfFundManagerHistory.scheme_uid == isin)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].manager_name == "Amit Ganatra"
+    assert rows[0].start_date == date(2026, 2, 1)
+
+    # Re-ingest the SAME file (reset to pending, as a real re-drop would be
+    # re-enqueued after a status reset) — the manager row must NOT duplicate.
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    row.status = "pending"
+    await db_session.commit()
+    result2 = await mi._parse_pipeline(file_id)
+
+    assert result2.startswith("parsed: factsheet_compilation")
+    db_session.expire_all()
+    rows2 = (
+        (
+            await db_session.execute(
+                sa_select(MfFundManagerHistory).where(MfFundManagerHistory.scheme_uid == isin)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows2) == 1  # still exactly one row — zero duplicates
+
+
+async def test_factsheet_compilation_unrecognized_layout_marks_unsupported(db_session, monkeypatch):
+    from dhanradar.mf import disclosure_parsers as dp
+
+    monkeypatch.setattr(dp, "looks_like_factsheet_compilation", lambda data: True)
+    monkeypatch.setattr(dp, "parse_factsheet_compilation", lambda data, amc: [])
+
+    file_id = await _insert_pending_bytes(
+        db_session, filename="HDFC MF Factsheet - May 2026.pdf", data=b"%PDF-fake"
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result == "unsupported: factsheet_compilation_layout_unrecognized"
+    db_session.expire_all()
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "unsupported"

@@ -141,6 +141,7 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
         # writer; every OTHER PDF keeps the contract-§2 archive behavior
         # (no fake parsing, no OCR).
         from dhanradar.mf.disclosure_parsers import (
+            looks_like_factsheet_compilation,
             looks_like_factsheet_pdf,
             looks_like_scheme_master_pdf,
         )
@@ -156,6 +157,14 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
         if looks_like_factsheet_pdf(data):
             return await _parse_special_class(
                 file_id, "factsheet_pdf", data, original_filename, amc_hint
+            )
+        # Whole-AMC factsheet COMPILATION PDFs (HDFC/UTI/AXIS layouts,
+        # 2026-07-11) carry the same MANAGER field, one file per AMC instead
+        # of one file per scheme — checked after factsheet_pdf so an ICICI
+        # per-scheme file (matched above) is never re-classified here.
+        if looks_like_factsheet_compilation(data):
+            return await _parse_special_class(
+                file_id, "factsheet_compilation", data, original_filename, amc_hint
             )
         await _mark(file_id, "archived")
         return "archived: pdf_saved_for_later"
@@ -473,6 +482,67 @@ async def _apply_file_class(
             await db.commit()
         resolved = 1 if (canonical_isin or all_isins) else 0
         return parsed.get("aum_as_of"), updates, resolved
+
+    if file_class == "factsheet_compilation":
+        # Whole-AMC factsheet compilation (HDFC/UTI/AXIS layouts,
+        # 2026-07-11): manager history ONLY, looped over every scheme
+        # section the splitter found — reuses the EXACT same resolve +
+        # dedup pattern the single-scheme 'factsheet_pdf' branch above uses
+        # per scheme, never a second writer. AUM/exit-load/min-lumpsum are
+        # deliberately not written here (not extracted by the parser —
+        # see disclosure_parsers.py's compilation-splitter docstring).
+        from dhanradar.mf.disclosure_parsers import parse_factsheet_compilation
+
+        if amc_name is None:
+            return None, None, 0
+        records = parse_factsheet_compilation(data, amc_name)
+        if not records:
+            return None, None, 0
+
+        updates = 0
+        resolved = 0
+        async with TaskSessionLocal() as db:
+            for rec in records:
+                scheme_name = rec.get("scheme_name")
+                manager_pairs = rec.get("manager_pairs") or []
+                if not scheme_name or not manager_pairs:
+                    continue
+                isin_map = await _resolve_scheme_isins({scheme_name}, amc_name)
+                canonical_isin = isin_map.get(scheme_name)
+                if not canonical_isin:
+                    regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(
+                        scheme_name, amc_name
+                    )
+                    plan_isins = regular_isins + direct_isins
+                    canonical_isin = plan_isins[0] if plan_isins else None
+                if not canonical_isin:
+                    continue
+                resolved += 1
+                existing = await db.execute(
+                    sa_text(
+                        "SELECT manager_name, start_date FROM mf.fund_manager_history "
+                        "WHERE scheme_uid = :i"
+                    ),
+                    {"i": canonical_isin},
+                )
+                existing_tuples = {(row[0], row[1]) for row in existing}
+                new_rows = [
+                    {
+                        "scheme_uid": canonical_isin,
+                        "manager_name": name,
+                        "start_date": start,
+                        "end_date": None,
+                        "source": amc_name,
+                        "run_id": run_id,
+                    }
+                    for name, start in manager_pairs
+                    if (name, start) not in existing_tuples
+                ]
+                if new_rows:
+                    await db.execute(pg_insert(MfFundManagerHistory).values(new_rows))
+                    updates += len(new_rows)
+            await db.commit()
+        return None, updates, resolved
 
     if file_class == "fund_performance":
         # AMFI "Fund Performance" export (multi-AMC, per SEBI category) —
