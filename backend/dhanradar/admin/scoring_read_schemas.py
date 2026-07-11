@@ -30,9 +30,11 @@ class EngineVersionRecord(BaseModel):
 class CoverageInfo(BaseModel):
     # Rows in mf.mf_funds — one per plan-variant ISIN (Direct/Regular etc.).
     total_funds: int
-    # Distinct schemes (plan variants collapsed) — matches the AMC Coverage page.
+    # Distinct schemes (plan variants collapsed, models/mf.py SCHEME_KEY) —
+    # matches the AMC Coverage page and industry counting.
     total_schemes: int = 0
-    # Distinct funds carrying a label in the latest nightly ranking run.
+    # Distinct SCHEMES with a label in the latest nightly ranking run
+    # (scheme-deduped like total_schemes, so the two tiles compare 1:1).
     labelled_funds: int = 0
 
 

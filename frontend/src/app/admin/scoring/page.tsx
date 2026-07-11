@@ -440,10 +440,10 @@ export default function AdminScoringPage() {
               sub="Plan variants collapsed — matches the AMC Coverage page"
             />
             <StatCard
-              title="Funds With a Current Label"
+              title="Schemes With a Current Label"
               value={modelQ.data.coverage.labelled_funds.toLocaleString('en-IN')}
               status={modelQ.data.coverage.labelled_funds > 0 ? 'healthy' : 'warning'}
-              sub="Labelled in the latest nightly scoring run"
+              sub="Labelled in the latest nightly run — counted like Distinct Schemes"
             />
           </div>
         )}

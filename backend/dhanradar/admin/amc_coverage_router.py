@@ -67,6 +67,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.mf import (
+    SCHEME_KEY,
     MfFund,
     MfFundConstituent,
     MfFundManagerHistory,
@@ -285,12 +286,10 @@ def _compute_staleness(
     return latest.isoformat(), (today - latest).days
 
 
-# A scheme group key: the taxonomy-derived clean name (already strips
-# plan/option/frequency noise so Growth/IDCW-Daily/Direct/Regular ISINs of the
-# SAME scheme collapse together), falling back to the ISIN for the rare row
-# with no derived short name — never groups two DIFFERENT schemes together,
-# only variants of the same one.
-_SCHEME_KEY = func.coalesce(MfFund.fund_name_short, MfFund.isin)
+# The scheme group key is now the platform-wide canonical SCHEME_KEY
+# (models/mf.py — one definition, founder counting rule 2026-07-10); the
+# private alias survives for this module's many internal references.
+_SCHEME_KEY = SCHEME_KEY
 
 
 async def _covered_by_amc(db: AsyncSession, predicate) -> dict[str, int]:

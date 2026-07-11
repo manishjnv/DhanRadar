@@ -30,6 +30,7 @@ from dhanradar.mf.risk import (
 # threshold, one place (mirrors the row-level guard already live in fund_explorer_list).
 from dhanradar.mf.router import _MIN_NAV_POINTS_1Y, _MIN_NAV_POINTS_3Y
 from dhanradar.models.mf import (
+    SCHEME_KEY,
     MfCategoryFlows,
     MfCategoryStats,
     MfFund,
@@ -759,10 +760,13 @@ async def get_fund_people(session: AsyncSession, isin: str) -> tuple[dict, dict]
     manager_changes_5y = sum(1 for r in rows if r.end_date is not None and r.end_date >= cutoff)
     people = {"managers": managers, "manager_changes_5y": manager_changes_5y}
 
+    # scheme_count is DISTINCT schemes (plan variants collapsed — models/mf.py
+    # SCHEME_KEY), the way SEBI/AMFI and every consumer app count funds; the
+    # raw ISIN row count read ~2.6× inflated on the public AMC card.
     amc_row = (
         await session.execute(
             select(
-                func.count(MfFund.isin),
+                func.count(func.distinct(SCHEME_KEY)),
                 func.count(func.distinct(MfFund.sebi_category)),
             ).where(MfFund.amc_name == fund.amc_name)
         )
