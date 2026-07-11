@@ -1780,7 +1780,18 @@ async def _nav_daily_pipeline_body(stats) -> str:
                         "fund_name_short": insert(MfFund).excluded.fund_name_short,
                         "idcw_frequency": insert(MfFund).excluded.idcw_frequency,
                         "is_segregated": insert(MfFund).excluded.is_segregated,
-                        "benchmark_index": insert(MfFund).excluded.benchmark_index,
+                        # Never overwrite a real benchmark_index with NULL: this feed only
+                        # derives a non-null value for index funds matched against
+                        # BENCHMARK_REGISTRY (see _navrows_to_fund_upserts docstring) — every
+                        # other fund's incoming value is NULL by construction. Without this
+                        # guard, this nightly upsert silently erased the AMFI Fund-Performance
+                        # benchmark names PR #544 ingests for ALL funds (RCA 2026-07-11:
+                        # 8,264 populated rows -> 301). COALESCE mirrors the isin2 guard in
+                        # mf_scheme_master_refresh (mf_scheme_master.py) — incoming wins when
+                        # non-null, existing survives when incoming is NULL.
+                        "benchmark_index": func.coalesce(
+                            insert(MfFund).excluded.benchmark_index, MfFund.benchmark_index
+                        ),
                         # Keep the earliest date seen — LEAST ignores NULL so a NULL
                         # existing launch_date gets replaced by the incoming nav_date.
                         "launch_date": func.least(
