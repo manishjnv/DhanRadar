@@ -397,6 +397,43 @@ def looks_like_factsheet_pdf(data: bytes) -> bool:
     return "managing this fund since" in first.lower() and "aum as on" in first.lower()
 
 
+_COMPILATION_SNIFF_PAGES = 20
+
+
+def looks_like_factsheet_compilation(data: bytes) -> bool:
+    """CONTENT sniff for a whole-AMC factsheet COMPILATION PDF (one file,
+    every scheme in the AMC) — verified 2026-07-11 against the real HDFC/
+    UTI/AXIS May-June 2026 files, each with a distinct but stable per-scheme
+    manager anchor: HDFC's "Name Since Total Exp" table header, UTI's
+    "FUND MANAGER SUMMARY" annexure, AXIS's "...is managing the scheme
+    since...schemes of Axis Mutual Fund" prose. Scans only the first
+    _COMPILATION_SNIFF_PAGES pages — these run 100+ pages, and scanning the
+    whole document on every intake would be wasteful and, on the biggest
+    files, memory-risky on the 640 MB worker — and returns on the first
+    anchor found."""
+    if not data.startswith(b"%PDF"):
+        return False
+    try:
+        import io as _io
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(_io.BytesIO(data))
+        n = min(_COMPILATION_SNIFF_PAGES, len(reader.pages))
+        for i in range(n):
+            text = reader.pages[i].extract_text() or ""
+            if (
+                "Name Since Total Exp" in text
+                or "FUND MANAGER SUMMARY" in text
+                or "Managing the scheme since" in text
+                or "schemes of Axis Mutual Fund" in text
+            ):
+                return True
+    except Exception:  # noqa: BLE001 — unreadable PDF is simply not this class
+        return False
+    return False
+
+
 def parse_factsheet_pdf(data: bytes) -> dict[str, Any]:
     """Per-scheme factsheet PDF → the scheme_master-style dict (ONE file =
     ONE scheme): scheme_name, manager_pairs, aum_crore/aum_as_of (CLOSING
@@ -499,6 +536,318 @@ def _flatten_pdf_lines(data: bytes) -> list[str]:
             if cleaned:
                 lines.append(cleaned)
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Factsheet COMPILATION splitter (2026-07-11) — whole-AMC PDF, every scheme
+# in one file. Reuses the SAME per-scheme output shape parse_factsheet_pdf
+# returns (scheme_name + manager_pairs only — AUM/exit-load/min-lumpsum are
+# deliberately NOT extracted here: those need their own per-layout verified
+# anchors and manager is the metric this class targets, PR body has the
+# per-file yield). Each AMC's layout is genuinely different (real files,
+# verified 2026-07-11) — no shared regex, one small per-AMC extractor each,
+# dispatched by the AMC the caller already detected from the filename.
+# Every extractor walks reader.pages ONE PAGE AT A TIME (never accumulates
+# every page's text before returning) — these run 100+ pages and the box has
+# a 640 MB worker budget (see the memory-guard trap in the runbook).
+# ---------------------------------------------------------------------------
+
+
+def parse_factsheet_compilation(data: bytes, amc_name: str | None) -> list[dict[str, Any]]:
+    """Whole-AMC factsheet compilation PDF -> [{"scheme_name", "manager_pairs"}],
+    one dict per scheme found. `amc_name` is the AMC already detected from the
+    filename by the caller (manual_ingest.py); an unrecognized/undetected AMC
+    fails closed to [] rather than guessing a layout. A scheme's own detail
+    page can legitimately be reprinted earlier in the document as a
+    "featured fund" highlight (confirmed real, AXIS) — de-duplicated by
+    scheme_name, first occurrence wins.
+    """
+    try:
+        import io as _io
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(_io.BytesIO(data))
+    except Exception:  # noqa: BLE001 — unreadable PDF, never a guess
+        return []
+
+    if amc_name == "HDFC":
+        return _parse_hdfc_compilation(reader)
+    if amc_name == "UTI":
+        return _parse_uti_compilation(reader)
+    if amc_name == "AXIS":
+        return _parse_axis_compilation(reader)
+    return []  # unrecognized AMC for this class — fail closed, never guess
+
+
+_HDFC_BANNER_RE = re.compile(r"^\d{1,3}\s*\|\s*[A-Za-z]+\s+\d{4}\s*$")
+# HDFC's per-scheme "FUND MANAGER" table: "Name Since Total Exp" header, then
+# repeating "<Name>[ (<Portfolio qualifier>)] <Month> <DD>, <YYYY> Over <N>
+# years" blocks (verified 2026-07-11, incl. multi-manager schemes like HDFC
+# Balanced Advantage Fund — 5 managers on one page). The name char class
+# excludes ',' and '-' so it naturally stops at the credential/qualifier
+# separator instead of over-consuming into the next word (no explicit month
+# list needed — datetime.strptime is the real validator, same idiom as
+# _MANAGER_SINCE_RE above).
+_HDFC_MANAGER_BLOCK_RE = re.compile(
+    r"([A-Z][A-Za-z.’' ]{1,40}?)\s*(?:\([^)]*\))?\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})"
+    r"\s*Over\s+\d+\s*years?",
+)
+
+
+def _hdfc_scheme_name_from_lines(lines: list[str]) -> str:
+    """The scheme name sits on the line immediately after the running
+    "<page> | <Month> <Year>" banner (verified: every scheme page repeats
+    this banner + name at its own top)."""
+    for i, line in enumerate(lines[:-1]):
+        if _HDFC_BANNER_RE.match(line):
+            cand = lines[i + 1]
+            if len(cand) > 5 and not cand.lower().startswith("for product label"):
+                return cand
+    return ""
+
+
+def _parse_hdfc_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        # Uppercase "FUND MANAGER" is the section header (never the lowercase
+        # "...Dedicated Fund Manager for Overseas Investments" boilerplate
+        # that also appears on continuation pages) — a real anchor, verified
+        # against every one of the ~50 scheme pages sampled.
+        if "FUND MANAGER" not in text or "Name Since Total Exp" not in text:
+            continue
+        lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        scheme_name = _hdfc_scheme_name_from_lines(lines)
+        if not scheme_name or scheme_name in seen:
+            continue
+        flat = " ".join(lines)
+        # Slice strictly AFTER "Name Since Total Exp" (never from "FUND
+        # MANAGER" itself) — some real pages omit the "¥" footnote marker
+        # that would otherwise act as an accidental separator, and without
+        # this the permissive name char class (letters + spaces, needed for
+        # multi-word names) swallows "FUND MANAGER" itself into the first
+        # captured name (caught 2026-07-11 against the real file: "FUND
+        # MANAGER Rakesh Sethia" instead of "Rakesh Sethia").
+        header_pos = flat.find("Name Since Total Exp")
+        end = flat.find("DATE OF ALLOTMENT", header_pos)
+        if header_pos < 0 or end < 0:
+            continue
+        block = flat[header_pos + len("Name Since Total Exp") : end]
+        manager_pairs: list[tuple[str, date]] = []
+        for name, month, _day, year in _HDFC_MANAGER_BLOCK_RE.findall(block):
+            clean_name = " ".join(name.split()).strip(" ,")
+            if not clean_name:
+                continue
+            try:
+                start_date = datetime.strptime(f"01-{month[:3]}-{year}", "%d-%b-%Y").date()
+            except ValueError:
+                continue
+            if (clean_name, start_date) not in manager_pairs:
+                manager_pairs.append((clean_name, start_date))
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
+
+
+# UTI: one scheme per page. Scheme name comes from the ALL-CAPS banner line
+# ("UTI LARGE CAP FUND"), but pg_trgm similarity is case-sensitive and the
+# master's scheme_name is Title Case ("UTI Large Cap Fund") — an ALL-CAPS
+# query would share almost no trigrams with the true row and silently fail
+# to resolve. The "FUND MANAGER SUMMARY" annexure (verified 2026-07-11,
+# pages ~79-80 printed) lists every scheme in the AMC's own Title Case, so
+# it is parsed FIRST into a lookup and used to recover the correct casing;
+# `.title()` is only a fallback for a scheme the summary doesn't cover.
+_UTI_BANNER_LINE_RE = re.compile(r"^UTI\b[A-Z0-9 &\-',.]*$")
+_UTI_SUMMARY_TRAILER_RE = re.compile(r"[@^*\s]*(?:-|\d{1,3})\s*$")
+_UTI_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+# "Mr./Ms./Mrs. <Name>[,-]<credentials...>Managing the scheme since <Month>
+# <Year>" — repeated per co-manager (verified 2026-07-11, incl. 3-manager
+# schemes like UTI Flexi Cap Fund). The name char class excludes ',' and '-'
+# so it stops at the credential separator instead of over-consuming.
+_UTI_MANAGER_RE = re.compile(
+    r"Mr\.?\s+([A-Z][A-Za-z.’' ]{1,40}?)\s*[,\-].{0,120}?"
+    r"Managing the scheme since\s+([A-Za-z]+)[\s-]+(\d{4})",
+)
+_UTI_DISCLAIMER_START = "Past performance may or may not be sustained"
+
+
+def _uti_manager_summary_lookup(text: str) -> dict[str, str]:
+    """Parse the "FUND MANAGER SUMMARY" page(s) into {UPPER(clean name):
+    clean Title-Case name} — the AMC's own scheme-name spelling, ground
+    truth for the whole document. A summary line is "<Sr No> Mr. <Manager
+    Name> <Scheme Name> <page ref>" for the FIRST scheme under a manager and
+    just "<Scheme Name> <page ref>" for every scheme after — `line.find`
+    (not `startswith`) handles both shapes (caught 2026-07-11: `startswith`
+    silently dropped every manager's FIRST scheme, e.g. UTI Flexi Cap Fund)."""
+    lookup: dict[str, str] = {}
+    idx = text.find("FUND MANAGER SUMMARY")
+    if idx < 0:
+        return lookup
+    for raw_line in text[idx:].splitlines():
+        line = raw_line.strip()
+        uti_pos = line.find("UTI")
+        if uti_pos < 0:
+            continue
+        line = line[uti_pos:]
+        line = _UTI_SUMMARY_TRAILER_RE.sub("", line)
+        name = _UTI_PAREN_RE.sub("", line).strip(" @^*")
+        if name:
+            lookup[name.upper()] = name
+    return lookup
+
+
+def _uti_banner_line(lines: list[str]) -> str:
+    """The ALL-CAPS scheme banner, followed within a few lines by the
+    SEBI-mandated "An open ended..." description (verified on every real
+    scheme page; front-matter/media pages that also mention "Fund Manager"
+    never carry this pair). Many banners carry a mixed-case "(Erstwhile <old
+    name>)" annotation — sometimes inline on the same line ("UTI LARGE CAP
+    FUND (Erstwhile UTI Mastershare Unit Scheme)"), sometimes its OWN line
+    right after the banner ("UTI OVERNIGHT FUND" / "(Maturity of 1 day)" /
+    "An open ended..." — 3 separate lines, caught 2026-07-11) — the ALL-CAPS
+    check runs only on the part before any inline annotation, and the
+    description search allows a short gap for a possible annotation line."""
+    for i, line in enumerate(lines[:-1]):
+        head = line.split("(")[0].strip()
+        if not _UTI_BANNER_LINE_RE.match(head):
+            continue
+        # "open-ended" (hyphen) and "open ended" (space) both appear across
+        # real scheme pages (caught 2026-07-11: hyphenated form on UTI
+        # Focused Fund was silently missed) — normalize before checking.
+        if any("open ended" in nxt.lower().replace("-", " ") for nxt in lines[i + 1 : i + 4]):
+            return line
+    return ""
+
+
+def _uti_manager_pairs(flat: str) -> list[tuple[str, date]]:
+    # Bound the search to BEFORE the trailing disclaimer paragraph — it
+    # restates "Mr. <Name> since <date>, Mr. <Name2> ... Managing the scheme
+    # since <date2>" in prose closely enough to false-match the same regex
+    # (caught 2026-07-11: produced a bogus 4th "manager" named "Ajay Tyagi
+    # since Jan" on UTI Flexi Cap Fund). The real structured manager block
+    # always precedes this paragraph.
+    boundary = flat.find(_UTI_DISCLAIMER_START)
+    search_text = flat[:boundary] if boundary > 0 else flat
+    pairs: list[tuple[str, date]] = []
+    for name, month, year in _UTI_MANAGER_RE.findall(search_text):
+        clean = " ".join(name.split()).strip(" ,-")
+        if not clean:
+            continue
+        try:
+            start = datetime.strptime(f"01-{month[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if (clean, start) not in pairs:
+            pairs.append((clean, start))
+    return pairs
+
+
+def _parse_uti_compilation(reader: Any) -> list[dict[str, Any]]:
+    name_lookup: dict[str, str] = {}
+    pages_text: list[str] = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        pages_text.append(text)
+        if "FUND MANAGER SUMMARY" in text:
+            name_lookup.update(_uti_manager_summary_lookup(text))
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for text in pages_text:
+        if "Fund Manager" not in text:
+            continue
+        lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        banner = _uti_banner_line(lines)
+        if not banner:
+            continue
+        clean_banner = _UTI_PAREN_RE.sub("", banner).strip()
+        # Fallback only (the summary lookup misses a genuine scheme-name
+        # spelling difference between the annexure and the banner, e.g.
+        # "and" vs "&"): plain `.title()` mangles "UTI" -> "Uti" since it
+        # treats the whole ALL-CAPS run as one word (caught 2026-07-11).
+        # The banner is guaranteed (by _UTI_BANNER_LINE_RE) to start with
+        # the literal "UTI" token, so keep it and title-case only the rest.
+        scheme_name = name_lookup.get(clean_banner.upper()) or (
+            "UTI " + clean_banner[3:].strip().title()
+        )
+        if scheme_name in seen:
+            continue
+        manager_pairs = _uti_manager_pairs(" ".join(lines))
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
+
+
+# AXIS: one scheme per page. Preferred scheme-name source is the performance
+# table's own Title-Case row ("Axis Large Cap Fund - Regular Plan - Growth
+# Option" — this file is the "Regular Fund Factsheet", so every scheme's
+# Regular-Plan row is present); the ALL-CAPS banner + .title() is only a
+# fallback for a layout the row pattern doesn't cover (e.g. a single-NAV ETF
+# with no plan structure) — same case-sensitivity reasoning as UTI above.
+_AXIS_BANNER_LINE_RE = re.compile(r"^AXIS\b[A-Z0-9 &\-',.]*$")
+_AXIS_SCHEME_NAME_RE = re.compile(
+    r"(Axis\s[A-Za-z0-9&.,’' \-]*?)\s*-\s*Regular Plan\s*-\s*Growth Option"
+)
+# "<Name> is managing the scheme since <Day><st/nd/rd/th> <Month> <Year> and
+# he/she manages <N> schemes of Axis Mutual Fund" — repeated per co-manager,
+# joined by '&' (verified 2026-07-11, incl. 3-manager schemes like Axis
+# Large Cap Fund). The digit in "<N> schemes" between entries prevents the
+# name group from ever bridging into the next manager's name.
+_AXIS_MANAGER_RE = re.compile(
+    r"([A-Z][A-Za-z.’' ]{1,40}?)\s+is managing the scheme since\s+"
+    r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})",
+)
+
+
+def _axis_scheme_name(lines: list[str], flat: str) -> str:
+    m = _AXIS_SCHEME_NAME_RE.search(flat)
+    if m:
+        return " ".join(m.group(1).split()).strip(" -")
+    for line in lines:
+        if _AXIS_BANNER_LINE_RE.match(line):
+            return line.title()
+    return ""
+
+
+def _axis_manager_pairs(flat: str) -> list[tuple[str, date]]:
+    pairs: list[tuple[str, date]] = []
+    for name, _day, month, year in _AXIS_MANAGER_RE.findall(flat):
+        clean = " ".join(name.split()).strip(" ,")
+        if not clean:
+            continue
+        try:
+            start = datetime.strptime(f"01-{month[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if (clean, start) not in pairs:
+            pairs.append((clean, start))
+    return pairs
+
+
+def _parse_axis_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if "is managing the scheme since" not in text:
+            continue
+        lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        flat = " ".join(lines)
+        scheme_name = _axis_scheme_name(lines, flat)
+        if not scheme_name or scheme_name in seen:
+            continue
+        manager_pairs = _axis_manager_pairs(flat)
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
 
 
 def _looks_like_amfi_aaum(data: bytes) -> bool:
