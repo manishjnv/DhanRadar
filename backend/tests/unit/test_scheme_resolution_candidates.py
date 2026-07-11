@@ -85,6 +85,73 @@ def test_default_prefix_unchanged_for_other_amcs():
     assert _amc_scheme_prefixes("MIRAE") == ["Mirae Asset%"]
 
 
+# ---------------------------------------------------------------------------
+# BHARAT Bond ETF/FOF — Edelweiss-managed target-maturity series with no
+# "Edelweiss" prefix in any scheme name (25 real mf_funds rows under
+# amc_name=EDELWEISS, verified 2026-07-12) — the SAME class of gap as
+# BHARAT 22 -> ICICI_PRU above (PR #557's compilation parser splitter
+# already extracts these scheme sections correctly; the 16-pair prod gap was
+# the RESOLVER never being allowed to consider them for EDELWEISS).
+# ---------------------------------------------------------------------------
+
+
+def test_edelweiss_prefixes_include_bharat_bond():
+    prefixes = _amc_scheme_prefixes("EDELWEISS")
+    assert "Edelweiss%" in prefixes
+    assert "BHARAT Bond%" in prefixes
+
+
+def test_bharat22_never_matches_edelweiss_prefix():
+    # MUST-NOT: ICICI's "BHARAT 22 ETF" must never satisfy EDELWEISS's
+    # row-restriction WHERE clause — "BHARAT Bond%" and "BHARAT 22%" are
+    # deliberately distinct literal prefixes, never a bare "BHARAT%".
+    edelweiss_prefixes = _amc_scheme_prefixes("EDELWEISS")
+    icici_prefixes = _amc_scheme_prefixes("ICICI_PRU")
+    assert "BHARAT 22%" not in edelweiss_prefixes
+    assert "BHARAT Bond%" not in icici_prefixes
+    assert not "BHARAT 22 ETF".upper().startswith("BHARAT BOND")
+    assert "BHARAT Bond ETF - April 2030".upper().startswith("BHARAT BOND")
+
+
+def test_shared_prefixes_are_query_gated():
+    # Unit-level MUST-NOT for the CI-caught leak (2026-07-12): the row
+    # restriction alone is NOT enough — pg_trgm similarity between
+    # "BHARAT 22 ETF" and "BHARAT Bond ETF - <maturity>" clears the 0.35
+    # resolver threshold, so with "BHARAT Bond%" unconditionally in
+    # EDELWEISS's WHERE, a BHARAT 22 query resolved to the WRONG fund in
+    # CI's real-Postgres integration run. The gate drops a shared
+    # product-line prefix from the WHERE unless the QUERY itself carries
+    # it — the wrong row never enters the candidate set, so similarity is
+    # never even computed against it.
+    from dhanradar.tasks.mf import _prefixes_for_query
+
+    edel = _amc_scheme_prefixes("EDELWEISS")
+    # Positive: a genuine BHARAT Bond query keeps its shared prefix.
+    assert _prefixes_for_query(edel, "BHARAT Bond ETF - April 2030") == [
+        "Edelweiss%",
+        "BHARAT Bond%",
+    ]
+    # Case-insensitive, mirroring ILIKE semantics.
+    assert _prefixes_for_query(edel, "bharat bond etf - april 2031") == [
+        "Edelweiss%",
+        "BHARAT Bond%",
+    ]
+    # MUST-NOT: a BHARAT 22 query under EDELWEISS drops the shared prefix
+    # entirely — BHARAT Bond rows are excluded BEFORE similarity scoring.
+    assert _prefixes_for_query(edel, "BHARAT 22 ETF") == ["Edelweiss%"]
+    # Ordinary Edelweiss-brand queries also never search BHARAT Bond rows.
+    assert _prefixes_for_query(edel, "Edelweiss Large & Mid Cap Fund") == ["Edelweiss%"]
+
+    icici = _amc_scheme_prefixes("ICICI_PRU")
+    # Reverse direction: the existing ICICI BHARAT 22 path keeps working...
+    assert _prefixes_for_query(icici, "BHARAT 22 ETF") == ["ICICI%", "BHARAT 22%"]
+    # ...while a BHARAT Bond query under ICICI is equally blocked from the
+    # BHARAT 22 rows (same latent hazard, same gate).
+    assert _prefixes_for_query(icici, "BHARAT Bond ETF - April 2030") == ["ICICI%"]
+    # AMCs with no shared prefix pass through untouched.
+    assert _prefixes_for_query(_amc_scheme_prefixes("KOTAK"), "Kotak Flexicap Fund") == ["KOTAK%"]
+
+
 def test_prefix_where_clause_binds_every_prefix():
     sql, binds = _prefix_where_clause(["ICICI%", "BHARAT 22%"])
     assert sql == "(scheme_name ILIKE :p0 OR scheme_name ILIKE :p1)"

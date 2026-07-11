@@ -1058,6 +1058,83 @@ async def test_factsheet_compilation_writes_manager_history_and_dedups_on_reinge
     assert len(rows2) == 1  # still exactly one row — zero duplicates
 
 
+async def test_factsheet_compilation_edelweiss_bharat_bond_resolves_after_prefix_fix(
+    db_session, monkeypatch
+):
+    """Root-cause regression (2026-07-12): PR #557 ops wrote 156/172 real
+    Edelweiss compilation pairs — the 16-pair gap was exactly the 8 BHARAT
+    Bond ETF/FOF sections x 2 managers. The splitter (`parse_factsheet_
+    compilation`) already extracts a BHARAT Bond scheme_name correctly (real
+    layout, no "Edelweiss" prefix at all — see
+    TestFactsheetCompilationEdelweiss.test_bharat_bond_series_falls_back_to_
+    nav_line); the gap was `_resolve_scheme_isins`'s AMC-prefix restriction
+    (`_amc_scheme_prefixes("EDELWEISS")`) never including a BHARAT-Bond-shaped
+    prefix, so the real master row was excluded from the candidate set before
+    similarity was ever computed. Runs the REAL resolver (live pg_trgm), not
+    a monkeypatch — same convention as the HDFC dedup test above."""
+    from datetime import date
+
+    from sqlalchemy import select as sa_select
+
+    from dhanradar.mf import disclosure_parsers as dp
+    from dhanradar.models.mf import MfFund, MfFundManagerHistory
+
+    isin = "INF999KBBOND1"
+    db_session.add(
+        MfFund(
+            isin=isin,
+            scheme_name="BHARAT Bond ETF - April 2030",
+            amc_name="Edelweiss Asset Management Test",
+        )
+    )
+    # A same-session ICICI "BHARAT 22 ETF" row proves the MUST-NOT: it must
+    # never be pulled into EDELWEISS's candidate set despite sharing the
+    # "BHARAT " word prefix.
+    db_session.add(
+        MfFund(
+            isin="INF999KB22ETF",
+            scheme_name="BHARAT 22 ETF",
+            amc_name="ICICI Prudential Test",
+        )
+    )
+    await db_session.commit()
+
+    records = [
+        {
+            "scheme_name": "BHARAT Bond ETF - April 2030",
+            "manager_pairs": [("Test Delta", date(2026, 1, 1))],
+        }
+    ]
+    monkeypatch.setattr(dp, "looks_like_factsheet_compilation", lambda data: True)
+    monkeypatch.setattr(dp, "parse_factsheet_compilation", lambda data, amc: records)
+
+    file_id = await _insert_pending_bytes(
+        db_session, filename="Edelweiss Factsheet June - 26.pdf", data=b"%PDF-fake"
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result.startswith("parsed: factsheet_compilation")
+    db_session.expire_all()
+    rows = (
+        (
+            await db_session.execute(
+                sa_select(MfFundManagerHistory).where(MfFundManagerHistory.scheme_uid == isin)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].manager_name == "Test Delta"
+
+    # MUST-NOT: resolving under amc_name="EDELWEISS" must never match the
+    # sibling ICICI BHARAT 22 row.
+    from dhanradar.tasks.mf import _resolve_scheme_isins
+
+    resolved = await _resolve_scheme_isins({"BHARAT 22 ETF"}, "EDELWEISS")
+    assert resolved == {}
+
+
 async def test_factsheet_compilation_unrecognized_layout_marks_unsupported(db_session, monkeypatch):
     from dhanradar.mf import disclosure_parsers as dp
 

@@ -661,6 +661,17 @@ def looks_like_factsheet_compilation(data: bytes) -> bool:
     managing the scheme since...schemes of Axis Mutual Fund" prose, Kotak's
     per-scheme "Fund Manager*:" label, Edelweiss's "Fund Managers Experience
     Managing Since" table header, ABSL's "Managing the Fund Since:" label.
+    Extended 2026-07-12 for the AMCs' separate PASSIVE/INDEX-fund factsheet
+    siblings (same AMC, a different sub-brochure — verified against the real
+    HDFC/AXIS/MIRAE passive files): AXIS's passive layout carries no "...is
+    managing the scheme since..." prose at all, but every scheme page has its
+    own "Work experience:" label right after the manager's name; MIRAE (a
+    brand-new AMC for this class) prints "Fund Managers :" followed by a
+    "(since <Month> <Day>, <Year>)" parenthetical per manager — checked together
+    (both substrings on the same page) since "Fund Managers :" alone is too
+    generic a label to anchor on by itself. HDFC's own passive/index
+    factsheet reuses the EXACT SAME "Name Since Total Exp" table anchor as
+    its regular factsheet (real per-scheme layout, zero new anchor needed).
     Scans only the first _COMPILATION_SNIFF_PAGES pages — these run 100+
     pages, and scanning the whole document on every intake would be
     wasteful and, on the biggest files, memory-risky on the 640 MB worker —
@@ -687,6 +698,8 @@ def looks_like_factsheet_compilation(data: bytes) -> bool:
                 or "Fund Manager*:" in text
                 or "Fund Managers Experience Managing Since" in text
                 or "Managing the Fund Since:" in text
+                or "Work experience:" in text
+                or ("Fund Managers :" in text and "(since " in text)
             ):
                 return True
     except Exception:  # noqa: BLE001 — unreadable PDF is simply not this class
@@ -843,7 +856,43 @@ def parse_factsheet_compilation(data: bytes, amc_name: str | None) -> list[dict[
         return _parse_edelweiss_compilation(reader)
     if amc_name == "ABSL":
         return _parse_absl_compilation(reader)
+    if amc_name == "MIRAE":
+        return _parse_mirae_compilation(reader)
     return []  # unrecognized AMC for this class — fail closed, never guess
+
+
+# Manager-name trailing-credential strip (2026-07-12), shared post-processing
+# for EVERY factsheet_compilation extractor below. Root cause (live prod wart
+# "Anurag Mittal Bcom", UTI Money Market Fund): the real line reads "Mr.
+# Anurag Mittal Bcom, MSc, CA\nManaging the scheme since Dec 2021" — there is
+# NO separator between the name and the FIRST credential token, so the
+# manager-name regex's stopping literal (a comma) is the one AFTER "Bcom",
+# not before it, and "Bcom" is swallowed into the captured name. Every OTHER
+# credential in the same line ("MSc", "CA") already sits after ITS OWN comma,
+# which the regex correctly stops at — they were never polluted.
+# Verified by running every existing extractor against all 6 real baseline
+# files (HDFC/UTI/AXIS/KOTAK/EDELWEISS/ABSL) and checking every captured name
+# for a trailing token matching a candidate credential list (Bcom/B.Com/BCom/
+# MSc/M.Sc/CA/CFA/CAIA/MBA/PGDM/FRM/ACA/B.E/BE/B.Tech) — "Bcom" on this ONE
+# UTI line is the ONLY hit anywhere in the corpus. The allowlist below is
+# intentionally this narrow — NOT a regex loosening (the name-capturing
+# regexes are untouched); this is a fixed post-hoc token-membership check
+# applied to a name AFTER the existing separator-bounded regex already
+# captured it, so it can only ever REMOVE a known-bad trailing token, never
+# widen what any regex matches.
+_CREDENTIAL_SUFFIX_TOKENS = {"BCOM"}  # normalized: dots removed, upper-cased
+
+
+def _strip_credential_suffix(name: str) -> str:
+    """Drop a trailing academic-credential token the manager-name regex
+    swallowed because the real file has no separator before it (see
+    `_CREDENTIAL_SUFFIX_TOKENS`) — a bare string op on an already
+    comma/whitespace-cleaned name, single-token names are left untouched
+    (never strips a genuine one-word name)."""
+    tokens = name.split()
+    if len(tokens) > 1 and tokens[-1].upper().replace(".", "") in _CREDENTIAL_SUFFIX_TOKENS:
+        return " ".join(tokens[:-1])
+    return name
 
 
 _HDFC_BANNER_RE = re.compile(r"^\d{1,3}\s*\|\s*[A-Za-z]+\s+\d{4}\s*$")
@@ -881,14 +930,25 @@ def _parse_hdfc_compilation(reader: Any) -> list[dict[str, Any]]:
         # Uppercase "FUND MANAGER" is the section header (never the lowercase
         # "...Dedicated Fund Manager for Overseas Investments" boilerplate
         # that also appears on continuation pages) — a real anchor, verified
-        # against every one of the ~50 scheme pages sampled.
-        if "FUND MANAGER" not in text or "Name Since Total Exp" not in text:
+        # against every one of the ~50 scheme pages sampled. Cheap raw-text
+        # filter first (this literal never wraps across a line break).
+        if "FUND MANAGER" not in text:
             continue
         lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        flat = " ".join(lines)
+        # "Name Since Total Exp" checked on the LINE-NORMALIZED flat text, not
+        # raw text — HDFC Gold ETF's real page (Index Solutions passive
+        # factsheet, verified 2026-07-12) wraps the header itself across a
+        # column break ("Name Since Total \nExp"), so a raw-text substring
+        # check silently skipped the whole scheme even though the manager
+        # table is genuinely present. `flat` only ever ADDS matches versus
+        # `text` (whitespace-only normalization), so this can never regress
+        # a page that already matched on raw text.
+        if "Name Since Total Exp" not in flat:
+            continue
         scheme_name = _hdfc_scheme_name_from_lines(lines)
         if not scheme_name or scheme_name in seen:
             continue
-        flat = " ".join(lines)
         # Slice strictly AFTER "Name Since Total Exp" (never from "FUND
         # MANAGER" itself) — some real pages omit the "¥" footnote marker
         # that would otherwise act as an accidental separator, and without
@@ -903,7 +963,7 @@ def _parse_hdfc_compilation(reader: Any) -> list[dict[str, Any]]:
         block = flat[header_pos + len("Name Since Total Exp") : end]
         manager_pairs: list[tuple[str, date]] = []
         for name, month, _day, year in _HDFC_MANAGER_BLOCK_RE.findall(block):
-            clean_name = " ".join(name.split()).strip(" ,")
+            clean_name = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
             if not clean_name:
                 continue
             try:
@@ -1025,7 +1085,7 @@ def _uti_manager_pairs(flat: str) -> list[tuple[str, date]]:
     search_text = flat[:boundary] if boundary > 0 else flat
     pairs: list[tuple[str, date]] = []
     for name, month, year in _UTI_MANAGER_RE.findall(search_text):
-        clean = " ".join(name.split()).strip(" ,-")
+        clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,-"))
         if not clean:
             continue
         try:
@@ -1118,7 +1178,71 @@ def _axis_scheme_name(lines: list[str], flat: str) -> str:
 def _axis_manager_pairs(flat: str) -> list[tuple[str, date]]:
     pairs: list[tuple[str, date]] = []
     for name, _day, month, year in _AXIS_MANAGER_RE.findall(flat):
-        clean = " ".join(name.split()).strip(" ,")
+        clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
+        if not clean:
+            continue
+        try:
+            start = datetime.strptime(f"01-{month[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if (clean, start) not in pairs:
+            pairs.append((clean, start))
+    return pairs
+
+
+# AXIS PASSIVE (2026-07-12): a separate real sibling file ("Axis Passive
+# Factsheet"), one scheme per page, genuinely different layout from the
+# regular factsheet above — no "...is managing the scheme since..." prose and
+# no "- Regular Plan - Growth Option" performance row anywhere on a scheme's
+# own page (verified: those phrases only occur in this file's Scheme-Returns
+# annexure, pages 44-57, never on a per-scheme page). Scheme name is the
+# banner line immediately before the "MONTHLY FACTSHEET" tagline (sometimes
+# 1-2 lines earlier if the name wraps, or if a parenthetical NSE/BSE-code or
+# "(Formerly known as ...)" annotation line sits between them — same
+# skip-parenthetical idiom as Edelweiss/Kotak above). The tagline itself
+# sometimes prints as "MONTHL Y FACTSHEET" (a stray kerning space INSIDE
+# "MONTHLY", verified 2026-07-12 on 3 real pages: NIFTY IT/Healthcare/India
+# Consumption ETF — a raw "MONTHLY FACTSHEET" substring check silently
+# skipped the whole scheme) — matched via a tolerant regex instead of a
+# literal. Manager block is "Mr./Ms./Mrs. <Name>Work experience: <N>
+# years.<He/She> <has been|is> managing <this|the> <fund|scheme> since
+# <Day><ordinal> <Month> <Year>" — pypdf's extraction glues several of these
+# word boundaries with NO space at all (verified: "MalikWork experience:",
+# "15 years.He", "hasbeen managing", "6thMarch 2026" all appear with zero
+# spaces on real pages, while other real pages spell the SAME phrase with
+# normal spaces) — every joint the codebase has seen either glued or spaced
+# uses `\s*` (zero-or-more), never `\s+`. Name length is bounded ({1,40}?)
+# the same as every other AMC's manager regex — "Work experience:" is a
+# real, specific literal that never appears in ordinary prose, so a
+# mid-sentence false start still can't reach it within the bound.
+_AXIS_PASSIVE_FACTSHEET_TAG_RE = re.compile(r"MONTHL\s*Y\s*FACTSHEET")
+_AXIS_PASSIVE_MANAGER_RE = re.compile(
+    r"(?:Mr\.|Ms\.|Mrs\.)\s*([A-Z][A-Za-z.’' ]{1,40}?)Work experience:\s*\d+\s*years\.\s*"
+    r"(?:He|She)\s*(?:has\s*been|is)\s*managing\s*(?:this|the)\s*(?:fund|scheme)\s*since\s*"
+    r"(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]+)\s+(\d{4})"
+)
+
+
+def _axis_passive_scheme_name(lines: list[str]) -> str:
+    parts: list[str] = []
+    for line in lines:
+        m = _AXIS_PASSIVE_FACTSHEET_TAG_RE.search(line)
+        if m:
+            head = line[: m.start()].strip()
+            if head:
+                parts.append(head)
+            break
+        if line.startswith("("):
+            continue  # parenthetical annotation, e.g. "(NSE Symbol: AXISNIFTY)"
+        parts.append(line)
+    name = " ".join(parts).strip()
+    return name if name.startswith("Axis") else ""
+
+
+def _axis_passive_manager_pairs(flat: str) -> list[tuple[str, date]]:
+    pairs: list[tuple[str, date]] = []
+    for name, _day, month, year in _AXIS_PASSIVE_MANAGER_RE.findall(flat):
+        clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
         if not clean:
             continue
         try:
@@ -1135,14 +1259,25 @@ def _parse_axis_compilation(reader: Any) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for page in reader.pages:
         text = page.extract_text() or ""
-        if "is managing the scheme since" not in text:
-            continue
         lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
         flat = " ".join(lines)
-        scheme_name = _axis_scheme_name(lines, flat)
-        if not scheme_name or scheme_name in seen:
+        if "is managing the scheme since" in text:
+            scheme_name = _axis_scheme_name(lines, flat)
+            if not scheme_name or scheme_name in seen:
+                continue
+            manager_pairs = _axis_manager_pairs(flat)
+        elif "Work experience:" in text and _AXIS_PASSIVE_FACTSHEET_TAG_RE.search(text):
+            # Regular-layout pages never reach here (they match the branch
+            # above first — every regular scheme page carries "is managing
+            # the scheme since" on the SAME page as its own "Work experience:"
+            # annexure block, verified 2026-07-12), so this branch only ever
+            # fires on the genuinely different passive-file layout.
+            scheme_name = _axis_passive_scheme_name(lines)
+            if not scheme_name or scheme_name in seen:
+                continue
+            manager_pairs = _axis_passive_manager_pairs(flat)
+        else:
             continue
-        manager_pairs = _axis_manager_pairs(flat)
         if not manager_pairs:
             continue
         out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
@@ -1221,7 +1356,7 @@ def _parse_kotak_compilation(reader: Any) -> list[dict[str, Any]]:
                 except ValueError:
                     continue
                 for name in _KOTAK_NAME_ONLY_RE.findall(names_blob):
-                    clean = " ".join(name.split()).strip(" ,")
+                    clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
                     if clean and (clean, start_date) not in manager_pairs:
                         manager_pairs.append((clean, start_date))
             if not manager_pairs:
@@ -1298,7 +1433,7 @@ def _parse_edelweiss_compilation(reader: Any) -> list[dict[str, Any]]:
         block = flat[anchor + len("Managing Since") : block_end]
         manager_pairs: list[tuple[str, date]] = []
         for name, raw_date in _EDEL_MANAGER_ROW_RE.findall(block):
-            clean = " ".join(name.split()).strip(" ,")
+            clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
             if not clean:
                 continue
             try:
@@ -1350,7 +1485,7 @@ def _parse_absl_compilation(reader: Any) -> list[dict[str, Any]]:
             continue
         manager_pairs: list[tuple[str, date]] = []
         for name, raw_date in _ABSL_MANAGER_ROW_RE.findall(flat):
-            clean = " ".join(name.split()).strip(" ,")
+            clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
             if not clean:
                 continue
             try:
@@ -1359,6 +1494,103 @@ def _parse_absl_compilation(reader: Any) -> list[dict[str, Any]]:
                 continue
             if (clean, start_date) not in manager_pairs:
                 manager_pairs.append((clean, start_date))
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
+
+
+# MIRAE (2026-07-12, brand-new AMC for this class): one scheme per page,
+# verified against the real ~135-page June-2026 passive factsheet. Every
+# scheme's Performance Report section repeats a single clean, well-punctuated
+# summary line — "Fund Managers : Mr./Ms. <Name> (since <Month> <Day>,
+# <Year> )[, Mr./Ms. <Name2> (since <Date2>)]" — the ONLY occurrence of the
+# manager's name paired with a tenure date (an earlier "Fund Managers :"
+# label at the top of the page lists names alone, no date, so anchoring on
+# the "(since " parenthetical naturally skips it). A trailing space before
+# the closing paren is real on some pages ("(since May 09, 2025 )", verified
+# 2026-07-12 on Nifty50 Equal Weight ETF) — `\s*` before `\)` tolerates it.
+# ~9 of the file's 65 real sections (verified: newly-launched schemes under
+# 6 months old, e.g. Nifty 500 Value 50 ETF, BSE India Defence ETF) carry
+# NO Performance Report at all — the page states outright "the scheme is in
+# existence for less than 6 months, hence performance shall not be
+# provided" (SEBI master circular clause 14.2.2) — only the dateless name
+# list survives, so no (name, start_date) pair can be honestly written for
+# them; §8.4 forbids fabricating a date. Scheme name is recovered from the
+# SAME Performance Report table's own header row — "Period <Scheme Name>
+# Scheme Benchmark* Additional Benchmark**" — which prints the AMC's own
+# Title-Case spelling (the page's OTHER banner is ALL-CAPS, and this
+# codebase's pg_trgm resolver is case-sensitive: an ALL-CAPS query shares
+# almost no trigrams with the Title-Case master row, same root cause as the
+# UTI banner-casing fix above) and may wrap across 1-3 lines for a long
+# scheme name — collected up to the bounded, always-present "Scheme
+# Benchmark" stopping literal, never scanned past it. A wrap can also split
+# mid-word at a hyphen ("...G-\nSec ETF", verified on the 8-13 yr G-Sec ETF)
+# — joined WITHOUT an inserted space when the prior fragment ends in "-",
+# unlike every other line join which uses a space.
+_MIRAE_MANAGER_SINCE_RE = re.compile(
+    r"(?:Mr\.|Ms\.|Mrs\.)\s+([A-Z][A-Za-z.’' ]{1,40}?)\s*\(since\s+"
+    r"([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s*\)"
+)
+
+
+def _mirae_join(name: str, seg: str) -> str:
+    if not seg:
+        return name
+    if not name:
+        return seg
+    return name + seg if name.endswith("-") else f"{name} {seg}"
+
+
+def _mirae_scheme_name_from_lines(lines: list[str]) -> str:
+    name = ""
+    collecting = False
+    for line in lines:
+        if not collecting:
+            if not line.startswith("Period "):
+                continue
+            collecting = True
+            line = line[len("Period ") :]
+        if "Scheme Benchmark" in line:
+            name = _mirae_join(name, line.split("Scheme Benchmark")[0].strip(" *"))
+            break
+        name = _mirae_join(name, line.strip(" *"))
+    name = name.strip(" *")
+    return name if name.startswith("Mirae Asset") else ""
+
+
+def _mirae_manager_pairs(flat: str) -> list[tuple[str, date]]:
+    pairs: list[tuple[str, date]] = []
+    # Unlike HDFC/UTI/AXIS (Month+Year only, day forced to 1), MIRAE's real
+    # "(since <Month> <Day>, <Year>)" line states the exact day — keep it
+    # verbatim (§8.4), same convention as Kotak/Edelweiss/ABSL below.
+    for name, month, day, year in _MIRAE_MANAGER_SINCE_RE.findall(flat):
+        clean = _strip_credential_suffix(" ".join(name.split()).strip(" ,"))
+        if not clean:
+            continue
+        try:
+            start = datetime.strptime(f"{day}-{month[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if (clean, start) not in pairs:
+            pairs.append((clean, start))
+    return pairs
+
+
+def _parse_mirae_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if "Fund Managers :" not in text or "(since " not in text:
+            continue
+        lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        flat = " ".join(lines)
+        scheme_name = _mirae_scheme_name_from_lines(lines)
+        if not scheme_name or scheme_name in seen:
+            continue
+        manager_pairs = _mirae_manager_pairs(flat)
         if not manager_pairs:
             continue
         out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
