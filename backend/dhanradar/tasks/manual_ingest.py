@@ -261,7 +261,7 @@ async def _parse_special_class(
         # plan-resolver's bare-prefix strategy stays precise with no AMC
         # scope; see _resolve_scheme_isins_by_plan). Every other class still
         # requires a detected AMC.
-        if amc_name is None and file_class not in ("amfi_aaum", "ter"):
+        if amc_name is None and file_class not in ("amfi_aaum", "ter", "fund_performance"):
             stats.status_override = "skipped"
             await _mark(file_id, "unsupported", error="amc_undetectable")
             return "unsupported: amc_undetectable"
@@ -370,6 +370,43 @@ async def _apply_file_class(
     )
     from dhanradar.models.mf import MfAumHistory, MfFund, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
+
+    if file_class == "fund_performance":
+        # AMFI "Fund Performance" export (multi-AMC, per SEBI category) —
+        # writes the two FACTUAL columns only: primary benchmark name +
+        # validated riskometer band, to EVERY plan/option variant ISIN of
+        # the bare scheme name (both are scheme-level facts, identical
+        # across plans — same bare-prefix resolution the AMFI TER writer
+        # uses). Return columns are never read (parser contract).
+        from dhanradar.mf.disclosure_parsers import parse_fund_performance
+
+        triples = parse_fund_performance(data, ext)
+        if not triples:
+            return None, None, 0
+        resolved = 0
+        updates = 0
+        async with TaskSessionLocal() as db:
+            for scheme_name, bench, band in triples:
+                regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(scheme_name, None)
+                isins = regular_isins + direct_isins
+                if not isins:
+                    continue
+                resolved += 1
+                for isin in isins:
+                    if band:
+                        result = await db.execute(
+                            sa_text("UPDATE mf.mf_funds SET risk_o_meter = :b WHERE isin = :i"),
+                            {"b": band, "i": isin},
+                        )
+                        updates += int(getattr(result, "rowcount", 0) or 0)
+                    if bench:
+                        result = await db.execute(
+                            sa_text("UPDATE mf.mf_funds SET benchmark_index = :b WHERE isin = :i"),
+                            {"b": bench, "i": isin},
+                        )
+                        updates += int(getattr(result, "rowcount", 0) or 0)
+            await db.commit()
+        return None, updates, resolved
 
     if file_class == "amfi_aaum":
         period, triples = parse_amfi_aaum(data, ext)

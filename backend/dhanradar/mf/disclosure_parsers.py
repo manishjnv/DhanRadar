@@ -89,6 +89,8 @@ def classify_file_class(filename: str, data: bytes | None = None) -> str:
     # content is the only reliable signal, same reasoning as scheme_master.
     if data is not None and _looks_like_amfi_aaum(data):
         return "amfi_aaum"
+    if data is not None and _looks_like_fund_performance(data):
+        return "fund_performance"
     low = filename.lower()
     if "aaum" in low or "average asset" in low or "average_asset" in low or "average-asset" in low:
         return "aaum"
@@ -283,6 +285,78 @@ def parse_aaum_annexure(data: bytes, ext: str) -> tuple[date | None, list[tuple[
         if out:
             return period, out
     return None, []
+
+
+def _looks_like_fund_performance(data: bytes) -> bool:
+    """CONTENT sniff for AMFI's "Fund Performance" export (Crisil-powered,
+    one xlsx per SEBI category, ~41 files/quarter): the first rows carry a
+    'Fund Performance' title and a header row with 'Scheme Name',
+    'Benchmark' and 'Riskometer Scheme'. Filename is arbitrary
+    ("Fund-Performance-10-Jul-2026--2221 (3).xlsx"), so only bytes decide.
+    Anything unreadable is simply not this class, never an error."""
+    if not data.startswith(b"PK\x03\x04"):
+        return False
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        title_seen = False
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+            joined = " | ".join(cells).lower()
+            if "fund performance" in joined:
+                title_seen = True
+            if title_seen and "scheme name" in joined and "riskometer scheme" in joined:
+                return True
+            if i > 8:
+                break
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
+def parse_fund_performance(data: bytes, ext: str) -> list[tuple[str, str | None, str | None]]:
+    """AMFI "Fund Performance" export → [(scheme_name, benchmark, risk_band)].
+
+    Extracts ONLY the two factual scheme attributes (primary benchmark name +
+    scheme riskometer, validated VERBATIM against the 6 regulatory band words);
+    every NAV/return column is deliberately never read (house rule: returns
+    are computed from NAV in-house, third-party computed returns are never
+    ingested — see DATA_SOURCES.md §12 entry). Pure, fail-closed [].
+    """
+    results: list[tuple[str, str | None, str | None]] = []
+    for _sheet, rows in _iter_sheets(data, ext):
+        name_ci = bench_ci = risk_ci = None
+        header_idx = None
+        for idx, row in enumerate(rows[:10]):
+            cells = [_s(c) for c in row]
+            for ci, cell in enumerate(cells):
+                low = cell.lower()
+                if low == "scheme name":
+                    name_ci = ci
+                elif low == "benchmark":
+                    bench_ci = ci
+                elif low == "riskometer scheme":
+                    risk_ci = ci
+            if name_ci is not None and bench_ci is not None and risk_ci is not None:
+                header_idx = idx
+                break
+        if header_idx is None or name_ci is None or bench_ci is None or risk_ci is None:
+            continue
+        for row in rows[header_idx + 1 :]:
+            cells = [_s(c) for c in row]
+            name = cells[name_ci] if name_ci < len(cells) else ""
+            if not name:
+                continue
+            bench_raw = cells[bench_ci] if bench_ci < len(cells) else ""
+            bench = bench_raw if bench_raw.upper() not in ("", "NA", "N/A", "-") else None
+            risk_raw = cells[risk_ci] if risk_ci < len(cells) else ""
+            band = _BANDS_LOWER.get(risk_raw.strip().lower())
+            if bench is None and band is None:
+                continue  # nothing factual to write for this row
+            results.append((name, bench, band))
+    return results
 
 
 def _looks_like_amfi_aaum(data: bytes) -> bool:

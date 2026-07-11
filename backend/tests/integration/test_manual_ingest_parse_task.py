@@ -888,3 +888,49 @@ async def test_other_pdfs_still_archive(db_session, monkeypatch):
     db_session.expire_all()
     row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
     assert row.status == "archived"
+
+
+# ---------------------------------------------------------------------------
+# fund_performance writer (2026-07-10) — benchmark + riskometer written to
+# EVERY plan-variant ISIN of the bare scheme name; real DB fields asserted.
+# ---------------------------------------------------------------------------
+
+
+def _build_fund_performance_xlsx() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Crisil Intelligence"])
+    ws.append(["Fund Performance"])
+    ws.append(["Scheme Name", "Benchmark", "Riskometer Scheme", "NAV Regular"])
+    ws.append(["FP Test Large Cap Fund", "Nifty 100 TRI", "Very High", "12.3"])
+    ws.append(["FP Unknown Fund", "Nifty 50 TRI", "High", "9.9"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_fund_performance_writes_both_fields_to_all_plan_variants(db_session):
+    from dhanradar.models.mf import MfFund
+
+    for isin, name in (
+        ("INF200KFP001", "FP Test Large Cap Fund - Regular Plan - Growth"),
+        ("INF200KFP002", "FP Test Large Cap Fund - Direct Plan - Growth"),
+    ):
+        db_session.add(MfFund(isin=isin, scheme_name=name, amc_name="TESTAMC"))
+    await db_session.commit()
+
+    data = _build_fund_performance_xlsx()
+    file_id = await _insert_pending_bytes(
+        db_session, filename="Fund-Performance-10-Jul-2026--9999.xlsx", data=data
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result.startswith("parsed: fund_performance")
+    db_session.expire_all()
+    for isin in ("INF200KFP001", "INF200KFP002"):
+        fund = await db_session.get(MfFund, isin)
+        assert fund.risk_o_meter == "Very High", isin
+        assert fund.benchmark_index == "Nifty 100 TRI", isin
+    row = await db_session.get(MfManualIngestFile, uuid.UUID(file_id))
+    assert row.status == "parsed"
+    # "FP Unknown Fund" resolved nothing — resolved=1 of 2 is still a parse.
