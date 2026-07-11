@@ -24,6 +24,7 @@ from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
 from dhanradar.tasks.mf import (
     _drop_over_covered_funds,
     _extract_sebi_row,
+    _fetch_parse_upsert_files,
     _fiscal_year_str,
     _parse_sebi_xlsx,
     _pick_canonical_plan_isin,
@@ -1177,6 +1178,193 @@ def test_parse_sebi_xlsx_tata_two_digit_year_as_of_date():
 
     assert len(rows) == 1
     assert rows[0]["as_of_month"] == date(2026, 5, 1)
+
+
+def test_parse_sebi_xlsx_zerodha_for_month_year_banner_no_as_on_phrase():
+    """B103/Fix-4: ZERODHA's real SEBI banner (confirmed 2026-07-12 against
+    all 19 live scheme files from assets.zerodhafundhouse.com) reads "MONTHLY
+    PORTFOLIO STATEMENT OF ZERODHA NIFTY 100 ETF FOR JUNE 2026" -- no "as
+    on"/"as of" phrase and no day-of-month anywhere in the file, so the
+    phrase-gate above never even fired and as_of_month stayed None for every
+    row. _upsert_constituents then silently dropped every row (`if
+    row.get("as_of_month") is None: continue`) -- 0 rows written to the DB
+    despite _parse_sebi_xlsx extracting every ISIN/name/weight correctly, the
+    same zero-rows-written failure shape as the TATA/ICICI cases above but on
+    a NEW trigger-phrase gap (the gate itself never opened, not just the
+    date-format regex inside it)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            None,
+            None,
+            "PURSUANT TO REGULATION 59A OF SECURITIES & EXCHANGE BOARD OF "
+            "INDIA (MUTUAL FUNDS) REGULATIONS, 1996",
+        ]
+    )
+    ws.append([None, None, "MONTHLY PORTFOLIO STATEMENT OF ZERODHA NIFTY 100 ETF FOR JUNE 2026"])
+    ws.append([None])
+    ws.append(
+        [
+            None,
+            None,
+            "Name of the Instrument",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to NAV",
+        ]
+    )
+    ws.append([None])
+    ws.append([None, None, "EQUITY & EQUITY RELATED"])
+    ws.append([None, None, "a) Listed/awaiting listing on Stock Exchanges"])
+    ws.append([None, None, "HDFC Bank Limited", "INE040A01034", "Banks", 179572, 1432.894774, 0.0911])
+    ws.append([None, None, "ICICI Bank Limited", "INE090A01021", "Banks", 84005, 1155.23676, 0.0734])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ZERODHA")
+
+    assert len(rows) == 2
+    assert rows[0]["as_of_month"] == date(2026, 6, 1)
+    assert rows[0]["constituent_isin"] == "INE040A01034"
+    assert rows[0]["weight_pct"] == pytest.approx(0.0911)
+    assert rows[1]["constituent_isin"] == "INE090A01021"
+
+
+def test_parse_sebi_xlsx_zerodha_bare_month_year_banner_no_for_keyword():
+    """B103/Fix-4: ZEN50's own file (confirmed 2026-07-12, the 19th real
+    file) drops the word "for" entirely -- "MONTHLY PORTFOLIO STATEMENT OF
+    ZERODHA NIFTY 50 ETF JUNE 2026" -- the one inconsistency among the 19 real
+    files. The fallback anchors "(for) <Month> <YYYY>" to the END of the row
+    (not a bare search anywhere in it), so it still resolves here without
+    ever floating a mid-string date match -- see _max_disclosure_month's
+    target-maturity-scheme-name incident docstring for the real bug class
+    that end-anchoring guards against."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append([None, None, "MONTHLY PORTFOLIO STATEMENT OF ZERODHA NIFTY 50 ETF JUNE 2026"])
+    ws.append([None])
+    ws.append(
+        [
+            None,
+            None,
+            "Name of the Instrument",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to NAV",
+        ]
+    )
+    ws.append([None, None, "HDFC Bank Limited", "INE040A01034", "Banks", 85862, 685.135829, 0.1113])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ZERODHA")
+
+    assert len(rows) == 1
+    assert rows[0]["as_of_month"] == date(2026, 6, 1)
+
+
+def test_parse_sebi_xlsx_zerodha_banner_only_no_holdings_yields_zero_rows():
+    """Negative case: a Zerodha-style banner + header with NO data rows
+    beneath it (a genuinely empty/malformed disclosure) must still yield 0
+    rows -- the as_of_month gate fix must not manufacture holdings out of a
+    banner alone."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append([None, None, "MONTHLY PORTFOLIO STATEMENT OF ZERODHA NIFTY 100 ETF FOR JUNE 2026"])
+    ws.append([None])
+    ws.append(
+        [
+            None,
+            None,
+            "Name of the Instrument",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to NAV",
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "ZERODHA")
+
+    assert rows == []
+
+
+class _FakeConstituentFetchResponse:
+    """Minimal stand-in for an httpx.Response — _fetch_parse_upsert_files only
+    calls `.raise_for_status()`, reads `.headers.get("content-type", ...)` and
+    `.content`."""
+
+    def __init__(self, content: bytes, content_type: str = "") -> None:
+        self.content = content
+        self.headers = {"content-type": content_type}
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+class _FakeConstituentFetchClient:
+    """Minimal stand-in for httpx.AsyncClient — _fetch_parse_upsert_files only
+    calls `await client.get(url, headers=...)`."""
+
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+
+    async def get(self, url, headers=None):  # noqa: ANN001 — test double
+        return _FakeConstituentFetchResponse(self._content)
+
+
+async def test_fetch_parse_upsert_files_logs_parsed_zero_written_outcome(monkeypatch, caplog):
+    """B103/Fix-4 robustness: a file can genuinely PARSE (xlsx opens, rows
+    extracted by _parse_sebi_xlsx) but still have every row dropped
+    downstream in _upsert_constituents (bad as_of_month / unresolved scheme
+    name) -- before this fix that outcome was silently indistinguishable in
+    the logs from a truly-empty file (both just produced total_rows=0, and
+    the file was still counted in `parsed_files`). Assert the dedicated
+    WARNING + outcome=parsed_zero_written line fires whenever
+    _parse_sebi_xlsx returns rows but the upsert writes none, so this failure
+    class shows up in log-based monitoring instead of hiding as a silent
+    0-yield AMC."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append([None, None, "MONTHLY PORTFOLIO STATEMENT OF ZERODHA NIFTY 100 ETF FOR JUNE 2026"])
+    ws.append(
+        [
+            None,
+            None,
+            "Name of the Instrument",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to NAV",
+        ]
+    )
+    ws.append([None, None, "HDFC Bank Limited", "INE040A01034", "Banks", 179572, 1432.894774, 0.0911])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    async def _fake_upsert_writes_zero(parsed_rows, amc_name, run_id=None):
+        return 0, 0  # simulate every extracted row getting dropped downstream
+
+    monkeypatch.setattr("dhanradar.tasks.mf._upsert_constituents", _fake_upsert_writes_zero)
+
+    client = _FakeConstituentFetchClient(buf.getvalue())
+    with caplog.at_level("WARNING"):
+        total_rows, total_aum = await _fetch_parse_upsert_files(
+            client, "ZERODHA", ["https://assets.zerodhafundhouse.com/x.xlsx"]
+        )
+
+    assert total_rows == 0
+    assert total_aum == 0
+    assert any("outcome=parsed_zero_written" in r.message for r in caplog.records)
 
 
 class _FakeStaticResponse:
