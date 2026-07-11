@@ -16,6 +16,7 @@ export function SectionHeader({
   index,
   title,
   tag,
+  badge,
   info,
   className,
 }: {
@@ -24,6 +25,8 @@ export function SectionHeader({
   title: string;
   /** Small accent pill (e.g. "Market Mood"). */
   tag?: string;
+  /** Inline badge slot (e.g. <LiveBadge/>) — renders ON the header line, never below it. */
+  badge?: React.ReactNode;
   /** Muted right-aligned context line (e.g. "684 funds"). */
   info?: React.ReactNode;
   className?: string;
@@ -41,6 +44,7 @@ export function SectionHeader({
           {tag}
         </span>
       )}
+      {badge}
       {info && <span className="ml-auto text-caption text-ink-muted">{info}</span>}
     </div>
   );
