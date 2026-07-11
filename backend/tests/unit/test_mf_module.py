@@ -26,6 +26,7 @@ from dhanradar.tasks.mf import (
     _extract_sebi_row,
     _fetch_parse_upsert_files,
     _fiscal_year_str,
+    _normalize_fraction_weight_groups,
     _parse_sebi_xlsx,
     _pick_canonical_plan_isin,
     parsed_to_snapshot_holdings,
@@ -1615,6 +1616,189 @@ def test_parse_sebi_xlsx_rejects_section_header_as_scheme_name_midfile():
     assert all(r["scheme_name"] == "SBI Test Multi Asset Fund" for r in rows)
 
 
+# --- Item 5 (2026-07-12): EDELWEISS constituent parse depth -------------------
+# Real May-2026 EDELWEISS monthly portfolio file (manual-ingest inbox,
+# 2,840 raw rows) pads a blank row between EVERY asset-class sub-table within
+# ONE scheme's per-scheme sheet (Equity, Debt/Government Securities,
+# Derivatives, Money Market Instruments, TREPS/Reverse Repo, ...) — the SAME
+# blank-row shape EDELWEISS was already known for between header and first
+# holding (see the SBI/repeated-header test above), just recurring. The old
+# unconditional `col_map = {}` on every blank row silently dropped every
+# sub-table after the first (confirmed: sheet "EDBE30" — BHARAT Bond ETF -
+# April 2030 — captured only 88.86% of its own 100% GRAND TOTAL; sheet
+# "EEDGEF" — Edelweiss Large Cap Fund — captured 96.75%, losing Derivatives +
+# Money Market + TREPS + Accrued Interest + Net Receivables entirely).
+def test_parse_sebi_xlsx_edelweiss_multi_section_same_scheme_survives_blank_gap():
+    """Positive: two asset-class sub-tables of the SAME scheme, separated by
+    a blank row and a bare (non-scheme-keyword) section label — no repeated
+    header — must both be captured under the one real scheme_name, weight_pct
+    summing close to the file's own 100%. Matches the real BHARAT Bond ETF /
+    Large Cap Fund shape (Equity/Debt block, blank, Government Securities/
+    Derivatives block, no second header row)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["PORTFOLIO STATEMENT OF EDELWEISS TEST FUND AS ON MAY 31, 2026"])
+    ws.append(["(An open ended scheme investing in test securities)"])
+    ws.append([])
+    ws.append(
+        [
+            "Name of the Instrument",
+            "ISIN",
+            "Rating/Industry",
+            "Quantity",
+            "Market/Fair Value(Rs. In Lacs)",
+            "% to Net Assets",
+            "YIELD",
+        ]
+    )
+    ws.append([])
+    ws.append(["Equity & Equity related"])
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "Banks", 1000, 900.0, 0.90, None])
+    ws.append(["Sub Total", None, None, None, 900.0, 0.90, None])
+    ws.append([])  # blank — no header repeats after this in real EDELWEISS files
+    ws.append(["Government Securities"])
+    ws.append(
+        ["7.10% GOVT OF INDIA RED 18-04-2029", "IN0020220011", "SOVEREIGN", 500, 100.0, 0.10, None]
+    )
+    ws.append(["Sub Total", None, None, None, 100.0, 0.10, None])
+    ws.append([])
+    ws.append(["TOTAL", None, None, None, 1000.0, 1.0, None])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "EDELWEISS")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 2
+    assert all(r["scheme_name"] == "EDELWEISS TEST FUND" for r in holdings)
+    wsum = sum(r["weight_pct"] for r in holdings)
+    assert wsum == pytest.approx(1.0)  # 0.90 + 0.10 — Government Securities not dropped
+
+
+def test_parse_sebi_xlsx_edelweiss_investment_in_fund_label_not_new_scheme():
+    """MUST-NOT: "Investment in Mutual fund" / "Investment in Exchange Traded
+    Fund" are EDELWEISS's own asset-class sub-section labels (confirmed real
+    May-2026 file, sheets EEARBF/EEESSF/EEMAAF/EEMOFF) — both genuinely
+    contain "fund"/"etf", so once a blank-row gap is checked for a new
+    scheme, this label used to satisfy the keyword gate and wrongly hijack
+    `current_scheme`, silently dropping every real holding that followed
+    under the WRONG (garbage) scheme name. Confirmed real: Edelweiss
+    Arbitrage Fund's weight_pct sum was 28.62% without this exclusion vs
+    100.00% with it, purely from 3 real "invested into Edelweiss's own
+    Liquid/Money-Market/Low-Duration funds" rows landing on the wrong
+    scheme."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["PORTFOLIO STATEMENT OF EDELWEISS TEST ARBITRAGE FUND AS ON MAY 31, 2026"])
+    ws.append(["(An open ended scheme investing in arbitrage opportunities)"])
+    ws.append([])
+    ws.append(
+        [
+            "Name of the Instrument",
+            "ISIN",
+            "Rating/Industry",
+            "Quantity",
+            "Market/Fair Value(Rs. In Lacs)",
+            "% to Net Assets",
+            "YIELD",
+        ]
+    )
+    ws.append([])
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "Banks", 1000, 900.0, 0.28, None])
+    ws.append(["Sub Total", None, None, None, 900.0, 0.28, None])
+    ws.append([])
+    ws.append(["Investment in Mutual fund"])
+    ws.append(
+        ["EDELWEISS LIQUID FUND - DIRECT PL -GR", "INF754K01GM4", None, 500, 100.0, 0.07, None]
+    )
+    ws.append(["Sub Total", None, None, None, 100.0, 0.07, None])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "EDELWEISS")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 2
+    # Both rows must stay on the REAL scheme, not "Investment in Mutual fund".
+    assert all(r["scheme_name"] == "EDELWEISS TEST ARBITRAGE FUND" for r in holdings)
+    assert any(r["constituent_name"] == "EDELWEISS LIQUID FUND - DIRECT PL -GR" for r in holdings)
+
+
+def test_parse_sebi_xlsx_edelweiss_grand_total_stops_footer_leaking_as_holdings():
+    """MUST-NOT: the real May-2026 file's per-scheme sheets continue past
+    GRAND TOTAL into a NAV-per-plan-option table and numbered SEBI disclosure
+    notes — a completely different table shape that happens to share the
+    stale holdings col_map once blank rows stop resetting it. Confirmed
+    real: 1,298 such rows (e.g. "Direct Plan Growth Option" paired with a NAV
+    number landing in the ISIN column) got written as fake constituent rows
+    across the May-2026 file before this guard. A GRAND TOTAL row must be the
+    definitive end of extraction for that scheme's table."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["PORTFOLIO STATEMENT OF EDELWEISS TEST FUND AS ON MAY 31, 2026"])
+    ws.append([])
+    ws.append(
+        [
+            "Name of the Instrument",
+            "ISIN",
+            "Rating/Industry",
+            "Quantity",
+            "Market/Fair Value(Rs. In Lacs)",
+            "% to Net Assets",
+            "YIELD",
+        ]
+    )
+    ws.append([])
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "Banks", 1000, 900.0, 1.0, None])
+    ws.append(["GRAND TOTAL", None, None, None, 900.0, 1.0, None])
+    ws.append([])
+    ws.append(["Plan /option (Face Value 10)", "As on", "As on"])
+    ws.append(["Direct Plan Growth Option", 21.9151, 21.9397])
+    ws.append(
+        [
+            "5. Investment in Repo of Corporate Debt Securities during the month ended May 31, 2026",
+            "NIL",
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "EDELWEISS")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 1
+    assert holdings[0]["constituent_name"] == "HDFC Bank Ltd."
+
+
+def test_parse_sebi_xlsx_blank_row_gap_still_splits_genuine_new_scheme():
+    """Regression guard for the reset's ORIGINAL purpose (multi-scheme-per-
+    sheet consolidated files, e.g. UTI): a blank row followed by a REAL new
+    scheme banner (its own "fund"/"scheme" keyword, a DIFFERENT name) must
+    still start a new scheme and a new header — item 5's deferred-reset
+    (`pending_scheme_check`) must not accidentally merge two different
+    schemes' holdings together."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["SCHEME:UTI Test Equity Fund"])
+    ws.append(["Name of the Instrument", "ISIN", "Industry", "Quantity", "Market Value", "% to NAV"])
+    ws.append(["HDFC Bank Ltd.", "INE040A01034", "Banks", 1000, 900.0, 90.0])
+    ws.append([])
+    ws.append(["SCHEME:UTI Test Debt Fund"])
+    ws.append(["Name of the Instrument", "ISIN", "Industry", "Quantity", "Market Value", "% to NAV"])
+    ws.append(
+        ["7.10% GOVT OF INDIA RED 18-04-2029", "IN0020220011", "SOVEREIGN", 500, 100.0, 95.0]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "UTI")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 2
+    scheme_names = {r["scheme_name"] for r in holdings}
+    assert scheme_names == {"UTI Test Equity Fund", "UTI Test Debt Fund"}
+
+
 def test_parse_sebi_xlsx_month_dd_yyyy_no_space_after_comma():
     """ICICI_PRU's per-scheme manual-ingest files (B80, 2026-07-07 triage — 269
     files) banner the as-of date WITHOUT a space after the comma:
@@ -1865,23 +2049,81 @@ def test_drop_over_covered_funds_skips_fund_over_105_pct():
 
 
 # --- B90 (7-AMC enrichment): MOTILAL_OSWAL fixes ------------------------------
-def test_extract_sebi_row_motilal_oswal_singular_percent_header_scaled():
+def test_extract_sebi_row_motilal_oswal_singular_percent_header_recognized():
     """MOTILAL_OSWAL's header reads singular "% to Net Asset" (every other AMC
-    uses a plural/NAV variant already recognized), AND its cell stores the
-    underlying Excel percentage-NUMBER-FORMAT fraction (e.g. 0.008 for a
-    displayed 0.80%) rather than a plain-typed percentage number. Both must be
-    handled, and ONLY for this AMC — a genuinely tiny, plainly-typed
-    percentage from another AMC must not be multiplied by 100."""
+    uses a plural/NAV variant already recognized) — the column-name match
+    alone must still resolve weight_pct."""
     col_map = _col_map("Name of the Instrument", "ISIN", "% to Net Asset", "Market Value")
-    row = ["HDFC Bank Ltd.", "INE040A01034", "0.0079873241569103", "1234.56"]
-    result = _extract_sebi_row(row, col_map, "Motilal Oswal Nifty 50 ETF", "MOTILAL_OSWAL", date(2026, 6, 1))
+    row = ["HDFC Bank Ltd.", "INE040A01034", "11.14", "1234.56"]
+    result = _extract_sebi_row(
+        row, col_map, "Motilal Oswal Nifty 50 ETF", "MOTILAL_OSWAL", date(2026, 6, 1)
+    )
     assert result is not None
-    assert result["weight_pct"] == pytest.approx(0.79873241569103)
+    assert result["weight_pct"] == pytest.approx(11.14)
+
+
+def test_extract_sebi_row_motilal_oswal_not_double_scaled_2026_07_12():
+    """MUST-NOT (item 4c, 2026-07-12, B103-class): a row-level `weight_pct *=
+    100` used to fire unconditionally for MOTILAL_OSWAL on the theory its "%
+    to Net Asset" cell always stores an Excel percentage-format FRACTION.
+    Real files fetched live from motilaloswalmf.com's own AEM API (both
+    May-2026 and June-2026, confirmed 2026-07-12) show the column already
+    holding a plain percentage number (11.14 for an 11.14% HDFC Bank
+    holding), not a <1 fraction — the blind multiply turned every row 100x
+    too large (11.14 -> 1114.0), so every one of the June file's 86 schemes
+    summed to exactly 10000.00% and `_drop_over_covered_funds`'s >105% guard
+    dropped all 6,369 rows (parsed_zero_written). weight_pct must now pass
+    through unmultiplied; `_normalize_fraction_weight_groups` (group-sum
+    based) is the sole place fraction-vs-percent semantics get corrected."""
+    col_map = _col_map("Name of the Instrument", "ISIN", "% to Net Asset", "Market Value")
+    row = ["HDFC Bank Ltd.", "INE040A01034", "11.14", "1234.56"]
+    result = _extract_sebi_row(
+        row, col_map, "Motilal Oswal Nifty 50 ETF", "MOTILAL_OSWAL", date(2026, 6, 1)
+    )
+    assert result is not None
+    assert result["weight_pct"] == pytest.approx(11.14)  # NOT 1114.0
+
+
+def test_motilal_oswal_full_scheme_survives_upsert_pipeline_2026_07_12():
+    """MUST-NOT, end-to-end (item 4c): a realistic MOTILAL_OSWAL scheme whose
+    per-row weight_pct is already percent-scale (summing to ~100 across its
+    holdings, matching the real June-2026 file) must survive both
+    `_normalize_fraction_weight_groups` (must NOT treat a ~100 sum as a
+    fraction-scale group needing ×100) and `_drop_over_covered_funds` (must
+    NOT trip the >105% guard) — i.e. must actually get written, unlike the
+    real 6,369-rows-extracted-0-written failure this regresses against."""
+    col_map = _col_map("Name of the Instrument", "ISIN", "% to Net Asset", "Market Value")
+    # 10 holdings, 10.0% each == 100% total, matching real-file percent scale.
+    batch = []
+    for i in range(10):
+        row = [f"Holding {i}", f"INE{i:06d}0{i % 10}0{i}", "10.0", "50.0"]
+        r = _extract_sebi_row(
+            row, col_map, "Motilal Oswal Nifty 50 ETF", "MOTILAL_OSWAL", date(2026, 6, 1)
+        )
+        assert r is not None
+        batch.append(
+            {
+                "isin": "INF247L01AB0",  # stand-in resolved scheme ISIN
+                "constituent_name": r["constituent_name"],
+                "as_of_month": r["as_of_month"],
+                "constituent_isin": r["constituent_isin"],
+                "sector": r["sector"],
+                "rating": r["rating"],
+                "weight_pct": r["weight_pct"],
+                "market_value_cr": r["market_value_cr"],
+                "source_amc": "MOTILAL_OSWAL",
+            }
+        )
+    batch = _normalize_fraction_weight_groups(batch, "MOTILAL_OSWAL")
+    result = _drop_over_covered_funds(batch, "MOTILAL_OSWAL")
+    assert len(result) == 10  # nothing dropped
+    assert sum(r["weight_pct"] for r in result) == pytest.approx(100.0)
 
 
 def test_extract_sebi_row_other_amc_plain_percent_not_scaled():
     """A different AMC's plainly-typed, genuinely small weight_pct must NOT be
-    multiplied by 100 — the ×100 fix is scoped to MOTILAL_OSWAL only."""
+    multiplied — no AMC-specific row-level scaling exists any more; the
+    shared group-sum normalizer is the only place semantics are corrected."""
     col_map = _col_map("Name of the Instrument", "ISIN", "% to NAV", "Market Value")
     row = ["Net Receivables/(Payables)", "", "0.42", "1234.56"]
     result = _extract_sebi_row(row, col_map, "UTI Equity Fund", "UTI", date(2026, 6, 1))
