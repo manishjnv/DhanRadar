@@ -15,6 +15,7 @@
  */
 
 import * as React from 'react';
+import { cleanSchemeName } from '@/features/mf/explorer-format';
 
 // ---------------------------------------------------------------------------
 // Types — mirrors the backend PortfolioTransparencyResponse schema exactly.
@@ -227,6 +228,7 @@ function FundRow({ fund }: { fund: FundTransparency }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
           <p
+            title={fund.scheme_name}
             style={{
               margin: 0,
               fontFamily: 'var(--dr-font-sans)',
@@ -235,7 +237,7 @@ function FundRow({ fund }: { fund: FundTransparency }) {
               color: 'var(--text)',
             }}
           >
-            {fund.scheme_name}
+            {cleanSchemeName(fund.scheme_name)}
           </p>
           {fund.category && (
             <p

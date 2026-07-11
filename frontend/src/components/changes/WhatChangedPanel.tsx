@@ -15,6 +15,7 @@
  */
 
 import * as React from 'react';
+import { cleanSchemeName } from '@/features/mf/explorer-format';
 
 // ---------------------------------------------------------------------------
 // Types — mirrors the backend PortfolioChangesResponse schema exactly.
@@ -287,7 +288,7 @@ function FreshnessLine({ change }: { change: FundChange }) {
 
 /** One fund change row */
 function ChangeRow({ change }: { change: FundChange }) {
-  const heading = change.scheme_name ?? change.isin;
+  const heading = change.scheme_name ? cleanSchemeName(change.scheme_name) : change.isin;
 
   return (
     <div

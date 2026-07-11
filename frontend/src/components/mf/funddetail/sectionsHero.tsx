@@ -79,7 +79,10 @@ const NAVY_GRADIENT = 'linear-gradient(115deg, var(--dr-navy,#0B1F3A) 0%, #13294
 const EMERALD_GRADIENT = 'linear-gradient(135deg, #052E26 0%, #064E3B 70%)';
 
 export interface FundHead {
+  /** Short display title (fund_name_short); the raw AMFI name never renders as a title. */
   name: string;
+  /** Full legal scheme name — tooltip + accessibility only. */
+  fullName?: string;
   amc: string | null;
   category: string;
   label: Label;
@@ -132,7 +135,7 @@ export function HeroSection({ head, factors }: { head: FundHead; factors: FundFa
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-h2 font-semibold leading-tight tracking-[-0.02em] text-white">{head.name}</h1>
+                <h1 className="text-h2 font-semibold leading-tight tracking-[-0.02em] text-white" title={head.fullName ?? head.name}>{head.name}</h1>
                 {/* dev-verify */}
                 <LiveBadge />
               </div>

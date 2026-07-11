@@ -10,6 +10,7 @@
  * raw snake_case enum, never an advisory verb).
  */
 import { EDU_LABELS } from '@/lib/displayLabel';
+import { fundDisplayTitle, optionDisplay } from './explorer-format';
 import type { FundHead } from './types';
 
 /**
@@ -48,7 +49,15 @@ function labelWord(fund: FundHead): string | null {
 
 /** Build the page <title>/<meta description> from REAL fetched fund.head data. */
 export function buildFundMetadataText(fund: FundHead): FundMetadataText {
-  const title = `${fund.scheme_name} \u2014 NAV, returns, DhanRadar read`;
+  // Short display title (founder rule 2026-07-11) + compact plan/option so the
+  // per-ISIN variants of one scheme still get distinct browser-tab titles.
+  // The full legal scheme_name stays in the description + JSON-LD for
+  // exact-name searches.
+  const variant = [
+    fund.plan_type ? (fund.plan_type === 'direct' ? 'Direct' : 'Regular') : null,
+    optionDisplay(fund),
+  ].filter(Boolean).join(' \u00b7 ');
+  const title = `${fundDisplayTitle(fund)}${variant ? ` (${variant})` : ''} \u2014 NAV, returns, DhanRadar read`;
 
   const parts: string[] = [];
   const category = fund.sebi_category ?? fund.category;
@@ -123,6 +132,7 @@ export function buildFundJsonLd(fund: FundHead, isin: string): Record<string, un
     '@context': 'https://schema.org',
     '@type': 'FinancialProduct',
     name: fund.scheme_name,
+    alternateName: fundDisplayTitle(fund),
     category,
     ...(fund.amc_name ? { provider: { '@type': 'Organization', name: fund.amc_name } } : {}),
     url: `${SITE_URL}/mf/fund/${isin}`,

@@ -13,6 +13,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
+import { cleanSchemeName } from '@/features/mf/explorer-format';
 import { Input, PasswordInput } from '@/components/ui/Input';
 import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_COLOR } from './ui';
 import {
@@ -1516,7 +1517,7 @@ function HoldingsTable({ holdings }: { holdings: Holding[] }) {
                   {/* Fund */}
                   <td className="py-3 pr-4">
                     <div>
-                      <div className="font-semibold text-ink leading-tight max-w-[220px] truncate" title={h.scheme_name}>{h.scheme_name}</div>
+                      <div className="font-semibold text-ink leading-tight max-w-[220px] truncate" title={h.scheme_name}>{cleanSchemeName(h.scheme_name)}</div>
                       <div className="text-[10px] text-ink-muted leading-tight">{h.category ?? '—'}</div>
                     </div>
                   </td>
