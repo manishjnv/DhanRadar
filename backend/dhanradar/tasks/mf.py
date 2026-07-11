@@ -5463,10 +5463,14 @@ def _resolution_candidates(sname: str) -> list[str]:
 # mf.mf_funds — every one carries amc_name=EDELWEISS but a scheme_name with
 # no "Edelweiss" prefix at all) — same class of gap as BHARAT 22 -> ICICI_PRU
 # above, fixed the same way: extend this AMC's prefix list, never touch the
-# resolver logic itself. "BHARAT Bond%" and "BHARAT 22%" are deliberately
-# DIFFERENT literal prefixes (not a bare "BHARAT%") so ICICI's "BHARAT 22
-# ETF" can never satisfy EDELWEISS's row-restriction WHERE clause, and vice
-# versa (see test_bharat22_never_matches_edelweiss_prefix).
+# resolver logic itself. The "BHARAT ..." prefixes are QUERY-GATED (see
+# `_prefixes_for_query` below) — the row-restriction WHERE clause alone is
+# NOT enough to keep the two BHARAT product lines apart, because pg_trgm
+# similarity between "BHARAT 22 ETF" and "BHARAT Bond ETF - <maturity>"
+# clears the resolver's 0.35 threshold (shared "BHARAT"/"ETF" trigrams —
+# proven by the CI integration MUST-NOT test on the first attempt, which
+# shipped the row restriction alone and leaked a BHARAT 22 query onto the
+# BHARAT Bond master row).
 _AMC_PREFIX_OVERRIDES: dict[str, list[str]] = {
     "MIRAE": ["Mirae Asset%"],
     "PPFAS": ["Parag Parikh%"],
@@ -5475,10 +5479,37 @@ _AMC_PREFIX_OVERRIDES: dict[str, list[str]] = {
     "EDELWEISS": ["Edelweiss%", "BHARAT Bond%"],
 }
 
+# Shared brand-less product-line prefixes (CPSE "BHARAT 22" under ICICI_PRU,
+# target-maturity "BHARAT Bond" under EDELWEISS). These are admitted into the
+# row-restriction WHERE only when the QUERY name itself carries the same
+# prefix — gating the cross-product path BEFORE any similarity scoring, in
+# BOTH directions (a "BHARAT Bond ..." query under ICICI_PRU is equally
+# blocked from the "BHARAT 22%" rows). Brand prefixes are never gated: fuzzy
+# matching exists precisely because file spellings drift, but the drift is
+# never at the very first token (the AMC brand), while these shared prefixes
+# ARE the first tokens of their product lines by definition.
+_QUERY_GATED_PREFIXES = frozenset({"BHARAT 22%", "BHARAT Bond%"})
+
 
 def _amc_scheme_prefixes(amc_name: str) -> list[str]:
     """Master scheme-name prefixes for one AMC — pure. "ICICI_PRU" → ICICI%."""
     return _AMC_PREFIX_OVERRIDES.get(amc_name) or [amc_name.split("_")[0] + "%"]
+
+
+def _prefixes_for_query(prefixes: list[str], query_name: str) -> list[str]:
+    """The subset of an AMC's row-restriction prefixes applicable to ONE
+    query name — pure. Brand prefixes always apply; a shared product-line
+    prefix (`_QUERY_GATED_PREFIXES`) applies only when the query itself
+    starts with it (case-insensitive, mirroring ILIKE). Root cause this
+    exists for (CI-caught 2026-07-12): with "BHARAT Bond%" unconditionally
+    in EDELWEISS's WHERE, a "BHARAT 22 ETF" query (ICICI's product)
+    fuzzy-matched the BHARAT Bond master row above the 0.35 pg_trgm
+    threshold and resolved to the WRONG fund. Never empty by construction —
+    every AMC's own brand prefix is un-gated."""
+    q = query_name.casefold()
+    return [
+        p for p in prefixes if p not in _QUERY_GATED_PREFIXES or q.startswith(p[:-1].casefold())
+    ]
 
 
 def _prefix_where_clause(prefixes: list[str]) -> tuple[str, dict[str, str]]:
@@ -5543,7 +5574,13 @@ async def _resolve_scheme_isins_by_plan(
         # ILIKE prefix alone stays precise against the whole master.
         prefix_sql, prefix_binds = "TRUE", {}
     else:
-        prefix_sql, prefix_binds = _prefix_where_clause(_amc_scheme_prefixes(amc_name))
+        # Same query gate as _resolve_scheme_isins: a shared product-line
+        # prefix joins the row WHERE only when this scheme_name carries it —
+        # matters for the 0.6-similarity fallback below, which would
+        # otherwise score the query against the other BHARAT product line.
+        prefix_sql, prefix_binds = _prefix_where_clause(
+            _prefixes_for_query(_amc_scheme_prefixes(amc_name), scheme_name)
+        )
 
     async with TaskSessionLocal() as db:
         rows: Sequence[Any] = []
@@ -5618,7 +5655,6 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
 
     scheme_isin_map: dict[str, str] = {}
     prefixes = _amc_scheme_prefixes(amc_name)
-    prefix_sql, prefix_binds = _prefix_where_clause(prefixes)
     # Margin within which two candidates are considered a genuine tie (not one
     # correct match beating an unrelated fund) — same-scheme plan-variant rows
     # cluster within a few hundredths of each other in practice (e.g. 0.925 vs
@@ -5636,6 +5672,14 @@ async def _resolve_scheme_isins(scheme_names: set[str], amc_name: str) -> dict[s
             # Bonus, ...) are all visible for the canonical-plan tie-break,
             # not just the top 3 by raw score.
             for query_name in _resolution_candidates(sname):
+                # Per-query WHERE: shared product-line prefixes ("BHARAT
+                # Bond%"/"BHARAT 22%") drop out unless the query carries
+                # them — the gate that keeps a BHARAT 22 query from ever
+                # similarity-scoring against a BHARAT Bond row (and vice
+                # versa). See _prefixes_for_query for the CI-caught leak.
+                prefix_sql, prefix_binds = _prefix_where_clause(
+                    _prefixes_for_query(prefixes, query_name)
+                )
                 result = await db.execute(
                     sa_text(
                         "SELECT isin, scheme_name, similarity(scheme_name, :sname) as sim "
