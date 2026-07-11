@@ -5397,6 +5397,19 @@ _SCHEME_RENAME_ALIASES: dict[str, str] = {
     "sbi magnum multicap fund": "SBI Flexicap Fund",
     "sbi magnum children's benefit fund": "SBI Children's Fund - Savings Plan",
     "sbi magnum children's benefit plan": "SBI Children's Fund - Savings Plan",
+    # HSBC rename-alias pass (2026-07-11): the founder's ranked action assumed
+    # HSBC's ~50% AMFI-field gap was legacy L&T-era scheme names (HSBC
+    # absorbed L&T MF in 2022). VERIFIED FALSE — scanned all 47 relevant HSBC
+    # disclosure/AMFI files on prod for "L&T": the only hit is "L&T Finance
+    # Limited" as a PORTFOLIO HOLDING (investee bond issuer) inside HSBC
+    # Liquid Fund, never a scheme banner. No L&T scheme name exists anywhere
+    # in current HSBC data — every scheme is already stored under its current
+    # HSBC name in both mf_funds and AMFI's own files. The real gap (2 of 88
+    # HSBC scheme families) is a SPACING/PLURALIZATION mismatch between
+    # AMFI's Fund-Performance file and mf_funds.scheme_name — not a rename —
+    # reusing this same map since the transform mechanics are identical.
+    "hsbc large & midcap fund": "HSBC Large & Mid Cap Fund",
+    "hsbc mid cap fund": "HSBC Midcap Fund",
 }
 
 # "<Current Name> (formerly known as <Old Name>)" / "<Current> [earlier known
@@ -5502,6 +5515,12 @@ async def _resolve_scheme_isins_by_plan(
     above `_resolve_scheme_isins`'s 0.35) only if the prefix match finds
     nothing, to tolerate minor AMC spelling drift between the TER file's own
     name and `mf_funds.scheme_name`.
+
+    The bare prefix is tried through `_resolution_candidates` (2026-07-11) —
+    same alias/rename map `_resolve_scheme_isins` uses — so a multi-AMC
+    source (amc_name=None, no 0.6-similarity fallback available) isn't
+    stuck with the raw name alone when it's a known spacing/rename variant
+    (e.g. HSBC's "Large & Midcap" vs master's "Large & Mid Cap").
     """
     from sqlalchemy import text as sa_text
 
@@ -5517,14 +5536,18 @@ async def _resolve_scheme_isins_by_plan(
         prefix_sql, prefix_binds = _prefix_where_clause(_amc_scheme_prefixes(amc_name))
 
     async with TaskSessionLocal() as db:
-        result = await db.execute(
-            sa_text(
-                "SELECT isin, scheme_name FROM mf.mf_funds "
-                f"WHERE {prefix_sql} AND scheme_name ILIKE :bare_prefix"
-            ),
-            {"bare_prefix": f"{scheme_name}%", **prefix_binds},
-        )
-        rows = result.fetchall()
+        rows: Sequence[Any] = []
+        for candidate in _resolution_candidates(scheme_name):
+            result = await db.execute(
+                sa_text(
+                    "SELECT isin, scheme_name FROM mf.mf_funds "
+                    f"WHERE {prefix_sql} AND scheme_name ILIKE :bare_prefix"
+                ),
+                {"bare_prefix": f"{candidate}%", **prefix_binds},
+            )
+            rows = result.fetchall()
+            if rows:
+                break
         if not rows and amc_name is not None:
             # The looser 0.6-similarity fallback stays AMC-scoped only — with
             # no AMC filter it could cross-match a different AMC's similar
