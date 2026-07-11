@@ -791,3 +791,131 @@ def test_parse_ter_disclosure_unrecognized_layout_returns_empty():
 
     data = _xlsx(build)
     assert parse_ter_disclosure(data, ".xlsx") == []
+
+
+# ---------------------------------------------------------------------------
+# fund_performance (2026-07-10) — AMFI's Crisil-powered per-category export:
+# ONLY the two factual columns (benchmark + validated riskometer band) are
+# extracted; NAV/return columns are never read (house rule — returns are
+# computed in-house from NAV, never ingested).
+# ---------------------------------------------------------------------------
+
+
+def _fund_performance_xlsx(rows_after_header=None) -> bytes:
+    import io as _io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Crisil Intelligence"])
+    ws.append(["Generated on: 10-Jul-2026 10:47"])
+    ws.append([])
+    ws.append(["Fund Performance"])
+    ws.append(
+        [
+            "Scheme Name",
+            "Benchmark",
+            "Riskometer Scheme",
+            "Riskometer Benchmark",
+            "NAV Date",
+            "NAV Regular",
+            "NAV Direct",
+            "Return 1 Year (%) Regular",
+            "Return 1 Year (%) Direct",
+            "Return 1 Year (%) Benchmark",
+        ]
+    )
+    for row in rows_after_header or [
+        [
+            "Aditya Birla Sun Life Large Cap Fund",
+            "Nifty 100 TRI",
+            "Very High",
+            "Very High",
+            "2026-07-08",
+            510.18,
+            567.41,
+            -4.95,
+            -4.32,
+            -3.70,
+        ],
+        [
+            "Axis Large Cap Fund",
+            "BSE 100 TRI",
+            "VERY HIGH",  # case-insensitive band
+            "Very High",
+            "2026-07-08",
+            58.91,
+            68.33,
+            -4.0,
+            -3.17,
+            -3.99,
+        ],
+        [
+            "Broken Row Fund",
+            "NA",
+            "Not A Real Band",  # nothing factual -> dropped
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+    ]:
+        ws.append(row)
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class TestFundPerformance:
+    def test_sniff_and_classify(self):
+        from dhanradar.mf.disclosure_parsers import classify_file_class
+
+        data = _fund_performance_xlsx()
+        # Filename is arbitrary — only the bytes decide.
+        assert classify_file_class("Fund-Performance-10-Jul-2026--1047.xlsx", data) == (
+            "fund_performance"
+        )
+        assert classify_file_class("whatever (3).xlsx", data) == "fund_performance"
+
+    def test_parses_factual_columns_only(self):
+        from dhanradar.mf.disclosure_parsers import parse_fund_performance
+
+        triples = parse_fund_performance(_fund_performance_xlsx(), ".xlsx")
+        assert triples == [
+            ("Aditya Birla Sun Life Large Cap Fund", "Nifty 100 TRI", "Very High"),
+            ("Axis Large Cap Fund", "BSE 100 TRI", "Very High"),  # band canonicalized
+        ]
+
+    def test_invalid_band_and_na_benchmark_fail_closed(self):
+        from dhanradar.mf.disclosure_parsers import parse_fund_performance
+
+        triples = parse_fund_performance(
+            _fund_performance_xlsx(
+                [
+                    ["X Fund", "NA", "Extremely High", "", "", "", "", "", "", ""],
+                    ["Y Fund", "Nifty 50 TRI", "garbage", "", "", "", "", "", "", ""],
+                ]
+            ),
+            ".xlsx",
+        )
+        # X: no valid benchmark AND no valid band -> dropped entirely.
+        # Y: benchmark kept, band fail-closed None (never guessed).
+        assert triples == [("Y Fund", "Nifty 50 TRI", None)]
+
+    def test_non_performance_workbook_is_not_sniffed(self):
+        from dhanradar.mf.disclosure_parsers import _looks_like_fund_performance
+
+        assert not _looks_like_fund_performance(b"%PDF junk")
+        import io as _io
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        wb.active.append(["Name of the Instrument", "ISIN", "Quantity"])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        assert not _looks_like_fund_performance(buf.getvalue())
