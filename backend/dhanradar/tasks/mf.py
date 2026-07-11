@@ -4113,6 +4113,24 @@ async def _fetch_parse_upsert_files(
             continue
 
         rows, aum_cnt = await _upsert_constituents(parsed, amc_name)
+        if rows == 0:
+            # This is the ZERODHA/B103 failure shape: _parse_sebi_xlsx extracted
+            # real holdings rows (`parsed` is non-empty — the `if not parsed`
+            # branch above didn't fire) but every one was silently dropped
+            # downstream in _upsert_constituents (no as_of_month, or the scheme
+            # name never resolved to an ISIN) -- a file that "parsed
+            # successfully" yet wrote 0 rows, indistinguishable in the existing
+            # logs from a genuinely-empty file. WARNING (not debug) + a
+            # distinct, greppable outcome string so this class of bug shows up
+            # in log-based monitoring instead of hiding as a 0-yield AMC.
+            logger.warning(
+                "mf_constituents_fetch amc=%s outcome=parsed_zero_written url=%s "
+                "extracted %d raw rows but wrote 0 (as_of_month undetected or "
+                "scheme name unresolved)",
+                amc_name,
+                file_url,
+                len(parsed),
+            )
         total_rows += rows
         total_aum += aum_cnt
         parsed_files += 1
@@ -4561,6 +4579,21 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 or "month end" in joined
                 or "as of" in joined
                 or "as on" in joined
+                # ZERODHA (2026-07-12, B103): its SEBI banner reads "MONTHLY
+                # PORTFOLIO STATEMENT OF <scheme> FOR JUNE 2026" — confirmed
+                # against all 19 real scheme files fetched live from
+                # assets.zerodhafundhouse.com. It contains none of the "as
+                # on"/"as of" phrases above, so the gate never fired and
+                # as_of_month stayed None for the whole file; every row was
+                # then silently dropped by _upsert_constituents's `if
+                # row.get("as_of_month") is None: continue` — 0 rows written
+                # despite `_parse_sebi_xlsx` extracting every ISIN/name/weight
+                # correctly. "portfolio statement" is the standard SEBI
+                # Regulation 59A banner phrase (present in every AMC's own
+                # banner row, never in a holdings row), so it's a safe generic
+                # trigger; the actual date is only set below if the new
+                # "for <Month> <YYYY>" fallback regex also matches.
+                or "portfolio statement" in joined
             ):
                 import re
 
@@ -4621,6 +4654,45 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                             as_of_month = (
                                 _dt.strptime(
                                     f"01-{month_m.group(1)[:3]}-{month_m.group(3)}", "%d-%b-%Y"
+                                )
+                                .date()
+                                .replace(day=1)
+                            )
+                        except ValueError:
+                            pass
+                # Fallback: bare "(for) <Month> <YYYY>" at the END of the row
+                # (no day at all) — ZERODHA (2026-07-12, B103) banner:
+                # "MONTHLY PORTFOLIO STATEMENT OF ZERODHA NIFTY 100 ETF FOR
+                # JUNE 2026" (18/19 real scheme files). None of the three
+                # day-anchored formats above can ever match it (there is no
+                # day-of-month anywhere in the banner), so without this
+                # fallback as_of_month stays None forever — same
+                # zero-rows-written failure as the TATA/ICICI cases documented
+                # above. Defaults to day=1 like every other format here.
+                # "for" is OPTIONAL: ZEN50's own file (confirmed 2026-07-12,
+                # the 19th real file) drops it entirely -- "...NIFTY 50 ETF
+                # JUNE 2026". The whole match is anchored to the END of the
+                # row (`$` after `.strip()`) rather than searched anywhere, so
+                # a target-maturity scheme name that embeds its OWN
+                # word+4-digit-year earlier in the SAME banner (e.g. "Nifty
+                # SDL Sep 2027 Index Fund ..."; see _max_disclosure_month's
+                # docstring for the real incident this class of bug caused)
+                # can never be picked up instead of the true trailing
+                # disclosure date -- SEBI's own mandated banner wording always
+                # puts the period last.
+                if as_of_month is None:
+                    for_m = re.search(
+                        r"\b(?:for\s+)?([A-Za-z]+)\s+(\d{4})\s*$",
+                        " ".join(row_strs).strip(),
+                        re.IGNORECASE,
+                    )
+                    if for_m:
+                        try:
+                            from datetime import datetime as _dt
+
+                            as_of_month = (
+                                _dt.strptime(
+                                    f"01-{for_m.group(1)[:3]}-{for_m.group(2)}", "%d-%b-%Y"
                                 )
                                 .date()
                                 .replace(day=1)
