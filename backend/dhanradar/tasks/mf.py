@@ -5457,12 +5457,22 @@ def _resolution_candidates(sname: str) -> list[str]:
 # AMC → master scheme-name ILIKE prefixes. Most AMCs' scheme names start with
 # the AMC's short name (the `split("_")[0] + "%"` default below); the entries
 # here are the verified exceptions. ICICI_PRU additionally owns "BHARAT 22 ETF"
-# (INF109KB15Y7) — a CPSE scheme named without any "ICICI" prefix.
+# (INF109KB15Y7) — a CPSE scheme named without any "ICICI" prefix. EDELWEISS
+# additionally owns the 25 "BHARAT Bond ..." target-maturity ETF/FOF schemes
+# (a real, sponsor-shared product line, verified 2026-07-12 against
+# mf.mf_funds — every one carries amc_name=EDELWEISS but a scheme_name with
+# no "Edelweiss" prefix at all) — same class of gap as BHARAT 22 -> ICICI_PRU
+# above, fixed the same way: extend this AMC's prefix list, never touch the
+# resolver logic itself. "BHARAT Bond%" and "BHARAT 22%" are deliberately
+# DIFFERENT literal prefixes (not a bare "BHARAT%") so ICICI's "BHARAT 22
+# ETF" can never satisfy EDELWEISS's row-restriction WHERE clause, and vice
+# versa (see test_bharat22_never_matches_edelweiss_prefix).
 _AMC_PREFIX_OVERRIDES: dict[str, list[str]] = {
     "MIRAE": ["Mirae Asset%"],
     "PPFAS": ["Parag Parikh%"],
     "ABSL": ["Aditya Birla%"],
     "ICICI_PRU": ["ICICI%", "BHARAT 22%"],
+    "EDELWEISS": ["Edelweiss%", "BHARAT Bond%"],
 }
 
 

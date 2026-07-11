@@ -1049,6 +1049,30 @@ _HDFC_NON_SCHEME_PAGE = (
     "Glossary \n"
     "Sharpe Ratio is a risk to reward ratio, it measures portfolio returns."
 )
+# Real bug (2026-07-12, HDFC Gold ETF / Index Solutions passive factsheet):
+# the "Name Since Total Exp" header itself wraps across a column break
+# ("Name Since Total" / "Exp" on separate lines) — the OLD guard checked the
+# literal against RAW (non-line-normalized) page text and silently skipped
+# the whole scheme even though the manager table is genuinely present. Also
+# exercises a 3-line-wrapped parenthetical manager qualifier.
+_HDFC_SCHEME_C_WRAPPED_HEADER = (
+    "58  |  May 2026 \n"
+    "HDFC Test Gold ETF \n"
+    "An open ended scheme replicating / tracking performance of Gold \n"
+    "FUND MANAGER \n"
+    "Name Since Total \n"
+    "Exp \n"
+    "Test Manager \n"
+    "(Dedicated Fund Manager \n"
+    "for commodities related \n"
+    "investments viz. Gold) \n"
+    "February \n"
+    "02, 2022 \n"
+    "Over 31 \n"
+    "years \n"
+    "DATE OF ALLOTMENT/INCEPTION DATE \n"
+    "August 13, 2010"
+)
 
 
 class TestFactsheetCompilationHdfc:
@@ -1077,6 +1101,14 @@ class TestFactsheetCompilationHdfc:
         names = [name for name, _ in result[0]["manager_pairs"]]
         assert names == ["Rakesh Sethia", "Anand Laddha"]
         assert not any("FUND MANAGER" in n for n in names)
+
+    def test_wrapped_name_since_total_exp_header_still_matches(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_hdfc_compilation(_FakeReader([_HDFC_SCHEME_C_WRAPPED_HEADER]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "HDFC Test Gold ETF"
+        assert result[0]["manager_pairs"] == [("Test Manager", date(2022, 2, 1))]
 
 
 _UTI_SUMMARY_PAGE = (
@@ -1197,6 +1229,21 @@ _UTI_SCHEME_F_CURLY_APOSTROPHE = (
     "UTI CHILDREN’S TEST FUND\n"
     "An open ended fund for investment for children.\n"
 )
+# Live prod wart (2026-07-11, UTI Money Market Fund): "Mr. Anurag Mittal
+# Bcom, MSc, CA" has NO separator between the name and the first credential
+# token — real line, byte-for-byte.
+_UTI_SCHEME_I_CREDENTIAL_NO_SEPARATOR = (
+    "51\n"
+    "Debt objective text.\n"
+    "20th July, 2009\n"
+    "Nifty Money Market Index A-I\n"
+    "Mr. Anurag Mittal Bcom, MSc, CA\n"
+    "Managing the scheme since Dec 2021\n"
+    "Total Exp: 15 Yrs\n"
+    "Fund Manager\n"
+    "UTI TEST THETA FUND\n"
+    "An open ended debt scheme.\n"
+)
 
 
 class TestFactsheetCompilationUti:
@@ -1305,6 +1352,19 @@ class TestFactsheetCompilationUti:
         # "Since" (capital) with a real month/year must also match — the
         # literal is scoped case-insensitive.
         assert result[0]["manager_pairs"] == [("Test Zeta", date(2025, 5, 1))]
+
+    def test_credential_suffix_glued_to_name_is_stripped(self) -> None:
+        # Live prod wart (2026-07-11, UTI Money Market Fund): the real line
+        # "Mr. Anurag Mittal Bcom, MSc, CA" has NO separator between the name
+        # and the FIRST credential token, so the name-capturing regex's
+        # stopping comma is the one AFTER "Bcom", not before it — "Bcom" got
+        # swallowed into the captured name. Fixed by a shared post-hoc
+        # trailing-token strip, not a regex change.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_I_CREDENTIAL_NO_SEPARATOR]))
+        assert len(result) == 1
+        assert result[0]["manager_pairs"] == [("Anurag Mittal", date(2021, 12, 1))]
 
 
 _AXIS_SCHEME_A_MULTI = (
@@ -1570,6 +1630,248 @@ class TestFactsheetCompilationAbsl:
         assert dp._parse_absl_compilation(_FakeReader([_ABSL_NON_SCHEME_PAGE])) == []
 
 
+class TestCredentialSuffixStrip:
+    def test_strips_known_credential_token_regardless_of_punctuation(self) -> None:
+        from dhanradar.mf.disclosure_parsers import _strip_credential_suffix
+
+        assert _strip_credential_suffix("Anurag Mittal Bcom") == "Anurag Mittal"
+        assert _strip_credential_suffix("Anurag Mittal BCom") == "Anurag Mittal"
+        assert _strip_credential_suffix("Anurag Mittal B.Com") == "Anurag Mittal"
+
+    def test_leaves_clean_names_untouched(self) -> None:
+        from dhanradar.mf.disclosure_parsers import _strip_credential_suffix
+
+        assert _strip_credential_suffix("Anurag Mittal") == "Anurag Mittal"
+        assert _strip_credential_suffix("Test Manager") == "Test Manager"
+        assert _strip_credential_suffix("Rakesh Sethia") == "Rakesh Sethia"
+
+    def test_never_strips_a_bare_single_token_name(self) -> None:
+        # Guard: never strips down to nothing even if a genuine single-word
+        # name happens to collide with the allowlist.
+        from dhanradar.mf.disclosure_parsers import _strip_credential_suffix
+
+        assert _strip_credential_suffix("Bcom") == "Bcom"
+
+
+# AXIS PASSIVE (2026-07-12): a real separate sibling file, one scheme per
+# page — no "...is managing the scheme since..." prose anywhere on a
+# scheme's own page. Manager block glues several word boundaries with ZERO
+# space (verified: "OneWork experience:", "hasbeen managing", "6thMarch
+# 2026").
+_AXIS_PASSIVE_SCHEME_A = (
+    "Axis Test Index Fund MONTHLY FACTSHEET - MAY 31,2026\n"
+    "Investment Objective:\n"
+    "To provide returns before expenses.\n"
+    "Type of Scheme:\n"
+    "An Open Ended Index Fund tracking the Test TRI\n"
+    "Fund Manager:\n"
+    "Mr. Test OneWork experience: 15 years.He hasbeen managing this fund since 6thMarch 2026\n"
+    "Mr. Test TwoWork experience: 18 years.He hasbeen managing this fund since 6thMarch 2026\n"
+    "Index Facts:\n"
+)
+# Real 2026-07-12 quirk (verified on 3 real pages: NIFTY IT/Healthcare/India
+# Consumption ETF): the "MONTHLY FACTSHEET" tagline sometimes prints with a
+# stray kerning space INSIDE the word ("MONTHL Y FACTSHEET") — the scheme
+# name is on its own line in this shape, with a parenthetical NSE/BSE-code
+# annotation line in between.
+_AXIS_PASSIVE_SCHEME_B_TAG_GLITCH = (
+    "Axis Test Healthcare ETF\n"
+    "(NSE Symbol: AXISTESTHC, BSE Scrip Code: 543348)\n"
+    "MONTHL Y FACTSHEET - MAY 31,2026\n"
+    "Investment Objective:\n"
+    "Type of Scheme:\n"
+    "An open ended scheme replicating/tracking Test Healthcare TRI\n"
+    "Fund Manager:\n"
+    "Mr. Test ThreeWork experience: 17 years.He hasbeen managing this fund since 1stJune 2024\n"
+)
+_AXIS_PASSIVE_NON_SCHEME_PAGE = "Tax Reckoner - FY 2025-2026\nAsset class period of holding table."
+# Real REGULAR-file page (verified 2026-07-12, Axis Large Cap Fund) also
+# carries its OWN "Work experience:" annexure block for the SAME scheme —
+# the passive branch must never fire here; the "is managing the scheme
+# since" branch runs first and wins.
+_AXIS_SCHEME_D_BOTH_ANCHORS = (
+    "AXIS TEST DELTA FUND\n"
+    "INVESTMENT OBJECTIVE: To achieve long term capital appreciation.\n"
+    "Axis Test Delta Fund - Regular Plan - Growth Option -4.48% 9,553\n"
+    "Past performance may or may not be sustained in future. Test Four is "
+    "managing the scheme since 23rd November 2016 and he manages 6 schemes "
+    "of Axis Mutual Fund.\n"
+    "Mr. Test Four\n"
+    "Work experience: 21 years.He has been managing this fund since 23rd "
+    "November 2016\n"
+)
+
+
+class TestFactsheetCompilationAxisPassive:
+    def test_glued_work_experience_manager_block_and_scheme_name(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_axis_compilation(_FakeReader([_AXIS_PASSIVE_SCHEME_A]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Axis Test Index Fund"
+        assert result[0]["manager_pairs"] == [
+            ("Test One", date(2026, 3, 1)),
+            ("Test Two", date(2026, 3, 1)),
+        ]
+
+    def test_tagline_kerning_glitch_still_matches(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_axis_compilation(_FakeReader([_AXIS_PASSIVE_SCHEME_B_TAG_GLITCH]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Axis Test Healthcare ETF"
+        assert result[0]["manager_pairs"] == [("Test Three", date(2024, 6, 1))]
+
+    def test_non_scheme_page_yields_nothing(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        assert dp._parse_axis_compilation(_FakeReader([_AXIS_PASSIVE_NON_SCHEME_PAGE])) == []
+
+    def test_regular_layout_page_wins_even_with_work_experience_present(self) -> None:
+        # Regression guard: a page carrying BOTH real anchors must still
+        # route through the regular (unchanged) extraction path.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_axis_compilation(_FakeReader([_AXIS_SCHEME_D_BOTH_ANCHORS]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Axis Test Delta Fund"
+        assert result[0]["manager_pairs"] == [("Test Four", date(2016, 11, 1))]
+
+
+# MIRAE (2026-07-12, brand-new AMC for this class): a plain "Fund Managers
+# :\n<Name1>\n<Name2>" list near the top (no date) and a SEPARATE "Fund
+# Managers : Mr./Ms. <Name> (since <Date>)" summary line inside the
+# Performance Report section — the ONLY date-bearing occurrence.
+_MIRAE_SCHEME_A = (
+    "MIRAE ASSET\n"
+    "TEST NIFTY 50 ETF\n"
+    "NSE Symbol: TESTETF, BSE Scrip Code: 542131\n"
+    "(Exchange Traded Fund (ETF) - An open ended scheme replicating/tracking Test Index)\n"
+    "Monthly Factsheet as on 31 May, 2026\n"
+    "Fund Information\n"
+    "Fund Managers :\n"
+    "Ms. Test Gala\n"
+    "Mr. Test Patel\n"
+    "Allotment Date : 20th November 2018\n"
+    "Performance Report\n"
+    "Period Mirae Asset Test Nifty 50 ETF Scheme Benchmark* Additional Benchmark**\n"
+    "Last 1 Year -3.88% -3.84% -7.21%\n"
+    "Fund Managers : Ms. Test Gala (since December 28, 2020), Mr. Test Patel (since March 12, 2025)\n"
+    "Note: Returns (%) for less than 1 year calculated on simple annualized basis.\n"
+)
+# Long name wraps across 3 lines in the Performance Report header — the
+# collector must stop AT the "Scheme Benchmark" literal, never scan past it.
+_MIRAE_SCHEME_B_WRAPPED_NAME = (
+    "MIRAE ASSET\n"
+    "TEST DIVERSIFIED EQUITY ALLOCATOR PASSIVE FOF*\n"
+    "Formerly Known as Mirae Asset Test Fund of Fund\n"
+    "(Fund of Fund)\n"
+    "Monthly Factsheet as on 31 May, 2026\n"
+    "Fund Information\n"
+    "Fund Managers:\n"
+    "Mr. Test Srivastava\n"
+    "Performance Report\n"
+    "Period Mirae Asset Test Diversified\n"
+    "Equity Allocator Passive\n"
+    "FOF*\n"
+    "Scheme Benchmark* Additional Benchmark**\n"
+    "Last 1 Year 0.11% -0.01% -7.21%\n"
+    "Fund Managers : Mr. Test Srivastava (since January 01, 2026)\n"
+)
+# Trailing space before the closing paren is real on some pages (verified,
+# Nifty50 Equal Weight ETF) — regex must tolerate it.
+_MIRAE_SCHEME_C_TRAILING_SPACE_IN_PAREN = (
+    "MIRAE ASSET\n"
+    "TEST EQUAL WEIGHT ETF\n"
+    "Monthly Factsheet as on 31 May, 2026\n"
+    "Fund Managers :\n"
+    "Ms. Test Gala\n"
+    "Performance Report\n"
+    "Period Mirae Asset Test Equal Weight ETF Scheme Benchmark* Additional Benchmark**\n"
+    "Fund Managers : Ms. Test Gala (since May 09, 2025 )\n"
+)
+# Mid-word hyphen wrap ("...G-\nSec ETF") must join WITHOUT an inserted
+# space (verified, Nifty 8-13 yr G-Sec ETF).
+_MIRAE_SCHEME_D_HYPHEN_WRAP = (
+    "MIRAE ASSET\n"
+    "TEST 8-13 YR G-SEC ETF\n"
+    "Monthly Factsheet as on 31 May, 2026\n"
+    "Fund Managers :\n"
+    "Ms. Test Kulkarni\n"
+    "Performance Report\n"
+    "Period Mirae Asset Test 8-13 yr G-\n"
+    "Sec ETF\n"
+    "Scheme Benchmark* Additional Benchmark**\n"
+    "Fund Managers : Ms. Test Kulkarni (since February 05, 2026)\n"
+)
+# A newly-launched scheme (< 6 months old, real SEBI clause 14.2.2
+# disclaimer text) has NO Performance Report at all — only the dateless
+# top-of-page name list survives, so no (name, date) pair can be honestly
+# written.
+_MIRAE_SCHEME_E_NO_PERFORMANCE_REPORT = (
+    "MIRAE ASSET\n"
+    "TEST DEFENCE ETF\n"
+    "Monthly Factsheet as on 31 May, 2026\n"
+    "Fund Managers@ :\n"
+    "Ms. Test Gala\n"
+    "Mr. Test Singh\n"
+    "Pursuant to clause 14.2.2 of Chapter 14 in SEBI master circular dated "
+    "March 20, 2026, the scheme is in existence for less than 6 months, "
+    "hence performance shall not be provided.\n"
+)
+_MIRAE_NON_SCHEME_PAGE = "INDEX\nCONTENT PAGE NO\nHow to read a Mutual Fund Factsheet? 5"
+
+
+class TestFactsheetCompilationMirae:
+    def test_single_line_performance_header_and_since_dates(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_mirae_compilation(_FakeReader([_MIRAE_SCHEME_A]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Mirae Asset Test Nifty 50 ETF"
+        assert result[0]["manager_pairs"] == [
+            ("Test Gala", date(2020, 12, 28)),
+            ("Test Patel", date(2025, 3, 12)),
+        ]
+
+    def test_wrapped_scheme_name_stops_at_scheme_benchmark(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_mirae_compilation(_FakeReader([_MIRAE_SCHEME_B_WRAPPED_NAME]))
+        assert len(result) == 1
+        assert (
+            result[0]["scheme_name"] == "Mirae Asset Test Diversified Equity Allocator Passive FOF"
+        )
+        assert result[0]["manager_pairs"] == [("Test Srivastava", date(2026, 1, 1))]
+
+    def test_trailing_space_before_closing_paren_still_matches(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_mirae_compilation(_FakeReader([_MIRAE_SCHEME_C_TRAILING_SPACE_IN_PAREN]))
+        assert len(result) == 1
+        assert result[0]["manager_pairs"] == [("Test Gala", date(2025, 5, 9))]
+
+    def test_hyphen_wrap_joins_without_inserted_space(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_mirae_compilation(_FakeReader([_MIRAE_SCHEME_D_HYPHEN_WRAP]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Mirae Asset Test 8-13 yr G-Sec ETF"
+
+    def test_no_performance_report_yields_nothing_never_fabricates_a_date(self) -> None:
+        # Honest exclusion: a newly-launched scheme with no date-bearing
+        # summary line must yield NOTHING, never a guessed date (§8.4).
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_mirae_compilation(_FakeReader([_MIRAE_SCHEME_E_NO_PERFORMANCE_REPORT]))
+        assert result == []
+
+    def test_non_scheme_page_yields_nothing(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        assert dp._parse_mirae_compilation(_FakeReader([_MIRAE_NON_SCHEME_PAGE])) == []
+
+
 class TestFactsheetCompilationDispatch:
     def test_unrecognized_amc_fails_closed(self, monkeypatch) -> None:
         import pypdf
@@ -1609,6 +1911,15 @@ class TestFactsheetCompilationDispatch:
             result = dp.parse_factsheet_compilation(b"%PDF-fake", amc)
             assert result and result[0]["scheme_name"] == expected_name
 
+    def test_dispatches_mirae_to_its_own_extractor(self, monkeypatch) -> None:
+        import pypdf
+
+        from dhanradar.mf import disclosure_parsers as dp
+
+        monkeypatch.setattr(pypdf, "PdfReader", lambda _buf: _FakeReader([_MIRAE_SCHEME_A]))
+        result = dp.parse_factsheet_compilation(b"%PDF-fake", "MIRAE")
+        assert result and result[0]["scheme_name"] == "Mirae Asset Test Nifty 50 ETF"
+
     def test_sniff_scans_first_pages_and_recognizes_each_layout(self, monkeypatch) -> None:
         import pypdf
 
@@ -1621,6 +1932,8 @@ class TestFactsheetCompilationDispatch:
             _KOTAK_SCHEME_A,
             _EDEL_SCHEME_A,
             _ABSL_SCHEME_A,
+            _AXIS_PASSIVE_SCHEME_A,
+            _MIRAE_SCHEME_A,
         ):
             monkeypatch.setattr(pypdf, "PdfReader", lambda _buf, t=page_text: _FakeReader([t]))
             assert looks_like_factsheet_compilation(b"%PDF-fake")

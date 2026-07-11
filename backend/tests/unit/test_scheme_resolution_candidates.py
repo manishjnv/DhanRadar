@@ -85,6 +85,34 @@ def test_default_prefix_unchanged_for_other_amcs():
     assert _amc_scheme_prefixes("MIRAE") == ["Mirae Asset%"]
 
 
+# ---------------------------------------------------------------------------
+# BHARAT Bond ETF/FOF — Edelweiss-managed target-maturity series with no
+# "Edelweiss" prefix in any scheme name (25 real mf_funds rows under
+# amc_name=EDELWEISS, verified 2026-07-12) — the SAME class of gap as
+# BHARAT 22 -> ICICI_PRU above (PR #557's compilation parser splitter
+# already extracts these scheme sections correctly; the 16-pair prod gap was
+# the RESOLVER never being allowed to consider them for EDELWEISS).
+# ---------------------------------------------------------------------------
+
+
+def test_edelweiss_prefixes_include_bharat_bond():
+    prefixes = _amc_scheme_prefixes("EDELWEISS")
+    assert "Edelweiss%" in prefixes
+    assert "BHARAT Bond%" in prefixes
+
+
+def test_bharat22_never_matches_edelweiss_prefix():
+    # MUST-NOT: ICICI's "BHARAT 22 ETF" must never satisfy EDELWEISS's
+    # row-restriction WHERE clause — "BHARAT Bond%" and "BHARAT 22%" are
+    # deliberately distinct literal prefixes, never a bare "BHARAT%".
+    edelweiss_prefixes = _amc_scheme_prefixes("EDELWEISS")
+    icici_prefixes = _amc_scheme_prefixes("ICICI_PRU")
+    assert "BHARAT 22%" not in edelweiss_prefixes
+    assert "BHARAT Bond%" not in icici_prefixes
+    assert not "BHARAT 22 ETF".upper().startswith("BHARAT BOND")
+    assert "BHARAT Bond ETF - April 2030".upper().startswith("BHARAT BOND")
+
+
 def test_prefix_where_clause_binds_every_prefix():
     sql, binds = _prefix_where_clause(["ICICI%", "BHARAT 22%"])
     assert sql == "(scheme_name ILIKE :p0 OR scheme_name ILIKE :p1)"
