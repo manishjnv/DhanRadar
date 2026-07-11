@@ -45,6 +45,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchFundHeadServer } from '@/features/mf/server-api';
 import { buildFundMetadataText, buildFundJsonLd, FUND_NOT_FOUND_METADATA } from '@/features/mf/fundMetadata';
+import { fundDisplayTitle, fundVariantTags } from '@/features/mf/explorer-format';
 import { EDU_LABELS } from '@/lib/displayLabel';
 import FundDetailClientView from '@/components/mf/funddetail/FundDetailClientView';
 
@@ -80,7 +81,10 @@ export default async function FundDetailPage({
 
   const jsonLd = buildFundJsonLd(fund, params.isin);
   const labelWord = fund.verb_label ? EDU_LABELS[fund.verb_label] : null;
-  const category = fund.sebi_category ?? fund.category;
+  // Founder rule 2026-07-11: short title everywhere; variant facts as tags.
+  // The full legal scheme_name stays in JSON-LD/metadata + the h1 tooltip.
+  const displayTitle = fundDisplayTitle(fund);
+  const variantTags = fundVariantTags(fund);
 
   return (
     <>
@@ -101,9 +105,17 @@ export default async function FundDetailPage({
       <FundDetailClientView
         initialFundHead={fund}
         ssrSummary={
-          <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-4">
-            <h1 className="text-h3 text-ink">{fund.scheme_name}</h1>
-            {category && <p className="text-small text-ink-secondary">{category}</p>}
+          <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-3">
+            <h1 className="text-h3 text-ink" title={fund.scheme_name}>{displayTitle}</h1>
+            {variantTags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1.5" title={fund.scheme_name}>
+                {variantTags.map((t) => (
+                  <span key={t} className="rounded-full border border-line bg-surface px-2 py-0.5 text-caption text-ink-secondary">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-secondary">
               {fund.nav_latest != null && (
                 <span>NAV ₹{fund.nav_latest.toFixed(2)}{fund.nav_date ? ` (as of ${fund.nav_date})` : ''}</span>

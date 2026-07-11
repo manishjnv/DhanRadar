@@ -43,9 +43,19 @@ function makeFund(overrides: Partial<FundHead> = {}): FundHead {
 const BANNED_VERBS = 'buy sell hold switch avoid caution recommend should suggest'.split(' ');
 
 describe('buildFundMetadataText', () => {
-  it('builds a factual title with the scheme name', () => {
+  it('builds a factual title: short name + compact plan/option variant', () => {
     const { title } = buildFundMetadataText(makeFund());
-    expect(title).toBe('Parag Parikh Flexi Cap Fund \u2014 NAV, returns, DhanRadar read');
+    expect(title).toBe('Parag Parikh Flexi Cap Fund (Direct \u00b7 Growth) \u2014 NAV, returns, DhanRadar read');
+  });
+
+  it('title uses fund_name_short and IDCW frequency when present', () => {
+    const { title } = buildFundMetadataText(makeFund({
+      scheme_name: 'SBI Banking & PSU Fund - Direct Plan - Daily Income Distribution cum Capital Withdrawal Option (IDCW)',
+      fund_name_short: 'SBI Banking & PSU Fund',
+      option_type: 'idcw',
+      idcw_frequency: 'daily',
+    }));
+    expect(title).toBe('SBI Banking & PSU Fund (Direct \u00b7 IDCW \u00b7 Daily) \u2014 NAV, returns, DhanRadar read');
   });
 
   it('description includes category, NAV, returns, and the label WORD (never the raw enum)', () => {

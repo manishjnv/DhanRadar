@@ -11,6 +11,7 @@
 
 import * as React from 'react';
 import { FadeUp } from '@/components/ui/FadeUp';
+import { cleanSchemeName } from '@/features/mf/explorer-format';
 import { useCountUp } from '@/features/mf/useCountUp';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -222,7 +223,7 @@ function SchemesTable({
               <React.Fragment key={s.isin}>
                 <tr className="border-b border-line last:border-0">
                   <td className="py-2.5 pr-3">
-                    <p className="font-medium text-ink leading-snug">{s.scheme_name}</p>
+                    <p className="font-medium text-ink leading-snug" title={s.scheme_name}>{cleanSchemeName(s.scheme_name)}</p>
                     <p className="text-caption text-ink-muted">{s.amc_name}</p>
                   </td>
                   <td className="py-2.5 pr-3 text-ink-secondary hidden sm:table-cell">{s.category}</td>

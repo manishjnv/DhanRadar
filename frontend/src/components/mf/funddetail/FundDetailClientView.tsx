@@ -50,6 +50,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
+import { fundDisplayTitle, optionDisplay } from '@/features/mf/explorer-format';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { useFundDetail, useFundComposition, useFundFactors, useLatestPortfolio } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
@@ -149,15 +150,13 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
 
   const planLabel =
     fund.plan_type === 'direct' ? 'Direct' : fund.plan_type === 'regular' ? 'Regular' : null;
-  const optionLabel =
-    fund.option_type === 'growth' ? 'Growth'
-    : fund.option_type === 'idcw' ? 'IDCW'
-    : fund.option_type === 'dividend_reinvest' ? 'Div Reinvest'
-    : fund.option_type === 'dividend_payout' ? 'Div Payout'
-    : null;
+  // "IDCW · Daily" etc. — shared helper appends the payout frequency.
+  const optionLabel = optionDisplay(fund);
 
   const head: FundHead = {
-    name: fund.scheme_name,
+    // Founder rule 2026-07-11: short title everywhere; full name = tooltip only.
+    name: fundDisplayTitle(fund),
+    fullName: fund.scheme_name,
     amc: fund.amc_name,
     category: fund.sebi_category ?? 'Mutual Fund',
     // null verb_label (unranked fund, W0 gate: any ISIN loads) → the label set's own
@@ -212,7 +211,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
         <Link href={backHref} className="mb-3 inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
           ← Back to Fund Explorer
         </Link>
-        <Crumb category={head.category} name={fund.scheme_name} />
+        <Crumb category={head.category} name={head.name} />
       </div>
 
       {/* S1 — Hero + status */}
