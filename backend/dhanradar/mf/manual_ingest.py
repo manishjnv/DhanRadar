@@ -47,7 +47,14 @@ logger = logging.getLogger(__name__)
 
 # .xls/.xlsx/.pdf — PDFs are accepted + archived (never parsed, contract §2).
 ALLOWED_EXTENSIONS: tuple[str, ...] = (".xls", ".xlsx", ".pdf")
-MAX_BYTES = 25 * 1024 * 1024  # 25 MB cap — applies per file AND per zip member
+# Raised 25 → 40 MB (2026-07-11): Kotak's real whole-AMC factsheet compilation
+# (`KotakMFFactsheetJune2026.pdf`, 26.9 MB — a now-parsed class, PR #557) was
+# silently rejected `file_too_large` at intake, twice (founder's 2026-07-06
+# upload + the post-#557 ship both sit in failed/). The cap is a 640 MB-worker
+# memory guard, not a policy: the compilation parser walks pages one at a time
+# and the 16 MB Edelweiss parse peaked the worker at ~279 MiB — 40 MB leaves
+# real headroom while still rejecting runaway uploads.
+MAX_BYTES = 40 * 1024 * 1024  # 40 MB cap — applies per file AND per zip member
 
 ZIP_EXTENSION = ".zip"
 # Raised 50 → 1000 (2026-07-07): SBI's real per-scheme portfolio zips carry 441/57/156
