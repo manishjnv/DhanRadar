@@ -100,6 +100,18 @@ class MfFund(Base):
     isin2: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+# THE canonical "count funds like the industry does" grouping key (founder rule
+# 2026-07-10). AMFI issues one ISIN per scheme × plan (Direct/Regular) × option
+# (Growth/IDCW…), so mf_funds has ~2.6× more rows than real schemes; SEBI/AMFI
+# statistics, CAMS/KFin, and every consumer app count SCHEMES with variants
+# collapsed. Group by the taxonomy-derived clean name, falling back to the ISIN
+# for the rare row with no derived short name — variants of the SAME scheme
+# collapse, two DIFFERENT schemes never merge. Use COUNT(DISTINCT SCHEME_KEY)
+# for every user- or admin-facing "how many funds/schemes" figure; raw row
+# counts are for storage/ISIN-level statements only and must be labelled so.
+SCHEME_KEY = func.coalesce(MfFund.fund_name_short, MfFund.isin)
+
+
 class MfNavHistory(Base):
     # TimescaleDB hypertable (created in migration 0004; PK is (isin, nav_date)).
     __tablename__ = "mf_nav_history"

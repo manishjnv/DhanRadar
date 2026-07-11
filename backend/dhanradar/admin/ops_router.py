@@ -40,7 +40,7 @@ from dhanradar.audit.service import record_admin_action
 from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
 from dhanradar.models.mf import (
-    MfFund,
+    SCHEME_KEY,
     MfIngestionRun,
     MfSourceHealth,
 )
@@ -799,8 +799,10 @@ async def get_health(
         .limit(1)
     )
 
-    # total_schemes
-    total_schemes = (await db.scalar(select(func.count()).select_from(MfFund))) or 0
+    # total_schemes — DISTINCT schemes (plan variants collapsed, models/mf.py
+    # SCHEME_KEY), matching the field's name and the platform counting rule;
+    # previously this was the raw mf_funds ROW count (~2.6× inflated).
+    total_schemes = (await db.scalar(select(func.count(func.distinct(SCHEME_KEY))))) or 0
 
     # active_users / premium_users — aggregate SQL against auth.users (admin-only)
     user_counts = await db.execute(
