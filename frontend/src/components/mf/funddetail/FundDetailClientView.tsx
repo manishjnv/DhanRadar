@@ -293,9 +293,18 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
   );
 }
 
-export default function FundDetailClientView({ initialFundHead }: { initialFundHead?: ApiFundHead }) {
+export default function FundDetailClientView({
+  initialFundHead,
+  ssrSummary,
+}: {
+  initialFundHead?: ApiFundHead;
+  // Server-rendered crawler summary from page.tsx — rendered inside the shell
+  // so it lives in the scroll area (scrolls away) instead of pinned above it.
+  ssrSummary?: React.ReactNode;
+}) {
   return (
     <MaybeShell maxWidth="full">
+      {ssrSummary}
       <React.Suspense fallback={<FundDetailSkeleton />}>
         <FundDetailView initialFundHead={initialFundHead} />
       </React.Suspense>

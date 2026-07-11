@@ -123,10 +123,12 @@ export function TickerBar() {
 
   if (!data) return null;
 
+  // sticky: on document-scroll (public) pages the strip pins under the dev
+  // banner on scroll; inside AppShell the document never scrolls, so it's inert.
   return (
     <div
       data-testid="ticker-bar"
-      className="ticker-wrap h-6 w-full overflow-hidden border-b border-white/10 bg-navy"
+      className="ticker-wrap sticky top-[var(--dev-banner-h,0px)] z-30 h-6 w-full overflow-hidden border-b border-white/10 bg-navy"
     >
       <div className="ticker-track flex h-6 w-max items-center gap-4 pr-4 text-micro">
         <StripContent data={data} />
