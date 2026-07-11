@@ -283,6 +283,14 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.nav_daily_fetch",
         "schedule": crontab(hour=23, minute=30),
     },
+    # Per-category chained median-return index (Phase 4c pt2) — 00:00 IST; after
+    # nav_daily_fetch (23:30), before mf-metrics-refresh (00:15). Materializes
+    # mf.mf_category_series from the day's fresh NAV (fund-detail "category
+    # average" chart line — data layer only this session, no API/DOM exposure).
+    "mf-category-series-refresh": {
+        "task": "dhanradar.tasks.mf.category_series_refresh",
+        "schedule": crontab(hour=0, minute=0),
+    },
     # Fund metrics precompute — 00:15 IST; must run after nav_daily_fetch so
     # metrics reflect the day's fresh NAV.
     "mf-metrics-refresh": {
