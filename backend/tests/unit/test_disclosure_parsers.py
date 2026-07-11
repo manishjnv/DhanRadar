@@ -919,3 +919,72 @@ class TestFundPerformance:
         buf = _io.BytesIO()
         wb.save(buf)
         assert not _looks_like_fund_performance(buf.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# factsheet_pdf (2026-07-11) — per-scheme AMC factsheets: the fund MANAGER
+# (+ tenure), closing AUM, exit load and min amount. Fixture lines are
+# verbatim pypdf-extracted text from the founder's real ICICI files.
+# ---------------------------------------------------------------------------
+
+_FACTSHEET_LINES = [
+    "Portfolio as on May 31, 2026",
+    "ICICI Prudential Flexicap Fund",
+    "(An open ended dynamic equity scheme investing across large cap, mid cap & small cap stocks)",
+    "Scheme Details",
+    "Monthly AAUM as on 31-May-26 : Rs. 21,132.13 crores",
+    "Closing AUM as on 31-May-26 : Rs. 21,188.99 crores `",
+    "Fund Managers** :",
+    "Rajat Chandak",
+    "(Managing this fund since July, 2021",
+    "& Overall 18 years of experience)",
+    "Inception/Allotment date: 17-Jul-21",
+    "Application Amount for fresh Subscription :",
+    "Rs. 5,000/- (plus in multiple of Re. 1)",
+    "Exit load for Redemption / Switch out :-",
+    "Lumpsum & SIP / STP / SWP Option",
+    "1% of the applicable NAV - If the amount sought to be",
+    "redeemed or switched out is invested for a period of upto 12 months",
+    "1. Different plans shall have different expense structure. The performance "
+    "details provided herein are of ICICI Prudential Flexicap Fund.",
+]
+
+
+class TestFactsheetPdf:
+    def test_parses_all_fields_from_real_lines(self, monkeypatch):
+        import datetime as _dt
+
+        from dhanradar.mf import disclosure_parsers as dp
+
+        monkeypatch.setattr(dp, "_flatten_pdf_lines", lambda data: _FACTSHEET_LINES)
+        parsed = dp.parse_factsheet_pdf(b"%PDF-fake")
+        assert parsed["scheme_name"] == "ICICI Prudential Flexicap Fund"
+        assert parsed["manager_pairs"] == [("Rajat Chandak", _dt.date(2021, 7, 1))]
+        assert parsed["aum_crore"] == 21188.99
+        assert parsed["aum_as_of"] == _dt.date(2026, 5, 31)
+        assert parsed["min_lumpsum_amount"] == 5000.0
+        assert parsed["exit_load_pct"] == 1.0
+        assert parsed["exit_load_days"] == 360  # "upto 12 months"
+
+    def test_disclaimer_name_wins_when_page_order_flips(self, monkeypatch):
+        # Real evidence 2026-07-11: pypdf emits the disclaimer FIRST for some
+        # files of the same layout — the disclaimer's own fund name is the
+        # reliable strategy, never the first title-looking line.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        flipped = _FACTSHEET_LINES[-1:] + _FACTSHEET_LINES[:-1]
+        monkeypatch.setattr(dp, "_flatten_pdf_lines", lambda data: flipped)
+        parsed = dp.parse_factsheet_pdf(b"%PDF-fake")
+        assert parsed["scheme_name"] == "ICICI Prudential Flexicap Fund"
+
+    def test_fails_closed_without_a_name(self, monkeypatch):
+        from dhanradar.mf import disclosure_parsers as dp
+
+        monkeypatch.setattr(dp, "_flatten_pdf_lines", lambda data: ["random", "text"])
+        assert dp.parse_factsheet_pdf(b"%PDF-fake") == {}
+
+    def test_sniff_rejects_non_factsheets(self):
+        from dhanradar.mf.disclosure_parsers import looks_like_factsheet_pdf
+
+        assert not looks_like_factsheet_pdf(b"PK\x03\x04 xlsx")
+        assert not looks_like_factsheet_pdf(b"%PDF-1.7 garbage without markers")

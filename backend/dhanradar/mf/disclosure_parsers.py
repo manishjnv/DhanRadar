@@ -359,6 +359,148 @@ def parse_fund_performance(data: bytes, ext: str) -> list[tuple[str, str | None,
     return results
 
 
+_MANAGER_SINCE_RE = re.compile(
+    r"([A-Z][A-Za-z.'\u2019 ]{2,50}?)\s*\n?\(Managing this fund since\s+([A-Za-z]+),?\s*(\d{4})",
+)
+_CLOSING_AUM_RE = re.compile(
+    r"Closing AUM as on\s+(\d{1,2}-[A-Za-z]{3}-\d{2,4})\s*:\s*Rs\.?\s*([\d,]+(?:\.\d+)?)\s*crores",
+    re.IGNORECASE,
+)
+_FRESH_SUBSCRIPTION_RE = re.compile(
+    r"Application Amount for fresh Subscription\s*:?\s*\n?\s*Rs\.?\s*([\d,]+)",
+    re.IGNORECASE,
+)
+_HEREIN_ARE_OF_RE = re.compile(
+    r"performance details provided herein are of\s+([^.\n]+?)\s*(?:\.|\n)", re.IGNORECASE
+)
+_EXIT_LOAD_SECTION_RE = re.compile(
+    r"Exit load for Redemption\s*/\s*Switch\s*out\s*:?-?(.{0,400})", re.IGNORECASE | re.DOTALL
+)
+
+
+def looks_like_factsheet_pdf(data: bytes) -> bool:
+    """CONTENT sniff for an AMC's PER-SCHEME factsheet PDF (ICICI layout,
+    2026-07-11: 2 pages, "Fund Managers** :" + "(Managing this fund since
+    <Month>, <Year>)" + "Closing AUM as on <date>"). First page only — the
+    whole-AMC "Complete Factsheet" compilations have a cover page and stay
+    archived (per-scheme files are the reliable unit)."""
+    if not data.startswith(b"%PDF"):
+        return False
+    try:
+        import io as _io
+
+        from pypdf import PdfReader
+
+        first = PdfReader(_io.BytesIO(data)).pages[0].extract_text() or ""
+    except Exception:  # noqa: BLE001 — unreadable PDF is simply not this class
+        return False
+    return "managing this fund since" in first.lower() and "aum as on" in first.lower()
+
+
+def parse_factsheet_pdf(data: bytes) -> dict[str, Any]:
+    """Per-scheme factsheet PDF → the scheme_master-style dict (ONE file =
+    ONE scheme): scheme_name, manager_pairs, aum_crore/aum_as_of (CLOSING
+    AUM — the stated net-assets figure, same semantics as the portfolio
+    grand-total row), exit_load_pct/days, min_lumpsum_amount. Facts only;
+    every NAV/return figure is deliberately never read. Fail-closed {}.
+    """
+    try:
+        flat_lines = _flatten_pdf_lines(data)
+    except Exception:  # noqa: BLE001
+        return {}
+    text = "\n".join(flat_lines)
+
+    # Scheme name — two strategies (pypdf's page-text ordering varies between
+    # files of the SAME layout, confirmed 2026-07-11):
+    #   1. The standard performance disclaimer names the fund exactly:
+    #      "...performance details provided herein are of <Fund Name>."
+    #   2. Fallback: the first fund-title-looking line at the top of page 1
+    #      (directly under "Portfolio as on <date>").
+    scheme_name = ""
+    m = _HEREIN_ARE_OF_RE.search(text)
+    if m:
+        scheme_name = " ".join(m.group(1).split()).strip(" .")
+    if not scheme_name:
+        for line in flat_lines[:8]:
+            clean = line.strip()
+            if (
+                len(clean) > 8
+                and any(kw in clean.lower() for kw in ("fund", "etf", "plan"))
+                and "portfolio as on" not in clean.lower()
+                and not clean[0].isdigit()
+            ):
+                scheme_name = clean
+                break
+    if not scheme_name:
+        return {}
+
+    manager_pairs: list[tuple[str, date]] = []
+    for name, month, year in _MANAGER_SINCE_RE.findall(text):
+        try:
+            start = datetime.strptime(f"01-{month[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        clean_name = " ".join(name.split()).strip(" ,")
+        if clean_name and (clean_name, start) not in manager_pairs:
+            manager_pairs.append((clean_name, start))
+
+    aum_crore: float | None = None
+    aum_as_of: date | None = None
+    m = _CLOSING_AUM_RE.search(text)
+    if m:
+        try:
+            aum_crore = float(m.group(2).replace(",", ""))
+            raw_date = m.group(1)
+            fmt = "%d-%b-%y" if len(raw_date.split("-")[-1]) == 2 else "%d-%b-%Y"
+            aum_as_of = datetime.strptime(raw_date, fmt).date()
+        except ValueError:
+            aum_crore, aum_as_of = None, None
+
+    min_lumpsum: float | None = None
+    m = _FRESH_SUBSCRIPTION_RE.search(text)
+    if m:
+        try:
+            val = float(m.group(1).replace(",", ""))
+            min_lumpsum = val if val > 0 else None
+        except ValueError:
+            min_lumpsum = None
+
+    exit_load_pct: float | None = None
+    exit_load_days: int | None = None
+    m = _EXIT_LOAD_SECTION_RE.search(text)
+    if m:
+        exit_load_pct, exit_load_days = _parse_exit_load_text(m.group(1))
+
+    return {
+        "scheme_name": scheme_name,
+        "manager_pairs": manager_pairs,
+        "aum_crore": aum_crore,
+        "aum_as_of": aum_as_of,
+        "min_lumpsum_amount": min_lumpsum,
+        "exit_load_pct": exit_load_pct,
+        "exit_load_days": exit_load_days,
+    }
+
+
+def _flatten_pdf_lines(data: bytes) -> list[str]:
+    """All pages' text as lines (whitespace-normalized per line, empties
+    dropped) — the factsheet parser needs LINE structure (manager names sit
+    on their own line above the tenure parenthetical), unlike the fully
+    flattened stream `_flatten_pdf` produces for the label-pair pages."""
+    import io as _io
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(_io.BytesIO(data))
+    lines: list[str] = []
+    for page in reader.pages:
+        for raw in (page.extract_text() or "").splitlines():
+            cleaned = " ".join(raw.split())
+            if cleaned:
+                lines.append(cleaned)
+    return lines
+
+
 def _looks_like_amfi_aaum(data: bytes) -> bool:
     """CONTENT sniff for the AMFI consolidated scheme-wise AAUM workbook:
     a header row carrying BOTH 'AMFI Code' and 'Scheme NAV Name' plus an
