@@ -4551,6 +4551,31 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
         col_map: dict[str, int] = {}
         rows_since_header = 0  # holdings extracted since col_map was (re)built
         current_scheme: str | None = None  # Reset per sheet for per-scheme files.
+        # Item 5 (2026-07-12): a blank row after >=1 holding used to reset
+        # col_map UNCONDITIONALLY (see the reset block below) — correct for a
+        # true new-scheme boundary in a multi-scheme-per-sheet consolidated
+        # file, wrong for EDELWEISS's PER-SCHEME sheets, which pad the SAME
+        # scheme's own asset-class sub-tables (Equity, then blank, Debt
+        # Instruments/Government Securities, then blank, Derivatives, Money
+        # Market Instruments, TREPS/Reverse Repo, Accrued Interest, Net
+        # Receivables — real May-2026 file, sheet "EEDGEF") with blank-row
+        # separators too. The eager reset cleared col_map at the FIRST such
+        # gap and it was NEVER re-established (no second "Name of the
+        # Instrument" header ever appears in a per-scheme sheet), silently
+        # dropping every asset-class sub-table after the first — confirmed:
+        # sheet "EDBE30" (BHARAT Bond ETF - April 2030) captured only its
+        # Listed-debt sub-table (weight_pct sum 88.86%), losing Government
+        # Securities (~8%) and TREPS/accrued/net-receivables (~3%) entirely,
+        # even though the file's own GRAND TOTAL row proves 100%. Fix: defer
+        # the reset — a blank row after >=1 holding only ARMS a check; col_map
+        # is cleared only if the row(s) that follow actually start a NEW
+        # scheme (a real banner/name row, via the exact same candidate
+        # detection + cleanup used at sheet-start below). A same-scheme
+        # section label ("Government Securities", "Derivatives", "Money
+        # Market Instruments", "TREPS / Reverse Repo") never satisfies that
+        # detection, so col_map survives and every later sub-table keeps
+        # extracting under the sheet's one true header.
+        pending_scheme_check = False
 
         # For per-scheme files (e.g. MIRAE), infer scheme name from sheet name
         # if the sheet name looks like a scheme (contains "fund", "plan", etc.).
@@ -4737,7 +4762,12 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # repeated across 2+ of its columns (name/ISIN/quantity/value/etc. are all
             # distinct), so this can't misfire on real data.
             non_empty = [s for s in row_strs if s and s.lower() not in ("none", "")]
-            if non_empty and not col_map:
+            # Item 5: also run candidate detection when col_map is still SET
+            # but a blank-row gap armed `pending_scheme_check` — see its
+            # docstring above. Sheet-start behavior (`not col_map`) is
+            # unchanged; this only widens the check for the deferred-reset
+            # case.
+            if non_empty and (not col_map or pending_scheme_check):
                 _val_counts = Counter(non_empty)
                 _top_val, _top_count = _val_counts.most_common(1)[0]
                 if _top_count >= 2 or len(non_empty) == 1:
@@ -4962,7 +4992,7 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 # failure than the zero_rows_upserted_scheme_unresolved B83
                 # fixed) because "fmp" alone matches none of the other
                 # keywords either.
-                if candidate and any(
+                _is_scheme_candidate = candidate and any(
                     kw in candidate.lower()
                     for kw in (
                         "fund",
@@ -4977,7 +5007,23 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                         "fof",
                         "fmp",
                     )
-                ):
+                )
+                if pending_scheme_check:
+                    # Item 5: a deferred blank-row-gap check (see the reset
+                    # block below) only earns a col_map reset when this row
+                    # is a genuinely NEW, DIFFERENT scheme — the exact same
+                    # keyword gate a same-scheme section label ("Government
+                    # Securities", "Derivatives", "Money Market Instruments",
+                    # "TREPS / Reverse Repo") already fails today, so this
+                    # never fires for those. Real multi-scheme-per-sheet
+                    # files (the reset's original purpose) still reset here,
+                    # unchanged.
+                    if _is_scheme_candidate and candidate != current_scheme:
+                        current_scheme = candidate
+                        col_map = {}
+                        rows_since_header = 0
+                    pending_scheme_check = False
+                elif _is_scheme_candidate:
                     current_scheme = candidate
 
             # Fallback for per-scheme files (e.g. MIRAE): use sheet name as scheme if no scheme detected yet.
@@ -4997,14 +5043,30 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 )
 
             # Detect header row (contains "Name of Instrument" or similar).
-            if not col_map and any(
+            # Item 5 (2026-07-12): no longer gated on `not col_map` — SBI's
+            # real multi-asset-allocation files (see
+            # test_parse_sebi_xlsx_rejects_section_header_as_scheme_name_midfile)
+            # genuinely REPEAT this exact header row before each asset-class
+            # sub-table, and since col_map now survives ordinary blank-row
+            # gaps (it no longer resets col_map itself — see the
+            # pending_scheme_check block below), the old `not col_map` gate
+            # would leave the STALE first-table col_map in place and read the
+            # repeated header row's own literal cell text ("Name of the
+            # Instrument / Issuer", "ISIN", ...) as if it were a holding.
+            # A genuine header row always REPLACES col_map with the freshest
+            # layout, which is safe even when nothing changed (identical
+            # dict rebuild) and correct on the rare AMC where a later
+            # sub-table's columns differ from the first.
+            if any(
                 "name" in s.lower()
                 and ("instrument" in s.lower() or "security" in s.lower() or "stock" in s.lower())
                 for s in row_strs
             ):
+                col_map = {}
                 for ci, cell in enumerate(row_strs):
                     col_map[_normalize_col(cell)] = ci
                 rows_since_header = 0
+                pending_scheme_check = False
                 continue
 
             # Data rows — only after header detected.
@@ -5015,16 +5077,49 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
                 if row_dict:
                     result.append(row_dict)
                     rows_since_header += 1
-
-                # Reset on blank rows (new scheme section upcoming) — but only
-                # AFTER at least one holding was extracted under this header.
-                # EDELWEISS (2026-07-07) pads 1-2 blank rows between the header
-                # and the first holding; resetting on those wiped col_map before
-                # any data row was ever read (whole workbook parsed to 0 rows).
-                if not any(s for s in row_strs if s and s.lower() not in ("none", "")):
-                    if rows_since_header:
+                    # Item 5 (2026-07-12): a "grand total"/"net assets"/
+                    # "portfolio total" row (is_total_row) is the file's OWN
+                    # declaration that the holdings table just ended. Because
+                    # col_map now survives ordinary blank-row gaps (above), a
+                    # sheet's FOOTER (NAV-per-plan-option table, numbered
+                    # SEBI disclosure notes, a repeated "Scheme Name / Risk-
+                    # O-Meter" mini-table) would otherwise keep matching the
+                    # stale holdings col_map and get mis-extracted as fake
+                    # constituent rows — confirmed real: 1,298 such rows
+                    # across the May-2026 file before this guard (e.g.
+                    # "Direct Plan Growth Option" paired with a NAV number
+                    # landing in the ISIN column). Clearing col_map here is
+                    # exactly the pre-item-5 blank-row reset's job, just
+                    # triggered on a stronger, unambiguous signal instead of
+                    # merely on blank. A genuinely NEW scheme after this in a
+                    # multi-scheme-per-sheet file still works — the
+                    # pending_scheme_check candidate detection below fires
+                    # unchanged (col_map is empty by then, same as before).
+                    if row_dict.get("is_total_row"):
                         col_map = {}
                         rows_since_header = 0
+
+                # A blank row after >=1 holding MIGHT be a new-scheme
+                # boundary (multi-scheme-per-sheet consolidated files) — but
+                # only arm the check here; do NOT clear col_map yet. Item 5
+                # (2026-07-12): the earlier unconditional `col_map = {}` here
+                # was correct for a genuine new scheme but silently dropped
+                # every later same-scheme asset-class sub-table (EDELWEISS
+                # pads a blank row between EVERY section: Equity, Debt,
+                # Government Securities, Derivatives, Money Market
+                # Instruments, TREPS/Reverse Repo, ...) because no second
+                # header row ever reappears in a per-scheme sheet to
+                # re-populate col_map. The candidate-detection block above
+                # (see `pending_scheme_check`) now does the actual reset,
+                # and only for a confirmed, DIFFERENT scheme name — a
+                # same-scheme section label leaves col_map (and therefore
+                # extraction) untouched. EDELWEISS (2026-07-07) pads 1-2
+                # blank rows between the header and the first holding too;
+                # the `rows_since_header` guard (unchanged) still prevents
+                # arming before any data row was ever read.
+                if not any(s for s in row_strs if s and s.lower() not in ("none", "")):
+                    if rows_since_header:
+                        pending_scheme_check = True
 
     return result
 
@@ -5147,8 +5242,21 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
 # May-2026 file). "... total$" also catches "PORTFOLIO TOTAL" — handled by
 # the is_total_row keyword list above so it's kept (not dropped) when it
 # carries a market_value_cr.
+# EDELWEISS (item 5, 2026-07-12): "Investment in Mutual fund" / "Investment in
+# Exchange Traded Fund" are the AMC's own asset-class sub-section labels for a
+# scheme's holdings of OTHER funds/ETFs (confirmed real May-2026 file, sheets
+# EEARBF/EEESSF/EEMAAF/EEMOFF) — genuinely contain "fund"/"etf", so once the
+# blank-row-gap `pending_scheme_check` (see _parse_sebi_xlsx) started treating
+# ANY keyword-matching single-value row as a candidate new scheme, these two
+# labels wrongly won that check and clobbered `current_scheme` mid-sheet,
+# dropping every real holding after them (confirmed: Arbitrage Fund's
+# weight_pct sum fell to 28.62% without this exclusion, 100.00% with it — the
+# 4 real "invested into Edelweiss's own Liquid/Money-Market/Low-Duration
+# funds" rows right after the label were the first casualty). No real scheme
+# name is ever phrased "Investment in ...", so this can't reject one.
 _SECTION_HEADER_RE = re.compile(
-    r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$|total\s*$",
+    r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$|total\s*$"
+    r"|^investment\s+in\s+(mutual\s+fund|exchange\s+traded\s+fund)\b",
     re.IGNORECASE,
 )
 
@@ -5305,19 +5413,28 @@ def _extract_sebi_row(
     if weight_pct_raw:
         try:
             weight_pct = float(weight_pct_raw.replace(",", "").replace("%", "").strip())
-            # MOTILAL_OSWAL's "% to Net Asset" column is a genuine Excel
-            # percentage-NUMBER-FORMAT cell — openpyxl (data_only=True) returns
-            # the underlying fraction (e.g. 0.0079873241569103 for a displayed
-            # "0.80%"), not the displayed percentage number every other AMC's
-            # plain-typed weight column already is. Confirmed 2026-07-08
-            # against the real June-2026 file: every row's raw value is < 1
-            # with 10+ decimal digits of float noise, consistent with a
-            # stored fraction, never a manually-typed 2-decimal percentage.
-            # Scoped to this AMC only — do NOT widen to a bare "< 1" check for
-            # every AMC (a genuinely tiny <1% holding, plainly typed, is
-            # common and must NOT be multiplied by 100).
-            if amc_name == "MOTILAL_OSWAL" and weight_pct is not None:
-                weight_pct *= 100
+            # REMOVED 2026-07-12 (B103-class, item 4c): a blind `*= 100` used to
+            # live here for MOTILAL_OSWAL, on the claim that its "% to Net
+            # Asset" column stores an Excel percentage-format FRACTION. Real
+            # files fetched live 2026-07-12 (May-2026 AND June-2026, both
+            # straight from motilaloswalmf.com's own AEM API) disprove that for
+            # the CURRENT format: row 12 of sheet "YO01" reads
+            # `(1, 'HDFC Bank Limited', 'INE040A01034', 'Banks', 108786, 868.06,
+            # 11.14, ...)` — col 6 ("% to Net Assets") is already a plain
+            # percentage number (11.14), not a <1 fraction. The blind multiply
+            # turned every row's weight_pct 100x too large (11.14 -> 1114.0),
+            # so every one of the June file's 86 schemes summed to exactly
+            # 10000.00% and `_drop_over_covered_funds`'s >105% guard (below,
+            # in `_upsert_constituents`) discarded all 6,369 extracted rows —
+            # the true cause of the parsed_zero_written WARNING, not an
+            # as_of_month problem (as_of_month parsed correctly as 2026-06-01
+            # for every row from the "MONTHLY PORTFOLIO STATEMENT AS ON JUNE
+            # 30, 2026" banner). weight_pct is now left as the file states it;
+            # `_normalize_fraction_weight_groups` (group-sum-based, already the
+            # shared mechanism for ABSL/EDELWEISS/ICICI_PRU/MIRAE/NIPPON) is the
+            # one place semantics get corrected, so a future MOTILAL_OSWAL
+            # format flip back to fraction-scale self-heals the same way those
+            # AMCs already do, instead of a second AMC-specific guess here.
         except ValueError:
             pass
 
