@@ -419,8 +419,13 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
           pathname={pathname}
         />
         {/* p-3 (was p-6) — tight gap to the topbar/sidebar, founder space-
-            optimization 2026-07-11. Footer negative margins must mirror it. */}
-        <main className="flex-1 overflow-y-auto p-3">
+            optimization 2026-07-11. Footer negative margins must mirror it.
+            `relative` is LOAD-BEARING (RCA G9): without it, absolutely
+            positioned descendants (e.g. Tailwind sr-only spans in tables) use
+            the DOCUMENT as containing block, escape this overflow-y-auto scroll
+            box, and stretch the page — double scrollbar + dead space below the
+            footer (desktop + mobile). */}
+        <main className="relative flex-1 overflow-y-auto p-3">
           <div className="flex min-h-full flex-col">
             <div className="flex-1">{children}</div>
             {/* The shared global SiteFooter — universal for ALL users (anonymous get it

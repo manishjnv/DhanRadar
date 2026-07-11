@@ -64,6 +64,17 @@ function renderShell() {
 // Tests
 // ---------------------------------------------------------------------------
 describe('AppShell', () => {
+  // RCA G9 regression tripwire: the scroll container MUST be position:relative,
+  // or absolutely positioned descendants (Tailwind sr-only spans in tables)
+  // anchor to the DOCUMENT, escape the overflow-y-auto box, and stretch the
+  // page — double scrollbar + dead space below the footer.
+  it('main scroll container is position:relative (G9 containment)', () => {
+    const { container } = renderShell();
+    const main = container.querySelector('main');
+    expect(main).toHaveClass('relative');
+    expect(main).toHaveClass('overflow-y-auto');
+  });
+
   it('renders children and userSlot', () => {
     renderShell();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
