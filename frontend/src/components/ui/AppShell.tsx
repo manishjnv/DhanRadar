@@ -65,14 +65,14 @@ function NavLink({
       className={cn(
         'flex items-center rounded-md py-2 text-small transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-        collapsed ? 'justify-center px-2' : 'gap-3 px-3',
+        collapsed ? 'justify-center px-2' : 'gap-2.5 px-2.5',
         active
           ? 'bg-royal/10 text-royal font-medium'
           : 'text-ink-secondary hover:bg-surface-2 hover:text-ink',
       )}
     >
       <Icon size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" />
-      {!collapsed && label}
+      {!collapsed && <span className="truncate">{label}</span>}
     </Link>
   );
 }
@@ -104,8 +104,8 @@ function SidebarContent({
         href="/mf/portfolio"
         onClick={onNavClick}
         className={cn(
-          'flex h-14 items-center border-b border-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-          collapsed ? 'justify-center px-2' : 'gap-2.5 px-4',
+          'flex h-10 items-center border-b border-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+          collapsed ? 'justify-center px-2' : 'gap-2.5 px-3',
         )}
         aria-label="DhanRadar — go to portfolio"
       >
@@ -120,7 +120,7 @@ function SidebarContent({
       </Link>
 
       {/* Nav */}
-      <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Primary">
+      <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
         {!collapsed && (
           <p className="px-3 pb-1 pt-2 text-caption font-medium uppercase tracking-wide text-ink-faint">
             Workspace
@@ -162,7 +162,7 @@ function SidebarContent({
       </nav>
 
       {/* Footer — settings + collapse toggle */}
-      <div className="flex flex-col gap-1 border-t border-line p-3">
+      <div className="flex flex-col gap-1 border-t border-line p-2">
         {isAdmin && (
           <NavLink item={ADMIN_NAV} onClick={onNavClick} collapsed={collapsed} />
         )}
@@ -214,7 +214,7 @@ function Topbar({
   pathname?: string;
 }) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
+    <header className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-surface px-4">
       <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
@@ -392,12 +392,13 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
 
   return (
     <div className="flex h-[calc(100dvh_-_var(--dev-banner-h,0px)_-_var(--ticker-h,0px))] overflow-hidden bg-bg">
-      {/* Desktop sidebar — animates between w-56 (expanded) and w-14 (collapsed) */}
+      {/* Desktop sidebar — animates between w-40 (expanded) and w-14 (collapsed).
+          w-40 (160px, was w-56/224px) — founder space-optimization 2026-07-11. */}
       <aside
         className={cn(
           'hidden md:flex h-full shrink-0 flex-col border-r border-line bg-surface',
           'transition-[width] duration-200 ease-in-out overflow-hidden',
-          collapsed ? 'w-14' : 'w-56',
+          collapsed ? 'w-14' : 'w-40',
         )}
       >
         <SidebarContent collapsed={collapsed} onToggle={toggleCollapsed} isAdmin={isAdmin} />
@@ -418,14 +419,16 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
           publicNav={publicNav}
           pathname={pathname}
         />
-        <main className="flex-1 overflow-y-auto p-6">
+        {/* p-3 (was p-6) — tight gap to the topbar/sidebar, founder space-
+            optimization 2026-07-11. Footer negative margins must mirror it. */}
+        <main className="flex-1 overflow-y-auto p-3">
           <div className="flex min-h-full flex-col">
             <div className="flex-1">{children}</div>
             {/* The shared global SiteFooter — universal for ALL users (anonymous get it
                 via MaybeShell; logged-in get the SAME footer here). Full-bleed: the
-                negative margins cancel the <main> p-6 so it sits flush at the bottom.
+                negative margins cancel the <main> p-3 so it sits flush at the bottom.
                 SiteFooter carries the standing SEBI Disclaimer. */}
-            <div className="-mx-6 -mb-6 mt-8">
+            <div className="-mx-3 -mb-3 mt-8">
               <SiteFooter />
             </div>
           </div>

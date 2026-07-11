@@ -52,8 +52,8 @@ export function StickyPortfolioBar({ currentValue, schemes, visible }: Props) {
     <div
       aria-hidden={!visible}
       className={cn(
-        // Positioned just below the h-14 topbar; after the md sidebar (w-56).
-        'fixed top-14 left-0 md:left-56 right-0 z-30',
+        // Positioned just below the h-10 topbar; after the md sidebar (w-40).
+        'fixed top-10 left-0 md:left-40 right-0 z-30',
         'flex items-center gap-3 px-4 py-2.5',
         'border-b border-line bg-surface/90 backdrop-blur-sm',
         'transition-transform duration-200 ease-in-out',
