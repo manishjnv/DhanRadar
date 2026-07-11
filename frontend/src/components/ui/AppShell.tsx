@@ -27,8 +27,9 @@ interface NavItem {
 
 const WORKSPACE: NavItem[] = [
   { href: '/mf/portfolio',   label: 'Portfolio',       icon: Wallet           },
-  { href: '/mf/explore',     label: 'Explore Funds',   icon: BarChart2        },
-  { href: '/mf/compare',     label: 'Compare Funds',   icon: GitCompare       },
+  // Short labels — full "Explore Funds"/"Compare Funds" truncate at w-40
+  { href: '/mf/explore',     label: 'Explore',         icon: BarChart2        },
+  { href: '/mf/compare',     label: 'Compare',         icon: GitCompare       },
   { href: '/mf/leaderboard', label: 'Leaderboard',     icon: Trophy           },
   { href: '/mf/watchlist',   label: 'Watchlist',       icon: Star             },
   { href: '/mood',           label: 'Market Mood',     icon: Compass          },
@@ -111,11 +112,9 @@ function SidebarContent({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/icon.svg" alt="" width={26} height={26} className="shrink-0" />
+        {/* Single line — the two-line lockup overflowed the h-10 row at w-40 */}
         {!collapsed && (
-          <span className="flex flex-col leading-tight">
-            <span className="text-body font-medium text-navy">DhanRadar</span>
-            <span className="text-caption text-ink-muted">Investor Console</span>
-          </span>
+          <span className="truncate text-body font-medium text-navy">DhanRadar</span>
         )}
       </Link>
 
@@ -259,7 +258,7 @@ function Topbar({
           aria-label="Search funds"
           onClick={onSearchOpen}
           className={cn(
-            'flex items-center gap-2 rounded-md px-3 py-1.5',
+            'flex items-center gap-2 rounded-md px-3 py-1',
             'border border-line bg-surface-2 text-small text-ink-secondary',
             'hover:bg-surface-3 hover:text-ink',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
