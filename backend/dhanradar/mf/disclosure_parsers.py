@@ -655,14 +655,19 @@ _COMPILATION_SNIFF_PAGES = 20
 def looks_like_factsheet_compilation(data: bytes) -> bool:
     """CONTENT sniff for a whole-AMC factsheet COMPILATION PDF (one file,
     every scheme in the AMC) — verified 2026-07-11 against the real HDFC/
-    UTI/AXIS May-June 2026 files, each with a distinct but stable per-scheme
-    manager anchor: HDFC's "Name Since Total Exp" table header, UTI's
-    "FUND MANAGER SUMMARY" annexure, AXIS's "...is managing the scheme
-    since...schemes of Axis Mutual Fund" prose. Scans only the first
-    _COMPILATION_SNIFF_PAGES pages — these run 100+ pages, and scanning the
-    whole document on every intake would be wasteful and, on the biggest
-    files, memory-risky on the 640 MB worker — and returns on the first
-    anchor found."""
+    UTI/AXIS/KOTAK/EDELWEISS/ABSL May-June 2026 files, each with a distinct
+    but stable per-scheme manager anchor: HDFC's "Name Since Total Exp"
+    table header, UTI's "FUND MANAGER SUMMARY" annexure, AXIS's "...is
+    managing the scheme since...schemes of Axis Mutual Fund" prose, Kotak's
+    per-scheme "Fund Manager*:" label, Edelweiss's "Fund Managers Experience
+    Managing Since" table header, ABSL's "Managing the Fund Since:" label.
+    Scans only the first _COMPILATION_SNIFF_PAGES pages — these run 100+
+    pages, and scanning the whole document on every intake would be
+    wasteful and, on the biggest files, memory-risky on the 640 MB worker —
+    and returns on the first anchor found. NOTE: Kotak's own manager-tenure
+    annexure only starts around page 146 (far past this window) but its
+    per-scheme "Fund Manager*:" label already appears on every scheme's
+    cover page from page 6 onward, so the early-page sniff still holds."""
     if not data.startswith(b"%PDF"):
         return False
     try:
@@ -679,6 +684,9 @@ def looks_like_factsheet_compilation(data: bytes) -> bool:
                 or "FUND MANAGER SUMMARY" in text
                 or "Managing the scheme since" in text
                 or "schemes of Axis Mutual Fund" in text
+                or "Fund Manager*:" in text
+                or "Fund Managers Experience Managing Since" in text
+                or "Managing the Fund Since:" in text
             ):
                 return True
     except Exception:  # noqa: BLE001 — unreadable PDF is simply not this class
@@ -829,6 +837,12 @@ def parse_factsheet_compilation(data: bytes, amc_name: str | None) -> list[dict[
         return _parse_uti_compilation(reader)
     if amc_name == "AXIS":
         return _parse_axis_compilation(reader)
+    if amc_name == "KOTAK":
+        return _parse_kotak_compilation(reader)
+    if amc_name == "EDELWEISS":
+        return _parse_edelweiss_compilation(reader)
+    if amc_name == "ABSL":
+        return _parse_absl_compilation(reader)
     return []  # unrecognized AMC for this class — fail closed, never guess
 
 
@@ -1129,6 +1143,222 @@ def _parse_axis_compilation(reader: Any) -> list[dict[str, Any]]:
         if not scheme_name or scheme_name in seen:
             continue
         manager_pairs = _axis_manager_pairs(flat)
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
+
+
+# KOTAK: the manager-tenure annexure ("ABOUT OUR FUND MANAGERS - REGULAR/
+# DIRECT PLAN", verified 2026-07-11 pages ~146-190 of the real 190-page
+# June-2026 file) is organised BY MANAGER, not by scheme, and repeats the
+# SAME schemes across a Regular-Plan pass and a Direct-Plan pass — dedup by
+# scheme_name (first occurrence wins) handles both passes for free. Every
+# scheme's own cover page names the manager but explicitly defers the
+# tenure date to this annexure ("For Fund Manager experience, please refer
+# page 162-166 & 181-185") — so the annexure, not the cover page, is the
+# only real tenure source. The one reliable per-scheme anchor inside it is a
+# compound sentence that appears once per scheme wherever its performance
+# table sits: "Scheme Inception date is <DD/MM/YYYY>[, <optional clause>].
+# Mr./Ms./Mrs. <Name>[, & Mr. <Name2>...] has/have been managing the fund
+# since <DD/MM/YYYY>" (repeated per co-manager clause via `finditer` — real
+# schemes have up to 4 managers, each clause its own separate match, joined
+# by "&"/"and"/". " indifferently since each is found independently;
+# verified against Kotak Balanced Advantage Fund's 3 managers on 3 distinct
+# dates). pypdf's table-cell reading order sometimes separates the scheme-
+# name banner from this sentence with other reordered cells in between
+# (verified: passive/target-maturity index & debt-index schemes print their
+# NAV/benchmark table BETWEEN the banner and the sentence) — the scheme
+# name is therefore recovered by searching BACKWARD from the anchor for the
+# closest "Kotak ... Fund/ETF/FOF" run within a bounded window, never by
+# requiring direct adjacency.
+_KOTAK_INCEPTION_RE = re.compile(r"Scheme Inception date\s+is\s+\d{1,2}/\d{1,2}/\d{2,4}")
+# The name char class blocks re-entering a SECOND "Kotak" occurrence via a
+# per-character `(?!Kotak)` lookahead — without this, a lazy match bridges
+# across unrelated intervening benchmark/table text that has no stopping
+# literal of its own, swallowing TWO unrelated fund names into one bogus
+# scheme_name (caught 2026-07-11 against the real file: "Kotak Silver ETF
+# Domestic Prices of physical Silver Kotak Pioneer Fund"). Same over-capture
+# failure class as the 2026-07-11 HDFC/UTI/AXIS manager-name RCA — bound or
+# fail closed, never trust "the next literal will stop it."
+_KOTAK_SCHEME_NAME_RE = re.compile(
+    r"Kotak\s+(?:(?!Kotak)[A-Za-z0-9&.,’'\- ]){2,80}?\s+(?:Fund|ETF|FOF)\b"
+)
+_KOTAK_MANAGER_CLAUSE_RE = re.compile(
+    r"((?:Mr\.|Ms\.|Mrs\.)\s+[A-Z][A-Za-z.’' ]{1,40}?"
+    r"(?:\s*(?:,|&|and)\s*(?:Mr\.|Ms\.|Mrs\.)\s+[A-Z][A-Za-z.’' ]{1,40}?)*)"
+    r"\s+(?:has|have)\s+been\s+managing\s+the\s+fund\s+since\s+(\d{1,2}/\d{1,2}/\d{2,4})"
+)
+_KOTAK_NAME_ONLY_RE = re.compile(
+    r"(?:Mr\.|Ms\.|Mrs\.)\s+([A-Z][A-Za-z.’' ]{1,40}?)(?=\s*(?:,|&|and\b|$))"
+)
+
+
+def _parse_kotak_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if "Scheme Inception date" not in text or "managing the fund since" not in text:
+            continue
+        flat = " ".join(text.split())
+        for m in _KOTAK_INCEPTION_RE.finditer(flat):
+            window_start = max(0, m.start() - 250)
+            names_before = list(_KOTAK_SCHEME_NAME_RE.finditer(flat, window_start, m.start()))
+            if not names_before:
+                continue
+            scheme_name = " ".join(names_before[-1].group(0).split())
+            if scheme_name in seen:
+                continue
+            next_anchor = _KOTAK_INCEPTION_RE.search(flat, m.end())
+            block_end = next_anchor.start() if next_anchor else min(len(flat), m.end() + 500)
+            block = flat[m.end() : block_end]
+            manager_pairs: list[tuple[str, date]] = []
+            for names_blob, raw_date in _KOTAK_MANAGER_CLAUSE_RE.findall(block):
+                try:
+                    start_date = datetime.strptime(raw_date, "%d/%m/%Y").date()
+                except ValueError:
+                    continue
+                for name in _KOTAK_NAME_ONLY_RE.findall(names_blob):
+                    clean = " ".join(name.split()).strip(" ,")
+                    if clean and (clean, start_date) not in manager_pairs:
+                        manager_pairs.append((clean, start_date))
+            if not manager_pairs:
+                continue
+            out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+            seen.add(scheme_name)
+    return out
+
+
+# EDELWEISS: one or two pages per scheme (verified 2026-07-11 against the
+# real ~193-page May-2026 file). Unlike Kotak, manager + tenure sit directly
+# on the scheme's own page, no cross-page annexure needed: "Fund Manager\n
+# Fund Managers Experience Managing Since\nMr. <Name> <N> years <DD-Mon-YY>"
+# repeated per co-manager. The scheme banner ("Edelweiss <Name>", or the
+# BHARAT Bond target-maturity series which carries no "Edelweiss" prefix at
+# all — a real, sponsor-shared product line, verified against the TOC) sits
+# on its own line(s) immediately before the SEBI "An open ended..."
+# description line; the name itself sometimes WRAPS onto a 2nd/3rd line
+# before that description (e.g. "Edelweiss Large & Mid Cap" / "Fund" / "An
+# open ended...", caught 2026-07-11 — a single-line-only check silently
+# dropped 43 of 71 real sections).
+_EDEL_MANAGER_ROW_RE = re.compile(
+    r"(?:Mr\.|Ms\.|Mrs\.)\s+([A-Z][A-Za-z.’' ]{1,40}?)\s+\d+\s*[Yy]ears?\s+"
+    r"(\d{1,2}-[A-Za-z]{3}-\d{2,4})"
+)
+_EDEL_BLOCK_END_RE = re.compile(
+    r"Minimum Investment Amount|Exit Load|Minimum Creation Unit Size|Minimum Additional"
+)
+
+
+def _edel_scheme_name_from_lines(lines: list[str]) -> str:
+    for i, line in enumerate(lines[:-1]):
+        s = line.strip()
+        if not (s.startswith("Edelweiss ") or s.startswith("BHARAT Bond")):
+            continue
+        for span in (1, 2, 3):
+            if i + span >= len(lines):
+                break
+            nxt = lines[i + span].strip()
+            if nxt.lower().startswith("an open"):
+                return " ".join(lines[i : i + span]).strip()
+    # BHARAT Bond ETF/FOF series: single-NAV product, no "An open ended..."
+    # description line pairs with the banner — fall back to the literal
+    # "BHARAT Bond ... : <price>" NAV line (verified 2026-07-11).
+    for line in lines:
+        s = line.strip()
+        if s.startswith("BHARAT Bond") and ":" in s:
+            return s.split(":")[0].strip()
+    return ""
+
+
+def _parse_edelweiss_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if "Managing Since" not in text:
+            continue
+        lines = [" ".join(ln.split()) for ln in text.splitlines() if ln.strip()]
+        scheme_name = _edel_scheme_name_from_lines(lines)
+        if not scheme_name or scheme_name in seen:
+            continue
+        flat = " ".join(lines)
+        anchor = flat.find("Managing Since")
+        if anchor < 0:
+            continue
+        # Slice strictly to the manager-table block (between the column
+        # header and the next known section literal) — same bounded-slice
+        # idiom as HDFC's "Name Since Total Exp" -> "DATE OF ALLOTMENT"
+        # window, so the permissive name char class can never bridge into
+        # unrelated later page text.
+        end_m = _EDEL_BLOCK_END_RE.search(flat, anchor)
+        block_end = end_m.start() if end_m else min(len(flat), anchor + 600)
+        block = flat[anchor + len("Managing Since") : block_end]
+        manager_pairs: list[tuple[str, date]] = []
+        for name, raw_date in _EDEL_MANAGER_ROW_RE.findall(block):
+            clean = " ".join(name.split()).strip(" ,")
+            if not clean:
+                continue
+            try:
+                start_date = datetime.strptime(raw_date, "%d-%b-%y").date()
+            except ValueError:
+                continue
+            if (clean, start_date) not in manager_pairs:
+                manager_pairs.append((clean, start_date))
+        if not manager_pairs:
+            continue
+        out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})
+        seen.add(scheme_name)
+    return out
+
+
+# ABSL ("Empower Factsheet"): one or two pages per scheme (verified
+# 2026-07-11 against the real ~254-page June-2026 file). Manager + tenure
+# sit directly on the scheme's own page: "Fund Manager - Mr. <Name>\n
+# Managing the Fund Since: <Month DD, YYYY>" repeated per co-manager, name
+# and date immediately adjacent with nothing else between them (verified
+# incl. 4-manager schemes, e.g. Aditya Birla Sun Life Balanced Advantage
+# Fund). Scheme name comes from the Investment Performance table's own row,
+# which always starts with the scheme's Title-Case name followed by a
+# return percentage — a real, bounded stopping literal (mirrors HDFC's
+# "Over N years" idiom: the digit-percent pattern is the actual validator,
+# not a hand-picked char class boundary).
+_ABSL_MANAGER_ROW_RE = re.compile(
+    r"Fund Manager\s*-\s*(?:Mr\.|Ms\.|Mrs\.)\s+([A-Z][A-Za-z.’' ]{1,40}?)\s+"
+    r"Managing the Fund Since:\s*([A-Za-z]+\s+\d{1,2},\s*\d{4})"
+)
+_ABSL_SCHEME_NAME_RE = re.compile(
+    r"(Aditya Birla Sun Life\s+[A-Za-z0-9&.,’'\-—/ ]{2,60}?)\s+-?\d+\.\d+\s*%"
+)
+
+
+def _parse_absl_compilation(reader: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if "Managing the Fund Since" not in text or "Fund Manager" not in text:
+            continue
+        flat = " ".join(text.split())
+        m = _ABSL_SCHEME_NAME_RE.search(flat)
+        if not m:
+            continue
+        scheme_name = " ".join(m.group(1).split()).strip(" -")
+        if not scheme_name or scheme_name in seen:
+            continue
+        manager_pairs: list[tuple[str, date]] = []
+        for name, raw_date in _ABSL_MANAGER_ROW_RE.findall(flat):
+            clean = " ".join(name.split()).strip(" ,")
+            if not clean:
+                continue
+            try:
+                start_date = datetime.strptime(raw_date, "%B %d, %Y").date()
+            except ValueError:
+                continue
+            if (clean, start_date) not in manager_pairs:
+                manager_pairs.append((clean, start_date))
         if not manager_pairs:
             continue
         out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})

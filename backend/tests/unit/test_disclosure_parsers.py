@@ -1362,6 +1362,214 @@ class TestFactsheetCompilationAxis:
         assert "Past performance" not in first_name
 
 
+# KOTAK: real 2026-07-11 shape — the manager-tenure annexure is organised BY
+# MANAGER, and the reliable per-scheme anchor is the compound "Scheme
+# Inception date is <date>. Mr./Ms. <Name>[...] has/have been managing the
+# fund since <date>" sentence, with the scheme-name banner sitting a short
+# distance BEFORE it (sometimes with unrelated benchmark-table noise in
+# between, verified against real target-maturity/index scheme pages).
+_KOTAK_SCHEME_A = (
+    "163\n"
+    "Fund Manager*: Mr. Test One\n"  # cover-page-style label the sniff keys on
+    "Kotak Test Alpha Fund\n"
+    "Kotak Test Alpha\n"
+    "Index TRI#\n"
+    "Index TRI#\n"
+    "Scheme Inception date is 10/4/2023. Mr. Test One & Mr. Test Two have "
+    "been managing the fund since 10/4/2023, Mr. Test Three have been "
+    "managing the fund since 09/03/2026.\n"
+    "Different plans have different expense structure. The performance "
+    "details provided herein are of Regular Plan - Growth Option\n"
+)
+# Ms. honorific (real 2026-07-11 shape, Kotak Banking & Financial Services
+# Fund uses "Ms. Shibani Kurian" in this exact sentence structure).
+_KOTAK_SCHEME_B_MS_HONORIFIC = (
+    "163\n"
+    "Kotak Test Banking Fund\n"
+    "Nifty Banking TRI#\n"
+    "Scheme Inception date is 27/02/2023. Ms. Test Four has been managing "
+    "the fund since 27/02/2023\n"
+    "Different plans have different expense structure.\n"
+)
+# Regression for the real 2026-07-11 bug: a lazy "letters + spaces" name
+# char class with no stopping literal bridged across TWO unrelated "Kotak
+# ... Fund" mentions ("Kotak Silver ETF Domestic Prices of physical Silver
+# Kotak Pioneer Fund") when the first one has no "Fund/ETF/FOF" terminal
+# word of its own before the second "Kotak" starts. The nearest, cleanly-
+# bounded name ("Kotak Test Pioneer Fund") must win, never the bridged one.
+_KOTAK_SCHEME_C_BRIDGE_GUARD = (
+    "165\n"
+    "Kotak Test Silver ETF\n"
+    "Domestic Prices of physical Silver\n"
+    "Kotak Test Pioneer Fund\n"
+    "Nifty Pioneer TRI#\n"
+    "Scheme Inception date is 20/10/2023. Mr. Test Five has been managing "
+    "the fund since 20/10/2023\n"
+    "Different plans have different expense structure.\n"
+)
+_KOTAK_NON_SCHEME_PAGE = "Kotak Asset Allocation View\nMarket Cap Stance\nLarge Cap (Equal Weight)"
+
+
+class TestFactsheetCompilationKotak:
+    def test_splits_two_schemes_and_skips_non_scheme_page(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader(
+            [_KOTAK_NON_SCHEME_PAGE, _KOTAK_SCHEME_A, _KOTAK_SCHEME_B_MS_HONORIFIC]
+        )
+        result = dp._parse_kotak_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        assert alpha["scheme_name"] == "Kotak Test Alpha Fund"
+        assert alpha["manager_pairs"] == [
+            ("Test One", date(2023, 4, 10)),
+            ("Test Two", date(2023, 4, 10)),
+            ("Test Three", date(2026, 3, 9)),
+        ]
+        # Ms. honorific must resolve just like Mr./Mrs.
+        assert beta["scheme_name"] == "Kotak Test Banking Fund"
+        assert beta["manager_pairs"] == [("Test Four", date(2023, 2, 27))]
+
+    def test_never_bridges_across_unrelated_kotak_fund_mentions(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_kotak_compilation(_FakeReader([_KOTAK_SCHEME_C_BRIDGE_GUARD]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "Kotak Test Pioneer Fund"
+        assert "Silver ETF" not in result[0]["scheme_name"]
+        assert result[0]["manager_pairs"] == [("Test Five", date(2023, 10, 20))]
+
+    def test_non_scheme_page_yields_nothing(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        assert dp._parse_kotak_compilation(_FakeReader([_KOTAK_NON_SCHEME_PAGE])) == []
+
+
+# EDELWEISS: real 2026-07-11 shape — manager + tenure sit directly on the
+# scheme's own page ("Fund Manager\nFund Managers Experience Managing
+# Since\nMr. <Name> <N> years <DD-Mon-YY>"); the scheme banner sometimes
+# wraps onto a 2nd/3rd line before the SEBI "An open ended..." description.
+_EDEL_SCHEME_A = (
+    "Some portfolio holdings text.\n"
+    "Fund Manager\n"
+    "Fund Managers Experience Managing Since\n"
+    "Mr. Test Alpha 18 years 01-Oct-21\n"
+    "Mr. Test Beta 17 years 02-May-17\n"
+    "Minimum Investment Amount\n"
+    "Rs. 100/- per application & in multiples of Re. 1/- thereafter\n"
+    "Exit Load\n"
+    "Edelweiss Test Alpha Fund\n"
+    "An open ended equity scheme predominantly investing in large cap stocks\n"
+)
+# Real bug (2026-07-11): the scheme name itself wraps onto a 2nd line before
+# the description ("Edelweiss Large & Mid Cap" / "Fund" / "An open
+# ended..."), which the old single-line-only check silently dropped.
+_EDEL_SCHEME_B_WRAPPED_NAME = (
+    "Some portfolio holdings text.\n"
+    "Fund Manager\n"
+    "Fund Managers Experience Managing Since\n"
+    "Ms. Test Gamma 18 years 01-Apr-24\n"
+    "Minimum Investment Amount\n"
+    "Edelweiss Large & Mid Test\n"
+    "Fund\n"
+    "An open ended equity scheme investing in both large cap and mid cap stocks\n"
+)
+# BHARAT Bond ETF/FOF series: real, sponsor-shared products with NO
+# "Edelweiss" prefix and no "An open ended..." pairing at all — falls back
+# to the literal "BHARAT Bond ... : <price>" NAV line.
+_EDEL_SCHEME_C_BHARAT_BOND = (
+    "About the Scheme\n"
+    "NAV\n"
+    "BHARAT Bond Test ETF - April 2030 : ₹1569.92\n"
+    "Fund Manager\n"
+    "Fund Managers Experience Managing Since\n"
+    "Mr. Test Delta 26 Years 26-Dec-19\n"
+    "Exit Load\n"
+    "Nil\n"
+)
+_EDEL_NON_SCHEME_PAGE = "Expert Speaks\nJune quarter most challenging market commentary."
+
+
+class TestFactsheetCompilationEdelweiss:
+    def test_splits_two_schemes_and_skips_non_scheme_page(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_EDEL_NON_SCHEME_PAGE, _EDEL_SCHEME_A, _EDEL_SCHEME_B_WRAPPED_NAME])
+        result = dp._parse_edelweiss_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        assert alpha["scheme_name"] == "Edelweiss Test Alpha Fund"
+        assert alpha["manager_pairs"] == [
+            ("Test Alpha", date(2021, 10, 1)),
+            ("Test Beta", date(2017, 5, 2)),
+        ]
+        # Wrapped 2-line name + Ms. honorific
+        assert beta["scheme_name"] == "Edelweiss Large & Mid Test Fund"
+        assert beta["manager_pairs"] == [("Test Gamma", date(2024, 4, 1))]
+
+    def test_bharat_bond_series_falls_back_to_nav_line(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_edelweiss_compilation(_FakeReader([_EDEL_SCHEME_C_BHARAT_BOND]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "BHARAT Bond Test ETF - April 2030"
+        assert result[0]["manager_pairs"] == [("Test Delta", date(2019, 12, 26))]
+
+    def test_non_scheme_page_yields_nothing(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        assert dp._parse_edelweiss_compilation(_FakeReader([_EDEL_NON_SCHEME_PAGE])) == []
+
+
+# ABSL ("Empower Factsheet"): real 2026-07-11 shape — "Fund Manager - Mr.
+# <Name>\nManaging the Fund Since: <Month DD, YYYY>" repeated per co-manager,
+# scheme name recovered from the Investment Performance table's own row
+# (Title-Case name immediately followed by a return percentage).
+_ABSL_SCHEME_A = (
+    "Fund Snapshot\n"
+    "Date of Allotment : Aug 30, 2002\n"
+    "Fund Manager - Mr. Test Alpha\n"
+    "Managing the Fund Since: January 07, 2026\n"
+    "Experience in Managing the Fund: 0.4 Years\n"
+    "Investment Performance NAV as on May 29, 2026 : ₹500.21\n"
+    "Aditya Birla Sun Life Test Alpha Fund 17.90% 11.73% 10.87% 11.34% -3.59%\n"
+)
+_ABSL_SCHEME_B_MULTI = (
+    "Fund Snapshot\n"
+    "Fund Manager - Mr. Test Beta\n"
+    "Managing the Fund Since: November 03, 2023\n"
+    "Experience in Managing the Fund: 2.6 Years\n"
+    "Fund Manager - Ms. Test Gamma\n"
+    "Managing the Fund Since: November 21, 2022\n"
+    "Experience in Managing the Fund: 3.5 Years\n"
+    "Aditya Birla Sun Life Test Beta Fund 20.67% 14.11% 12.70% 16.38% 4.93%\n"
+)
+_ABSL_NON_SCHEME_PAGE = "Tax Reckoner Tax Year 2026-27\nWithholding tax rate table."
+
+
+class TestFactsheetCompilationAbsl:
+    def test_splits_two_schemes_and_skips_non_scheme_page(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        reader = _FakeReader([_ABSL_NON_SCHEME_PAGE, _ABSL_SCHEME_A, _ABSL_SCHEME_B_MULTI])
+        result = dp._parse_absl_compilation(reader)
+        assert len(result) == 2
+        alpha, beta = result
+        assert alpha["scheme_name"] == "Aditya Birla Sun Life Test Alpha Fund"
+        assert alpha["manager_pairs"] == [("Test Alpha", date(2026, 1, 7))]
+        # Second manager uses the Ms. honorific.
+        assert beta["scheme_name"] == "Aditya Birla Sun Life Test Beta Fund"
+        assert beta["manager_pairs"] == [
+            ("Test Beta", date(2023, 11, 3)),
+            ("Test Gamma", date(2022, 11, 21)),
+        ]
+
+    def test_non_scheme_page_yields_nothing(self) -> None:
+        from dhanradar.mf import disclosure_parsers as dp
+
+        assert dp._parse_absl_compilation(_FakeReader([_ABSL_NON_SCHEME_PAGE])) == []
+
+
 class TestFactsheetCompilationDispatch:
     def test_unrecognized_amc_fails_closed(self, monkeypatch) -> None:
         import pypdf
@@ -1386,12 +1594,34 @@ class TestFactsheetCompilationDispatch:
         result = dp.parse_factsheet_compilation(b"%PDF-fake", "HDFC")
         assert result and result[0]["scheme_name"] == "HDFC Test Alpha Fund"
 
+    def test_dispatches_kotak_edelweiss_absl_to_their_own_extractors(self, monkeypatch) -> None:
+        import pypdf
+
+        from dhanradar.mf import disclosure_parsers as dp
+
+        cases = [
+            ("KOTAK", _KOTAK_SCHEME_A, "Kotak Test Alpha Fund"),
+            ("EDELWEISS", _EDEL_SCHEME_A, "Edelweiss Test Alpha Fund"),
+            ("ABSL", _ABSL_SCHEME_A, "Aditya Birla Sun Life Test Alpha Fund"),
+        ]
+        for amc, page_text, expected_name in cases:
+            monkeypatch.setattr(pypdf, "PdfReader", lambda _buf, t=page_text: _FakeReader([t]))
+            result = dp.parse_factsheet_compilation(b"%PDF-fake", amc)
+            assert result and result[0]["scheme_name"] == expected_name
+
     def test_sniff_scans_first_pages_and_recognizes_each_layout(self, monkeypatch) -> None:
         import pypdf
 
         from dhanradar.mf.disclosure_parsers import looks_like_factsheet_compilation
 
-        for page_text in (_HDFC_SCHEME_A, _UTI_SCHEME_A, _AXIS_SCHEME_A_MULTI):
+        for page_text in (
+            _HDFC_SCHEME_A,
+            _UTI_SCHEME_A,
+            _AXIS_SCHEME_A_MULTI,
+            _KOTAK_SCHEME_A,
+            _EDEL_SCHEME_A,
+            _ABSL_SCHEME_A,
+        ):
             monkeypatch.setattr(pypdf, "PdfReader", lambda _buf, t=page_text: _FakeReader([t]))
             assert looks_like_factsheet_compilation(b"%PDF-fake")
 
