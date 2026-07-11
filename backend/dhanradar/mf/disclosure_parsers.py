@@ -32,6 +32,13 @@ first-batch files):
     which joins exactly on mf_funds.amfi_code — the one disclosure class that
     needs ZERO name resolution. Multi-AMC by design, so its file class
     ('amfi_aaum') is content-sniffed and bypasses AMC detection.)
+  - TATA per-scheme "SCHEME SUMMARY DOCUMENT" (2026-07-11 — TATA's own
+    ~70-file per-scheme download, saved with a misleading `.xls` extension:
+    it's a real xlsx zip. One sheet, label/value rows, byte-identical layout
+    across every scheme type sampled. Unlike every other class here, the
+    file GIVES the scheme's ISINs directly — resolved by exact ISIN match,
+    never fuzzy name matching. Manager name(s) + tenure, exit load, minimum
+    application amount.)
 
 All parsers are PURE (bytes in, tuples out — no DB, no network) so they unit-
 test without fixtures beyond in-memory workbooks. Writers live in
@@ -84,6 +91,12 @@ def classify_file_class(filename: str, data: bytes | None = None) -> str:
     """
     if data is not None and _looks_like_scheme_master_html(data):
         return "scheme_master"
+    # TATA's per-scheme "SCHEME SUMMARY DOCUMENT" workbook (2026-07-11): real
+    # filenames are plain per-scheme names ("Tata-Large-Cap-Fund.xls")
+    # indistinguishable from any other AMC's portfolio disclosure — content
+    # is the only reliable signal, same reasoning as scheme_master above.
+    if data is not None and looks_like_scheme_summary_xls(data):
+        return "scheme_summary_xls"
     # AMFI's consolidated scheme-wise AAUM download has an arbitrary filename
     # ("average-aum2.xlsx" from the portal) that matches NO keyword below —
     # content is the only reliable signal, same reasoning as scheme_master.
@@ -204,7 +217,19 @@ def _iter_sheets(data: bytes, ext: str) -> Iterator[tuple[str, list[list[Any]]]]
 def _iter_sheets_xlsx(data: bytes) -> Iterator[tuple[str, list[list[Any]]]]:
     """The .xlsx branch of `_iter_sheets`, split out so it can be retried with
     repaired bytes on a stylesheet-corruption ValueError without duplicating
-    the openpyxl-open-and-iterate logic."""
+    the openpyxl-open-and-iterate logic.
+
+    Root-cause fix (2026-07-11, TATA's real "SCHEME SUMMARY DOCUMENT" per-
+    scheme files): a worksheet's own `<dimension ref="A1"/>` can understate
+    the real used range (TATA's declares just A1 while data sits in
+    A1:C60ish) — openpyxl's READ-ONLY mode trusts that declared dimension
+    and `iter_rows()` yields only the single cell it covers. `reset_dimensions()`
+    (a real `ReadOnlyWorksheet` method) makes it scan the sheet's actual XML
+    instead of trusting the stale bound. Called on EVERY worksheet here (not
+    just TATA's) so every xlsx parser sharing this one reader is protected,
+    not just the one class that surfaced the bug — verified no behavior
+    change on a correctly-dimensioned file (reset just removes an
+    optimization hint, it never changes which rows exist in the XML)."""
     import openpyxl
 
     try:
@@ -216,7 +241,9 @@ def _iter_sheets_xlsx(data: bytes) -> Iterator[tuple[str, list[list[Any]]]]:
         wb = openpyxl.load_workbook(io.BytesIO(repaired), read_only=True, data_only=True)
     try:
         for name in wb.sheetnames:
-            yield name, [list(row) for row in wb[name].iter_rows(values_only=True)]
+            ws = wb[name]
+            ws.reset_dimensions()
+            yield name, [list(row) for row in ws.iter_rows(values_only=True)]
     finally:
         wb.close()
 
@@ -357,6 +384,231 @@ def parse_fund_performance(data: bytes, ext: str) -> list[tuple[str, str | None,
                 continue  # nothing factual to write for this row
             results.append((name, bench, band))
     return results
+
+
+# ---------------------------------------------------------------------------
+# TATA per-scheme "SCHEME SUMMARY DOCUMENT" workbook (2026-07-11) — TATA's own
+# website serves ~70 real per-scheme files as ".xls" but they are, byte-for-
+# byte, valid xlsx zips (PK header) — a genuine extension mislabel. One
+# sheet, 3 columns (row idx | field label | value), ~54 label rows verified
+# byte-identical across every scheme TYPE sampled (large-cap equity, index,
+# liquid/debt, gold ETF, retirement plan) — only the VALUES vary. Unlike
+# every other class here, this file GIVES the scheme's ISINs directly (one
+# file lists every plan/option variant of ONE scheme) — resolved by exact
+# ISIN lookup in the writer, never fuzzy name matching.
+#
+# Extracted: fund name (informational only — resolution is by ISIN, this is
+# never used to match), fund manager name(s) + tenure start date(s), exit
+# load (handed VERBATIM, after trim, to the existing `_parse_exit_load_text`
+# — never a second exit-load reader), minimum application amount, and the
+# ISIN list.
+#
+# Deliberately NOT extracted: "Annual Expense (Stated maximum)" is a STATED
+# ceiling, not the actual TER the AMFI consolidated TER class already
+# covers — writing it would pollute expense_ratio_pct from a less-accurate
+# source; SIP/STP/SWP mechanics and custodian/auditor/registrar are
+# administrative, not analytics-relevant. Benchmark (Tier 1) / Riskometer
+# ARE present in the file but skipped this pass — the only existing writer
+# for those fields (fund_performance, PR #544) resolves by fuzzy NAME
+# matching, not ISIN, so reusing it here would mean a second write pattern,
+# not a reuse; noted as the extension point (a follow-up could add two more
+# `UPDATE ... WHERE isin = :i` statements identical in shape to the
+# exit-load/min-lumpsum ones below), not built in this pass.
+# ---------------------------------------------------------------------------
+
+_TATA_ISIN_RE = re.compile(r"[A-Z]{2}[A-Z0-9]{9}\d")
+# Two DISTINCT marker shapes, deliberately not one permissive "leading digits"
+# regex: a bare date's day-of-month ('19 Jan 2024', '27-Mar-19') also starts
+# with digits, so an unqualified `(\d+)` would misread the day as an index
+# (caught by the positional-pairing test — '19 Jan 2024' was silently read as
+# index 19). Real manager-index markers are unambiguous: either the literal
+# 'FM' prefix, or a bare digit followed IMMEDIATELY by '.' (never '-' —
+# dates use '-' right after the day digit, e.g. '27-Mar-19'; no real manager
+# index in any sampled file uses a bare digit + dash).
+_TATA_FM_MARKER_RE = re.compile(r"^FM\s*-?\s*(\d+)\s*[-.:]*\s*(.*)$", re.IGNORECASE)
+_TATA_BARE_MARKER_RE = re.compile(r"^(\d+)\.\s*(.*)$")
+_TATA_DATE_NUM_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{2,4})")
+_TATA_DATE_MON_RE = re.compile(r"(\d{1,2})[\s\-]+([A-Za-z]{3,9})[.,\s\-]*(\d{2,4})")
+
+
+def looks_like_scheme_summary_xls(data: bytes) -> bool:
+    """CONTENT sniff — never filename (TATA's per-scheme filenames are
+    indistinguishable from any other AMC's by pattern alone). The first
+    sheet's first row carries 'Fields' + 'SCHEME SUMMARY DOCUMENT' as a
+    banner pair (verified identical across ~70 real files). Goes through
+    `_iter_sheets_xlsx` (not a second openpyxl open) so it inherits the
+    read-only broken-`<dimension>` fix above for free — without it, the
+    banner row itself reads back truncated to one cell and this sniff would
+    never fire."""
+    if not data.startswith(b"PK\x03\x04"):
+        return False
+    try:
+        _name, rows = next(iter(_iter_sheets_xlsx(data)))
+    except Exception:  # noqa: BLE001 — a sniff must never break classification
+        return False
+    if not rows:
+        return False
+    head = [_s(c).lower() for c in rows[0]]
+    return "fields" in head and any("scheme summary document" in c for c in head)
+
+
+def _tata_isins(field: str) -> list[str]:
+    """ISIN list, verbatim-validated. Real files carry 3 distinct data-entry
+    errors: a missing leading letter, two ISINs concatenated with no
+    separator, and a bare '0' placeholder — a strict 12-char ISIN shape
+    check silently drops all three rather than guessing where to split or
+    what letter is missing. Separator varies (comma, comma+space, or a bare
+    newline — all three seen in real files); order-preserving de-dup."""
+    seen: list[str] = []
+    for token in re.split(r"[,\n;]", field):
+        token = token.strip()
+        if token and _TATA_ISIN_RE.fullmatch(token) and token not in seen:
+            seen.append(token)
+    return seen
+
+
+def _tata_split_indexed(field: str) -> list[tuple[int | None, str]]:
+    """Split a comma/semicolon list into (index, rest) pairs. `index` is the
+    manager's own 'FM-N'/'N.' ordinal when present (real separator styles
+    seen: 'FM-1', 'FM 1 -', '1.'), else None — the caller correlates the
+    name field against the date field by this index."""
+    out: list[tuple[int | None, str]] = []
+    for item in re.split(r"[,;]", field):
+        item = item.strip()
+        if not item:
+            continue
+        m = _TATA_FM_MARKER_RE.match(item) or _TATA_BARE_MARKER_RE.match(item)
+        if m:
+            out.append((int(m.group(1)), m.group(2).strip(" -")))
+        else:
+            out.append((None, item))
+    return out
+
+
+def _tata_extract_date(text: str) -> date | None:
+    """First recognizable date anywhere in `text` — real files mix DD/MM/YYYY
+    ('01/07/2025') with DD-Month-YYYY in several spacing variants ('01-July-
+    2025', '20-Dec-24', '16-March- 2026'). Fail-closed None on free text
+    ('From the date of allotment' — a real value, never guessed into a
+    date)."""
+    m = _TATA_DATE_NUM_RE.search(text)
+    if m:
+        day, month, year = m.groups()
+        y = int(year) + 2000 if len(year) == 2 else int(year)
+        try:
+            return date(y, int(month), int(day))
+        except ValueError:
+            return None
+    m = _TATA_DATE_MON_RE.search(text)
+    if m:
+        day, mon, year = m.groups()
+        y = int(year) + 2000 if len(year) == 2 else int(year)
+        try:
+            return datetime.strptime(f"{int(day):02d}-{mon[:3]}-{y}", "%d-%b-%Y").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _tata_manager_pairs(name_field: str, date_field: str) -> list[tuple[str, date | None]]:
+    """Correlate the 'Fund Manager Name' and 'Fund Manager From Date' fields.
+
+    Real files use THREE different pairing shapes (verified across ~70
+    files): (1) both fields carry a matching 'FM-N'/'N.' index per manager —
+    paired by index, robust even when the date field ALSO repeats the name
+    ('2. Rakesh Prajapati - 20-Dec-2024'); (2) neither field has an index and
+    the split counts match — paired POSITIONALLY; (3) counts genuinely
+    mismatch (e.g. 2 managers, 1 date with no index to attribute it to
+    either) — every manager in that file gets `None`, never a guessed
+    pairing. `None` dates are returned here, not dropped — the caller
+    decides whether to write a dateless manager (`fund_manager_history.
+    start_date` is NOT NULL, so in practice they're skipped at write time,
+    never fabricated — §8.4).
+    """
+    names = _tata_split_indexed(name_field)
+    dates = _tata_split_indexed(date_field)
+
+    date_by_idx: dict[int, date] = {}
+    fallback_dates: list[date] = []
+    for idx, raw in dates:
+        parsed = _tata_extract_date(raw)
+        if parsed is None:
+            continue
+        if idx is not None:
+            date_by_idx.setdefault(idx, parsed)
+        else:
+            fallback_dates.append(parsed)
+
+    use_positional = not date_by_idx and len(names) == len(fallback_dates)
+
+    pairs: list[tuple[str, date | None]] = []
+    for i, (idx, raw_name) in enumerate(names):
+        clean_name = " ".join(raw_name.split()).strip(" ,-")
+        if not clean_name:
+            continue
+        start = date_by_idx.get(idx) if idx is not None else None
+        if start is None and use_positional:
+            start = fallback_dates[i]
+        pairs.append((clean_name, start))
+    return pairs
+
+
+def parse_scheme_summary_xls(data: bytes) -> dict[str, Any]:
+    """TATA per-scheme "SCHEME SUMMARY DOCUMENT" workbook → one dict (ONE
+    file = ONE scheme, same output shape as `parse_factsheet_pdf`). Fail-
+    closed {} when the file carries no 'Fund Name' label at all (the sniff
+    already gates the common case; this is the belt-and-braces check).
+
+    Keys: scheme_name (informational only — resolution is by ISIN, never by
+    this name), manager_pairs (list[(name, date|None)] — see
+    `_tata_manager_pairs`), exit_load_pct/exit_load_days (verbatim-trimmed
+    text handed to the existing `_parse_exit_load_text`, same parser
+    `factsheet_pdf`/`scheme_master` already use — never a second exit-load
+    reader), min_lumpsum_amount, isins (every plan/option ISIN the file
+    lists for this one scheme).
+    """
+    try:
+        _name, rows = next(iter(_iter_sheets_xlsx(data)))
+    except Exception:  # noqa: BLE001 — unreadable workbook, never a guess
+        return {}
+    labels: dict[str, str] = {}
+    for row in rows:
+        if not row or len(row) < 2 or row[1] is None:
+            continue
+        label = _s(row[1])
+        if label:
+            labels.setdefault(label, _s(row[2]) if len(row) > 2 else "")
+
+    scheme_name = labels.get("Fund Name", "")
+    if not scheme_name:
+        return {}
+
+    manager_pairs = _tata_manager_pairs(
+        labels.get("Fund Manager Name", ""), labels.get("Fund Manager From Date", "")
+    )
+
+    exit_load_pct, exit_load_days = _parse_exit_load_text(
+        labels.get("Exit Load (if applicable)", "").strip()
+    )
+
+    min_lumpsum: float | None = None
+    min_raw = labels.get("Minimum Application Amount", "")
+    try:
+        val = float(min_raw)
+        min_lumpsum = val if val > 0 else None
+    except ValueError:
+        min_lumpsum = None
+
+    isins = _tata_isins(labels.get("ISINs", ""))
+
+    return {
+        "scheme_name": scheme_name,
+        "manager_pairs": manager_pairs,
+        "exit_load_pct": exit_load_pct,
+        "exit_load_days": exit_load_days,
+        "min_lumpsum_amount": min_lumpsum,
+        "isins": isins,
+    }
 
 
 _MANAGER_SINCE_RE = re.compile(
