@@ -304,7 +304,10 @@ export function AdminShell({ children, variant = 'admin' }: AdminShellProps) {
       <AdminSidebar variant={variant} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileNav variant={variant} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+        {/* `relative` is LOAD-BEARING (RCA G9) — contains absolutely positioned
+            descendants (sr-only spans etc.) in this scroll box; without it they
+            escape to the document and cause double scrollbar + dead space. */}
+        <main className="relative flex-1 overflow-y-auto overflow-x-hidden">
           <div className="min-w-0 p-4 md:p-6">
             {children}
           </div>
