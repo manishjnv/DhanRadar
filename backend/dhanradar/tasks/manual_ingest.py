@@ -140,12 +140,22 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
         # TER/benchmark/manager/exit-load) parses via the scheme_master
         # writer; every OTHER PDF keeps the contract-§2 archive behavior
         # (no fake parsing, no OCR).
-        from dhanradar.mf.disclosure_parsers import looks_like_scheme_master_pdf
+        from dhanradar.mf.disclosure_parsers import (
+            looks_like_factsheet_pdf,
+            looks_like_scheme_master_pdf,
+        )
 
         data = path.read_bytes()
         if looks_like_scheme_master_pdf(data):
             return await _parse_special_class(
                 file_id, "scheme_master_pdf", data, original_filename, amc_hint
+            )
+        # Per-scheme factsheet PDFs (ICICI layout, 2026-07-11) carry the fund
+        # MANAGER (+ tenure), closing AUM, exit load and min amount — the
+        # manager being the one field with no other machine-readable source.
+        if looks_like_factsheet_pdf(data):
+            return await _parse_special_class(
+                file_id, "factsheet_pdf", data, original_filename, amc_hint
             )
         await _mark(file_id, "archived")
         return "archived: pdf_saved_for_later"
@@ -261,7 +271,12 @@ async def _parse_special_class(
         # plan-resolver's bare-prefix strategy stays precise with no AMC
         # scope; see _resolve_scheme_isins_by_plan). Every other class still
         # requires a detected AMC.
-        if amc_name is None and file_class not in ("amfi_aaum", "ter", "fund_performance"):
+        if amc_name is None and file_class not in (
+            "amfi_aaum",
+            "ter",
+            "fund_performance",
+            "factsheet_pdf",  # detects its AMC from the in-file scheme name
+        ):
             stats.status_override = "skipped"
             await _mark(file_id, "unsupported", error="amc_undetectable")
             return "unsupported: amc_undetectable"
@@ -370,6 +385,94 @@ async def _apply_file_class(
     )
     from dhanradar.models.mf import MfAumHistory, MfFund, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
+
+    if file_class == "factsheet_pdf":
+        # Per-scheme factsheet (ICICI layout): manager history + closing AUM
+        # (fill-if-null-or-older, ADR-0035 — a monthly closing AUM is the
+        # SAME stated net-assets figure the portfolio grand-total carries) +
+        # exit load + min lumpsum. Single canonical ISIN via the shared
+        # fuzzy resolver (same as scheme_master) for manager history; the
+        # scalar facts go to every plan-variant ISIN via the bare-prefix
+        # plan resolver (scheme-level facts, identical across plans).
+        from dhanradar.mf.disclosure_parsers import parse_factsheet_pdf
+
+        parsed = parse_factsheet_pdf(data)
+        scheme_name = parsed.get("scheme_name")
+        if not scheme_name:
+            return None, None, 0
+        if amc_name is None:
+            amc_name = detect_amc(scheme_name)
+        if amc_name is None:
+            return None, None, 0
+        isin_map = await _resolve_scheme_isins({scheme_name}, amc_name)
+        canonical_isin = isin_map.get(scheme_name)
+        regular_isins, direct_isins = await _resolve_scheme_isins_by_plan(scheme_name, None)
+        all_isins = regular_isins + direct_isins
+        if not canonical_isin and not all_isins:
+            return parsed.get("aum_as_of"), 0, 0
+
+        updates = 0
+        async with TaskSessionLocal() as db:
+            if parsed.get("aum_crore") is not None and parsed.get("aum_as_of") is not None:
+                for isin in all_isins or ([canonical_isin] if canonical_isin else []):
+                    result = await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds SET aum_crore = :v, aum_as_of = :p "
+                            "WHERE isin = :i AND (aum_as_of IS NULL OR aum_as_of < :p)"
+                        ),
+                        {"v": parsed["aum_crore"], "p": parsed["aum_as_of"], "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("exit_load_pct") is not None:
+                for isin in all_isins or ([canonical_isin] if canonical_isin else []):
+                    result = await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds SET exit_load_pct = :p, "
+                            "exit_load_days = COALESCE(:d, exit_load_days) WHERE isin = :i"
+                        ),
+                        {
+                            "p": parsed["exit_load_pct"],
+                            "d": parsed.get("exit_load_days"),
+                            "i": isin,
+                        },
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("min_lumpsum_amount") is not None:
+                for isin in all_isins or ([canonical_isin] if canonical_isin else []):
+                    result = await db.execute(
+                        sa_text("UPDATE mf.mf_funds SET min_lumpsum_amount = :v WHERE isin = :i"),
+                        {"v": parsed["min_lumpsum_amount"], "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            manager_pairs = parsed.get("manager_pairs") or []
+            manager_isin = canonical_isin or (all_isins[0] if all_isins else None)
+            if manager_pairs and manager_isin:
+                existing = await db.execute(
+                    sa_text(
+                        "SELECT manager_name, start_date FROM mf.fund_manager_history "
+                        "WHERE scheme_uid = :i"
+                    ),
+                    {"i": manager_isin},
+                )
+                existing_tuples = {(row[0], row[1]) for row in existing}
+                new_rows = [
+                    {
+                        "scheme_uid": manager_isin,
+                        "manager_name": name,
+                        "start_date": start,
+                        "end_date": None,
+                        "source": amc_name,
+                        "run_id": run_id,
+                    }
+                    for name, start in manager_pairs
+                    if (name, start) not in existing_tuples
+                ]
+                if new_rows:
+                    await db.execute(pg_insert(MfFundManagerHistory).values(new_rows))
+                    updates += len(new_rows)
+            await db.commit()
+        resolved = 1 if (canonical_isin or all_isins) else 0
+        return parsed.get("aum_as_of"), updates, resolved
 
     if file_class == "fund_performance":
         # AMFI "Fund Performance" export (multi-AMC, per SEBI category) —
