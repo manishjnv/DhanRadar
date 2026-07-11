@@ -38,8 +38,13 @@ def test_allowed_extensions_is_xls_xlsx_pdf():
     assert set(ALLOWED_EXTENSIONS) == {".xls", ".xlsx", ".pdf"}
 
 
-def test_max_bytes_is_25mb():
-    assert MAX_BYTES == 25 * 1024 * 1024
+def test_max_bytes_covers_the_largest_real_compilation_pdf():
+    # 40 MB (was 25): Kotak's real whole-AMC factsheet compilation is
+    # 28,213,031 bytes and was silently rejected `file_too_large` at intake
+    # (2026-07-06 founder upload AND the 2026-07-11 post-#557 ship). The cap
+    # must clear the largest real file of a parsed class with headroom.
+    assert MAX_BYTES == 40 * 1024 * 1024
+    assert MAX_BYTES > 28_213_031  # KotakMFFactsheetJune2026.pdf, the real blocker
 
 
 # ---------------------------------------------------------------------------

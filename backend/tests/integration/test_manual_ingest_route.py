@@ -207,7 +207,9 @@ async def test_admin_upload_size_cap_returns_413(async_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER_IDS", admin_id)
     headers = make_auth_headers(access_token=access)
 
-    oversized = b"0" * (25 * 1024 * 1024 + 1)
+    from dhanradar.mf.manual_ingest import MAX_BYTES
+
+    oversized = b"0" * (MAX_BYTES + 1)  # tracks the constant (25→40 MB, PR #558)
     r = await async_client.post(
         "/api/v1/admin/ingest/disclosure-files",
         files=[
