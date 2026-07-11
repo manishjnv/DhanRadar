@@ -936,6 +936,52 @@ async def test_fund_performance_writes_both_fields_to_all_plan_variants(db_sessi
     # "FP Unknown Fund" resolved nothing — resolved=1 of 2 is still a parse.
 
 
+def _build_fund_performance_hsbc_spacing_xlsx() -> bytes:
+    # Real AMFI banner text (2026-07-11 prod file) — no space before "Cap".
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Crisil Intelligence"])
+    ws.append(["Fund Performance"])
+    ws.append(["Scheme Name", "Benchmark", "Riskometer Scheme", "NAV Regular"])
+    ws.append(["HSBC Large & Midcap Fund", "NIFTY Large Midcap 250 TRI", "Very High", "45.1"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_fund_performance_hsbc_large_midcap_alias_no_amc(db_session):
+    """Root-cause regression (2026-07-11): AMFI's consolidated multi-AMC
+    Fund-Performance file spells this HSBC scheme "Large & Midcap" (no
+    space); master stores "Large & Mid Cap" (space). The dispatcher runs
+    with amc_name=None (real prod path — AMFI names inherently carry the
+    AMC brand), so before this fix `_resolve_scheme_isins_by_plan` never
+    tried `_resolution_candidates` and had no similarity fallback (fails
+    closed on a bare-prefix miss) — riskometer/benchmark stayed NULL. The
+    HSBC-specific alias entry now lets the SAME code path the generic
+    AMFITEST tests exercise also succeed on this real, verified case."""
+    from dhanradar.models.mf import MfFund
+
+    for isin, name in (
+        ("INF900HLM001", "HSBC Large & Mid Cap Fund - Regular Plan - Growth"),
+        ("INF900HLM002", "HSBC Large & Mid Cap Fund - Direct Plan - Growth"),
+    ):
+        db_session.add(MfFund(isin=isin, scheme_name=name, amc_name="HSBC Asset Management Test"))
+    await db_session.commit()
+
+    data = _build_fund_performance_hsbc_spacing_xlsx()
+    file_id = await _insert_pending_bytes(
+        db_session, filename="Fund-Performance-10-Jul-2026--9998.xlsx", data=data
+    )
+    result = await mi._parse_pipeline(file_id)
+
+    assert result.startswith("parsed: fund_performance")
+    db_session.expire_all()
+    for isin in ("INF900HLM001", "INF900HLM002"):
+        fund = await db_session.get(MfFund, isin)
+        assert fund.risk_o_meter == "Very High", isin
+        assert fund.benchmark_index == "NIFTY Large Midcap 250 TRI", isin
+
+
 # ---------------------------------------------------------------------------
 # factsheet_compilation (2026-07-11) — whole-AMC factsheet PDFs (HDFC/UTI/
 # AXIS): manager history only, looped per scheme the splitter found. Real

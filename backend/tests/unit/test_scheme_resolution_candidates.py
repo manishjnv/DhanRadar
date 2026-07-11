@@ -185,6 +185,60 @@ def test_candidates_children_plan_maps_to_savings_plan_lineage():
 
 
 # ---------------------------------------------------------------------------
+# HSBC rename-alias pass (2026-07-11) — the founder's ranked action assumed
+# a legacy L&T-era-name problem (HSBC absorbed L&T MF in 2022). VERIFIED
+# FALSE on prod: scanned every HSBC disclosure/AMFI-multi-AMC file (portfolio
+# holdings, HSBC's own TER/AAUM files, AMFI's consolidated Fund-Performance
+# files) for "L&T" — the only hit is "L&T Finance Limited" as a PORTFOLIO
+# HOLDING (investee bond issuer) inside HSBC Liquid Fund, never a scheme
+# banner. No scheme in mf_funds or in any live AMFI file carries an L&T
+# name — every HSBC scheme is already stored/reported under its current
+# name. The REAL (small, verified) gap: AMFI's Fund-Performance file spells
+# 2 HSBC schemes with different spacing than master, and the resolver that
+# reads that file (`_resolve_scheme_isins_by_plan`, amc_name=None branch —
+# see tasks/mf.py) never consulted this alias map at all, unlike
+# `_resolve_scheme_isins`. Both real strings pulled from prod 2026-07-11:
+# AMFI Fund-Performance file text vs mf.mf_funds.scheme_name.
+# ---------------------------------------------------------------------------
+
+
+def test_candidates_hsbc_large_midcap_spacing_variant():
+    # AMFI file: "HSBC Large & Midcap Fund" (no space) — master:
+    # "HSBC Large & Mid Cap Fund - ..." (space before Cap).
+    got = _resolution_candidates("HSBC Large & Midcap Fund")
+    assert got[0] == "HSBC Large & Mid Cap Fund"
+    assert "HSBC Large & Midcap Fund" in got  # raw form still tried last
+
+
+def test_candidates_hsbc_midcap_spacing_variant():
+    # AMFI file: "HSBC Mid Cap Fund" (space) — master ISINs (the former L&T
+    # Midcap Fund registrar series, INF917K*): "HSBC Midcap Fund - ..." (no
+    # space) — the OPPOSITE direction of the pair above, confirming this is
+    # AMFI/master spelling inconsistency, not a systematic rename pattern.
+    got = _resolution_candidates("HSBC Mid Cap Fund")
+    assert got[0] == "HSBC Midcap Fund"
+
+
+def test_candidates_no_lt_alias_exists():
+    """MUST-NOT-match: no L&T-branded name should ever appear as an alias
+    key or value — verified zero L&T scheme banners exist in any live HSBC
+    or AMFI source file (2026-07-11 prod scan). A fabricated L&T alias would
+    be untested, unverified, dead code — worse than none per the founder's
+    binding rule (a wrong match writes another fund's holdings)."""
+    from dhanradar.tasks.mf import _SCHEME_RENAME_ALIASES
+
+    for key, value in _SCHEME_RENAME_ALIASES.items():
+        assert "l&t" not in key, key
+        assert "L&T" not in value, value
+
+
+def test_candidates_hsbc_unrelated_scheme_is_passthrough():
+    # A normal HSBC scheme with no spacing quirk must be untouched —
+    # confirms the 2 new entries are scoped narrowly, not a blanket rewrite.
+    assert _resolution_candidates("HSBC Value Fund") == ["HSBC Value Fund"]
+
+
+# ---------------------------------------------------------------------------
 # _parse_sebi_xlsx guards — house banner + future as-of clamp. In-memory
 # workbooks reproducing the real SBI per-scheme layout.
 # ---------------------------------------------------------------------------
