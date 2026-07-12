@@ -258,6 +258,13 @@ class MfFundMetrics(Base):
     beta_1y: Mapped[float | None] = mapped_column(Float, nullable=True)
     tracking_error_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # TRI-based alpha (migration 0077, Phase 4c pt5) — simple return differential vs the
+    # fund's OWN mapped mf_benchmark_tri series, for ANY fund with a resolved benchmark
+    # (not just index funds). Distinct from alpha_1y above (CAPM, index-funds-only,
+    # price-index track) — see dhanradar.mf.benchmark_alpha for the pure math.
+    alpha_1y_tri_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_key_1y: Mapped[str | None] = mapped_column(Text, nullable=True)
+
 
 class MfCategoryStats(Base):
     """Per-category percentile distribution of key fund metrics.

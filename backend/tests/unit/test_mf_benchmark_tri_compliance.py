@@ -17,6 +17,11 @@ from dhanradar.mf.comparison import rebase_series
 
 _MF_DIR = Path(__file__).resolve().parents[2] / "dhanradar" / "mf"
 _FORBIDDEN_TERMS = ("tri_value", "benchmark_tri")
+#: Phase 4c pt5 (2026-07-12, B2) — mf_fund_metrics.alpha_1y_tri_pct/benchmark_key_1y are
+#: NEW columns this session (migration 0077). Neither may appear in a client-facing
+#: surface yet (no consumer wires them up this session) — same grep-tripwire discipline
+#: as the raw TRI terms above.
+_FORBIDDEN_ALPHA_TERMS = ("alpha_1y_tri_pct", "benchmark_key_1y")
 
 
 def _read(name: str) -> str:
@@ -37,6 +42,22 @@ def test_schemas_never_mentions_raw_tri():
         assert term not in src, (
             f"{term!r} found in schemas.py — TRI is internal-compute only (ADR-0033)"
         )
+
+
+def test_router_never_exposes_new_tri_alpha_columns():
+    """Phase 4c pt5 (B2) — mf_fund_metrics.alpha_1y_tri_pct/benchmark_key_1y are new
+    this session and have no client-facing consumer yet; this must stay true until a
+    future session deliberately wires one up (and updates/removes this tripwire).
+    """
+    src = _read("router.py").lower()
+    for term in _FORBIDDEN_ALPHA_TERMS:
+        assert term not in src, f"{term!r} found in router.py — not surfaced this session"
+
+
+def test_schemas_never_exposes_new_tri_alpha_columns():
+    src = _read("schemas.py").lower()
+    for term in _FORBIDDEN_ALPHA_TERMS:
+        assert term not in src, f"{term!r} found in schemas.py — not surfaced this session"
 
 
 def _walk_no_forbidden_keys(obj: object, forbidden: tuple[str, ...]) -> None:
@@ -66,9 +87,13 @@ def test_fund_comparison_response_schema_has_no_tri_value_key():
                 "label": "Nifty 50 TRI",
                 "is_fallback": False,
             },
-            "category": {"points": None, "reason": "category average unavailable — cohort too thin"},
+            "category": {
+                "points": None,
+                "reason": "category average unavailable — cohort too thin",
+            },
         },
         "disclosure": "Educational analysis only — not investment advice.",
         "not_advice": "NOT_ADVICE",
     }
     _walk_no_forbidden_keys(response, _FORBIDDEN_TERMS)
+    _walk_no_forbidden_keys(response, _FORBIDDEN_ALPHA_TERMS)

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dhanradar.mf.benchmark_map import (
     NIFTY50_TRI,
+    NIFTY100_TRI,
+    NIFTY500_MULTICAP_502525_TRI,
     NIFTY500_TRI,
+    NIFTY_FINANCIAL_SERVICES_TRI,
+    NIFTY_INDIA_CONSUMPTION_TRI,
+    NIFTY_LARGEMIDCAP250_TRI,
     NIFTY_MIDCAP150_TRI,
     NIFTY_SMALLCAP250_TRI,
     candidate_index_key,
@@ -123,5 +128,70 @@ def test_candidate_index_key_none_for_strings_containing_a_canonical_name():
     # Exact-equality-after-normalization is the gate; no qualifier blacklist can
     # enumerate these.
     assert candidate_index_key("NIFTY 50 Hybrid Composite Debt 65:35 Index TRI") is None
-    assert candidate_index_key("NIFTY500 Multicap 50:25:25 TRI") is None
     assert candidate_index_key("Nifty 50 Arbitrage TRI") is None
+    # NOTE: "NIFTY500 Multicap 50:25:25 TRI" was ALSO asserted None here pre-Phase-4c-pt5
+    # — it has since become a genuine canonical key (verified live against
+    # niftyindices.com 2026-07-12; same underlying index as "NIFTY 500 Multicap
+    # 50:25:25 Total Return Index", just an abbreviated TRI spelling with no space
+    # before "500"). See test_candidate_index_key_500_multicap_502525_tri_variants
+    # below — this is a deliberate behavior change, not a regression.
+
+
+# ---------------------------------------------------------------------------
+# candidate_index_key — 5 new canonical keys (Phase 4c pt5, 2026-07-12)
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_index_key_nifty_100_tri():
+    assert candidate_index_key("Nifty 100 TRI") == NIFTY100_TRI
+
+
+def test_candidate_index_key_largemidcap_250_tri():
+    assert candidate_index_key("Nifty LargeMidcap 250 TRI") == NIFTY_LARGEMIDCAP250_TRI
+
+
+def test_candidate_index_key_india_consumption_tri():
+    assert candidate_index_key("Nifty India Consumption TRI") == NIFTY_INDIA_CONSUMPTION_TRI
+
+
+def test_candidate_index_key_financial_services_tri():
+    assert candidate_index_key("Nifty Financial Services TRI") == NIFTY_FINANCIAL_SERVICES_TRI
+
+
+def test_candidate_index_key_500_multicap_502525_tri_variants():
+    assert (
+        candidate_index_key("NIFTY 500 Multicap 50:25:25 Total Return Index")
+        == NIFTY500_MULTICAP_502525_TRI
+    )
+    # Abbreviated "TRI" spelling, no space before "500" — normalizes to the same key.
+    assert candidate_index_key("NIFTY500 Multicap 50:25:25 TRI") == NIFTY500_MULTICAP_502525_TRI
+
+
+def test_candidate_index_key_none_for_nifty_100_near_miss_variants():
+    # Real AMFI strings observed in the SAME top-30 sweep — genuinely different indices.
+    assert candidate_index_key("NIFTY 100 Equal Weighted TRI") is None
+    assert candidate_index_key("Nifty 100 ESG TRI") is None
+    assert candidate_index_key("Nifty 100 ESG Sector Leaders TRI") is None
+    assert candidate_index_key("Nifty 100 Low Volatility 30 TRI") is None
+    assert candidate_index_key("Nifty 100 Quality 30 TRI") is None
+
+
+def test_candidate_index_key_none_for_financial_services_near_miss_variants():
+    assert candidate_index_key("Nifty Financial Services Ex-Bank TRI") is None
+    assert candidate_index_key("Nifty MidSmall Financial Services TRI") is None
+
+
+def test_candidate_index_key_none_for_largemidcap_near_miss_variant():
+    assert candidate_index_key("Nifty LargeMidcap250 Plus 8-13 yr G-Sec 70:30 TRI") is None
+
+
+def test_candidate_index_key_none_for_multicap_near_miss_variants():
+    # Different weighting scheme (50:30:20 vs the canonical 50:25:25) or an added
+    # thematic qualifier — genuinely different indices, must stay unmapped.
+    assert candidate_index_key("Nifty500 Multicap India Manufacturing 50:30:20 TRI") is None
+    assert candidate_index_key("Nifty500 Multicap Infrastructure 50:30:20 TRI") is None
+    assert candidate_index_key("Nifty500 Multicap Momentum Quality 50 TRI") is None
+
+
+def test_candidate_index_key_none_for_india_consumption_near_miss_variant():
+    assert candidate_index_key("Nifty MidSmall India Consumption TRI") is None
