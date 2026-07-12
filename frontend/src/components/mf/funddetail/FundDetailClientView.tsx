@@ -5,7 +5,7 @@
  * moved out of app/mf/fund/[isin]/page.tsx during the SSR-core migration
  * (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §18.6). `page.tsx` is now a Server
  * Component wrapper that fetches `fund.head` server-side (title/description/
- * JSON-LD + a small server-rendered summary block for crawlers) and renders
+ * JSON-LD) and renders
  * this component, passing the same payload down as `initialFundHead` so
  * useFundDetail() does not re-fetch on mount.
  *
@@ -294,16 +294,11 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
 
 export default function FundDetailClientView({
   initialFundHead,
-  ssrSummary,
 }: {
   initialFundHead?: ApiFundHead;
-  // Server-rendered crawler summary from page.tsx — rendered inside the shell
-  // so it lives in the scroll area (scrolls away) instead of pinned above it.
-  ssrSummary?: React.ReactNode;
 }) {
   return (
     <MaybeShell maxWidth="full">
-      {ssrSummary}
       <React.Suspense fallback={<FundDetailSkeleton />}>
         <FundDetailView initialFundHead={initialFundHead} />
       </React.Suspense>
