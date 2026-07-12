@@ -309,6 +309,157 @@ export function GrowthChart({
   );
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// ComparisonChart — fund vs its OWN benchmark vs category median (Phase 4c pt4).
+// All 3 series arrive PRE-REBASED (base-100, first point exactly 100.0) from the
+// server — this component only plots + adds the hover crosshair/tooltip. Hover
+// idiom ported from portfolio/sections.tsx's VsMarketChart (fraction-based x
+// mapping over the SVG's own bounding box, date-matched nearest-point lookup).
+// ───────────────────────────────────────────────────────────────────────────
+export interface ComparisonPoint {
+  d: string;
+  v: number;
+}
+
+function parseIsoDateMs(d: string): number {
+  return new Date(`${d}T00:00:00Z`).getTime();
+}
+
+function fmtCompareDate(iso: string): string {
+  const d = new Date(iso);
+  const mon = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  return `${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}`;
+}
+
+/** "₹100 grew to ₹X" — the rebased base-100 value read as a plain rupee illustration. */
+function fmtGrewTo(v: number): string {
+  return `₹100 grew to ₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
+export function ComparisonChart({
+  fund,
+  benchmark,
+  category,
+  height = 220,
+}: {
+  fund: ComparisonPoint[];
+  benchmark: ComparisonPoint[] | null;
+  category: ComparisonPoint[] | null;
+  height?: number;
+}) {
+  const [frac, setFrac] = React.useState<number | null>(null);
+  const W = 680, H = height, mT = 14, mB = 8, mL = 4, mR = 6;
+
+  const fundT = React.useMemo(() => fund.map((p) => ({ t: parseIsoDateMs(p.d), v: p.v })), [fund]);
+  const benchT = React.useMemo(
+    () => (benchmark ?? []).map((p) => ({ t: parseIsoDateMs(p.d), v: p.v })),
+    [benchmark],
+  );
+  const catT = React.useMemo(
+    () => (category ?? []).map((p) => ({ t: parseIsoDateMs(p.d), v: p.v })),
+    [category],
+  );
+
+  const t0 = fundT.length ? fundT[0].t : 0;
+  const t1 = fundT.length ? fundT[fundT.length - 1].t : 1;
+  const span = t1 - t0 || 1;
+  const xs = (t: number) => mL + ((t - t0) / span) * (W - mL - mR);
+
+  const allV = [...fundT, ...benchT, ...catT].map((p) => p.v);
+  const lo = allV.length ? Math.min(...allV, 100) : 90;
+  const hi = allV.length ? Math.max(...allV, 100) : 110;
+  const pad = (hi - lo) * 0.12 || 4;
+  const ys = (v: number) =>
+    mT + (1 - (v - (lo - pad)) / (hi + pad - (lo - pad))) * (H - mT - mB);
+
+  const toPath = (a: { t: number; v: number }[]) =>
+    a.map((p, i) => `${i ? 'L' : 'M'}${xs(p.t).toFixed(1)},${ys(p.v).toFixed(1)}`).join(' ');
+
+  const nearest = (a: { t: number; v: number }[], t: number) =>
+    a.length ? a.reduce((b, p) => (Math.abs(p.t - t) < Math.abs(b.t - t) ? p : b)) : null;
+
+  const hoverT = frac !== null ? t0 + frac * span : null;
+  const hf = hoverT !== null ? nearest(fundT, hoverT) : null;
+  const hb = hoverT !== null ? nearest(benchT, hoverT) : null;
+  const hc = hoverT !== null ? nearest(catT, hoverT) : null;
+  const shownT = hf?.t ?? hb?.t ?? hc?.t ?? hoverT;
+
+  const setFromClientX = (clientX: number, el: Element) => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0) setFrac(Math.max(0, Math.min(1, (clientX - r.left) / r.width)));
+  };
+
+  if (fundT.length < 2) return null; // caller gates on <DataState>/empty copy
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full cursor-crosshair"
+        style={{ height }}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="This fund versus its benchmark and category average, both rebased to a common starting value of 100"
+        onMouseMove={(e) => setFromClientX(e.clientX, e.currentTarget)}
+        onMouseLeave={() => setFrac(null)}
+        onTouchStart={(e) => setFromClientX(e.touches[0].clientX, e.currentTarget)}
+        onTouchMove={(e) => setFromClientX(e.touches[0].clientX, e.currentTarget)}
+        onTouchEnd={() => setFrac(null)}
+      >
+        <line
+          x1={mL} y1={ys(100).toFixed(1)} x2={W - mR} y2={ys(100).toFixed(1)}
+          stroke="var(--border,#E2E8F0)" strokeDasharray="3 4"
+        />
+        {catT.length > 1 && (
+          <path d={toPath(catT)} fill="none" stroke="#00B386" strokeWidth="2" strokeDasharray="5 4" />
+        )}
+        {benchT.length > 1 && <path d={toPath(benchT)} fill="none" stroke="#94A3B8" strokeWidth="2" />}
+        <path d={toPath(fundT)} fill="none" stroke="#1E5EFF" strokeWidth="2.6" />
+        {hoverT !== null && shownT !== null && (
+          <>
+            <line x1={xs(shownT)} y1={mT} x2={xs(shownT)} y2={H - mB} stroke="rgba(15,23,42,.18)" />
+            {hf && <circle cx={xs(hf.t)} cy={ys(hf.v)} r="4" fill="#1E5EFF" stroke="#fff" strokeWidth="1.5" />}
+            {hb && <circle cx={xs(hb.t)} cy={ys(hb.v)} r="4" fill="#94A3B8" stroke="#fff" strokeWidth="1.5" />}
+            {hc && <circle cx={xs(hc.t)} cy={ys(hc.v)} r="4" fill="#00B386" stroke="#fff" strokeWidth="1.5" />}
+          </>
+        )}
+      </svg>
+      {frac !== null && (hf || hb || hc) && (
+        <div
+          className="pointer-events-none absolute top-1 z-10 min-w-[176px] rounded-xl border border-line bg-surface px-3 py-2 shadow-lg"
+          style={
+            frac < 0.6
+              ? { left: `calc(${(frac * 100).toFixed(1)}% + 12px)` }
+              : { right: `calc(${((1 - frac) * 100).toFixed(1)}% + 12px)` }
+          }
+        >
+          <div className="text-[10px] uppercase tracking-wider text-ink-muted">
+            {shownT !== null ? fmtCompareDate(new Date(shownT).toISOString().slice(0, 10)) : ''}
+          </div>
+          {hf && (
+            <div className="mt-1 flex items-center justify-between gap-4 text-[12px]">
+              <span className="text-royal">This fund</span>
+              <b className="tabular-nums text-ink">{fmtGrewTo(hf.v)}</b>
+            </div>
+          )}
+          {hb && (
+            <div className="flex items-center justify-between gap-4 text-[12px] text-ink-secondary">
+              <span>Benchmark</span>
+              <b className="tabular-nums">{fmtGrewTo(hb.v)}</b>
+            </div>
+          )}
+          {hc && (
+            <div className="flex items-center justify-between gap-4 text-[12px] text-emerald">
+              <span>Category avg</span>
+              <b className="tabular-nums">{fmtGrewTo(hc.v)}</b>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Rank trend (lower rank = higher line). `maxRank` = the category's total fund
  * count (worst possible rank) — real categories rarely have exactly 8 funds. */
 export function RankChart({ series, maxRank = 8, height = 150 }: { series: number[]; maxRank?: number; height?: number }) {

@@ -25,7 +25,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
-import { useFundNav, useFundAnalytics, useFundSip, useFundPeople } from '@/features/mf/api';
+import { useFundNav, useFundAnalytics, useFundSip, useFundPeople, useFundComparison } from '@/features/mf/api';
 import { useBenchmarkSeries, useBenchmarkReturns } from '@/features/portfolio/api';
 import { benchmarkForCategory } from './categoryBenchmark';
 import type { CategoryPercentileBand } from '@/features/mf/types';
@@ -33,7 +33,7 @@ import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
   TabBar, ChipToggle, Accordion, BandBar, InfoTip, Panel,
-  WhatThisMeans, PreviewBadge, GrowthChart, RankChart, DrawdownChart,
+  WhatThisMeans, PreviewBadge, GrowthChart, RankChart, DrawdownChart, ComparisonChart,
   TONE_TEXT,
 } from './parts';
 import {
@@ -240,12 +240,24 @@ function fmtPct(v: number | null | undefined, digits = 1): string {
 
 const PERF_TABS = [
   { key: 'returns',   label: 'Returns'     },
+  { key: 'compare',   label: 'Compare'     },
   { key: 'sip',       label: 'SIP Growth'  },
   { key: 'rolling',   label: 'Rolling'     },
   { key: 'rank',      label: 'Rank Trend'  },
   { key: 'drawdowns', label: 'Drawdowns'   },
   { key: 'consist',   label: 'Consistency' },
 ];
+
+// Compare-tab benchmark dropdown — the 4 canonical TRI index keys (Phase 4c pt3,
+// dhanradar.mf.benchmark_map.CANONICAL_INDEX_KEYS). Distinct from `categoryBenchmark.ts`'s
+// price-index registry keys (nifty50/nifty100/...) used by the Returns tab above —
+// a different backend table/endpoint, never mix the two key spaces.
+const COMPARISON_BENCHMARKS = [
+  { key: 'nifty50_tri', label: 'Nifty 50 TRI' },
+  { key: 'nifty_midcap150_tri', label: 'Nifty Midcap 150 TRI' },
+  { key: 'nifty_smallcap250_tri', label: 'Nifty Smallcap 250 TRI' },
+  { key: 'nifty500_tri', label: 'Nifty 500 TRI' },
+] as const;
 
 // UI range labels (GROWTH.ranges) → the fund.nav_series `range` query param.
 const RANGE_TO_API: Record<string, '1y' | '3y' | '5y' | 'max'> = {
@@ -468,6 +480,106 @@ function ReturnsTab({ head, isin }: { head: FundHead; isin: string }) {
       <WhatThisMeans>
         This chart shows how {GROWTH.invested} invested at the start of the selected period would
         have grown, next to the {benchDisplayName} price index (excludes dividends) for comparison.
+      </WhatThisMeans>
+    </>
+  );
+}
+
+// ── Compare tab (Phase 4c pt4) ───────────────────────────────────────────────
+// Fund vs its OWN SEBI-declared benchmark vs its category-peer median — three
+// rebased base-100 lines sharing ONE anchor date (GET /fund/{isin}/comparison).
+// Real: no sample-data fallback, no PreviewBadge (S10's LiveBadge already covers it).
+function CompareTab({ isin }: { isin: string }) {
+  const [uiWindow, setUiWindow] = React.useState(GROWTH.ranges[2]); // default 5Y, matches Returns tab
+  const apiWindow = RANGE_TO_API[uiWindow] ?? '5y';
+  const [benchmarkKey, setBenchmarkKey] = React.useState(''); // '' = scheme's own resolved benchmark
+
+  const { data, isLoading, isFetching, isError, refetch } = useFundComparison(
+    isin, apiWindow, benchmarkKey || null,
+  );
+
+  const fundPoints = data?.series.fund ?? [];
+  const benchPoints = data?.series.benchmark.points ?? [];
+  const catPoints = data?.series.category.points ?? null;
+
+  const status: 'loading' | 'error' | 'empty' | 'present' = isLoading
+    ? 'loading'
+    : isError
+      ? 'error'
+      : fundPoints.length >= 2
+        ? 'present'
+        : 'empty';
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ChipToggle
+          options={GROWTH.ranges.map((r) => ({ key: r, label: r }))}
+          active={uiWindow}
+          onChange={setUiWindow}
+        />
+        <label className="flex items-center gap-2 text-[12px] font-semibold text-ink-muted">
+          vs
+          <select
+            value={benchmarkKey}
+            onChange={(e) => setBenchmarkKey(e.target.value)}
+            className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px] font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          >
+            <option value="">Scheme&apos;s benchmark (default)</option>
+            {COMPARISON_BENCHMARKS.map((b) => (
+              <option key={b.key} value={b.key}>{b.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-line bg-gradient-to-b from-white to-surface-2 p-4">
+        <DataState
+          status={status}
+          emptyCopy="We don't have enough price history yet to draw this chart."
+          onRetry={() => refetch()}
+          skeleton={<Skeleton className="h-[220px] w-full rounded-xl" />}
+        >
+          <div className={cn('transition-opacity duration-300', isFetching ? 'opacity-40' : 'opacity-100')}>
+            <ComparisonChart
+              fund={fundPoints}
+              benchmark={benchPoints.length >= 2 ? benchPoints : null}
+              category={catPoints && catPoints.length >= 2 ? catPoints : null}
+              height={220}
+            />
+          </div>
+
+          {/* Legend — real label strings from the API, including the honest fallback
+              wording verbatim (§14.1 no-suppress: category reason renders, never blank). */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <i className="inline-block h-2 w-5 rounded-full" style={{ background: '#1E5EFF' }} aria-hidden="true" />
+              This fund
+            </span>
+            {data && (
+              <span className="inline-flex items-center gap-1.5">
+                <i className="inline-block h-2 w-5 rounded-full bg-ink-faint" aria-hidden="true" />
+                {data.series.benchmark.label}
+                {data.series.benchmark.is_fallback && (
+                  <InfoTip tip="This scheme's own benchmark isn't mapped yet, so we're showing the broad market instead." />
+                )}
+              </span>
+            )}
+            {data?.series.category.points ? (
+              <span className="inline-flex items-center gap-1.5">
+                <i className="inline-block h-0 w-5 border-t-2 border-dashed border-emerald" aria-hidden="true" />
+                Category average
+              </span>
+            ) : (
+              data && <span>{data.series.category.reason}</span>
+            )}
+          </div>
+        </DataState>
+      </div>
+
+      <WhatThisMeans>
+        Every line is rebased to start at the same ₹100 reference point, so you can compare the
+        shapes directly — regardless of the fund&apos;s actual NAV level.
       </WhatThisMeans>
     </>
   );
@@ -882,6 +994,7 @@ export function PerformanceSection({ head, isin }: { head: FundHead; isin: strin
       </div>
 
       {tab === 'returns'   && <ReturnsTab head={head} isin={isin} />}
+      {tab === 'compare'   && <CompareTab isin={isin} />}
       {tab === 'sip'       && <SipTab isin={isin} />}
       {tab === 'rolling'   && <RollingTab isin={isin} />}
       {tab === 'rank'      && <RankTab isin={isin} head={head} />}

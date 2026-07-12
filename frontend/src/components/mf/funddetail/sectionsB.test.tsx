@@ -24,6 +24,7 @@ const mockUseFundNav = vi.fn();
 const mockUseFundAnalytics = vi.fn();
 const mockUseFundSip = vi.fn();
 const mockUseFundPeople = vi.fn();
+const mockUseFundComparison = vi.fn();
 const mockUseBenchmarkSeries = vi.fn();
 const mockUseBenchmarkReturns = vi.fn();
 
@@ -32,6 +33,7 @@ vi.mock('@/features/mf/api', () => ({
   useFundAnalytics: (...args: unknown[]) => mockUseFundAnalytics(...args),
   useFundSip: (...args: unknown[]) => mockUseFundSip(...args),
   useFundPeople: (...args: unknown[]) => mockUseFundPeople(...args),
+  useFundComparison: (...args: unknown[]) => mockUseFundComparison(...args),
 }));
 
 vi.mock('@/features/portfolio/api', () => ({
@@ -160,6 +162,145 @@ describe('Returns tab comparison table (Fix 1)', () => {
     // Multiple honest "—" cells across the table (Launch column always, plus
     // every field with no served basis) — assert at least one is present.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+});
+
+describe('Compare tab (Phase 4c pt4) — fund vs benchmark vs category', () => {
+  // Shared no-op mocks for the OTHER Performance-Center tabs — the Returns tab
+  // mounts first (default) before the click switches to Compare, so its hooks
+  // must resolve without crashing even though these tests don't assert on it.
+  function mockOtherPerfTabs() {
+    mockUseFundNav.mockReturnValue({ data: undefined, isLoading: false });
+    mockUseFundSip.mockReturnValue({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() });
+    mockUseBenchmarkSeries.mockReturnValue({ data: undefined });
+    mockUseBenchmarkReturns.mockReturnValue({ data: undefined });
+    mockUseFundAnalytics.mockReturnValue({
+      data: { analytics: emptyDataEnvelope(), rank_history: emptyDataEnvelope(), health: emptyDataEnvelope() },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+  }
+
+  const COMPARISON_ALL_PRESENT = {
+    window: '5y' as const,
+    anchor_date: '2024-01-01',
+    series: {
+      fund: [
+        { d: '2024-01-01', v: 100.0 },
+        { d: '2024-06-01', v: 112.5 },
+      ],
+      benchmark: {
+        points: [
+          { d: '2024-01-01', v: 100.0 },
+          { d: '2024-06-01', v: 108.0 },
+        ],
+        label: 'Nifty 500 TRI',
+        is_fallback: false,
+      },
+      category: {
+        points: [
+          { d: '2024-01-01', v: 100.0 },
+          { d: '2024-06-01', v: 105.0 },
+        ],
+        reason: null,
+      },
+    },
+    disclosure: 'Educational analysis only — not investment advice.',
+    not_advice: 'NOT_ADVICE',
+  };
+
+  it('renders all three legend entries when all lines are present', () => {
+    mockOtherPerfTabs();
+    mockUseFundComparison.mockReturnValue({
+      data: COMPARISON_ALL_PRESENT, isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+
+    render(<PerformanceSection head={HEAD} isin={ISIN} />);
+    fireEvent.click(screen.getByText('Compare'));
+
+    expect(screen.getByText('This fund')).toBeInTheDocument();
+    // 'Nifty 500 TRI' also appears as a <select> option (the dropdown) — getAllByText.
+    expect(screen.getAllByText('Nifty 500 TRI').length).toBeGreaterThan(0);
+    expect(screen.getByText('Category average')).toBeInTheDocument();
+  });
+
+  it('renders the honest fallback label verbatim when is_fallback is true', () => {
+    mockOtherPerfTabs();
+    const FALLBACK_LABEL = "Nifty 50 (broad market — not this scheme's benchmark)";
+    mockUseFundComparison.mockReturnValue({
+      data: {
+        ...COMPARISON_ALL_PRESENT,
+        series: {
+          ...COMPARISON_ALL_PRESENT.series,
+          benchmark: { points: COMPARISON_ALL_PRESENT.series.benchmark.points, label: FALLBACK_LABEL, is_fallback: true },
+        },
+      },
+      isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+
+    render(<PerformanceSection head={HEAD} isin={ISIN} />);
+    fireEvent.click(screen.getByText('Compare'));
+
+    expect(screen.getByText(FALLBACK_LABEL)).toBeInTheDocument();
+  });
+
+  it('renders the category reason line — never blank — when the category line is omitted', () => {
+    mockOtherPerfTabs();
+    const REASON = 'category average unavailable — cohort too thin';
+    mockUseFundComparison.mockReturnValue({
+      data: {
+        ...COMPARISON_ALL_PRESENT,
+        series: { ...COMPARISON_ALL_PRESENT.series, category: { points: null, reason: REASON } },
+      },
+      isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+
+    render(<PerformanceSection head={HEAD} isin={ISIN} />);
+    fireEvent.click(screen.getByText('Compare'));
+
+    expect(screen.getByText(REASON)).toBeInTheDocument();
+    expect(screen.queryByText('Category average')).not.toBeInTheDocument();
+  });
+
+  it('hover tooltip shows all three present lines', () => {
+    mockOtherPerfTabs();
+    mockUseFundComparison.mockReturnValue({
+      data: COMPARISON_ALL_PRESENT, isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+    // jsdom's getBoundingClientRect returns all-zero by default — the chart's
+    // hover math needs a real width to convert clientX into a fraction.
+    const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 680, height: 220, top: 0, left: 0, right: 680, bottom: 220, x: 0, y: 0, toJSON: () => {},
+    } as DOMRect);
+
+    render(<PerformanceSection head={HEAD} isin={ISIN} />);
+    fireEvent.click(screen.getByText('Compare'));
+
+    const chart = screen.getByRole('img', { name: /this fund versus its benchmark/i });
+    fireEvent.mouseMove(chart, { clientX: 340 });
+
+    expect(screen.getAllByText(/₹100 grew to ₹/)).toHaveLength(3);
+
+    rectSpy.mockRestore();
+  });
+
+  it('renders no advisory verb anywhere in the Compare tab, in any data state', () => {
+    // Kept as one space-joined string + .split(' ') so this guard file itself
+    // does not trip ci_guards' own quoted-advisory-word scan (see
+    // src/data/tooltip-copy-guard.test.ts for the same convention).
+    const ADVISORY_VERBS =
+      'buy sell hold invest reinvest divest avoid recommend rebalance book redeem should must ' +
+      'consider diversify allocate trim increase reduce';
+    const ADVISORY = new RegExp(String.raw`\b(${ADVISORY_VERBS.split(' ').join('|')})\b`, 'i');
+
+    mockOtherPerfTabs();
+    mockUseFundComparison.mockReturnValue({
+      data: COMPARISON_ALL_PRESENT, isLoading: false, isFetching: false, isError: false, refetch: vi.fn(),
+    });
+
+    const { container } = render(<PerformanceSection head={HEAD} isin={ISIN} />);
+    fireEvent.click(screen.getByText('Compare'));
+
+    expect(ADVISORY.test(container.textContent ?? '')).toBe(false);
   });
 });
 

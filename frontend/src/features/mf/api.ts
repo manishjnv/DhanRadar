@@ -30,6 +30,7 @@ import type {
   FundSipIllustration,
   FundEvents,
   FundFit,
+  FundComparisonResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -523,6 +524,36 @@ export function useFundEvents(isin: string) {
   return useQuery<DataEnvelope<FundEvents>>({
     queryKey: queryKeys.mf.fundEvents(isin),
     queryFn: () => api.get<DataEnvelope<FundEvents>>(`/mf/fund/${isin}/events`),
+    enabled: !!isin,
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4c pt4 — fund.comparison (fund vs its own benchmark vs category median)
+// ---------------------------------------------------------------------------
+
+/** `fund.comparison` — GET /api/v1/mf/fund/{isin}/comparison?window=&benchmark_key=
+ *  `benchmarkKey` null/undefined uses the fund's own resolved benchmark (server
+ *  default); pass one of the 4 canonical index keys to override (index-switch
+ *  dropdown). Not wrapped in DataEnvelope — same plain public-response shape as
+ *  the sibling /mf/benchmark/* reference endpoints (disclosure/not_advice inline). */
+export function useFundComparison(
+  isin: string,
+  window: FundComparisonResponse['window'] = '1y',
+  benchmarkKey?: string | null,
+) {
+  return useQuery<FundComparisonResponse>({
+    queryKey: queryKeys.mf.fundComparison(isin, window, benchmarkKey ?? null),
+    queryFn: () => {
+      const qs = new URLSearchParams({ window });
+      if (benchmarkKey) qs.set('benchmark_key', benchmarkKey);
+      return api.get<FundComparisonResponse>(`/mf/fund/${isin}/comparison?${qs.toString()}`);
+    },
     enabled: !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
