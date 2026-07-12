@@ -133,6 +133,34 @@ class MfNavHistory(Base):
     )
 
 
+class MfCategorySeries(Base):
+    """Materialized per-category chained median-return index (Phase 4c pt2, migration 0075).
+
+    ``category`` is ``mf_funds.sebi_category`` — the same grouping key
+    :mod:`dhanradar.mf.cohort` uses for the scoring cohort (cohort.py's on-the-fly read
+    path is unchanged by this table). ``index_value`` is base-100 chained off the
+    category's per-day MEDIAN scheme return (see
+    ``dhanradar.tasks.mf.category_series_refresh`` for the math), not a median of raw
+    NAVs — avoids start-date bias and tolerates funds entering/leaving the category.
+    TimescaleDB hypertable on ``series_date`` (created in migration 0075).
+    """
+
+    __tablename__ = "mf_category_series"
+    __table_args__ = (
+        PrimaryKeyConstraint("category", "series_date"),
+        _SCHEMA,
+    )
+
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    series_date: Mapped[date] = mapped_column(Date, nullable=False)
+    index_value: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
+    median_daily_return: Mapped[float | None] = mapped_column(Numeric(12, 8), nullable=True)
+    fund_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfFundMetrics(Base):
     """Precomputed per-fund long-horizon stats, refreshed nightly after nav_daily_fetch.
 

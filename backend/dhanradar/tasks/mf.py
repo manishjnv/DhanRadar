@@ -1921,6 +1921,178 @@ async def _nav_backfill_pipeline(years: int) -> str:
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Category-average series (Phase 4c pt2) — materializes dhanradar.mf.cohort's
+# on-the-fly median math into mf.mf_category_series. cohort.py's read path is
+# UNCHANGED by this table (that switch is a later, separate change).
+# ---------------------------------------------------------------------------
+
+_CATEGORY_SERIES_TASK_NAME = "dhanradar.tasks.mf.category_series_refresh"
+# Self-heal window for a normal nightly run (re-derives the last few days from the
+# stored anchor before them — idempotent, cheap: a few hundred categories x a week).
+_CATEGORY_SERIES_CATCHUP_DAYS = 7
+# Calendar-day buffer scanned BEFORE start_date so the LAG() in _CATEGORY_SERIES_SQL
+# always sees each scheme's prior NAV row even across a long weekend/holiday run.
+_CATEGORY_SERIES_LAG_LOOKBACK_DAYS = 10
+_CATEGORY_SERIES_UPSERT_CHUNK = 2000
+
+# One SQL pass: canonical scheme per category (Direct+Growth preferred — mirrors
+# category_series.pick_canonical_isin) -> per-scheme day-over-day return (LAG per isin,
+# so a scheme's own trading-day gaps are handled correctly) -> per-category per-day
+# MEDIAN return + fund_count (percentile_cont(0.5), identical to statistics.median) ->
+# chained base-100 index via the standard log-sum-exp cumulative-product window
+# (EXP(SUM(LN(1+r))) OVER ... ROWS UNBOUNDED PRECEDING), continued off the last stored
+# index_value before :start_date (COALESCE to 100.0 when there is none — a series'
+# first-ever run). Same math as dhanradar.mf.category_series (the pure, unit-tested
+# spec) — this is the SQL path because a 14k-ISIN x 10y Python loop is too slow / can
+# OOM the box (founder direction, Phase 4c pt2).
+_CATEGORY_SERIES_SQL = """
+WITH canonical AS (
+    SELECT DISTINCT ON (COALESCE(f.fund_name_short, f.isin))
+        f.isin,
+        f.sebi_category AS category
+    FROM mf.mf_funds f
+    WHERE f.sebi_category IS NOT NULL AND f.sebi_category <> 'uncategorized'
+    ORDER BY
+        COALESCE(f.fund_name_short, f.isin),
+        CASE
+            WHEN f.plan_type = 'direct' AND f.option_type = 'growth' THEN 0
+            WHEN f.option_type = 'growth' THEN 1
+            ELSE 2
+        END,
+        f.isin
+),
+nav_ret AS (
+    SELECT
+        c.category,
+        n.nav_date,
+        n.nav / NULLIF(LAG(n.nav) OVER (PARTITION BY n.isin ORDER BY n.nav_date), 0) - 1
+            AS daily_return
+    FROM mf.mf_nav_history n
+    JOIN canonical c ON c.isin = n.isin
+    WHERE n.nav_date >= :lookback_start AND n.nav_date <= :end_date
+),
+daily_agg AS (
+    SELECT
+        category,
+        nav_date AS series_date,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY daily_return) AS median_daily_return,
+        COUNT(*) AS fund_count
+    FROM nav_ret
+    WHERE daily_return IS NOT NULL AND nav_date >= :start_date
+    GROUP BY category, nav_date
+),
+anchor AS (
+    SELECT DISTINCT ON (category) category, index_value AS anchor_index
+    FROM mf.mf_category_series
+    WHERE series_date < :start_date
+    ORDER BY category, series_date DESC
+)
+SELECT
+    da.category,
+    da.series_date,
+    COALESCE(a.anchor_index, 100.0) * EXP(SUM(LN(1 + da.median_daily_return)) OVER (
+        PARTITION BY da.category ORDER BY da.series_date
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    )) AS index_value,
+    da.median_daily_return,
+    da.fund_count
+FROM daily_agg da
+LEFT JOIN anchor a ON a.category = da.category
+ORDER BY da.category, da.series_date
+"""
+
+
+@celery_app.task(name=_CATEGORY_SERIES_TASK_NAME)
+def category_series_refresh(start_date: str | None = None, end_date: str | None = None) -> str:
+    """Nightly 00:00 IST (after nav_daily_fetch 23:30, before mf_metrics_refresh 00:15):
+    materialize mf.mf_category_series — a per-category chained median-return index
+    (base 100), Value-Research-style "category average" line for the fund chart
+    (Phase 4c pt2). Computed purely from mf_nav_history — no new data source, no
+    API/DOM exposure yet. Idempotent upsert on (category, series_date).
+
+    Default range (no args) = the last _CATEGORY_SERIES_CATCHUP_DAYS days through
+    yesterday — self-heals a missed nightly run. Pass start_date (and optionally
+    end_date, both YYYY-MM-DD) to rebuild a longer window; the SAME query, just a wider
+    date range — this is also the one-off historical backfill entry point (see the PR
+    description for the exact command; never run against prod from this task's own
+    schedule — a human/Opus runs the backfill manually per docs/infra-notes.md).
+    """
+    try:
+        return asyncio.run(_category_series_pipeline(start_date, end_date))
+    except Exception:  # noqa: BLE001
+        logger.exception("category_series_refresh pipeline error")
+        return "category_series_refresh: failed — see worker logs"
+
+
+async def _category_series_pipeline(
+    start_date: str | None = None, end_date: str | None = None
+) -> str:
+    from sqlalchemy import func
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import MfCategorySeries
+
+    end = date.fromisoformat(end_date) if end_date else date.today() - timedelta(days=1)
+    start = (
+        date.fromisoformat(start_date)
+        if start_date
+        else end - timedelta(days=_CATEGORY_SERIES_CATCHUP_DAYS - 1)
+    )
+    lookback_start = start - timedelta(days=_CATEGORY_SERIES_LAG_LOOKBACK_DAYS)
+    if start > end:
+        return f"category_series_refresh: skipped — start_date {start} after end_date {end}"
+
+    async with TaskSessionLocal() as db:
+        result = await db.execute(
+            sa_text(_CATEGORY_SERIES_SQL),
+            {"lookback_start": lookback_start, "start_date": start, "end_date": end},
+        )
+        rows = result.mappings().all()
+        if not rows:
+            return f"category_series_refresh: 0 rows ({start}..{end})"
+
+        upserts = [
+            {
+                "category": r["category"],
+                "series_date": r["series_date"],
+                "index_value": r["index_value"],
+                "median_daily_return": r["median_daily_return"],
+                "fund_count": r["fund_count"],
+            }
+            for r in rows
+        ]
+        for i in range(0, len(upserts), _CATEGORY_SERIES_UPSERT_CHUNK):
+            chunk = upserts[i : i + _CATEGORY_SERIES_UPSERT_CHUNK]
+            stmt = (
+                pg_insert(MfCategorySeries)
+                .values(chunk)
+                .on_conflict_do_update(
+                    index_elements=["category", "series_date"],
+                    set_={
+                        "index_value": pg_insert(MfCategorySeries).excluded.index_value,
+                        "median_daily_return": pg_insert(
+                            MfCategorySeries
+                        ).excluded.median_daily_return,
+                        "fund_count": pg_insert(MfCategorySeries).excluded.fund_count,
+                        "computed_at": func.now(),
+                    },
+                )
+            )
+            await db.execute(stmt)
+        await db.commit()
+
+    categories = len({r["category"] for r in rows})
+    summary = (
+        f"category_series_refresh: upserted {len(upserts)} rows across "
+        f"{categories} categories ({start}..{end})"
+    )
+    logger.info(summary)
+    return summary
+
+
 @celery_app.task(name="dhanradar.tasks.mf.mf_metrics_refresh")
 def mf_metrics_refresh() -> str:
     """Nightly precompute of per-fund long-horizon stats into mf_fund_metrics.
