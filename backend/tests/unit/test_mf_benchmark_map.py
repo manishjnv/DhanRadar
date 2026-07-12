@@ -75,6 +75,14 @@ def test_candidate_index_key_500_checked_before_50_in_ordering():
     assert candidate_index_key("Nifty 500 TRI") == NIFTY500_TRI
 
 
+def test_candidate_index_key_exact_spelling_forms_still_map():
+    # Review fix (PR #565): exact-equality-after-normalization must keep mapping the
+    # legitimate spelling variants of the canonical names.
+    assert candidate_index_key("NIFTY 50 TRI") == NIFTY50_TRI
+    assert candidate_index_key("Nifty500 (TRI)") == NIFTY500_TRI
+    assert candidate_index_key("NIFTY Midcap150 Total Return Index") == NIFTY_MIDCAP150_TRI
+
+
 # ---------------------------------------------------------------------------
 # candidate_index_key — honest-fallback: None on anything not confidently mapped
 # ---------------------------------------------------------------------------
@@ -92,6 +100,7 @@ def test_candidate_index_key_none_for_unmapped_tri_index():
 def test_candidate_index_key_none_without_tri_signal():
     # Bare index name, no TRI/Total Return signal — not assumed to be the TRI series.
     assert candidate_index_key("Nifty 50") is None
+    assert candidate_index_key("Nifty 500") is None
 
 
 def test_candidate_index_key_none_for_ambiguous_variant():
@@ -106,3 +115,13 @@ def test_candidate_index_key_none_for_empty_or_none_input():
 
 def test_candidate_index_key_none_for_hybrid_benchmark():
     assert candidate_index_key("Nifty 50 Hybrid Composite Debt 65:35 Index") is None
+
+
+def test_candidate_index_key_none_for_strings_containing_a_canonical_name():
+    # Review fix (PR #565): these real AMFI benchmark strings CONTAIN a canonical index
+    # name but denote a DIFFERENT index — the old substring matcher mis-mapped all three.
+    # Exact-equality-after-normalization is the gate; no qualifier blacklist can
+    # enumerate these.
+    assert candidate_index_key("NIFTY 50 Hybrid Composite Debt 65:35 Index TRI") is None
+    assert candidate_index_key("NIFTY500 Multicap 50:25:25 TRI") is None
+    assert candidate_index_key("Nifty 50 Arbitrage TRI") is None

@@ -9,10 +9,15 @@ AMFI's per-scheme `benchmark_index` disclosure is free text — "Nifty 500 TRI",
 "NIFTY Banking & PSU Debt Index A-II", "Nifty Midcap150 TRI", etc. New strings arrive
 with every AMFI file, so mapping them to a series we actually fetch (`mf.mf_benchmark_tri`)
 must be DATA (`mf.mf_benchmark_map`), not a code deploy. `candidate_index_key()` is the
-seed logic: it returns one of the 4 canonical keys ONLY on a confident match — every other
-string (debt/hybrid benchmarks, an index we don't carry, an ambiguous factor/ESG variant)
-returns None rather than guessing. Unmapped strings surface on the admin coverage page;
-the UI falls back honestly ("vs Nifty 50 (broad market — not this scheme's benchmark)").
+seed logic: a confident match means the normalized string is EXACTLY one of the known
+spelling forms of a canonical index name — never a substring/containment match. Real AMFI
+strings like "NIFTY 50 Hybrid Composite Debt 65:35 Index TRI" (the standard aggressive-
+hybrid benchmark), "NIFTY500 Multicap 50:25:25 TRI", or "Nifty 50 Arbitrage TRI" CONTAIN
+a canonical name but denote a DIFFERENT index, and no qualifier blacklist can enumerate
+them all. Every other string (debt/hybrid benchmarks, an index we don't carry, a
+factor/ESG/arbitrage variant) returns None rather than guessing. Unmapped strings surface
+on the admin coverage page; the UI falls back honestly ("vs Nifty 50 (broad market — not
+this scheme's benchmark)").
 
 Distinct from `dhanradar.mf.benchmark_mapping` (Block 0.7): that module derives an INDEX
 FUND's own benchmark from its SCHEME NAME (gated to the "Other Scheme - Index Funds" SEBI
@@ -47,38 +52,21 @@ CANONICAL_INDEX_KEYS: tuple[str, ...] = (
     NIFTY500_TRI,
 )
 
-#: Qualifier words meaning the benchmark tracks a DERIVATIVE/variant index that shares a
-#: headline number with a plain-vanilla one but is NOT the same series (e.g. "Nifty 50
-#: Equal Weight TRI" is not our `nifty50_tri`) — presence forces None, never guessed.
-#: Mirrors `dhanradar.mf.benchmark_mapping._AMBIGUOUS_QUALIFIERS`.
-_AMBIGUOUS_QUALIFIERS: tuple[str, ...] = (
-    "equal weight",
-    "esg",
-    "quality",
-    "value",
-    "momentum",
-    "alpha",
-    "low volatility",
-    "smart beta",
-    "next",
-    "shariah",
-    "total market",
-    "high beta",
-    "dividend opportunities",
-)
-
-#: (normalized substring, canonical key) — checked IN ORDER. Longer/more-specific index
-#: names are listed before their shorter substrings: "nifty midcap 150"/"nifty smallcap
-#: 250" before "nifty 500"/"nifty 50" — and "nifty 500" before "nifty 50", since "nifty
-#: 500" literally contains "nifty 50" as a leading substring after normalization.
-_NAME_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("nifty midcap 150", NIFTY_MIDCAP150_TRI),
-    ("nifty mid cap 150", NIFTY_MIDCAP150_TRI),
-    ("nifty smallcap 250", NIFTY_SMALLCAP250_TRI),
-    ("nifty small cap 250", NIFTY_SMALLCAP250_TRI),
-    ("nifty 500", NIFTY500_TRI),
-    ("nifty 50", NIFTY50_TRI),
-)
+#: normalized string -> canonical key, EXACT EQUALITY only (post-normalization). Any
+#: string that merely CONTAINS one of these forms ("nifty 50 hybrid composite debt 65:35
+#: tri", "nifty 500 multicap 50:25:25 tri", "nifty 50 arbitrage tri", "nifty 50 equal
+#: weight tri", …) is a DIFFERENT index and must fall through to None — exact equality is
+#: the gate, so no qualifier blacklist is needed (a variant string can never equal a
+#: canonical form). Every "tri" here is guaranteed by normalize_benchmark_name(), which
+#: unifies "TRI" / "(TRI)" / "Total Return(s) Index" spellings.
+_ALLOWED_FORMS: dict[str, str] = {
+    "nifty 50 tri": NIFTY50_TRI,
+    "nifty 500 tri": NIFTY500_TRI,
+    "nifty midcap 150 tri": NIFTY_MIDCAP150_TRI,
+    "nifty mid cap 150 tri": NIFTY_MIDCAP150_TRI,
+    "nifty smallcap 250 tri": NIFTY_SMALLCAP250_TRI,
+    "nifty small cap 250 tri": NIFTY_SMALLCAP250_TRI,
+}
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _TRAILING_INDEX_RE = re.compile(r"\bindex\.?$")
@@ -112,23 +100,13 @@ def normalize_benchmark_name(raw: str) -> str:
 def candidate_index_key(raw: str) -> str | None:
     """Return a canonical TRI index key for `raw`, or None (never guessed).
 
-    Confident-match only: requires the normalized string to (1) contain a standalone
-    "tri" token — a scheme's benchmark disclosure not explicitly naming TRI/Total Return
-    Index is not assumed to mean the TRI series even though SEBI mandates TRI benchmarking
-    (the raw string itself doesn't confirm it), (2) carry none of the ambiguous-variant
-    qualifiers, and (3) match exactly one of the 4 canonical index name patterns.
+    Confident-match only: the normalized string must EQUAL one of the known spelling
+    forms in `_ALLOWED_FORMS` exactly — never a substring/containment match (a string
+    that merely contains a canonical name, e.g. "NIFTY 50 Hybrid Composite Debt 65:35
+    Index TRI", denotes a different index). This also implies the TRI signal is
+    explicit: a bare "Nifty 50" (no TRI/Total Return Index in the raw string) is not
+    assumed to mean the TRI series and returns None.
     """
     if not raw:
         return None
-    norm = normalize_benchmark_name(raw)
-    if not norm:
-        return None
-    tokens = norm.split()
-    if "tri" not in tokens:
-        return None
-    if any(qualifier in norm for qualifier in _AMBIGUOUS_QUALIFIERS):
-        return None
-    for pattern, key in _NAME_PATTERNS:
-        if pattern in norm:
-            return key
-    return None
+    return _ALLOWED_FORMS.get(normalize_benchmark_name(raw))
