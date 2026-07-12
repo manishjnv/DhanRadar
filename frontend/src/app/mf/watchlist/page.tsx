@@ -36,6 +36,7 @@ import {
   CompareTray, StickyBar,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
+import { useWatchlist } from '@/features/mf/watchlist';
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function WatchlistSkeleton() {
@@ -55,6 +56,8 @@ type PageState = 'empty' | 'dash';
 function WatchlistView() {
   const [pageState, setPageState] = React.useState<PageState>('dash');
   const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
+  // Real saved funds (localStorage, shared with the fund-detail hero star).
+  const { list: saved, toggle: toggleSaved } = useWatchlist();
 
   const toggle = React.useCallback((i: number) => {
     setSelected((prev) => {
@@ -120,6 +123,31 @@ function WatchlistView() {
 
           <section>
             <SectionHeader index="03" title="Watchlist Funds" info="8 funds · tap ⇄ to shortlist" />
+            {/* Real saved funds first (fund-detail hero star); preview cards below stay illustrative. */}
+            {saved.length > 0 && (
+              <div className="mb-3">
+                <p className="mb-2 text-caption font-semibold text-ink-secondary">Your saved funds ({saved.length})</p>
+                <div className="flex flex-col gap-2">
+                  {saved.map((e) => (
+                    <div key={e.isin} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-3.5">
+                      <div className="min-w-0">
+                        <Link href={`/mf/fund/${e.isin}`} className="text-small font-semibold text-ink transition-colors hover:text-royal">{e.name}</Link>
+                        {e.category && <div className="text-caption text-ink-muted">{e.category}</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleSaved(e)}
+                        className="shrink-0 rounded p-1 text-lg text-amber transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                        aria-label={`Remove ${e.name} from watchlist`}
+                        title="Remove from watchlist"
+                      >
+                        ★
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <FundsSection selected={selected} onToggle={toggle} />
           </section>
 

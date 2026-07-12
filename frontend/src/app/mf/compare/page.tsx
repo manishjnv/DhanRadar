@@ -29,6 +29,9 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Preview } from '@/components/mf/compare/ui';
+import { useFundDetail } from '@/features/mf/api';
+import { FUNDS } from '@/components/mf/compare/sampleData';
+import type { CompareFund } from '@/components/mf/compare/sampleData';
 import {
   HeroSection, EduReadSection, ScoreboardSection, PersonaSection, MatrixSection,
   MoodSection, PerformanceSection, SipSection, RollingSection, RankingSection,
@@ -69,18 +72,52 @@ function CompareView() {
   const category = searchParams.get('category') ?? 'Small Cap';
   const count = 3;
 
+  // ?funds=<isin> (Fund Detail "⇄ Compare" CTA) — column 1 becomes the REAL
+  // fund: identity + real label/band/NAV/AUM/expense from fund.head; fields we
+  // don't have stay "—", and no sample badge/TOP-MATCH copy may attach to a
+  // real fund. Columns 2-3 + all other sections remain the labeled preview.
+  const firstIsin = (searchParams.get('funds') ?? '').split(',')[0] || '';
+  const { data: realFund } = useFundDetail(firstIsin);
+  const funds = React.useMemo<CompareFund[] | undefined>(() => {
+    if (!realFund) return undefined;
+    const name = realFund.fund_name_short ?? realFund.scheme_name;
+    const cat = realFund.category ?? realFund.sebi_category;
+    const first: CompareFund = {
+      ...FUNDS[0],
+      key: realFund.isin,
+      name,
+      short: name.split(' ')[0] ?? name,
+      cat: [cat, realFund.plan_type === 'direct' ? 'Direct' : realFund.plan_type === 'regular' ? 'Regular' : null].filter(Boolean).join(' · '),
+      amc: realFund.amc_name ?? '—',
+      logo: name[0]?.toUpperCase() ?? 'F',
+      label: realFund.verb_label ?? 'insufficient_data',
+      band: realFund.confidence_band ?? 'low',
+      assessWord: '',
+      nav: realFund.nav_latest != null ? realFund.nav_latest.toFixed(2) : '—',
+      navc: realFund.nav_change_pct != null ? `${realFund.nav_change_pct >= 0 ? '+' : ''}${realFund.nav_change_pct.toFixed(2)}%` : '',
+      aum: realFund.aum_crore != null ? realFund.aum_crore.toLocaleString('en-IN', { maximumFractionDigits: 0 }) + ' Cr' : '—',
+      exp: realFund.expense_ratio_pct != null ? `${realFund.expense_ratio_pct.toFixed(2)}%` : '—',
+      age: '—',
+      mgr: '—',
+      badges: [],
+      isTopMatch: false,
+    };
+    return [first, ...FUNDS.slice(1)];
+  }, [realFund]);
+  const displayCategory = (realFund && (realFund.category ?? realFund.sebi_category)) || category;
+
   return (
     <div className="w-full pb-24">
       <div className="mb-4">
         <Link href="/mf/explore" className="mb-3 inline-flex w-fit items-center gap-1 rounded text-small text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
           ← Back to Fund Explorer
         </Link>
-        <Crumb category={category} count={count} />
+        <Crumb category={displayCategory} count={count} />
       </div>
 
       {/* S1 — Hero comparison columns */}
-      <SectionHeader index="01" title={`Comparing ${count} ${category} Funds`} info="Add up to 4" />
-      <HeroSection />
+      <SectionHeader index="01" title={`Comparing ${count} Funds`} info="Add up to 4" />
+      <HeroSection funds={funds} />
 
       {/* S2 — DhanRadar educational read (was "Comparison Winner") */}
       <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="AI" /><EduReadSection /></Section>

@@ -18,6 +18,7 @@ import {
   VAL, VAL_VERDICT, CHANGES, ALTS, AI_INSIGHTS, FAQ, STICKY, SIPDATA, SIP_AMOUNTS,
   SIP_DURATIONS, fmtCr, toStrength,
 } from './sampleData';
+import type { CompareFund } from './sampleData';
 import {
   SoWhat, RichText, Panel, WinChip, Dot, CompareTable, ScoreboardRows, HeatTable, CTA,
 } from './ui';
@@ -26,10 +27,11 @@ const STRENGTH_WORD = { strong: 'Strong', good: 'Good', moderate: 'Moderate', so
 const ASSESS_TOP = { in_form: 'In Form', on_track: 'On Track', off_track: 'Off Track', out_of_form: 'Out of Form', insufficient_data: '—' } as const;
 
 // ── S1 — Hero fund columns ───────────────────────────────────────────────────
-export function HeroSection() {
+// `funds` override: /mf/compare?funds=<isin> replaces column 1 with the real fund.
+export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
-      {FUNDS.map((f) => (
+      {funds.map((f) => (
         <div
           key={f.key}
           className={cn(

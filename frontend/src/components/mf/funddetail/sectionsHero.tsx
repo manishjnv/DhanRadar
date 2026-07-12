@@ -14,7 +14,9 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
+import { useWatchlist } from '@/features/mf/watchlist';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import { MoodGauge } from '@/components/mood/MoodGauge';
@@ -115,9 +117,11 @@ export interface FundHead {
 // ═══════════════════════════════════════════════════════════════════════════
 // S1 — HERO
 // ═══════════════════════════════════════════════════════════════════════════
-export function HeroSection({ head, factors }: { head: FundHead; factors: FundFactors }) {
+export function HeroSection({ head, factors, isin }: { head: FundHead; factors: FundFactors; isin: string }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
+  const { has, toggle } = useWatchlist();
+  const saved = has(isin);
   const pills = [
     ...(head.planOption.length ? [head.planOption.join(' · ')] : []),
     ...FUND.pills,
@@ -169,8 +173,15 @@ export function HeroSection({ head, factors }: { head: FundHead; factors: FundFa
           <div className="mt-4 flex flex-wrap gap-2">
             <CTA kind="invest">⚡ Invest Now</CTA>
             <CTA kind="sip">＋ Start SIP</CTA>
-            <CTA kind="ghost">⇄ Compare</CTA>
-            <CTA kind="ghost">☆ Watchlist</CTA>
+            <CTA kind="ghost" href={`/mf/compare?funds=${isin}&category=${encodeURIComponent(head.category)}`}>⇄ Compare</CTA>
+            <CTA
+              kind="ghost"
+              pressed={saved}
+              onClick={() => toggle({ isin, name: head.name, category: head.category })}
+            >
+              <span aria-hidden="true" className={saved ? 'text-amber' : undefined}>{saved ? '★' : '☆'}</span>
+              {saved ? 'Watchlisted' : 'Watchlist'}
+            </CTA>
             <CTA kind="ghost">↗ Share</CTA>
           </div>
         </div>
@@ -230,11 +241,19 @@ function HeroKpi({ l, v, sub, subTone }: { l: string; v: string; sub?: string; s
   );
 }
 
-function CTA({ kind, children }: { kind: 'invest' | 'sip' | 'ghost'; children: React.ReactNode }) {
+function CTA({ kind, href, onClick, pressed, children }: {
+  kind: 'invest' | 'sip' | 'ghost';
+  href?: string;
+  onClick?: () => void;
+  pressed?: boolean;
+  children: React.ReactNode;
+}) {
   const base = 'inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 whitespace-nowrap';
   if (kind === 'invest') return <button className={cn(base, 'bg-royal text-white hover:opacity-90')} style={{ background: 'var(--dr-royal,#1E5EFF)' }}>{children}</button>;
   if (kind === 'sip') return <button className={cn(base, 'bg-white hover:bg-surface-2')} style={{ color: 'var(--dr-navy,#0B1F3A)' }}>{children}</button>;
-  return <button className={cn(base, 'border border-white/20 bg-white/10 text-white hover:bg-white/20')}>{children}</button>;
+  const ghost = cn(base, 'border border-white/20 bg-white/10 text-white hover:bg-white/20');
+  if (href) return <Link href={href} className={ghost}>{children}</Link>;
+  return <button onClick={onClick} aria-pressed={pressed} className={ghost}>{children}</button>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
