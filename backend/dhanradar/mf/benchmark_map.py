@@ -35,21 +35,41 @@ from __future__ import annotations
 
 import re
 
-#: The only 4 TRI series DhanRadar fetches (niftyindices.com — see tasks/mf.py
-#: `benchmark_tri_fetch`). Debt/hybrid/other equity indices have no CRISIL-licensed
-#: series available (MF_MASTER_DB_IMPROVEMENT_PLAN.md "Phase 4c") — the category-median
-#: line is the primary comparison there. Never add a key here without a matching fetcher
-#: entry in tasks/mf.py's `_TRI_NIFTYINDICES_NAME`.
+#: The TRI series DhanRadar fetches (niftyindices.com — see tasks/mf.py
+#: `benchmark_tri_fetch`). Debt/hybrid/arbitrage/gold/other non-broad-equity indices have
+#: NO series on this endpoint at all (verified 2026-07-12 by probing niftyindices'
+#: getTotalReturnIndexString with every plausible "indexName" spelling for the top-30
+#: unmapped benchmark strings — every debt/hybrid/arbitrage/gold candidate returned an
+#: empty body regardless of name variant; CRISIL-licensed indices were never probed at
+#: all, per ADR-0033) — the category-median line is the primary comparison there. Never
+#: add a key here without a matching fetcher entry in tasks/mf.py's
+#: `_TRI_NIFTYINDICES_NAME`, AND a captured real probe response proving the endpoint
+#: actually returns TRI data for it.
 NIFTY50_TRI = "nifty50_tri"
 NIFTY_MIDCAP150_TRI = "nifty_midcap150_tri"
 NIFTY_SMALLCAP250_TRI = "nifty_smallcap250_tri"
 NIFTY500_TRI = "nifty500_tri"
+
+#: Phase 4c pt5 (2026-07-12) — 5 new canonical keys added via the data-driven top-30
+#: unmapped-benchmark-string sweep (PR body has the full table). Each was verified live
+#: against niftyindices' getTotalReturnIndexString before being added here — see
+#: tasks/mf.py's `_TRI_NIFTYINDICES_NAME` docstring for the exact probe outcome per key.
+NIFTY100_TRI = "nifty100_tri"
+NIFTY_LARGEMIDCAP250_TRI = "nifty_largemidcap250_tri"
+NIFTY_INDIA_CONSUMPTION_TRI = "nifty_india_consumption_tri"
+NIFTY_FINANCIAL_SERVICES_TRI = "nifty_financial_services_tri"
+NIFTY500_MULTICAP_502525_TRI = "nifty500_multicap_502525_tri"
 
 CANONICAL_INDEX_KEYS: tuple[str, ...] = (
     NIFTY50_TRI,
     NIFTY_MIDCAP150_TRI,
     NIFTY_SMALLCAP250_TRI,
     NIFTY500_TRI,
+    NIFTY100_TRI,
+    NIFTY_LARGEMIDCAP250_TRI,
+    NIFTY_INDIA_CONSUMPTION_TRI,
+    NIFTY_FINANCIAL_SERVICES_TRI,
+    NIFTY500_MULTICAP_502525_TRI,
 )
 
 #: normalized string -> canonical key, EXACT EQUALITY only (post-normalization). Any
@@ -66,6 +86,18 @@ _ALLOWED_FORMS: dict[str, str] = {
     "nifty mid cap 150 tri": NIFTY_MIDCAP150_TRI,
     "nifty smallcap 250 tri": NIFTY_SMALLCAP250_TRI,
     "nifty small cap 250 tri": NIFTY_SMALLCAP250_TRI,
+    # Phase 4c pt5 (2026-07-12) — each entry below is the EXACT live
+    # mf_funds.benchmark_index string observed in the top-30 unmapped-benchmark sweep.
+    # Every near-miss variant found in the SAME sweep ("Nifty 100 ESG TRI", "Nifty 100
+    # Equal Weighted TRI", "Nifty Financial Services Ex-Bank TRI", "Nifty500 Multicap
+    # Infrastructure 50:30:20 TRI", "Nifty LargeMidcap250 Plus 8-13 yr G-Sec 70:30 TRI",
+    # etc.) denotes a DIFFERENT index and correctly falls through to None under exact
+    # equality — never broaden these to a substring/prefix match.
+    "nifty 100 tri": NIFTY100_TRI,
+    "nifty largemidcap 250 tri": NIFTY_LARGEMIDCAP250_TRI,
+    "nifty india consumption tri": NIFTY_INDIA_CONSUMPTION_TRI,
+    "nifty financial services tri": NIFTY_FINANCIAL_SERVICES_TRI,
+    "nifty 500 multicap 50:25:25 tri": NIFTY500_MULTICAP_502525_TRI,
 }
 
 #: Canonical key -> a friendly display label, used ONLY when a caller explicitly
@@ -78,6 +110,11 @@ INDEX_DISPLAY_NAME: dict[str, str] = {
     NIFTY_MIDCAP150_TRI: "Nifty Midcap 150 TRI",
     NIFTY_SMALLCAP250_TRI: "Nifty Smallcap 250 TRI",
     NIFTY500_TRI: "Nifty 500 TRI",
+    NIFTY100_TRI: "Nifty 100 TRI",
+    NIFTY_LARGEMIDCAP250_TRI: "Nifty LargeMidcap 250 TRI",
+    NIFTY_INDIA_CONSUMPTION_TRI: "Nifty India Consumption TRI",
+    NIFTY_FINANCIAL_SERVICES_TRI: "Nifty Financial Services TRI",
+    NIFTY500_MULTICAP_502525_TRI: "NIFTY 500 Multicap 50:25:25 TRI",
 }
 
 _WHITESPACE_RE = re.compile(r"\s+")

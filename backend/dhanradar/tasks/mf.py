@@ -1379,6 +1379,13 @@ _COHORT_LOOKBACK_DAYS = 1200
 # Lookback for mf_metrics_refresh — needs 5Y window (vs 3Y for cohort builder).
 _METRICS_LOOKBACK_DAYS = 1900
 
+# TRI-based alpha (Phase 4c pt5, MF_MASTER_DB_IMPROVEMENT_PLAN.md "Phase 4"/B2) — the
+# TRI window loaded per canonical index is much shorter than the fund NAV lookback: the
+# spec gates on "≥252 tri rows in the last ~400 days" (mirrors the nav_points >= 252
+# gate other 1Y stats already use). Global load, not per-chunk — see
+# _metrics_refresh_pipeline's benchmark_map_by_raw/tri_series_by_key.
+_METRICS_TRI_LOOKBACK_DAYS = 400
+
 # B63: peers' NAV series are loaded in batches of this many ISINs. Loading every
 # peer's 1200-day series at once OOM-killed (SIGKILL) the 640M batch worker the
 # moment the NAV table became complete (5.9M rows; hundreds of peers per
@@ -2212,14 +2219,33 @@ _BENCHMARK_TRI_USER_AGENT = (
 _BENCHMARK_TRI_FETCH_URL = "https://niftyindices.com/BackPage/getTotalReturnIndexString"
 
 # canonical index_key -> the exact "indexName" string niftyindices' endpoint expects
-# (reverse-engineered 2026-07-12; verified live for all 4 — see PR description for the
-# captured probe output). Every dhanradar.mf.benchmark_map.CANONICAL_INDEX_KEYS entry
-# MUST have one of these.
+# (reverse-engineered 2026-07-12; verified live for all original 4 — see PR description
+# for the captured probe output). Every dhanradar.mf.benchmark_map.CANONICAL_INDEX_KEYS
+# entry MUST have one of these.
+#
+# Phase 4c pt5 (2026-07-12, PR — benchmark-curation-alpha): 5 new keys added after
+# probing this SAME endpoint from a dev machine with every plausible "indexName" for the
+# founder's top-30 unmapped-benchmark-string sweep. Verified LIVE (real HTTP 200 +
+# non-empty TotalReturnsIndex rows) for all 5 below. Every debt/hybrid/arbitrage/gold
+# candidate probed in the same sweep ("NIFTY LOW DURATION DEBT INDEX", "NIFTY LIQUID
+# INDEX", "NIFTY CORPORATE BOND INDEX", "NIFTY BANKING & PSU DEBT INDEX", "NIFTY 50
+# ARBITRAGE INDEX", "NIFTY EQUITY SAVINGS INDEX", "NIFTY50 HYBRID COMPOSITE DEBT 50:50
+# INDEX", "NIFTY MONEY MARKET INDEX", "NIFTY ULTRA SHORT DURATION DEBT INDEX", "NIFTY
+# MEDIUM DURATION DEBT INDEX", "NIFTY SHORT DURATION DEBT INDEX", "NIFTY 1D RATE",
+# "GOLD" — with and without the "INDEX"/tier-suffix variants) returned an EMPTY body
+# regardless of name spelling — this endpoint genuinely serves broad-equity TRI only,
+# not fixed-income/hybrid/arbitrage/commodity indices. Those stay unmapped honestly
+# (never became a canonical key); see the PR body for every probe's raw output.
 _TRI_NIFTYINDICES_NAME: dict[str, str] = {
     "nifty50_tri": "NIFTY 50",
     "nifty_midcap150_tri": "NIFTY MIDCAP 150",
     "nifty_smallcap250_tri": "NIFTY SMALLCAP 250",
     "nifty500_tri": "NIFTY 500",
+    "nifty100_tri": "NIFTY 100",
+    "nifty_largemidcap250_tri": "NIFTY LARGEMIDCAP 250",
+    "nifty_india_consumption_tri": "NIFTY INDIA CONSUMPTION",
+    "nifty_financial_services_tri": "NIFTY FINANCIAL SERVICES",
+    "nifty500_multicap_502525_tri": "NIFTY500 MULTICAP 50:25:25",
 }
 
 
@@ -2413,6 +2439,7 @@ async def _metrics_refresh_pipeline() -> str:
 
     from dhanradar.config import settings as _s
     from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.benchmark_alpha import alpha_1y_tri_pct as _compute_alpha_1y_tri_pct
     from dhanradar.mf.risk import (
         benchmark_relative_stats,
         calendar_year_returns,
@@ -2424,6 +2451,8 @@ async def _metrics_refresh_pipeline() -> str:
     from dhanradar.mf.signals import extended_horizon_stats
     from dhanradar.models.mf import (
         MfBenchmarkDaily,
+        MfBenchmarkMap,
+        MfBenchmarkTri,
         MfCategoryStats,
         MfFund,
         MfFundMetrics,
@@ -2475,6 +2504,30 @@ async def _metrics_refresh_pipeline() -> str:
         all_isins = [r[0] for r in isin_rows]
 
     logger.info("mf_metrics_refresh: %d ISINs to process", len(all_isins))
+
+    # TRI-based alpha (Phase 4c pt5) — global load, NOT per-chunk: mf_benchmark_map
+    # (a few hundred rows) and the handful of canonical mf_benchmark_tri series are tiny
+    # compared to a NAV chunk, so loading them once up front avoids re-querying twice
+    # per chunk iteration. benchmark_map_by_raw covers ANY fund with a mapped benchmark
+    # (not just index funds, unlike the price-index bench_series_cache built per chunk
+    # below).
+    tri_cutoff = today - timedelta(days=_METRICS_TRI_LOOKBACK_DAYS)
+    async with TaskSessionLocal() as db:
+        map_rows = (
+            await db.execute(select(MfBenchmarkMap.benchmark_name_raw, MfBenchmarkMap.index_key))
+        ).all()
+        benchmark_map_by_raw: dict[str, str] = {r.benchmark_name_raw: r.index_key for r in map_rows}
+
+        tri_rows = (
+            await db.execute(
+                select(MfBenchmarkTri.index_key, MfBenchmarkTri.tri_date, MfBenchmarkTri.tri_value)
+                .where(MfBenchmarkTri.tri_date >= tri_cutoff)
+                .order_by(MfBenchmarkTri.index_key, MfBenchmarkTri.tri_date)
+            )
+        ).all()
+    tri_series_by_key: dict[str, list[tuple[date, float]]] = {}
+    for index_key, tri_date, tri_value in tri_rows:
+        tri_series_by_key.setdefault(index_key, []).append((tri_date, float(tri_value)))
 
     n_processed = 0
     # Per-fund calendar-year returns, accumulated across chunks for the category-stats
@@ -2560,6 +2613,24 @@ async def _metrics_refresh_pipeline() -> str:
                 else:
                     alpha_1y = beta_1y = te_pct = None
 
+                # TRI-based alpha (Phase 4c pt5) — the fund's OWN 1Y NAV return minus
+                # its OWN mapped benchmark's 1Y TRI return, for ANY fund whose
+                # benchmark_index resolves via mf_benchmark_map (not just index funds
+                # like alpha_1y above). Anchored on this fund's own latest NAV date, so
+                # the window matches r1 exactly. All-None when unmapped, or the mapped
+                # index has too little TRI history — never fabricated.
+                tri_index_key = benchmark_map_by_raw.get(bkey) if bkey else None
+                tri_points_for_fund = (
+                    tri_series_by_key.get(tri_index_key) if tri_index_key else None
+                )
+                fund_points = series.get(isin, [])
+                alpha_tri: float | None = None
+                if tri_points_for_fund and fund_points:
+                    alpha_tri = _compute_alpha_1y_tri_pct(
+                        r1, tri_points_for_fund, fund_points[-1][0]
+                    )
+                benchmark_key_1y = tri_index_key if alpha_tri is not None else None
+
                 # ponytail: _METRICS_LOOKBACK_DAYS (1900d, ~5.2y) can fall a little short
                 # of the ~6y span calendar_year_returns wants for a full 5-year strip —
                 # the oldest year(s) just come back missing, same honest-partial-data
@@ -2596,6 +2667,9 @@ async def _metrics_refresh_pipeline() -> str:
                         "alpha_1y": alpha_1y,
                         "beta_1y": beta_1y,
                         "tracking_error_pct": te_pct,
+                        # TRI-based alpha (migration 0077, Phase 4c pt5).
+                        "alpha_1y_tri_pct": alpha_tri,
+                        "benchmark_key_1y": benchmark_key_1y,
                     }
                 )
 
@@ -2641,6 +2715,9 @@ async def _metrics_refresh_pipeline() -> str:
                             "alpha_1y": insert(MfFundMetrics).excluded.alpha_1y,
                             "beta_1y": insert(MfFundMetrics).excluded.beta_1y,
                             "tracking_error_pct": insert(MfFundMetrics).excluded.tracking_error_pct,
+                            # TRI-based alpha (migration 0077, Phase 4c pt5).
+                            "alpha_1y_tri_pct": insert(MfFundMetrics).excluded.alpha_1y_tri_pct,
+                            "benchmark_key_1y": insert(MfFundMetrics).excluded.benchmark_key_1y,
                         },
                     )
                 )

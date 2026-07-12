@@ -26,9 +26,37 @@ def _load_fixture_bytes() -> bytes:
     return (_FIXTURES / "niftyindices_tri_nifty50_sample.json").read_bytes()
 
 
+def _load_nifty100_fixture_bytes() -> bytes:
+    """Phase 4c pt5 (2026-07-12) — real captured response for one of the 5 new
+    canonical indices, fetched live the same session (see PR description for the
+    full probe transcript). NTR_Value is "-" for this index (unlike Nifty 50's
+    populated NTR_Value) — the parser must ignore it either way (gross TRI only)."""
+    return (_FIXTURES / "niftyindices_tri_nifty100_sample.json").read_bytes()
+
+
 # ---------------------------------------------------------------------------
-# _parse_niftyindices_tri_response — real captured sample
+# _parse_niftyindices_tri_response — real captured sample, new canonical index
 # ---------------------------------------------------------------------------
+
+
+def test_parse_nifty100_real_sample_returns_5_rows_in_source_order():
+    rows = _parse_niftyindices_tri_response(_load_nifty100_fixture_bytes(), "nifty100_tri")
+    assert len(rows) == 5
+    assert [r[1] for r in rows] == [
+        date(2026, 7, 10),
+        date(2026, 7, 9),
+        date(2026, 7, 8),
+        date(2026, 7, 7),
+        date(2026, 7, 6),
+    ]
+
+
+def test_parse_nifty100_real_sample_handles_dash_ntr_value():
+    # NTR_Value is "-" for every row of this real response — must not raise/crash and
+    # must still use TotalReturnsIndex (gross) exclusively.
+    rows = _parse_niftyindices_tri_response(_load_nifty100_fixture_bytes(), "nifty100_tri")
+    by_date = {d: v for _key, d, v in rows}
+    assert by_date[date(2026, 7, 10)] == Decimal("34949.79")
 
 
 def test_parse_real_sample_returns_5_rows_in_source_order():
