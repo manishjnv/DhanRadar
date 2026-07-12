@@ -33,6 +33,14 @@ import statistics
 from dataclasses import dataclass
 from datetime import date
 
+# A real MF NAV never moves +/-50% in a single trading day; beyond that is a scale
+# change (e.g. a face-value split) or a data error, not a real return (the 2018-05-03
+# Overnight-Fund 99x lesson) — exclude it from the median input rather than let it
+# dominate a thin cohort's median or corrupt the chained index. Also protects the
+# chain's LN(1+r) domain (a return <= -100% is undefined) — mirrored in
+# ``dhanradar.tasks.mf._CATEGORY_SERIES_SQL`` as the same named constant/param.
+MAX_ABS_DAILY_RETURN = 0.5
+
 
 @dataclass(frozen=True)
 class CategorySeriesPoint:
@@ -72,6 +80,10 @@ def daily_returns(nav_by_date: dict[date, float]) -> dict[date, float]:
     prior trading day — correct for AMFI data (rows only exist on trading days) and
     naturally tolerant of a scheme's own gaps (a newly-launched scheme's first NAV date
     has no return; a scheme with a data gap compares against its last known NAV point).
+
+    A return outside (-1, MAX_ABS_DAILY_RETURN] in absolute value is dropped — it never
+    contributes to that day's median or fund_count (return-sanity hardening, see
+    MAX_ABS_DAILY_RETURN's docstring).
     """
     dates = sorted(nav_by_date)
     out: dict[date, float] = {}
@@ -79,7 +91,9 @@ def daily_returns(nav_by_date: dict[date, float]) -> dict[date, float]:
         prev_nav = nav_by_date[prev_d]
         cur_nav = nav_by_date[cur_d]
         if prev_nav and prev_nav > 0:
-            out[cur_d] = cur_nav / prev_nav - 1.0
+            r = cur_nav / prev_nav - 1.0
+            if r > -1.0 and abs(r) <= MAX_ABS_DAILY_RETURN:
+                out[cur_d] = r
     return out
 
 
