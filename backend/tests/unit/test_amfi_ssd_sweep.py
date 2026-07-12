@@ -25,7 +25,10 @@ from __future__ import annotations
 import re
 
 import pytest
+from sqlalchemy.exc import IntegrityError as _IntegrityError
 
+from dhanradar.mf.manual_ingest import _is_unique_violation
+from dhanradar.models.mf import MfManualIngestFile
 from dhanradar.tasks import manual_ingest as mi
 
 # The real AMFI-portal 404 shape (IIS default), captured verbatim during the
@@ -284,3 +287,64 @@ def test_duplicate_status_counted_not_ingested(monkeypatch: pytest.MonkeyPatch) 
 
     assert "duplicate=1" in result
     assert "ingested=0" in result
+
+
+# ---------------------------------------------------------------------------
+# RCA G10 regressions — PR #569 shipped a channel value the ledger's CHECK
+# constraint rejected, and intake_file()'s duplicate-race handler swallowed the
+# violation as "duplicate" (sweep ran green, ingested nothing).
+# ---------------------------------------------------------------------------
+
+
+def _integrity_error_with_pgcode(pgcode):
+    class _Orig(Exception):
+        pass
+
+    orig = _Orig("boom")
+    orig.pgcode = pgcode
+    return _IntegrityError("stmt", {}, orig)
+
+
+def test_channel_check_constraint_allows_amfi_ssd_sweep():
+    """G10 tripwire: the model's CHECK constraint must include the sweep channel
+    (migration 0078 widens the live one — this guards the model staying in sync)."""
+    checks = [
+        str(c.sqltext)
+        for c in MfManualIngestFile.__table__.constraints
+        if getattr(c, "name", "") == "ck_manual_ingest_files_channel"
+    ]
+    assert checks, "channel CHECK constraint missing"
+    assert "amfi_ssd_sweep" in checks[0]
+
+
+def test_is_unique_violation_true_only_for_23505():
+    assert _is_unique_violation(_integrity_error_with_pgcode("23505")) is True
+    assert _is_unique_violation(_integrity_error_with_pgcode("23514")) is False  # CHECK
+    assert _is_unique_violation(_integrity_error_with_pgcode("23503")) is False  # FK
+
+
+def test_is_unique_violation_asyncpg_cause_hop():
+    class _Orig(Exception):
+        pass
+
+    class _Cause(Exception):
+        pass
+
+    cause = _Cause("check fail")
+    cause.pgcode = "23514"
+    orig = _Orig("adapter wrapper")
+    orig.__cause__ = cause
+    exc = _IntegrityError("stmt", {}, orig)
+    assert _is_unique_violation(exc) is False
+
+
+def test_sweep_docstring_example_respects_range_guard():
+    """The copy-paste ops example must never trip the guard again (G10)."""
+    import re
+
+    from dhanradar.tasks.manual_ingest import amfi_ssd_sweep
+
+    m = re.search(r"delay\((\d+),\s*(\d+)\)", amfi_ssd_sweep.__doc__)
+    assert m, "docstring example missing"
+    start, end = int(m.group(1)), int(m.group(2))
+    assert end - start + 1 <= 500
