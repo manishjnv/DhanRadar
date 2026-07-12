@@ -196,8 +196,11 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
     #
     # MOTILAL_OSWAL: a public (no auth/nonce) Adobe-AEM JSON search API.
     # CANARA_ROBECO: a plain GET whose query string IS the month/year filter
-    #   (searchyear/filteryear/filtermonth) plus GET-addressable pagination —
-    #   no cookie/JS needed once the exact param shape is known.
+    #   (filteryear/filtermonth) plus GET-addressable pagination — no cookie
+    #   needed, and (re-confirmed B103 2026-07-12) no real JS execution
+    #   either, just a browser-shaped User-Agent on the discovery GET (see
+    #   _process_amc_paginated_query docstring — the site dropped the old
+    #   `searchyear` param and the WAF check turned out to be UA-string-only).
     # NAVI: a WordPress REST API gated by a `wp-nonce` header whose value is
     #   embedded in plain (no-JS) page HTML — a 2-step plain-httpx flow.
     # ZERODHA: sits in the Playwright bucket (`zerodha_multi`) — its
@@ -215,7 +218,7 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
         "name": "CANARA_ROBECO",
         "paginated_query_url_template": (
             "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/"
-            "scheme-monthly-portfolio/?searchyear={fy}&filteryear={year}&filtermonth={month:02d}&pagination={page}"
+            "scheme-monthly-portfolio/?filteryear={year}&filtermonth={month:02d}&pagination={page}"
         ),
     },
     {
@@ -3881,8 +3884,26 @@ async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
             except Exception:  # noqa: BLE001
                 logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
 
+        # --- Paginated-query AMCs (B103 2026-07-12: CANARA_ROBECO — WAF
+        # blocks the honest UA on the discovery GET but needs no real JS
+        # execution, so this stays plain httpx with a browser-shaped UA; NOT
+        # in the Playwright bucket below — see _process_amc_paginated_query) ---
+        for amc in paginated_query_amcs:
+            amc_name = amc["name"]
+            try:
+                rows, aum_cnt = await _process_amc_paginated_query(
+                    client, amc_name, amc["paginated_query_url_template"]
+                )
+                total_rows += rows
+                aum_updates += aum_cnt
+                logger.info(
+                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d", amc_name, rows, aum_cnt
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("mf_constituents_fetch amc=%s failed — skipping", amc_name)
+
         # --- Playwright AMCs (JS SPA discovery) ---
-        if playwright_amcs or zerodha_multi_amcs or paginated_query_amcs:
+        if playwright_amcs or zerodha_multi_amcs:
             import tracemalloc
 
             tracemalloc.start()
@@ -3948,37 +3969,10 @@ async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
                                 logger.exception(
                                     "mf_constituents_fetch amc=%s failed — skipping", amc_name
                                 )
-                        # --- CANARA_ROBECO (B90): the site's WAF blocks the
-                        # honest DhanRadar UA on plain httpx requests (403);
-                        # a real browser fingerprint (Playwright) is let
-                        # through for the exact same GET-addressable
-                        # month/year/pagination query string — see
-                        # _process_amc_paginated_query docstring.
-                        for amc in paginated_query_amcs:
-                            amc_name = amc["name"]
-                            if not first_amc:
-                                await asyncio.sleep(10)
-                            first_amc = False
-                            try:
-                                rows, aum_cnt = await _process_amc_paginated_query(
-                                    client, browser, amc_name, amc["paginated_query_url_template"]
-                                )
-                                total_rows += rows
-                                aum_updates += aum_cnt
-                                logger.info(
-                                    "mf_constituents_fetch amc=%s rows=%d aum_updates=%d",
-                                    amc_name,
-                                    rows,
-                                    aum_cnt,
-                                )
-                            except Exception:  # noqa: BLE001
-                                logger.exception(
-                                    "mf_constituents_fetch amc=%s failed — skipping", amc_name
-                                )
                     finally:
                         await browser.close()
             except Exception as e:  # noqa: BLE001
-                _all_pw_amcs = playwright_amcs + zerodha_multi_amcs + paginated_query_amcs
+                _all_pw_amcs = playwright_amcs + zerodha_multi_amcs
                 logger.warning(
                     "mf_constituents_fetch playwright unavailable (%s: %s) — skipping %d JS-SPA AMCs: %s",
                     type(e).__name__,
@@ -4625,7 +4619,11 @@ async def _process_amc_static_multi(
 
 
 async def _fetch_parse_upsert_files(
-    client: httpx.AsyncClient, amc_name: str, file_urls: list[str]
+    client: httpx.AsyncClient,
+    amc_name: str,
+    file_urls: list[str],
+    *,
+    referer: str | None = None,
 ) -> tuple[int, int]:
     """Shared fetch→parse→upsert loop for a list of already-discovered file URLs.
 
@@ -4634,17 +4632,30 @@ async def _fetch_parse_upsert_files(
     copy of it — matching the "reuse the existing parser" discipline already
     enforced for `_parse_sebi_xlsx` itself. A single bad file (network error,
     unparseable content) is logged and skipped; it never aborts the batch.
+
+    `referer` (B103 2026-07-12, NAVI): optional, per-AMC — when set, sent as
+    a `Referer` header on every download in this batch. Added defensively
+    for NAVI after its CDN (`public-assets.prod.navi-tech.in`) was reported
+    403ing downloads in production 2026-07-10; a same-session local repro
+    could NOT reproduce the 403 (every header combination tried, including
+    the pre-existing honest-UA-only shape, returned 200 with valid content —
+    see the PR body's probe matrix), so this is NOT a proven fix — it is the
+    standing hypothesis from that diagnosis, added because it is zero-risk
+    (confirmed not to break the already-working shape) and costs nothing for
+    every other AMC (default None => unchanged behaviour). Left unset for
+    MOTILAL_OSWAL/CANARA_ROBECO — no evidence either needs it.
     """
     total_rows = 0
     total_aum = 0
     parsed_files = 0
 
+    headers = {"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"}
+    if referer:
+        headers["Referer"] = referer
+
     for file_url in file_urls:
         try:
-            resp = await client.get(
-                file_url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
-            )
+            resp = await client.get(file_url, headers=headers)
             resp.raise_for_status()
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -4700,21 +4711,6 @@ async def _fetch_parse_upsert_files(
         total_rows,
     )
     return total_rows, total_aum
-
-
-def _fiscal_year_str(target: date) -> str:
-    """India fiscal-year label "YYYY-YY" for a given date (April-start FY).
-
-    E.g. 2026-05-31 -> "2026-27" (FY starts April 2026); 2026-02-15 ->
-    "2025-26" (still inside the FY that started April 2025). Used by
-    CANARA_ROBECO's own site-side fiscal-year query param — confirmed live
-    2026-07-08 that passing a non-matching `searchyear` (e.g. calendar year
-    instead of fiscal year) makes the site return "No documents found" even
-    though the file genuinely exists for that month.
-    """
-    if target.month >= 4:
-        return f"{target.year}-{str(target.year + 1)[2:]}"
-    return f"{target.year - 1}-{str(target.year)[2:]}"
 
 
 async def _process_amc_aem_json_api(
@@ -4777,19 +4773,46 @@ async def _process_amc_aem_json_api(
     return await _fetch_parse_upsert_files(client, amc_name, [file_url])
 
 
+# A real browser User-Agent — same role as _BENCHMARK_TRI_USER_AGENT (niftyindices):
+# CANARA_ROBECO's WAF returns 403 to DhanRadar's honest identifying UA on the
+# discovery GET (confirmed live 2026-07-12) but lets a browser-shaped UA string
+# through with NO real JS execution needed — see _process_amc_paginated_query.
+_CANARA_ROBECO_DISCOVERY_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+
 async def _process_amc_paginated_query(
-    client: httpx.AsyncClient, browser: Any, amc_name: str, url_template: str
+    client: httpx.AsyncClient, amc_name: str, url_template: str
 ) -> tuple[int, int]:
-    """CANARA_ROBECO (B90): the discovery page's query string IS the
-    month/year filter, plus GET-addressable pagination (`&pagination=N`) —
-    but the site's WAF returns 403 to a plain httpx GET carrying DhanRadar's
-    honest identifying User-Agent (confirmed live 2026-07-08), while the
-    SAME query string succeeds with a real browser fingerprint. The actual
-    `.xlsx` files under `wp-content/uploads/` are NOT behind that WAF rule
-    (confirmed: 200 via plain httpx with the honest UA) — so this uses
-    Playwright ONLY to render the discovery/search page and read the
-    rendered link list, then hands the discovered URLs to the shared
-    `_fetch_parse_upsert_files` (plain httpx) for the actual downloads.
+    """CANARA_ROBECO (B90, re-fixed B103 2026-07-12): the discovery page's
+    query string IS the month/year filter, plus GET-addressable pagination
+    (`&pagination=N`). Two things had changed since the original #523 build,
+    both confirmed by reading the LIVE page 2026-07-12:
+
+    1. Param shape — the site's own filter-button JS
+       (`customSearchBtn` click handler) sets only `filteryear` (plain
+       4-digit calendar year) + `filtermonth` (2-digit month) and reloads
+       this SAME page; it never sends a `searchyear` (fiscal-year, e.g.
+       "2026-27") param for THIS listing — that param belongs to a
+       DIFFERENT disclosure page sharing the same WordPress theme. The old
+       scraper sent `searchyear` anyway; the extra/wrong-format param made
+       the listing return zero documents (exactly the B103 "finds nothing"
+       symptom) even though `filteryear`/`filtermonth` alone work.
+    2. No Playwright needed — the WAF still 403s a plain httpx GET carrying
+       DhanRadar's honest UA (confirmed live), but a plain httpx GET with a
+       browser-shaped User-Agent (`_CANARA_ROBECO_DISCOVERY_UA`) succeeds
+       (200) with every `.xlsx` link already present in the server-rendered
+       HTML — no JS execution required (verified real content on pages 1
+       AND 2, 10 distinct links each, zero overlap). The original build
+       reached for a full Playwright browser when a header swap sufficed;
+       this drops CANARA_ROBECO out of the Playwright bucket entirely.
+
+    The actual `.xlsx` files under `wp-content/uploads/` are NOT behind that
+    WAF rule (confirmed live: 200 via plain httpx with the HONEST UA) — so
+    only this discovery GET uses the browser UA; downloads still go through
+    the shared `_fetch_parse_upsert_files` (honest UA, unchanged).
 
     Tries the previous month first, then 2 months back (SEBI publication
     lag). Paginates until a page returns no NEW links or a hard cap (20
@@ -4797,52 +4820,45 @@ async def _process_amc_paginated_query(
     scheme count is under 60, so even 10 files/page never approaches this).
     """
     now = datetime.now(UTC)
-    page = await browser.new_page()
-    try:
-        for months_back in (1, 2):
-            target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
-            fy = _fiscal_year_str(target.date())
+    for months_back in (1, 2):
+        target = (now.replace(day=1) - timedelta(days=months_back * 28)).replace(day=1)
 
-            seen: set[str] = set()
-            for page_num in range(1, 21):
-                url = url_template.format(
-                    fy=fy, year=target.year, month=target.month, page=page_num
-                )
-                try:
-                    await page.goto(url, wait_until="networkidle", timeout=30_000)
-                except Exception:  # noqa: BLE001
-                    logger.debug(
-                        "mf_constituents_fetch amc=%s paginated-query page=%d nav failed",
-                        amc_name,
-                        page_num,
-                        exc_info=True,
-                    )
-                    break
-
-                html = await page.content()
-                page_links = set(re.findall(r'href="([^"]+\.xlsx?[^"]*)"', html, re.IGNORECASE))
-                new_links = page_links - seen
-                if not new_links:
-                    break
-                seen |= new_links
-
-            if not seen:
+        seen: set[str] = set()
+        for page_num in range(1, 21):
+            url = url_template.format(year=target.year, month=target.month, page=page_num)
+            try:
+                resp = await client.get(url, headers={"User-Agent": _CANARA_ROBECO_DISCOVERY_UA})
+                resp.raise_for_status()
+            except Exception:  # noqa: BLE001
                 logger.debug(
-                    "mf_constituents_fetch amc=%s paginated-query: no links for %s",
+                    "mf_constituents_fetch amc=%s paginated-query page=%d fetch failed",
                     amc_name,
-                    target.strftime("%B %Y"),
+                    page_num,
+                    exc_info=True,
                 )
-                continue
+                break
 
-            logger.info(
-                "mf_constituents_fetch amc=%s paginated-query: %d files for %s",
+            page_links = set(re.findall(r'href="([^"]+\.xlsx?[^"]*)"', resp.text, re.IGNORECASE))
+            new_links = page_links - seen
+            if not new_links:
+                break
+            seen |= new_links
+
+        if not seen:
+            logger.debug(
+                "mf_constituents_fetch amc=%s paginated-query: no links for %s",
                 amc_name,
-                len(seen),
                 target.strftime("%B %Y"),
             )
-            return await _fetch_parse_upsert_files(client, amc_name, sorted(seen))
-    finally:
-        await page.close()
+            continue
+
+        logger.info(
+            "mf_constituents_fetch amc=%s paginated-query: %d files for %s",
+            amc_name,
+            len(seen),
+            target.strftime("%B %Y"),
+        )
+        return await _fetch_parse_upsert_files(client, amc_name, sorted(seen))
 
     logger.warning(
         "mf_constituents_fetch amc=%s paginated-query: no disclosure files found", amc_name
@@ -4865,6 +4881,17 @@ async def _process_amc_nonce_api(
     2026-07-08 — no Playwright/browser session needed at all.
 
     Tries the previous month first, then 2 months back (SEBI publication lag).
+
+    B103 (2026-07-12): production logs reported the discovery step above
+    still works (nonce + file list both returned) but the CDN
+    (`public-assets.prod.navi-tech.in`) 403s the actual downloads. A
+    same-session local repro of the download step — every header
+    combination tried (current honest-UA-only shape, +Referer, browser UA,
+    browser UA +Referer, +Origin, no headers at all) — returned 200 with a
+    genuine, parseable xlsx, so the 403 did NOT reproduce here (see PR body
+    probe matrix). Passing `referer=nonce_page_url` below is a zero-risk
+    defensive addition (the standing BLOCKERS.md hypothesis), not a
+    locally-proven fix — post-merge, verify via a real trigger + log check.
     """
     try:
         page_resp = await client.get(
@@ -4938,7 +4965,7 @@ async def _process_amc_nonce_api(
             len(file_urls),
             target.strftime("%B %Y"),
         )
-        return await _fetch_parse_upsert_files(client, amc_name, file_urls)
+        return await _fetch_parse_upsert_files(client, amc_name, file_urls, referer=nonce_page_url)
 
     logger.warning("mf_constituents_fetch amc=%s nonce-api: no disclosure files found", amc_name)
     return 0, 0
