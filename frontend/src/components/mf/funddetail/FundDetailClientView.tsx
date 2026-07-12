@@ -215,35 +215,35 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       </div>
 
       {/* S1 — Hero + status */}
-      <HeroSection head={head} factors={factors} />
+      <HeroSection head={head} factors={factors} isin={isin} />
       <StatusRow contributing={contributing} />
 
-      {/* S2 — Educational verdict */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="Assessment" badge={<LiveBadge />} />{/* dev-verify */}<VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
+      {/* S2 — Performance center (founder 2026-07-12: directly below hero) */}
+      <Section><SectionHeader index="02" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} badge={<LiveBadge />} />{/* dev-verify */}<PerformanceSection head={head} isin={isin} /></Section>
 
-      {/* S3 — Smart entry timing */}
-      <Section><SectionHeader index="03" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
+      {/* S3 — Snapshot */}
+      <Section><SectionHeader index="03" title="Investment Snapshot" badge={<LiveBadge />} />{/* dev-verify */}<SnapshotSection head={head} isin={isin} /></Section>
 
-      {/* S4 — Portfolio fit */}
-      <Section><SectionHeader index="04" title="Portfolio Fit" tag="Exclusive" badge={<LiveBadge />} />{/* dev-verify */}<PortfolioFitSection portfolioId={portfolioId} isin={isin} /></Section>
+      {/* S4 — Educational verdict */}
+      <Section><SectionHeader index="04" title="DhanRadar Educational Read" tag="Assessment" badge={<LiveBadge />} />{/* dev-verify */}<VerdictSection head={head} signals={{ contributing, contradicting }} /></Section>
 
-      {/* S5 — My investment (P1 — real data) */}
-      <Section><SectionHeader index="05" title="My Investment" info="Your own numbers for this fund" badge={<LiveBadge />} />{/* dev-verify */}<MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
+      {/* S5 — Smart entry timing */}
+      <Section><SectionHeader index="05" title="Smart Entry Timing" tag="DhanRadar" info="Category valuation context" /><EntryTimingSection /></Section>
 
-      {/* S6 — Market mood */}
-      <Section><SectionHeader index="06" title="Market Mood Analysis" tag="DMMI" badge={<LiveBadge />} />{/* dev-verify */}<MoodSection /></Section>
+      {/* S6 — Portfolio fit */}
+      <Section><SectionHeader index="06" title="Portfolio Fit" tag="Exclusive" badge={<LiveBadge />} />{/* dev-verify */}<PortfolioFitSection portfolioId={portfolioId} isin={isin} /></Section>
 
-      {/* S7 — Fund health */}
-      <Section><SectionHeader index="07" title="Fund Health Dashboard" info="Traffic-light read" badge={<LiveBadge />} />{/* dev-verify */}<FundHealthSection isin={isin} /></Section>
+      {/* S7 — My investment (P1 — real data) */}
+      <Section><SectionHeader index="07" title="My Investment" info="Your own numbers for this fund" badge={<LiveBadge />} />{/* dev-verify */}<MyInvestmentSection portfolioId={portfolioId} isin={isin} /></Section>
 
-      {/* S8 — What changed */}
-      <Section><SectionHeader index="08" title="What Changed This Month" tag="AI" badge={<LiveBadge />} />{/* dev-verify */}<WhatChangedSection isin={isin} /></Section>
+      {/* S8 — Market mood */}
+      <Section><SectionHeader index="08" title="Market Mood Analysis" tag="DMMI" badge={<LiveBadge />} />{/* dev-verify */}<MoodSection /></Section>
 
-      {/* S9 — Snapshot */}
-      <Section><SectionHeader index="09" title="Investment Snapshot" badge={<LiveBadge />} />{/* dev-verify */}<SnapshotSection head={head} isin={isin} /></Section>
+      {/* S9 — Fund health */}
+      <Section><SectionHeader index="09" title="Fund Health Dashboard" info="Traffic-light read" badge={<LiveBadge />} />{/* dev-verify */}<FundHealthSection isin={isin} /></Section>
 
-      {/* S10 — Performance center */}
-      <Section><SectionHeader index="10" title="Performance Center" info={`vs ${benchmarkMeta.displayName} · price index, excludes dividends`} badge={<LiveBadge />} />{/* dev-verify */}<PerformanceSection head={head} isin={isin} /></Section>
+      {/* S10 — What changed */}
+      <Section><SectionHeader index="10" title="What Changed This Month" tag="AI" badge={<LiveBadge />} />{/* dev-verify */}<WhatChangedSection isin={isin} /></Section>
 
       {/* S11 — Assessment breakdown (band rings, no numbers) */}
       <Section><SectionHeader index="11" title="DhanRadar Assessment Breakdown" info="How confident the read is — by dimension" badge={<LiveBadge />} />{/* dev-verify */}<ScoreBreakdownSection factors={factors} /></Section>
