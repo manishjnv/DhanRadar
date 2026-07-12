@@ -68,7 +68,7 @@ const LINK_RING =
 // ---------------------------------------------------------------------------
 function Hero() {
   return (
-    <section className="mx-auto max-w-6xl px-6 pt-16 pb-12 lg:pt-24 lg:pb-16">
+    <section className="mx-auto max-w-6xl px-6 pt-12 pb-8 lg:pt-16 lg:pb-12">
       <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
         {/* Left — copy */}
         <div className="flex flex-col gap-6">
@@ -202,7 +202,7 @@ function HowItWorks() {
       aria-labelledby="how-heading"
       className="bg-surface-2 border-y border-line"
     >
-      <div className="mx-auto max-w-6xl px-6 py-12">
+      <div className="mx-auto max-w-6xl px-6 py-8">
         <h2
           id="how-heading"
           className="text-h2 font-semibold text-ink text-center mb-10"
@@ -268,7 +268,7 @@ function Features() {
   return (
     <section
       aria-labelledby="features-heading"
-      className="mx-auto max-w-6xl px-6 py-16"
+      className="mx-auto max-w-6xl px-6 py-12"
     >
       <h2
         id="features-heading"
@@ -327,7 +327,7 @@ function Faq() {
       aria-labelledby="faq-heading"
       className="bg-surface-2 border-y border-line"
     >
-      <div className="mx-auto max-w-2xl px-6 py-16">
+      <div className="mx-auto max-w-2xl px-6 py-12">
         <h2
           id="faq-heading"
           className="text-h2 font-semibold text-ink text-center mb-10"
@@ -387,7 +387,7 @@ export default function HomePage() {
         {/* Bottom CTA strip */}
         <section
           aria-labelledby="cta-heading"
-          className="mx-auto max-w-6xl px-6 py-16 text-center"
+          className="mx-auto max-w-6xl px-6 py-12 text-center"
         >
           <h2
             id="cta-heading"
