@@ -144,12 +144,25 @@ async def _parse_pipeline(file_id: str, amc_hint: str | None = None) -> str:
             looks_like_factsheet_compilation,
             looks_like_factsheet_pdf,
             looks_like_scheme_master_pdf,
+            looks_like_ssd_pdf,
         )
 
         data = path.read_bytes()
         if looks_like_scheme_master_pdf(data):
             return await _parse_special_class(
                 file_id, "scheme_master_pdf", data, original_filename, amc_hint
+            )
+        # Per-scheme "SCHEME SUMMARY DOCUMENT" PDFs (top-5 AMC wave,
+        # 2026-07-12 — HDFC/ICICI/HSBC/Franklin/Mirae, either the AMC's own
+        # site or the AMFI portal mirror) carry the same manager/exit-load/
+        # min-amount facts as scheme_summary_xls (TATA) PLUS benchmark and
+        # riskometer — checked BEFORE factsheet_pdf: its own banner
+        # ("SCHEME SUMMARY DOCUMENT") never appears in a factsheet, so
+        # order can't misclassify either way, but scheme_summary_pdf's sniff
+        # is the cheaper/more specific one.
+        if looks_like_ssd_pdf(data):
+            return await _parse_special_class(
+                file_id, "scheme_summary_pdf", data, original_filename, amc_hint
             )
         # Per-scheme factsheet PDFs (ICICI layout, 2026-07-11) carry the fund
         # MANAGER (+ tenure), closing AUM, exit load and min amount — the
@@ -285,6 +298,7 @@ async def _parse_special_class(
             "ter",
             "fund_performance",
             "factsheet_pdf",  # detects its AMC from the in-file scheme name
+            "scheme_summary_pdf",  # same fallback — see the writer branch below
         ):
             stats.status_override = "skipped"
             await _mark(file_id, "unsupported", error="amc_undetectable")
@@ -379,15 +393,23 @@ async def _apply_file_class(
         fills `aum_crore` only where the fund has NO dated figure at all,
         and writes NO `aum_as_of` and NO history row (§8.4 — a history row
         needs a real as_of_month, never a fabricated one).
-      - scheme_summary_xls (2026-07-11 — TATA's per-scheme "SCHEME SUMMARY
-        DOCUMENT" workbook) → `exit_load_pct`/`exit_load_days` (unconditional
-        overwrite, same rule as factsheet_pdf) + `min_lumpsum_amount`
-        (unconditional overwrite) + `fund_manager_history` (deduped on
-        (scheme_uid, manager_name, start_date), same pattern as
+      - scheme_summary_xls / scheme_summary_pdf (2026-07-11 TATA xlsx /
+        2026-07-12 top-5-AMC PDF — the SAME SEBI "SCHEME SUMMARY DOCUMENT"
+        template, two file formats) → `exit_load_pct`/`exit_load_days`
+        (unconditional overwrite, same rule as factsheet_pdf) +
+        `min_lumpsum_amount` (unconditional overwrite) + `fund_manager_history`
+        (deduped on (scheme_uid, manager_name, start_date), same pattern as
         factsheet_pdf), resolved by EXACT ISIN match — the file lists every
         plan/option ISIN for the one scheme it describes, so all three are
         written to EVERY one of those ISINs that exists in mf_funds, never
-        just a single "canonical" one.
+        just a single "canonical" one. The PDF variant additionally carries
+        `benchmark_tier1`/`risk_band` (the xlsx TATA parser deliberately
+        skips these — see its own docstring) → `benchmark_index`/
+        `risk_o_meter`, but FILL-IF-NULL only (never overwrite a non-NULL
+        value) — the same B104 COALESCE discipline the nightly NAV upsert
+        now enforces; AMFI's Fund-Performance names already cover ~8.2k
+        schemes and are a more consistently-sourced fact than a single SSD
+        read, so this class only fills gaps, never contests them.
     """
     from sqlalchemy import text as sa_text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -404,21 +426,32 @@ async def _apply_file_class(
     from dhanradar.models.mf import MfAumHistory, MfFund, MfFundManagerHistory
     from dhanradar.tasks.mf import _resolve_scheme_isins, _resolve_scheme_isins_by_plan
 
-    if file_class == "scheme_summary_xls":
-        # TATA per-scheme "SCHEME SUMMARY DOCUMENT" workbook (2026-07-11):
-        # the file GIVES every plan/option ISIN for the ONE scheme it
-        # describes — resolved by EXACT ISIN lookup, never the fuzzy name
-        # resolver every other class here uses. Exit load, minimum
-        # application amount, and manager history are scheme-level facts
-        # identical across every option variant (same reasoning the 'ter'
-        # class docstring above gives for TER), so all three are written to
-        # EVERY ISIN the file lists that actually exists in mf_funds.
-        from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+    if file_class in ("scheme_summary_xls", "scheme_summary_pdf"):
+        # TATA's per-scheme "SCHEME SUMMARY DOCUMENT" xlsx (2026-07-11) and
+        # the top-5 AMC PDF variant (2026-07-12, HDFC/ICICI/HSBC/Franklin/
+        # Mirae) share one writer: the file GIVES every plan/option ISIN
+        # for the ONE scheme it describes — resolved by EXACT ISIN lookup,
+        # never the fuzzy name resolver every other class here uses. Exit
+        # load, minimum application amount, and manager history are
+        # scheme-level facts identical across every option variant (same
+        # reasoning the 'ter' class docstring above gives for TER), so all
+        # three are written to EVERY ISIN the file lists that actually
+        # exists in mf_funds.
+        if file_class == "scheme_summary_pdf":
+            from dhanradar.mf.disclosure_parsers import parse_ssd_pdf
 
-        parsed = parse_scheme_summary_xls(data)
+            parsed = parse_ssd_pdf(data)
+        else:
+            from dhanradar.mf.disclosure_parsers import parse_scheme_summary_xls
+
+            parsed = parse_scheme_summary_xls(data)
         isins = parsed.get("isins") or []
         if not isins:
             return None, None, 0
+        # scheme_summary_pdf may arrive with amc_name=None (content-sniffed,
+        # not filename-detected) — same fallback factsheet_pdf uses.
+        if amc_name is None and parsed.get("scheme_name"):
+            amc_name = detect_amc(parsed["scheme_name"])
 
         async with TaskSessionLocal() as db:
             existing = await db.execute(
@@ -451,6 +484,28 @@ async def _apply_file_class(
                         {"v": parsed["min_lumpsum_amount"], "i": isin},
                     )
                     updates += int(getattr(result, "rowcount", 0) or 0)
+            # scheme_summary_pdf only (the xlsx parser never returns these
+            # keys) — fill-if-null, never overwrite (see docstring above).
+            if parsed.get("benchmark_tier1"):
+                for isin in resolved_isins:
+                    result = await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds SET benchmark_index = :b "
+                            "WHERE isin = :i AND benchmark_index IS NULL"
+                        ),
+                        {"b": parsed["benchmark_tier1"], "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
+            if parsed.get("risk_band"):
+                for isin in resolved_isins:
+                    result = await db.execute(
+                        sa_text(
+                            "UPDATE mf.mf_funds SET risk_o_meter = :b "
+                            "WHERE isin = :i AND risk_o_meter IS NULL"
+                        ),
+                        {"b": parsed["risk_band"], "i": isin},
+                    )
+                    updates += int(getattr(result, "rowcount", 0) or 0)
             # Only pairs with a real, non-fabricated start_date can ever be
             # written — `fund_manager_history.start_date` is NOT NULL, so a
             # manager the FM-index correlation couldn't confidently date is
@@ -474,7 +529,14 @@ async def _apply_file_class(
                             "manager_name": name,
                             "start_date": start,
                             "end_date": None,
-                            "source": amc_name or "TATA",
+                            # amc_name is guaranteed non-None here for BOTH
+                            # sub-classes by this point: scheme_summary_xls
+                            # is gated at the call site (amc_name required
+                            # before _apply_file_class runs at all);
+                            # scheme_summary_pdf falls back to the in-file
+                            # scheme name above, and isins (checked earlier)
+                            # implies parsed["scheme_name"] is non-empty.
+                            "source": amc_name or "SSD",
                             "run_id": run_id,
                         }
                         for name, start in manager_pairs

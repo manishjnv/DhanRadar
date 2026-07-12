@@ -611,6 +611,432 @@ def parse_scheme_summary_xls(data: bytes) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# scheme_summary_pdf (2026-07-12) — the SAME SEBI "SCHEME SUMMARY DOCUMENT"
+# per-scheme template as scheme_summary_xls above, published as a PDF by
+# HDFC / ICICI Prudential / HSBC / Franklin Templeton / Mirae (top-5 AMC
+# ingestion wave), either from the AMC's own site or the AMFI portal's mirror
+# (`portal.amfiindia.com/spages/SSD_<id>.pdf`). Real samples verified
+# 2026-07-12 (docs/Sample/amc-data/{HDFC,ICICI,HSBC,Franklin-Templeton,
+# MIRAE}/scheme-summary/): the numbered 1-53 field template is IDENTICAL in
+# content to the xlsx variant, but pypdf's PLAIN `extract_text()` scrambles
+# reading order on several real files (ICICI's AMFI-portal mirror: every
+# field's LABEL prints first in one block, then every VALUE in a second
+# block — label/value pairing by line order is impossible there).
+# `extraction_mode="layout"` (pypdf's x/y-position-aware mode) restores the
+# correct row order on EVERY sample tried — a label and its own value sit on
+# the same line again — so this class reads PDFs through THAT mode
+# exclusively, never plain extract_text().
+#
+# Same output dict shape as `parse_scheme_summary_xls` (scheme_name/
+# manager_pairs/exit_load_pct/exit_load_days/min_lumpsum_amount/isins) PLUS
+# two fields the xlsx parser deliberately skipped: benchmark_tier1 and
+# risk_band — the writer fills mf_funds.benchmark_index/risk_o_meter ONLY
+# where currently NULL (never overwrites — the same B104 COALESCE discipline
+# the nightly NAV upsert now enforces; AMFI's Fund-Performance names already
+# cover ~8.2k schemes and must not be clobbered by a lower-confidence SSD
+# read).
+#
+# Field NUMBERS are not a safe anchor across AMCs (Mirae renumbers every
+# field past 20 because each of its up-to-4 fund managers gets 3 OWN
+# numbered rows instead of one shared comma-list row) — every anchor below
+# is a LABEL text match, sequential/bounded (search only after the previous
+# anchor), never a number.
+# ---------------------------------------------------------------------------
+
+_SSD_BANNER_RE = re.compile(r"SCHEME SUMMARY DOCUMENT", re.IGNORECASE)
+_SSD_FUND_NAME_RE = re.compile(r"\bFund Name\b")
+# HDFC's real files drop the "ti" ligature glyph ENTIRELY in several labels
+# (a font/encoding defect confirmed 2026-07-12 against both real HDFC
+# samples — `_flatten_pdf_layout` already normalizes the leaked NUL byte to
+# a space, so `\s*` alone absorbs the gap here): "Option" -> "Op on",
+# "Listing" -> "Lis ng", "Application" -> "Applica on" — 2 letters gone, not
+# a misrender. `(?:ti)?` makes the pair optional everywhere it's
+# structurally expected; the same `\s*` also absorbs the SEPARATE plain
+# stray-space artifact the same files carry elsewhere (e.g. "R egular"),
+# which loses no letters.
+_SSD_OPTION_NAMES_RE = re.compile(r"Op(?:ti)?\s*on\s*Names?\s*\(\s*R\s*egular", re.IGNORECASE)
+_SSD_RISK_RE = re.compile(r"Riskometer\s*\(as on[^)]*\)", re.IGNORECASE)
+_SSD_CATEGORY_RE = re.compile(r"Category\s*as\s*Per\s*SEBI", re.IGNORECASE)
+# Mirae's real files misspell this label "Benchmarch" on EVERY sample seen —
+# the `k|ch` alternation matches both the correct and the misspelled form
+# with one pattern (verified 2026-07-12 against all 5 target AMCs).
+_SSD_BENCH1_RE = re.compile(r"Benchmar(?:k|ch)\s*\(Tier\s*1\)", re.IGNORECASE)
+_SSD_BENCH2_RE = re.compile(r"Benchmar(?:k|ch)\s*\(Tier\s*2\)", re.IGNORECASE)
+_SSD_EXPENSE_RE = re.compile(r"(?:Annual|Actual)\s+[Ee]xpenses?", re.IGNORECASE)
+# Franklin's real file typos the closing bracket: "(if applicable}".
+_SSD_EXIT_LOAD_RE = re.compile(r"Exit Load\s*\(if applicable[)\}]", re.IGNORECASE)
+_SSD_CUSTODIAN_RE = re.compile(r"\bCustodian\b")
+# ISINs' own label is used as a BOUNDARY (stop for Listing Details, in
+# `_SSD_LISTING_DETAILS_RE` below) but never as the ISIN block's own START —
+# see that constant's docstring for why. Both this and the min-application
+# labels carry the same "ti"-drop defect `_SSD_OPTION_NAMES_RE` above
+# documents ("Listing" -> "Lis ng", "Application" -> "Applica on").
+_SSD_LISTING_DETAILS_RE = re.compile(r"Lis(?:ti)?\s*ng\s*De\s*tails", re.IGNORECASE)
+_SSD_AMFI_CODE_RE = re.compile(r"AMFI Codes?\s*\(To be phased out\)", re.IGNORECASE)
+_SSD_MIN_APP_RE = re.compile(r"Minimum\s*Applica(?:ti)?\s*on\s*Amoun\s*t(?!\s*in\b)", re.IGNORECASE)
+_SSD_MIN_APP_MULT_RE = re.compile(
+    r"Minimum\s*Applica(?:ti)?\s*on\s*Amoun\s*t\s+in\b", re.IGNORECASE
+)
+# The manager block: BOTH real row shapes seen — one shared comma-list row
+# ("Fund Manager Name" / "... Type" / "... From Date", HDFC/HSBC/Franklin/
+# DSP-family) and one row PER manager ("Fund Manager 1 - Name" / "Fund
+# Manager 2 - Name" ..., ICICI/Mirae) — the optional `\d*` matches both.
+# "Type" is tracked ONLY as a boundary (its own value is never needed) —
+# without it, a Name row's value runs all the way to the NEXT Name/Date row,
+# swallowing the whole Type row's text (and, for a comma-list Type value,
+# splitting it into bogus extra "managers" — caught 2026-07-12 against every
+# real sample).
+_SSD_MGR_NAME_RE = re.compile(r"Fund Manager\s*\d*\s*[-–]?\s*Name\b", re.IGNORECASE)
+_SSD_MGR_TYPE_RE = re.compile(r"Fund Manager\s*\d*\s*[-–]?\s*Type\b", re.IGNORECASE)
+_SSD_MGR_DATE_RE = re.compile(r"Fund Manager\s*\d*\s*[-–]?\s*(?:From\s*)?Date\b", re.IGNORECASE)
+_SSD_MONTH_FIRST_DATE_RE = re.compile(r"\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s*(\d{4})\b")
+_SSD_ISIN_RE = re.compile(r"\b[A-Z]{2}[A-Z0-9]{9}\d\b")
+_SSD_FM_MARKER_RE = re.compile(r"\bFM\s*-?\s*(\d+)\s*[-.:]*\s*", re.IGNORECASE)
+_SSD_NUM_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
+# A field NUMBER that lands mid-row (real Mirae/ICICI artifact: the number
+# column is vertically centered against a multi-manager block, so it prints
+# next to a DIFFERENT physical line than the field it belongs to — e.g.
+# ICICI's "Fund Manager 2 - Name" line carries manager 1's stray "18") gets
+# swept into whichever value slice sits next to it. Stripped as a trailing
+# short bare-digit token — never inside a real name/date, always a leaked
+# row number.
+_SSD_TRAILING_FIELDNUM_RE = re.compile(r"\s+\d{1,3}\s*$")
+
+
+def looks_like_ssd_pdf(data: bytes) -> bool:
+    """CONTENT sniff for the PDF "SCHEME SUMMARY DOCUMENT" template — the
+    literal banner phrase every real sample (HDFC/ICICI/HSBC/Franklin/Mirae,
+    both the AMC's own site and the AMFI-portal mirror) prints on its first
+    page, next to the "Fields" column header. A cheap plain-text check is
+    enough for a sniff — only the full parse needs layout mode."""
+    if not data.startswith(b"%PDF"):
+        return False
+    try:
+        import io as _io
+
+        from pypdf import PdfReader
+
+        first = PdfReader(_io.BytesIO(data)).pages[0].extract_text() or ""
+    except Exception:  # noqa: BLE001 — unreadable PDF is simply not this class
+        return False
+    return bool(_SSD_BANNER_RE.search(first)) and "fields" in first.lower()
+
+
+def _flatten_pdf_layout(data: bytes) -> str:
+    """All pages' LAYOUT-mode text, joined and whitespace-collapsed to one
+    string — see the module note above for why layout mode (not
+    `_flatten_pdf`'s plain mode) is required for this class.
+
+    Real HDFC files drop the "ti" ligature glyph entirely wherever it
+    appears (a font/encoding defect confirmed 2026-07-12 against both real
+    HDFC samples), and pypdf renders the gap as a literal NUL byte, not a
+    space ("Op\\x00on" for "Option", byte-level). NUL bytes are stripped to
+    spaces here — once, at the source — rather than special-cased in every
+    downstream label regex, and this doubles as a safety net: a NUL byte in
+    a manager name would make Postgres reject the whole write
+    ("A string literal cannot contain NUL (0x00) characters")."""
+    import io as _io
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(_io.BytesIO(data))
+    text = " ".join(page.extract_text(extraction_mode="layout") or "" for page in reader.pages)
+    return re.sub(r"[\s\x00]+", " ", text).strip()
+
+
+def _ssd_value_between(
+    text: str,
+    start_re: re.Pattern[str],
+    stop_re: re.Pattern[str] | None,
+    search_from: int = 0,
+) -> str | None:
+    """Text between the END of `start_re`'s first match (at/after
+    `search_from`) and the START of `stop_re`'s next match — `None` if
+    `start_re` never matches. Mirrors `_extract_all_labels`'s "next known
+    label ends this one's value" contract, generalized to regex anchors
+    since the SSD's own field NUMBERS are not a safe anchor (see module
+    note)."""
+    m = start_re.search(text, search_from)
+    if not m:
+        return None
+    end = len(text)
+    if stop_re is not None:
+        stop = stop_re.search(text, m.end())
+        if stop:
+            end = stop.start()
+    value = text[m.end() : end].strip(" :-")
+    # The NEXT field's own row NUMBER routinely leaks onto the tail of THIS
+    # field's captured value (real artifact: the row-number column is
+    # vertically centered against a multi-line value cell, so it prints
+    # beside whichever physical line ends up in the middle — often the
+    # line right before the next field's own label; e.g. a Riskometer value
+    # of "Very High" followed a line later by "6 Category as Per..." reads
+    # back as "Very High 6"). Stripped as a trailing short bare-digit token
+    # — never part of a real value in any field this parser reads.
+    return _SSD_TRAILING_FIELDNUM_RE.sub("", value).strip()
+
+
+def _ssd_extract_date(text: str) -> date | None:
+    """First recognizable date in `text`, trying every real order seen across
+    the 5 target AMCs' SSD PDFs: numeric DD/MM/YYYY and DD-Month-YYYY
+    (reuses `_tata_extract_date`, the same generic parser TATA's xlsx class
+    uses) PLUS "Month DD, YYYY" (HDFC "July 29, 2022", Franklin "May 02,
+    2016") — a US-style order the xlsx samples never used, so it is added
+    here rather than loosening the shared TATA regex. Fail-closed None."""
+    found = _tata_extract_date(text)
+    if found is not None:
+        return found
+    m = _SSD_MONTH_FIRST_DATE_RE.search(text)
+    if m:
+        mon, day, year = m.groups()
+        try:
+            return datetime.strptime(f"{int(day):02d}-{mon[:3]}-{year}", "%d-%b-%Y").date()
+        except ValueError:
+            return None
+    return None
+
+
+def _ssd_clean_manager_name(raw: str) -> str:
+    """Whitespace-normalize a captured manager-name value, drop a trailing
+    role/portfolio-segment qualifier in parens (real Mirae multi-asset
+    scheme: "Mr. Harshad Borawake (Equity Portion)" -> "Mr. Harshad
+    Borawake" — every other manager-name source on this platform stores the
+    bare name), and strip a leaked field-number token (see
+    `_SSD_TRAILING_FIELDNUM_RE`)."""
+    name = " ".join(raw.split())
+    name = re.split(r"\s*\(", name)[0]
+    name = _SSD_TRAILING_FIELDNUM_RE.sub("", name)
+    return name.strip(" ,-")
+
+
+def _ssd_manager_rows(text: str, start: int, end: int) -> tuple[list[str], list[str]]:
+    """Every 'Name'-labeled and 'From Date'/'Date'-labeled row's raw value
+    text within [start, end), in document order. A row's own value can
+    itself be a comma list (the shared-row shape) or a single manager (the
+    per-manager-row shape) — `_ssd_manager_pairs` below tells them apart by
+    how many rows came back. 'Type' rows are located too but ONLY used as a
+    boundary — a Name row otherwise has no way to know where its own value
+    ends and the following Type row's begins."""
+    anchors: list[tuple[int, int, str]] = (
+        [(m.start(), m.end(), "name") for m in _SSD_MGR_NAME_RE.finditer(text, start, end)]
+        + [(m.start(), m.end(), "type") for m in _SSD_MGR_TYPE_RE.finditer(text, start, end)]
+        + [(m.start(), m.end(), "date") for m in _SSD_MGR_DATE_RE.finditer(text, start, end)]
+    )
+    anchors.sort(key=lambda a: a[0])
+    names: list[str] = []
+    dates: list[str] = []
+    for i, (_a_start, a_end, kind) in enumerate(anchors):
+        if kind == "type":
+            continue
+        value_end = anchors[i + 1][0] if i + 1 < len(anchors) else end
+        value = _SSD_TRAILING_FIELDNUM_RE.sub("", text[a_end:value_end].strip(" :-")).strip()
+        # A "-" placeholder row (real Mirae shape: unused manager 2/3/4
+        # slots) strips down to nothing — UNLESS a leaked field number (see
+        # `_SSD_TRAILING_FIELDNUM_RE`'s own note) is the only thing left
+        # after the dash itself is gone, leaving a bare digit string that
+        # would otherwise be mistaken for a real name/date. Neither a real
+        # manager name nor a real tenure date is ever pure digits.
+        if not value or value.isdigit():
+            continue
+        (names if kind == "name" else dates).append(value)
+    return names, dates
+
+
+def _ssd_manager_pairs(names_raw: list[str], dates_raw: list[str]) -> list[tuple[str, date | None]]:
+    """Correlate manager names to tenure-start dates across BOTH real row
+    shapes (see `_ssd_manager_rows`).
+
+    Every Name row is first expanded through `_tata_split_indexed` (the SAME
+    comma/FM-marker splitter TATA's xlsx parser uses) — a row can itself
+    carry a comma list (the shared-row shape) or already be exactly one
+    manager (the per-manager-row shape, OR a lone manager on a single
+    indexed row — Franklin's real "Fund Manager 1- Name" single-manager
+    file uses this shape too). Concatenating every row's split in document
+    order keeps the overall manager order intact either way.
+
+    Per-manager DATE rows (ICICI/Mirae, or a lone Franklin-style row):
+    len(dates_raw) already equals the manager count — paired POSITIONALLY,
+    only when the counts agree (never a guessed pairing on a mismatch).
+
+    One shared comma-list DATE row (HDFC/HSBC/Franklin-ELSS/DSP-family):
+    two correlation strategies, tried in order, per manager:
+      1. an 'FM-N' marker's POSITION in the date text (HDFC/HSBC-Liquid:
+         "FM 1 - Managing Since July 29, 2022 and FM 2 - ..." — split by
+         marker position, never by comma, because the date itself contains
+         a comma ("July 29, 2022") a naive comma-split would misread as a
+         field separator).
+      2. the manager's own name repeated verbatim inside the date text
+         (DSP/Franklin-ELSS/HSBC-SmallCap: "Mr. Anil Ghelani - 26/12/2023,
+         ...") — find that substring, read the first date found right
+         after it.
+    Neither strategy finding a date is a legitimate, fail-closed outcome —
+    `None`, never fabricated (§8.4); the writer already skips dateless
+    pairs.
+    """
+    split_names: list[tuple[int | None, str]] = []
+    for row in names_raw:
+        split_names.extend(_tata_split_indexed(row))
+
+    if dates_raw and len(dates_raw) == len(split_names):
+        pairs: list[tuple[str, date | None]] = []
+        for (_idx, raw_name), date_text in zip(split_names, dates_raw):
+            clean = _ssd_clean_manager_name(raw_name)
+            if clean:
+                pairs.append((clean, _ssd_extract_date(date_text)))
+        return pairs
+
+    date_field = dates_raw[0] if dates_raw else ""
+    fm_segments: dict[int, str] = {}
+    hits = list(_SSD_FM_MARKER_RE.finditer(date_field))
+    for i, hit in enumerate(hits):
+        seg_end = hits[i + 1].start() if i + 1 < len(hits) else len(date_field)
+        fm_segments[int(hit.group(1))] = date_field[hit.end() : seg_end]
+
+    def _find_pos(name: str) -> int:
+        pos = date_field.find(name)
+        if pos < 0:
+            bare = re.sub(r"^(?:Mr|Ms|Mrs)\.?\s+", "", name)
+            pos = date_field.find(bare) if bare != name else -1
+        return pos
+
+    # Pre-locate every manager's own name-substring position in date_field,
+    # in TEXT order — needed to bound each manager's own search window to
+    # the NEXT located manager's position, never a fixed length. A fixed
+    # window can swallow a NEIGHBOR's date when that neighbor's date uses a
+    # "Month DD, YYYY" order the day-first regex doesn't recognize as a
+    # match starting there but DOES accidentally match further along in the
+    # window (caught 2026-07-12 against HSBC Small Cap's real file:
+    # "Venugopal Manghat - Dec 17, 2019, Sonal Gupta - 05-July -21" —
+    # "Dec 17, 2019" needs the month-first fallback, but a wide-enough
+    # window lets the day-first regex match "05-July-21" first instead).
+    located = sorted(
+        (pos, i)
+        for i, (_idx, raw_name) in enumerate(split_names)
+        if (pos := _find_pos(_ssd_clean_manager_name(raw_name))) >= 0
+    )
+    window_end_by_index: dict[int, int] = {
+        i: (located[j + 1][0] if j + 1 < len(located) else len(date_field))
+        for j, (_pos, i) in enumerate(located)
+    }
+
+    pairs = []
+    for i, (idx, raw_name) in enumerate(split_names):
+        clean_name = _ssd_clean_manager_name(raw_name)
+        if not clean_name:
+            continue
+        start_date: date | None = None
+        if idx is not None and idx in fm_segments:
+            start_date = _ssd_extract_date(fm_segments[idx])
+        if start_date is None and i in window_end_by_index:
+            pos = _find_pos(clean_name)
+            start_date = _ssd_extract_date(date_field[pos : window_end_by_index[i]])
+        pairs.append((clean_name, start_date))
+    return pairs
+
+
+def _ssd_match_risk_band(value: str) -> str | None:
+    """Riskometer value -> one of the 6 regulatory bands, matched as a
+    PREFIX rather than requiring an exact match (every other risk-band
+    reader on this platform uses an exact `_BANDS_LOWER` lookup, but real
+    HDFC files glue the SEBI disclaimer sentence directly onto the band word
+    with no separator at all: "Very High RiskInvestors understand that
+    their principal will be at Very High Risk" — an exact match would miss
+    it entirely). Bands are checked longest-first so "Low to Moderate" is
+    never mistaken for a "Low" prefix match. Fail-closed None on anything
+    that isn't one of the 6 words verbatim at the start."""
+    low = value.strip().lower()
+    for band in sorted(RISKOMETER_BANDS, key=len, reverse=True):
+        if low.startswith(band.lower()):
+            return band
+    return None
+
+
+def _ssd_isins(text: str) -> list[str]:
+    """ISIN list, order-preserving de-dup, strict 12-char shape (same
+    verbatim-only rule TATA's `_tata_isins` enforces — a malformed token,
+    e.g. a real DSP file dropping the leading letter off one ISIN, is simply
+    never matched by the fixed-length pattern rather than guessed/repaired).
+    `findall` over the raw blob (not a comma/newline pre-split) because real
+    files glue the ISIN directly onto the preceding plan description with no
+    separator at all (HDFC: "...OPTION- INF179K01VM3 HDFC FLEXI...")."""
+    seen: list[str] = []
+    for tok in _SSD_ISIN_RE.findall(text):
+        if tok not in seen:
+            seen.append(tok)
+    return seen
+
+
+def parse_ssd_pdf(data: bytes) -> dict[str, Any]:
+    """PDF "SCHEME SUMMARY DOCUMENT" -> the SAME dict shape
+    `parse_scheme_summary_xls` returns (scheme_name/manager_pairs/
+    exit_load_pct/exit_load_days/min_lumpsum_amount/isins), plus
+    benchmark_tier1/risk_band (see module note). Fail-closed {} when no
+    'Fund Name' is found at all.
+    """
+    try:
+        text = _flatten_pdf_layout(data)
+    except Exception:  # noqa: BLE001 — unreadable PDF, never a guess
+        return {}
+
+    scheme_name = (_ssd_value_between(text, _SSD_FUND_NAME_RE, _SSD_OPTION_NAMES_RE) or "").strip()
+    if not scheme_name:
+        return {}
+
+    risk_raw = _ssd_value_between(text, _SSD_RISK_RE, _SSD_CATEGORY_RE) or ""
+    risk_band = _ssd_match_risk_band(risk_raw)
+
+    bench_raw = (_ssd_value_between(text, _SSD_BENCH1_RE, _SSD_BENCH2_RE) or "").strip()
+    benchmark_tier1 = (
+        bench_raw if bench_raw.upper() not in ("", "NA", "N/A", "-", "NOT APPLICABLE") else None
+    )
+
+    bench2_match = _SSD_BENCH2_RE.search(text)
+    mgr_start = bench2_match.end() if bench2_match else 0
+    expense_match = _SSD_EXPENSE_RE.search(text, mgr_start)
+    mgr_end = expense_match.start() if expense_match else len(text)
+    names_raw, dates_raw = _ssd_manager_rows(text, mgr_start, mgr_end)
+    manager_pairs = _ssd_manager_pairs(names_raw, dates_raw)
+
+    exit_raw = _ssd_value_between(text, _SSD_EXIT_LOAD_RE, _SSD_CUSTODIAN_RE) or ""
+    exit_load_pct, exit_load_days = _parse_exit_load_text(exit_raw)
+
+    # Widened to start from "Listing Details" (the field immediately BEFORE
+    # ISINs), not the "ISINs" label's own end: on every AMC with 5+ ISINs the
+    # block wraps across enough lines that the "ISINs" label itself centers
+    # PAST the block's first 1-2 wrapped lines — those lines still print
+    # (right after the always-short, single-line Listing Details value) but
+    # sit textually BEFORE the "ISINs" label match, so anchoring on that
+    # label's own end silently drops the leading ISIN(s) (caught 2026-07-12:
+    # HDFC Flexi Cap Fund's real file lost its first of 6). ISIN pattern-
+    # matching is content-strict (`_ssd_isins`), so including Listing
+    # Details' own short "Not Applicable"/"NA" value in the window is safe —
+    # it never contains a 12-char ISIN-shaped token.
+    isins_raw = _ssd_value_between(text, _SSD_LISTING_DETAILS_RE, _SSD_AMFI_CODE_RE) or ""
+    isins = _ssd_isins(isins_raw)
+
+    min_raw = _ssd_value_between(text, _SSD_MIN_APP_RE, _SSD_MIN_APP_MULT_RE) or ""
+    min_lumpsum: float | None = None
+    num_m = _SSD_NUM_RE.search(min_raw)
+    if num_m:
+        try:
+            val = float(num_m.group(1).replace(",", ""))
+            min_lumpsum = val if val > 0 else None
+        except ValueError:
+            min_lumpsum = None
+
+    return {
+        "scheme_name": scheme_name,
+        "manager_pairs": manager_pairs,
+        "exit_load_pct": exit_load_pct,
+        "exit_load_days": exit_load_days,
+        "min_lumpsum_amount": min_lumpsum,
+        "isins": isins,
+        "benchmark_tier1": benchmark_tier1,
+        "risk_band": risk_band,
+    }
+
+
 _MANAGER_SINCE_RE = re.compile(
     r"([A-Z][A-Za-z.'\u2019 ]{2,50}?)\s*\n?\(Managing this fund since\s+([A-Za-z]+),?\s*(\d{4})",
 )
