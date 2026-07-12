@@ -1206,7 +1206,8 @@ class MfManualIngestFile(Base):
     __tablename__ = "manual_ingest_files"
     __table_args__ = (
         CheckConstraint(
-            "channel IN ('upload', 'folder', 'email')", name="ck_manual_ingest_files_channel"
+            "channel IN ('upload', 'folder', 'email', 'amfi_ssd_sweep')",
+            name="ck_manual_ingest_files_channel",
         ),
         CheckConstraint(
             "status IN ('pending', 'parsed', 'failed', 'duplicate', 'unsupported', 'archived')",

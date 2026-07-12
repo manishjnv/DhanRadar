@@ -97,6 +97,23 @@ def stored_path_for(file_id: str, original_filename: str) -> Path:
     return _store_dir() / f"{file_id}{ext}"
 
 
+def _is_unique_violation(exc: IntegrityError) -> bool:
+    """True only for a UNIQUE violation (Postgres SQLSTATE 23505) — the benign
+    intake sha256 race. A CHECK/FK/NOT-NULL violation must NOT look like a
+    duplicate (RCA G10: a CHECK violation on a new channel value was silently
+    swallowed as 'duplicate' and the SSD sweep ingested nothing). asyncpg wraps
+    the driver error one level deeper than psycopg, hence the __cause__ hop."""
+    orig = getattr(exc, "orig", None)
+    pgcode = getattr(orig, "pgcode", None) or getattr(
+        getattr(orig, "__cause__", None), "pgcode", None
+    )
+    if pgcode is not None:
+        return pgcode == "23505"
+    # No pgcode anywhere (non-Postgres test doubles): fall back to the message —
+    # still fail-loud for anything that doesn't look like a unique violation.
+    return "unique" in str(exc).lower()
+
+
 async def intake_file(
     data: bytes,
     original_filename: str,
@@ -159,13 +176,18 @@ async def intake_file(
         )
         try:
             await db.commit()
-        except IntegrityError:
-            # Race: another channel/request inserted the same sha256 first (unique
-            # constraint is the real backstop — the SELECT above is only the
-            # common-case fast path). Drop our copy; the winner's row already has
-            # its own parse enqueued.
+        except IntegrityError as exc:
             await db.rollback()
             stored_path.unlink(missing_ok=True)
+            # ONLY a unique violation is the benign sha256 race (another
+            # channel/request inserted the same digest first — the unique
+            # constraint is the real backstop, the SELECT above just the fast
+            # path). Anything else (CHECK violation, FK, NOT NULL) is a real
+            # defect and must fail LOUDLY: RCA G10 — PR #569's new channel value
+            # wasn't in ck_manual_ingest_files_channel, and this handler silently
+            # reported every real SSD as "duplicate" while ingesting nothing.
+            if not _is_unique_violation(exc):
+                raise
             return IntakeResult(None, "duplicate", None)
 
     from dhanradar.tasks.manual_ingest import parse_manual_disclosure_file

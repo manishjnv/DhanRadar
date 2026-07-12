@@ -1316,7 +1316,10 @@ def amfi_ssd_sweep(start_id: int, end_id: int, amc_filter: str | None = None) ->
 
         docker compose exec dhanradar-worker python -c \
           "from dhanradar.tasks.manual_ingest import amfi_ssd_sweep; \
-           print(amfi_ssd_sweep.delay(8500, 9000).get())"
+           print(amfi_ssd_sweep.delay(8500, 8999).get())"
+
+    (8500..8999 = exactly 500 ids inclusive — MAX_SWEEP_RANGE; 8500..9000 is
+    501 and trips the range guard. RCA G10 shipped that off-by-one example.)
 
     Fetches SSD_<id>.pdf for every id in [start_id, end_id] (inclusive),
     content-sniffs each hit for the real "SCHEME SUMMARY DOCUMENT" banner via
