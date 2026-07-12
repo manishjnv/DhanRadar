@@ -1244,6 +1244,56 @@ _UTI_SCHEME_I_CREDENTIAL_NO_SEPARATOR = (
     "UTI TEST THETA FUND\n"
     "An open ended debt scheme.\n"
 )
+# Real shape (2026-07-12, UTI Quant Fund — real file
+# uti_fund_watch_active_june_2026_rv1.pdf page 28, the 44th of 45 real
+# sections): manager tenure has NO month/year at all, just "Managing the
+# scheme Since Inception" — _UTI_MANAGER_RE's month+year capture can never
+# match this. The scheme's real inception date is a separate bare
+# "<Day><ordinal> <Month>, <Year>" value line a few lines above (byte-for-
+# byte real page text, hyphen name/credential separator).
+_UTI_SCHEME_H_SINCE_INCEPTION_HYPHEN = (
+    "18\n"
+    "The scheme shall seek to generate long term capital \n"
+    "appreciation by investing in equity and equity related \n"
+    "instruments by following a quantitative investment theme.\n"
+    "21st January, 2025\n"
+    "BSE 200 TRI\n"
+    "Mr. Test Iota - B.Com, MMS, CFA, \n"
+    "Managing the scheme Since Inception \n"
+    "Total Exp: 19 Yrs\n"
+    "Investment Objective\n"
+    "Date of inception/allotment\n"
+    "Benchmark Index\n"
+    "Fund Manager\n"
+    "UTI TEST IOTA FUND\n"
+    "An open-ended equity scheme following a quantitative investment theme.\n"
+    "Past performance may or may not be sustained in future. The scheme is "
+    "managed by the Fund Manager Mr. Test Iota, managing since Inception.\n"
+)
+# Real shape (2026-07-12, UTI Income Plus Arbitrage Active Fund Of Fund —
+# same real file page 29, the 45th of 45 real sections): the SAME
+# "Since Inception" shape but with a comma name/credential separator, and the
+# "Fund Of Fund" scheme-name suffix.
+_UTI_SCHEME_J_SINCE_INCEPTION_COMMA = (
+    "19\n"
+    "The scheme shall seek to generate long-term capital \n"
+    "appreciation by investing in units of debt oriented mutual \n"
+    "fund schemes and arbitrage mutual fund schemes.\n"
+    "4th April, 2025\n"
+    "60% CRISIL Short Term Bond Fund Index + 40%\n"
+    "Nifty 50 Arbitrage TRI\n"
+    "Mr. Test Kappa, Bcom, MSc., CA\n"
+    "Managing the scheme Since Inception \n"
+    "Total Exp: 15 Yrs\n"
+    "Investment Objective\n"
+    "Date of inception/allotment\n"
+    "Benchmark Index\n"
+    "Fund Manager\n"
+    "UTI TEST KAPPA FUND OF FUND\n"
+    "An open-ended fund of funds investing in units of debt oriented mutual "
+    "fund schemes and arbitrage mutual fund schemes\n"
+    "The Scheme is currently managed by Mr. Test Kappa since May 2025.\n"
+)
 
 
 class TestFactsheetCompilationUti:
@@ -1365,6 +1415,33 @@ class TestFactsheetCompilationUti:
         result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_I_CREDENTIAL_NO_SEPARATOR]))
         assert len(result) == 1
         assert result[0]["manager_pairs"] == [("Anurag Mittal", date(2021, 12, 1))]
+
+    def test_since_inception_hyphen_separator_recovers_page_inception_date(self) -> None:
+        # Real bug (2026-07-12, UTI Quant Fund): "Managing the scheme Since
+        # Inception" has no month/year for _UTI_MANAGER_RE to capture — the
+        # scheme was silently dropped entirely (manager_pairs stayed empty,
+        # 2 of 45 real sections missed). The fallback recovers the manager
+        # name and resolves the date from the page's own bare
+        # "Date of inception/allotment" value line.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_H_SINCE_INCEPTION_HYPHEN]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Test Iota Fund"
+        assert result[0]["manager_pairs"] == [("Test Iota", date(2025, 1, 21))]
+
+    def test_since_inception_comma_separator_recovers_page_inception_date(self) -> None:
+        # Real bug (2026-07-12, UTI Income Plus Arbitrage Active Fund Of
+        # Fund): same "Since Inception" shape, comma separator instead of
+        # hyphen, and a trailing disclaimer sentence that also says
+        # "since May 2025" in prose — must not produce a second/duplicate
+        # bogus pair, and the structured Since-Inception date wins.
+        from dhanradar.mf import disclosure_parsers as dp
+
+        result = dp._parse_uti_compilation(_FakeReader([_UTI_SCHEME_J_SINCE_INCEPTION_COMMA]))
+        assert len(result) == 1
+        assert result[0]["scheme_name"] == "UTI Test Kappa Fund Of Fund"
+        assert result[0]["manager_pairs"] == [("Test Kappa", date(2025, 4, 4))]
 
 
 _AXIS_SCHEME_A_MULTI = (

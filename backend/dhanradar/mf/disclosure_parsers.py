@@ -1442,6 +1442,60 @@ _UTI_MANAGER_RE = re.compile(
 )
 _UTI_DISCLAIMER_START = "Past performance may or may not be sustained"
 
+# Rare UTI shape (verified 2026-07-12, real file
+# uti_fund_watch_active_june_2026_rv1.pdf, pages 28/29 — UTI Quant Fund + UTI
+# Income Plus Arbitrage Active Fund Of Fund, the last 2 of 45 real sections
+# _UTI_MANAGER_RE still missed): the manager block reads "Mr. <Name>[,-]
+# <credentials>\nManaging the scheme Since Inception\nTotal Exp: <N> Yrs" —
+# there is NO month/year at all, so _UTI_MANAGER_RE's `([A-Za-z]+)[\s-]+
+# (\d{4})` capture never matches (nothing to capture: "Inception" is not
+# followed by a 4-digit year). Name-only anchor, stops at the SAME first
+# comma/hyphen separator _UTI_MANAGER_RE uses.
+_UTI_MANAGER_NAME_ONLY_RE = re.compile(r"^Mr\.?\s+([A-Z][A-Za-z.’' ]{1,40}?)\s*[,\-]")
+_UTI_SINCE_INCEPTION_RE = re.compile(
+    r"Managing\s+(?:(?:this|the)\s+scheme\s+)?since\s+inception", re.IGNORECASE
+)
+# The bare "<Day><ordinal> <Month>, <Year>" value line (the page's own "Date
+# of inception/allotment" field) — verified: on both real pages this is the
+# ONLY line matching this shape start-to-end; every OTHER date on the page
+# ("NAV per unit as on 29th May, 2026", etc.) is embedded mid-sentence in a
+# longer label, never a bare line, so the `^...$` full-line anchor can't
+# false-match those.
+_UTI_BARE_DATE_RE = re.compile(r"^(\d{1,2})(?:st|nd|rd|th)\s+([A-Za-z]+),?\s*(\d{4})$")
+
+
+def _uti_inception_fallback(lines: list[str]) -> list[tuple[str, date]]:
+    """Recover the manager+date pair for the "Managing the scheme Since
+    Inception" shape `_UTI_MANAGER_RE` can't match (see
+    `_UTI_MANAGER_NAME_ONLY_RE` above). The scheme's actual inception date
+    sits a few lines ABOVE the manager name (verified 2026-07-12: same
+    "Date of inception/allotment" value the page prints near its top,
+    directly before the Benchmark Index / Fund Manager values) — searched
+    backward in a tight 6-line window so it can only ever find that one
+    value, never a random later-page date."""
+    pairs: list[tuple[str, date]] = []
+    for i, line in enumerate(lines):
+        m = _UTI_MANAGER_NAME_ONLY_RE.match(line)
+        if not m:
+            continue
+        if not _UTI_SINCE_INCEPTION_RE.search(" ".join(lines[i : i + 3])):
+            continue
+        clean = _strip_credential_suffix(m.group(1).strip(" ,-"))
+        if not clean:
+            continue
+        start: date | None = None
+        for back in lines[max(0, i - 6) : i]:
+            dm = _UTI_BARE_DATE_RE.match(back)
+            if dm:
+                day, month, year = dm.groups()
+                try:
+                    start = datetime.strptime(f"{day}-{month[:3]}-{year}", "%d-%b-%Y").date()
+                except ValueError:
+                    start = None
+        if start and (clean, start) not in pairs:
+            pairs.append((clean, start))
+    return pairs
+
 
 def _uti_manager_summary_lookup(text: str) -> dict[str, str]:
     """Parse the "FUND MANAGER SUMMARY" page(s) into {UPPER(clean name):
@@ -1500,7 +1554,8 @@ def _uti_banner_line(lines: list[str]) -> str:
     return ""
 
 
-def _uti_manager_pairs(flat: str) -> list[tuple[str, date]]:
+def _uti_manager_pairs(lines: list[str]) -> list[tuple[str, date]]:
+    flat = " ".join(lines)
     # Bound the search to BEFORE the trailing disclaimer paragraph — it
     # restates "Mr. <Name> since <date>, Mr. <Name2> ... Managing the scheme
     # since <date2>" in prose closely enough to false-match the same regex
@@ -1520,7 +1575,12 @@ def _uti_manager_pairs(flat: str) -> list[tuple[str, date]]:
             continue
         if (clean, start) not in pairs:
             pairs.append((clean, start))
-    return pairs
+    if pairs:
+        return pairs
+    # No dated block on this page at all — try the "Since Inception" shape
+    # (see `_uti_inception_fallback`) rather than reporting the scheme as
+    # having no manager.
+    return _uti_inception_fallback(lines)
 
 
 def _parse_uti_compilation(reader: Any) -> list[dict[str, Any]]:
@@ -1562,7 +1622,7 @@ def _parse_uti_compilation(reader: Any) -> list[dict[str, Any]]:
         )
         if scheme_name in seen:
             continue
-        manager_pairs = _uti_manager_pairs(" ".join(lines))
+        manager_pairs = _uti_manager_pairs(lines)
         if not manager_pairs:
             continue
         out.append({"scheme_name": scheme_name, "manager_pairs": manager_pairs})

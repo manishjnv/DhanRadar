@@ -5630,8 +5630,28 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             # layout, which is safe even when nothing changed (identical
             # dict rebuild) and correct on the rare AMC where a later
             # sub-table's columns differ from the first.
+            #
+            # `len(s) <= 60` (2026-07-12): SBI's ESG-scored schemes add two
+            # BRSR-disclosure hyperlink columns per holding (confirmed real
+            # June-2026 file, sheet SMEEF / SBI ESG Exclusionary Strategy
+            # Fund) — one older BSE URL shape is
+            # "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=..."
+            # (row 21, Ultratech Cement Ltd.), which coincidentally contains
+            # BOTH "name" (inside "Pname=") and "stock" (inside "stockinfo")
+            # as bare substrings — an ordinary holding row was misdetected as
+            # a NEW header row, wiping col_map and rebuilding it from that
+            # row's own garbage cell values (numbers/URLs), silently
+            # dropping every real holding for the rest of the sheet (only
+            # 11 of 42 equity rows survived, weight_pct sum 51.64% instead
+            # of ~100%). Every genuine SEBI header cell seen across every
+            # real AMC file so far is a short column-label phrase (longest:
+            # "Name of the Instrument / Issuer", 32 chars) — a URL or a
+            # boilerplate disclosure sentence is always far longer, so
+            # capping the cell length this heuristic considers can only
+            # ever REJECT a false match, never a real header.
             if any(
-                "name" in s.lower()
+                len(s) <= 60
+                and "name" in s.lower()
                 and ("instrument" in s.lower() or "security" in s.lower() or "stock" in s.lower())
                 for s in row_strs
             ):
@@ -5827,9 +5847,30 @@ def _parse_sebi_csv(csv_text: str, amc_name: str) -> list[dict]:
 # 4 real "invested into Edelweiss's own Liquid/Money-Market/Low-Duration
 # funds" rows right after the label were the first casualty). No real scheme
 # name is ever phrased "Investment in ...", so this can't reject one.
+#
+# SBI (2026-07-12): the SAME EDELWEISS-class bug, SBI's own wording for the
+# same two SEBI-standard "OTHERS"/EQUITY sub-category labels — "Alternative
+# Investment Funds" (every debt-ish scheme's mandatory CDMDF line) and
+# "Foreign Securities and /or overseas ETF" — confirmed real June-2026 file:
+# whenever a scheme genuinely HOLDS something in that sub-category, the label
+# row prints with NO trailing "NIL NIL" padding (unlike every scheme that
+# doesn't), so it's a BARE single-cell row exactly like EDELWEISS's case —
+# `len(non_empty) == 1` wins the candidate check unconditionally, and both
+# labels contain "fund"/"etf". Confirmed damage: 26 rows of REAL "SBI
+# Floating Rate Debt Fund"/"SBI Multicap Fund"/etc interest-rate-swap
+# holdings (e.g. sheet SFRDF, "Deutsche Bank AG 09-06-2031") got attributed
+# to a fake scheme literally named "Alternative Investment Funds" instead —
+# and every row between the label and the next real header (including the
+# scheme's own genuine CDMDF/TREPS/GRAND TOTAL rows) was silently dropped
+# because the label's col_map reset was never re-populated until the
+# DERIVATIVES section's own header appeared, sheets later. No real SBI
+# scheme name is ever phrased this way (confirmed against the file's own
+# 125-row "Index" sheet), so this can't reject a real one.
 _SECTION_HEADER_RE = re.compile(
     r"^\s*\(?[a-z]\)|^\s*(sub\s*)?total|listed/awaiting|^unlisted$|total\s*$"
-    r"|^investment\s+in\s+(mutual\s+fund|exchange\s+traded\s+fund)\b",
+    r"|^investment\s+in\s+(mutual\s+fund|exchange\s+traded\s+fund)\b"
+    r"|^alternative\s+investment\s+funds\s*$"
+    r"|^foreign\s+securities\s+and\s*/?\s*or\s+overseas\s+etf\s*$",
     re.IGNORECASE,
 )
 
