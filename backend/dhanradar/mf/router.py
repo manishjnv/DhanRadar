@@ -1167,6 +1167,45 @@ async def fund_events(
     )
 
 
+@router.get("/fund/{isin}/comparison")
+async def fund_comparison(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    isin: Annotated[str, Path(pattern="^[A-Z0-9]{12}$")],
+    window: Annotated[str, Query(pattern="^(1y|3y|5y|max)$")] = "1y",
+    benchmark_key: Annotated[str | None, Query()] = None,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`fund.comparison` (Phase 4c pt4, MF_MASTER_DB_IMPROVEMENT_PLAN.md "Phase 4c") —
+    fund vs its OWN SEBI-declared benchmark vs its category-peer median, three
+    rebased base-100 growth lines sharing ONE shared anchor date (the fund's first
+    NAV date on/after the window's start). Public — no auth, no per-user data, same
+    rate limiter as the explorer.
+
+    `benchmark_key` (one of the 4 canonical equity-index keys) overrides the fund's
+    own resolved benchmark — powers the frontend's index-switch dropdown; 422 for an
+    unrecognized key. All rebase math and the internal per-day index table stay out
+    of this file (ADR-0033) — see `dhanradar.mf.fund_read.get_fund_comparison` /
+    `dhanradar.mf.comparison`.
+    """
+    from dhanradar.mf.benchmark_map import CANONICAL_INDEX_KEYS
+    from dhanradar.mf.fund_read import get_fund_comparison
+    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+
+    if benchmark_key is not None and benchmark_key not in CANONICAL_INDEX_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"invalid_benchmark_key: must be one of {list(CANONICAL_INDEX_KEYS)}",
+        )
+
+    payload = await get_fund_comparison(db, isin, window=window, benchmark_key=benchmark_key)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fund_not_found")
+
+    payload["disclosure"] = DISCLOSURE_BUNDLE
+    payload["not_advice"] = NOT_ADVICE
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

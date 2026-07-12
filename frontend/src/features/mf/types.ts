@@ -516,6 +516,43 @@ export interface FundEvents {
   events: FundEvent[];
 }
 
+/** GET /api/v1/mf/fund/{isin}/comparison (Phase 4c pt4) — fund vs its OWN benchmark
+ *  vs its category-peer median, three REBASED base-100 growth lines sharing ONE
+ *  shared anchor date. `v` is ALWAYS a base-100 ratio (never a raw NAV/index level) —
+ *  the first point of every non-empty line is exactly 100.0. */
+export interface FundComparisonPoint {
+  /** ISO date (YYYY-MM-DD) */
+  d: string;
+  v: number;
+}
+export interface FundComparisonBenchmarkLine {
+  points: FundComparisonPoint[];
+  /** The fund's own raw AMFI benchmark string when confidently mapped; otherwise
+   *  the honest fallback wording verbatim — render as-is, never paraphrase. */
+  label: string;
+  /** true when this is the honest Nifty 50 fallback, not the scheme's own benchmark. */
+  is_fallback: boolean;
+}
+export interface FundComparisonCategoryLine {
+  /** null when the category cohort is too thin to publish — see `reason`. */
+  points: FundComparisonPoint[] | null;
+  /** Human-readable reason when `points` is null (e.g. "category average unavailable
+   *  — cohort too thin"). Render verbatim — never blank, never re-derived. */
+  reason: string | null;
+}
+export interface FundComparisonResponse {
+  window: '1y' | '3y' | '5y' | 'max';
+  /** null only when the fund has no NAV history in the requested window. */
+  anchor_date: string | null;
+  series: {
+    fund: FundComparisonPoint[];
+    benchmark: FundComparisonBenchmarkLine;
+    category: FundComparisonCategoryLine;
+  };
+  disclosure: string;
+  not_advice: string;
+}
+
 /** One item from GET /api/v1/mf/funds/categories */
 export interface FundCategory {
   key: string;           // full SEBI string, e.g. "Equity Scheme - Large Cap Fund"

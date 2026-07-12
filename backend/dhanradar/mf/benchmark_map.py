@@ -68,6 +68,18 @@ _ALLOWED_FORMS: dict[str, str] = {
     "nifty small cap 250 tri": NIFTY_SMALLCAP250_TRI,
 }
 
+#: Canonical key -> a friendly display label, used ONLY when a caller explicitly
+#: overrides the benchmark via `?benchmark_key=` (Phase 4c pt4 comparison endpoint —
+#: powers the frontend's index-switch dropdown). When NOT overridden, the served
+#: `label` is the fund's own raw AMFI benchmark string instead (never this dict) —
+#: the honest-fallback rule ties the label to what's actually being compared against.
+INDEX_DISPLAY_NAME: dict[str, str] = {
+    NIFTY50_TRI: "Nifty 50 TRI",
+    NIFTY_MIDCAP150_TRI: "Nifty Midcap 150 TRI",
+    NIFTY_SMALLCAP250_TRI: "Nifty Smallcap 250 TRI",
+    NIFTY500_TRI: "Nifty 500 TRI",
+}
+
 _WHITESPACE_RE = re.compile(r"\s+")
 _TRAILING_INDEX_RE = re.compile(r"\bindex\.?$")
 _TOTAL_RETURN_RE = re.compile(r"total returns? index")

@@ -17,6 +17,15 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.mf.benchmark_map import INDEX_DISPLAY_NAME, NIFTY50_TRI
+from dhanradar.mf.comparison import (
+    CATEGORY_THIN_REASON,
+    MIN_CATEGORY_COVERAGE,
+    MIN_CATEGORY_FUND_COUNT,
+    NIFTY50_FALLBACK_LABEL,
+    nearest_value_on_or_before,
+    rebase_series,
+)
 from dhanradar.mf.fund_events import summarize_event
 from dhanradar.mf.risk import (
     SIP_MIN_MONTHS_FOR_ILLUSTRATION,
@@ -31,7 +40,10 @@ from dhanradar.mf.risk import (
 from dhanradar.mf.router import _MIN_NAV_POINTS_1Y, _MIN_NAV_POINTS_3Y
 from dhanradar.models.mf import (
     SCHEME_KEY,
+    MfBenchmarkMap,
+    MfBenchmarkTri,
     MfCategoryFlows,
+    MfCategorySeries,
     MfCategoryStats,
     MfFund,
     MfFundConstituent,
@@ -1162,4 +1174,183 @@ async def get_fund_events(session: AsyncSession, isin: str) -> dict | None:
             }
             for r in rows
         ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4c pt4 — fund.comparison (fund vs its OWN benchmark vs category median)
+# MF_MASTER_DB_IMPROVEMENT_PLAN.md "Phase 4c". Rebase math lives in
+# dhanradar.mf.comparison (pure, golden-set testable) — this function is the DB
+# read-orchestration only: load the three raw series, hand them to the pure helpers.
+# ---------------------------------------------------------------------------
+
+_COMPARISON_WINDOW_DAYS: dict[str, int | None] = {"1y": 366, "3y": 1100, "5y": 1830, "max": None}
+_COMPARISON_SERIES_CAP = 400  # same cap/stride convention as _NAV_SERIES_CAP
+
+
+async def _resolve_comparison_benchmark(
+    session: AsyncSession, fund: MfFund, override: str | None
+) -> tuple[str, str, bool]:
+    """Resolve (index_key, label, is_fallback) for the benchmark line.
+
+    An explicit ``override`` (the frontend's index-switch dropdown) is never silently
+    swapped — its own display label is used even if that index turns out to have no
+    data (an honest empty line, not a surprise substitution). Without an override:
+    ``fund.benchmark_index`` (raw AMFI string) -> mf_benchmark_map (exact match) ->
+    index_key, label = the raw string, is_fallback = False. Unmapped -> Nifty 50 with
+    the honest fallback label, is_fallback = True (spec's "if unmapped ... fall back").
+    """
+    if override is not None:
+        return override, INDEX_DISPLAY_NAME.get(override, override), False
+    raw = fund.benchmark_index
+    if raw:
+        mapped = await session.get(MfBenchmarkMap, raw)
+        if mapped is not None:
+            return mapped.index_key, raw, False
+    return NIFTY50_TRI, NIFTY50_FALLBACK_LABEL, True
+
+
+async def _comparison_index_rows(
+    session: AsyncSession, index_key: str, end_date: date
+) -> list[tuple[date, float]]:
+    """Ascending (date, value) rows for one canonical TRI index_key, up to end_date."""
+    rows = (
+        await session.execute(
+            select(MfBenchmarkTri.tri_date, MfBenchmarkTri.tri_value)
+            .where(MfBenchmarkTri.index_key == index_key)
+            .where(MfBenchmarkTri.tri_date <= end_date)
+            .order_by(MfBenchmarkTri.tri_date.asc())
+        )
+    ).all()
+    return [(r.tri_date, float(r.tri_value)) for r in rows]
+
+
+async def _comparison_category_line(
+    session: AsyncSession,
+    category: str | None,
+    fund_dates: set[date],
+    anchor_date: date,
+    end_date: date,
+) -> tuple[list[dict] | None, str | None]:
+    """The category-median line, or (None, reason) when unavailable/too thin.
+
+    Server-side thin-cohort rule (binding): only ``mf_category_series`` rows with
+    ``fund_count >= MIN_CATEGORY_FUND_COUNT`` are used at all; if fewer than
+    ``MIN_CATEGORY_COVERAGE`` of the fund line's OWN dates have a qualifying row, the
+    line is omitted with :data:`CATEGORY_THIN_REASON` — never emitted silently thin.
+    """
+    if category is None:
+        return None, CATEGORY_THIN_REASON
+
+    rows = (
+        await session.execute(
+            select(MfCategorySeries.series_date, MfCategorySeries.index_value)
+            .where(MfCategorySeries.category == category)
+            .where(MfCategorySeries.series_date <= end_date)
+            .where(MfCategorySeries.fund_count >= MIN_CATEGORY_FUND_COUNT)
+            .order_by(MfCategorySeries.series_date.asc())
+        )
+    ).all()
+    qualifying = [(r.series_date, float(r.index_value)) for r in rows]
+
+    anchor_value = nearest_value_on_or_before(qualifying, anchor_date)
+    if anchor_value is None:
+        return None, CATEGORY_THIN_REASON
+
+    qualifying_dates = {d for d, _ in qualifying if anchor_date <= d <= end_date}
+    coverage = len(fund_dates & qualifying_dates) / len(fund_dates) if fund_dates else 0.0
+    if coverage < MIN_CATEGORY_COVERAGE:
+        return None, CATEGORY_THIN_REASON
+
+    rows_after_anchor = [(d, v) for d, v in qualifying if d > anchor_date]
+    return _downsample(
+        rebase_series(rows_after_anchor, anchor_date, anchor_value), _COMPARISON_SERIES_CAP
+    ), None
+
+
+async def get_fund_comparison(
+    session: AsyncSession, isin: str, window: str = "1y", benchmark_key: str | None = None
+) -> dict | None:
+    """`fund.comparison` — three REBASED base-100 lines sharing ONE anchor date: this
+    fund's own NAV, its resolved benchmark, and its SEBI category's chained-median
+    index. See `dhanradar.mf.comparison` module docstring for the anchor/rebase
+    correctness crux. `window` is anchored on the fund's OWN latest NAV date (not
+    wall-clock "today"), same convention as `get_fund_nav_series`. Every line is
+    independently optional except the fund's own — an unmapped benchmark or a
+    too-thin category cohort degrades that ONE line with an honest label/reason,
+    never the whole response (no-suppress rule).
+    """
+    fund = await session.get(MfFund, isin)
+    if fund is None:
+        return None
+
+    days = _COMPARISON_WINDOW_DAYS.get(window, _COMPARISON_WINDOW_DAYS["1y"])
+    latest = (
+        await session.execute(select(func.max(MfNavHistory.nav_date)).where(MfNavHistory.isin == isin))
+    ).scalar_one_or_none()
+
+    nav_stmt = (
+        select(MfNavHistory.nav_date, MfNavHistory.nav)
+        .where(MfNavHistory.isin == isin)
+        .order_by(MfNavHistory.nav_date.asc())
+    )
+    if days is not None and latest is not None:
+        nav_stmt = nav_stmt.where(MfNavHistory.nav_date >= latest - timedelta(days=days))
+    nav_rows = [(r.nav_date, float(r.nav)) for r in (await session.execute(nav_stmt)).all()]
+
+    if not nav_rows:
+        # Fund exists but has no NAV history in this window — still 200, honest empty
+        # (no-suppress rule); the benchmark label still resolves so the legend reads
+        # sensibly even with nothing plotted yet.
+        key, label, is_fallback = await _resolve_comparison_benchmark(session, fund, benchmark_key)
+        return {
+            "window": window,
+            "anchor_date": None,
+            "series": {
+                "fund": [],
+                "benchmark": {"points": [], "label": label, "is_fallback": is_fallback},
+                "category": {"points": None, "reason": CATEGORY_THIN_REASON},
+            },
+        }
+
+    anchor_date, anchor_nav = nav_rows[0]
+    end_date = nav_rows[-1][0]
+    fund_points = _downsample(
+        rebase_series(nav_rows[1:], anchor_date, anchor_nav), _COMPARISON_SERIES_CAP
+    )
+
+    key, label, is_fallback = await _resolve_comparison_benchmark(session, fund, benchmark_key)
+    bench_rows = await _comparison_index_rows(session, key, end_date)
+    bench_anchor_value = nearest_value_on_or_before(bench_rows, anchor_date)
+    # Honest degrade (spec: "if unmapped or empty, fall back to nifty50_tri") — ONLY on
+    # the DEFAULT resolution path. An explicit ?benchmark_key= choice never silently
+    # swaps (see _resolve_comparison_benchmark docstring).
+    if bench_anchor_value is None and benchmark_key is None and key != NIFTY50_TRI:
+        key, label, is_fallback = NIFTY50_TRI, NIFTY50_FALLBACK_LABEL, True
+        bench_rows = await _comparison_index_rows(session, key, end_date)
+        bench_anchor_value = nearest_value_on_or_before(bench_rows, anchor_date)
+    benchmark_points = (
+        _downsample(
+            rebase_series(
+                [r for r in bench_rows if r[0] > anchor_date], anchor_date, bench_anchor_value
+            ),
+            _COMPARISON_SERIES_CAP,
+        )
+        if bench_anchor_value is not None
+        else []
+    )
+
+    fund_dates = {d for d, _ in nav_rows}
+    category_points, category_reason = await _comparison_category_line(
+        session, fund.sebi_category, fund_dates, anchor_date, end_date
+    )
+
+    return {
+        "window": window,
+        "anchor_date": anchor_date.isoformat(),
+        "series": {
+            "fund": fund_points,
+            "benchmark": {"points": benchmark_points, "label": label, "is_fallback": is_fallback},
+            "category": {"points": category_points, "reason": category_reason},
+        },
     }
