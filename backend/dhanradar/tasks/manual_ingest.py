@@ -31,6 +31,8 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import httpx
+
 from dhanradar.celery_app import celery_app
 from dhanradar.mf.disclosure_parsers import classify_file_class
 from dhanradar.mf.manual_ingest import (
@@ -65,6 +67,7 @@ TASK_PARSE = "dhanradar.tasks.manual_ingest.parse_manual_disclosure_file"
 TASK_SCAN_FOLDER = "dhanradar.tasks.manual_ingest.scan_incoming_folder"
 TASK_POLL_EMAIL = "dhanradar.tasks.manual_ingest.poll_email_inbox"
 TASK_REAP_STUCK = "dhanradar.tasks.manual_ingest.reap_stuck_manual_ingest_files"
+TASK_AMFI_SSD_SWEEP = "dhanradar.tasks.manual_ingest.amfi_ssd_sweep"
 SOURCE = "manual_disclosure_inbox"
 
 
@@ -1264,3 +1267,153 @@ async def _poll_email_pipeline() -> str:
             pass
 
     return f"polled: ingested={n_ingested} rejected_sender={n_rejected}"
+
+
+# ---------------------------------------------------------------------------
+# Channel D — AMFI-portal SSD bulk-enumeration sweep. MANUAL-ONLY: not in
+# celery_app.py's beat_schedule, never auto-invoked — an admin/founder fires
+# it by explicit id range. The platform-wide manager/exit-load lever for
+# HDFC/HSBC/Franklin/ICICI (their own sites are bot-walled/timeout/no public
+# index — see MANUAL_DATA_DOWNLOAD_RUNBOOK.md row 15).
+#
+# URL shape verified empirically 2026-07-12 (probe transcript in the PR body
+# that introduced this task): `https://portal.amfiindia.com/spages/
+# SSD_<id>.pdf` — a plain sequential integer id. The id space is NOT SSD-only
+# — it's shared with SID/SAI/other AMFI-portal documents (a real hit was seen
+# for a random-looking AMC at nearly every id tried), so hit density varies
+# by window (100% in some 6-id spans, ~20% in others) — never assume every id
+# in a range is a real SSD. A miss is a stable IIS "404 - File or directory
+# not found" HTML page (1245 bytes) — the expected common case, not an error.
+# No WAF/bot-block observed with a plain browser UA across 40 probe requests
+# at 1 req/sec (unlike NAVAll.txt's Cloudflare front); no robots.txt exists
+# at the domain root.
+# ---------------------------------------------------------------------------
+
+SSD_URL_TMPL = "https://portal.amfiindia.com/spages/SSD_{id}.pdf"
+# Mirrors market_data/amfi.py's _USER_AGENT (same "bare urllib/httpx UA gets
+# blocked, a browser UA doesn't" pattern already used for NAVAll.txt) —
+# duplicated rather than imported, the same convention amfi.py's own
+# docstring notes notifications/channels.py already follows for its own
+# Cloudflare-guard UA.
+_SWEEP_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+# Per-run cap — the "resumable cursor" IS start_id/end_id: an op re-invokes
+# with start_id = (previous end_id + 1) for the next chunk, no persisted
+# checkpoint needed. Bounds one task's wall-clock time and blast radius:
+# 500 ids * ~1.1s/id ≈ 9 min, well under the batch queue's 30 min hard
+# task_time_limit (celery_app.py).
+MAX_SWEEP_RANGE = 500
+_SWEEP_DELAY_SECONDS = 1.0  # ≥1 req/sec — gentle, matches the probe protocol
+
+
+@celery_app.task(name=TASK_AMFI_SSD_SWEEP)
+def amfi_ssd_sweep(start_id: int, end_id: int, amc_filter: str | None = None) -> str:
+    """MANUAL-ONLY — never called by beat. Post-merge ops command (see the PR
+    body for the suggested first range):
+
+        docker compose exec dhanradar-worker python -c \
+          "from dhanradar.tasks.manual_ingest import amfi_ssd_sweep; \
+           print(amfi_ssd_sweep.delay(8500, 9000).get())"
+
+    Fetches SSD_<id>.pdf for every id in [start_id, end_id] (inclusive),
+    content-sniffs each hit for the real "SCHEME SUMMARY DOCUMENT" banner via
+    `looks_like_ssd_pdf` — the SAME sniff the intake parse path
+    (tasks/manual_ingest.py::_parse_pipeline) already uses — and routes every
+    real SSD through `intake_upload()` (channel='amfi_ssd_sweep'): the
+    identical validate/dedup/persist/enqueue path scan_incoming_folder and
+    poll_email_inbox already use, so sha256 dedup makes re-sweeping an
+    already-covered range a no-op. `amc_filter`, when given, is matched
+    (case-insensitive, exact) against the SAME canonical AMC code
+    `detect_amc()` resolves elsewhere in this module (e.g. "HDFC", "HSBC",
+    "FRANKLIN", "ICICI_PRU") — a narrowing pre-filter only; the downstream
+    parse task re-resolves the AMC from the file's own content regardless.
+    """
+    try:
+        return asyncio.run(_amfi_ssd_sweep_pipeline(start_id, end_id, amc_filter))
+    except Exception:  # noqa: BLE001 — one bad range must never crash the worker
+        logger.exception("amfi_ssd_sweep failed start_id=%s end_id=%s", start_id, end_id)
+        return "failed: internal_error"
+
+
+def _pdf_first_page_text(data: bytes) -> str:
+    """Cheap first-page text extraction for the amc_filter pre-check — plain
+    (non-layout) mode is enough, same as `looks_like_ssd_pdf`'s own internal
+    extraction (which only returns bool, discarding the text this needs)."""
+    import io as _io
+
+    try:
+        from pypdf import PdfReader
+
+        return PdfReader(_io.BytesIO(data)).pages[0].extract_text() or ""
+    except Exception:  # noqa: BLE001 — unreadable PDF, empty text is fine here
+        return ""
+
+
+async def _amfi_ssd_sweep_pipeline(start_id: int, end_id: int, amc_filter: str | None) -> str:
+    from dhanradar.mf.disclosure_parsers import looks_like_ssd_pdf
+
+    if end_id < start_id:
+        return f"failed: invalid_range start_id={start_id} end_id={end_id}"
+    span = end_id - start_id + 1
+    if span > MAX_SWEEP_RANGE:
+        return (
+            f"failed: range_too_large span={span} max={MAX_SWEEP_RANGE} "
+            f"— call again in <={MAX_SWEEP_RANGE}-id chunks (resume at start_id={start_id})"
+        )
+
+    n_pdf_hits = n_ssd = n_amc_filtered = n_ingested = n_duplicate = 0
+    n_unsupported = n_errors = 0
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        for scheme_id in range(start_id, end_id + 1):
+            url = SSD_URL_TMPL.format(id=scheme_id)
+            try:
+                resp = await client.get(url, headers={"User-Agent": _SWEEP_USER_AGENT})
+                data = resp.content
+            except Exception as exc:  # noqa: BLE001 — one bad id must never kill the sweep
+                logger.warning("amfi_ssd_sweep: fetch error id=%s err=%s", scheme_id, exc)
+                n_errors += 1
+                await asyncio.sleep(_SWEEP_DELAY_SECONDS)
+                continue
+
+            if resp.status_code != 200 or not data.startswith(b"%PDF"):
+                # 404 (id unused) or any non-PDF response — the expected
+                # common case (ids are shared with SID/SAI/other document
+                # types), never logged as an error.
+                await asyncio.sleep(_SWEEP_DELAY_SECONDS)
+                continue
+            n_pdf_hits += 1
+
+            if not looks_like_ssd_pdf(data):
+                # A real PDF at this id but not the SSD template (SID/SAI/etc
+                # sharing the same id space).
+                await asyncio.sleep(_SWEEP_DELAY_SECONDS)
+                continue
+            n_ssd += 1
+
+            if amc_filter:
+                detected = detect_amc(_pdf_first_page_text(data))
+                if detected is None or detected.upper() != amc_filter.upper():
+                    n_amc_filtered += 1
+                    await asyncio.sleep(_SWEEP_DELAY_SECONDS)
+                    continue
+
+            extracted, _skipped = await intake_upload(
+                data, f"SSD_{scheme_id}.pdf", "amfi_ssd_sweep", None, None
+            )
+            for _name, result in extracted:
+                if result.status == "duplicate":
+                    n_duplicate += 1
+                elif result.status == "unsupported":
+                    n_unsupported += 1
+                else:
+                    n_ingested += 1
+            await asyncio.sleep(_SWEEP_DELAY_SECONDS)
+
+    return (
+        f"swept {start_id}-{end_id}: pdf_hits={n_pdf_hits} ssd={n_ssd} "
+        f"ingested={n_ingested} duplicate={n_duplicate} amc_filtered={n_amc_filtered} "
+        f"unsupported={n_unsupported} errors={n_errors}"
+    )
