@@ -4,8 +4,8 @@
  * Server Component wrapper (FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §18.6 —
  * targeted SSR core, not a full rewrite of all 22 sections). Fetches
  * `fund.head` server-side so crawlers get real content in the initial HTML
- * response — page <title>/description, JSON-LD structured data, and a small
- * server-rendered summary block — then hands the SAME payload to the existing
+ * response — page <title>/description and JSON-LD structured data — then
+ * hands the SAME payload to the existing
  * 'use client' FundDetailClientView as `initialFundHead` so its
  * useFundDetail() hook does not re-fetch on mount (no double fetch).
  *
@@ -45,8 +45,6 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchFundHeadServer } from '@/features/mf/server-api';
 import { buildFundMetadataText, buildFundJsonLd, FUND_NOT_FOUND_METADATA } from '@/features/mf/fundMetadata';
-import { fundDisplayTitle, fundVariantTags } from '@/features/mf/explorer-format';
-import { EDU_LABELS } from '@/lib/displayLabel';
 import FundDetailClientView from '@/components/mf/funddetail/FundDetailClientView';
 
 // Mandatory — see file header ("BUILD-TIME TRAP").
@@ -80,11 +78,6 @@ export default async function FundDetailPage({
   if (!fund) notFound();
 
   const jsonLd = buildFundJsonLd(fund, params.isin);
-  const labelWord = fund.verb_label ? EDU_LABELS[fund.verb_label] : null;
-  // Founder rule 2026-07-11: short title everywhere; variant facts as tags.
-  // The full legal scheme_name stays in JSON-LD/metadata + the h1 tooltip.
-  const displayTitle = fundDisplayTitle(fund);
-  const variantTags = fundVariantTags(fund);
 
   return (
     <>
@@ -96,37 +89,12 @@ export default async function FundDetailPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      {/* Server-rendered summary — real content in the initial HTML response,
-          verifiable via `curl` without JS execution. Plain text label WORD
-          only (never the ScoreRing/numeric component). Passed INTO the client
-          view so it renders inside the shell's scroll area and scrolls away
-          with the page — rendered here (outside MaybeShell/AppShell) it sat
-          pinned above the app chrome and never scrolled. */}
-      <FundDetailClientView
-        initialFundHead={fund}
-        ssrSummary={
-          <div className="mb-4 rounded-2xl border border-line bg-surface-2 p-3">
-            <h1 className="text-h3 text-ink" title={fund.scheme_name}>{displayTitle}</h1>
-            {variantTags.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1.5" title={fund.scheme_name}>
-                {variantTags.map((t) => (
-                  <span key={t} className="rounded-full border border-line bg-surface px-2 py-0.5 text-caption text-ink-secondary">
-                    {t}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-small text-ink-secondary">
-              {fund.nav_latest != null && (
-                <span>NAV ₹{fund.nav_latest.toFixed(2)}{fund.nav_date ? ` (as of ${fund.nav_date})` : ''}</span>
-              )}
-              {fund.return_1y_pct != null && <span>1Y return {fund.return_1y_pct.toFixed(1)}%</span>}
-              {fund.return_3y_pct != null && <span>3Y return {fund.return_3y_pct.toFixed(1)}%</span>}
-              {labelWord && <span>DhanRadar educational read: {labelWord}</span>}
-            </div>
-          </div>
-        }
-      />
+      {/* No separate crawler summary block: the hero itself SSRs with real
+          content (initialFundHead seeds useFundDetail on a force-dynamic
+          route — verified via curl: hero h1 + returns are in the initial
+          HTML). A duplicate visible block was redundant, and CSS-hiding it
+          would be cloaking. */}
+      <FundDetailClientView initialFundHead={fund} />
     </>
   );
 }
