@@ -65,7 +65,7 @@ export function MaybeShell({
   return (
     <div className="flex min-h-screen flex-col bg-bg">
       <SiteHeader />
-      <main className={cn('mx-auto w-full flex-1 px-4 py-8 sm:px-6', widthClass)}>
+      <main className={cn('mx-auto w-full flex-1 px-4 py-4 sm:px-6', widthClass)}>
         {children}
       </main>
       <SiteFooter />

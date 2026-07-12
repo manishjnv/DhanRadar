@@ -61,8 +61,8 @@ export function SiteFooter() {
 
   return (
     <footer className="border-t border-line bg-surface">
-      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {/* Brand block */}
           <div className="flex flex-col gap-3 lg:col-span-1">
             <Link
@@ -104,7 +104,7 @@ export function SiteFooter() {
         </div>
 
         {/* Standing SEBI disclaimer — rendered on every public surface */}
-        <div className="mt-10 flex justify-center border-t border-line pt-6">
+        <div className="mt-6 flex justify-center border-t border-line pt-6">
           <Disclaimer className="max-w-2xl text-center" />
         </div>
       </div>
