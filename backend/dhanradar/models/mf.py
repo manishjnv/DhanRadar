@@ -161,6 +161,54 @@ class MfCategorySeries(Base):
     )
 
 
+class MfBenchmarkMap(Base):
+    """Free-text AMFI benchmark string -> canonical TRI index key (Phase 4c pt3, migration
+    0076). Data, not code: :mod:`dhanradar.mf.benchmark_map` is the pure name-matcher;
+    :func:`dhanradar.tasks.mf.benchmark_map_seed` (manual-only) writes confident matches
+    here with ``mapped_by='auto-seed'``. Unmapped strings simply have no row — the honest-
+    fallback rule (never guess) means most AMFI benchmark strings stay unmapped until a
+    confident match exists.
+    """
+
+    __tablename__ = "mf_benchmark_map"
+    __table_args__ = _SCHEMA
+
+    benchmark_name_raw: Mapped[str] = mapped_column(Text, primary_key=True)
+    index_key: Mapped[str] = mapped_column(Text, nullable=False)
+    mapped_by: Mapped[str] = mapped_column(Text, nullable=False)
+    mapped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MfBenchmarkTri(Base):
+    """Daily Total Return Index values for the 4 canonical equity indices (Phase 4c pt3,
+    migration 0076, TimescaleDB hypertable on ``tri_date``). Source:
+    niftyindices.com (:func:`dhanradar.tasks.mf.benchmark_tri_fetch`).
+
+    COMPLIANCE (ADR-0033, binding): ``tri_value`` is INTERNAL-COMPUTE ONLY — it must never
+    reach an API response or a frontend file (see
+    ``tests/unit/test_mf_benchmark_tri_compliance.py``'s grep tripwire). Structurally kept
+    OUT of :class:`MfBenchmarkDaily` (the existing Nifty 50 PRICE-index table, which DOES
+    serve the DOM) — never merge these two tables.
+    """
+
+    __tablename__ = "mf_benchmark_tri"
+    __table_args__ = (
+        PrimaryKeyConstraint("index_key", "tri_date"),
+        _SCHEMA,
+    )
+
+    index_key: Mapped[str] = mapped_column(Text, nullable=False)
+    tri_date: Mapped[date] = mapped_column(Date, nullable=False)
+    tri_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfFundMetrics(Base):
     """Precomputed per-fund long-horizon stats, refreshed nightly after nav_daily_fetch.
 

@@ -1,0 +1,37 @@
+[
+  {
+    "RequestNumber": "TRI63919422629519029800",
+    "Index Name": "Nifty 50",
+    "Date": "05 Jun 2026",
+    "TotalReturnsIndex": "35295.11",
+    "NTR_Value": "30701.36"
+  },
+  {
+    "RequestNumber": "TRI63919422629519029800",
+    "Index Name": "Nifty 50",
+    "Date": "04 Jun 2026",
+    "TotalReturnsIndex": "35354.58",
+    "NTR_Value": "30756.38"
+  },
+  {
+    "RequestNumber": "TRI63919422629519029800",
+    "Index Name": "Nifty 50",
+    "Date": "03 Jun 2026",
+    "TotalReturnsIndex": "35338.07",
+    "NTR_Value": "30763.6"
+  },
+  {
+    "RequestNumber": "TRI63919422629519029800",
+    "Index Name": "Nifty 50",
+    "Date": "02 Jun 2026",
+    "TotalReturnsIndex": "35455.73",
+    "NTR_Value": "30866.03"
+  },
+  {
+    "RequestNumber": "TRI63919422629519029800",
+    "Index Name": "Nifty 50",
+    "Date": "01 Jun 2026",
+    "TotalReturnsIndex": "35303.30",
+    "NTR_Value": "30733.33"
+  }
+]

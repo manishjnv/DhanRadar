@@ -452,6 +452,15 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.nifty_close_daily",
         "schedule": crontab(hour=23, minute=45),
     },
+    # Phase 4c pt3 — Benchmark TRI (Total Return Index) daily fetch, 23:45 IST (same
+    # slot as nifty-close-daily — both are single-purpose low-load fetches on the batch
+    # queue; no conflict). Writes mf.mf_benchmark_tri for the 4 canonical equity
+    # indices (niftyindices.com). COMPLIANCE (ADR-0033): internal-compute only, never
+    # DOM/API-exposed — see tests/unit/test_mf_benchmark_tri_compliance.py.
+    "mf-benchmark-tri-fetch": {
+        "task": "dhanradar.tasks.mf.benchmark_tri_fetch",
+        "schedule": crontab(hour=23, minute=45),
+    },
     # ----- Phase 6 — planned data sources (Admin.md §18 step 6). Each task writes an
     # mf.ingestion_runs row + an mf.source_health row via tasks/ingestion_run.py, so
     # the Ops console flips the source Planned → Healthy on the first successful run.

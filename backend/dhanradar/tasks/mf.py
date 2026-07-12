@@ -1935,6 +1935,11 @@ _CATEGORY_SERIES_CATCHUP_DAYS = 7
 # always sees each scheme's prior NAV row even across a long weekend/holiday run.
 _CATEGORY_SERIES_LAG_LOOKBACK_DAYS = 10
 _CATEGORY_SERIES_UPSERT_CHUNK = 2000
+# A real MF NAV never moves +/-50% in a single trading day; beyond that is a scale
+# change or a data error (the 2018-05-03 Overnight-Fund 99x lesson), not a real return.
+# Excluded from the median input (also protects the SQL's LN(1+r) domain — a return
+# <= -100% is undefined). Mirrored as dhanradar.mf.category_series.MAX_ABS_DAILY_RETURN.
+_CATEGORY_SERIES_MAX_ABS_DAILY_RETURN = 0.5
 
 # One SQL pass: canonical scheme per category (Direct+Growth preferred — mirrors
 # category_series.pick_canonical_isin) -> per-scheme day-over-day return (LAG per isin,
@@ -1979,7 +1984,13 @@ daily_agg AS (
         percentile_cont(0.5) WITHIN GROUP (ORDER BY daily_return) AS median_daily_return,
         COUNT(*) AS fund_count
     FROM nav_ret
-    WHERE daily_return IS NOT NULL AND nav_date >= :start_date
+    WHERE daily_return IS NOT NULL
+      -- Return-sanity hardening: exclude insane daily returns from the median input
+      -- (and from fund_count) before they ever reach percentile_cont — see
+      -- _CATEGORY_SERIES_MAX_ABS_DAILY_RETURN's docstring.
+      AND daily_return > -1
+      AND ABS(daily_return) <= :max_abs_daily_return
+      AND nav_date >= :start_date
     GROUP BY category, nav_date
 ),
 anchor AS (
@@ -2048,7 +2059,12 @@ async def _category_series_pipeline(
     async with TaskSessionLocal() as db:
         result = await db.execute(
             sa_text(_CATEGORY_SERIES_SQL),
-            {"lookback_start": lookback_start, "start_date": start, "end_date": end},
+            {
+                "lookback_start": lookback_start,
+                "start_date": start,
+                "end_date": end,
+                "max_abs_daily_return": _CATEGORY_SERIES_MAX_ABS_DAILY_RETURN,
+            },
         )
         rows = result.mappings().all()
         if not rows:
@@ -2089,6 +2105,287 @@ async def _category_series_pipeline(
         f"category_series_refresh: upserted {len(upserts)} rows across "
         f"{categories} categories ({start}..{end})"
     )
+    logger.info(summary)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Benchmark map seed (Phase 4c pt3) — manual-only, NOT in beat. Seeds
+# mf.mf_benchmark_map from the distinct mf_funds.benchmark_index strings already
+# ingested (AMFI Fund-Performance disclosure, PR #544), so the honest-fallback rule
+# (never guess) runs once instead of at chart-request time.
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(name="dhanradar.tasks.mf.benchmark_map_seed")
+def benchmark_map_seed() -> str:
+    """Manual-only (NOT in beat schedule) — seed mf.mf_benchmark_map from DISTINCT,
+    non-null mf_funds.benchmark_index strings. Inserts a row ONLY for a confident
+    dhanradar.mf.benchmark_map.candidate_index_key() match (mapped_by='auto-seed');
+    every other string is left unmapped (honest-fallback rule — no fuzzy guessing).
+    Idempotent (ON CONFLICT DO NOTHING on the PK, benchmark_name_raw) — safe to re-run
+    after new AMFI strings arrive; never overwrites an existing (possibly manually
+    curated) mapping row.
+    """
+    try:
+        return asyncio.run(_benchmark_map_seed_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("benchmark_map_seed pipeline error")
+        return "benchmark_map_seed: failed — see worker logs"
+
+
+async def _benchmark_map_seed_pipeline() -> str:
+    from sqlalchemy import distinct as sa_distinct
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.benchmark_map import candidate_index_key
+    from dhanradar.models.mf import MfBenchmarkMap, MfFund
+
+    async with TaskSessionLocal() as db:
+        raw_names = (
+            (
+                await db.execute(
+                    sa_select(sa_distinct(MfFund.benchmark_index)).where(
+                        MfFund.benchmark_index.isnot(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        seen = len(raw_names)
+
+        to_insert = [
+            {"benchmark_name_raw": raw, "index_key": key, "mapped_by": "auto-seed"}
+            for raw in raw_names
+            if raw is not None and (key := candidate_index_key(raw)) is not None
+        ]
+        if to_insert:
+            stmt = (
+                pg_insert(MfBenchmarkMap)
+                .values(to_insert)
+                .on_conflict_do_nothing(index_elements=["benchmark_name_raw"])
+            )
+            await db.execute(stmt)
+            await db.commit()
+
+    mapped = len(to_insert)
+    unmapped = seen - mapped
+    summary = (
+        f"benchmark_map_seed: {seen} distinct benchmark strings seen, "
+        f"{mapped} mapped, {unmapped} left unmapped"
+    )
+    logger.info(summary)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Benchmark TRI daily fetch (Phase 4c pt3) — daily Total Return Index for the 4
+# canonical equity indices (niftyindices.com), materializing mf.mf_benchmark_tri.
+# COMPLIANCE (ADR-0033, binding): tri_value is internal-compute only — see
+# tests/unit/test_mf_benchmark_tri_compliance.py's grep tripwire. This section never
+# writes mf_benchmark_daily (the existing DOM-serving Nifty 50 PRICE-index table).
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_TRI_TASK_NAME = "dhanradar.tasks.mf.benchmark_tri_fetch"
+_BENCHMARK_TRI_UPSERT_CHUNK = 2000
+# niftyindices' own historical-data UI hard-caps a single request's date span at 1 year
+# (client-side check in IISLComponet.js's TotalReturnindexHistoricalData()) — a longer
+# backfill range is chunked into windows of at most this many days.
+_BENCHMARK_TRI_MAX_WINDOW_DAYS = 365
+# A real browser User-Agent verified working from a dev machine 2026-07-12; DhanRadar's
+# honest identifying UA ("DhanRadar/1.0 (research; contact@dhanradar.com)", used
+# elsewhere in this file) was tried first and TIMED OUT (silently dropped, no error
+# response) against this specific endpoint — niftyindices' WAF/CDN appears to gate on a
+# recognizable browser UA string here. No cookies/session priming or Origin/Referer
+# header were needed (verified). KVM4 (prod) reachability is UNVERIFIED — NSE itself is
+# geo-blocked from the box (docs/project-state/DATA_SOURCES.md) — so
+# _fetch_niftyindices_tri_window is kept as ONE isolated function: if the box can't
+# reach niftyindices directly, a response body fetched elsewhere can be replayed through
+# _parse_niftyindices_tri_response + the same upsert path without touching this function.
+_BENCHMARK_TRI_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_BENCHMARK_TRI_FETCH_URL = "https://niftyindices.com/BackPage/getTotalReturnIndexString"
+
+# canonical index_key -> the exact "indexName" string niftyindices' endpoint expects
+# (reverse-engineered 2026-07-12; verified live for all 4 — see PR description for the
+# captured probe output). Every dhanradar.mf.benchmark_map.CANONICAL_INDEX_KEYS entry
+# MUST have one of these.
+_TRI_NIFTYINDICES_NAME: dict[str, str] = {
+    "nifty50_tri": "NIFTY 50",
+    "nifty_midcap150_tri": "NIFTY MIDCAP 150",
+    "nifty_smallcap250_tri": "NIFTY SMALLCAP 250",
+    "nifty500_tri": "NIFTY 500",
+}
+
+
+def _tri_date_windows(
+    start: date, end: date, max_days: int = _BENCHMARK_TRI_MAX_WINDOW_DAYS
+) -> list[tuple[date, date]]:
+    """Split [start, end] into non-overlapping windows of at most max_days each."""
+    windows: list[tuple[date, date]] = []
+    cursor = start
+    while cursor <= end:
+        window_end = min(cursor + timedelta(days=max_days - 1), end)
+        windows.append((cursor, window_end))
+        cursor = window_end + timedelta(days=1)
+    return windows
+
+
+def _parse_niftyindices_tri_response(data: bytes, index_key: str) -> list[tuple[str, date, Any]]:
+    """Pure parser: niftyindices' getTotalReturnIndexString JSON array response ->
+    (index_key, tri_date, tri_value) rows. No DB/network access — golden-set testable
+    against a real captured sample (tests/fixtures/niftyindices_tri_nifty50_sample.json).
+
+    Response shape (verified live 2026-07-12): a JSON array of
+    ``{"Index Name", "Date" ("05 Jun 2026"), "TotalReturnsIndex", "NTR_Value"}``. Uses
+    TotalReturnsIndex (gross TRI, dividends reinvested — SEBI's mandated MF-benchmark
+    convention) — NOT NTR_Value (a net-of-tax variant only present for 3 of the 4
+    indices, "-" for the rest).
+    """
+    from decimal import Decimal
+
+    rows = json.loads(data)
+    out: list[tuple[str, date, Any]] = []
+    for row in rows:
+        tri_date = datetime.strptime(row["Date"], "%d %b %Y").date()
+        tri_value = Decimal(str(row["TotalReturnsIndex"]).replace(",", ""))
+        out.append((index_key, tri_date, tri_value))
+    return out
+
+
+async def _fetch_niftyindices_tri_window(
+    client: httpx.AsyncClient, index_name: str, start: date, end: date
+) -> bytes:
+    """One HTTP POST to niftyindices' historical-TRI endpoint for one index, one
+    <=1-year window. Reverse-engineered 2026-07-12 from
+    https://niftyindices.com/reports/historical-data's
+    liveindexsa.niftyindices.com/assets/js/IISLComponet.js,
+    TotalReturnindexHistoricalData() (line ~1664) — the client builds a single-quoted
+    pseudo-JSON string, wraps it in a real JSON envelope under the key "cinfo". See
+    _BENCHMARK_TRI_USER_AGENT's docstring for the UA requirement.
+    """
+    cinfo = (
+        "{'name':'"
+        + index_name
+        + "','startDate':'"
+        + start.strftime("%d-%b-%Y")
+        + "','endDate':'"
+        + end.strftime("%d-%b-%Y")
+        + "','indexName':'"
+        + index_name
+        + "'}"
+    )
+    resp = await client.post(
+        _BENCHMARK_TRI_FETCH_URL,
+        content=json.dumps({"cinfo": cinfo}),
+        headers={
+            "User-Agent": _BENCHMARK_TRI_USER_AGENT,
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        },
+        timeout=20.0,
+    )
+    resp.raise_for_status()
+    return resp.content
+
+
+@celery_app.task(name=_BENCHMARK_TRI_TASK_NAME)
+def benchmark_tri_fetch(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    index_keys: list[str] | None = None,
+) -> str:
+    """Nightly 23:45 IST — daily Total Return Index fetch for the 4 canonical equity
+    indices into mf.mf_benchmark_tri (Phase 4c pt3). COMPLIANCE (ADR-0033): tri_value
+    is internal-compute only, never surfaced client-facing.
+
+    Default range (no args) = yesterday..today for all 4 CANONICAL_INDEX_KEYS — same
+    self-heal shape as category_series_refresh. Pass start_date/end_date (YYYY-MM-DD)
+    and optionally index_keys to backfill a longer history — chunked into
+    <=_BENCHMARK_TRI_MAX_WINDOW_DAYS-day windows automatically. One failing index
+    (network error, HTTP error, malformed response) is logged and skipped — it does
+    NOT abort the other indices' fetch+upsert.
+    """
+    try:
+        return asyncio.run(_benchmark_tri_pipeline(start_date, end_date, index_keys))
+    except Exception:  # noqa: BLE001
+        logger.exception("benchmark_tri_fetch pipeline error")
+        return "benchmark_tri_fetch: failed — see worker logs"
+
+
+async def _benchmark_tri_pipeline(
+    start_date: str | None,
+    end_date: str | None,
+    index_keys: list[str] | None,
+) -> str:
+    from sqlalchemy import func as sa_func
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.mf.benchmark_map import CANONICAL_INDEX_KEYS
+    from dhanradar.models.mf import MfBenchmarkTri
+
+    end = date.fromisoformat(end_date) if end_date else date.today()
+    start = date.fromisoformat(start_date) if start_date else end - timedelta(days=1)
+    keys = index_keys or list(CANONICAL_INDEX_KEYS)
+    if start > end:
+        return f"benchmark_tri_fetch: skipped — start_date {start} after end_date {end}"
+
+    total_rows = 0
+    failed_keys: list[str] = []
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for key in keys:
+            index_name = _TRI_NIFTYINDICES_NAME.get(key)
+            if index_name is None:
+                logger.warning("benchmark_tri_fetch: unknown index_key %s, skipping", key)
+                failed_keys.append(key)
+                continue
+            try:
+                key_rows = 0
+                for w_start, w_end in _tri_date_windows(start, end):
+                    raw = await _fetch_niftyindices_tri_window(client, index_name, w_start, w_end)
+                    parsed = _parse_niftyindices_tri_response(raw, key)
+                    if not parsed:
+                        continue
+                    upserts = [
+                        {"index_key": k, "tri_date": d, "tri_value": v, "source": "niftyindices"}
+                        for k, d, v in parsed
+                    ]
+                    async with TaskSessionLocal() as db:
+                        for i in range(0, len(upserts), _BENCHMARK_TRI_UPSERT_CHUNK):
+                            chunk = upserts[i : i + _BENCHMARK_TRI_UPSERT_CHUNK]
+                            stmt = (
+                                pg_insert(MfBenchmarkTri)
+                                .values(chunk)
+                                .on_conflict_do_update(
+                                    index_elements=["index_key", "tri_date"],
+                                    set_={
+                                        "tri_value": pg_insert(MfBenchmarkTri).excluded.tri_value,
+                                        "source": pg_insert(MfBenchmarkTri).excluded.source,
+                                        "ingested_at": sa_func.now(),
+                                    },
+                                )
+                            )
+                            await db.execute(stmt)
+                        await db.commit()
+                    key_rows += len(parsed)
+                total_rows += key_rows
+            except Exception as exc:  # noqa: BLE001 — one index must not kill the rest
+                logger.warning("benchmark_tri_fetch: index %s failed: %s", key, exc)
+                failed_keys.append(key)
+
+    ok_count = len(keys) - len(failed_keys)
+    summary = (
+        f"benchmark_tri_fetch: {total_rows} rows across {ok_count}/{len(keys)} indices "
+        f"({start}..{end})"
+    )
+    if failed_keys:
+        summary += f"; failed={failed_keys}"
     logger.info(summary)
     return summary
 

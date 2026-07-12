@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import date
 
 from dhanradar.mf.category_series import (
+    MAX_ABS_DAILY_RETURN,
     CategorySeriesPoint,
     chain_index,
     daily_returns,
@@ -128,3 +129,53 @@ def test_pick_canonical_isin_falls_back_to_lowest_isin_when_no_growth_variant():
         ("ISIN_A_IDCW", "direct", "idcw"),
     ]
     assert pick_canonical_isin(variants) == "ISIN_A_IDCW"
+
+
+# ---------------------------------------------------------------------------
+# 4. Return-sanity hardening (the 2018-05-03 Overnight-Fund 99x lesson) —
+#    daily_returns() must drop insane single-day moves before they ever reach the
+#    median/fund_count, not just clamp them downstream.
+# ---------------------------------------------------------------------------
+
+
+def test_daily_returns_excludes_ln_blowup_return_of_minus_one():
+    # prev=100 -> cur=0 is r == -1.0 exactly — the LN(1+r) domain boundary.
+    returns = daily_returns({_D0: 100.0, _D1: 0.0})
+    assert returns == {}
+
+
+def test_daily_returns_excludes_scale_change_return_of_99():
+    # prev=1 -> cur=100 is r == 99.0 — a 100x jump (face-value/scale change or bad data).
+    returns = daily_returns({_D0: 1.0, _D1: 100.0})
+    assert returns == {}
+
+
+def test_daily_returns_excludes_large_negative_return_beyond_bound():
+    # r == -0.6, beyond the -MAX_ABS_DAILY_RETURN floor but still > -1 (not an LN blowup).
+    returns = daily_returns({_D0: 100.0, _D1: 40.0})
+    assert returns == {}
+
+
+def test_daily_returns_includes_a_real_world_return():
+    # r == 0.04 (4%) — well within bound, must be kept.
+    returns = daily_returns({_D0: 100.0, _D1: 104.0})
+    assert round(returns[_D1], 6) == 0.04
+
+
+def test_daily_returns_includes_return_exactly_at_the_bound():
+    # r == MAX_ABS_DAILY_RETURN exactly (0.5) — inclusive boundary ("<=").
+    returns = daily_returns({_D0: 100.0, _D1: 150.0})
+    assert round(returns[_D1], 6) == MAX_ABS_DAILY_RETURN
+
+
+def test_fund_count_reflects_exclusion_of_an_insane_return():
+    # S2's D1 return is a scale-change (10000%) and must be excluded — fund_count for
+    # D1 drops to 1 (S1 only), not 2.
+    scheme_returns = {
+        "S1": daily_returns({_D0: 100.0, _D1: 101.0}),
+        "S2": daily_returns({_D0: 1.0, _D1: 100.0}),  # r=99.0, excluded
+    }
+    daily = median_returns_by_day(scheme_returns)
+    median, count = daily[_D1]
+    assert round(median, 6) == 0.01
+    assert count == 1
