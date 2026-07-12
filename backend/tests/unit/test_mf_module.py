@@ -13,7 +13,7 @@ import enum
 import io
 import re
 from dataclasses import fields
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from openpyxl import Workbook
@@ -23,6 +23,8 @@ from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 from dhanradar.mf.scoring_bridge import FundSignals, to_factor_inputs
 from dhanradar.mf.service import assemble_report, cas_sha256, dedup_key
 from dhanradar.tasks.mf import (
+    _AMC_DISCLOSURE_ROOTS,
+    _active_disclosure_roots,
     _drop_over_covered_funds,
     _extract_sebi_row,
     _fetch_parse_upsert_files,
@@ -1841,6 +1843,57 @@ def test_parse_sebi_xlsx_sbi_long_bse_url_not_mistaken_for_header_row():
     assert all(r["scheme_name"] == "SBI Test ESG Fund" for r in rows)
 
 
+def test_parse_sebi_xlsx_sbi_raw_datetime_banner_cell_sets_as_of_month():
+    """Root cause of "SBI ESG Exclusionary Strategy Fund 0 June rows" (all 4
+    ISIN variants, before+after — confirmed 0 rows April/May/June 2026 on
+    prod). Real June-2026 file, sheet SMEEF: row 4 pairs the
+    "PORTFOLIO STATEMENT AS ON :" label with a genuine openpyxl
+    datetime.datetime(2026, 6, 30, 0, 0) CELL VALUE, not text. str()-ing that
+    cell for the text regexes produces "2026-06-30 00:00:00", which none of
+    them match (no month NAME, no "/" separator) — as_of_month stayed None
+    for the WHOLE sheet. SMEEF is always the FIRST scheme sheet in SBI's
+    monthly workbook (sheet order confirmed identical across the real
+    April/May/June-2026 files: Index, SMEEF, SLMF, ...), so there is no
+    earlier sheet's as_of_month to inherit either — every one of its 48 real
+    June holding rows got as_of_month=None and was silently dropped by
+    `_upsert_constituents`'s `if row.get("as_of_month") is None: continue`,
+    even though the scheme name ("SBI ESG Exclusionary Strategy Fund")
+    resolves to mf_funds with zero ambiguity (byte-for-byte exact match, no
+    alias needed — verified against live mf_funds 2026-07-12). The extracted
+    name/ISIN/weight were never the problem; only the date was silently
+    lost. Fixed by checking each trigger row's raw cell values for a
+    date/datetime instance BEFORE falling back to text regexes."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "SMEEF"
+    ws.append(["", "SBI Mutual Fund", "007"])
+    ws.append(["", "SCHEME NAME :", "SBI ESG Exclusionary Strategy Fund"])
+    ws.append(["", "PORTFOLIO STATEMENT AS ON :", datetime(2026, 6, 30, 0, 0)])
+    ws.append(["", ""])
+    ws.append(
+        [
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry^",
+            "Market value\n(Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(["", "ICICI Bank Ltd.", "INE090A01021", "Banks", "46619.28", "8.72"])
+    ws.append(["", "HDFC Bank Ltd.", "INE040A01034", "Banks", "43007.91", "8.04"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+
+    assert len(rows) == 2
+    assert all(r["as_of_month"] == date(2026, 6, 1) for r in rows)
+    assert all(r["scheme_name"] == "SBI ESG Exclusionary Strategy Fund" for r in rows)
+    isins = {r["constituent_isin"] for r in rows}
+    assert isins == {"INE090A01021", "INE040A01034"}
+
+
 # --- Item 5 (2026-07-12): EDELWEISS constituent parse depth -------------------
 # Real May-2026 EDELWEISS monthly portfolio file (manual-ingest inbox,
 # 2,840 raw rows) pads a blank row between EVERY asset-class sub-table within
@@ -2524,3 +2577,51 @@ async def test_fetch_parse_upsert_files_omits_referer_by_default():
     await _fetch_parse_upsert_files(client, "MOTILAL_OSWAL", ["https://example.com/x.xlsx"])
 
     assert "Referer" not in captured_headers[0]
+
+
+# --- Item 3 (2026-07-12): manual_only scraper dispatch skip ------------------
+
+
+def test_active_disclosure_roots_skips_manual_only_navi():
+    """NAVI's CDN 403s every download from the KVM4 box IP (confirmed twice,
+    20/20 files) — a real dev IP reaches the same URLs fine, so nightly
+    auto-retry can never succeed. `manual_only: True` on NAVI's real config
+    entry must pull it out of the active dispatch list so it's skipped, not
+    attempted-and-logged-failed, every night."""
+    active, skipped = _active_disclosure_roots(_AMC_DISCLOSURE_ROOTS)
+
+    assert "NAVI" not in {a["name"] for a in active}
+    assert "NAVI" in skipped
+    # Every other real AMC in the live config must still be active — this
+    # flag must never silently swallow anything besides what's explicitly
+    # marked manual_only.
+    assert len(active) == len(_AMC_DISCLOSURE_ROOTS) - len(skipped)
+
+
+def test_active_disclosure_roots_no_manual_only_flag_keeps_everything_active():
+    """Negative case: with no AMC marked manual_only, the split is a pure
+    passthrough — the flag must never change behaviour by its mere
+    ABSENCE."""
+    roots = [{"name": "A", "url": "x"}, {"name": "B", "url": "y"}]
+
+    active, skipped = _active_disclosure_roots(roots)
+
+    assert active == roots
+    assert skipped == []
+
+
+def test_active_disclosure_roots_manual_only_amc_excluded_from_every_bucket():
+    """A manual_only AMC must be invisible to EVERY dispatch-strategy bucket,
+    not just one — the dispatch loop builds its buckets from the `active`
+    list this function returns, so this is the single choke point that
+    guarantees a manual_only AMC is never attempted via nonce-API,
+    static-multi, Playwright, or any other strategy."""
+    roots = [
+        {"name": "MANUAL_NONCE", "nonce_api_url": "x", "manual_only": True},
+        {"name": "REAL_STATIC", "static_multi": True},
+    ]
+
+    active, skipped = _active_disclosure_roots(roots)
+
+    assert active == [{"name": "REAL_STATIC", "static_multi": True}]
+    assert skipped == ["MANUAL_NONCE"]

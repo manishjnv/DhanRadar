@@ -226,6 +226,19 @@ _AMC_DISCLOSURE_ROOTS: list[dict] = [
         "nonce_page_url": "https://navi.com/mutual-fund/downloads/portfolio",
         "nonce_api_url": "https://navi.com/wp-json/nv/v1/documents",
         "nonce_api_category": "884",
+        # manual_only (2026-07-12): NAVI's CDN (public-assets.prod.navi-tech.in)
+        # 403s EVERY download from the KVM4 box IP specifically — confirmed
+        # twice, all 20/20 files, even with a defensive Referer header (see the
+        # NAVI referer comment on `_download_and_parse_one` below). A real dev
+        # IP reaches the same URLs fine, so this is a datacenter-IP block, not
+        # a broken scraper. Nightly auto-retry can never succeed and only logs
+        # a failure every run; `manual_only` pulls NAVI out of the scheduled
+        # dispatch loop entirely (see `_active_disclosure_roots`) so it's
+        # logged as skipped, not failed. Replacement path: run
+        # `scripts/fetch_navi_local.py` from a non-box machine, then ship the
+        # files to the manual-ingest inbox (`incoming/NAVI/`) for the existing
+        # folder-channel pipeline to pick up.
+        "manual_only": True,
     },
     {
         "name": "ZERODHA",
@@ -3770,6 +3783,22 @@ async def _mf_constituents_pipeline() -> str:
     return summary
 
 
+def _active_disclosure_roots(roots: list[dict]) -> tuple[list[dict], list[str]]:
+    """Split scraper configs into (active, manual_only_skipped_names) — pure.
+
+    `manual_only` AMCs (currently: NAVI — its CDN 403s every download from
+    the KVM4 box IP specifically, confirmed twice; see the NAVI dict entry's
+    comment) never enter the scheduled dispatch buckets below. They're
+    logged as SKIPPED, never attempted, so they never hit the per-AMC
+    `except Exception: logger.exception("...failed...")` path either — a
+    manual_only AMC must read as skipped-not-failed to whatever surface
+    watches these logs, not as a nightly failure to chase.
+    """
+    active = [a for a in roots if not a.get("manual_only")]
+    skipped = [a["name"] for a in roots if a.get("manual_only")]
+    return active, skipped
+
+
 async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
     """Fetch SEBI monthly disclosures for top-10 AMCs, upsert constituents.
 
@@ -3779,19 +3808,21 @@ async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
     total_rows = 0
     aum_updates = 0
 
+    active_roots, manual_only_skipped = _active_disclosure_roots(_AMC_DISCLOSURE_ROOTS)
+    if manual_only_skipped:
+        logger.info("mf_constituents_fetch manual_only_skipped amcs=%s", manual_only_skipped)
+
     # Separate AMCs by resolution strategy.
-    template_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("direct_url_template")]
-    json_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("json_api_url_template")]
-    static_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("static_multi")]
-    aem_json_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("aem_search_api_url")]
-    paginated_query_amcs = [
-        a for a in _AMC_DISCLOSURE_ROOTS if a.get("paginated_query_url_template")
-    ]
-    nonce_api_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("nonce_api_url")]
-    zerodha_multi_amcs = [a for a in _AMC_DISCLOSURE_ROOTS if a.get("zerodha_multi")]
+    template_amcs = [a for a in active_roots if a.get("direct_url_template")]
+    json_api_amcs = [a for a in active_roots if a.get("json_api_url_template")]
+    static_multi_amcs = [a for a in active_roots if a.get("static_multi")]
+    aem_json_amcs = [a for a in active_roots if a.get("aem_search_api_url")]
+    paginated_query_amcs = [a for a in active_roots if a.get("paginated_query_url_template")]
+    nonce_api_amcs = [a for a in active_roots if a.get("nonce_api_url")]
+    zerodha_multi_amcs = [a for a in active_roots if a.get("zerodha_multi")]
     playwright_amcs = [
         a
-        for a in _AMC_DISCLOSURE_ROOTS
+        for a in active_roots
         if not a.get("direct_url_template")
         and not a.get("json_api_url_template")
         and not a.get("static_multi")
@@ -3997,7 +4028,7 @@ async def _mf_constituents_pipeline_body() -> tuple[str, int, int]:
     summary = (
         f"mf_constituents_fetch done: "
         f"total_rows={total_rows} aum_updates={aum_updates} "
-        f"amcs={len(_AMC_DISCLOSURE_ROOTS)}"
+        f"amcs={len(active_roots)} manual_only_skipped={len(manual_only_skipped)}"
     )
     return summary, total_rows, aum_updates
 
@@ -5206,13 +5237,39 @@ def _parse_sebi_xlsx(file_bytes: bytes, amc_name: str) -> list[dict]:
             ):
                 import re
 
+                # Raw-datetime banner cell (SBI, confirmed 2026-07-12): "PORTFOLIO
+                # STATEMENT AS ON :" pairs with a genuine openpyxl datetime.datetime
+                # cell, not text — real June-2026 file, sheet SMEEF ("SBI ESG
+                # Exclusionary Strategy Fund"), banner cell holds
+                # datetime.datetime(2026, 6, 30, 0, 0). str()-ing it for the text
+                # regexes below produces "2026-06-30 00:00:00", which none of them
+                # match (no month NAME, no "/" separator) — as_of_month stayed None
+                # for the whole sheet until an unrelated footer note further down
+                # the SAME sheet ("...month ending June 30, 2026...") happened to
+                # match by accident. Every holdings row extracted before that
+                # footer — all 48 ESG Exclusionary Strategy Fund rows, because
+                # SMEEF is the FIRST scheme sheet in this file's order (no earlier
+                # sheet's as_of_month to inherit) — got as_of_month=None and was
+                # silently dropped by `_upsert_constituents`'s `if
+                # row.get("as_of_month") is None: continue`. Checking the raw cell
+                # type directly is strictly more reliable than any text regex and
+                # fixes every AMC/scheme using this cell shape generically, not
+                # just SBI's ESG fund.
+                for _cell in row:
+                    if isinstance(_cell, datetime):
+                        as_of_month = _cell.date().replace(day=1)
+                        break
+                    if isinstance(_cell, date):
+                        as_of_month = _cell.replace(day=1)
+                        break
+
                 # Try "DD-Mon-YYYY" or "DD Mon YYYY" format first.
                 date_m = re.search(
                     r"(\d{1,2})[- ](\w+)[- ](\d{4})",
                     " ".join(row_strs),
                     re.IGNORECASE,
                 )
-                if date_m:
+                if as_of_month is None and date_m:
                     try:
                         from datetime import datetime as _dt
 
@@ -6291,6 +6348,22 @@ _AMC_PREFIX_OVERRIDES: dict[str, list[str]] = {
     "ABSL": ["Aditya Birla%"],
     "ICICI_PRU": ["ICICI%", "BHARAT 22%"],
     "EDELWEISS": ["Edelweiss%", "BHARAT Bond%"],
+    # QUANT (2026-07-12): the split("_")[0] default below would build
+    # "QUANT%" — an ILIKE prefix that ALSO matches every "Quantum ..."
+    # master row (mf_funds confirmed: "Quant Small Cap Fund" next to
+    # "QUANTUM SMALL CAP FUND" — "Quant" is a literal prefix of "Quantum"),
+    # silently cross-resolving quant MF's disclosure rows onto Quantum
+    # Asset Management's schemes. Every real quant MF master name has a
+    # space right after the brand word (verified against mf_funds — no
+    # "Quant<word>" run-together form exists), so the explicit trailing
+    # space is the disambiguator, same word-boundary role the multi-word
+    # MIRAE/PPFAS/ABSL prefixes above play for free.
+    "QUANT": ["Quant %"],
+    # ILFS (2026-07-12): mf_funds spells the brand "IL&FS" (ampersand) —
+    # the default "ILFS%" (from amc_name.split("_")[0]) would never match
+    # any real IL&FS master row (confirmed: "IL&FS Infrastructure Debt Fund
+    # Series 1A" etc.), silently resolving 0 rows forever.
+    "ILFS": ["IL&FS%"],
 }
 
 # Shared brand-less product-line prefixes (CPSE "BHARAT 22" under ICICI_PRU,

@@ -308,6 +308,11 @@ _AMC_KEYWORDS: dict[str, str] = {
     "axis": "AXIS",
     "uti": "UTI",
     "nippon": "NIPPON",
+    # NIMF (2026-07-12): Nippon's own real filenames — "NIMF-MONTHLY-
+    # PORTFOLIO-30-Jun-26.xls" / "NIMF-FORTNIGHTLY-PORTFOLIO-15-June-26.xls"
+    # — carry NO "nippon" substring at all, only its abbreviation. No
+    # collision risk (no other AMC keyword contains "nimf").
+    "nimf": "NIPPON",
     "mirae": "MIRAE",
     "franklin": "FRANKLIN",
     "dsp": "DSP",
@@ -351,13 +356,41 @@ _AMC_KEYWORDS: dict[str, str] = {
     # names both say "Quantum". NOTE: deliberately the full word — "quant"
     # would collide with Quant MF (a different AMC, manual-download list).
     "quantum": "QUANTUM",
+    # QUANT (2026-07-12): quant Money Managers Limited — real founder inbox
+    # evidence, "quant_Mutual_Fund_Monthly_Portfolio_Jan2026.xlsx" among 84
+    # files, ALL landing amc_or_period_undetectable (no keyword existed).
+    # "quant" is a literal SUBSTRING of "quantum" (Quantum Asset Management,
+    # above) — a plain `kw in low` match here would misroute every real
+    # "Quantum ..." filename/scheme-name to quant MF too. Handled via
+    # `_QUANT_EXACT_RE` below (negative lookahead for "um"), never plain
+    # containment — same exact-match discipline as the BHARAT 22 / BHARAT
+    # Bond query-gated prefixes in tasks.mf (`_QUERY_GATED_PREFIXES`): a
+    # shared/overlapping brand token is disambiguated explicitly, never left
+    # to dict-iteration order.
+    "quant": "QUANT",
+    # ILFS (2026-07-12): IL&FS Infra Asset Management Limited — 4 real
+    # founder-inbox files ("ILFS_DASHBOARD_REPORT_R1 May 2026.xlsx",
+    # "ILFS_Portfolio_TransactionReports_June_2026.xlsx", ...). No collision
+    # risk — a plain substring is fine. Master scheme names spell the brand
+    # "IL&FS" (ampersand); `_amc_scheme_prefixes` in tasks.mf overrides the
+    # default "ILFS%" resolver prefix to "IL&FS%" for this AMC.
+    "ilfs": "ILFS",
 }
+
+# "quant" matched as itself, never as a prefix of "quantum" — see the
+# "quant" entry above. `(?!um)` rejects the one real collision; nothing else
+# in the AMC universe starts with "quant".
+_QUANT_EXACT_RE = re.compile(r"quant(?!um)", re.IGNORECASE)
 
 
 def detect_amc(text: str) -> str | None:
     """Keyword match against a filename or scheme name. Pure — unit-testable."""
     low = text.lower()
     for kw, amc in _AMC_KEYWORDS.items():
+        if kw == "quant":
+            if _QUANT_EXACT_RE.search(low):
+                return amc
+            continue
         if kw in low:
             return amc
     return None
@@ -374,9 +407,21 @@ _FILENAME_PERIOD_RES = (
     re.compile(rf"(\d{{1,2}})[-_ ]?({_MONTHS})[a-z]*[-_ ]?(\d{{4}})", re.IGNORECASE),
     # June302026 (month name directly followed by day+year)
     re.compile(rf"({_MONTHS})[a-z]*[-_ ]?(\d{{1,2}})[-_ ]?(\d{{4}})", re.IGNORECASE),
-    # May2026 · May_2026 · May 2026 (month name + year, no day)
-    re.compile(rf"({_MONTHS})[a-z]*[-_ ]?(\d{{4}})", re.IGNORECASE),
+    # May2026 · May_2026 · May 2026 (month name + year, no day). Year widened
+    # to 2-4 digits (2026-07-12, QUANT founder-inbox evidence:
+    # "Monthly_Portfolio_Feb26.xlsx" — a 2-digit year, same class of gap as
+    # TATA's DD/MM/YY sheet-banner fix in tasks.mf) — detect_period_from_filename
+    # below widens a captured 2-digit year to the 2000s.
+    re.compile(rf"({_MONTHS})[a-z]*[-_ ]?(\d{{2,4}})", re.IGNORECASE),
 )
+
+# QUANT (2026-07-12): "Portfolio_30042026.xlsx" / "Portfolio_Debt_31052026.xlsx"
+# — real founder-inbox filenames, an 8-digit DDMMYYYY block with NO
+# separator and NO month name at all. None of the _FILENAME_PERIOD_RES
+# patterns above can match this shape (every one anchors on a month NAME).
+# Lookaround guards keep this from matching part of a longer digit run
+# (e.g. a 9+ digit code); date() itself rejects an invalid day/month.
+_DDMMYYYY_RE = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)")
 
 
 def detect_period_from_filename(filename: str) -> date | None:
@@ -398,6 +443,8 @@ def detect_period_from_filename(filename: str) -> date | None:
             groups = m.groups()
             month_str = next(g for g in groups if g and g[0].isalpha())
             year_str = groups[-1]
+            if len(year_str) == 2:
+                year_str = str(2000 + int(year_str))
             try:
                 parsed = datetime.strptime(f"01-{month_str[:3]}-{year_str}", "%d-%b-%Y")
             except ValueError:
@@ -405,6 +452,14 @@ def detect_period_from_filename(filename: str) -> date | None:
             candidate = parsed.date().replace(day=1)
             if 2000 <= candidate.year and candidate <= max_month:
                 return candidate
+    for m in _DDMMYYYY_RE.finditer(filename):
+        _dd, mm, yyyy = m.groups()
+        try:
+            candidate = date(int(yyyy), int(mm), 1)
+        except ValueError:
+            continue
+        if 2000 <= candidate.year and candidate <= max_month:
+            return candidate
     return None
 
 
@@ -464,6 +519,25 @@ def detect_amc_and_parse(
         hinted = detect_amc(amc_hint)
         if hinted:
             amc_name = hinted
+            if not rows:
+                # NIPPON (2026-07-12): _parse_sebi_xlsx has AMC-SPECIFIC layout
+                # logic (its multi-sheet "Index" code->scheme-name map, gated
+                # on `amc_name == "NIPPON"` exactly) — real evidence: 6
+                # "NIMF-..." files (no "nippon"/"nimf" substring the OLD
+                # keyword set recognized) sat correctly hinted in
+                # incoming/NIPPON/, but the parse-with-"UNKNOWN" pass above
+                # never activates that logic, so it silently returned 0
+                # rows; the scheme-name fallback above then never runs
+                # either (no rows to read a name from), and the ALREADY-
+                # COMPUTED empty `rows` was returned as-is even after the
+                # hint correctly resolved amc_name — landing
+                # amc_or_period_undetectable despite amc_name being known.
+                # Re-parsing with the now-known real AMC name is required
+                # whenever the hint resolves a name the first pass didn't
+                # have; only runs on this rare (hint-rescued, empty-rows)
+                # path, so it's cheap, and correct for any future AMC whose
+                # parser branches on amc_name the same way NIPPON's does.
+                rows = _parse_sebi_xlsx(data, amc_name)
         else:
             logger.info("manual_ingest: unknown AMC subfolder hint=%r — ignoring", amc_hint)
 

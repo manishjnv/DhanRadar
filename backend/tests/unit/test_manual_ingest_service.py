@@ -234,6 +234,92 @@ def test_detect_amc_and_parse_ignores_unknown_hint():
     assert amc_name is None
 
 
+def test_detect_amc_matches_nimf_filename():
+    """Nippon's own real filenames — "NIMF-MONTHLY-PORTFOLIO-30-Jun-26.xls" —
+    carry no "nippon" substring at all, only the abbreviation "NIMF"."""
+    assert detect_amc("NIMF-MONTHLY-PORTFOLIO-30-Jun-26.xls") == "NIPPON"
+    assert detect_amc("NIMF-FORTNIGHTLY-PORTFOLIO-15-June-26.xls") == "NIPPON"
+
+
+def test_detect_period_from_filename_nimf_day_month_year_shapes():
+    """Real Nippon filenames put the DAY before the month name ("30-Jun-26",
+    reversed from the DD-Mon-YYYY patterns' own day-first assumption) with a
+    2-digit year — none of the day-anchored patterns match this shape, but
+    the widened month+2-digit-year pattern (added for QUANT's "Feb26") still
+    finds "Jun-26" / "June-26" / "May-26" as a plain substring match,
+    ignoring the leading day it doesn't require."""
+    assert detect_period_from_filename("NIMF-MONTHLY-PORTFOLIO-30-Jun-26.xls") == date(2026, 6, 1)
+    assert detect_period_from_filename("NIMF-FORTNIGHTLY-PORTFOLIO-15-June-26.xls") == date(
+        2026, 6, 1
+    )
+    assert detect_period_from_filename("NIMF-FORTNIGHTLY-PORTFOLIO-31-May-26.xls") == date(
+        2026, 5, 1
+    )
+
+
+def _build_nippon_index_style_xlsx() -> bytes:
+    """NIPPON's real May-2026+ multi-sheet format: an "Index" sheet maps a
+    short 2-5 letter CODE to the real scheme name; every OTHER sheet is
+    named by that bare code and carries NO scheme-name banner text of its
+    own anywhere — the scheme name is ONLY recoverable via the Index-sheet
+    map. `_parse_sebi_xlsx`'s Index-sheet-reading logic is gated on
+    `amc_name == "NIPPON"` exactly (dhanradar/tasks/mf.py) — parsed with any
+    other amc_name (e.g. the "UNKNOWN" placeholder detect_amc_and_parse uses
+    on its first pass) it yields ZERO rows, because the code-sheet's own
+    banner never reveals a real scheme name for the candidate-detection
+    logic to find."""
+    wb = Workbook()
+    idx = wb.active
+    idx.title = "Index"
+    idx.append(["GM", "Nippon India Growth Fund"])
+
+    code_sheet = wb.create_sheet("GM")
+    code_sheet.append(["Portfolio as on 30-Jun-2026"])
+    code_sheet.append(
+        ["Name of the Instrument", "ISIN", "Rating / Industry^", "Quantity", "% to NAV"]
+    )
+    code_sheet.append(["HDFC Bank Ltd", "INE040A01034", "Banks", "1000", "5.00"])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_detect_amc_and_parse_reparses_with_hinted_amc_when_first_pass_empty():
+    """NIPPON (2026-07-12): a filename with NO recognizable AMC keyword
+    ("unbranded_disclosure.xls" — simulates a real "NIMF-..." file BEFORE
+    the "nimf" keyword existed) sitting in a correctly-hinted incoming/NIPPON/
+    folder used to land amc_or_period_undetectable even though the hint
+    resolved amc_name="NIPPON" — because the file was already parsed with
+    the "UNKNOWN" placeholder (yielding 0 rows for NIPPON's Index-sheet
+    format) BEFORE the hint was ever consulted, and that stale empty `rows`
+    was returned as-is. Must now re-parse with the real amc_name once the
+    hint resolves it."""
+    data = _build_nippon_index_style_xlsx()
+
+    amc_name, period, rows = detect_amc_and_parse(
+        data, "unbranded_disclosure.xls", amc_hint="NIPPON"
+    )
+
+    assert amc_name == "NIPPON"
+    assert period == date(2026, 6, 1)
+    assert len(rows) == 1
+    assert rows[0]["scheme_name"] == "Nippon India Growth Fund"
+    assert rows[0]["constituent_isin"] == "INE040A01034"
+
+
+def test_detect_amc_and_parse_does_not_reparse_when_hint_unneeded():
+    """Regression guard: the re-parse-on-hint fix must fire ONLY on the rare
+    hint-rescued-empty-rows path — a normal filename-detected file (rows
+    already non-empty on the first pass) must never trigger a second parse."""
+    data = _build_disclosure_xlsx("HDFC Flexi Cap Fund")
+    amc_name, _period, rows = detect_amc_and_parse(
+        data, "HDFC_May2026_Portfolio.xlsx", amc_hint="SBI"
+    )
+    assert amc_name == "HDFC"
+    assert len(rows) == 3  # unchanged from the plain filename-detection path
+
+
 # ---------------------------------------------------------------------------
 # expand_zip — zip-bomb / abuse guards (contract §1)
 # ---------------------------------------------------------------------------
@@ -503,6 +589,69 @@ def test_quantum_banner_strips_to_bare_scheme_name():
     rows = [r for r in _parse_sebi_xlsx(buf.getvalue(), "QUANTUM") if not r.get("is_total_row")]
     assert rows
     assert rows[0]["scheme_name"] == "Quantum ELSS Tax Saver Fund"
+
+
+# --- Item 4 (2026-07-12): quant Money Managers — real founder-inbox evidence,
+# 84 files in incoming/QUANT/, every monthly portfolio landed
+# amc_or_period_undetectable ("quant" had no keyword, and "quant" is a
+# literal substring of the already-registered "quantum" keyword). -----------
+
+
+def test_detect_amc_matches_quant_never_quantum():
+    """ "quant" must resolve quant MF's OWN real filename/scheme-name/folder
+    forms, and must NEVER match anything that says "quantum" — the exact
+    inverse collision from the QUANTUM test above."""
+    assert detect_amc("quant_Mutual_Fund_Monthly_Portfolio_Jan2026.xlsx") == "QUANT"
+    assert detect_amc("Quant Small Cap Fund") == "QUANT"
+    assert detect_amc("QUANT") == "QUANT"  # folder hint
+
+    assert detect_amc("Quantum Small Cap fund portfolio.xlsx") == "QUANTUM"
+    assert detect_amc("QUANTUM SMALL CAP FUND") == "QUANTUM"
+    assert detect_amc("QUANTUM") == "QUANTUM"  # folder hint
+
+
+def test_quant_resolver_prefix_excludes_quantum_schemes():
+    """mf_funds carries both "Quant Small Cap Fund" and "QUANTUM SMALL CAP
+    FUND" — the default split("_")[0] prefix ("QUANT%") would ILIKE-match
+    BOTH (Quantum literally starts with Quant), silently cross-resolving
+    quant MF's disclosure rows onto Quantum Asset Management's schemes.
+    _amc_scheme_prefixes must return the space-disambiguated override."""
+    from dhanradar.tasks.mf import _amc_scheme_prefixes
+
+    prefixes = _amc_scheme_prefixes("QUANT")
+    assert prefixes == ["Quant %"]
+    # The override itself must be the disambiguator, not a bare brand prefix.
+    assert not any(p in ("QUANT%", "Quant%") for p in prefixes)
+
+
+def test_detect_period_from_filename_quant_observed_shapes():
+    """Real founder-inbox filename shapes (2026-07-12), none matched by the
+    pre-existing patterns (all anchor on a 4-digit year or a month name)."""
+    # 2-digit year directly after the month name, no day.
+    assert detect_period_from_filename("Monthly_Portfolio_Feb26.xlsx") == date(2026, 2, 1)
+    # 8-digit DDMMYYYY, no separator, no month name at all.
+    assert detect_period_from_filename("Portfolio_30042026.xlsx") == date(2026, 4, 1)
+    assert detect_period_from_filename("Portfolio_Debt_31052026.xlsx") == date(2026, 5, 1)
+    # Full month name + hyphen + 4-digit year (already worked; guards the
+    # widened-year regex change didn't regress the plain case).
+    assert detect_period_from_filename("January-2026.xlsx") == date(2026, 1, 1)
+
+
+def test_detect_amc_matches_ilfs_filename_and_folder_hint():
+    """IL&FS Infra Asset Management — 4 real founder-inbox files
+    ("ILFS_DASHBOARD_REPORT_R1 May 2026.xlsx", ...). mf_funds spells the
+    brand "IL&FS" (ampersand); the resolver prefix override must reflect
+    that, not the bare "ILFS%" the default would build."""
+    from dhanradar.tasks.mf import _amc_scheme_prefixes
+
+    assert detect_amc("ILFS_DASHBOARD_REPORT_R1 May 2026.xlsx") == "ILFS"
+    assert detect_amc("ILFS_Portfolio_TransactionReports_June_2026.xlsx") == "ILFS"
+    assert detect_amc("ILFS") == "ILFS"  # folder hint
+    assert detect_period_from_filename("ILFS_DASHBOARD_REPORT_R1 May 2026.xlsx") == date(2026, 5, 1)
+    assert detect_period_from_filename("ILFS_Portfolio_TransactionReports_June_2026.xlsx") == date(
+        2026, 6, 1
+    )
+    assert _amc_scheme_prefixes("ILFS") == ["IL&FS%"]
 
 
 def test_kotak_edelweiss_banner_prefixes_still_strip():
