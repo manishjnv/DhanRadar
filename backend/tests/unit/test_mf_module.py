@@ -1617,6 +1617,230 @@ def test_parse_sebi_xlsx_rejects_section_header_as_scheme_name_midfile():
     assert all(r["scheme_name"] == "SBI Test Multi Asset Fund" for r in rows)
 
 
+# --- SBI monthly-portfolio parse-depth fixes (2026-07-12) --------------------
+# Real June-2026 file (docs/Sample/amc-data/SBI/All-Schemes-Monthly-Portfolio---
+# as-on-30th-June-2026.xlsx, 4,437 rows / 120 schemes): per-scheme weight_pct
+# sum median 96.1%, min 0.81% before these two fixes.
+
+
+def test_parse_sebi_xlsx_sbi_alternative_investment_funds_bare_label_not_new_scheme():
+    """MUST-NOT: "Alternative Investment Funds" is SBI's own SEBI-standard
+    "OTHERS" sub-category label (every debt-ish scheme's mandatory CDMDF
+    line) — the SAME EDELWEISS-class bug (see
+    test_parse_sebi_xlsx_edelweiss_investment_in_fund_label_not_new_scheme
+    below), SBI's own wording. Confirmed real June-2026 file, sheet SFRDF
+    (SBI Floating Rate Debt Fund): whenever a scheme genuinely HOLDS
+    something in this sub-category, the label row prints with NO trailing
+    "NIL NIL" padding, so it's a bare single-cell row — `len(non_empty)==1`
+    won the candidate check unconditionally and "Alternative Investment
+    Funds" contains "fund", clobbering `current_scheme` and silently
+    dropping every real holding after it (confirmed real: 26 rows of
+    interest-rate-swap holdings from MULTIPLE real schemes ended up
+    attributed to a fake scheme literally named "Alternative Investment
+    Funds" instead). Real quoted row text below (byte-for-byte, only the
+    scheme/AMFI codes changed for test isolation)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SCHEME NAME :", "SBI Test Floating Rate Fund", "", "", "", "", ""])
+    ws.append(["", "", "PORTFOLIO STATEMENT AS ON :", "2026-06-30", "", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to AUM",
+            "YTM %",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "705489",
+            "Aditya Birla Housing Finance Ltd.",
+            "INE831R07607",
+            "CRISIL AAA",
+            "3000",
+            "2985.99",
+            "4.43",
+            "7.565",
+        ]
+    )
+    ws.append(["", "", "Total", "", "", "", "2985.99", "4.43", ""])
+    ws.append(["", "", "", "", "", "", "", "", ""])  # blank row — arms pending_scheme_check
+    ws.append(["", "", "Alternative Investment Funds"])  # bare label — NO NIL padding
+    ws.append(
+        [
+            "",
+            "6400002",
+            "Corporate Debt Market Development Fund-A2",
+            "INF0RQ622028",
+            "CDMDF",
+            "4940.353",
+            "586.49",
+            "0.87",
+            "5.51",
+        ]
+    )
+    ws.append(["", "", "Total", "", "", "", "586.49", "0.87", ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 2
+    assert all(r["scheme_name"] == "SBI Test Floating Rate Fund" for r in holdings)
+    assert any(
+        r["constituent_name"] == "Corporate Debt Market Development Fund-A2" for r in holdings
+    )
+
+
+def test_parse_sebi_xlsx_sbi_foreign_securities_bare_label_not_new_scheme():
+    """MUST-NOT: same bug class as the Alternative Investment Funds test
+    above, SBI's "Foreign Securities and /or overseas ETF" EQUITY-section
+    label. Confirmed real June-2026 file, sheet SLMF (SBI Large & Midcap
+    Fund): the label prints bare (no NIL padding) whenever the scheme
+    actually holds a foreign security, and "etf" satisfies the scheme-
+    keyword gate exactly like "fund" does for the AIF case."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SCHEME NAME :", "SBI Test Large Midcap Fund", "", "", "", "", ""])
+    ws.append(["", "", "PORTFOLIO STATEMENT AS ON :", "2026-06-30", "", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry^",
+            "Quantity",
+            "Market value\n(Rs. in Lakhs)",
+            "% to AUM",
+            "YTM %",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "100775",
+            "Lemon Tree Hotels Ltd.",
+            "INE970X01018",
+            "Leisure Services",
+            "4210285",
+            "4911.3",
+            "0.12",
+            "",
+        ]
+    )
+    ws.append(["", "", "Total", "", "", "", "4911.3", "0.12", ""])
+    ws.append(["", "", "", "", "", "", "", "", ""])  # blank row — arms pending_scheme_check
+    ws.append(["", "", "Foreign Securities and /or overseas ETF"])  # bare label — NO NIL padding
+    ws.append(
+        [
+            "",
+            "3000019",
+            "Epam Systems Inc",
+            "US29414B1044",
+            "IT - Services",
+            "299000",
+            "22443.87",
+            "0.55",
+            "",
+        ]
+    )
+    ws.append(["", "", "Total", "", "", "", "22443.87", "0.55", ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+    holdings = [r for r in rows if not r["is_total_row"]]
+
+    assert len(holdings) == 2
+    assert all(r["scheme_name"] == "SBI Test Large Midcap Fund" for r in holdings)
+    assert any(r["constituent_name"] == "Epam Systems Inc" for r in holdings)
+
+
+def test_parse_sebi_xlsx_sbi_long_bse_url_not_mistaken_for_header_row():
+    """MUST-NOT: SBI's ESG-scored schemes add BRSR-disclosure hyperlink
+    columns per holding. Confirmed real June-2026 file, sheet SMEEF (SBI
+    ESG Exclusionary Strategy Fund), Ultratech Cement Ltd. row — one older
+    BSE URL shape,
+    "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=..."
+    (byte-for-byte real text below), coincidentally contains BOTH "name"
+    (inside "Pname=") and "stock" (inside "stockinfo") as bare substrings —
+    an ordinary holding row was misdetected as a NEW header row, wiping
+    col_map and rebuilding it from that row's own garbage cell values,
+    silently dropping every real holding for the rest of the sheet (only
+    11 of 42 equity rows survived, weight_pct sum 51.64% instead of
+    ~100%)."""
+    long_bse_url = (
+        "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname="
+        "\\a3fa3c06-68a4-408b-9d3e-089ebd48d102.pdf"
+    )
+    assert len(long_bse_url) > 60  # the condition this test exercises
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Portfolio Details"
+    ws.append(["", "", "SCHEME NAME :", "SBI Test ESG Fund", "", "", ""])
+    ws.append(["", "", "PORTFOLIO STATEMENT AS ON :", "2026-06-30", "", "", ""])
+    ws.append(["", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "",
+            "Name of the Instrument / Issuer",
+            "ISIN",
+            "Rating / Industry^",
+            "Market value\n(Rs. in Lakhs)",
+            "% to AUM",
+        ]
+    )
+    ws.append(["", "", "", "", "", "", ""])
+    ws.append(
+        [
+            "",
+            "100082",
+            "Ultratech Cement Ltd.",
+            "INE481G01011",
+            "Cement & Cement Products",
+            "14291.31",
+            "2.67",
+            long_bse_url,
+        ]
+    )
+    ws.append(
+        [
+            "",
+            "100280",
+            "TVS Motor Company Ltd.",
+            "INE494B01023",
+            "Automobiles",
+            "13461.73",
+            "2.52",
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    rows = _parse_sebi_xlsx(buf.getvalue(), "SBI")
+
+    assert len(rows) == 2
+    names = {r["constituent_name"] for r in rows}
+    assert names == {"Ultratech Cement Ltd.", "TVS Motor Company Ltd."}
+    assert all(r["scheme_name"] == "SBI Test ESG Fund" for r in rows)
+
+
 # --- Item 5 (2026-07-12): EDELWEISS constituent parse depth -------------------
 # Real May-2026 EDELWEISS monthly portfolio file (manual-ingest inbox,
 # 2,840 raw rows) pads a blank row between EVERY asset-class sub-table within
