@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import enum
 import io
+import re
 from dataclasses import fields
 from datetime import date
 
@@ -25,10 +26,10 @@ from dhanradar.tasks.mf import (
     _drop_over_covered_funds,
     _extract_sebi_row,
     _fetch_parse_upsert_files,
-    _fiscal_year_str,
     _normalize_fraction_weight_groups,
     _parse_sebi_xlsx,
     _pick_canonical_plan_isin,
+    _process_amc_paginated_query,
     parsed_to_snapshot_holdings,
 )
 
@@ -2155,16 +2156,147 @@ def test_parse_sebi_xlsx_motilal_oswal_back_to_index_banner_not_scheme_name():
     assert rows[0]["scheme_name"] == "Motilal Oswal Nifty 50 ETF"
 
 
-# --- B90: CANARA_ROBECO fiscal-year helper ------------------------------------
-def test_fiscal_year_str_april_start_same_calendar_year():
-    """India FY starts April 1 — a date in April+ of year Y is inside FY Y-(Y+1)."""
-    assert _fiscal_year_str(date(2026, 5, 31)) == "2026-27"
-    assert _fiscal_year_str(date(2026, 4, 1)) == "2026-27"
+# --- B103 (2026-07-12): CANARA_ROBECO paginated-query discovery re-fix ------
+# Real page fixtures below are TRIMMED excerpts of the live discovery page's
+# rendered HTML (captured 2026-07-12) — genuine filenames/paths, just with
+# most of the surrounding markup stripped for test-file size.
+_CANARA_PAGE1_HTML = """
+<div class="documents-listing">
+  <a href="https://www.canararobeco.com/wp-content/uploads/2026/07/MI-CR-June-26.xlsx">MI</a>
+  <a href="https://www.canararobeco.com/wp-content/uploads/2026/07/GB-CR-June-26.xlsx">GB</a>
+</div>
+<div class="custom-pagination">
+  <a class="active" href="...&amp;pagination=1">1</a>
+  <a href="...&amp;pagination=2">2</a>
+</div>
+"""
+_CANARA_PAGE2_HTML = """
+<div class="documents-listing">
+  <a href="https://www.canararobeco.com/wp-content/uploads/2026/07/LI-CR-June-26.xlsx">LI</a>
+</div>
+"""
+_CANARA_PAGE3_EMPTY_HTML = (
+    '<div class="form-container-right-card-pdf"><p>No documents found.</p></div>'
+)
 
 
-def test_fiscal_year_str_jan_mar_belongs_to_prior_calendar_years_fy():
-    """A date in Jan-Mar of year Y is still inside the FY that started April
-    of year Y-1."""
-    assert _fiscal_year_str(date(2026, 2, 15)) == "2025-26"
-    assert _fiscal_year_str(date(2026, 3, 31)) == "2025-26"
+class _FakeCanaraResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
 
+    def raise_for_status(self) -> None:
+        pass
+
+
+class _FakeCanaraClient:
+    """Records every requested URL + header so the test can assert the FIXED
+    param shape (filteryear/filtermonth/pagination — NOT the old, wrong
+    `searchyear` fiscal-year param) and serves canned pages by pagination #."""
+
+    def __init__(self, pages: dict[int, str]) -> None:
+        self.pages = pages
+        self.requested_urls: list[str] = []
+        self.requested_headers: list[dict] = []
+
+    async def get(self, url, headers=None):  # noqa: ANN001 — test double
+        self.requested_urls.append(url)
+        self.requested_headers.append(headers or {})
+        m = re.search(r"pagination=(\d+)", url)
+        page_num = int(m.group(1)) if m else 1
+        return _FakeCanaraResponse(self.pages.get(page_num, _CANARA_PAGE3_EMPTY_HTML))
+
+
+async def test_process_amc_paginated_query_uses_filteryear_filtermonth_not_searchyear(monkeypatch):
+    """B103 root cause: the old template also sent a fiscal-year `searchyear`
+    param the site's current filter widget never sets, which made the
+    listing return zero documents. The fixed template/function must request
+    only `filteryear`/`filtermonth`/`pagination`."""
+    client = _FakeCanaraClient({1: _CANARA_PAGE1_HTML, 2: _CANARA_PAGE2_HTML})
+    url_template = (
+        "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/"
+        "scheme-monthly-portfolio/?filteryear={year}&filtermonth={month:02d}&pagination={page}"
+    )
+
+    captured: dict = {}
+
+    async def _fake_fetch_parse_upsert(client_, amc_name, file_urls, **kwargs):
+        captured["file_urls"] = file_urls
+        return len(file_urls) * 10, 0
+
+    monkeypatch.setattr("dhanradar.tasks.mf._fetch_parse_upsert_files", _fake_fetch_parse_upsert)
+
+    total_rows, _ = await _process_amc_paginated_query(client, "CANARA_ROBECO", url_template)
+
+    assert total_rows == 30  # 3 files (2 page1 + 1 page2) * 10
+    assert all("searchyear=" not in u for u in client.requested_urls)
+    assert all("filteryear=" in u and "filtermonth=" in u for u in client.requested_urls)
+    # Discovery GET uses a browser-shaped UA (WAF blocks the honest UA) —
+    # every request the fake client saw must carry it.
+    assert all("Mozilla" in h.get("User-Agent", "") for h in client.requested_headers)
+    assert len(captured["file_urls"]) == 3
+
+
+async def test_process_amc_paginated_query_stops_pagination_when_no_new_links(monkeypatch):
+    """Page 3 (and beyond) returns no new .xlsx links -> the page loop must
+    stop instead of walking all 20 hard-cap pages."""
+    client = _FakeCanaraClient({1: _CANARA_PAGE1_HTML, 2: _CANARA_PAGE2_HTML})
+    url_template = (
+        "https://www.canararobeco.com/documents/statutory-disclosures/scheme-dashboard/"
+        "scheme-monthly-portfolio/?filteryear={year}&filtermonth={month:02d}&pagination={page}"
+    )
+
+    async def _fake_fetch_parse_upsert(client_, amc_name, file_urls, **kwargs):
+        return 0, 0
+
+    monkeypatch.setattr("dhanradar.tasks.mf._fetch_parse_upsert_files", _fake_fetch_parse_upsert)
+
+    await _process_amc_paginated_query(client, "CANARA_ROBECO", url_template)
+
+    # 3 requests for the matching month (page1, page2, page3-empty-breaks) —
+    # never the full 20-page hard cap.
+    assert len(client.requested_urls) == 3
+
+
+# --- B103 (2026-07-12): NAVI download Referer hardening ----------------------
+async def test_fetch_parse_upsert_files_sends_referer_when_provided():
+    """NAVI's production CDN 403 could not be reproduced locally (see
+    _process_amc_nonce_api docstring), so the defensive `referer` param must
+    at minimum actually reach the request when a caller supplies one."""
+    buf = io.BytesIO()
+    Workbook().save(buf)  # empty-but-real xlsx — _parse_sebi_xlsx must not choke on it
+    client = _FakeConstituentFetchClient(buf.getvalue())
+    captured_headers: list[dict] = []
+    orig_get = client.get
+
+    async def _get_capture(url, headers=None):
+        captured_headers.append(headers or {})
+        return await orig_get(url, headers=headers)
+
+    client.get = _get_capture  # type: ignore[method-assign]
+
+    navi_referer = "https://navi.com/mutual-fund/downloads/portfolio"
+    await _fetch_parse_upsert_files(
+        client, "NAVI", ["https://public-assets.prod.navi-tech.in/x.xlsx"], referer=navi_referer
+    )
+
+    assert captured_headers[0]["Referer"] == navi_referer
+
+
+async def test_fetch_parse_upsert_files_omits_referer_by_default():
+    """Every other AMC (MOTILAL_OSWAL, CANARA_ROBECO, ...) must see UNCHANGED
+    behaviour — no Referer header when the caller doesn't pass one."""
+    buf = io.BytesIO()
+    Workbook().save(buf)
+    client = _FakeConstituentFetchClient(buf.getvalue())
+    captured_headers: list[dict] = []
+    orig_get = client.get
+
+    async def _get_capture(url, headers=None):
+        captured_headers.append(headers or {})
+        return await orig_get(url, headers=headers)
+
+    client.get = _get_capture  # type: ignore[method-assign]
+
+    await _fetch_parse_upsert_files(client, "MOTILAL_OSWAL", ["https://example.com/x.xlsx"])
+
+    assert "Referer" not in captured_headers[0]
