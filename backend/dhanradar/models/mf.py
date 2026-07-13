@@ -297,6 +297,38 @@ class MfCategoryStats(Base):
     )
 
 
+class MfWatchlistItem(Base):
+    """Per-user fund watchlist entry (fund-detail hero star / /mf/watchlist).
+
+    Stores only (user_id, isin) — display data joins client-side from fund.head.
+    Owner-scoped: RLS-enforced (db_security PERSONAL_TABLES/RLS_ENFORCED, 0079).
+    """
+
+    __tablename__ = "mf_watchlist_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "isin", name="uq_mf_watchlist_user_isin"),
+        Index("ix_mf_watchlist_items_user", "user_id"),
+        _SCHEMA,
+    )
+    # Same B85 rationale as MfPortfolio below: created_at is RETURNING-fetched at
+    # flush so handlers never need a post-commit refresh (which would re-SELECT
+    # under the reset RLS GUC → 0 rows → 500).
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfPortfolio(Base):
     """Named portfolio container — one per Free user, unlimited for Plus."""
 

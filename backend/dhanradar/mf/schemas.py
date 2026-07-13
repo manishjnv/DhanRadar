@@ -27,6 +27,17 @@ class PortfolioListResponse(BaseModel):
     portfolios: list[PortfolioSummary]
 
 
+class WatchlistItemOut(BaseModel):
+    """One watchlist entry — isin only; display data joins client-side from fund.head."""
+
+    isin: str
+    created_at: str
+
+
+class WatchlistResponse(BaseModel):
+    items: list[WatchlistItemOut]
+
+
 class PortfolioLatestResponse(BaseModel):
     """Returned by GET /mf/portfolio/latest — lets the frontend navigate to the
     user's most recent report without the user supplying or re-uploading a CAS."""

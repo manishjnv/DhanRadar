@@ -36,7 +36,48 @@ import {
   CompareTray, StickyBar,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
-import { useWatchlist } from '@/features/mf/watchlist';
+import { useWatchlist, type WatchlistEntry } from '@/hooks/useWatchlist';
+import { useFundDetail } from '@/features/mf/api';
+import { EDU_LABELS } from '@/lib/displayLabel';
+
+// Rich saved-fund card — real facts from fund.head; null facts are omitted,
+// never fabricated. Label renders as the educational WORD only (non-neg #1/#2).
+function WatchlistFundCard({ entry, onRemove }: { entry: WatchlistEntry; onRemove: () => void }) {
+  const { data: head, isLoading } = useFundDetail(entry.isin);
+
+  const displayName = head?.fund_name_short ?? head?.scheme_name ?? (entry.name || entry.isin);
+  const category = head?.category ?? head?.sebi_category ?? entry.category;
+  const labelWord = head?.verb_label ? EDU_LABELS[head.verb_label] : null;
+
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-2xl border border-line bg-surface p-3.5">
+      <div className="min-w-0">
+        <Link href={`/mf/fund/${entry.isin}`} className="text-small font-semibold text-ink transition-colors hover:text-royal">{displayName}</Link>
+        {category && <div className="text-caption text-ink-muted">{category}</div>}
+        {isLoading && !head && <div className="text-caption text-ink-faint">loading facts…</div>}
+        {head && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-secondary">
+            {head.nav_latest != null && (
+              <span>NAV ₹{head.nav_latest.toFixed(2)}{head.nav_date ? ` (as of ${head.nav_date})` : ''}</span>
+            )}
+            {head.return_1y_pct != null && <span>1Y return {head.return_1y_pct.toFixed(1)}%</span>}
+            {head.return_3y_pct != null && <span>3Y return {head.return_3y_pct.toFixed(1)}%</span>}
+            {labelWord && <span>DhanRadar educational read: <span className="font-medium text-ink">{labelWord}</span></span>}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="shrink-0 rounded p-1 text-lg text-amber transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+        aria-label={`Remove ${displayName} from watchlist`}
+        title="Remove from watchlist"
+      >
+        ★
+      </button>
+    </div>
+  );
+}
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
 function WatchlistSkeleton() {
@@ -129,21 +170,7 @@ function WatchlistView() {
                 <p className="mb-2 text-caption font-semibold text-ink-secondary">Your saved funds ({saved.length})</p>
                 <div className="flex flex-col gap-2">
                   {saved.map((e) => (
-                    <div key={e.isin} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-3.5">
-                      <div className="min-w-0">
-                        <Link href={`/mf/fund/${e.isin}`} className="text-small font-semibold text-ink transition-colors hover:text-royal">{e.name}</Link>
-                        {e.category && <div className="text-caption text-ink-muted">{e.category}</div>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggleSaved(e)}
-                        className="shrink-0 rounded p-1 text-lg text-amber transition-opacity hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
-                        aria-label={`Remove ${e.name} from watchlist`}
-                        title="Remove from watchlist"
-                      >
-                        ★
-                      </button>
-                    </div>
+                    <WatchlistFundCard key={e.isin} entry={e} onRemove={() => toggleSaved(e)} />
                   ))}
                 </div>
               </div>

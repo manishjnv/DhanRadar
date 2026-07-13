@@ -18,7 +18,7 @@ import {
   VAL, VAL_VERDICT, CHANGES, ALTS, AI_INSIGHTS, FAQ, STICKY, SIPDATA, SIP_AMOUNTS,
   SIP_DURATIONS, fmtCr, toStrength,
 } from './sampleData';
-import type { CompareFund } from './sampleData';
+import type { CompareFund, Row } from './sampleData';
 import {
   SoWhat, RichText, Panel, WinChip, Dot, CompareTable, ScoreboardRows, HeatTable, CTA,
 } from './ui';
@@ -201,11 +201,19 @@ export function MoodSection() {
 }
 
 // ── S7 — Performance center ──────────────────────────────────────────────────
-export function PerformanceSection() {
+export function PerformanceSection({ rows = PERF, funds, live = false }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean }) {
   return (
     <Panel>
-      <CompareTable rows={PERF} firstCol="Period" showCategory />
-      <SoWhat><RichText text="**So what:** Quant leads on raw 3Y/5Y returns, but Bandhan is close behind with a far smoother ride. Over 1Y all three beat the category — small-caps have been in form." /></SoWhat>
+      <CompareTable rows={rows} firstCol="Period" showCategory={!live} funds={funds} />
+      <SoWhat>
+        <RichText
+          text={
+            live
+              ? '**So what:** Period returns are factual point-in-time figures — read them alongside risk and cost, never in isolation. Past performance does not indicate future returns.'
+              : '**So what:** Quant leads on raw 3Y/5Y returns, but Bandhan is close behind with a far smoother ride. Over 1Y all three beat the category — small-caps have been in form.'
+          }
+        />
+      </SoWhat>
     </Panel>
   );
 }
@@ -290,12 +298,26 @@ function MultiRankChart() {
   );
 }
 
-export function RankingSection() {
+export function RankingSection({ rows = RANKT, funds, live = false }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean }) {
   return (
     <Panel>
-      <CompareTable rows={RANKT} firstCol="Metric" />
-      <MultiRankChart />
-      <SoWhat><RichText text="**So what:** **Bandhan** has the most consistent ranking (always top 4). **Quant** is the best improver. **Nippon** is the best long-term performer." /></SoWhat>
+      <CompareTable rows={rows} firstCol="Metric" funds={funds} />
+      {live ? (
+        <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-center text-caption text-ink-muted">
+          Rank trend chart appears here as rank history builds.
+        </div>
+      ) : (
+        <MultiRankChart />
+      )}
+      <SoWhat>
+        <RichText
+          text={
+            live
+              ? '**So what:** Category rank is a factual position within the SEBI category — a snapshot that moves over time, not a projection.'
+              : '**So what:** **Bandhan** has the most consistent ranking (always top 4). **Quant** is the best improver. **Nippon** is the best long-term performer.'
+          }
+        />
+      </SoWhat>
     </Panel>
   );
 }
@@ -419,24 +441,36 @@ export function AmcSection() {
 }
 
 // ── S17 — Cost comparison + cost-vis bars ────────────────────────────────────
-export function CostSection() {
-  const cmax = Math.max(...COST_VIS.map(([, v]) => v));
+export function CostSection({ rows = COST, vis = COST_VIS, funds, live = false }: { rows?: Row[]; vis?: [string, number, string][]; funds?: CompareFund[]; live?: boolean }) {
+  const cmax = vis.length ? Math.max(...vis.map(([, v]) => v)) : 0;
   return (
     <Panel>
-      <CompareTable rows={COST} firstCol="Metric" />
-      <div className="mt-4.5 mb-1.5 text-small font-semibold text-ink-secondary" style={{ marginTop: 18 }}>💸 Hidden cost on ₹10 L — total fees paid</div>
-      <div className="mt-3.5">
-        {COST_VIS.map(([n, v, c]) => (
-          <div key={n} className="mb-3 flex items-center gap-3">
-            <span className="flex w-[110px] shrink-0 items-center gap-1.5 text-small font-semibold sm:w-[120px]"><Dot color={c} size={9} />{n}</span>
-            <div className="relative h-[30px] flex-1 overflow-hidden rounded-lg bg-surface-2">
-              <span className="flex h-full items-center justify-end rounded-lg pr-2.5 font-mono text-caption font-bold text-white" style={{ width: `${(v / cmax) * 100}%`, background: c }}>₹{v.toFixed(1)} L</span>
-            </div>
+      <CompareTable rows={rows} firstCol="Metric" funds={funds} />
+      {vis.length > 0 && (
+        <>
+          <div className="mt-4.5 mb-1.5 text-small font-semibold text-ink-secondary" style={{ marginTop: 18 }}>💸 Hidden cost on ₹10 L — total fees paid</div>
+          <div className="mt-3.5">
+            {vis.map(([n, v, c]) => (
+              <div key={n} className="mb-3 flex items-center gap-3">
+                <span className="flex w-[110px] shrink-0 items-center gap-1.5 text-small font-semibold sm:w-[120px]"><Dot color={c} size={9} />{n}</span>
+                <div className="relative h-[30px] flex-1 overflow-hidden rounded-lg bg-surface-2">
+                  <span className="flex h-full items-center justify-end rounded-lg pr-2.5 font-mono text-caption font-bold text-white" style={{ width: `${(v / cmax) * 100}%`, background: c }}>₹{v.toFixed(1)} L</span>
+                </div>
+              </div>
+            ))}
+            <div className="mt-1 text-caption text-ink-muted">Total fees on a ₹10 L lump-sum held 15 years (at similar returns).</div>
           </div>
-        ))}
-        <div className="mt-1 text-caption text-ink-muted">Total fees on a ₹10 L lump-sum held 15 years (at similar returns).</div>
-      </div>
-      <SoWhat><RichText text="**So what:** Over 15 years, Bandhan's lower expense ratio works out to roughly **₹2.1 lakh** less in fees than Quant on a ₹10 L investment — money that stays compounding for you." /></SoWhat>
+        </>
+      )}
+      <SoWhat>
+        <RichText
+          text={
+            live
+              ? '**So what:** A lower expense ratio compounds in your favour over long holding periods — cost is one of the few things about a fund known in advance.'
+              : "**So what:** Over 15 years, Bandhan's lower expense ratio works out to roughly **₹2.1 lakh** less in fees than Quant on a ₹10 L investment — money that stays compounding for you."
+          }
+        />
+      </SoWhat>
     </Panel>
   );
 }
