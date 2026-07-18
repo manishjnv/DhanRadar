@@ -73,6 +73,7 @@ export const queryKeys = {
     fundSip:            (isin: string, amount: number, years: number) =>
                           ['mf', 'fund-sip', isin, amount, years] as const,
     fundEvents:         (isin: string) => ['mf', 'fund-events', isin] as const,
+    watchlist:          () => ['mf', 'watchlist'] as const,
     fundComparison:     (isin: string, window: string, benchmarkKey: string | null) =>
                           ['mf', 'fund-comparison', isin, window, benchmarkKey] as const,
   },

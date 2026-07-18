@@ -43,6 +43,8 @@ from fastapi import (
     status,
 )
 from sqlalchemy import func, select
+from sqlalchemy import text as sa_text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
@@ -67,9 +69,11 @@ from dhanradar.mf.schemas import (
     PortfolioReport,
     PortfolioSummary,
     SnapshotHistoryItem,
+    WatchlistItemOut,
+    WatchlistResponse,
 )
 from dhanradar.models.auth import UserActivityLog
-from dhanradar.models.mf import MfCasJob, MfPortfolio
+from dhanradar.models.mf import MfCasJob, MfPortfolio, MfWatchlistItem
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
@@ -231,6 +235,114 @@ async def delete_portfolio(
     await allow_ledger_purge(db)
     await db.delete(portfolio)
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Watchlist (0079) — add/remove are idempotent; RLS owner_isolation backstops
+# the WHERE user_id scoping on every statement.
+# ---------------------------------------------------------------------------
+
+# Sanity cap so a client loop can't grow a user's list without bound.
+_WATCHLIST_MAX_ITEMS = 200
+
+
+def _valid_isin(isin: str) -> str:
+    """Normalize + shape-check an ISIN path param (12 alphanumerics). 422 otherwise."""
+    isin = isin.strip().upper()
+    # isascii() first: str.isalnum() alone admits non-ASCII digits/letters, and
+    # real ISO 6166 ISINs are ASCII-only (adversarial review 2026-07-13 #2).
+    if len(isin) != 12 or not isin.isascii() or not isin.isalnum():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid_isin"
+        )
+    return isin
+
+
+@router.get("/watchlist", response_model=WatchlistResponse)
+async def get_watchlist(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> WatchlistResponse:
+    """Return the caller's watchlist, oldest first (IDOR: WHERE user_id==caller)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    rows = (
+        (
+            await db.execute(
+                select(MfWatchlistItem)
+                .where(MfWatchlistItem.user_id == uuid.UUID(user.user_id))
+                .order_by(MfWatchlistItem.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return WatchlistResponse(
+        items=[
+            WatchlistItemOut(isin=r.isin, created_at=r.created_at.isoformat()) for r in rows
+        ]
+    )
+
+
+@router.put("/watchlist/{isin}", status_code=status.HTTP_204_NO_CONTENT)
+async def add_watchlist_item(
+    isin: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> None:
+    """Idempotent add (PUT): ON CONFLICT DO NOTHING on (user_id, isin)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    isin = _valid_isin(isin)
+    uid = uuid.UUID(user.user_id)
+
+    # Per-user xact advisory lock serializes concurrent PUTs so the count-then-
+    # insert cap can't be blown past by a burst (adversarial review 2026-07-13 #1).
+    # hashtext collisions only serialize an occasional other user — harmless.
+    await db.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:uid))"), {"uid": str(uid)})
+
+    count = (
+        await db.execute(
+            select(func.count()).where(MfWatchlistItem.user_id == uid)
+        )
+    ).scalar_one()
+    if count >= _WATCHLIST_MAX_ITEMS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="watchlist_full"
+        )
+
+    await db.execute(
+        pg_insert(MfWatchlistItem)
+        .values(user_id=uid, isin=isin)
+        .on_conflict_do_nothing(constraint="uq_mf_watchlist_user_isin")
+    )
+    await db.commit()
+
+
+@router.delete("/watchlist/{isin}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_watchlist_item(
+    isin: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> None:
+    """Idempotent remove — deleting an absent row is still 204."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    isin = _valid_isin(isin)
+    row = (
+        await db.execute(
+            select(MfWatchlistItem).where(
+                MfWatchlistItem.user_id == uuid.UUID(user.user_id),
+                MfWatchlistItem.isin == isin,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------

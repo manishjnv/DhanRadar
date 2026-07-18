@@ -16,7 +16,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { useWatchlist } from '@/features/mf/watchlist';
+import { useWatchlist } from '@/hooks/useWatchlist';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import { MoodGauge } from '@/components/mood/MoodGauge';

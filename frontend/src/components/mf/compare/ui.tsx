@@ -103,11 +103,13 @@ export function CompareTable({
   firstCol = 'Metric',
   showCategory = false,
   verdict,
+  funds = FUNDS,
 }: {
   rows: Row[];
   firstCol?: string;
   showCategory?: boolean;
   verdict?: [string, string][];
+  funds?: CompareFund[];
 }) {
   return (
     <div className="-mx-1 overflow-x-auto">
@@ -115,7 +117,7 @@ export function CompareTable({
         <thead>
           <tr>
             <th className="border-b-2 border-line px-3 py-2.5 text-left font-mono text-[11px] font-bold uppercase tracking-[0.04em] text-ink-muted">{firstCol}</th>
-            {FUNDS.map((f) => (
+            {funds.map((f) => (
               <th key={f.key} className="border-b-2 border-line px-3 py-2.5 text-center font-mono text-[11px] font-bold uppercase tracking-[0.04em] text-ink-muted">
                 <span className="inline-flex items-center gap-1.5"><Dot color={f.color} size={8} />{f.short}</span>
               </th>
