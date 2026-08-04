@@ -1035,6 +1035,28 @@ def scan_incoming_folder() -> str:
         return "failed"
 
 
+# RCA 2026-08-04: a bulk re-download wave archived 344k duplicate copies into
+# processed/ (149 GB → disk 100%). Pure duplicates are now deleted (canonical
+# bytes already live content-addressed in store/), and processed/failed are
+# pruned to a bounded retention window on every scan.
+ARCHIVE_RETENTION_DAYS = 30
+
+
+def _prune_archives(*dirs: Path) -> int:
+    """Delete archive files older than ARCHIVE_RETENTION_DAYS. Returns count."""
+    cutoff = datetime.now(UTC).timestamp() - ARCHIVE_RETENTION_DAYS * 86400
+    n = 0
+    for d in dirs:
+        for f in d.iterdir():
+            try:
+                if f.is_file() and f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+                    n += 1
+            except OSError:  # vanished mid-scan / transient FS error — skip
+                continue
+    return n
+
+
 def _unique_dest(dest_dir: Path, name: str) -> Path:
     """Avoid clobbering a same-named file already moved into processed/failed."""
     dest = dest_dir / name
@@ -1105,14 +1127,24 @@ async def _scan_incoming_pipeline() -> str:
                 n_ok += 1
 
         all_unsupported = (not extracted) or all(r.status == "unsupported" for _n, r in extracted)
-        dest_dir = failed_dir if all_unsupported else processed_dir
+        all_duplicate = bool(extracted) and all(r.status == "duplicate" for _n, r in extracted)
         try:
-            # Flat processed/failed dirs — subfolders are never mirrored.
-            shutil.move(str(path), str(_unique_dest(dest_dir, path.name)))
+            if all_duplicate:
+                # Every member is already in the content-addressed store/ —
+                # archiving another copy is what filled the disk (RCA 2026-08-04).
+                path.unlink(missing_ok=True)
+            else:
+                dest_dir = failed_dir if all_unsupported else processed_dir
+                # Flat processed/failed dirs — subfolders are never mirrored.
+                shutil.move(str(path), str(_unique_dest(dest_dir, path.name)))
         except OSError:
-            logger.warning("manual_ingest: could not move %s to %s", path.name, dest_dir)
+            logger.warning("manual_ingest: could not move/remove %s", path.name)
 
-    return f"scanned: ok={n_ok} dup={n_dup} unsupported={n_bad} zip_skipped={n_skipped}"
+    n_pruned = _prune_archives(processed_dir, failed_dir)
+    return (
+        f"scanned: ok={n_ok} dup={n_dup} unsupported={n_bad} "
+        f"zip_skipped={n_skipped} pruned={n_pruned}"
+    )
 
 
 # ---------------------------------------------------------------------------
