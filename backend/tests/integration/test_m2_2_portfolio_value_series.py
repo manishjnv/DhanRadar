@@ -14,7 +14,7 @@ Mirrors test_c1_c2_portfolio_concepts.py (the proven C-wave pattern).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -159,8 +159,17 @@ async def _seed_user(db_session, email: str) -> str:
     return uid
 
 
-async def _seed_portfolio(db_session, uid: str, isin: str = "INF209K01QP2") -> str:
-    """Seed a portfolio with one holding (5 units, invested 900, NAV 200 @ 2026-06-30).
+def _days_ago(n: int) -> date:
+    """Relative NAV dates for the day-change tests — load_day_change's NAV lookup is
+    bounded to the last _NAV_STALENESS_DAYS (ADR-0039), so hardcoded calendar dates
+    rot: they were green in CI until the wall-clock crossed the cutoff (2026-08-04)."""
+    return date.today() - timedelta(days=n)
+
+
+async def _seed_portfolio(
+    db_session, uid: str, isin: str = "INF209K01QP2", nav_date: date = date(2026, 6, 30)
+) -> str:
+    """Seed a portfolio with one holding (5 units, invested 900, NAV 200 @ nav_date).
 
     Each test MUST pass its own unique `isin`: mf_nav_history is shared across tests in the
     session-scoped DB and seeded with ON CONFLICT DO NOTHING, so a reused ISIN accumulates NAV
@@ -186,7 +195,7 @@ async def _seed_portfolio(db_session, uid: str, isin: str = "INF209K01QP2") -> s
             "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 200.0)"
             " ON CONFLICT (isin, nav_date) DO NOTHING"
         ),
-        {"i": isin, "d": date(2026, 6, 30)},
+        {"i": isin, "d": nav_date},
     )
     await db_session.execute(
         text(
@@ -194,7 +203,7 @@ async def _seed_portfolio(db_session, uid: str, isin: str = "INF209K01QP2") -> s
             " invested_amount, avg_cost_nav, source, as_of_date)"
             " VALUES (:u, :p, :i, '999', 5.0, 900.0, 180.0, 'cas', :d)"
         ),
-        {"u": uid, "p": str(pid), "i": isin, "d": date(2026, 6, 30)},
+        {"u": uid, "p": str(pid), "i": isin, "d": nav_date},
     )
     await db_session.commit()
     return str(pid)
@@ -281,8 +290,8 @@ async def test_summary_day_change_two_nav_dates(db_session, rls_async_client):
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-two@test.dev")
-    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC002")  # 5 units, NAV 200.0 @ 2026-06-30
-    await _seed_nav(db_session, "INFTESTDC002", date(2026, 7, 1), 210.0)
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC002", nav_date=_days_ago(1))
+    await _seed_nav(db_session, "INFTESTDC002", _days_ago(0), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -302,9 +311,9 @@ async def test_summary_day_change_latest_minus_previous(db_session, rls_async_cl
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-three@test.dev")
-    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC003")  # NAV 200.0 @ 2026-06-30 (oldest)
-    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 1), 204.0)  # previous
-    await _seed_nav(db_session, "INFTESTDC003", date(2026, 7, 2), 209.0)  # latest
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC003", nav_date=_days_ago(2))  # oldest
+    await _seed_nav(db_session, "INFTESTDC003", _days_ago(1), 204.0)  # previous
+    await _seed_nav(db_session, "INFTESTDC003", _days_ago(0), 209.0)  # latest
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -324,7 +333,7 @@ async def test_summary_day_change_immune_to_flow(db_session, rls_async_client):
     from tests.conftest import make_auth_headers
 
     uid = await _seed_user(db_session, "vs-flow@test.dev")
-    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC004")  # 5 units, NAV 200.0 @ 2026-06-30
+    pid = await _seed_portfolio(db_session, uid, isin="INFTESTDC004", nav_date=_days_ago(1))
     # Simulate a same-day flow: invested_amount jumps far out of proportion to the NAV move.
     await db_session.execute(
         text(
@@ -334,7 +343,7 @@ async def test_summary_day_change_immune_to_flow(db_session, rls_async_client):
         {"p": pid},
     )
     await db_session.commit()
-    await _seed_nav(db_session, "INFTESTDC004", date(2026, 7, 1), 210.0)
+    await _seed_nav(db_session, "INFTESTDC004", _days_ago(0), 210.0)
     token, _ = create_access_token(uid)
 
     r = await rls_async_client.get(
@@ -375,8 +384,8 @@ async def test_summary_day_change_anchors_to_freshest_date_excludes_stale_fund(
             ),
             {"i": isin, "n": name},
         )
-    # Fresh fund: latest NAV lands 2026-07-01 (after an earlier 2026-06-30 row).
-    for d, nav in ((date(2026, 6, 30), 100.0), (date(2026, 7, 1), 110.0)):
+    # Fresh fund: latest NAV lands yesterday (after a day-before row).
+    for d, nav in ((_days_ago(2), 100.0), (_days_ago(1), 110.0)):
         await db_session.execute(
             text(
                 "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, :n)"
@@ -385,7 +394,7 @@ async def test_summary_day_change_anchors_to_freshest_date_excludes_stale_fund(
             {"i": fresh_isin, "d": d, "n": nav},
         )
     # Stale fund: 2 NAV dates of its own, but BOTH behind the fresh fund's latest date.
-    for d, nav in ((date(2026, 6, 28), 50.0), (date(2026, 6, 29), 55.0)):
+    for d, nav in ((_days_ago(4), 50.0), (_days_ago(3), 55.0)):
         await db_session.execute(
             text(
                 "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, :n)"
@@ -413,7 +422,7 @@ async def test_summary_day_change_anchors_to_freshest_date_excludes_stale_fund(
     # Only the fresh fund contributes: 10 x (110 - 100) = 100. If the stale fund's
     # 10 x (55 - 50) = 50 leaked in, this would be 150 — a two-day blend.
     assert d["day_change"] == pytest.approx(100.0, abs=0.01)
-    assert d["day_change_as_of"] == "2026-07-01"
+    assert d["day_change_as_of"] == _days_ago(1).isoformat()
 
     r2 = await rls_async_client.get(
         f"/api/v1/portfolio/{pid}/holdings", headers=make_auth_headers(access_token=token)

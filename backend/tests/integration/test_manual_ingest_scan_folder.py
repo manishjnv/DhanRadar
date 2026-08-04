@@ -158,6 +158,49 @@ async def test_zip_with_zero_eligible_members_moves_to_failed_and_logs_unsupport
     assert any("unsupported" in rec.message for rec in caplog.records)
 
 
+# ---------------------------------------------------------------------------
+# Duplicate handling + retention (RCA 2026-08-04 — 149 GB processed/ blowup)
+# ---------------------------------------------------------------------------
+
+
+async def test_all_duplicate_file_is_deleted_not_archived(tmp_path, _captured_delay):
+    """Re-ingesting identical bytes must NOT grow processed/ — the duplicate
+    copy is deleted (canonical bytes already live in store/)."""
+    incoming = _incoming(tmp_path)
+    (incoming / "dup_disclosure.xlsx").write_bytes(b"same-bytes-every-time")
+    result = await mi._scan_incoming_pipeline()
+    assert "ok=1" in result
+    assert (tmp_path / "processed" / "dup_disclosure.xlsx").exists()
+
+    (incoming / "dup_disclosure.xlsx").write_bytes(b"same-bytes-every-time")
+    result = await mi._scan_incoming_pipeline()
+    assert "dup=1" in result
+    assert not (incoming / "dup_disclosure.xlsx").exists()  # consumed
+    # exactly the ONE original archive copy — no _<uuid8> sibling
+    copies = list((tmp_path / "processed").glob("dup_disclosure*"))
+    assert len(copies) == 1
+
+
+async def test_prune_removes_archive_files_past_retention(tmp_path, _captured_delay):
+    import os
+    import time
+
+    processed = tmp_path / "processed"
+    processed.mkdir(parents=True)
+    old = processed / "ancient.xlsx"
+    old.write_bytes(b"old-archive")
+    stale = time.time() - (mi.ARCHIVE_RETENTION_DAYS + 1) * 86400
+    os.utime(old, (stale, stale))
+    fresh = processed / "recent.xlsx"
+    fresh.write_bytes(b"fresh-archive")
+
+    result = await mi._scan_incoming_pipeline()
+
+    assert "pruned=1" in result
+    assert not old.exists()
+    assert fresh.exists()
+
+
 async def test_zip_in_amc_subfolder_gets_amc_hint(tmp_path, _captured_delay):
     incoming = _incoming(tmp_path)
     sub = incoming / "SBI"

@@ -10,7 +10,7 @@ the A3 boundary, under RLS — mirrors test_m2_2_portfolio_value_series.py's PG 
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -18,6 +18,11 @@ from sqlalchemy import text
 from dhanradar.models.auth import User
 
 pytestmark = pytest.mark.integration
+
+# Relative dates — load_day_change's NAV lookup is bounded to _NAV_STALENESS_DAYS
+# (ADR-0039), so hardcoded calendar dates rot once the wall clock passes the cutoff.
+_D_PREV = date.today() - timedelta(days=1)
+_D_LATEST = date.today()
 
 
 async def _seed_user(db_session, email: str) -> str:
@@ -60,7 +65,7 @@ async def _seed_mixed_portfolio(db_session, uid: str) -> str:
                 "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 100.0)"
                 " ON CONFLICT (isin, nav_date) DO NOTHING"
             ),
-            {"i": isin, "d": date(2026, 6, 30)},
+            {"i": isin, "d": _D_PREV},
         )
         await db_session.execute(
             text(
@@ -74,7 +79,7 @@ async def _seed_mixed_portfolio(db_session, uid: str) -> str:
                 "i": isin,
                 "un": units,
                 "inv": invested,
-                "d": date(2026, 6, 30),
+                "d": _D_PREV,
             },
         )
     await db_session.commit()
@@ -127,7 +132,7 @@ async def test_day_change_ignores_zero_and_negative_holdings(db_session, rls_asy
                 "INSERT INTO mf.mf_nav_history (isin, nav_date, nav) VALUES (:i, :d, 110.0)"
                 " ON CONFLICT (isin, nav_date) DO NOTHING"
             ),
-            {"i": isin, "d": date(2026, 7, 1)},
+            {"i": isin, "d": _D_LATEST},
         )
     await db_session.commit()
     token, _ = create_access_token(uid)
