@@ -105,8 +105,16 @@ async def create_session(
         result="success" if ok else f"failed_http_{result['http_status']}",
     )
     if not ok:
-        # surface BSE's own error body (no secrets in it); do NOT retry
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail={"bse": result["body"]})
+        # Surface BSE's own error body (no secrets in a failed-login response);
+        # string detail so the UI shows it verbatim. Logged too — do NOT retry.
+        body_str = str(result["body"])[:400]
+        logger.warning(
+            "bse_uat login failed: http=%s body=%s", result["http_status"], body_str
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=f"BSE login not accepted (http {result['http_status']}): {body_str}",
+        )
     await get_redis().set(_TOKEN_KEY, token, ex=_TOKEN_TTL)
     return {"ok": True, "member_code": _MEMBER, "expires_in": _TOKEN_TTL}
 
