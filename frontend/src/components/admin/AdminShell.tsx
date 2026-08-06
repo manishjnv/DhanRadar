@@ -20,6 +20,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Landmark,
   LayoutDashboard,
   Activity,
   Users,
@@ -65,6 +66,7 @@ const ADMIN_NAV: AdminNavItem[] = [
   { href: '/admin/support',    label: 'Support',           icon: HeadphonesIcon,  live: true  },
   { href: '/admin/analytics',  label: 'Analytics',         icon: TrendingUp,      live: true  },
   { href: '/admin/notifications', label: 'Notifications',  icon: Bell,            live: true  },
+  { href: '/admin/bse-uat',    label: 'BSE UAT Console',   icon: Landmark,        live: true  },
 ];
 
 const AIOPS_NAV: AdminNavItem[] = [
