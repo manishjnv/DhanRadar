@@ -92,7 +92,10 @@ async def create_session(
 ) -> dict[str, Any]:
     """ONE login attempt against BSE UAT; caches BSE's outbound token in Redis (not our session auth)."""
     result = await _bse_post("login", {"username": _USERNAME, "password": body.password})
-    token = ((result["body"].get("data") or {}).get("access_token")) if isinstance(result["body"], dict) else None
+    # BSE nests the token either at data.access_token or data.data.access_token
+    # (both shapes observed on the demo tenant — see bse-api.md login recipe).
+    d = (result["body"].get("data") or {}) if isinstance(result["body"], dict) else {}
+    token = d.get("access_token") or (d.get("data") or {}).get("access_token")
     ok = result["http_status"] == 200 and bool(token)
     await record_admin_action(
         admin_id=str(admin.user_id),
