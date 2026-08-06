@@ -57,8 +57,21 @@ def _base_url() -> str:
     return base
 
 
+# BSE's WAF serves an HTML block page (HTTP 200!) to python user-agents —
+# a real browser UA is mandatory (bse-api.md recipe; same class as the
+# Resend/Cloudflare 1010 gotcha in infra-notes).
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+
 async def _bse_post(path: str, body: dict[str, Any], token: str | None = None) -> dict[str, Any]:
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _BROWSER_UA,
+    }
     if token:
         # BSE's OWN outbound auth scheme — not our inbound cookie auth (non-neg #5 governs inbound)
         headers["Authorization"] = f"Bearer {token}"  # nosec — outbound to BSE, not our session auth
@@ -91,7 +104,8 @@ async def create_session(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
 ) -> dict[str, Any]:
     """ONE login attempt against BSE UAT; caches BSE's outbound token in Redis (not our session auth)."""
-    result = await _bse_post("login", {"username": _USERNAME, "password": body.password})
+    # Login body is data-wrapped like every other BSE call (bse-api.md recipe).
+    result = await _bse_post("login", {"data": {"username": _USERNAME, "password": body.password}})
     # BSE nests the token either at data.access_token or data.data.access_token
     # (both shapes observed on the demo tenant — see bse-api.md login recipe).
     d = (result["body"].get("data") or {}) if isinstance(result["body"], dict) else {}
