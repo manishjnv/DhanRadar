@@ -87,12 +87,12 @@ async def test_phase3_endpoints_404_for_non_admin(async_client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. GET /admin/flags — admin gets 200 with exactly 3 env-sourced flags
+# 3. GET /admin/flags — admin gets 200 with exactly 4 env-sourced flags
 # ---------------------------------------------------------------------------
 
 
 async def test_admin_get_flags_returns_three(async_client, monkeypatch):
-    """Admin → 200; exactly three read-only env flags returned."""
+    """Admin → 200; exactly four read-only env flags returned."""
     from dhanradar.config import settings
     from tests.conftest import make_auth_headers
 
@@ -105,12 +105,13 @@ async def test_admin_get_flags_returns_three(async_client, monkeypatch):
     data = r.json()
 
     assert isinstance(data, list)
-    assert len(data) == 3, f"Expected 3 flags, got {len(data)}: {data}"
+    assert len(data) == 4, f"Expected 4 flags, got {len(data)}: {data}"
 
     keys = {f["key"] for f in data}
     assert "AUDIT_ARCHIVE_ENABLED" in keys
     assert "COOKIE_SECURE" in keys
     assert "DPDP_CONSENT_ENFORCED" in keys
+    assert "BSE_ORDERS_ENABLED" in keys
 
     for flag in data:
         assert flag["mutable"] is False, f"Flag {flag['key']} must not be mutable"
@@ -137,6 +138,7 @@ async def test_admin_flags_values_match_settings(async_client, monkeypatch):
     assert by_key["AUDIT_ARCHIVE_ENABLED"]["value"] == settings.AUDIT_ARCHIVE_ENABLED
     assert by_key["COOKIE_SECURE"]["value"] == settings.COOKIE_SECURE
     assert by_key["DPDP_CONSENT_ENFORCED"]["value"] == settings.DPDP_CONSENT_ENFORCED
+    assert by_key["BSE_ORDERS_ENABLED"]["value"] == settings.BSE_ORDERS_ENABLED
 
 
 # ---------------------------------------------------------------------------
