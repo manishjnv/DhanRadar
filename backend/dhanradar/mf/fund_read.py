@@ -151,6 +151,16 @@ async def get_fund_head(session: AsyncSession, isin: str) -> dict | None:
         # that disclosure file's own as_of_month, not the ingestion run time.
         "aum_crore": float(fund.aum_crore) if fund.aum_crore is not None else None,
         "aum_as_of": fund.aum_as_of.isoformat() if fund.aum_as_of else None,
+        # Transaction-page facts (2026-08-07): columns existed, never exposed.
+        # min_* are BSE-enrich-sourced (mostly NULL until prod enrich runs);
+        # exit_load + riskometer come from the SSD/disclosure sweep.
+        "min_lumpsum_amount": (
+            float(fund.min_lumpsum_amount) if fund.min_lumpsum_amount is not None else None
+        ),
+        "min_sip_amount": float(fund.min_sip_amount) if fund.min_sip_amount is not None else None,
+        "exit_load_pct": float(fund.exit_load_pct) if fund.exit_load_pct is not None else None,
+        "exit_load_days": fund.exit_load_days,
+        "risk_o_meter": fund.risk_o_meter,
     }
 
 
