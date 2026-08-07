@@ -17,6 +17,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { useWatchlist } from '@/hooks/useWatchlist';
+import { useMe } from '@/features/auth/api';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 import { FundAvatar } from '@/components/mf/explore/FundAvatar';
 import { MoodGauge } from '@/components/mood/MoodGauge';
@@ -121,6 +122,8 @@ export function HeroSection({ head, factors, isin }: { head: FundHead; factors: 
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
   const { has, toggle } = useWatchlist();
+  const { data: me } = useMe();
+  const investHref = me?.is_admin ? `/mf/invest/${isin}` : undefined;
   const saved = has(isin);
   const pills = [
     ...(head.planOption.length ? [head.planOption.join(' · ')] : []),
@@ -171,8 +174,8 @@ export function HeroSection({ head, factors, isin }: { head: FundHead; factors: 
 
           {/* actions — Invest / SIP labels kept per founder call */}
           <div className="mt-4 flex flex-wrap gap-2">
-            <CTA kind="invest">⚡ Invest Now</CTA>
-            <CTA kind="sip">＋ Start SIP</CTA>
+            <CTA kind="invest" href={investHref}>⚡ Invest Now</CTA>
+            <CTA kind="sip" href={investHref ? `${investHref}?type=sip` : undefined}>＋ Start SIP</CTA>
             <CTA kind="ghost" href={`/mf/compare?funds=${isin}&category=${encodeURIComponent(head.category)}`}>⇄ Compare</CTA>
             <CTA
               kind="ghost"
@@ -249,8 +252,22 @@ function CTA({ kind, href, onClick, pressed, children }: {
   children: React.ReactNode;
 }) {
   const base = 'inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 whitespace-nowrap';
-  if (kind === 'invest') return <button className={cn(base, 'bg-royal text-white hover:opacity-90')} style={{ background: 'var(--dr-royal,#1E5EFF)' }}>{children}</button>;
-  if (kind === 'sip') return <button className={cn(base, 'bg-white hover:bg-surface-2')} style={{ color: 'var(--dr-navy,#0B1F3A)' }}>{children}</button>;
+  // Invest/SIP become links only when a target is passed (admin-gated /mf/invest
+  // wizard while BSE prod approval is pending); otherwise the inert buttons stay.
+  if (kind === 'invest') {
+    const cls = cn(base, 'bg-royal text-white hover:opacity-90');
+    const sty = { background: 'var(--dr-royal,#1E5EFF)' };
+    return href
+      ? <Link href={href} className={cls} style={sty}>{children}</Link>
+      : <button className={cls} style={sty}>{children}</button>;
+  }
+  if (kind === 'sip') {
+    const cls = cn(base, 'bg-white hover:bg-surface-2');
+    const sty = { color: 'var(--dr-navy,#0B1F3A)' };
+    return href
+      ? <Link href={href} className={cls} style={sty}>{children}</Link>
+      : <button className={cls} style={sty}>{children}</button>;
+  }
   const ghost = cn(base, 'border border-white/20 bg-white/10 text-white hover:bg-white/20');
   if (href) return <Link href={href} className={ghost}>{children}</Link>;
   return <button onClick={onClick} aria-pressed={pressed} className={ghost}>{children}</button>;
@@ -483,9 +500,11 @@ export function ScoreBreakdownSection({ factors }: { factors: FundFactors }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // S22 — STICKY DECISION BAR (educational label, not advisory)
 // ═══════════════════════════════════════════════════════════════════════════
-export function StickyBar({ head, topReason }: { head: FundHead; topReason: string | null }) {
+export function StickyBar({ head, topReason, isin }: { head: FundHead; topReason: string | null; isin?: string }) {
   const labelWord = LABEL_DISPLAY[head.label];
   const bandWord = head.band ? BAND_WORD[head.band] : null;
+  const { data: me } = useMe();
+  const investHref = me?.is_admin && isin ? `/mf/invest/${isin}` : undefined;
   // Per-category-class static educational copy (§5 row 22, W1). "Top reason" is now
   // the real first contributing signal (W2, §10.1); falls back to a generic
   // educational line when there isn't one yet (unranked / insufficient_data).
@@ -521,8 +540,17 @@ export function StickyBar({ head, topReason }: { head: FundHead; topReason: stri
           ))}
         </div>
         <div className="flex shrink-0 gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-small font-semibold text-white" style={{ background: 'var(--dr-royal,#1E5EFF)' }}>⚡ Invest</button>
-          <button className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-small font-semibold" style={{ color: 'var(--dr-navy,#0B1F3A)' }}>＋ SIP</button>
+          {investHref ? (
+            <>
+              <Link href={investHref} className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-small font-semibold text-white" style={{ background: 'var(--dr-royal,#1E5EFF)' }}>⚡ Invest</Link>
+              <Link href={`${investHref}?type=sip`} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-small font-semibold" style={{ color: 'var(--dr-navy,#0B1F3A)' }}>＋ SIP</Link>
+            </>
+          ) : (
+            <>
+              <button className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-small font-semibold text-white" style={{ background: 'var(--dr-royal,#1E5EFF)' }}>⚡ Invest</button>
+              <button className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-small font-semibold" style={{ color: 'var(--dr-navy,#0B1F3A)' }}>＋ SIP</button>
+            </>
+          )}
         </div>
       </div>
     </div>

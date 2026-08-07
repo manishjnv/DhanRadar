@@ -287,7 +287,7 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
       </div>
 
       {/* S22 — Sticky decision bar */}
-      <StickyBar head={head} topReason={topReason} />
+      <StickyBar head={head} topReason={topReason} isin={isin} />
     </div>
   );
 }

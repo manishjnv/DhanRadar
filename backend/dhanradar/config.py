@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     BSE_PRIVATE_KEY_FILE: str = ""
     # uat | production — selects which BSE base URL the outbound client targets.
     BSE_ENV: str = "uat"
+    # Post-BSE-prod-approval flip: opens /mf/invest to non-admin users. OFF =
+    # the transaction flow stays admin-only against UAT (never inferred from
+    # BSE_ENV — same fail-closed pattern as BSE_ENRICH_ENABLED).
+    BSE_ORDERS_ENABLED: bool = False
     BSE_API_BASE_URL_UAT: str = "https://starmfv2demo.bseindia.com/api/"
     BSE_API_BASE_URL_PROD: str = "https://v2.bsestarmf.in/api/"
     # Scheme-master enrichment (tasks/bse_enrich.py) — dedicated arm flag, NOT

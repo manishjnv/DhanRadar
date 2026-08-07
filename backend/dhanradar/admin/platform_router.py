@@ -90,6 +90,10 @@ _FLAG_DESCRIPTIONS: dict[str, str] = {
     "DPDP_CONSENT_ENFORCED": (
         "Enforce DPDP consent check on data-processing routes"
     ),
+    "BSE_ORDERS_ENABLED": (
+        "Open the /mf/invest transaction flow to non-admin users (post-BSE prod "
+        "approval flip; while off the flow stays admin-only UAT)"
+    ),
 }
 
 
@@ -97,7 +101,7 @@ _FLAG_DESCRIPTIONS: dict[str, str] = {
 async def list_feature_flags(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
 ) -> list[FeatureFlagResponse]:
-    """Return the three operator-visible boolean settings.
+    """Return the operator-visible boolean settings.
 
     All flags are env-sourced and read-only — no runtime toggle is available.
     ``mutable`` is always False; the operator must restart the service to change
@@ -107,6 +111,7 @@ async def list_feature_flags(
         "AUDIT_ARCHIVE_ENABLED": settings.AUDIT_ARCHIVE_ENABLED,
         "COOKIE_SECURE": settings.COOKIE_SECURE,
         "DPDP_CONSENT_ENFORCED": settings.DPDP_CONSENT_ENFORCED,
+        "BSE_ORDERS_ENABLED": settings.BSE_ORDERS_ENABLED,
     }
     return [
         FeatureFlagResponse(
