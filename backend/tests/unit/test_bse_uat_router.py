@@ -57,3 +57,12 @@ def test_extract_order_id_shapes():
     assert _extract_order_id({"data": {"orders": [{}]}}) is None
     assert _extract_order_id({"status": "failed"}) is None
     assert _extract_order_id("not a dict") is None
+    # the REAL order_new shape observed live 2026-08-07 (wizard first order)
+    assert (
+        _extract_order_id(
+            {"status": "success",
+             "data": {"items": [{"mem_ord_ref_id": "1786301538", "id": 5001212827, "status": "success"}]},
+             "messages": []}
+        )
+        == "5001212827"
+    )
