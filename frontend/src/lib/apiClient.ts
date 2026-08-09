@@ -122,6 +122,18 @@ async function request<T>(
     throw new ApiError(problem);
   }
 
+  // Admin surfaces answer 404 (surface-hiding) instead of 401 for an expired
+  // session, so the silent-refresh above never fires and a mid-flow token
+  // expiry strands the user (RCA 2026-08-10: invest-wizard Confirm 404'd after
+  // the access token lapsed between steps). Mirror the 401 path once; a
+  // genuinely missing admin resource still 404s after the retried request.
+  if (res.status === 404 && !isRetry && (path === '/admin' || path.startsWith('/admin/'))) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return request<T>(method, path, body, true);
+    }
+  }
+
   if (!res.ok) {
     const problem = await parseProblem(res);
     throw new ApiError(problem);
