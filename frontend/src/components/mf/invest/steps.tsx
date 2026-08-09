@@ -31,6 +31,7 @@ import {
   STAGE_DEFS,
   matchesStage,
   toneFromUccValue,
+  uccField,
   formatINR,
   formatINRLakh,
   ordinalSuffix,
@@ -268,8 +269,8 @@ export function Step2({
           <div>
             {UCC_FIELDS.map((f) => {
               const isBank = f.key === 'bank_account';
-              const tone = toneFromUccValue(uccStatusObject[f.key], isBank);
-              const statusLabel = tone === 'ok' ? 'Verified' : tone === 'warn' ? 'Attention' : tone === 'bad' ? 'Failed' : 'Unknown';
+              const tone = toneFromUccValue(uccField(uccStatusObject, f.key), isBank);
+              const statusLabel = tone === 'ok' ? 'Verified' : tone === 'warn' ? 'Attention' : tone === 'bad' ? 'Failed' : 'Pending';
               return (
                 <VerificationRow
                   key={f.key}
