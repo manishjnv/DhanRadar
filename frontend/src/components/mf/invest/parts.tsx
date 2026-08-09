@@ -811,6 +811,20 @@ export function matchesStage(row: BseWebhookEvent, stage: string): boolean {
   return `${row.event ?? ''} ${row.event_type ?? ''}`.toLowerCase().includes(stage);
 }
 
+/** Live UAT shape (verified 2026-08-10): kyc_status / pan_verification /
+ * nominee_2fa live INSIDE ucc_status_object.holders[0]; bank_account and
+ * transaction_ready sit at the top level. Resolve top-level first, then
+ * fall back to the first holder. */
+export function uccField(so: Record<string, unknown>, key: string): unknown {
+  if (so[key] !== undefined) return so[key];
+  const holders = so['holders'];
+  if (Array.isArray(holders) && holders[0] && typeof holders[0] === 'object') {
+    return (holders[0] as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+
 /** ucc_status_object's per-field shape varies — search its JSON text for
  * TRUE/FALSE rather than assuming a fixed schema (task spec instruction). */
 export function toneFromUccValue(v: unknown, isBank: boolean): RowTone {
