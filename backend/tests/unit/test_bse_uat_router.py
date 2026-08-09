@@ -39,6 +39,19 @@ def test_parse_2fa_page_reversed_meta_attrs_and_dedup():
     assert lids == ["11111111-2222-4333-8444-555555555555"]
 
 
+def test_parse_2fa_page_unquoted_meta_content_s2_order_page():
+    """The s2 ORDER page emits the meta with an UNQUOTED content value
+    (live 2026-08-10): <meta name="jwt-token" content=eyJ... />"""
+    html = (
+        '<meta name="jwt-token" content=eyJhbGciOiJIUzI1NiJ9.payload.sig />'
+        "<div data-id=0c5fb0aa-5873-4559-85e5-7bdc11371ab0>"
+        "<div data-id=d917ad3a-dcaf-4255-a34e-11b759b9a6b6>"
+    )
+    jwt, lids = _parse_2fa_page(html)
+    assert jwt == "eyJhbGciOiJIUzI1NiJ9.payload.sig"
+    assert len(lids) == 2
+
+
 def test_parse_2fa_page_missing_returns_none_empty():
     jwt, lids = _parse_2fa_page("<html><body>WAF block page</body></html>")
     assert jwt is None
