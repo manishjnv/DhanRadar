@@ -267,13 +267,15 @@ def _find_url(obj: Any, needle: str) -> str | None:
 def _parse_2fa_page(html: str) -> tuple[str | None, list[str]]:
     """Extract the page jwt + row lids from a BSE 2FA view-object page.
 
-    `data-id` is UNQUOTED in BSE's HTML (data-id=<uuid>); jwt sits in
-    <meta name="jwt-token" content="...">, attribute order not guaranteed.
+    BSE emits UNQUOTED attribute values in these pages: data-id=<uuid>, and on
+    the s2 ORDER page even the meta is unquoted (content=eyJ... /> — live
+    2026-08-10, order 5001213535's page). Accept quoted and bare forms, either
+    attribute order.
     """
     jwt = None
-    m = re.search(r'name=["\']jwt-token["\'][^>]*content=["\']([^"\']+)["\']', html)
+    m = re.search(r'name=["\']?jwt-token["\']?[^>]*?content=["\']?([^"\'\s>]+)', html)
     if not m:
-        m = re.search(r'content=["\']([^"\']+)["\'][^>]*name=["\']jwt-token["\']', html)
+        m = re.search(r'content=["\']?([^"\'\s>]+)["\']?[^>]*?name=["\']?jwt-token', html)
     if m:
         jwt = m.group(1)
     lids = list(dict.fromkeys(re.findall(r"data-id=[\"']?([0-9a-fA-F-]{36})", html)))
