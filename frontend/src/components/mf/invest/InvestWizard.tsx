@@ -522,9 +522,11 @@ function InvestWizardInner({
           )}
         </div>
 
-        {/* desktop rail */}
+        {/* desktop rail — panel + help card share ONE sticky wrapper, else the
+            stuck panel slides over the in-flow card below it on scroll */}
         <aside className="hidden min-[1100px]:block">
-          <div className="sticky top-28 overflow-hidden rounded-lg border border-line shadow-md">
+          <div className="sticky top-28 space-y-4">
+          <div className="overflow-hidden rounded-lg border border-line shadow-md">
             <OrderSummaryPanel
               fund={fund}
               investType={investType}
@@ -534,7 +536,7 @@ function InvestWizardInner({
               orderId={orderId}
             />
           </div>
-          <Card className="mt-4">
+          <Card>
             <CardBody>
               <div className="text-small font-semibold text-ink">Need a hand?</div>
               <p className="mt-1 text-caption text-ink-secondary">
@@ -543,6 +545,7 @@ function InvestWizardInner({
               </p>
             </CardBody>
           </Card>
+          </div>
         </aside>
       </div>
 

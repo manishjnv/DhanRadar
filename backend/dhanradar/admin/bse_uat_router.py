@@ -281,11 +281,22 @@ def _parse_2fa_page(html: str) -> tuple[str | None, list[str]]:
 
 
 def _extract_order_id(body: Any) -> str | None:
-    """order_new/order_get responses nest the id differently across shapes."""
+    """order_new/order_get responses nest the id differently across shapes.
+
+    Live UAT 2026-08-07: order_new returns data.items[0].id (founder's first
+    wizard order 5001212827 was placed but read as a failure before this path
+    was added). order_get returns data.id; docs also show data.orders[0]."""
     if not isinstance(body, dict):
         return None
     d = body.get("data") or {}
-    for candidate in (d, *(d.get("orders") or [] if isinstance(d, dict) else [])):
+    if not isinstance(d, dict):
+        return None
+    candidates: list[Any] = [d]
+    for key in ("items", "orders"):
+        rows = d.get(key)
+        if isinstance(rows, list):
+            candidates.extend(rows)
+    for candidate in candidates:
         if isinstance(candidate, dict):
             for k in ("id", "order_id"):
                 if candidate.get(k):

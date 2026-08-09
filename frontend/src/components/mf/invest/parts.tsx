@@ -232,7 +232,7 @@ export function Stepper({
     // if the header ever exports its own var.
     <nav
       aria-label="Transaction progress"
-      className="sticky top-12 z-20 -mx-4 border-b border-line bg-surface/95 backdrop-blur-sm sm:-mx-6"
+      className="sticky top-12 z-20 -mx-4 border-b border-line bg-surface sm:-mx-6"
     >
       <div className="flex gap-0 overflow-x-auto px-4 sm:px-6">
         {STEP_TITLES.map((title, i) => {
