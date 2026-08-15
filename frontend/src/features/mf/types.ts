@@ -581,3 +581,106 @@ export interface MfReport {
   disclosure: string;
   not_advice: string;
 }
+
+// ---------------------------------------------------------------------------
+// Leaderboard (docs/features/leaderboard-data-backend.md §5) — GET /api/v1/mf/leaderboard
+// A board is ABSENT from `boards` when not yet wired server-side; the section
+// keeps rendering its illustrative preview in that case (never fabricated).
+// No score field exists anywhere in this contract (non-neg #2).
+// ---------------------------------------------------------------------------
+
+/** Generic ranked-fund row shared by most boards. */
+export interface LbFundRow {
+  isin: string;
+  fund_name_short: string | null;
+  scheme_name: string;
+  amc_name: string;
+  sebi_category: string;
+  verb_label: Label;
+  confidence_band: ConfidenceBand;
+  category_rank: number | null;
+  category_total: number | null;
+  rank_delta: number | null;
+  riskometer: string | null;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  return_5y_pct: number | null;
+  expense_ratio_pct: number | null;
+  aum_crore: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown_pct: number | null;
+  /** Board-specific headline value (e.g. AUM-growth % or return-per-cost multiple). */
+  metric_value: number | null;
+  metric_unit: string | null;
+}
+
+/** `label_upgrades` rows — a fund row plus its label transition. */
+export interface LbLabelUpgradeRow extends LbFundRow {
+  label_from: Label;
+  label_to: Label;
+}
+
+/** `champions` rows — per-category winner + runner-up. */
+export interface LbChampionRow {
+  category: string;
+  winner: LbFundRow;
+  /** null when the category has a single ranked scheme (never fabricated). */
+  runner_up: LbFundRow | null;
+  why: string;
+}
+
+/** `category_inflows` rows — category-level AMFI net flow (no per-fund flow source exists). */
+export interface LbCategoryInflowRow {
+  category: string;
+  net_flow_cr: number;
+  period_month: string;
+}
+
+/** `amc_facts` rows — factual AMC aggregates only; no composite AMC score/stars. */
+export interface LbAmcFactRow {
+  amc_name: string;
+  fund_count: number;
+  top_quartile_count: number;
+  /** null when none of the AMC's funds carry an AUM figure yet. */
+  aum_crore: number | null;
+  oldest_launch: string | null;
+  index_fund_count: number;
+}
+
+export interface LeaderboardHero {
+  funds_ranked: number;
+  categories: number;
+  top_fund: LbFundRow | null;
+  trending_category: string | null;
+  live_board_count: number;
+}
+
+export interface LeaderboardBoards {
+  top100?: { title: string; rows: LbFundRow[] };
+  champions?: { title: string; rows: LbChampionRow[] };
+  perf_1y?: { title: string; rows: LbFundRow[] };
+  perf_3y?: { title: string; rows: LbFundRow[] };
+  perf_5y?: { title: string; rows: LbFundRow[] };
+  risk_lowest?: { title: string; rows: LbFundRow[] };
+  risk_drawdown?: { title: string; rows: LbFundRow[] };
+  risk_sharpe?: { title: string; rows: LbFundRow[] };
+  value_ter?: { title: string; rows: LbFundRow[] };
+  value_efficiency?: { title: string; rows: LbFundRow[] };
+  value_index?: { title: string; rows: LbFundRow[] };
+  movers_up?: { title: string; rows: LbFundRow[] };
+  movers_down?: { title: string; rows: LbFundRow[] };
+  label_upgrades?: { title: string; rows: LbLabelUpgradeRow[] };
+  top10_entries?: { title: string; rows: LbFundRow[] };
+  aum_growth?: { title: string; rows: LbFundRow[] };
+  category_inflows?: { title: string; rows: LbCategoryInflowRow[] };
+  amc_facts?: { title: string; rows: LbAmcFactRow[] };
+}
+
+export interface LeaderboardResponse {
+  /** null until the first nightly refresh has ever published boards. */
+  as_of: string | null;
+  hero: LeaderboardHero | null;
+  boards: LeaderboardBoards;
+  disclosure: unknown;
+  not_advice: string;
+}

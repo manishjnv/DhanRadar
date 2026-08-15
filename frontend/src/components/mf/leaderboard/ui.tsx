@@ -16,6 +16,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { toBand, ringColor, riskColor } from './sampleData';
+import { LiveBadge } from '@/components/mf/funddetail/parts';
 
 const BAND_FILL: Record<'high' | 'medium' | 'low', number> = { high: 0.85, medium: 0.55, low: 0.3 };
 
@@ -42,6 +43,20 @@ export function BandRing({ score, size = 30, stroke = 4 }: { score: number; size
     <svg width={size} height={size} aria-hidden="true" style={{ transform: 'rotate(-90deg)' }} className="shrink-0">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={col} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${(circ * frac).toFixed(1)} ${(circ * (1 - frac)).toFixed(1)}`} />
+    </svg>
+  );
+}
+
+// ── Score band ring for LIVE rows — no score input at all, just the band word
+// + a colour already resolved from the educational label (never a number). ──
+export function BandRingLive({ band, color, size = 30, stroke = 4 }: { band: 'high' | 'medium' | 'low'; color: string; size?: number; stroke?: number }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const frac = BAND_FILL[band];
+  return (
+    <svg width={size} height={size} aria-hidden="true" style={{ transform: 'rotate(-90deg)' }} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${(circ * frac).toFixed(1)} ${(circ * (1 - frac)).toFixed(1)}`} />
     </svg>
   );
 }
@@ -195,16 +210,21 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
           <div className="truncate text-small font-bold leading-tight text-ink">{rail.title}</div>
           <div className="truncate text-caption text-ink-muted">{rail.q}</div>
         </div>
+        {rail.live && <LiveBadge className="ml-auto shrink-0" />}
       </div>
-      {rail.rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-b-0">
-          <span className="w-4 shrink-0 font-sans text-xs font-extrabold text-ink-faint">{i + 1}</span>
-          <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
-          <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
-          {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
-          <span className="shrink-0 font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
-        </div>
-      ))}
+      {rail.rows.length === 0 ? (
+        <div className="px-4 py-3 text-caption text-ink-muted">No funds yet</div>
+      ) : (
+        rail.rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-b-0">
+            <span className="w-4 shrink-0 font-sans text-xs font-extrabold text-ink-faint">{i + 1}</span>
+            <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
+            <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
+            {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
+            <span className="shrink-0 font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
+          </div>
+        ))
+      )}
     </div>
   );
 }

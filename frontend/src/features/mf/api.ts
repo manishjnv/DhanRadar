@@ -31,6 +31,7 @@ import type {
   FundEvents,
   FundFit,
   FundComparisonResponse,
+  LeaderboardResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -578,6 +579,25 @@ export function useFundPortfolioFit(portfolioId: string, isin: string) {
     enabled: !!portfolioId && !!isin,
     retry: (count, error) => {
       if (error instanceof ApiError && [401, 404].includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Leaderboard — GET /api/v1/mf/leaderboard (public, no auth).
+// docs/features/leaderboard-data-backend.md §5/§6. One request feeds Hero +
+// every board; sections read `boards.<key>` themselves and fall back to their
+// illustrative sample when a key is absent (endpoint not deployed yet, or that
+// board isn't wired server-side) — same 404-tolerant shape as useFundDetail.
+// ---------------------------------------------------------------------------
+export function useLeaderboard() {
+  return useQuery<LeaderboardResponse>({
+    queryKey: queryKeys.mf.leaderboard(),
+    queryFn: () => api.get<LeaderboardResponse>('/mf/leaderboard'),
+    retry: (count, error) => {
+      if (error instanceof ApiError && FUND_HEAD_SKIP_RETRY.includes(error.problem.status)) return false;
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,

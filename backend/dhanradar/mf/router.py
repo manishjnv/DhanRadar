@@ -39,6 +39,7 @@ from fastapi import (
     Path,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -73,7 +74,7 @@ from dhanradar.mf.schemas import (
     WatchlistResponse,
 )
 from dhanradar.models.auth import UserActivityLog
-from dhanradar.models.mf import MfCasJob, MfPortfolio, MfWatchlistItem
+from dhanradar.models.mf import MfCasJob, MfLeaderboardBoard, MfPortfolio, MfWatchlistItem
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
@@ -979,6 +980,94 @@ async def fund_explorer_list(
         disclosure=DISCLOSURE_BUNDLE,
         not_advice=NOT_ADVICE,
     )
+
+
+# Static display titles for the Phase 1 leaderboard boards (docs/features/
+# leaderboard-data-backend.md §5) — the DB payload carries only `rows`; the title
+# is a display concern of the read path, not stored per-day.
+_LEADERBOARD_BOARD_TITLES: dict[str, str] = {
+    "top100": "DhanRadar Top 100",
+    "champions": "Category Champions",
+    "perf_1y": "Best 1-Year Performers",
+    "perf_3y": "Best 3-Year Performers",
+    "perf_5y": "Best 5-Year Performers",
+    "risk_lowest": "Lowest Risk (Riskometer)",
+    "risk_drawdown": "Smallest Drawdown",
+    "risk_sharpe": "Best Risk-Adjusted (Sharpe)",
+    "value_ter": "Lowest Cost (Expense Ratio)",
+    "value_efficiency": "Best Return per Cost",
+    "value_index": "Cheapest Index Funds",
+    "movers_up": "Biggest Rank Gainers",
+    "movers_down": "Biggest Rank Decliners",
+    "label_upgrades": "Label Upgrades",
+    "top10_entries": "New to the Top 10",
+    "aum_growth": "Fastest AUM Growth",
+    "category_inflows": "Category Inflow Leaders",
+    "amc_facts": "AMC Facts",
+}
+
+
+@router.get("/leaderboard")
+async def leaderboard(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`GET /mf/leaderboard` (Phase 1, docs/features/leaderboard-data-backend.md §5) —
+    the public materialized leaderboard boards, nightly-refreshed by
+    `dhanradar.tasks.mf.leaderboard_refresh` into `mf.mf_leaderboard_boards`.
+
+    Public — no auth, no user data; safe to cache at the edge (5 min). Reads each
+    board_key's own latest row (graceful degradation if one board's nightly build
+    failed while the others succeeded). A board this phase hasn't wired yet is simply
+    absent from `boards` — the frontend keeps rendering its Preview sample (§5). Empty
+    table (before the first nightly run) returns `as_of=None`, `hero=None`, `boards={}`.
+    """
+    from dhanradar.mf.serialization import serialize_leaderboard_response
+    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+
+    # Bounded read: only each board_key's latest row (≤ ~19 rows) — never the whole
+    # history (the table grows ~19 rows/day; task-side 90-day retention caps it too).
+    latest_per_key = (
+        select(
+            MfLeaderboardBoard.board_key.label("bk"),
+            func.max(MfLeaderboardBoard.as_of_date).label("max_date"),
+        )
+        .group_by(MfLeaderboardBoard.board_key)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(MfLeaderboardBoard)
+            .join(
+                latest_per_key,
+                (MfLeaderboardBoard.board_key == latest_per_key.c.bk)
+                & (MfLeaderboardBoard.as_of_date == latest_per_key.c.max_date),
+            )
+            .order_by(MfLeaderboardBoard.as_of_date.desc())
+        )
+    ).scalars().all()
+
+    latest_as_of = rows[0].as_of_date.isoformat() if rows else None
+    latest_by_key: dict[str, MfLeaderboardBoard] = {}
+    for row in rows:
+        latest_by_key.setdefault(row.board_key, row)  # first-seen (DESC order) = latest
+
+    hero_payload = latest_by_key.pop("hero", None)
+    boards_payload = {
+        key: {"title": _LEADERBOARD_BOARD_TITLES.get(key, key), "rows": (row.payload or {}).get("rows", [])}
+        for key, row in latest_by_key.items()
+    }
+
+    response.headers["Cache-Control"] = "public, max-age=300"
+    envelope = serialize_leaderboard_response(
+        as_of=latest_as_of,
+        hero=hero_payload.payload if hero_payload is not None else None,
+        boards=boards_payload,
+    )
+    envelope["disclosure"] = DISCLOSURE_BUNDLE
+    envelope["not_advice"] = NOT_ADVICE
+    return envelope
 
 
 @router.get("/fund/{isin}")

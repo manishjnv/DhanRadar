@@ -165,8 +165,10 @@ def test_metrics_refresh_pipeline_includes_source_run_id():
             if isinstance(func, ast.Attribute) and func.attr == "append":
                 for arg in node.args:
                     if isinstance(arg, ast.Dict):
+                        # k.value not k.s — the deprecated Constant.s alias was
+                        # removed in Python 3.14 (still fine on CI's 3.12).
                         keys = [
-                            k.s if isinstance(k, ast.Constant) else None
+                            k.value if isinstance(k, ast.Constant) else None
                             for k in arg.keys
                         ]
                         if "isin" in keys and "as_of_date" in keys:

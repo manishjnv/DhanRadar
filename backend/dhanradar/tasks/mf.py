@@ -30,7 +30,7 @@ import os
 import re
 import time
 import zipfile
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -57,6 +57,7 @@ from dhanradar.mf.cas import (
     suppress_placeholder_restatements,
 )
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
+from dhanradar.mf.disclosure_parsers import RISKOMETER_BANDS
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
 from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
@@ -3284,6 +3285,717 @@ async def _fund_events_refresh_pipeline() -> str:
         await db.commit()
 
     summary = f"fund_events_refresh: {len(all_events)} events across {len(events_by_isin)} funds"
+    logger.info(summary)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard boards (Phase 1, docs/features/leaderboard-data-backend.md §4/§5).
+#
+# The `_build_leaderboard_*` functions below are PURE / DB-independent — plain
+# dicts/lists in, a board's `rows` list out (mirrors this file's own convention;
+# see the module docstring: "Pure mapping helpers are factored out for unit
+# testing without a worker"). `_leaderboard_refresh_pipeline` is the only piece
+# that touches a session: it loads the raw rows, normalizes them into plain
+# JSON-safe dicts (Decimal -> float, date -> isoformat), calls the builders, and
+# upserts. No score/unified_score field is ever produced here (non-neg #2);
+# mf/serialization.py's leaderboard allowlist is a second, independent guard at
+# the read boundary.
+# ---------------------------------------------------------------------------
+
+_LEADERBOARD_STALE_DAYS = 3
+_LEADERBOARD_TOP_N = 4  # every rail board except top100 caps at 4 rows (§5 contract)
+_LEADERBOARD_INDEX_CATEGORY = "Other Scheme - Index Funds"  # taxonomy.py canonical bucket
+_LEADERBOARD_RISK_RANK: dict[str, int] = {band: i for i, band in enumerate(RISKOMETER_BANDS)}
+_LEADERBOARD_LABEL_RANK: dict[str, int] = {
+    "out_of_form": 0,
+    "off_track": 1,
+    "on_track": 2,
+    "in_form": 3,
+}
+_LEADERBOARD_FUND_FIELDS: tuple[str, ...] = (
+    "isin",
+    "fund_name_short",
+    "scheme_name",
+    "amc_name",
+    "sebi_category",
+    "verb_label",
+    "confidence_band",
+    "category_rank",
+    "category_total",
+    "rank_delta",
+    "riskometer",
+    "return_1y_pct",
+    "return_3y_pct",
+    "return_5y_pct",
+    "expense_ratio_pct",
+    "aum_crore",
+    "sharpe_ratio",
+    "max_drawdown_pct",
+)
+
+
+def _leaderboard_is_stale(latest_date: date, today: date | None = None) -> bool:
+    """True when `latest_date` (mf_fund_ranks' latest as_of_date) is older than
+    `_LEADERBOARD_STALE_DAYS` — the nightly refresh must skip publishing rather than
+    materialize boards off a stale ranking run (design doc §4.1); the endpoint keeps
+    serving the last good document. `today` is injectable for tests; defaults to the
+    real current date."""
+    ref = today if today is not None else date.today()
+    return (ref - latest_date).days > _LEADERBOARD_STALE_DAYS
+
+
+def _leaderboard_scheme_key(fund: dict) -> str:
+    """SCHEME_KEY grouping (models/mf.py, founder rule 2026-07-10) — collapses a
+    scheme's plan/option ISIN variants (Direct/Regular x Growth/IDCW) to one row, the
+    same convention every "how many funds" figure on the platform uses, and the same
+    underlying rule fund_read.get_fund_peers uses to exclude a fund's own other
+    variant from its peers list."""
+    return fund.get("fund_name_short") or fund["isin"]
+
+
+def _dedupe_leaderboard_variants(funds: list[dict], sort_key: Any) -> list[dict]:
+    """Collapse scheme plan/option variants to the single best row per scheme under
+    `sort_key` (ascending = better; ties keep the first-seen row) — so no leaderboard
+    board ever lists the same underlying scheme twice (design doc §10)."""
+    best: dict[str, dict] = {}
+    for f in funds:
+        key = _leaderboard_scheme_key(f)
+        cur = best.get(key)
+        if cur is None or sort_key(f) < sort_key(cur):
+            best[key] = f
+    return list(best.values())
+
+
+def _leaderboard_fund_row(
+    fund: dict, *, metric_value: Any = None, metric_unit: str | None = None
+) -> dict:
+    """Shape one universe entry into the FundRow contract (§5) — exactly the
+    allowlisted field set, nothing else (a score field can never enter this dict)."""
+    row = {k: fund.get(k) for k in _LEADERBOARD_FUND_FIELDS}
+    row["metric_value"] = metric_value
+    row["metric_unit"] = metric_unit
+    return row
+
+
+def _build_leaderboard_top100(funds: list[dict]) -> list[dict]:
+    """top100 (§5, founder decision D1a) — cross-category, ordered by within-category
+    percentile (rank/total) ascending, bigger cohort breaks ties, ISIN alphabetical
+    last (deterministic) — never a persisted global rank (no scoring-engine change)."""
+
+    def _key(f: dict) -> tuple[float, int, str]:
+        return (f["category_rank"] / f["category_total"], -f["category_total"], f["isin"])
+
+    deduped = _dedupe_leaderboard_variants(funds, _key)
+    deduped.sort(key=_key)
+    return [_leaderboard_fund_row(f) for f in deduped[:100]]
+
+
+def _champion_why(winner: dict) -> str:
+    """Category-champion 'why' line — the winner's OWN compliance-approved
+    contributing_signals phrase (scoring/engine/signal_names.py, B58-f1), never a
+    fabricated summary or a number (non-neg #1/#2)."""
+    signals = winner.get("contributing_signals") or []
+    category = winner.get("sebi_category") or "its category"
+    if not signals:
+        return f"Leads {category} this period on category-relative standing."
+    return f"Leads {category}: {signals[0]}."
+
+
+def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
+    """champions (§5) — per sebi_category, rank-1 winner + rank-2 runner-up (post
+    variant-dedup); a category with a single scheme gets a winner and no runner-up
+    (never fabricated) — design doc §10."""
+    by_cat: dict[str, list[dict]] = defaultdict(list)
+    for f in funds:
+        by_cat[f["sebi_category"]].append(f)
+
+    def _key(f: dict) -> int:
+        return f["category_rank"]
+
+    rows = []
+    for cat in sorted(by_cat):
+        deduped = _dedupe_leaderboard_variants(by_cat[cat], _key)
+        deduped.sort(key=_key)
+        if not deduped:
+            continue
+        winner = deduped[0]
+        runner_up = deduped[1] if len(deduped) > 1 else None
+        rows.append(
+            {
+                "category": cat,
+                "winner": _leaderboard_fund_row(winner),
+                "runner_up": _leaderboard_fund_row(runner_up) if runner_up else None,
+                "why": _champion_why(winner),
+            }
+        )
+    return rows
+
+
+def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit: str) -> list[dict]:
+    """perf_1y / perf_3y / perf_5y (§5) — top 4 by the given return column, descending."""
+    candidates = [f for f in funds if f.get(metric_key) is not None]
+
+    def _key(f: dict) -> float:
+        return -f[metric_key]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f[metric_key], metric_unit=metric_unit)
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_risk_lowest(funds: list[dict]) -> list[dict]:
+    """risk_lowest (§5) — ascending SEBI riskometer band (RISKOMETER_BANDS,
+    mf/disclosure_parsers.py — Low ... Very High), volatility ASC tie-break."""
+    candidates = [f for f in funds if f.get("riskometer") in _LEADERBOARD_RISK_RANK]
+
+    def _key(f: dict) -> tuple[int, float]:
+        vol = f.get("volatility_pct")
+        return (_LEADERBOARD_RISK_RANK[f["riskometer"]], vol if vol is not None else float("inf"))
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["riskometer"], metric_unit="riskometer_band")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_risk_drawdown(funds: list[dict]) -> list[dict]:
+    """risk_drawdown (§5) — smallest max_drawdown_pct. The column is stored as a
+    POSITIVE magnitude (mf/signals.py `_max_drawdown_pct`: "as a positive
+    percentage"), so ASC already means "mildest decline" — no sign flip needed."""
+    candidates = [f for f in funds if f.get("max_drawdown_pct") is not None]
+
+    def _key(f: dict) -> float:
+        return f["max_drawdown_pct"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["max_drawdown_pct"], metric_unit="pct_max_drawdown")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_risk_sharpe(funds: list[dict]) -> list[dict]:
+    """risk_sharpe (§5) — highest Sharpe ratio."""
+    candidates = [f for f in funds if f.get("sharpe_ratio") is not None]
+
+    def _key(f: dict) -> float:
+        return -f["sharpe_ratio"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["sharpe_ratio"], metric_unit="sharpe_ratio")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_value_ter(funds: list[dict]) -> list[dict]:
+    """value_ter (§5) — lowest expense ratio (non-null, > 0)."""
+    candidates = [f for f in funds if (f.get("expense_ratio_pct") or 0) > 0]
+
+    def _key(f: dict) -> float:
+        return f["expense_ratio_pct"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["expense_ratio_pct"], metric_unit="pct_ter")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_value_efficiency(funds: list[dict]) -> list[dict]:
+    """value_efficiency (§5) — return_3y_pct / expense_ratio_pct, highest first
+    (both non-null, TER >= 0.05 so a near-zero-TER outlier can't dominate)."""
+    candidates = []
+    for f in funds:
+        ter = f.get("expense_ratio_pct")
+        ret3y = f.get("return_3y_pct")
+        if ter is None or ret3y is None or ter < 0.05:
+            continue
+        candidates.append({**f, "_efficiency": ret3y / ter})
+
+    def _key(f: dict) -> float:
+        return -f["_efficiency"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=round(f["_efficiency"], 2), metric_unit="return_per_ter")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_value_index(funds: list[dict]) -> list[dict]:
+    """value_index (§5) — lowest TER among index funds (sebi_category ==
+    taxonomy.py's canonical "Other Scheme - Index Funds" bucket)."""
+    candidates = [
+        f
+        for f in funds
+        if f.get("sebi_category") == _LEADERBOARD_INDEX_CATEGORY
+        and (f.get("expense_ratio_pct") or 0) > 0
+    ]
+
+    def _key(f: dict) -> float:
+        return f["expense_ratio_pct"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["expense_ratio_pct"], metric_unit="pct_ter")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_movers(
+    funds: list[dict], prev_by_isin: dict[str, dict], *, direction: str
+) -> list[dict]:
+    """movers_up / movers_down (§5) — rank delta between the two latest mf_fund_ranks
+    dates, same category only (a category change makes the ranks incomparable)."""
+    candidates = []
+    for f in funds:
+        prev = prev_by_isin.get(f["isin"])
+        if prev is None or prev["sebi_category"] != f["sebi_category"]:
+            continue
+        delta = prev["rank"] - f["category_rank"]  # positive = moved up (improved)
+        if (direction == "up" and delta > 0) or (direction == "down" and delta < 0):
+            candidates.append({**f, "_rank_delta": delta})
+
+    def _key(f: dict) -> int:
+        return -f["_rank_delta"] if direction == "up" else f["_rank_delta"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["_rank_delta"], metric_unit="rank_delta")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_label_upgrades(funds: list[dict], prev_by_isin: dict[str, dict]) -> list[dict]:
+    """label_upgrades (§5) — verb_label improved between the two latest dates, ranked
+    in_form > on_track > off_track > out_of_form; insufficient_data is ignored on
+    either side (non-neg #4 — no rateable band to compare)."""
+    candidates = []
+    for f in funds:
+        prev = prev_by_isin.get(f["isin"])
+        if prev is None:
+            continue
+        old_label, new_label = prev.get("verb_label"), f["verb_label"]
+        if old_label not in _LEADERBOARD_LABEL_RANK or new_label not in _LEADERBOARD_LABEL_RANK:
+            continue
+        improvement = _LEADERBOARD_LABEL_RANK[new_label] - _LEADERBOARD_LABEL_RANK[old_label]
+        if improvement > 0:
+            candidates.append(
+                {**f, "_label_from": old_label, "_label_to": new_label, "_improvement": improvement}
+            )
+
+    def _key(f: dict) -> tuple[int, str]:
+        return (-f["_improvement"], f["isin"])
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    rows = []
+    for f in deduped[:_LEADERBOARD_TOP_N]:
+        row = _leaderboard_fund_row(f)
+        row["label_from"] = f["_label_from"]
+        row["label_to"] = f["_label_to"]
+        rows.append(row)
+    return rows
+
+
+def _build_leaderboard_top10_entries(funds: list[dict], prev_by_isin: dict[str, dict]) -> list[dict]:
+    """top10_entries (§5) — category rank <= 10 now, was > 10 or absent previously."""
+    candidates = []
+    for f in funds:
+        if f["category_rank"] > 10:
+            continue
+        prev = prev_by_isin.get(f["isin"])
+        prev_rank = (
+            prev["rank"] if prev is not None and prev["sebi_category"] == f["sebi_category"] else None
+        )
+        if prev_rank is not None and prev_rank <= 10:
+            continue
+        candidates.append(f)
+
+    def _key(f: dict) -> tuple[int, str]:
+        return (f["category_rank"], f["isin"])
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [_leaderboard_fund_row(f) for f in deduped[:_LEADERBOARD_TOP_N]]
+
+
+def _build_leaderboard_aum_growth(
+    funds_by_isin: dict[str, dict], aum_pairs: dict[str, tuple[float, float]]
+) -> list[dict]:
+    """aum_growth (§5) — month-over-month % growth from aum_history's two latest
+    as_of_month rows per isin; the base (older) AUM must be >= 100 Cr so a tiny-base
+    fund can't dominate the board on noise."""
+    candidates = []
+    for isin, (latest, prev) in aum_pairs.items():
+        f = funds_by_isin.get(isin)
+        if f is None or prev < 100.0:
+            continue
+        candidates.append({**f, "_growth_pct": (latest - prev) / prev * 100.0})
+
+    def _key(f: dict) -> float:
+        return -f["_growth_pct"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=round(f["_growth_pct"], 2), metric_unit="pct_mom_aum")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_category_inflows(flow_rows: list[dict]) -> list[dict]:
+    """category_inflows (§5, design doc D3 reframe) — latest AMFI period_month,
+    Open-ended schemes only, top 4 by net_flow_cr. Category-level ONLY — fund-level
+    flows don't exist by design (models/mf.py MfCategoryFlows docstring)."""
+    candidates = [r for r in flow_rows if r.get("net_flow_cr") is not None]
+    candidates.sort(key=lambda r: -r["net_flow_cr"])
+    return [
+        {
+            "category": r["scheme_category"],
+            "net_flow_cr": r["net_flow_cr"],
+            "period_month": r["period_month"],
+        }
+        for r in candidates[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_amc_facts(funds: list[dict]) -> list[dict]:
+    """amc_facts (§5) — factual per-AMC aggregate (no composite AMC score, no
+    stars). fund_count/top_quartile_count/index_fund_count are scheme-deduped
+    (SCHEME_KEY, founder rule) so a Direct/Regular pair isn't counted twice;
+    aum_crore SUMS every plan/option variant's OWN AUM (real money, not a duplicate —
+    each variant is a genuinely separate pool of assets)."""
+    by_amc: dict[str, list[dict]] = defaultdict(list)
+    for f in funds:
+        if f.get("amc_name"):
+            by_amc[f["amc_name"]].append(f)
+
+    rows = []
+    for amc, amc_funds in by_amc.items():
+        aum_values = [f["aum_crore"] for f in amc_funds if f.get("aum_crore") is not None]
+        launches = [f["launch_date"] for f in amc_funds if f.get("launch_date") is not None]
+        deduped = _dedupe_leaderboard_variants(amc_funds, lambda f: f["category_rank"])
+        top_quartile_count = sum(
+            1 for f in deduped if f["category_rank"] <= math.ceil(f["category_total"] / 4)
+        )
+        index_fund_count = sum(1 for f in deduped if f["sebi_category"] == _LEADERBOARD_INDEX_CATEGORY)
+        rows.append(
+            {
+                "amc_name": amc,
+                "fund_count": len(deduped),
+                "top_quartile_count": top_quartile_count,
+                "aum_crore": round(sum(aum_values), 2) if aum_values else None,
+                "oldest_launch": min(launches).isoformat() if launches else None,
+                "index_fund_count": index_fund_count,
+            }
+        )
+    rows.sort(key=lambda r: (-r["top_quartile_count"], r["amc_name"]))
+    return rows[:8]
+
+
+def _build_leaderboard_hero(
+    funds: list[dict],
+    prev_by_isin: dict[str, dict],
+    top100_rows: list[dict],
+    live_board_count: int,
+) -> dict:
+    """hero (§5) — the 4 headline KPIs. funds_ranked/categories are scheme-deduped
+    counts (SCHEME_KEY, founder rule — "every user/admin-facing fund count")."""
+    funds_ranked = len({_leaderboard_scheme_key(f) for f in funds})
+    categories = len({f["sebi_category"] for f in funds if f.get("sebi_category")})
+    top_fund = top100_rows[0] if top100_rows else None
+
+    deltas_by_cat: dict[str, list[int]] = defaultdict(list)
+    for f in funds:
+        prev = prev_by_isin.get(f["isin"])
+        if prev is None or prev["sebi_category"] != f["sebi_category"]:
+            continue
+        delta = prev["rank"] - f["category_rank"]
+        if delta > 0:
+            deltas_by_cat[f["sebi_category"]].append(delta)
+    trending_category = (
+        max(deltas_by_cat, key=lambda c: sum(deltas_by_cat[c]) / len(deltas_by_cat[c]))
+        if deltas_by_cat
+        else None
+    )
+
+    return {
+        "funds_ranked": funds_ranked,
+        "categories": categories,
+        "top_fund": top_fund,
+        "trending_category": trending_category,
+        "live_board_count": live_board_count,
+    }
+
+
+@celery_app.task(name="dhanradar.tasks.mf.leaderboard_refresh")
+def leaderboard_refresh() -> str:
+    """Materializes ~18 public leaderboard boards + a hero summary row into
+    mf_leaderboard_boards (Phase 1, docs/features/leaderboard-data-backend.md §4).
+    Runs nightly 01:20 IST, after fund_events_refresh (01:15). Pure SELECTs over
+    mf_fund_ranks/mf_funds/mf_fund_metrics/aum_history/mf_category_flows — never
+    writes to any scoring/load-bearing table. Idempotent: upserts on
+    (board_key, as_of_date).
+    """
+    try:
+        return asyncio.run(_leaderboard_refresh_pipeline())
+    except Exception:  # noqa: BLE001
+        logger.exception("leaderboard_refresh pipeline error")
+        return "leaderboard_refresh: failed — see worker logs"
+
+
+async def _leaderboard_refresh_pipeline() -> str:
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from dhanradar.db import TaskSessionLocal
+    from dhanradar.models.mf import (
+        MfAumHistory,
+        MfCategoryFlows,
+        MfFund,
+        MfFundMetrics,
+        MfFundRanks,
+        MfLeaderboardBoard,
+    )
+
+    run_id = str(uuid4())
+
+    async with TaskSessionLocal() as db:
+        latest_date = (
+            await db.execute(select(func.max(MfFundRanks.as_of_date)))
+        ).scalar_one_or_none()
+
+    if latest_date is None:
+        logger.warning("leaderboard_refresh: mf_fund_ranks is empty — skipping")
+        return "leaderboard_refresh: skipped (mf_fund_ranks empty)"
+
+    # STALENESS GUARD (design doc §4.1) — never publish off a stale ranking run; the
+    # endpoint keeps serving the last good document (as_of surfaces the age).
+    if _leaderboard_is_stale(latest_date):
+        logger.warning(
+            "leaderboard_refresh: latest mf_fund_ranks as_of_date %s is stale "
+            "(> %d days old) — skipping publish",
+            latest_date,
+            _LEADERBOARD_STALE_DAYS,
+        )
+        return f"leaderboard_refresh: skipped (stale as_of_date={latest_date})"
+
+    async with TaskSessionLocal() as db:
+        prev_date = (
+            await db.execute(
+                select(MfFundRanks.as_of_date)
+                .distinct()
+                .where(MfFundRanks.as_of_date < latest_date)
+                .order_by(MfFundRanks.as_of_date.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        current_rows = (
+            await db.execute(
+                select(
+                    MfFundRanks.isin,
+                    MfFundRanks.sebi_category,
+                    MfFundRanks.rank,
+                    MfFundRanks.total_in_cat,
+                    MfFundRanks.verb_label,
+                    MfFundRanks.confidence_band,
+                    MfFundRanks.contributing_signals,
+                    MfFund.fund_name_short,
+                    MfFund.scheme_name,
+                    MfFund.amc_name,
+                    MfFund.risk_o_meter,
+                    MfFund.expense_ratio_pct,
+                    MfFund.aum_crore,
+                    MfFund.launch_date,
+                    MfFundMetrics.return_1y_pct,
+                    MfFundMetrics.return_3y_pct,
+                    MfFundMetrics.return_5y_pct,
+                    MfFundMetrics.sharpe_ratio,
+                    MfFundMetrics.max_drawdown_pct,
+                    MfFundMetrics.volatility_pct,
+                )
+                .join(MfFund, MfFund.isin == MfFundRanks.isin)
+                .outerjoin(MfFundMetrics, MfFundMetrics.isin == MfFundRanks.isin)
+                .where(MfFundRanks.as_of_date == latest_date)
+            )
+        ).all()
+
+        prev_rows: Sequence[Any] = []
+        if prev_date is not None:
+            prev_rows = (
+                await db.execute(
+                    select(
+                        MfFundRanks.isin, MfFundRanks.sebi_category, MfFundRanks.rank, MfFundRanks.verb_label
+                    ).where(MfFundRanks.as_of_date == prev_date)
+                )
+            ).all()
+
+        # aum_history — two latest as_of_month rows per isin (window function, same
+        # shape as _fund_events_refresh_pipeline's ter_change/aum_change diff above).
+        aum_subq = select(
+            MfAumHistory.isin,
+            MfAumHistory.aum_crore,
+            func.row_number()
+            .over(partition_by=MfAumHistory.isin, order_by=MfAumHistory.as_of_month.desc())
+            .label("rn"),
+        ).subquery()
+        aum_rows = (
+            await db.execute(
+                select(aum_subq.c.isin, aum_subq.c.aum_crore, aum_subq.c.rn).where(aum_subq.c.rn <= 2)
+            )
+        ).all()
+
+        latest_flow_month = (
+            await db.execute(select(func.max(MfCategoryFlows.period_month)))
+        ).scalar_one_or_none()
+        flow_rows_raw: Sequence[Any] = []
+        if latest_flow_month is not None:
+            flow_rows_raw = (
+                await db.execute(
+                    select(
+                        MfCategoryFlows.scheme_category,
+                        MfCategoryFlows.net_flow_cr,
+                        MfCategoryFlows.period_month,
+                    ).where(
+                        MfCategoryFlows.period_month == latest_flow_month,
+                        MfCategoryFlows.scheme_type == "Open ended Schemes",
+                    )
+                )
+            ).all()
+
+    # --- normalize into plain, JSON-safe dicts (Decimal -> float, date -> isoformat)
+    # -- everything below this line is PURE / DB-independent (unit-testable as such).
+    prev_by_isin = {
+        r.isin: {"rank": r.rank, "sebi_category": r.sebi_category, "verb_label": r.verb_label}
+        for r in prev_rows
+    }
+
+    funds: list[dict] = []
+    for r in current_rows:
+        prev = prev_by_isin.get(r.isin)
+        rank_delta = (
+            prev["rank"] - r.rank
+            if prev is not None and prev["sebi_category"] == r.sebi_category
+            else None
+        )
+        funds.append(
+            {
+                "isin": r.isin,
+                "fund_name_short": r.fund_name_short,
+                "scheme_name": r.scheme_name,
+                "amc_name": r.amc_name,
+                "sebi_category": r.sebi_category,
+                "verb_label": r.verb_label,
+                "confidence_band": r.confidence_band,
+                "category_rank": r.rank,
+                "category_total": r.total_in_cat,
+                "rank_delta": rank_delta,
+                "riskometer": r.risk_o_meter,
+                "return_1y_pct": r.return_1y_pct,
+                "return_3y_pct": r.return_3y_pct,
+                "return_5y_pct": float(r.return_5y_pct) if r.return_5y_pct is not None else None,
+                "expense_ratio_pct": float(r.expense_ratio_pct)
+                if r.expense_ratio_pct is not None
+                else None,
+                "aum_crore": float(r.aum_crore) if r.aum_crore is not None else None,
+                "sharpe_ratio": r.sharpe_ratio,
+                "max_drawdown_pct": r.max_drawdown_pct,
+                "volatility_pct": r.volatility_pct,
+                "launch_date": r.launch_date,
+                "contributing_signals": r.contributing_signals or [],
+            }
+        )
+    funds_by_isin = {f["isin"]: f for f in funds}
+
+    aum_by_isin: dict[str, dict[int, float]] = defaultdict(dict)
+    for r in aum_rows:
+        aum_by_isin[r.isin][r.rn] = float(r.aum_crore)
+    aum_pairs = {
+        isin: (vals[1], vals[2]) for isin, vals in aum_by_isin.items() if 1 in vals and 2 in vals
+    }
+
+    flow_rows = [
+        {
+            "scheme_category": r.scheme_category,
+            "net_flow_cr": float(r.net_flow_cr) if r.net_flow_cr is not None else None,
+            "period_month": r.period_month.isoformat(),
+        }
+        for r in flow_rows_raw
+    ]
+
+    top100_rows = _build_leaderboard_top100(funds)
+    boards: dict[str, list[dict]] = {
+        "top100": top100_rows,
+        "champions": _build_leaderboard_champions(funds),
+        "perf_1y": _build_leaderboard_perf_rail(funds, "return_1y_pct", "pct_1y"),
+        "perf_3y": _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y"),
+        "perf_5y": _build_leaderboard_perf_rail(funds, "return_5y_pct", "pct_5y"),
+        "risk_lowest": _build_leaderboard_risk_lowest(funds),
+        "risk_drawdown": _build_leaderboard_risk_drawdown(funds),
+        "risk_sharpe": _build_leaderboard_risk_sharpe(funds),
+        "value_ter": _build_leaderboard_value_ter(funds),
+        "value_efficiency": _build_leaderboard_value_efficiency(funds),
+        "value_index": _build_leaderboard_value_index(funds),
+        "movers_up": _build_leaderboard_movers(funds, prev_by_isin, direction="up"),
+        "movers_down": _build_leaderboard_movers(funds, prev_by_isin, direction="down"),
+        "label_upgrades": _build_leaderboard_label_upgrades(funds, prev_by_isin),
+        "top10_entries": _build_leaderboard_top10_entries(funds, prev_by_isin),
+        "aum_growth": _build_leaderboard_aum_growth(funds_by_isin, aum_pairs),
+        "category_inflows": _build_leaderboard_category_inflows(flow_rows),
+        "amc_facts": _build_leaderboard_amc_facts(funds),
+    }
+    hero = _build_leaderboard_hero(funds, prev_by_isin, top100_rows, live_board_count=len(boards))
+
+    payload_rows = [
+        {"board_key": key, "as_of_date": latest_date, "payload": {"rows": rows}, "source_run_id": run_id}
+        for key, rows in boards.items()
+    ]
+    payload_rows.append(
+        {"board_key": "hero", "as_of_date": latest_date, "payload": hero, "source_run_id": run_id}
+    )
+
+    # Bulk upsert — idempotent on (board_key, as_of_date) PK, same convention as the
+    # mf_fund_ranks upsert in _compute_market_ranks_pipeline above.
+    async with TaskSessionLocal() as db:
+        stmt = (
+            insert(MfLeaderboardBoard)
+            .values(payload_rows)
+            .on_conflict_do_update(
+                index_elements=["board_key", "as_of_date"],
+                set_={
+                    "payload": insert(MfLeaderboardBoard).excluded.payload,
+                    "source_run_id": insert(MfLeaderboardBoard).excluded.source_run_id,
+                    "computed_at": func.now(),
+                },
+            )
+        )
+        await db.execute(stmt)
+        # Retention ships with the writer (RCA 2026-08-04 manual-ingest disk blowup):
+        # keep 90 days of board history, prune the rest in the same transaction.
+        await db.execute(
+            sa_delete(MfLeaderboardBoard).where(
+                MfLeaderboardBoard.as_of_date < latest_date - timedelta(days=90)
+            )
+        )
+        await db.commit()
+
+    summary = f"leaderboard_refresh: {len(payload_rows)} boards written for as_of_date={latest_date}"
     logger.info(summary)
     return summary
 

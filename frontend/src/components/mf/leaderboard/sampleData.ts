@@ -18,6 +18,7 @@
  */
 
 import type { Strength, Band3 } from '@/components/mf/funddetail/sampleData';
+import type { Label } from '@/components/charts/ScoreRing';
 
 // ── Mockup colour constants (decorative brand-letter tiles + accents) ────────
 // Mirrors the E/B/A/R/O/V/C/N/P/T/G palette in the mockups, nudged to the
@@ -59,6 +60,19 @@ export function eduLabel(score: number): { word: string; color: string } {
 export const STRENGTH_WORD: Record<Strength, string> = { strong: 'Strong', good: 'Good', moderate: 'Fair', soft: 'Soft' };
 export const STRENGTH_COLOR: Record<Strength, string> = { strong: E, good: C, moderate: A, soft: R };
 
+/** Live-data verb_label → the same educational word/colour vocabulary eduLabel()
+ * uses on this page (page-local wording: 'Watch'/'Off Form', not the site-wide
+ * LabelChip copy) — real rows carry no numeric score, only the enum. */
+export function eduWordFromLabel(label: Label): { word: string; color: string } {
+  switch (label) {
+    case 'in_form': return { word: 'In Form', color: E };
+    case 'on_track': return { word: 'On Track', color: B };
+    case 'off_track': return { word: 'Watch', color: A };
+    case 'out_of_form': return { word: 'Off Form', color: R };
+    default: return { word: 'Insufficient Data', color: 'var(--text-muted)' };
+  }
+}
+
 export function riskColor(rk: string): string {
   return ({ Low: E, Moderate: A, 'Mod. High': O, High: R, 'Very High': R } as Record<string, string>)[rk] ?? A;
 }
@@ -73,7 +87,7 @@ export function aum(v: number): string {
 export const HERO_KPIS: { label: string; value: string; sub?: string; valueColor?: string; small?: boolean }[] = [
   { label: 'Funds Ranked', value: '2,847' },
   { label: 'Categories', value: '32' },
-  { label: 'Rating Providers', value: '4' },
+  { label: 'Live Boards', value: '11' },
   { label: 'Top Rated Today', value: 'Parag Parikh', small: true },
   { label: 'Trending', value: 'Small Cap', small: true },
   { label: 'DMMI', value: '62', sub: 'Caut+', valueColor: '#FBBF24' },
@@ -157,7 +171,8 @@ export const CHAMP: Champ[] = [
 
 // ── Mini-leaderboard rails ───────────────────────────────────────────────────
 export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean };
-export type Rail = { title: string; q: string; icon: string; color: string; rows: RailRow[] };
+/** `live` marks a rail as fed by a wired board (renders a small LiveBadge in its header). */
+export type Rail = { title: string; q: string; icon: string; color: string; rows: RailRow[]; live?: boolean };
 
 const row = (name: string, logo: string, color: string, val: string, up?: boolean): RailRow => ({ name, logo, color, val, up });
 
@@ -198,7 +213,7 @@ export const FLOW_RAIL: Rail[] = [
 ];
 export const IMPROVED_RAIL: Rail[] = [
   { title: 'Biggest Rank Jump', q: 'Climbed most', icon: '📈', color: E, rows: [row('HDFC Healthcare', 'H', R, '+11'), row('Bandhan SC', 'B', B, '+12'), row('Quant SC', 'Q', V, '+9'), row('SBI Contra', 'S', B, '+7')] },
-  { title: 'Biggest Score Gain', q: 'Improved most', icon: '⬆', color: B, rows: [row('HDFC Health', 'H', R, '+8'), row('SBI Contra', 'S', B, '+5'), row('Kotak EE', 'K', E, '+4'), row('Bandhan SC', 'B', B, '+4')] },
+  { title: 'Label Upgrades', q: 'Moved to a stronger label', icon: '⬆', color: B, rows: [row('HDFC Health', 'H', R, 'Watch → On Track'), row('SBI Contra', 'S', B, 'Off Form → Watch'), row('Kotak EE', 'K', E, 'On Track → In Form'), row('Bandhan SC', 'B', B, 'Watch → On Track')] },
   { title: 'Entering Top 10', q: 'New arrivals', icon: '🌟', color: G, rows: [row('Bandhan SC', 'B', B, '#3'), row('SBI Contra', 'S', B, '#5'), row('Nippon SC', 'N', E, '#7'), row('Kotak EE', 'K', E, '#9')] },
 ];
 export const TREND_RAIL: Rail[] = [

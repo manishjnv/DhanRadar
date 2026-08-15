@@ -1224,6 +1224,34 @@ class MfCategoryFlows(Base):
     )
 
 
+class MfLeaderboardBoard(Base):
+    """Materialized leaderboard board payloads (Phase 1,
+    docs/features/leaderboard-data-backend.md §4). One row per (board_key, as_of_date) —
+    `dhanradar.tasks.mf.leaderboard_refresh` (nightly 01:20 IST) upserts ~18 board rows +
+    one `board_key='hero'` summary row, all pure SELECTs over
+    mf_fund_ranks/mf_funds/mf_fund_metrics/aum_history/mf_category_flows. `payload`
+    carries ONLY label/band/ordinal fund rows (never a score field — non-neg #2;
+    re-enforced at the read boundary by mf/serialization.py's leaderboard allowlist).
+    `GET /mf/leaderboard` reads each board_key's own latest row so one board's failed
+    build doesn't blank the whole page (graceful degradation). No RLS — public
+    educational board content, not per-user data.
+    """
+
+    __tablename__ = "mf_leaderboard_boards"
+    __table_args__ = (
+        PrimaryKeyConstraint("board_key", "as_of_date"),
+        _SCHEMA,
+    )
+
+    board_key: Mapped[str] = mapped_column(Text, nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class MfManualIngestFile(Base):
     """Manual SEBI disclosure inbox (migration 0072) — the human-supplied side-channel for
     the 5 AMCs `mf_constituents_fetch` cannot scrape (HDFC/SBI/ICICI-Pru/Kotak/Axis bot-block).
