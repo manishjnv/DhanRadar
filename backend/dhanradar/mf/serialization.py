@@ -179,6 +179,100 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     ),
     "fund.health": frozenset({"lights", "as_of"}),
     "fund.changes": frozenset({"events"}),
+    # Phase 1 leaderboard (docs/features/leaderboard-data-backend.md §5) — one entry
+    # per board row SHAPE (a leaderboard payload isn't one flat concept, it's ~18
+    # board shapes + a hero summary). See `serialize_leaderboard_response` below.
+    "leaderboard.fund_row": frozenset(
+        {
+            "isin",
+            "fund_name_short",
+            "scheme_name",
+            "amc_name",
+            "sebi_category",
+            "verb_label",
+            "confidence_band",
+            "category_rank",
+            "category_total",
+            "rank_delta",
+            "riskometer",
+            "return_1y_pct",
+            "return_3y_pct",
+            "return_5y_pct",
+            "expense_ratio_pct",
+            "aum_crore",
+            "sharpe_ratio",
+            "max_drawdown_pct",
+            "metric_value",
+            "metric_unit",
+        }
+    ),
+    "leaderboard.label_upgrade_row": frozenset(
+        {
+            "isin",
+            "fund_name_short",
+            "scheme_name",
+            "amc_name",
+            "sebi_category",
+            "verb_label",
+            "confidence_band",
+            "category_rank",
+            "category_total",
+            "rank_delta",
+            "riskometer",
+            "return_1y_pct",
+            "return_3y_pct",
+            "return_5y_pct",
+            "expense_ratio_pct",
+            "aum_crore",
+            "sharpe_ratio",
+            "max_drawdown_pct",
+            "metric_value",
+            "metric_unit",
+            "label_from",
+            "label_to",
+        }
+    ),
+    "leaderboard.champion_row": frozenset({"category", "winner", "runner_up", "why"}),
+    "leaderboard.category_flow_row": frozenset({"category", "net_flow_cr", "period_month"}),
+    "leaderboard.amc_row": frozenset(
+        {
+            "amc_name",
+            "fund_count",
+            "top_quartile_count",
+            "aum_crore",
+            "oldest_launch",
+            "index_fund_count",
+        }
+    ),
+    "leaderboard.hero": frozenset(
+        {"funds_ranked", "categories", "top_fund", "trending_category", "live_board_count"}
+    ),
+}
+
+#: Maps a leaderboard `board_key` to the `ALLOWED_FIELDS` entry its rows are shaped
+#: like (Phase 1, §5). Every board wired by `dhanradar.tasks.mf.leaderboard_refresh`
+#: must have an entry here — `serialize_leaderboard_response` fail-closes
+#: (`MissingConceptAllowlist`) on any board_key absent from this map, same as an
+#: un-allowlisted concept above.
+_LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
+    "top100": "leaderboard.fund_row",
+    "perf_1y": "leaderboard.fund_row",
+    "perf_3y": "leaderboard.fund_row",
+    "perf_5y": "leaderboard.fund_row",
+    "risk_lowest": "leaderboard.fund_row",
+    "risk_drawdown": "leaderboard.fund_row",
+    "risk_sharpe": "leaderboard.fund_row",
+    "value_ter": "leaderboard.fund_row",
+    "value_efficiency": "leaderboard.fund_row",
+    "value_index": "leaderboard.fund_row",
+    "movers_up": "leaderboard.fund_row",
+    "movers_down": "leaderboard.fund_row",
+    "top10_entries": "leaderboard.fund_row",
+    "aum_growth": "leaderboard.fund_row",
+    "label_upgrades": "leaderboard.label_upgrade_row",
+    "champions": "leaderboard.champion_row",
+    "category_inflows": "leaderboard.category_flow_row",
+    "amc_facts": "leaderboard.amc_row",
 }
 
 
@@ -349,3 +443,56 @@ def serialize_concept(
 def is_tier_withheld(envelope: dict[str, Any]) -> bool:
     """True iff this envelope was withheld for TIER — the route raises HTTP 402 (tier-gate = 402, §6)."""
     return envelope["status"] == "withheld" and envelope["meta"]["reason"] == "tier"
+
+
+def _serialize_leaderboard_row(concept_id: str, row: dict) -> dict:
+    """Apply the B87 allowlist for one board row; a champions row additionally
+    allowlists its nested `winner`/`runner_up` FundRow sub-objects."""
+    row = _apply_allowlist(concept_id, row)
+    if concept_id == "leaderboard.champion_row":
+        if row.get("winner") is not None:
+            row["winner"] = _apply_allowlist("leaderboard.fund_row", row["winner"])
+        if row.get("runner_up") is not None:
+            row["runner_up"] = _apply_allowlist("leaderboard.fund_row", row["runner_up"])
+    return row
+
+
+def serialize_leaderboard_response(
+    *, as_of: str | None, hero: dict[str, Any] | None, boards: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/leaderboard` (Phase 1,
+    docs/features/leaderboard-data-backend.md §5) — the same #2 scrub + B87
+    allowlist mechanism as `serialize_concept` above, applied per row SHAPE since a
+    leaderboard payload isn't one flat concept, it's ~18 board shapes + a hero
+    summary (`_LEADERBOARD_ROW_CONCEPT`). A leaderboard board is public educational
+    content with no gating/tier axis (unlike `serialize_concept`'s registry-backed
+    concepts, which are sourced from the frontend-generated concepts_registry.json)
+    — this bypasses `get_concept()`/the withheld-status envelope entirely and applies
+    the #2 scrub + fail-closed allowlist directly, still the same structural
+    guarantee: a score field can never reach this response.
+
+    `boards` maps board_key -> {"title": str, "rows": list[dict]}. Raises
+    `MissingConceptAllowlist` (fail-closed) if a board_key has no entry in
+    `_LEADERBOARD_ROW_CONCEPT`.
+    """
+    data = _scrub({"hero": hero, "boards": boards})
+    _assert_no_forbidden(data)
+
+    hero_clean: dict[str, Any] | None = None
+    if data["hero"] is not None:
+        hero_clean = _apply_allowlist("leaderboard.hero", data["hero"])
+        if hero_clean.get("top_fund") is not None:
+            hero_clean["top_fund"] = _apply_allowlist("leaderboard.fund_row", hero_clean["top_fund"])
+
+    boards_clean: dict[str, dict[str, Any]] = {}
+    for key, board in (data["boards"] or {}).items():
+        concept_id = _LEADERBOARD_ROW_CONCEPT.get(key)
+        if concept_id is None:
+            raise MissingConceptAllowlist(
+                f"leaderboard board '{key}' has no row-shape entry in "
+                "_LEADERBOARD_ROW_CONCEPT (mf/serialization.py) — add one before serving it"
+            )
+        rows = [_serialize_leaderboard_row(concept_id, row) for row in board.get("rows", [])]
+        boards_clean[key] = {"title": board.get("title"), "rows": rows}
+
+    return {"as_of": as_of, "hero": hero_clean, "boards": boards_clean}

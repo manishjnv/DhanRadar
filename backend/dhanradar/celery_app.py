@@ -311,6 +311,14 @@ celery_app.conf.beat_schedule = {
         "task": "dhanradar.tasks.mf.fund_events_refresh",
         "schedule": crontab(hour=1, minute=15),
     },
+    # Leaderboard boards materialization (Phase 1,
+    # docs/features/leaderboard-data-backend.md §4) — 01:20 IST; after
+    # fund_events_refresh (01:15). Pure SELECTs over the ranks/metrics/events tables
+    # above into mf_leaderboard_boards, read by the public GET /mf/leaderboard.
+    "mf-leaderboard-refresh": {
+        "task": "dhanradar.tasks.mf.leaderboard_refresh",
+        "schedule": crontab(hour=1, minute=20),
+    },
     # Portfolio daily refresh — 01:30 IST; after NAV (23:30) + metrics (00:15).
     # Rebuilds cached reports from stored holdings + today's NAV so users see a
     # fresh portfolio when they log in without re-uploading their CAS statement.
