@@ -102,13 +102,13 @@ function SidebarContent({
     <>
       {/* Brand lockup */}
       <Link
-        href="/mf/portfolio"
+        href="/"
         onClick={onNavClick}
         className={cn(
           'flex h-10 items-center border-b border-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
           collapsed ? 'justify-center px-2' : 'gap-2.5 px-3',
         )}
-        aria-label="DhanRadar — go to portfolio"
+        aria-label="DhanRadar home"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/icon.svg" alt="" width={26} height={26} className="shrink-0" />

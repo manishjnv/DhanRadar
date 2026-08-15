@@ -41,16 +41,19 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <circle cx="280" cy="111" r="5" fill="#1FD79A" opacity="0.9" />
         </svg>
 
-        {/* Logo */}
+        {/* Logo — clickable to homepage; tabIndex -1 since the panel is
+            aria-hidden (mouse-clickable, not a phantom tab stop) */}
         <div>
-          <Image
-            src="/brand/logo-mono-dark.svg"
-            alt="DhanRadar"
-            width={200}
-            height={50}
-            priority
-            className="h-10 w-auto"
-          />
+          <Link href="/" tabIndex={-1} className="inline-block">
+            <Image
+              src="/brand/logo-mono-dark.svg"
+              alt="DhanRadar"
+              width={200}
+              height={50}
+              priority
+              className="h-10 w-auto"
+            />
+          </Link>
           <p className="mt-2 text-[11px] tracking-widest uppercase text-white/50">
             Educational market intelligence
           </p>

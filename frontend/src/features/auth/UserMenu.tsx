@@ -27,7 +27,7 @@ export function UserMenu() {
 
   function handleLogout() {
     logout(undefined, {
-      onSettled: () => router.replace('/login'),
+      onSettled: () => router.replace('/'),
     });
   }
 
