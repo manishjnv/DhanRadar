@@ -3511,6 +3511,11 @@ _LEADERBOARD_FUND_FIELDS: tuple[str, ...] = (
     "category_total",
     "rank_delta",
     "riskometer",
+    # Phase G (2026-08-16) — full return spectrum; 1d/1m are pipeline-computed
+    # from the NAV series, 3m comes from mf_fund_metrics.
+    "return_1d_pct",
+    "return_1m_pct",
+    "return_3m_pct",
     "return_1y_pct",
     "return_3y_pct",
     "return_5y_pct",
@@ -3529,6 +3534,26 @@ def _leaderboard_is_stale(latest_date: date, today: date | None = None) -> bool:
     real current date."""
     ref = today if today is not None else date.today()
     return (ref - latest_date).days > _LEADERBOARD_STALE_DAYS
+
+
+def _nav_window_return_pct(
+    last: tuple[date, float] | None,
+    earlier: tuple[date, float] | None,
+    max_gap_days: int,
+) -> float | None:
+    """Phase G — % change between two (nav_date, nav) points, None when the
+    window can't honestly support it: either point missing, non-positive
+    earlier NAV, wrong ordering, or a date gap beyond `max_gap_days` (a 1-day
+    return across a month-long data hole is not a 1-day return). Never a
+    fabricated 0."""
+    if last is None or earlier is None:
+        return None
+    (last_date, last_nav), (earlier_date, earlier_nav) = last, earlier
+    if earlier_nav <= 0 or last_date <= earlier_date:
+        return None
+    if (last_date - earlier_date).days > max_gap_days:
+        return None
+    return (last_nav / earlier_nav - 1) * 100
 
 
 def _fund_name_is_unclaimed(fund: dict) -> bool:
@@ -4803,6 +4828,8 @@ async def _leaderboard_refresh_pipeline() -> str:
                     # _leaderboard_is_growth_category + the sip/consistency/recovery/
                     # wealth_creator board scoping below.
                     MfFund.is_segregated,
+                    # Phase G — 3m is stored; 1d/1m are computed from the NAV maps below.
+                    MfFundMetrics.return_3m_pct,
                     MfFundMetrics.return_1y_pct,
                     MfFundMetrics.return_3y_pct,
                     MfFundMetrics.return_5y_pct,
@@ -4908,9 +4935,28 @@ async def _leaderboard_refresh_pipeline() -> str:
                 .order_by(MfNavHistory.isin, MfNavHistory.nav_date.asc())
             )
         ).all()
-        last_nav_rows = (
+        # Phase G — last TWO rows per isin (rn=1 feeds the freshness gate +
+        # wealth_creator as before; rn=2 gives the 1-day return), plus the
+        # newest row at/before as_of-30d for the 1-month return.
+        last2_subq = select(
+            MfNavHistory.isin,
+            MfNavHistory.nav_date,
+            MfNavHistory.nav,
+            func.row_number()
+            .over(partition_by=MfNavHistory.isin, order_by=MfNavHistory.nav_date.desc())
+            .label("rn"),
+        ).subquery()
+        last2_nav_rows = (
+            await db.execute(
+                select(last2_subq.c.isin, last2_subq.c.nav_date, last2_subq.c.nav, last2_subq.c.rn).where(
+                    last2_subq.c.rn <= 2
+                )
+            )
+        ).all()
+        month_ago_nav_rows = (
             await db.execute(
                 select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
+                .where(MfNavHistory.nav_date <= latest_date - timedelta(days=30))
                 .distinct(MfNavHistory.isin)
                 .order_by(MfNavHistory.isin, MfNavHistory.nav_date.desc())
             )
@@ -4968,6 +5014,10 @@ async def _leaderboard_refresh_pipeline() -> str:
                 "category_total": r.total_in_cat,
                 "rank_delta": rank_delta,
                 "riskometer": r.risk_o_meter,
+                # Phase G — 1d/1m filled from the NAV maps after this loop.
+                "return_1d_pct": None,
+                "return_1m_pct": None,
+                "return_3m_pct": float(r.return_3m_pct) if r.return_3m_pct is not None else None,
                 "return_1y_pct": r.return_1y_pct,
                 "return_3y_pct": r.return_3y_pct,
                 "return_5y_pct": float(r.return_5y_pct) if r.return_5y_pct is not None else None,
@@ -5029,7 +5079,9 @@ async def _leaderboard_refresh_pipeline() -> str:
     # to their own last NAV — however old — and top "current" boards with numbers
     # no investor can act on (see _LEADERBOARD_MAX_NAV_AGE_DAYS). last_nav_by_isin
     # is built here (it already existed for wealth_creator's multiples below).
-    last_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last_nav_rows}
+    last_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last2_nav_rows if r.rn == 1}
+    prev_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last2_nav_rows if r.rn == 2}
+    month_ago_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in month_ago_nav_rows}
     pre_freshness_count = len(funds)
     funds = [
         f
@@ -5042,6 +5094,12 @@ async def _leaderboard_refresh_pipeline() -> str:
         pre_freshness_count,
         _LEADERBOARD_MAX_NAV_AGE_DAYS,
     )
+    # Phase G — 1d/1m returns from the NAV maps (gap-guarded, None when the
+    # series can't honestly support the window; see _nav_window_return_pct).
+    for f in funds:
+        last = last_nav_by_isin.get(f["isin"])
+        f["return_1d_pct"] = _nav_window_return_pct(last, prev_nav_by_isin.get(f["isin"]), max_gap_days=7)
+        f["return_1m_pct"] = _nav_window_return_pct(last, month_ago_nav_by_isin.get(f["isin"]), max_gap_days=45)
     funds_by_isin = {f["isin"]: f for f in funds}
 
     # wealth_creator's TRUE since-launch multiples (design correction, §8) —
