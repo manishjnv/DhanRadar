@@ -3799,7 +3799,14 @@ def _build_leaderboard_risk_drawdown(funds: list[dict]) -> list[dict]:
         f
         for f in funds
         if f.get("max_drawdown_pct") is not None
-        and _leaderboard_is_growth_category(f.get("sebi_category"))
+        # ACTIVE growth prefixes, not _leaderboard_is_growth_category — that
+        # helper admits the Index bucket, and its DEBT index funds (target-
+        # maturity bond funds) "win" at ~0.01% vacuously (2026-08-16 live
+        # review: a CRISIL IBX AAA Mar-2024 index fund topped this board —
+        # same trap risk_recovery documents). Equity index funds lose their
+        # slot too, an accepted cost: their drawdowns mirror the active funds
+        # already shown, and the top100 board uses this exact scoping.
+        and (f.get("sebi_category") or "").startswith(_LEADERBOARD_GROWTH_PREFIXES)
     ]
 
     def _key(f: dict) -> float:
