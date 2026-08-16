@@ -1178,9 +1178,9 @@ function InsightText({ row }: { row: LbInsightRow }) {
   const links = row.links ?? [];
   if (links.length === 0) return <RichText text={row.text} />;
   const byLength = [...links].sort((a, b) => b.name.length - a.name.length);
-  let segments: React.ReactNode[] = [row.text];
+  let segments: (string | React.ReactElement)[] = [row.text];
   for (const l of byLength) {
-    segments = segments.flatMap((seg) => {
+    segments = segments.flatMap((seg): (string | React.ReactElement)[] => {
       if (typeof seg !== 'string') return [seg];
       const idx = seg.indexOf(l.name);
       if (idx === -1) return [seg];
