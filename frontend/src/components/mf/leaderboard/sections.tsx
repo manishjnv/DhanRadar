@@ -32,6 +32,7 @@ import {
 } from './sampleData';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { fundDisplayName } from '@/features/mf/fundDisplayName';
+import { shortenAmcName, categoryDisplayName } from '@/features/mf/explorer-format';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import type {
   LeaderboardHero, LeaderboardBoards, LbBoard,
@@ -487,16 +488,17 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                           <div className="text-small font-semibold leading-tight text-ink">{row.name}</div>
                         )}
                         <div className="mt-0.5 text-[11px] font-medium text-ink-muted">
-                          {row.amc} ·{' '}
+                          {/* Phase H — compressed second line; hrefs keep canonical strings */}
+                          {shortenAmcName(row.amc)} ·{' '}
                           {row.href ? (
                             <Link
                               href={`/mf/explore?category=${encodeURIComponent(row.cat)}`}
                               onClick={(e) => e.stopPropagation()}
                               className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
                             >
-                              {row.cat}
+                              {categoryDisplayName(row.cat)}
                             </Link>
-                          ) : row.cat}
+                          ) : categoryDisplayName(row.cat)}
                           {pfIsins.has(row.key) && <PortfolioPill className="ml-1.5 align-middle" />}
                         </div>
                       </div>
@@ -567,7 +569,7 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                 ) : (
                   <div className="truncate text-small font-semibold leading-tight text-ink">{row.name}</div>
                 )}
-                <div className="mt-0.5 text-[10.5px] text-ink-muted">{row.amc} · {row.cat}</div>
+                <div className="mt-0.5 text-[10.5px] text-ink-muted">{shortenAmcName(row.amc)} · {categoryDisplayName(row.cat)}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <EduPill word={row.labelWord} color={row.labelColor} />
                   {pfIsins.has(row.key) && <PortfolioPill />}
@@ -631,7 +633,7 @@ function CompareTray({ master, selected, live, onClear }: { master: T100Row[]; s
 type ChampView = {
   key: string; cat: string; winner: string; wLogo: string; wColor: string; ring: RingSpec;
   ret: string; runner: string; rLogo: string; rColor: string; why: string;
-  wHref?: string; rHref?: string; catHref?: string;
+  wHref?: string; rHref?: string; catHref?: string; catAvg?: number | null; retUp?: boolean;
 };
 function sampleChampView(c: typeof CHAMP[number]): ChampView {
   return {
@@ -647,6 +649,8 @@ function liveChampView(c: LbChampionRow): ChampView {
     key: c.category, cat: c.category, winner: fundDisplayName(wName).name, wLogo: initialOf(wName), wColor: colorFor(c.winner.isin),
     ring: { kind: 'band', band: c.winner.confidence_band, color: lbl.color },
     ret: `${pct1(c.winner.return_3y_pct)} 3Y`, runner: rName,
+    // Phase H — the category's honest 3y benchmark next to the winner's 3Y.
+    catAvg: c.winner.metric_category_avg, retUp: (c.winner.return_3y_pct ?? 0) >= 0,
     rLogo: c.runner_up ? initialOf(rName) : '·', rColor: c.runner_up ? colorFor(c.runner_up.isin) : 'var(--surface-3)',
     why: c.why,
     wHref: `/mf/fund/${c.winner.isin}`,
@@ -658,7 +662,7 @@ function ChampCard({ c, rail = false }: { c: ChampView; rail?: boolean }) {
   return (
     <div className={cn('rounded-xl border border-line bg-surface p-4 shadow-sm', rail && 'w-60 shrink-0')} style={rail ? { scrollSnapAlign: 'start' } : undefined}>
       <div className="flex items-center justify-between font-mono text-[9.5px] font-bold uppercase tracking-[0.04em] text-ink-muted">
-        <span>🏆 {c.catHref ? <Link href={c.catHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.cat}</Link> : c.cat}</span>
+        <span>🏆 {c.catHref ? <Link href={c.catHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{categoryDisplayName(c.cat)}</Link> : categoryDisplayName(c.cat)}</span>
         <span className="cursor-pointer text-royal">More →</span>
       </div>
       {/* D-1: letter tiles dropped page-wide; D-6: names wrap 2 lines, full name on hover */}
@@ -669,7 +673,11 @@ function ChampCard({ c, rail = false }: { c: ChampView; rail?: boolean }) {
           ) : (
             <div title={c.winner} className="line-clamp-2 text-[12.5px] font-bold leading-tight text-ink">{c.winner}</div>
           )}
-          <div className="text-[10px] text-ink-muted">Winner · {c.ret}</div>
+          <div className="text-[10px] text-ink-muted">
+            {/* Phase H — % emphasised (sign colour) + honest category benchmark */}
+            Winner · <span className="font-mono text-[10.5px] font-bold" style={{ color: c.retUp === false ? COLORS.R : E }}>{c.ret}</span>
+            {c.catAvg != null && <> · cat avg {c.catAvg.toFixed(1)}%</>}
+          </div>
         </div>
         <span className="ml-auto shrink-0"><RingCell ring={c.ring} size={28} stroke={4} /></span>
       </div>
@@ -834,7 +842,7 @@ function ThreeLensCard({ board }: { board?: LbBoard<LbFundRow> }) {
               >
                 <div className="min-w-0">
                   <div title={name} className="line-clamp-2 text-small font-bold leading-tight text-ink">{fundDisplayName(name).name}</div>
-                  <div className="truncate text-[10.5px] text-ink-muted">{r.sebi_category}</div>
+                  <div className="truncate text-[10.5px] text-ink-muted">{categoryDisplayName(r.sebi_category)}</div>
                 </div>
                 {([
                   ['Return · 3Y', pctSigned(r.return_3y_pct), E],

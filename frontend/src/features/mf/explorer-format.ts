@@ -110,11 +110,37 @@ export function fundVariantTags(f: FundNamingFields): string[] {
  * "AMC" or a different legal form are left unchanged.
  */
 export function shortenAmcName(name: string): string {
+  // Phase H (founder 2026-08-16): "HSBC Asset Management (India) Private Ltd."
+  // → "HSBC AMC"; covers every legal-suffix family in the AMFI master
+  // (Asset Management / Investment Managers / Funds Management / Money
+  // Managers / Mutual Fund), the "(India)" infix, and stray Private/Limited
+  // tails. Display-only — hrefs and queries keep the full official name.
   return name
+    .replace(/\s*\(India\)\s*/gi, ' ')
     .replace(
-      /\bAsset Management(\s+(Company|Co\.?))?(\s+(Private|Pvt\.?))?(\s+(Limited|Ltd\.?))?\b/gi,
+      /\b(Asset Management|Investment Managers?|Funds? Management|Money Managers?|Mutual Fund)(\s+(Company|Co\.?))?(\s+(Private|Pvt\.?))?(\s+(Limited|Ltd\.?))?\b/gi,
       'AMC',
     )
+    .replace(/\b(Private|Pvt\.?)\s+(Limited|Ltd\.?)\b/gi, '')
+    .replace(/\b(Limited|Ltd\.?)\b/gi, '')
+    .replace(/\bAMC(\s+AMC)+\b/gi, 'AMC')
     .replace(/\s{2,}/g, ' ')
+    .replace(/[\s.]+$/, '') // orphan "." left by a consumed "Ltd."
     .trim();
+}
+
+/** Phase H — "Equity Scheme - Flexi Cap Fund" → "Equity · Flexi Cap";
+ *  "Debt Scheme - Banking and PSU Fund" → "Debt · Banking & PSU". Display-only:
+ *  filters, hrefs, and API params keep the canonical SEBI string. */
+export function categoryDisplayName(raw: string): string {
+  const [cls, ...rest] = raw.split(/\s+-\s+/);
+  const clsShort = cls
+    .replace(/\s*Scheme\s*$/i, '')
+    .replace(/^Solution Oriented$/i, 'Solution');
+  const leaf = rest
+    .join(' - ')
+    .replace(/\s*Funds?\s*$/i, '')
+    .replace(/\band\b/gi, '&')
+    .trim();
+  return leaf ? `${clsShort} · ${leaf}` : clsShort;
 }

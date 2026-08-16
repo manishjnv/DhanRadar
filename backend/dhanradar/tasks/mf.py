@@ -3745,10 +3745,15 @@ def _champion_why(winner: dict) -> str:
     return f"Leads {category}: {signals[0]}."
 
 
-def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
+def _build_leaderboard_champions(
+    funds: list[dict],
+    category_means: dict[str, dict[str, float]] | None = None,
+) -> list[dict]:
     """champions (§5) — per sebi_category, rank-1 winner + rank-2 runner-up (post
     variant-dedup); a category with a single scheme gets a winner and no runner-up
-    (never fabricated) — design doc §10."""
+    (never fabricated) — design doc §10. Phase H (2026-08-16): the winner row
+    carries its category's 3y-return mean as metric_category_avg so the card can
+    show the winner's 3Y next to the honest category benchmark."""
     by_cat: dict[str, list[dict]] = defaultdict(list)
     for f in funds:
         by_cat[f["sebi_category"]].append(f)
@@ -3764,10 +3769,11 @@ def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
             continue
         winner = deduped[0]
         runner_up = deduped[1] if len(deduped) > 1 else None
+        cat_avg_3y = (category_means or {}).get(cat, {}).get("return_3y_pct")
         rows.append(
             {
                 "category": cat,
-                "winner": _leaderboard_fund_row(winner),
+                "winner": _leaderboard_fund_row(winner, category_avg=cat_avg_3y),
                 "runner_up": _leaderboard_fund_row(runner_up) if runner_up else None,
                 "why": _champion_why(winner),
             }
@@ -5184,7 +5190,7 @@ async def _leaderboard_refresh_pipeline() -> str:
     category_means = _leaderboard_category_means(funds)
     boards: dict[str, list[dict]] = {
         "top100": top100_rows,
-        "champions": _build_leaderboard_champions(funds),
+        "champions": _build_leaderboard_champions(funds, category_means),
         "perf_1y": _build_leaderboard_perf_rail(funds, "return_1y_pct", "pct_1y", category_means),
         "perf_3y": _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y", category_means),
         "perf_5y": _build_leaderboard_perf_rail(funds, "return_5y_pct", "pct_5y", category_means),
