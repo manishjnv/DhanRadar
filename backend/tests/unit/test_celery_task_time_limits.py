@@ -52,9 +52,19 @@ def test_fast_bucket_task_gets_the_tight_limit_not_the_global_default():
     """The exact regression this incident hit: a task explicitly listed in the
     fast bucket must resolve to the tight 4/5-min limit, NOT silently fall
     back to the 25/30-min global default."""
-    task = _finalized_task("dhanradar.tasks.mf.mf_metrics_refresh")
+    task = _finalized_task("dhanradar.tasks.mf.compute_market_ranks")
     assert task.soft_time_limit == 240
     assert task.time_limit == 300
+
+
+def test_metrics_refresh_gets_the_long_running_limit():
+    """Phase 2 (migration 0081) outgrew the fast bucket: SIP XIRR over ~22k
+    ISINs hit SoftTimeLimitExceeded at exactly 240s on 2026-08-16. The task
+    must now resolve to its dedicated 15/18-min entry — bounded (a hang still
+    can't wedge the queue), but with real headroom over the ~4-6 min compute."""
+    task = _finalized_task("dhanradar.tasks.mf.mf_metrics_refresh")
+    assert task.soft_time_limit == 900
+    assert task.time_limit == 1080
 
 
 def test_reaper_tasks_get_the_tight_limit():
