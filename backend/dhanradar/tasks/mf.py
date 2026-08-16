@@ -3414,6 +3414,38 @@ async def _fund_events_refresh_pipeline() -> str:
 _LEADERBOARD_STALE_DAYS = 3
 _LEADERBOARD_TOP_N = 4  # every rail board except top100 caps at 4 rows (§5 contract)
 _LEADERBOARD_INDEX_CATEGORY = "Other Scheme - Index Funds"  # taxonomy.py canonical bucket
+
+# DATA-ARTIFACT / plausibility guard (data-quality hardening, 2026-08-16). Prod
+# exposed real corrupted-data artifacts: sip_3y top = 'Franklin India Short-Term
+# 89.25%' (a segregated-portfolio side-pocket NAV jump), sip_5y top = 'ICICI
+# Overnight 53.24%'. No real 3-5y monthly-SIP XIRR exceeds 40%/yr — a value above
+# this cap means the underlying NAV series is corrupted, not that the fund performed
+# well. Also reused as the CAGR cap in `_since_launch_multiple` below (same "no real
+# fund compounds this fast" plausibility bound, different metric).
+_LEADERBOARD_MAX_SIP_XIRR_PCT = 40.0
+
+# DATA-ARTIFACT guard: categories where a SIP/consistency/recovery board is actually
+# meaningful. Cash/debt categories (Liquid, Overnight, ...) trivially top these
+# boards by construction — prod examples: sip_consistency top = 'ITI Liquid 100%',
+# risk_recovery top = 'TRUST Overnight 2 days'. Prefixes are the canonical
+# `mf/taxonomy.py` SEBI class strings ("Equity Scheme - ...", not raw AMFI headers).
+_LEADERBOARD_GROWTH_PREFIXES = ("Equity Scheme", "Hybrid Scheme", "Solution Oriented Scheme")
+
+
+def _leaderboard_is_growth_category(sebi_category: str | None) -> bool:
+    """True for growth-oriented sebi_category buckets: Equity/Hybrid/Solution-Oriented
+    scheme classes, plus the Index-funds bucket (equity-like exposure despite living
+    under the "Other Scheme" class prefix). False for Debt/cash-like categories and
+    the remaining "Other Scheme" leaves (Gold ETF, FoF, Other ETFs) — see the
+    plausibility-guard comment above for why those boards would otherwise be won
+    vacuously by cash funds."""
+    if sebi_category is None:
+        return False
+    if sebi_category == _LEADERBOARD_INDEX_CATEGORY:
+        return True
+    return sebi_category.startswith(_LEADERBOARD_GROWTH_PREFIXES)
+
+
 _LEADERBOARD_RISK_RANK: dict[str, int] = {band: i for i, band in enumerate(RISKOMETER_BANDS)}
 _LEADERBOARD_LABEL_RANK: dict[str, int] = {
     "out_of_form": 0,
@@ -3473,6 +3505,42 @@ def _dedupe_leaderboard_variants(funds: list[dict], sort_key: Any) -> list[dict]
         if cur is None or sort_key(f) < sort_key(cur):
             best[key] = f
     return list(best.values())
+
+
+def _leaderboard_log_hardening_exclusions(
+    board_key: str,
+    candidates: list[dict],
+    *,
+    check_growth: bool = True,
+    metric_key: str | None = None,
+    max_pct: float | None = None,
+) -> None:
+    """No-silent-caps guard-rail logging (data-quality hardening, 2026-08-16) — one
+    line per hardened board, so a data regression (a new corrupted NAV row, a
+    mis-flagged segregated fund) shows up in the worker log instead of quietly
+    shrinking a board. `candidates` = funds that had a non-null value for the board's
+    base metric BEFORE the guards ran. Each candidate is attributed to exactly one
+    reason, checked in segregated -> non_growth -> implausible_xirr priority order
+    (a board that doesn't apply a given guard just leaves that count at 0 —
+    `check_growth=False` / no `metric_key` for wealth_creator, which only guards on
+    is_segregated here)."""
+    segregated = non_growth = implausible = 0
+    for f in candidates:
+        if f.get("is_segregated"):
+            segregated += 1
+        elif check_growth and not _leaderboard_is_growth_category(f.get("sebi_category")):
+            non_growth += 1
+        elif metric_key is not None and max_pct is not None and f.get(metric_key, 0) > max_pct:
+            implausible += 1
+    total = segregated + non_growth + implausible
+    logger.info(
+        "%s: excluded %d (segregated=%d, non_growth=%d, implausible_xirr=%d)",
+        board_key,
+        total,
+        segregated,
+        non_growth,
+        implausible,
+    )
 
 
 def _leaderboard_fund_row(
@@ -3542,8 +3610,9 @@ def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
 
 def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit: str) -> list[dict]:
     """perf_1y / perf_3y / perf_5y (§5) — top 4 by the given return column,
-    descending. Generic enough to double as sip_3y/sip_5y (Phase 2, §8) over
-    sip_xirr_3y_pct/sip_xirr_5y_pct — same "highest non-null wins" shape."""
+    descending, "highest non-null wins". (sip_3y/sip_5y no longer reuse this
+    directly — see `_build_leaderboard_sip_rail` below, which adds the DATA-ARTIFACT
+    plausibility guards a raw XIRR column needs that a NAV-derived return doesn't.)"""
     candidates = [f for f in funds if f.get(metric_key) is not None]
 
     def _key(f: dict) -> float:
@@ -3553,6 +3622,36 @@ def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit
     deduped.sort(key=_key)
     return [
         _leaderboard_fund_row(f, metric_value=f[metric_key], metric_unit=metric_unit)
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_sip_rail(funds: list[dict], metric_key: str) -> list[dict]:
+    """sip_3y / sip_5y (Phase 2, §8) — top 4 by monthly-SIP XIRR (sip_xirr_3y_pct /
+    sip_xirr_5y_pct), descending. Same "highest non-null wins" shape as
+    `_build_leaderboard_perf_rail`, plus three DATA-ARTIFACT guards a raw XIRR
+    column needs: `is_segregated` funds excluded (a side-pocket NAV credit can spike
+    XIRR — prod example: Franklin India Short-Term sip_3y showed 89.25%),
+    non-growth categories excluded (a SIP-XIRR board is only meaningful for
+    growth-oriented schemes — prod example: ICICI Overnight sip_5y showed 53.24%),
+    and any XIRR above `_LEADERBOARD_MAX_SIP_XIRR_PCT` excluded (implausible —
+    signals a corrupted NAV series, not real performance)."""
+    candidates = [
+        f
+        for f in funds
+        if f.get(metric_key) is not None
+        and not f.get("is_segregated")
+        and _leaderboard_is_growth_category(f.get("sebi_category"))
+        and f[metric_key] <= _LEADERBOARD_MAX_SIP_XIRR_PCT
+    ]
+
+    def _key(f: dict) -> float:
+        return -f[metric_key]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f[metric_key], metric_unit="pct_sip_xirr")
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
@@ -3834,13 +3933,23 @@ def _since_launch_multiple(
     ~5.2y-capped window `_metrics_refresh_pipeline` loads for its other
     windows — so this is a real since-launch figure, not a proxy that would
     quietly collapse into a monotone transform of the 5Y return. None when
-    the span is under 5 years or the first NAV isn't positive.
+    the span is under 5 years, the first NAV isn't positive, or the implied CAGR
+    exceeds `_LEADERBOARD_MAX_SIP_XIRR_PCT` (DATA-ARTIFACT guard — no real fund
+    compounds >40%/yr over 5+ years; a violation means the earliest ingested NAV
+    row is corrupted, not that the fund is a genuine wealth creator. Prod example:
+    Edelweiss Liquid Fund showed a 178.78x since-launch multiple off a bad early
+    NAV row).
     """
     if (last_date - first_date).days < _SINCE_LAUNCH_MIN_DAYS:
         return None
     if first_nav <= 0:
         return None
-    return round(last_nav / first_nav, 2)
+    multiple = last_nav / first_nav
+    span_years = (last_date - first_date).days / 365.25
+    implied_cagr = multiple ** (1 / span_years) - 1
+    if implied_cagr > _LEADERBOARD_MAX_SIP_XIRR_PCT / 100.0:
+        return None
+    return round(multiple, 2)
 
 
 def _build_leaderboard_wealth_creator(
@@ -3848,9 +3957,12 @@ def _build_leaderboard_wealth_creator(
 ) -> list[dict]:
     """wealth_creator (Phase 2, §5) — top 4 by TRUE since-launch multiple
     (`_since_launch_multiple`, keyed by isin), highest first. A fund absent
-    from `multiples_by_isin` (no NAV history at all, or span under 5 years)
-    is excluded, never zero-filled."""
-    candidates = [f for f in funds if f["isin"] in multiples_by_isin]
+    from `multiples_by_isin` (no NAV history at all, span under 5 years, or an
+    implausible implied CAGR — see `_since_launch_multiple`'s DATA-ARTIFACT guard)
+    is excluded, never zero-filled. `is_segregated` funds are excluded here too,
+    defense-in-depth alongside the CAGR bound (prod example: Edelweiss Liquid
+    Fund's 178.78x came off a corrupted early NAV row on a segregated scheme)."""
+    candidates = [f for f in funds if f["isin"] in multiples_by_isin and not f.get("is_segregated")]
 
     def _key(f: dict) -> float:
         return -multiples_by_isin[f["isin"]]
@@ -3869,11 +3981,17 @@ def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
     """sip_consistency (Phase 2, §5) — highest rolling_1y_pct_positive (share of
     trailing 12-month windows with a positive return), gated to funds with a
     non-null return_3y_pct (>= 3Y history) so a young fund can't fake
-    consistency off a short, lucky window."""
+    consistency off a short, lucky window. DATA-ARTIFACT guard: also excludes
+    non-growth categories (a cash fund is 100%-positive by construction — vacuous;
+    prod example: ITI Liquid Fund topped this board at 100%) and `is_segregated`
+    funds."""
     candidates = [
         f
         for f in funds
-        if f.get("rolling_1y_pct_positive") is not None and f.get("return_3y_pct") is not None
+        if f.get("rolling_1y_pct_positive") is not None
+        and f.get("return_3y_pct") is not None
+        and not f.get("is_segregated")
+        and _leaderboard_is_growth_category(f.get("sebi_category"))
     ]
 
     def _key(f: dict) -> float:
@@ -3892,8 +4010,18 @@ def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
 def _build_leaderboard_risk_recovery(funds: list[dict]) -> list[dict]:
     """risk_recovery (Phase 2, §5) — fastest recovery from the fund's worst
     drawdown (recovery_days ascending); a fund that hasn't recovered yet
-    (recovery_days is None) is excluded, never treated as worst/best."""
-    candidates = [f for f in funds if f.get("recovery_days") is not None]
+    (recovery_days is None) is excluded, never treated as worst/best.
+    DATA-ARTIFACT guard: also excludes non-growth categories (an overnight/liquid
+    fund "recovering" in a couple of days is definitionally meaningless — prod
+    example: TRUST Overnight Fund - 2 Days topped this board) and `is_segregated`
+    funds."""
+    candidates = [
+        f
+        for f in funds
+        if f.get("recovery_days") is not None
+        and not f.get("is_segregated")
+        and _leaderboard_is_growth_category(f.get("sebi_category"))
+    ]
 
     def _key(f: dict) -> int:
         return f["recovery_days"]
@@ -4023,6 +4151,10 @@ async def _leaderboard_refresh_pipeline() -> str:
                     MfFund.expense_ratio_pct,
                     MfFund.aum_crore,
                     MfFund.launch_date,
+                    # DATA-ARTIFACT guard (data-quality hardening, 2026-08-16) — feeds
+                    # _leaderboard_is_growth_category + the sip/consistency/recovery/
+                    # wealth_creator board scoping below.
+                    MfFund.is_segregated,
                     MfFundMetrics.return_1y_pct,
                     MfFundMetrics.return_3y_pct,
                     MfFundMetrics.return_5y_pct,
@@ -4153,6 +4285,9 @@ async def _leaderboard_refresh_pipeline() -> str:
                 "sip_xirr_3y_pct": r.sip_xirr_3y_pct,
                 "sip_xirr_5y_pct": r.sip_xirr_5y_pct,
                 "recovery_days": r.recovery_days,
+                # Data-quality hardening (2026-08-16) — not in _LEADERBOARD_FUND_FIELDS
+                # (internal filter key only, never reaches the client).
+                "is_segregated": bool(r.is_segregated),
             }
         )
     funds_by_isin = {f["isin"]: f for f in funds}
@@ -4188,6 +4323,38 @@ async def _leaderboard_refresh_pipeline() -> str:
         for r in flow_rows_raw
     ]
 
+    # No-silent-caps logging (data-quality hardening, 2026-08-16, §4 of this change)
+    # — one line per hardened board BEFORE the guards run, so a regression (a spike
+    # in segregated/non-growth/implausible candidates) is visible in the worker log.
+    _leaderboard_log_hardening_exclusions(
+        "sip_3y",
+        [f for f in funds if f.get("sip_xirr_3y_pct") is not None],
+        metric_key="sip_xirr_3y_pct",
+        max_pct=_LEADERBOARD_MAX_SIP_XIRR_PCT,
+    )
+    _leaderboard_log_hardening_exclusions(
+        "sip_5y",
+        [f for f in funds if f.get("sip_xirr_5y_pct") is not None],
+        metric_key="sip_xirr_5y_pct",
+        max_pct=_LEADERBOARD_MAX_SIP_XIRR_PCT,
+    )
+    _leaderboard_log_hardening_exclusions(
+        "sip_consistency",
+        [
+            f
+            for f in funds
+            if f.get("rolling_1y_pct_positive") is not None and f.get("return_3y_pct") is not None
+        ],
+    )
+    _leaderboard_log_hardening_exclusions(
+        "risk_recovery", [f for f in funds if f.get("recovery_days") is not None]
+    )
+    _leaderboard_log_hardening_exclusions(
+        "wealth_creator",
+        [f for f in funds if f["isin"] in multiples_by_isin],
+        check_growth=False,
+    )
+
     top100_rows = _build_leaderboard_top100(funds)
     boards: dict[str, list[dict]] = {
         "top100": top100_rows,
@@ -4210,8 +4377,8 @@ async def _leaderboard_refresh_pipeline() -> str:
         "amc_facts": _build_leaderboard_amc_facts(funds),
         # Phase 2 (migration 0081, leaderboard-data-backend.md §8) — 5 new boards.
         "wealth_creator": _build_leaderboard_wealth_creator(funds, multiples_by_isin),
-        "sip_3y": _build_leaderboard_perf_rail(funds, "sip_xirr_3y_pct", "pct_sip_xirr"),
-        "sip_5y": _build_leaderboard_perf_rail(funds, "sip_xirr_5y_pct", "pct_sip_xirr"),
+        "sip_3y": _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct"),
+        "sip_5y": _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct"),
         "sip_consistency": _build_leaderboard_sip_consistency(funds),
         "risk_recovery": _build_leaderboard_risk_recovery(funds),
     }
