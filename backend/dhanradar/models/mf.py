@@ -265,6 +265,17 @@ class MfFundMetrics(Base):
     alpha_1y_tri_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     benchmark_key_1y: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Phase 2 batch metrics (migration 0081, leaderboard-data-backend.md §8) — SIP
+    # XIRR / recovery, computed from the same NAV series already loaded by
+    # _metrics_refresh_pipeline (dhanradar/tasks/mf.py). All nullable: None
+    # whenever the fund's history can't support the calculation. (The wealth-
+    # creator board's since-launch multiple is NOT stored here — it's computed
+    # directly in _leaderboard_refresh_pipeline from the full mf_nav_history
+    # table, since this table's NAV series is capped at ~5.2 years.)
+    sip_xirr_3y_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sip_xirr_5y_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recovery_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 
 class MfCategoryStats(Base):
     """Per-category percentile distribution of key fund metrics.

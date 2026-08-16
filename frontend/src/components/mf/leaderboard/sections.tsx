@@ -7,7 +7,7 @@
  * scroll horizontally at every size; grids collapse to one column on phones.
  *
  * Most sections still render illustrative preview data (sampleData.ts). Sections
- * that accept a `live`/`boards` prop (Top100, Champions, Performance, Risk,
+ * that accept a `live`/`boards` prop (Top100, Champions, Performance, Sip, Risk,
  * Value, Flows, Improved, AMC, Trending) swap in real GET /mf/leaderboard rows
  * when the caller (page.tsx) passes them — falling back to the untouched sample
  * whenever a board key is absent. No numeric DhanRadar score ever renders; live
@@ -78,12 +78,30 @@ function fmtDelta(n: number | null | undefined): string {
 /** Board-specific headline value — the wire unit key maps to a display suffix
  * ('pct_mom_aum' → '+52.3%', 'return_per_ter' → '36×'); unknown units render
  * the bare number rather than leaking the unit key into the UI. */
-const METRIC_SUFFIX: Record<string, string> = { pct_mom_aum: '%', return_per_ter: '×' };
+const METRIC_SUFFIX: Record<string, string> = {
+  pct_mom_aum: '%', return_per_ter: '×', x_since_launch: '×', pct_sip_xirr: '%',
+};
 function metricVal(r: LbFundRow): string {
   if (r.metric_value == null) return '—';
   const suffix = METRIC_SUFFIX[r.metric_unit ?? ''] ?? '';
   const sign = suffix === '%' && r.metric_value >= 0 ? '+' : '';
   return `${sign}${r.metric_value.toFixed(suffix === '×' ? 0 : 1)}${suffix}`;
+}
+/** SIP rails render the bare XIRR number ('28.1', matching the sample's
+ * unsuffixed style) — never metricVal's %/sign formatting. */
+function sipXirrVal(r: LbFundRow): string {
+  return r.metric_value == null ? '—' : r.metric_value.toFixed(1);
+}
+/** sip_consistency's metric_value is 0-100 ("% of rolling 1Y windows
+ * positive") — banded into a word, the raw pct never reaches the DOM. */
+function sipConsistencyWord(r: LbFundRow): string {
+  const v = r.metric_value;
+  if (v == null) return '—';
+  return v >= 85 ? 'Strong' : v >= 70 ? 'Good' : 'Fair';
+}
+/** risk_recovery's metric_value is days; the rail displays rounded months. */
+function recoveryMonths(r: LbFundRow): string {
+  return r.metric_value == null ? '—' : `${Math.round(r.metric_value / 30)} mo`;
 }
 function fundRailRow(r: LbFundRow, val: string, up?: boolean): RailRow {
   const name = fundName(r);
@@ -105,6 +123,12 @@ function liveRail<T>(sample: Rail, board: { rows: T[] } | undefined, mapRow: (ro
  * already carry one section-level LiveBadge (no need to repeat it per rail). */
 function wiredRail<T>(sample: Rail, board: { rows: T[] } | undefined, mapRow: (row: T) => RailRow): Rail {
   return board ? { ...sample, rows: board.rows.map(mapRow) } : sample;
+}
+/** Picks wiredRail (all 4 boards present, section carries one header badge)
+ * vs liveRail (mixed coverage, per-rail chip) — shared by PerformanceSection
+ * and RiskSection, whose 4th rail can go either way. */
+function coverageRail<T>(allLive: boolean, sample: Rail, board: { rows: T[] } | undefined, mapRow: (row: T) => RailRow): Rail {
+  return allLive ? wiredRail(sample, board, mapRow) : liveRail(sample, board, mapRow);
 }
 
 // Ring cell — score band (sample) vs label/confidence band (live), same visual shape.
@@ -524,29 +548,45 @@ export function RailSection({ rails }: { rails: Rail[] }) {
   return <HScroll>{rails.map((r) => <MiniLbCard key={r.title + r.icon} rail={r} />)}</HScroll>;
 }
 
-// Untouched — S6 SIP and S9 Intelligence extras are not wired this session.
-export const SipSection = () => <RailSection rails={SIP_RAIL} />;
+// Untouched — S9 Intelligence extras are not wired this session.
 export const IntelligenceSection = () => <RailSection rails={INTEL_RAIL} />;
 
-// S5 — mixed coverage (perf_1y/3y/5y live, Best Wealth Creator stays sample) → per-rail chip.
+// S5 — full coverage (perf_1y/3y/5y + wealth_creator all live) → section badge;
+// any subset live → per-rail chip (coverageRail, page.tsx computes the same allLive).
 export function PerformanceSection({ boards }: { boards?: LeaderboardBoards } = {}) {
+  const allLive = !!(boards?.perf_1y && boards?.perf_3y && boards?.perf_5y && boards?.wealth_creator);
   const rails: Rail[] = [
-    liveRail(PERF_RAIL[0], boards?.perf_1y, (r) => fundRailRow(r, pctSigned(r.return_1y_pct), (r.return_1y_pct ?? 0) >= 0)),
-    liveRail(PERF_RAIL[1], boards?.perf_3y, (r) => fundRailRow(r, pctSigned(r.return_3y_pct), (r.return_3y_pct ?? 0) >= 0)),
-    liveRail(PERF_RAIL[2], boards?.perf_5y, (r) => fundRailRow(r, pctSigned(r.return_5y_pct), (r.return_5y_pct ?? 0) >= 0)),
-    PERF_RAIL[3],
+    coverageRail(allLive, PERF_RAIL[0], boards?.perf_1y, (r) => fundRailRow(r, pctSigned(r.return_1y_pct), (r.return_1y_pct ?? 0) >= 0)),
+    coverageRail(allLive, PERF_RAIL[1], boards?.perf_3y, (r) => fundRailRow(r, pctSigned(r.return_3y_pct), (r.return_3y_pct ?? 0) >= 0)),
+    coverageRail(allLive, PERF_RAIL[2], boards?.perf_5y, (r) => fundRailRow(r, pctSigned(r.return_5y_pct), (r.return_5y_pct ?? 0) >= 0)),
+    coverageRail(allLive, PERF_RAIL[3], boards?.wealth_creator, (r) => fundRailRow(r, metricVal(r), true)),
   ];
   return <RailSection rails={rails} />;
 }
 
-// S7 — mixed coverage (risk_lowest/drawdown/sharpe live, Fastest Recovery stays sample).
-export function RiskSection({ boards }: { boards?: LeaderboardBoards } = {}) {
+// S6 — mixed coverage (sip_3y/sip_5y/sip_consistency live, Best SIP for
+// Beginners stays sample — founder decision D4 pending) → per-rail chip.
+export function SipSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   const rails: Rail[] = [
-    liveRail(RISK_RAIL[0], boards?.risk_lowest, (r) => fundRailRow(r, r.riskometer ?? '—', false)),
+    liveRail(SIP_RAIL[0], boards?.sip_3y, (r) => fundRailRow(r, sipXirrVal(r))),
+    liveRail(SIP_RAIL[1], boards?.sip_5y, (r) => fundRailRow(r, sipXirrVal(r))),
+    liveRail(SIP_RAIL[2], boards?.sip_consistency, (r) => fundRailRow(r, sipConsistencyWord(r))),
+    SIP_RAIL[3],
+  ];
+  return <RailSection rails={rails} />;
+}
+
+// S7 — full coverage (risk_lowest/drawdown/sharpe + risk_recovery all live) →
+// section badge; any subset live → per-rail chip. Same allLive treatment as
+// PerformanceSection (page.tsx computes the matching boolean for the header).
+export function RiskSection({ boards }: { boards?: LeaderboardBoards } = {}) {
+  const allLive = !!(boards?.risk_lowest && boards?.risk_drawdown && boards?.risk_sharpe && boards?.risk_recovery);
+  const rails: Rail[] = [
+    coverageRail(allLive, RISK_RAIL[0], boards?.risk_lowest, (r) => fundRailRow(r, r.riskometer ?? '—', false)),
     // max_drawdown_pct is a POSITIVE magnitude on the wire — display as a fall ('−8.0%').
-    liveRail(RISK_RAIL[1], boards?.risk_drawdown, (r) => fundRailRow(r, r.max_drawdown_pct != null ? `−${r.max_drawdown_pct.toFixed(1)}%` : '—', false)),
-    liveRail(RISK_RAIL[2], boards?.risk_sharpe, (r) => fundRailRow(r, r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—', true)),
-    RISK_RAIL[3],
+    coverageRail(allLive, RISK_RAIL[1], boards?.risk_drawdown, (r) => fundRailRow(r, r.max_drawdown_pct != null ? `−${r.max_drawdown_pct.toFixed(1)}%` : '—', false)),
+    coverageRail(allLive, RISK_RAIL[2], boards?.risk_sharpe, (r) => fundRailRow(r, r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—', true)),
+    coverageRail(allLive, RISK_RAIL[3], boards?.risk_recovery, (r) => fundRailRow(r, recoveryMonths(r), true)),
   ];
   return <RailSection rails={rails} />;
 }

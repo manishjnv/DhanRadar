@@ -1004,6 +1004,12 @@ _LEADERBOARD_BOARD_TITLES: dict[str, str] = {
     "aum_growth": "Fastest AUM Growth",
     "category_inflows": "Category Inflow Leaders",
     "amc_facts": "AMC Facts",
+    # Phase 2 (migration 0081, leaderboard-data-backend.md §8).
+    "wealth_creator": "Best Wealth Creators",
+    "sip_3y": "Best 3-Year SIP",
+    "sip_5y": "Best 5-Year SIP",
+    "sip_consistency": "Steadiest SIP Consistency",
+    "risk_recovery": "Fastest Drawdown Recovery",
 }
 
 
