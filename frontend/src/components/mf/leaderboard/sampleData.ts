@@ -93,16 +93,14 @@ export const HERO_KPIS: { label: string; value: string; sub?: string; valueColor
   { label: 'DMMI', value: '62', sub: 'Caut+', valueColor: '#FBBF24' },
 ];
 export type QuickLink = { label: string; href: string };
+// F-2 (founder 2026-08-16): trimmed 13 → 7 — keep only what the sticky nav
+// cannot do (Explorer category queries) plus the three highest-intent anchors.
+// Pure nav mirrors (Trending / AI Spotlight / Hidden Gems / Lowest Risk /
+// Best Value / Most Consistent) deleted — three rows named the same places.
 export const HERO_QUICK: QuickLink[] = [
   { label: 'Top Rated', href: '#top100' },
   { label: 'Best SIP', href: '#sip' },
   { label: 'Highest Returns', href: '#performance' },
-  { label: 'Lowest Risk', href: '#risk' },
-  { label: 'Best Value', href: '#value' },
-  { label: 'Most Consistent', href: '#sip' },
-  { label: 'Trending', href: '#trending' },
-  { label: 'Hidden Gems', href: '#intelligence' },
-  { label: 'AI Spotlight', href: '#intelligence' },
   { label: 'Tax Saving', href: '/mf/explore?category=Equity%20Scheme%20-%20ELSS' },
   { label: 'Retirement', href: '/mf/explore?category=Solution%20Oriented%20Scheme%20-%20Retirement%20Fund' },
   { label: 'Index', href: '/mf/explore?category=Other%20Scheme%20-%20Index%20Funds' },
@@ -112,31 +110,12 @@ export const MOBILE_QUICK: QuickLink[] = [
   { label: 'Top Rated', href: '#top100' },
   { label: 'Best SIP', href: '#sip' },
   { label: 'Highest Returns', href: '#performance' },
-  { label: 'Lowest Risk', href: '#risk' },
-  { label: 'Best Value', href: '#value' },
-  { label: 'Trending', href: '#trending' },
-  { label: 'Hidden Gems', href: '#intelligence' },
-  { label: 'AI Spotlight', href: '#intelligence' },
   { label: 'ELSS', href: '/mf/explore?category=Equity%20Scheme%20-%20ELSS' },
   { label: 'Index', href: '/mf/explore?category=Other%20Scheme%20-%20Index%20Funds' },
 ];
 
-// ── Discovery shortcuts (D-4, founder 2026-08-16: compact text chips, no icons,
-// no invented counts; 'Highest Rated · Multi-agency' DELETED — the third-party
-// ratings section was removed with S15, the tile promised a dead surface) ─────
-export type Disc = { name: string; anchor: string };
-export const DISC: Disc[] = [
-  { name: 'Top 100', anchor: '#top100' },
-  { name: 'Category Champions', anchor: '#champions' },
-  { name: 'Best Returns', anchor: '#performance' },
-  { name: 'SIP Lists', anchor: '#sip' },
-  { name: 'Lowest Risk', anchor: '#risk' },
-  { name: 'Best Value', anchor: '#value' },
-  { name: 'Best AMCs', anchor: '#amc' },
-  { name: 'Fund Managers', anchor: '#managers' },
-  { name: 'Trending', anchor: '#trending' },
-  { name: 'AI Spotlight', anchor: '#intelligence' },
-];
+// Discovery shortcuts — REMOVED (F-1, founder 2026-08-16): the Discover
+// section duplicated both the hero quick chips and the sticky CATNAV.
 
 // ── Top 100 funds ────────────────────────────────────────────────────────────
 export type Fund = {

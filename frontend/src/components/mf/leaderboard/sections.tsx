@@ -24,7 +24,7 @@ import {
   RichText, HScroll, IconBtn, CTA, MiniLbCard, PortfolioIsinsContext, PortfolioPill,
 } from './ui';
 import {
-  COLORS, FUNDS, DISC, CHAMP, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
+  COLORS, FUNDS, CHAMP, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
   HERO_KPIS, HERO_QUICK, REGIME_EXPLAINER,
   PERF_RAIL, SIP_RAIL, RISK_RAIL, VALUE_RAIL, INTEL_RAIL, FLOW_RAIL, IMPROVED_RAIL, TREND_RAIL,
   eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, aum,
@@ -243,16 +243,18 @@ export function CatNav() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   return (
+    // F-3 (founder 2026-08-16): text tabs + active underline, NOT pills — so
+    // the page reads one chip row + one navigation, never four chip rows.
     <div className="sticky top-0 z-20 -mx-4 mt-6 border-y border-line bg-surface/95 backdrop-blur sm:-mx-6">
-      <div className="flex gap-1.5 overflow-x-auto px-4 py-2 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-4 overflow-x-auto px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
         {CATNAV.map((c) => (
           <button
             key={c.id}
             type="button"
             onClick={() => go(c.id)}
             className={cn(
-              'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              active === c.id ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
+              'shrink-0 whitespace-nowrap border-b-2 px-0.5 py-2.5 text-[12.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+              active === c.id ? 'border-royal text-ink' : 'border-transparent text-ink-muted hover:border-line-strong hover:text-ink',
             )}
           >
             {c.label}
@@ -266,23 +268,8 @@ export function CatNav() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S2 — DISCOVERY SHORTCUTS
 // ═══════════════════════════════════════════════════════════════════════════
-// D-4 (founder 2026-08-16): compact text-chip row — the sticky CATNAV already
-// jumps to sections, so the old icon-card grid duplicated it at 3× the height.
-export function DiscoverSection() {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {DISC.map((d) => (
-        <a
-          key={d.name}
-          href={d.anchor}
-          className="rounded-lg border border-line bg-surface px-3.5 py-2 text-[12.5px] font-semibold text-ink-secondary shadow-sm transition-colors hover:border-royal hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
-        >
-          {d.name}
-        </a>
-      ))}
-    </div>
-  );
-}
+// DiscoverSection REMOVED (F-1, founder 2026-08-16) — it duplicated both the
+// hero quick chips and the sticky CATNAV; a section must earn its scroll.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // S3 — TOP 100  (compare tray lives here)
@@ -352,9 +339,31 @@ function liveT100Row(r: LbFundRow): Omit<T100Row, 'rank'> {
   };
 }
 
-export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?: T100Filters } = {}) {
+// F-4 (founder 2026-08-16): the depth tabs render in the SECTION HEADER's
+// badge slot (page.tsx), not as their own full-width row — tab state lives on
+// the page so the header control and this table share it.
+export function Top100Tabs({ tab, onTabChange }: { tab: string; onTabChange: (t: string) => void }) {
+  return (
+    <span className="inline-flex overflow-hidden rounded-lg border border-line bg-surface-2">
+      {T100_TABS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onTabChange(t.key)}
+          className={cn(
+            'px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+            tab === t.key ? 'bg-navy text-white' : 'text-ink-secondary hover:bg-surface-3',
+          )}
+        >
+          {t.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[]; filters?: T100Filters; tab?: string } = {}) {
   const router = useRouter();
-  const [tab, setTab] = React.useState('10');
   const [mobileAll, setMobileAll] = React.useState(false);
   // I3 — selection keyed by row.key (the ISIN on live rows), never by render
   // index: sort/filter reorder the list, an index would silently swap the
@@ -408,23 +417,6 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
 
   return (
     <>
-      {/* tabs */}
-      <div className="mb-3.5 flex gap-1.5">
-        {T100_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'rounded-lg border px-3.5 py-2 text-[12.5px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              tab === t.key ? 'border-navy bg-navy text-white' : 'border-line bg-surface text-ink-secondary hover:bg-surface-2',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
       {/* DESKTOP table */}
       <div className="hidden overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm md:block">
         <table className="w-full min-w-[1040px] border-collapse text-small">
