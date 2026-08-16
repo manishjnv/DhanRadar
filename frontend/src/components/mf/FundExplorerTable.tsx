@@ -30,6 +30,7 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
 import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
+import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import type { FundExplorerItem } from '@/features/mf/types';
 import type { Label } from '@/components/charts/ScoreRing';
 
@@ -224,7 +225,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                         title={fund.scheme_name}
                         className="font-medium text-ink leading-tight group-hover:text-royal transition-colors line-clamp-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
                       >
-                        {fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)}
+                        {fundDisplayName(fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)).name}
                       </Link>
                       <div className="flex items-center flex-wrap gap-1 mt-0.5">
                         {fund.amc_name && (

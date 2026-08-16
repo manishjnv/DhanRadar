@@ -16,7 +16,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { toBand, ringColor, riskColor } from './sampleData';
+import { COLORS, toBand, ringColor, riskColor } from './sampleData';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 
 const BAND_FILL: Record<'high' | 'medium' | 'low', number> = { high: 0.85, medium: 0.55, low: 0.3 };
@@ -243,18 +243,29 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
           // rails (first-initial + arbitrary color carried no information —
           // the rank number anchors the row); tighter padding + lighter
           // weights. Tiles stay in the wide Top-100/Champions surfaces.
+          // E-4 — signed values get a factual direction arrow + semantic
+          // colour (▲ emerald / ▼ red); unsigned values (TER, riskometer,
+          // multiples, label words) stay in the rail colour. Direction of a
+          // number, never an advisory signal.
+          const dir = r.val.startsWith('+') ? 1 : /^[−-]\d/.test(r.val) ? -1 : 0;
+          const valColor = dir === 1 ? COLORS.E : dir === -1 ? COLORS.R : rail.color;
           const inner = (
             <>
               {/* D-2: one token step darker than the old text-ink-faint */}
               <span className="w-4 shrink-0 font-sans text-xs font-semibold text-ink-muted">{i + 1}</span>
               <span className="min-w-0 flex-1">
-                {/* D-6: wrap to 2 lines instead of cutting the name; full name on hover */}
-                <span title={r.name} className="block line-clamp-2 text-[11.5px] font-medium leading-snug text-ink">{r.name}</span>
-                {r.isin != null && pfIsins.has(r.isin) && <PortfolioPill />}
+                {/* D-6/E-3: short display name, qualifier tag chip, full name on hover */}
+                <span title={r.fullName ?? r.name} className="block line-clamp-2 text-[11.5px] font-medium leading-snug text-ink">{r.name}</span>
+                <span className="flex flex-wrap items-center gap-1">
+                  {r.tag && <span className="mt-0.5 inline-block rounded bg-surface-3 px-1 py-px text-[8.5px] font-semibold text-ink-secondary">{r.tag}</span>}
+                  {r.isin != null && pfIsins.has(r.isin) && <PortfolioPill />}
+                </span>
               </span>
               {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
               <span className="flex shrink-0 flex-col items-end">
-                <span className="font-mono text-xs font-semibold" style={{ color: rail.color }}>{r.val}</span>
+                <span className="font-mono text-xs font-semibold" style={{ color: valColor }}>
+                  {dir === 1 ? '▲ ' : dir === -1 ? '▼ ' : ''}{r.val}
+                </span>
                 {r.sub && <span className="text-[9.5px] text-ink-muted">{r.sub}</span>}
               </span>
             </>

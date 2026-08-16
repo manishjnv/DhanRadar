@@ -196,7 +196,7 @@ export const CHAMP: Champ[] = [
 // V1: `sub` is a tiny muted caption under `val` — e.g. a category-average
 // comparison ("cat avg 14.1%") or (V6) a short flow explainer. Optional; rows
 // without it render exactly as before.
-export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean; href?: string; sub?: string; isin?: string };
+export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean; href?: string; sub?: string; isin?: string; tag?: string; fullName?: string };
 /** `live` marks a rail as fed by a wired board (renders a small LiveBadge in its header). */
 export type Rail = { title: string; q: string; icon: string; color: string; rows: RailRow[]; live?: boolean };
 
