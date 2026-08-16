@@ -273,6 +273,13 @@ _LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
     "champions": "leaderboard.champion_row",
     "category_inflows": "leaderboard.category_flow_row",
     "amc_facts": "leaderboard.amc_row",
+    # Phase 2 (migration 0081, leaderboard-data-backend.md §8) — 5 new boards,
+    # all plain FundRow shapes (the new metric travels via metric_value only).
+    "wealth_creator": "leaderboard.fund_row",
+    "sip_3y": "leaderboard.fund_row",
+    "sip_5y": "leaderboard.fund_row",
+    "sip_consistency": "leaderboard.fund_row",
+    "risk_recovery": "leaderboard.fund_row",
 }
 
 

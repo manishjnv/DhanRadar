@@ -83,6 +83,8 @@ function LeaderboardView() {
   const moodBand = moodHealthy ? mood.data!.confidence_band : undefined;
   const moodColor = moodHealthy ? REGIME_COLOR[mood.data!.regime] : undefined;
 
+  const perfLive = !!(boards?.perf_1y && boards?.perf_3y && boards?.perf_5y && boards?.wealth_creator);
+  const riskLive = !!(boards?.risk_lowest && boards?.risk_drawdown && boards?.risk_sharpe && boards?.risk_recovery);
   const valueLive = !!(boards?.value_ter && boards?.value_efficiency && boards?.value_index);
   const improvedLive = !!(boards?.movers_up && boards?.label_upgrades && boards?.top10_entries);
 
@@ -125,21 +127,21 @@ function LeaderboardView() {
         <ChampionsSection live={boards?.champions?.rows} />
       </Anchor>
 
-      {/* S5 — Performance (mixed coverage: per-rail chip, see PerformanceSection) */}
+      {/* S5 — Performance (all 4 rails live → section badge, else per-rail chip; see PerformanceSection) */}
       <Anchor id="performance">
-        <SectionHeader index="04" title="Performance Leaderboards" info="highest returns by period" />
+        <SectionHeader index="04" title="Performance Leaderboards" info="highest returns by period" badge={perfLive ? <LiveBadge /> : undefined} />
         <PerformanceSection boards={boards} />
       </Anchor>
 
-      {/* S6 — SIP */}
+      {/* S6 — SIP (mixed coverage: per-rail chip, see SipSection) */}
       <Anchor id="sip">
         <SectionHeader index="05" title="SIP Leaderboards" info="best for monthly investors" />
-        <SipSection />
+        <SipSection boards={boards} />
       </Anchor>
 
-      {/* S7 — Risk (mixed coverage: per-rail chip, see RiskSection) */}
+      {/* S7 — Risk (all 4 rails live → section badge, else per-rail chip; see RiskSection) */}
       <Anchor id="risk">
-        <SectionHeader index="06" title="Risk Leaderboards" info="safest & steadiest funds" />
+        <SectionHeader index="06" title="Risk Leaderboards" info="safest & steadiest funds" badge={riskLive ? <LiveBadge /> : undefined} />
         <RiskSection boards={boards} />
       </Anchor>
 

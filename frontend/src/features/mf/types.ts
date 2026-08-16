@@ -661,9 +661,19 @@ export interface LeaderboardBoards {
   perf_1y?: { title: string; rows: LbFundRow[] };
   perf_3y?: { title: string; rows: LbFundRow[] };
   perf_5y?: { title: string; rows: LbFundRow[] };
+  /** unit x_since_launch — multiple of launch NAV, e.g. 42.0 → '42×'. */
+  wealth_creator?: { title: string; rows: LbFundRow[] };
+  /** unit pct_sip_xirr — SIP XIRR %, rendered bare (no sign/suffix). */
+  sip_3y?: { title: string; rows: LbFundRow[] };
+  sip_5y?: { title: string; rows: LbFundRow[] };
+  /** unit pct_rolling_positive — metric_value is 0-100, "% of rolling 1-year
+   *  windows positive"; rendered as a word band, never the raw pct. */
+  sip_consistency?: { title: string; rows: LbFundRow[] };
   risk_lowest?: { title: string; rows: LbFundRow[] };
   risk_drawdown?: { title: string; rows: LbFundRow[] };
   risk_sharpe?: { title: string; rows: LbFundRow[] };
+  /** unit days_recovery — metric_value is days; rendered as rounded months. */
+  risk_recovery?: { title: string; rows: LbFundRow[] };
   value_ter?: { title: string; rows: LbFundRow[] };
   value_efficiency?: { title: string; rows: LbFundRow[] };
   value_index?: { title: string; rows: LbFundRow[] };

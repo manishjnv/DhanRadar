@@ -33,9 +33,14 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_hero,
     _build_leaderboard_label_upgrades,
     _build_leaderboard_movers,
+    _build_leaderboard_perf_rail,
+    _build_leaderboard_risk_recovery,
+    _build_leaderboard_sip_consistency,
     _build_leaderboard_top100,
+    _build_leaderboard_wealth_creator,
     _dedupe_leaderboard_variants,
     _leaderboard_is_stale,
+    _since_launch_multiple,
 )
 
 # ci_guards / anti_pattern_sweep convention (docs/rca 'ci_guards FE advisory-verb
@@ -233,6 +238,79 @@ def test_staleness_guard_skips_beyond_3_days() -> None:
     assert _leaderboard_is_stale(date(2026, 8, 10), today=date(2026, 8, 16)) is True  # 6 days
     assert _leaderboard_is_stale(date(2026, 8, 13), today=date(2026, 8, 16)) is False  # exactly 3 days
     assert _leaderboard_is_stale(date(2026, 8, 12), today=date(2026, 8, 16)) is True  # 4 days
+
+
+# ---------------------------------------------------------------------------
+# 2f — Phase 2 boards (docs/features/leaderboard-data-backend.md §8): wealth
+# creator, SIP rails (reused _build_leaderboard_perf_rail), SIP consistency,
+# drawdown recovery.
+# ---------------------------------------------------------------------------
+
+
+def test_since_launch_multiple_none_under_5y_guard() -> None:
+    result = _since_launch_multiple(date(2022, 1, 1), 100.0, date(2025, 1, 1), 150.0)  # ~3y span
+    assert result is None
+
+
+def test_since_launch_multiple_none_when_first_nav_not_positive() -> None:
+    result = _since_launch_multiple(date(2018, 1, 1), 0.0, date(2026, 1, 1), 200.0)  # 8y span
+    assert result is None
+
+
+def test_since_launch_multiple_computes_ratio_over_5y_guard() -> None:
+    result = _since_launch_multiple(date(2018, 1, 1), 50.0, date(2026, 1, 1), 200.0)  # 8y span
+    assert result == 4.0
+
+
+def test_wealth_creator_orders_by_since_launch_multiple_excludes_null() -> None:
+    funds = [
+        _fund("INE_W1"),
+        _fund("INE_W2"),
+        _fund("INE_W3"),  # no entry in multiples_by_isin — short history, excluded not zero-filled
+    ]
+    multiples_by_isin = {"INE_W1": 5.0, "INE_W2": 8.0}
+    rows = _build_leaderboard_wealth_creator(funds, multiples_by_isin)
+    assert [r["isin"] for r in rows] == ["INE_W2", "INE_W1"]
+    assert rows[0]["metric_value"] == 8.0
+    assert rows[0]["metric_unit"] == "x_since_launch"
+
+
+def test_sip_rails_reuse_perf_rail_over_sip_xirr_columns() -> None:
+    """sip_3y / sip_5y aren't a new builder — they call the already-tested
+    generic _build_leaderboard_perf_rail over the new SIP XIRR columns."""
+    funds = [
+        _fund("INE_S1", sip_xirr_3y_pct=10.0, sip_xirr_5y_pct=9.0),
+        _fund("INE_S2", sip_xirr_3y_pct=14.0, sip_xirr_5y_pct=None),
+    ]
+    sip_3y = _build_leaderboard_perf_rail(funds, "sip_xirr_3y_pct", "pct_sip_xirr")
+    sip_5y = _build_leaderboard_perf_rail(funds, "sip_xirr_5y_pct", "pct_sip_xirr")
+    assert [r["isin"] for r in sip_3y] == ["INE_S2", "INE_S1"]
+    assert [r["isin"] for r in sip_5y] == ["INE_S1"]  # null sip_xirr_5y_pct excluded
+    assert sip_3y[0]["metric_unit"] == "pct_sip_xirr"
+
+
+def test_sip_consistency_requires_3y_history_and_orders_by_pct_positive() -> None:
+    funds = [
+        _fund("INE_C1", rolling_1y_pct_positive=90.0, return_3y_pct=12.0),
+        _fund("INE_C2", rolling_1y_pct_positive=95.0, return_3y_pct=None),  # < 3Y history — excluded
+        _fund("INE_C3", rolling_1y_pct_positive=80.0, return_3y_pct=10.0),
+    ]
+    rows = _build_leaderboard_sip_consistency(funds)
+    assert [r["isin"] for r in rows] == ["INE_C1", "INE_C3"]
+    assert rows[0]["metric_value"] == 90.0
+    assert rows[0]["metric_unit"] == "pct_rolling_positive"
+
+
+def test_risk_recovery_orders_ascending_excludes_never_recovered() -> None:
+    funds = [
+        _fund("INE_R1", recovery_days=120),
+        _fund("INE_R2", recovery_days=30),
+        _fund("INE_R3", recovery_days=None),  # never recovered — excluded
+    ]
+    rows = _build_leaderboard_risk_recovery(funds)
+    assert [r["isin"] for r in rows] == ["INE_R2", "INE_R1"]
+    assert rows[0]["metric_value"] == 30
+    assert rows[0]["metric_unit"] == "days_recovery"
 
 
 # ---------------------------------------------------------------------------

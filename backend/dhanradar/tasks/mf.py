@@ -58,9 +58,10 @@ from dhanradar.mf.cas import (
 )
 from dhanradar.mf.cohort import CohortBenchmark, FundStats
 from dhanradar.mf.disclosure_parsers import RISKOMETER_BANDS
+from dhanradar.mf.risk import drawdown_series
 from dhanradar.mf.scoring_bridge import score_fund, upsert_user_fund_score
 from dhanradar.mf.signals import CategoryRelative, compute_fund_signals
-from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot
+from dhanradar.mf.snapshot import CashFlow, Holding, build_snapshot, xirr
 from dhanradar.mf.taxonomy import (
     canonical_for,
     derive_short_name,
@@ -2433,6 +2434,98 @@ async def _benchmark_tri_pipeline(
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 batch metrics (docs/features/leaderboard-data-backend.md §8) — SIP
+# XIRR, drawdown-recovery days. PURE / DB-independent functions computed
+# inside _metrics_refresh_pipeline's existing per-fund loop from the NAV
+# series already loaded there (`series.get(isin, [])`, ascending
+# [(date, nav), ...]) — no new query, same convention as the leaderboard
+# builders above. (The since-launch multiple lives near
+# _build_leaderboard_wealth_creator below — it needs the FULL mf_nav_history
+# span, not this pipeline's ~5.2y-capped series.)
+# ---------------------------------------------------------------------------
+
+_SIP_INSTALLMENT = 10_000.0  # arbitrary; cancels out of the XIRR rate
+
+
+def _recovery_days(points: list[tuple[date, float]]) -> int | None:
+    """Days to recover from the fund's WORST drawdown episode — the identical
+    episode `max_drawdown_pct` (extended_horizon_stats -> _max_drawdown_pct)
+    describes, since both run the same running-peak scan over the same
+    `_sorted_unique`-deduped series. Thin wrapper, not a reimplementation:
+    delegates to `dhanradar.mf.risk.drawdown_series`, the exact function
+    `fund_read.get_fund_analytics` (the read path) already calls — so batch
+    and read-path recovery-days can never drift apart. Per that function's own
+    semantics, the count is calendar days from the PEAK preceding the worst
+    fall (not the trough) to the first later date the NAV closes at/above that
+    peak; None if the fund hasn't recovered by its latest NAV point.
+    """
+    _, _, recovery = drawdown_series(points)
+    return recovery
+
+
+def _sip_xirr(points: list[tuple[date, float]], months: int) -> float | None:
+    """Simulate a fixed ₹10,000 monthly SIP over the trailing `months` calendar
+    months — anchored on the SERIES' OWN latest NAV date (not today), the same
+    "anchor on the latest point" convention every other window in this
+    pipeline uses — and return its XIRR as a percent.
+
+    One purchase per calendar month, on the FIRST NAV date available that
+    month (a real SIP order date, not a fixed day-of-month); units accumulate
+    across installments. The final cash flow is a same-day full redemption:
+    total units x the latest NAV. Reuses `dhanradar.mf.snapshot.xirr` (its
+    CashFlow convention: investments negative, redemption positive) rather
+    than reimplementing IRR.
+
+    Returns None when:
+      - the loaded history doesn't stretch back far enough to cover the full
+        window (earliest NAV point more than 15 days after the window's
+        calendar start — a partial first month would silently understate the
+        SIP), or
+      - any one of the `months` trailing calendar months has no NAV point at
+        all (a gap the fund can't be blamed for, but the XIRR would be, so
+        it's excluded rather than approximated).
+    """
+    pts = sorted(points)
+    if len(pts) < 2:
+        return None
+    latest_date, latest_nav = pts[-1]
+
+    year, month = latest_date.year, latest_date.month
+    month_starts: list[date] = []
+    for i in range(months - 1, -1, -1):
+        m = month - i
+        y = year
+        while m < 1:
+            m += 12
+            y -= 1
+        month_starts.append(date(y, m, 1))
+
+    if (pts[0][0] - month_starts[0]).days > 15:
+        return None  # partial first month — history doesn't cover the full window
+
+    def _month_end_exclusive(d: date) -> date:
+        return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+
+    cashflows: list[CashFlow] = []
+    total_units = 0.0
+    pos = 0
+    for m_start in month_starts:
+        m_end = _month_end_exclusive(m_start)
+        while pos < len(pts) and pts[pos][0] < m_start:
+            pos += 1
+        if pos >= len(pts) or pts[pos][0] >= m_end:
+            return None  # this calendar month has no NAV point at all
+        purchase_date, purchase_nav = pts[pos]
+        if purchase_nav <= 0:
+            return None
+        total_units += _SIP_INSTALLMENT / purchase_nav
+        cashflows.append(CashFlow(when=purchase_date, amount=-_SIP_INSTALLMENT))
+
+    cashflows.append(CashFlow(when=latest_date, amount=total_units * latest_nav))
+    return xirr(cashflows)
+
+
 @celery_app.task(name="dhanradar.tasks.mf.mf_metrics_refresh")
 def mf_metrics_refresh() -> str:
     """Nightly precompute of per-fund long-horizon stats into mf_fund_metrics.
@@ -2614,6 +2707,13 @@ async def _metrics_refresh_pipeline() -> str:
                 # (which stays fund-NAV 1Y-only; also reused by the portfolio M2.3 path).
                 r3y_avg, r3y_min, r3y_max, r3y_pct_pos = rolling_3y_returns(series.get(isin, []))
 
+                # Phase 2 batch metrics (migration 0081, leaderboard-data-backend.md
+                # §8) — SIP XIRR (3Y/5Y), drawdown-recovery days; both pure, from
+                # the SAME series already loaded above.
+                sip_xirr_3y = _sip_xirr(series.get(isin, []), months=36)
+                sip_xirr_5y = _sip_xirr(series.get(isin, []), months=60)
+                recovery_days = _recovery_days(series.get(isin, []))
+
                 # Benchmark-relative stats (alpha/beta/tracking error, Block 0.7) —
                 # only for index funds with a registry-valid mapped benchmark_index
                 # (bench_series_cache is empty for every other fund); everyone else
@@ -2687,6 +2787,10 @@ async def _metrics_refresh_pipeline() -> str:
                         # TRI-based alpha (migration 0077, Phase 4c pt5).
                         "alpha_1y_tri_pct": alpha_tri,
                         "benchmark_key_1y": benchmark_key_1y,
+                        # Phase 2 batch metrics (migration 0081).
+                        "sip_xirr_3y_pct": sip_xirr_3y,
+                        "sip_xirr_5y_pct": sip_xirr_5y,
+                        "recovery_days": recovery_days,
                     }
                 )
 
@@ -2735,6 +2839,10 @@ async def _metrics_refresh_pipeline() -> str:
                             # TRI-based alpha (migration 0077, Phase 4c pt5).
                             "alpha_1y_tri_pct": insert(MfFundMetrics).excluded.alpha_1y_tri_pct,
                             "benchmark_key_1y": insert(MfFundMetrics).excluded.benchmark_key_1y,
+                            # Phase 2 batch metrics (migration 0081).
+                            "sip_xirr_3y_pct": insert(MfFundMetrics).excluded.sip_xirr_3y_pct,
+                            "sip_xirr_5y_pct": insert(MfFundMetrics).excluded.sip_xirr_5y_pct,
+                            "recovery_days": insert(MfFundMetrics).excluded.recovery_days,
                         },
                     )
                 )
@@ -3433,7 +3541,9 @@ def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
 
 
 def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit: str) -> list[dict]:
-    """perf_1y / perf_3y / perf_5y (§5) — top 4 by the given return column, descending."""
+    """perf_1y / perf_3y / perf_5y (§5) — top 4 by the given return column,
+    descending. Generic enough to double as sip_3y/sip_5y (Phase 2, §8) over
+    sip_xirr_3y_pct/sip_xirr_5y_pct — same "highest non-null wins" shape."""
     candidates = [f for f in funds if f.get(metric_key) is not None]
 
     def _key(f: dict) -> float:
@@ -3707,6 +3817,95 @@ def _build_leaderboard_amc_facts(funds: list[dict]) -> list[dict]:
     return rows[:8]
 
 
+_SINCE_LAUNCH_MIN_DAYS = 365 * 5  # 5Y guard — short histories are noise (§8)
+
+
+def _since_launch_multiple(
+    first_date: date, first_nav: float, last_date: date, last_nav: float
+) -> float | None:
+    """latest_nav / first-ever-ingested-nav — how many times ₹1 invested at our
+    earliest ingested NAV point has multiplied.
+
+    "Launch" here means OUR EARLIEST INGESTED NAV (the AMFI full-history
+    backfill), not necessarily the fund's true SEBI inception date — the
+    honest label for whatever history AMFI's backfill actually gave us.
+    Callers pass the fund's true first/last row from the FULL mf_nav_history
+    table (`_leaderboard_refresh_pipeline`, DISTINCT ON isin), not the
+    ~5.2y-capped window `_metrics_refresh_pipeline` loads for its other
+    windows — so this is a real since-launch figure, not a proxy that would
+    quietly collapse into a monotone transform of the 5Y return. None when
+    the span is under 5 years or the first NAV isn't positive.
+    """
+    if (last_date - first_date).days < _SINCE_LAUNCH_MIN_DAYS:
+        return None
+    if first_nav <= 0:
+        return None
+    return round(last_nav / first_nav, 2)
+
+
+def _build_leaderboard_wealth_creator(
+    funds: list[dict], multiples_by_isin: dict[str, float]
+) -> list[dict]:
+    """wealth_creator (Phase 2, §5) — top 4 by TRUE since-launch multiple
+    (`_since_launch_multiple`, keyed by isin), highest first. A fund absent
+    from `multiples_by_isin` (no NAV history at all, or span under 5 years)
+    is excluded, never zero-filled."""
+    candidates = [f for f in funds if f["isin"] in multiples_by_isin]
+
+    def _key(f: dict) -> float:
+        return -multiples_by_isin[f["isin"]]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(
+            f, metric_value=multiples_by_isin[f["isin"]], metric_unit="x_since_launch"
+        )
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
+    """sip_consistency (Phase 2, §5) — highest rolling_1y_pct_positive (share of
+    trailing 12-month windows with a positive return), gated to funds with a
+    non-null return_3y_pct (>= 3Y history) so a young fund can't fake
+    consistency off a short, lucky window."""
+    candidates = [
+        f
+        for f in funds
+        if f.get("rolling_1y_pct_positive") is not None and f.get("return_3y_pct") is not None
+    ]
+
+    def _key(f: dict) -> float:
+        return -f["rolling_1y_pct_positive"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(
+            f, metric_value=f["rolling_1y_pct_positive"], metric_unit="pct_rolling_positive"
+        )
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_risk_recovery(funds: list[dict]) -> list[dict]:
+    """risk_recovery (Phase 2, §5) — fastest recovery from the fund's worst
+    drawdown (recovery_days ascending); a fund that hasn't recovered yet
+    (recovery_days is None) is excluded, never treated as worst/best."""
+    candidates = [f for f in funds if f.get("recovery_days") is not None]
+
+    def _key(f: dict) -> int:
+        return f["recovery_days"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["recovery_days"], metric_unit="days_recovery")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
 def _build_leaderboard_hero(
     funds: list[dict],
     prev_by_isin: dict[str, dict],
@@ -3771,6 +3970,7 @@ async def _leaderboard_refresh_pipeline() -> str:
         MfFundMetrics,
         MfFundRanks,
         MfLeaderboardBoard,
+        MfNavHistory,
     )
 
     run_id = str(uuid4())
@@ -3829,6 +4029,13 @@ async def _leaderboard_refresh_pipeline() -> str:
                     MfFundMetrics.sharpe_ratio,
                     MfFundMetrics.max_drawdown_pct,
                     MfFundMetrics.volatility_pct,
+                    # Phase 2 batch metrics (migration 0081) — feed the 5 new boards.
+                    # (since_launch_multiple is NOT a column here — computed below
+                    # from the full mf_nav_history span, see multiples_by_isin.)
+                    MfFundMetrics.rolling_1y_pct_positive,
+                    MfFundMetrics.sip_xirr_3y_pct,
+                    MfFundMetrics.sip_xirr_5y_pct,
+                    MfFundMetrics.recovery_days,
                 )
                 .join(MfFund, MfFund.isin == MfFundRanks.isin)
                 .outerjoin(MfFundMetrics, MfFundMetrics.isin == MfFundRanks.isin)
@@ -3879,6 +4086,26 @@ async def _leaderboard_refresh_pipeline() -> str:
                 )
             ).all()
 
+        # wealth_creator's TRUE since-launch span (design correction, §8) — first
+        # and last ingested NAV row per isin over the FULL mf_nav_history table
+        # (not the ~1900d-capped window _metrics_refresh_pipeline loads). Each
+        # query is a single indexed scan of the (isin, nav_date) PK via DISTINCT
+        # ON isin — cheap regardless of table size.
+        first_nav_rows = (
+            await db.execute(
+                select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
+                .distinct(MfNavHistory.isin)
+                .order_by(MfNavHistory.isin, MfNavHistory.nav_date.asc())
+            )
+        ).all()
+        last_nav_rows = (
+            await db.execute(
+                select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
+                .distinct(MfNavHistory.isin)
+                .order_by(MfNavHistory.isin, MfNavHistory.nav_date.desc())
+            )
+        ).all()
+
     # --- normalize into plain, JSON-safe dicts (Decimal -> float, date -> isoformat)
     # -- everything below this line is PURE / DB-independent (unit-testable as such).
     prev_by_isin = {
@@ -3919,9 +4146,31 @@ async def _leaderboard_refresh_pipeline() -> str:
                 "volatility_pct": r.volatility_pct,
                 "launch_date": r.launch_date,
                 "contributing_signals": r.contributing_signals or [],
+                # Phase 2 batch metrics (migration 0081) — not in
+                # _LEADERBOARD_FUND_FIELDS (board value travels via metric_value
+                # only); used purely as sort/filter keys by the builders below.
+                "rolling_1y_pct_positive": r.rolling_1y_pct_positive,
+                "sip_xirr_3y_pct": r.sip_xirr_3y_pct,
+                "sip_xirr_5y_pct": r.sip_xirr_5y_pct,
+                "recovery_days": r.recovery_days,
             }
         )
     funds_by_isin = {f["isin"]: f for f in funds}
+
+    # wealth_creator's TRUE since-launch multiples (design correction, §8) —
+    # first/last ingested NAV row per isin from the FULL mf_nav_history query
+    # above, run through the pure `_since_launch_multiple` helper.
+    first_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in first_nav_rows}
+    last_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last_nav_rows}
+    multiples_by_isin: dict[str, float] = {}
+    for isin, (first_date, first_nav) in first_nav_by_isin.items():
+        last = last_nav_by_isin.get(isin)
+        if last is None:
+            continue
+        last_date, last_nav = last
+        multiple = _since_launch_multiple(first_date, first_nav, last_date, last_nav)
+        if multiple is not None:
+            multiples_by_isin[isin] = multiple
 
     aum_by_isin: dict[str, dict[int, float]] = defaultdict(dict)
     for r in aum_rows:
@@ -3959,6 +4208,12 @@ async def _leaderboard_refresh_pipeline() -> str:
         "aum_growth": _build_leaderboard_aum_growth(funds_by_isin, aum_pairs),
         "category_inflows": _build_leaderboard_category_inflows(flow_rows),
         "amc_facts": _build_leaderboard_amc_facts(funds),
+        # Phase 2 (migration 0081, leaderboard-data-backend.md §8) — 5 new boards.
+        "wealth_creator": _build_leaderboard_wealth_creator(funds, multiples_by_isin),
+        "sip_3y": _build_leaderboard_perf_rail(funds, "sip_xirr_3y_pct", "pct_sip_xirr"),
+        "sip_5y": _build_leaderboard_perf_rail(funds, "sip_xirr_5y_pct", "pct_sip_xirr"),
+        "sip_consistency": _build_leaderboard_sip_consistency(funds),
+        "risk_recovery": _build_leaderboard_risk_recovery(funds),
     }
     hero = _build_leaderboard_hero(funds, prev_by_isin, top100_rows, live_board_count=len(boards))
 
