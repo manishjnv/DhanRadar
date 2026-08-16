@@ -5108,6 +5108,7 @@ async def _leaderboard_refresh_pipeline() -> str:
         from dhanradar.ai_gateway.gateway import OpenRouterGateway
         from dhanradar.mf.leaderboard_insights import (
             generate_leaderboard_insights,
+            link_insights,
             screen_insights,
         )
 
@@ -5125,7 +5126,9 @@ async def _leaderboard_refresh_pipeline() -> str:
             )
         )
         if insight_texts:
-            boards["ai_insights"] = [{"text": t} for t in insight_texts]
+            # Entity links (2026-08-16) — deterministic post-hoc matching against
+            # the exact names the prompt carried; the model never emits a link.
+            boards["ai_insights"] = link_insights(insight_texts, boards)
     except TimeoutError:
         logger.warning(
             "leaderboard_refresh: ai_insights timed out after %.0f s — board skipped",

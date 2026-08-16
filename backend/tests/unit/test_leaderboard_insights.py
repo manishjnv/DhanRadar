@@ -32,6 +32,7 @@ from dhanradar.mf.leaderboard_insights import (
     LeaderboardInsights,
     build_messages,
     generate_leaderboard_insights,
+    link_insights,
     screen_insights,
 )
 
@@ -268,3 +269,82 @@ def test_insight_card_advisory_text_rejected_by_quality_validator():
                 "insights": [_CARDS[0], "You should switch to index funds now."],
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Entity links (2026-08-16) — deterministic post-hoc, never model-emitted
+# ---------------------------------------------------------------------------
+
+_LINK_BOARDS = {
+    "movers_up": [
+        {"fund_name_short": "Quant Small Cap", "isin": "INF966L01ABC", "rank_delta": 9},
+        {"fund_name_short": "HDFC Flexi Cap", "isin": "INF179K01XYZ", "rank_delta": 5},
+    ],
+    "value_ter": [{"fund_name_short": "UTI Nifty 50 Index", "isin": "INF789F01QRS", "expense_ratio_pct": 0.2}],
+    "category_inflows": [{"category": "Small Cap Fund", "net_flow_cr": 5697.9}],
+}
+
+
+def test_link_insights_attaches_only_prompt_fed_names_with_their_isins():
+    rows = link_insights(
+        ["Quant Small Cap climbed 9 places this week.", "Small Cap funds saw big inflows."],
+        _LINK_BOARDS,
+    )
+    assert rows[0]["links"] == [{"name": "Quant Small Cap", "isin": "INF966L01ABC"}]
+    # Card 2 mentions a CATEGORY, not a prompt-fed fund name — no links key at all.
+    assert "links" not in rows[1]
+    assert [r["text"] for r in rows] == [
+        "Quant Small Cap climbed 9 places this week.",
+        "Small Cap funds saw big inflows.",
+    ]
+
+
+def test_link_insights_never_links_model_minted_names_or_bad_isins():
+    boards = {
+        "movers_up": [
+            # Malformed isin — writer-side shape check drops it.
+            {"fund_name_short": "Poison Fund Name", "isin": "../../../etc", "rank_delta": 1},
+            # Degenerate short name — would substring-match everywhere.
+            {"fund_name_short": "abc", "isin": "INF000A01234", "rank_delta": 2},
+        ],
+    }
+    rows = link_insights(
+        ["Poison Fund Name and abc both moved, and so did Imaginary Fund."], boards
+    )
+    assert "links" not in rows[0]
+
+
+def test_link_insights_name_collision_across_boards_never_links_either_fund():
+    """Adversarial-review finding (2026-08-16): fund_name_short is NOT unique and
+    the model never sees isins — a name shared by two DIFFERENT funds must link
+    NEITHER (fail-closed), not first-board-wins with the wrong isin."""
+    boards = {
+        "movers_up": [{"fund_name_short": "Shared Name Fund", "isin": "INF000A01011", "rank_delta": 3}],
+        "value_ter": [
+            {"fund_name_short": "Shared Name Fund", "isin": "INF000B02022", "expense_ratio_pct": 0.3},
+            {"fund_name_short": "Unique Cost Fund", "isin": "INF000C03033", "expense_ratio_pct": 0.4},
+        ],
+    }
+    rows = link_insights(["Shared Name Fund and Unique Cost Fund both feature today."], boards)
+    assert rows[0]["links"] == [{"name": "Unique Cost Fund", "isin": "INF000C03033"}]
+
+
+def test_link_insights_same_fund_on_two_boards_still_links():
+    boards = {
+        "movers_up": [{"fund_name_short": "Twice Seen Fund", "isin": "INF000D04044", "rank_delta": 2}],
+        "value_ter": [{"fund_name_short": "Twice Seen Fund", "isin": "INF000D04044", "expense_ratio_pct": 0.2}],
+    }
+    rows = link_insights(["Twice Seen Fund leads on both boards."], boards)
+    assert rows[0]["links"] == [{"name": "Twice Seen Fund", "isin": "INF000D04044"}]
+
+
+def test_link_insights_rows_beyond_prompt_slice_are_not_linkable():
+    boards = {
+        "movers_up": [
+            {"fund_name_short": f"Fund Number {i}", "isin": f"INF00000{i:04d}", "rank_delta": i}
+            for i in range(6)
+        ],
+    }
+    # _ROWS_PER_BOARD = 3: row 4 ("Fund Number 4") never entered the prompt.
+    rows = link_insights(["Fund Number 1 rose while Fund Number 4 fell."], boards)
+    assert rows[0]["links"] == [{"name": "Fund Number 1", "isin": "INF00000001"[:8] + "0001"}]

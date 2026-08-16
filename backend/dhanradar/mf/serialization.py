@@ -15,6 +15,7 @@ BLOCKERS B87 (2026-07-04): the #2 numeric strip is now backed by a per-concept f
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -256,9 +257,16 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
         {"manager_name", "amc_name", "funds_count", "tenure_years", "percentile_word", "top_fund_name"}
     ),
     # Phase 3c ai_insights (leaderboard-data-backend.md §9b) — governed-gateway
-    # educational cards; `text` is the ONLY key a row may carry (fail-closed).
-    "leaderboard.insight_row": frozenset({"text"}),
+    # educational cards. `text` + deterministic post-hoc `links` (entity links,
+    # 2026-08-16) are the ONLY keys a row may carry; `links` additionally passes
+    # the nested shape scrub in `_serialize_leaderboard_row` (fail-closed).
+    "leaderboard.insight_row": frozenset({"text", "links"}),
 }
+
+#: Entity-link isin shape (2026-08-16) — read-boundary re-validation of the same
+#: rule the writer (`leaderboard_insights._LINK_ISIN_RE`) enforces, so a poisoned
+#: DB row can never smuggle a path segment into an /mf/fund/{isin} href.
+_INSIGHT_LINK_ISIN_RE = re.compile(r"^[A-Z0-9]{12}$")
 
 #: Maps a leaderboard `board_key` to the `ALLOWED_FIELDS` entry its rows are shaped
 #: like (Phase 1, §5). Every board wired by `dhanradar.tasks.mf.leaderboard_refresh`
@@ -479,13 +487,39 @@ def is_tier_withheld(envelope: dict[str, Any]) -> bool:
 
 def _serialize_leaderboard_row(concept_id: str, row: dict) -> dict:
     """Apply the B87 allowlist for one board row; a champions row additionally
-    allowlists its nested `winner`/`runner_up` FundRow sub-objects."""
+    allowlists its nested `winner`/`runner_up` FundRow sub-objects, and an
+    insight row's `links` passes a nested fail-closed shape scrub."""
     row = _apply_allowlist(concept_id, row)
     if concept_id == "leaderboard.champion_row":
         if row.get("winner") is not None:
             row["winner"] = _apply_allowlist("leaderboard.fund_row", row["winner"])
         if row.get("runner_up") is not None:
             row["runner_up"] = _apply_allowlist("leaderboard.fund_row", row["runner_up"])
+    if concept_id == "leaderboard.insight_row":
+        # Entity links (2026-08-16), nested fail-closed: `links` survives ONLY as
+        # a list of {name: non-empty str, isin: ^[A-Z0-9]{12}$} pairs, REBUILT
+        # key-by-key (an extra key inside an item can never pass through). Any
+        # malformed item is dropped; a non-list or fully-malformed value drops
+        # the key entirely — text-only is always a valid row.
+        links = row.get("links")
+        clean_links: list[dict] = []
+        if isinstance(links, list):
+            for item in links:
+                if (
+                    isinstance(item, dict)
+                    and isinstance(item.get("name"), str)
+                    # Mirrors the writer's _LINK_MIN_NAME_LEN=5 floor (a
+                    # degenerate short name would over-link mid-word) — the
+                    # scrub re-enforces EVERY writer rule, not just the isin.
+                    and len(item["name"]) >= 5
+                    and isinstance(item.get("isin"), str)
+                    and _INSIGHT_LINK_ISIN_RE.fullmatch(item["isin"])
+                ):
+                    clean_links.append({"name": item["name"], "isin": item["isin"]})
+        if clean_links:
+            row["links"] = clean_links
+        else:
+            row.pop("links", None)
     return row
 
 

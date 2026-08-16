@@ -1174,17 +1174,55 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
 // S15 — AI INSIGHTS (Trusted Ratings section removed — founder decision
 // 2026-08-16: third-party ratings not required, no licensed source planned)
 // ═══════════════════════════════════════════════════════════════════════════
+/** Entity links (2026-08-16) — wrap each server-matched fund name in a fund-page
+ *  link. The `links` list is deterministic post-hoc matching of known-good names
+ *  (the model never emits a link); longest names are applied first so a shorter
+ *  overlapping name can never split a longer match. Plain text renders as-is. */
+function InsightText({ row }: { row: LbInsightRow }) {
+  const links = row.links ?? [];
+  if (links.length === 0) return <RichText text={row.text} />;
+  const byLength = [...links].sort((a, b) => b.name.length - a.name.length);
+  let segments: (string | React.ReactElement)[] = [row.text];
+  for (const l of byLength) {
+    segments = segments.flatMap((seg): (string | React.ReactElement)[] => {
+      if (typeof seg !== 'string') return [seg];
+      const idx = seg.indexOf(l.name);
+      if (idx === -1) return [seg];
+      return [
+        seg.slice(0, idx),
+        <Link
+          key={`${l.isin}-${idx}`}
+          href={`/mf/fund/${encodeURIComponent(l.isin)}`}
+          className="font-semibold text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
+        >
+          {l.name}
+        </Link>,
+        seg.slice(idx + l.name.length),
+      ];
+    });
+  }
+  // Plain-string segments still get RichText (**bold** support) — only the
+  // matched names themselves become links.
+  return (
+    <>
+      {segments.map((seg, i) =>
+        typeof seg === 'string' ? <RichText key={i} text={seg} /> : seg,
+      )}
+    </>
+  );
+}
+
 export function AiInsightsSection({ live }: { live?: LbInsightRow[] }) {
   // Live cards from the governed gateway when the board exists; Preview sample otherwise.
-  const texts = live && live.length > 0 ? live.map((r) => r.text) : AI_INSIGHTS;
+  const rows: LbInsightRow[] = live && live.length > 0 ? live : AI_INSIGHTS.map((t) => ({ text: t }));
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      {texts.map((t, i) => (
+      {rows.map((r, i) => (
         <div key={i} className="flex gap-3 rounded-xl border border-line p-3.5" style={{ background: 'linear-gradient(135deg,#FAFBFF,#fff)' }}>
           <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-lg" style={{ background: 'rgba(139,92,246,.10)', color: '#8B5CF6' }} aria-hidden="true">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z" /></svg>
           </span>
-          <p className="m-0 text-small leading-relaxed text-ink-secondary"><RichText text={t} /></p>
+          <p className="m-0 text-small leading-relaxed text-ink-secondary"><InsightText row={r} /></p>
         </div>
       ))}
     </div>

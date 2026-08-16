@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
 
 from pydantic import Field
@@ -160,6 +161,82 @@ def build_messages(boards: dict[str, list[dict]], as_of: date) -> list[dict[str,
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Deterministic entity links (2026-08-16) — post-hoc, never model-emitted
+# ---------------------------------------------------------------------------
+
+#: Same shape the router's isin path params enforce — re-validated AGAIN at the
+#: read boundary (serialization.py insight_row nested scrub), so a poisoned name
+#: or DB row can never smuggle a path segment into an /mf/fund/{isin} href.
+_LINK_ISIN_RE = re.compile(r"^[A-Z0-9]{12}$")
+
+#: A degenerate short "name" would substring-match unrelated card text and
+#: over-link. Real fund_name_short values are full scheme names; anything this
+#: short is a data defect, not a linkable entity.
+_LINK_MIN_NAME_LEN = 5
+
+
+def _prompt_fund_entities(boards: dict[str, list[dict]]) -> dict[str, str]:
+    """The exact ``fund_name_short -> isin`` pairs `_board_view` exposed to the
+    model — the ONLY names an insight card may ever link. Same `_PROMPT_BOARDS`,
+    same ``_ROWS_PER_BOARD`` slice, so the linkable set is precisely what the
+    model saw and nothing else (known-good source; the model cannot mint an
+    entity). The isin comes from OUR board row, never from generated text."""
+    entities: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for board_key, (_alias, fields) in _PROMPT_BOARDS.items():
+        if "fund_name_short" not in fields:
+            continue
+        for row in (boards.get(board_key) or [])[:_ROWS_PER_BOARD]:
+            name = row.get("fund_name_short")
+            isin = row.get("isin")
+            if not (
+                isinstance(name, str)
+                and len(name) >= _LINK_MIN_NAME_LEN
+                and isinstance(isin, str)
+                and _LINK_ISIN_RE.fullmatch(isin)
+            ):
+                continue
+            if name in ambiguous:
+                continue
+            existing = entities.get(name)
+            if existing is not None and existing != isin:
+                # COLLISION (adversarial-review finding, 2026-08-16):
+                # fund_name_short has no uniqueness constraint, and the model
+                # never sees isins — a name shared by two DIFFERENT funds
+                # cannot be resolved to either one honestly. Fail-closed: an
+                # ambiguous name never links (same withhold-on-doubt pattern
+                # as screen_insights), rather than first-board-wins attaching
+                # the WRONG fund's isin to a factually-correct card.
+                del entities[name]
+                ambiguous.add(name)
+                continue
+            entities[name] = isin
+    return entities
+
+
+def link_insights(texts: list[str], boards: dict[str, list[dict]]) -> list[dict]:
+    """Shape screened card texts into `ai_insights` board rows with deterministic
+    entity links. The model NEVER emits a link: after both advisory screens pass,
+    each card's text is scanned for the exact fund_name_short strings that were
+    fed into the prompt (`_prompt_fund_entities`), and matches are attached as
+    ``links: [{name, isin}]``. LITERAL substring match only — no regex is ever
+    built from a third-party name string (a crafted name with regex metachars is
+    matched as plain text or not at all). Cards with no match carry no links key
+    (the read-boundary allowlist tolerates both shapes)."""
+    entities = _prompt_fund_entities(boards)
+    rows: list[dict] = []
+    for text in texts:
+        links = [
+            {"name": name, "isin": isin} for name, isin in entities.items() if name in text
+        ]
+        row: dict = {"text": text}
+        if links:
+            row["links"] = links
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------------------
