@@ -3767,8 +3767,19 @@ def _build_leaderboard_risk_lowest(funds: list[dict]) -> list[dict]:
 def _build_leaderboard_risk_drawdown(funds: list[dict]) -> list[dict]:
     """risk_drawdown (§5) — smallest max_drawdown_pct. The column is stored as a
     POSITIVE magnitude (mf/signals.py `_max_drawdown_pct`: "as a positive
-    percentage"), so ASC already means "mildest decline" — no sign flip needed."""
-    candidates = [f for f in funds if f.get("max_drawdown_pct") is not None]
+    percentage"), so ASC already means "mildest decline" — no sign flip needed.
+    DATA-MEANING guard (2026-08-16 live review): growth-scoped — cash/overnight
+    funds "win" a smallest-drawdown board vacuously at 0.0% by construction
+    (first V2 takeaway read "smallest falls are around 0.0% — mostly Overnight
+    funds", which informs nobody). `risk_lowest` stays deliberately unscoped
+    (riskometer is the honest whole-universe safety answer); THIS board answers
+    "which growth funds fell least", which is the question worth asking."""
+    candidates = [
+        f
+        for f in funds
+        if f.get("max_drawdown_pct") is not None
+        and _leaderboard_is_growth_category(f.get("sebi_category"))
+    ]
 
     def _key(f: dict) -> float:
         return f["max_drawdown_pct"]
@@ -4505,13 +4516,15 @@ _LEADERBOARD_TAKEAWAY_METRIC: dict[str, str] = {
 def _leaderboard_dominant_category(rows: list[dict]) -> str | None:
     """Most common sebi_category among rows, with the canonical "X Scheme - "
     prefix (mf/taxonomy.py) stripped for plain-English display — e.g. "Equity
-    Scheme - Large Cap Fund" -> "Large Cap Fund". None if no row carries a
-    category."""
+    Scheme - Large Cap Fund" -> "Large Cap" (the trailing " Fund" is stripped too,
+    because every template appends the word "funds" — first live run printed
+    "Overnight Fund funds"). None if no row carries a category."""
     cats = [r["sebi_category"] for r in rows if r.get("sebi_category")]
     if not cats:
         return None
     winner = Counter(cats).most_common(1)[0][0]
-    return winner.split(" Scheme - ", 1)[-1]
+    display = winner.split(" Scheme - ", 1)[-1]
+    return display.removesuffix(" Fund").removesuffix(" Funds")
 
 
 def _leaderboard_takeaway(board_key: str, rows: list[dict]) -> str | None:
@@ -4543,21 +4556,26 @@ def _leaderboard_takeaway(board_key: str, rows: list[dict]) -> str | None:
         return None
 
     if board_key == "perf_3y":
+        # "total returns" — the column is CUMULATIVE 3-year return, and live values
+        # can be legitimately huge (Nippon Taiwan +319%, NAV-verified 2026-08-16);
+        # the period words keep a big number honest instead of reading as annual.
         return (
             f"Most of the strongest 3-year performers right now are {dominant} funds, "
-            f"with top returns around {max(values):.1f}%."
+            f"with top 3-year total returns around {max(values):.1f}%."
         )
     if board_key == "sip_3y":
         return f"{dominant} funds lead the 3-year SIP boards, with top XIRRs around {max(values):.1f}%."
     if board_key == "risk_drawdown":
         return (
-            f"The smallest recent falls among ranked funds are around {min(values):.1f}% "
+            f"The smallest recent falls among growth funds are around {min(values):.1f}% "
             f"— mostly {dominant} funds."
         )
     # value_ter — index dominance only claimed when strictly over half the rows are Index.
+    # TER formatted 2dp: the cheapest funds charge 0.02%, which 1dp rounds to a
+    # misleading "0.0%" (first live run).
     index_heavy = sum(1 for r in rows if "Index" in (r.get("sebi_category") or "")) > len(rows) / 2
     tail = "index funds dominate this board." if index_heavy else f"mostly {dominant} funds."
-    return f"The lowest-cost funds charge about {min(values):.1f}% a year — {tail}"
+    return f"The lowest-cost funds charge about {min(values):.2f}% a year — {tail}"
 
 
 @celery_app.task(name="dhanradar.tasks.mf.leaderboard_refresh")

@@ -948,8 +948,8 @@ def test_takeaway_perf_3y() -> None:
     ]
     text = _leaderboard_takeaway("perf_3y", rows)
     assert text == (
-        "Most of the strongest 3-year performers right now are Large Cap Fund funds, "
-        "with top returns around 18.5%."
+        "Most of the strongest 3-year performers right now are Large Cap funds, "
+        "with top 3-year total returns around 18.5%."
     )
     _assert_no_advisory_verb(text)
 
@@ -961,18 +961,21 @@ def test_takeaway_sip_3y() -> None:
         {"sebi_category": "Hybrid Scheme - Aggressive Hybrid Fund", "metric_value": 15.0},
     ]
     text = _leaderboard_takeaway("sip_3y", rows)
-    assert text == "Mid Cap Fund funds lead the 3-year SIP boards, with top XIRRs around 22.3%."
+    assert text == "Mid Cap funds lead the 3-year SIP boards, with top XIRRs around 22.3%."
     _assert_no_advisory_verb(text)
 
 
 def test_takeaway_risk_drawdown() -> None:
+    # Rows mirror the now growth-scoped builder (2026-08-16 live review): a
+    # cash/liquid fund can no longer reach this board, so the fixture uses the
+    # conservative-hybrid funds that legitimately win smallest-drawdown.
     rows = [
-        {"sebi_category": "Debt Scheme - Liquid Fund", "max_drawdown_pct": 0.8},
-        {"sebi_category": "Debt Scheme - Liquid Fund", "max_drawdown_pct": 1.2},
+        {"sebi_category": "Hybrid Scheme - Conservative Hybrid Fund", "max_drawdown_pct": 0.8},
+        {"sebi_category": "Hybrid Scheme - Conservative Hybrid Fund", "max_drawdown_pct": 1.2},
         {"sebi_category": "Equity Scheme - Large Cap Fund", "max_drawdown_pct": 5.0},
     ]
     text = _leaderboard_takeaway("risk_drawdown", rows)
-    assert text == "The smallest recent falls among ranked funds are around 0.8% — mostly Liquid Fund funds."
+    assert text == "The smallest recent falls among growth funds are around 0.8% — mostly Conservative Hybrid funds."
     _assert_no_advisory_verb(text)
 
 
@@ -983,7 +986,7 @@ def test_takeaway_value_ter_index_dominant() -> None:
         {"sebi_category": "Equity Scheme - Large Cap Fund", "expense_ratio_pct": 1.0},
     ]
     text = _leaderboard_takeaway("value_ter", rows)
-    assert text == "The lowest-cost funds charge about 0.2% a year — index funds dominate this board."
+    assert text == "The lowest-cost funds charge about 0.20% a year — index funds dominate this board."
     _assert_no_advisory_verb(text)
 
 
@@ -994,7 +997,7 @@ def test_takeaway_value_ter_non_index_dominant() -> None:
         {"sebi_category": "Other Scheme - Index Funds", "expense_ratio_pct": 0.2},
     ]
     text = _leaderboard_takeaway("value_ter", rows)
-    assert text == "The lowest-cost funds charge about 0.2% a year — mostly Large Cap Fund funds."
+    assert text == "The lowest-cost funds charge about 0.20% a year — mostly Large Cap funds."
     _assert_no_advisory_verb(text)
 
 
@@ -1005,7 +1008,7 @@ def test_takeaway_momentum() -> None:
         {"sebi_category": "Hybrid Scheme - Aggressive Hybrid Fund"},
     ]
     text = _leaderboard_takeaway("momentum", rows)
-    assert text == "Flexi Cap Fund funds are climbing the rankings fastest this period."
+    assert text == "Flexi Cap funds are climbing the rankings fastest this period."
     _assert_no_advisory_verb(text)
 
 
@@ -1037,9 +1040,9 @@ def test_serialize_leaderboard_response_passes_through_str_takeaway() -> None:
     envelope = serialize_leaderboard_response(
         as_of="2026-08-15",
         hero=None,
-        boards={"perf_3y": {"title": "t", "rows": [], "takeaway": "Large Cap Fund funds lead."}},
+        boards={"perf_3y": {"title": "t", "rows": [], "takeaway": "Large Cap funds lead."}},
     )
-    assert envelope["boards"]["perf_3y"]["takeaway"] == "Large Cap Fund funds lead."
+    assert envelope["boards"]["perf_3y"]["takeaway"] == "Large Cap funds lead."
 
 
 def test_serialize_leaderboard_response_drops_non_str_takeaway() -> None:
