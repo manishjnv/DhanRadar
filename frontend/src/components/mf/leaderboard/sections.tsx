@@ -22,10 +22,10 @@ import {
   RichText, HScroll, IconBtn, CTA, DiscCard, MiniLbCard,
 } from './ui';
 import {
-  COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, RATINGS, AI_INSIGHTS, FAQ, CATNAV,
+  COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
   HERO_KPIS, HERO_QUICK, FILTER_GROUPS,
   PERF_RAIL, SIP_RAIL, RISK_RAIL, VALUE_RAIL, INTEL_RAIL, FLOW_RAIL, IMPROVED_RAIL, TREND_RAIL,
-  eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, agreeBand, aum,
+  eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, aum,
   type Fund, type Rail, type RailRow,
 } from './sampleData';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -175,7 +175,7 @@ export function HeroSection({ hero, moodWord, moodBand, moodColor }: {
       <div className="relative z-[2]">
         <h1 className="mb-2 font-sans text-[28px] font-extrabold leading-[1.05] tracking-[-0.03em] sm:text-[34px]">Mutual Fund Rankings</h1>
         <p className="mb-5 max-w-[600px] text-small leading-relaxed text-slate-300 sm:text-body">
-          Discover India’s highest-rated mutual funds using DhanRadar Intelligence and trusted industry ratings — best funds first, every question answered.
+          Discover India’s highest-rated mutual funds using DhanRadar Intelligence — best funds first, every question answered.
         </p>
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl bg-white/10 lg:grid-cols-6">
           {kpis.map((k) => (
@@ -575,14 +575,14 @@ export function PerformanceSection({ boards }: { boards?: LeaderboardBoards } = 
   return <RailSection rails={rails} />;
 }
 
-// S6 — mixed coverage (sip_3y/sip_5y/sip_consistency live, Best SIP for
-// Beginners stays sample — founder decision D4 pending) → per-rail chip.
+// S6 — all 4 rails wired (sip_beginner = D4 published-rule rail, signed off
+// 2026-08-16) → per-rail chip when coverage is mixed.
 export function SipSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   const rails: Rail[] = [
     liveRail(SIP_RAIL[0], boards?.sip_3y, (r) => fundRailRow(r, sipXirrVal(r))),
     liveRail(SIP_RAIL[1], boards?.sip_5y, (r) => fundRailRow(r, sipXirrVal(r))),
     liveRail(SIP_RAIL[2], boards?.sip_consistency, (r) => fundRailRow(r, sipConsistencyWord(r))),
-    SIP_RAIL[3],
+    liveRail(SIP_RAIL[3], boards?.sip_beginner, (r) => fundRailRow(r, sipXirrVal(r))),
   ];
   return <RailSection rails={rails} />;
 }
@@ -896,57 +896,8 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// S15 — TRUSTED ACROSS AGENCIES
-// ═══════════════════════════════════════════════════════════════════════════
-export function RatingsSection() {
-  return (
-    <>
-      <div className="grid gap-3.5 lg:grid-cols-2">
-        {RATINGS.map((r) => {
-          const ab = agreeBand(r.agree);
-          return (
-            <div key={r.name} className="rounded-2xl border border-line bg-surface p-4 shadow-sm sm:p-5">
-              <div className="mb-3.5 flex items-center gap-3">
-                <Logo letter={r.logo} color={r.color} size={42} radius={11} font={15} />
-                <div className="min-w-0">
-                  <div className="truncate text-body font-bold text-ink">{r.name}</div>
-                  <div className="text-[11.5px] text-ink-muted">Highly rated across all 4 providers</div>
-                </div>
-                <div className="ml-auto shrink-0 text-right">
-                  <div className="font-sans text-base font-extrabold text-emerald">{ab.word}</div>
-                  <div className="text-[9.5px] uppercase tracking-[0.04em] text-ink-muted">Agreement</div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2.5">
-                {r.providers.map((p) => (
-                  <div key={p.name} className="flex items-center gap-2.5 text-[12.5px]">
-                    <span className="flex-1 font-semibold text-ink-secondary">{p.name}</span>
-                    {p.kind === 'stars' ? (
-                      <span className="text-sm tracking-[1px] text-amber">{p.value}</span>
-                    ) : p.kind === 'rank' ? (
-                      <span className="font-mono font-extrabold text-royal">{p.value}</span>
-                    ) : (
-                      <EduPill word={p.value} color={E} />
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 h-[7px] overflow-hidden rounded bg-surface-2">
-                <div className="h-full rounded bg-emerald" style={{ width: `${ab.fill}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <SoWhat>
-        <RichText text="**When DhanRadar, Morningstar, CRISIL and Value Research all agree, the case is strongest.** A high Agreement reading means independent methodologies reached the same conclusion — the strongest possible validation." />
-      </SoWhat>
-    </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// S16 — AI INSIGHTS
+// S15 — AI INSIGHTS (Trusted Ratings section removed — founder decision
+// 2026-08-16: third-party ratings not required, no licensed source planned)
 // ═══════════════════════════════════════════════════════════════════════════
 export function AiInsightsSection({ live }: { live?: LbInsightRow[] }) {
   // Live cards from the governed gateway when the board exists; Preview sample otherwise.

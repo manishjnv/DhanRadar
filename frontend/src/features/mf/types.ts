@@ -685,6 +685,8 @@ export interface LeaderboardBoards {
   /** unit pct_rolling_positive — metric_value is 0-100, "% of rolling 1-year
    *  windows positive"; rendered as a word band, never the raw pct. */
   sip_consistency?: { title: string; rows: LbFundRow[] };
+  /** unit pct_sip_xirr — D4 published-rule rail; metric_value is 3Y SIP XIRR %. */
+  sip_beginner?: { title: string; rows: LbFundRow[] };
   risk_lowest?: { title: string; rows: LbFundRow[] };
   risk_drawdown?: { title: string; rows: LbFundRow[] };
   risk_sharpe?: { title: string; rows: LbFundRow[] };
