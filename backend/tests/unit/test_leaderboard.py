@@ -26,7 +26,7 @@ Coverage:
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -57,6 +57,7 @@ from dhanradar.tasks.mf import (
     _leaderboard_fund_row,
     _leaderboard_is_growth_category,
     _leaderboard_is_stale,
+    _leaderboard_nav_is_fresh,
     _leaderboard_takeaway,
     _since_launch_multiple,
 )
@@ -214,6 +215,40 @@ def test_dedupe_variants_keeps_best_by_sort_key_regardless_of_input_order() -> N
     other = {"isin": "B1", "fund_name_short": "Other Scheme"}
     out = _dedupe_leaderboard_variants([worse, better, other], sort_key=lambda f: f["isin"])
     assert {f["isin"] for f in out} == {"A1", "B1"}
+
+
+def test_dedupe_variants_collapses_case_and_punctuation_short_name_variants() -> None:
+    # Prod 2026-08-16: one scheme's plan variants carried "Short-Term" /
+    # "SHORT TERM" / "Short Term" as derived short names — raw-string keying let
+    # Franklin India Short-Term fill 3 of perf_1y's 4 slots.
+    variants = [
+        {"isin": "F1", "fund_name_short": "Franklin India Short-Term"},
+        {"isin": "F2", "fund_name_short": "Franklin India SHORT TERM"},
+        {"isin": "F3", "fund_name_short": "Franklin India Short Term"},
+        {"isin": "G1", "fund_name_short": "Franklin India Ultra Short"},
+    ]
+    out = _dedupe_leaderboard_variants(variants, sort_key=lambda f: f["isin"])
+    assert {f["isin"] for f in out} == {"F1", "G1"}
+
+
+def test_dedupe_variants_falls_back_to_isin_when_short_name_missing_or_empty() -> None:
+    variants = [
+        {"isin": "N1", "fund_name_short": None},
+        {"isin": "N2", "fund_name_short": ""},
+        {"isin": "N3", "fund_name_short": "--"},  # normalizes to empty → isin key
+    ]
+    out = _dedupe_leaderboard_variants(variants, sort_key=lambda f: f["isin"])
+    assert {f["isin"] for f in out} == {"N1", "N2", "N3"}
+
+
+def test_nav_freshness_gate_bounds_and_fail_closed() -> None:
+    as_of = date(2026, 8, 15)
+    assert _leaderboard_nav_is_fresh(as_of, as_of)
+    assert _leaderboard_nav_is_fresh(as_of - timedelta(days=30), as_of)
+    assert not _leaderboard_nav_is_fresh(as_of - timedelta(days=31), as_of)
+    # dead series (prod: ICICI Overnight last NAV 2022-09-16 showed "907%" 1y)
+    assert not _leaderboard_nav_is_fresh(date(2022, 9, 16), as_of)
+    assert not _leaderboard_nav_is_fresh(None, as_of)  # no NAV at all → fail-closed
 
 
 # ---------------------------------------------------------------------------

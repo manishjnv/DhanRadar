@@ -3435,6 +3435,17 @@ async def _fund_events_refresh_pipeline() -> str:
 
 _LEADERBOARD_STALE_DAYS = 3
 _LEADERBOARD_TOP_N = 4  # every rail board except top100 caps at 4 rows (§5 contract)
+
+# DATA-ARTIFACT guard (2026-08-16 live review): a fund whose NAV series has STOPPED
+# (wound-up scheme, discontinued plan, dead ETF feed) must not compete on any
+# "current" board — its metrics are anchored to its own last NAV, however old.
+# Prod examples: ICICI Overnight (last NAV 2022-09-16) topped perf_1y at "907%";
+# Franklin India Short-Term (last NAV 2025-05-02, wound up, side-pocket recovery
+# credits in its final year) took 3 more perf_1y slots. Prod distribution check
+# 2026-08-16: 976 of 9,291 ranked funds have a last NAV >30 days old (all
+# discontinued/closed names), only 8 sit in the 7-30-day band — 30 days drops
+# only true zombies, never a live fund on a holiday gap.
+_LEADERBOARD_MAX_NAV_AGE_DAYS = 30
 _LEADERBOARD_INDEX_CATEGORY = "Other Scheme - Index Funds"  # taxonomy.py canonical bucket
 
 # DATA-ARTIFACT / plausibility guard (data-quality hardening, 2026-08-16). Prod
@@ -3507,13 +3518,32 @@ def _leaderboard_is_stale(latest_date: date, today: date | None = None) -> bool:
     return (ref - latest_date).days > _LEADERBOARD_STALE_DAYS
 
 
+def _leaderboard_nav_is_fresh(last_nav_date: date | None, as_of: date) -> bool:
+    """True when the fund's latest ingested NAV is within
+    `_LEADERBOARD_MAX_NAV_AGE_DAYS` of the ranking run's as_of date — the
+    universe-level zombie gate (see the constant's comment for the prod
+    artifacts it exists to kill). No NAV row at all → not fresh (fail-closed)."""
+    return (
+        last_nav_date is not None
+        and (as_of - last_nav_date).days <= _LEADERBOARD_MAX_NAV_AGE_DAYS
+    )
+
+
 def _leaderboard_scheme_key(fund: dict) -> str:
     """SCHEME_KEY grouping (models/mf.py, founder rule 2026-07-10) — collapses a
     scheme's plan/option ISIN variants (Direct/Regular x Growth/IDCW) to one row, the
     same convention every "how many funds" figure on the platform uses, and the same
     underlying rule fund_read.get_fund_peers uses to exclude a fund's own other
-    variant from its peers list."""
-    return fund.get("fund_name_short") or fund["isin"]
+    variant from its peers list. Normalized casefold/alnum-only (2026-08-16): prod
+    variants of one scheme carried "Short-Term" / "SHORT TERM" / "Short Term" as
+    their derived short names, so the raw string keyed three "different" schemes
+    and Franklin India Short-Term filled 3 of perf_1y's 4 slots."""
+    name = fund.get("fund_name_short")
+    if name:
+        norm = re.sub(r"[^a-z0-9]+", "", name.casefold())
+        if norm:
+            return norm
+    return fund["isin"]
 
 
 def _dedupe_leaderboard_variants(funds: list[dict], sort_key: Any) -> list[dict]:
@@ -4872,13 +4902,30 @@ async def _leaderboard_refresh_pipeline() -> str:
         for f in funds
         if not f["is_segregated"] and not _scheme_name_is_segregated(f.get("scheme_name") or "")
     ]
+    # UNIVERSE-LEVEL NAV-freshness gate (2026-08-16 live review, root-cause fix):
+    # dead NAV series (wound-up schemes, discontinued plans) carry metrics anchored
+    # to their own last NAV — however old — and top "current" boards with numbers
+    # no investor can act on (see _LEADERBOARD_MAX_NAV_AGE_DAYS). last_nav_by_isin
+    # is built here (it already existed for wealth_creator's multiples below).
+    last_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last_nav_rows}
+    pre_freshness_count = len(funds)
+    funds = [
+        f
+        for f in funds
+        if _leaderboard_nav_is_fresh(last_nav_by_isin.get(f["isin"], (None, 0.0))[0], latest_date)
+    ]
+    logger.info(
+        "leaderboard universe: %d of %d funds dropped by NAV-freshness gate (> %d days)",
+        pre_freshness_count - len(funds),
+        pre_freshness_count,
+        _LEADERBOARD_MAX_NAV_AGE_DAYS,
+    )
     funds_by_isin = {f["isin"]: f for f in funds}
 
     # wealth_creator's TRUE since-launch multiples (design correction, §8) —
     # first/last ingested NAV row per isin from the FULL mf_nav_history query
     # above, run through the pure `_since_launch_multiple` helper.
     first_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in first_nav_rows}
-    last_nav_by_isin = {r.isin: (r.nav_date, float(r.nav)) for r in last_nav_rows}
     multiples_by_isin: dict[str, float] = {}
     for isin, (first_date, first_nav) in first_nav_by_isin.items():
         last = last_nav_by_isin.get(isin)
