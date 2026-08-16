@@ -25,7 +25,7 @@ import {
 } from './ui';
 import {
   COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
-  HERO_KPIS, HERO_QUICK, FILTER_GROUPS,
+  HERO_KPIS, HERO_QUICK, FILTER_GROUPS, REGIME_EXPLAINER,
   PERF_RAIL, SIP_RAIL, RISK_RAIL, VALUE_RAIL, INTEL_RAIL, FLOW_RAIL, IMPROVED_RAIL, TREND_RAIL,
   eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, aum,
   type Fund, type Rail, type RailRow,
@@ -105,9 +105,14 @@ function sipConsistencyWord(r: LbFundRow): string {
 function recoveryMonths(r: LbFundRow): string {
   return r.metric_value == null ? '—' : `${Math.round(r.metric_value / 30)} mo`;
 }
-function fundRailRow(r: LbFundRow, val: string, up?: boolean): RailRow {
+/** V1 — `catAvg` is the SEBI-category average of the SAME metric `val` renders
+ *  (only pass it from return/sip/TER rails, whose metric is a plain percentage —
+ *  a rank/word/multiple rail has no comparable "cat avg %" to show). Absent or
+ *  null → row renders exactly as before (no sub line). */
+function fundRailRow(r: LbFundRow, val: string, up?: boolean, catAvg?: number | null): RailRow {
   const name = fundName(r);
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}` };
+  const sub = catAvg != null ? `cat avg ${catAvg.toFixed(1)}%` : undefined;
+  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}`, sub };
 }
 function upgradeRailRow(r: LbLabelUpgradeRow): RailRow {
   const name = fundName(r);
@@ -620,7 +625,13 @@ export function IntelligenceSection({ boards }: { boards?: LeaderboardBoards } =
     coverageRail(allLive, INTEL_RAIL[3], boards?.quality, (r) => fundRailRow(r, r.metric_value != null ? r.metric_value.toFixed(2) : '—', true)),
     coverageRail(allLive, INTEL_RAIL[4], boards?.ai_spotlight, (r) => fundRailRow(r, r.metric_value != null ? `In ${r.metric_value} boards` : '—', true)),
   ];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.momentum?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
 }
 
 // S5 — full coverage (perf_1y/3y/5y + wealth_creator all live) → section badge;
@@ -628,24 +639,36 @@ export function IntelligenceSection({ boards }: { boards?: LeaderboardBoards } =
 export function PerformanceSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   const allLive = !!(boards?.perf_1y && boards?.perf_3y && boards?.perf_5y && boards?.wealth_creator);
   const rails: Rail[] = [
-    coverageRail(allLive, PERF_RAIL[0], boards?.perf_1y, (r) => fundRailRow(r, pctSigned(r.return_1y_pct), (r.return_1y_pct ?? 0) >= 0)),
-    coverageRail(allLive, PERF_RAIL[1], boards?.perf_3y, (r) => fundRailRow(r, pctSigned(r.return_3y_pct), (r.return_3y_pct ?? 0) >= 0)),
-    coverageRail(allLive, PERF_RAIL[2], boards?.perf_5y, (r) => fundRailRow(r, pctSigned(r.return_5y_pct), (r.return_5y_pct ?? 0) >= 0)),
+    coverageRail(allLive, PERF_RAIL[0], boards?.perf_1y, (r) => fundRailRow(r, pctSigned(r.return_1y_pct), (r.return_1y_pct ?? 0) >= 0, r.metric_category_avg)),
+    coverageRail(allLive, PERF_RAIL[1], boards?.perf_3y, (r) => fundRailRow(r, pctSigned(r.return_3y_pct), (r.return_3y_pct ?? 0) >= 0, r.metric_category_avg)),
+    coverageRail(allLive, PERF_RAIL[2], boards?.perf_5y, (r) => fundRailRow(r, pctSigned(r.return_5y_pct), (r.return_5y_pct ?? 0) >= 0, r.metric_category_avg)),
     coverageRail(allLive, PERF_RAIL[3], boards?.wealth_creator, (r) => fundRailRow(r, metricVal(r), true)),
   ];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.perf_3y?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
 }
 
 // S6 — all 4 rails wired (sip_beginner = D4 published-rule rail, signed off
 // 2026-08-16) → per-rail chip when coverage is mixed.
 export function SipSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   const rails: Rail[] = [
-    liveRail(SIP_RAIL[0], boards?.sip_3y, (r) => fundRailRow(r, sipXirrVal(r))),
-    liveRail(SIP_RAIL[1], boards?.sip_5y, (r) => fundRailRow(r, sipXirrVal(r))),
+    liveRail(SIP_RAIL[0], boards?.sip_3y, (r) => fundRailRow(r, sipXirrVal(r), undefined, r.metric_category_avg)),
+    liveRail(SIP_RAIL[1], boards?.sip_5y, (r) => fundRailRow(r, sipXirrVal(r), undefined, r.metric_category_avg)),
     liveRail(SIP_RAIL[2], boards?.sip_consistency, (r) => fundRailRow(r, sipConsistencyWord(r))),
-    liveRail(SIP_RAIL[3], boards?.sip_beginner, (r) => fundRailRow(r, sipXirrVal(r))),
+    liveRail(SIP_RAIL[3], boards?.sip_beginner, (r) => fundRailRow(r, sipXirrVal(r), undefined, r.metric_category_avg)),
   ];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.sip_3y?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
 }
 
 // S7 — full coverage (risk_lowest/drawdown/sharpe + risk_recovery all live) →
@@ -660,17 +683,41 @@ export function RiskSection({ boards }: { boards?: LeaderboardBoards } = {}) {
     coverageRail(allLive, RISK_RAIL[2], boards?.risk_sharpe, (r) => fundRailRow(r, r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—', true)),
     coverageRail(allLive, RISK_RAIL[3], boards?.risk_recovery, (r) => fundRailRow(r, recoveryMonths(r), true)),
   ];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.risk_drawdown?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
 }
 
 // S8 — full coverage (all 3 value rails live) → section-level badge, no per-rail chip.
 export function ValueSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   const rails: Rail[] = [
-    wiredRail(VALUE_RAIL[0], boards?.value_ter, (r) => fundRailRow(r, ter1(r.expense_ratio_pct), false)),
+    wiredRail(VALUE_RAIL[0], boards?.value_ter, (r) => fundRailRow(r, ter1(r.expense_ratio_pct), false, r.metric_category_avg)),
     wiredRail(VALUE_RAIL[1], boards?.value_efficiency, (r) => fundRailRow(r, metricVal(r), true)),
-    wiredRail(VALUE_RAIL[2], boards?.value_index, (r) => fundRailRow(r, ter1(r.expense_ratio_pct), false)),
+    wiredRail(VALUE_RAIL[2], boards?.value_index, (r) => fundRailRow(r, ter1(r.expense_ratio_pct), false, r.metric_category_avg)),
   ];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.value_ter?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
+}
+
+/** V6 — short static explainer for a category-inflow row, by category-name
+ *  pattern. Factual/reviewed rule copy, never generated — matches the plan's
+ *  "flow explainers" spec verbatim. Categories matching none of the patterns
+ *  get no sub (rendered exactly as before). */
+function flowCategorySub(category: string): string | undefined {
+  if (/Arbitrage|Liquid|Overnight|Money Market/i.test(category)) return 'often used to park cash';
+  if (/Small Cap|Mid Cap/i.test(category)) return 'higher risk appetite';
+  if (/Index/i.test(category)) return 'shift to passive';
+  if (/ELSS/i.test(category)) return 'tax-season flows';
+  return undefined;
 }
 
 // S11 — rail 1 retitled to real category-level inflows (fund-level flows don't
@@ -684,13 +731,20 @@ export function FlowsSection({ boards }: { boards?: LeaderboardBoards } = {}) {
           return {
             name: r.category, logo: initialOf(r.category), color: colorFor(r.category), val, up: r.net_flow_cr >= 0,
             href: `/mf/explore?category=${encodeURIComponent(r.category)}`,
+            sub: flowCategorySub(r.category),
           };
         }),
       }
     : FLOW_RAIL[0];
   const rail2 = liveRail(FLOW_RAIL[1], boards?.aum_growth, (r) => fundRailRow(r, metricVal(r), true));
   const rails: Rail[] = [rail1, rail2, FLOW_RAIL[2]];
-  return <RailSection rails={rails} />;
+  const takeaway = boards?.category_inflows?.takeaway;
+  return (
+    <>
+      <RailSection rails={rails} />
+      {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
+    </>
+  );
 }
 
 // S12 — full coverage (movers_up + label_upgrades + top10_entries) → section badge.
@@ -731,7 +785,8 @@ function DmmiList({ rows }: { rows: { name: string; logo: string; color: string 
     </div>
   );
 }
-export function MarketSection() {
+export function MarketSection({ regime }: { regime?: string } = {}) {
+  const regimeNote = regime ? REGIME_EXPLAINER[regime] : undefined;
   const blocks: { label: string; color: string; rows: typeof DMMI.best }[] = [
     { label: 'Best funds for now', color: 'var(--emerald)', rows: DMMI.best },
     { label: 'Best SIP today', color: 'var(--royal)', rows: DMMI.sip },
@@ -766,6 +821,7 @@ export function MarketSection() {
       <SoWhat>
         <RichText text="**Market mood is Cautiously Optimistic — typical phase: accumulation.** In similar phases, Flexi Cap & quality Small Cap funds led. This is an educational read of conditions, not a recommendation." />
       </SoWhat>
+      {regimeNote && <p className="mt-3 text-caption leading-relaxed text-ink-muted">{regimeNote}</p>}
     </Card>
   );
 }

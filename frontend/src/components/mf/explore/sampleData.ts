@@ -58,21 +58,9 @@ export const SAMPLE_FUNDS: SampleFund[] = [
   { isin:'S12', name:'Sample Gold FOF A', amc:'Sample AMC Twelve', short:'Gold FOF A', logo:'G', color:C.amber, cat:'FOF', sub:'Gold FOF', label:'off_track', band:'medium', risk:'Moderate', r1:22.4, r3:16.8, r5:14.2, sipXirr:13.0, expense:0.34, aumCr:4200, drawdown:-12, flow:'-₹420 Cr', rankDelta:-2, fit:'Moderate' },
 ];
 
-// ── S1 hero: illustrative stat tiles (real ones are filled by the page) ──
-export const HERO_QUICK = [
-  'Best SIP Funds', 'Best Funds Today', 'Top Rated', 'Lowest Risk', 'Highest Return',
-  'Undervalued', 'New Investor Picks', 'Retirement Funds', 'Tax Saving',
-];
-
-// ── S2 search suggestion tags ──
-export const SEARCH_TAGS = ['Small Cap', 'Large Cap', 'Healthcare', 'Best SIP', 'Low Risk', 'Tax Saving', 'Index Funds', 'Flexi Cap'];
-
-// ── S3 quick-discovery chips (15) ──
-export const DISCOVERY_CHIPS = [
-  '🔥 Trending', '⭐ Top Rated', '💰 Highest SIP Return', '🛡 Lowest Risk', '📈 Momentum Leaders',
-  '💎 Undervalued', '🚀 Fastest AUM', '🏆 Consistent', '🧠 AI Spotlight', '💸 Lowest Cost',
-  '❤️ Beginner Friendly', '🎯 Retirement', '🏦 Tax Saving ELSS', '🌍 International', '📊 Index Funds',
-];
+// S1 hero quick actions, S2 search tags, and S3 quick-discovery chips are now
+// ALL rendered from the shared QUICK_INTENTS registry (features/mf/quickIntents.ts,
+// Phase C chip consolidation) — no page-local decorative chip vocabularies here.
 
 // ── S4 advanced-filter groups + ranges ──
 export const FILTER_GROUPS: { title: string; options: string[] }[] = [

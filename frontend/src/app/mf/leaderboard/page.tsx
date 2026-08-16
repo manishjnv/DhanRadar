@@ -162,7 +162,7 @@ function LeaderboardView() {
       {/* S10 — Current Market */}
       <Anchor id="market">
         <SectionHeader index="09" title="Current Market Leaders" tag="DMMI" info="what fits today’s market" />
-        <MarketSection />
+        <MarketSection regime={moodHealthy ? mood.data!.regime : undefined} />
       </Anchor>
 
       {/* S11 — Fund Flows (mixed coverage: per-rail chip, see FlowsSection) */}

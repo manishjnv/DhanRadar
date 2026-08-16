@@ -612,6 +612,10 @@ export interface LbFundRow {
   /** Board-specific headline value (e.g. AUM-growth % or return-per-cost multiple). */
   metric_value: number | null;
   metric_unit: string | null;
+  /** V1 — the SEBI-category average of this board's headline metric (same unit
+   *  as metric_value/return_*_pct/expense_ratio_pct depending on the board).
+   *  null until mf_category_stats publishes it for this fund's category. */
+  metric_category_avg?: number | null;
 }
 
 /** `label_upgrades` rows — a fund row plus its label transition. */
@@ -671,50 +675,60 @@ export interface LeaderboardHero {
   live_board_count: number;
 }
 
+/** Shared board-entry shape. V2 — `takeaway` is an optional plain-language
+ *  educational sentence generated nightly through the governed AI gateway
+ *  (same CALL/FLOOR/AUDIT + advisory-screen path as `ai_insights`), from this
+ *  board's own rows only. Absent on boards without a generated takeaway yet. */
+export interface LbBoard<T> {
+  title: string;
+  rows: T[];
+  takeaway?: string;
+}
+
 export interface LeaderboardBoards {
-  top100?: { title: string; rows: LbFundRow[] };
-  champions?: { title: string; rows: LbChampionRow[] };
-  perf_1y?: { title: string; rows: LbFundRow[] };
-  perf_3y?: { title: string; rows: LbFundRow[] };
-  perf_5y?: { title: string; rows: LbFundRow[] };
+  top100?: LbBoard<LbFundRow>;
+  champions?: LbBoard<LbChampionRow>;
+  perf_1y?: LbBoard<LbFundRow>;
+  perf_3y?: LbBoard<LbFundRow>;
+  perf_5y?: LbBoard<LbFundRow>;
   /** unit x_since_launch — multiple of launch NAV, e.g. 42.0 → '42×'. */
-  wealth_creator?: { title: string; rows: LbFundRow[] };
+  wealth_creator?: LbBoard<LbFundRow>;
   /** unit pct_sip_xirr — SIP XIRR %, rendered bare (no sign/suffix). */
-  sip_3y?: { title: string; rows: LbFundRow[] };
-  sip_5y?: { title: string; rows: LbFundRow[] };
+  sip_3y?: LbBoard<LbFundRow>;
+  sip_5y?: LbBoard<LbFundRow>;
   /** unit pct_rolling_positive — metric_value is 0-100, "% of rolling 1-year
    *  windows positive"; rendered as a word band, never the raw pct. */
-  sip_consistency?: { title: string; rows: LbFundRow[] };
+  sip_consistency?: LbBoard<LbFundRow>;
   /** unit pct_sip_xirr — D4 published-rule rail; metric_value is 3Y SIP XIRR %. */
-  sip_beginner?: { title: string; rows: LbFundRow[] };
-  risk_lowest?: { title: string; rows: LbFundRow[] };
-  risk_drawdown?: { title: string; rows: LbFundRow[] };
-  risk_sharpe?: { title: string; rows: LbFundRow[] };
+  sip_beginner?: LbBoard<LbFundRow>;
+  risk_lowest?: LbBoard<LbFundRow>;
+  risk_drawdown?: LbBoard<LbFundRow>;
+  risk_sharpe?: LbBoard<LbFundRow>;
   /** unit days_recovery — metric_value is days; rendered as rounded months. */
-  risk_recovery?: { title: string; rows: LbFundRow[] };
-  value_ter?: { title: string; rows: LbFundRow[] };
-  value_efficiency?: { title: string; rows: LbFundRow[] };
-  value_index?: { title: string; rows: LbFundRow[] };
-  movers_up?: { title: string; rows: LbFundRow[] };
-  movers_down?: { title: string; rows: LbFundRow[] };
-  label_upgrades?: { title: string; rows: LbLabelUpgradeRow[] };
-  top10_entries?: { title: string; rows: LbFundRow[] };
-  aum_growth?: { title: string; rows: LbFundRow[] };
-  category_inflows?: { title: string; rows: LbCategoryInflowRow[] };
-  amc_facts?: { title: string; rows: LbAmcFactRow[] };
+  risk_recovery?: LbBoard<LbFundRow>;
+  value_ter?: LbBoard<LbFundRow>;
+  value_efficiency?: LbBoard<LbFundRow>;
+  value_index?: LbBoard<LbFundRow>;
+  movers_up?: LbBoard<LbFundRow>;
+  movers_down?: LbBoard<LbFundRow>;
+  label_upgrades?: LbBoard<LbLabelUpgradeRow>;
+  top10_entries?: LbBoard<LbFundRow>;
+  aum_growth?: LbBoard<LbFundRow>;
+  category_inflows?: LbBoard<LbCategoryInflowRow>;
+  amc_facts?: LbBoard<LbAmcFactRow>;
   /** unit 'gem' — no metric_value semantics beyond board membership. */
-  hidden_gems?: { title: string; rows: LbFundRow[] };
+  hidden_gems?: LbBoard<LbFundRow>;
   /** unit 'rank_delta' — metric_value is a signed rank-delta integer. */
-  future_leaders?: { title: string; rows: LbFundRow[] };
+  future_leaders?: LbBoard<LbFundRow>;
   /** unit 'rank_delta' — metric_value is a signed rank-delta integer. */
-  momentum?: { title: string; rows: LbFundRow[] };
+  momentum?: LbBoard<LbFundRow>;
   /** unit 'sharpe_ratio' — metric_value is the Sharpe ratio. */
-  quality?: { title: string; rows: LbFundRow[] };
+  quality?: LbBoard<LbFundRow>;
   /** unit 'boards' — metric_value is the count of boards the fund appears on. */
-  ai_spotlight?: { title: string; rows: LbFundRow[] };
-  manager_facts?: { title: string; rows: LbManagerRow[] };
+  ai_spotlight?: LbBoard<LbFundRow>;
+  manager_facts?: LbBoard<LbManagerRow>;
   /** Phase 3c — governed-gateway educational insight cards. */
-  ai_insights?: { title: string; rows: LbInsightRow[] };
+  ai_insights?: LbBoard<LbInsightRow>;
 }
 
 export interface LeaderboardResponse {
