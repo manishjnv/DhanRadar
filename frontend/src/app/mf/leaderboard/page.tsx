@@ -87,6 +87,8 @@ function LeaderboardView() {
   const riskLive = !!(boards?.risk_lowest && boards?.risk_drawdown && boards?.risk_sharpe && boards?.risk_recovery);
   const valueLive = !!(boards?.value_ter && boards?.value_efficiency && boards?.value_index);
   const improvedLive = !!(boards?.movers_up && boards?.label_upgrades && boards?.top10_entries);
+  const intelLive = !!(boards?.hidden_gems && boards?.future_leaders && boards?.momentum && boards?.quality && boards?.ai_spotlight);
+  const managersInfo = boards?.manager_facts ? 'the people behind the returns — covered schemes only' : 'the people behind the returns';
 
   return (
     <div className="w-full pb-24">
@@ -151,10 +153,10 @@ function LeaderboardView() {
         <ValueSection boards={boards} />
       </Anchor>
 
-      {/* S9 — Intelligence */}
+      {/* S9 — Intelligence (all 5 rails live → section badge, else per-rail chip; see IntelligenceSection) */}
       <Anchor id="intelligence">
-        <SectionHeader index="08" title="DhanRadar Intelligence" tag="Proprietary" info="our unique rankings" />
-        <IntelligenceSection />
+        <SectionHeader index="08" title="DhanRadar Intelligence" tag="Proprietary" info="our unique rankings" badge={intelLive ? <LiveBadge /> : undefined} />
+        <IntelligenceSection boards={boards} />
       </Anchor>
 
       {/* S10 — Current Market */}
@@ -177,8 +179,8 @@ function LeaderboardView() {
 
       {/* S13 — Managers */}
       <Anchor id="managers">
-        <SectionHeader index="12" title="Best Fund Managers" info="the people behind the returns" />
-        <ManagersSection />
+        <SectionHeader index="12" title="Best Fund Managers" info={managersInfo} badge={boards?.manager_facts ? <LiveBadge /> : undefined} />
+        <ManagersSection live={boards?.manager_facts?.rows} />
       </Anchor>
 
       {/* S14 — AMCs */}

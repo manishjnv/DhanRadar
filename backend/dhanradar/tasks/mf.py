@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import re
+import statistics
 import time
 import zipfile
 from collections import Counter, defaultdict
@@ -3961,8 +3962,17 @@ def _build_leaderboard_wealth_creator(
     implausible implied CAGR — see `_since_launch_multiple`'s DATA-ARTIFACT guard)
     is excluded, never zero-filled. `is_segregated` funds are excluded here too,
     defense-in-depth alongside the CAGR bound (prod example: Edelweiss Liquid
-    Fund's 178.78x came off a corrupted early NAV row on a segregated scheme)."""
-    candidates = [f for f in funds if f["isin"] in multiples_by_isin and not f.get("is_segregated")]
+    Fund's 178.78x came off a corrupted early NAV row on a segregated scheme).
+    Growth-category scoped (2nd live run: ICICI Overnight topped at "10.01x" — a
+    debt fund's decades-long face-value drift is not wealth creation in this
+    board's sense; the board's promise is growth-scheme compounding)."""
+    candidates = [
+        f
+        for f in funds
+        if f["isin"] in multiples_by_isin
+        and not f.get("is_segregated")
+        and _leaderboard_is_growth_category(f.get("sebi_category"))
+    ]
 
     def _key(f: dict) -> float:
         return -multiples_by_isin[f["isin"]]
@@ -3984,7 +3994,9 @@ def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
     consistency off a short, lucky window. DATA-ARTIFACT guard: also excludes
     non-growth categories (a cash fund is 100%-positive by construction — vacuous;
     prod example: ITI Liquid Fund topped this board at 100%) and `is_segregated`
-    funds."""
+    funds. Arbitrage funds excluded by name (2nd live run: ITI Arbitrage topped at
+    100% — arbitrage sits in the Hybrid bucket but is cash-like by construction,
+    the same vacuous-winner problem)."""
     candidates = [
         f
         for f in funds
@@ -3992,6 +4004,7 @@ def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
         and f.get("return_3y_pct") is not None
         and not f.get("is_segregated")
         and _leaderboard_is_growth_category(f.get("sebi_category"))
+        and "Arbitrage" not in (f.get("sebi_category") or "")
     ]
 
     def _key(f: dict) -> float:
@@ -4014,13 +4027,17 @@ def _build_leaderboard_risk_recovery(funds: list[dict]) -> list[dict]:
     DATA-ARTIFACT guard: also excludes non-growth categories (an overnight/liquid
     fund "recovering" in a couple of days is definitionally meaningless — prod
     example: TRUST Overnight Fund - 2 Days topped this board) and `is_segregated`
-    funds."""
+    funds. Requires a REAL fall (max_drawdown >= 5%): the Index-funds bucket mixes
+    debt index funds in (2nd live run: a CRISIL IBX AAA target-maturity fund
+    "recovered" in 2 days from a rounding-sized dip) — recovery is only meaningful
+    from a drawdown an investor would actually feel."""
     candidates = [
         f
         for f in funds
         if f.get("recovery_days") is not None
         and not f.get("is_segregated")
         and _leaderboard_is_growth_category(f.get("sebi_category"))
+        and (f.get("max_drawdown_pct") or 0) >= 5.0
     ]
 
     def _key(f: dict) -> int:
@@ -4032,6 +4049,252 @@ def _build_leaderboard_risk_recovery(funds: list[dict]) -> list[dict]:
         _leaderboard_fund_row(f, metric_value=f["recovery_days"], metric_unit="days_recovery")
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3a boards (design doc §9b, decisions locked 2026-08-16) — hidden gems,
+# future leaders, momentum, portfolio quality, cross-board AI spotlight.
+# ---------------------------------------------------------------------------
+
+_LEADERBOARD_HIDDEN_GEM_PERCENTILE = 0.25  # category top-quartile rank/total (§9b)
+_LEADERBOARD_FUTURE_LEADER_PERCENTILE = 0.5  # category top-half rank/total (§9b)
+
+
+def _build_leaderboard_hidden_gems(funds: list[dict]) -> list[dict]:
+    """hidden_gems (§9b) — category top-quartile standing (rank/total <= 0.25)
+    among funds with a below-median AUM in their OWN category (median computed
+    over same-category funds that have an AUM at all; a fund with no AUM is
+    excluded from both the median pool and the candidate pool — never treated
+    as small). `is_segregated` excluded."""
+    aum_by_cat: dict[str, list[float]] = defaultdict(list)
+    for f in funds:
+        if f.get("aum_crore") is not None:
+            aum_by_cat[f["sebi_category"]].append(f["aum_crore"])
+    median_aum_by_cat = {cat: statistics.median(vals) for cat, vals in aum_by_cat.items()}
+
+    candidates = []
+    for f in funds:
+        if f.get("is_segregated") or f.get("aum_crore") is None:
+            continue
+        median_aum = median_aum_by_cat.get(f["sebi_category"])
+        if median_aum is None or f["aum_crore"] >= median_aum:
+            continue
+        percentile = f["category_rank"] / f["category_total"]
+        if percentile > _LEADERBOARD_HIDDEN_GEM_PERCENTILE:
+            continue
+        candidates.append({**f, "_percentile": percentile})
+
+    def _key(f: dict) -> float:
+        return f["_percentile"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=None, metric_unit="gem")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_future_leaders(funds: list[dict]) -> list[dict]:
+    """future_leaders (§9b) — positive rank_delta funds already standing in the
+    top half of their category (rank/total <= 0.5) — rising AND already decent,
+    distinct from `movers_up` which is delta-only regardless of current
+    standing."""
+    candidates = [
+        f
+        for f in funds
+        if f.get("rank_delta") is not None
+        and f["rank_delta"] > 0
+        and f["category_rank"] / f["category_total"] <= _LEADERBOARD_FUTURE_LEADER_PERCENTILE
+    ]
+
+    def _key(f: dict) -> int:
+        return -f["rank_delta"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["rank_delta"], metric_unit="rank_delta")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_momentum(funds: list[dict]) -> list[dict]:
+    """momentum (§9b) — rank_delta > 0 funds whose `contributing_signals` carry
+    one of the compliance-locked 1Y/3Y "ahead of category peers" phrases
+    (scoring/engine/signal_names.py, B58-f1). The engine computes no per-axis
+    momentum band (models/mf.py:653) — this board narrates off the fund's OWN
+    approved signal phrase instead, same discipline as `_champion_why`. Ties on
+    rank_delta break by return_1y_pct descending (missing 1Y return sorts
+    last, never treated as a winning tie-break)."""
+    from dhanradar.scoring.engine.signal_names import SignalName, display
+
+    ahead_phrases = frozenset(
+        {
+            display(SignalName.COHORT_1Y_AHEAD_SHORT_TRACK),
+            display(SignalName.COHORT_1Y_AHEAD),
+            display(SignalName.COHORT_3Y_AHEAD),
+        }
+    )
+    candidates = [
+        f
+        for f in funds
+        if f.get("rank_delta") is not None
+        and f["rank_delta"] > 0
+        and ahead_phrases & set(f.get("contributing_signals") or [])
+    ]
+
+    def _key(f: dict) -> tuple[int, float]:
+        r1y = f.get("return_1y_pct")
+        return (-f["rank_delta"], -r1y if r1y is not None else float("inf"))
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["rank_delta"], metric_unit="rank_delta")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_quality(funds: list[dict]) -> list[dict]:
+    """quality (§9b) — funds whose `confidence_factors` (the engine's own named
+    confidence-quality bands, W2/migration 0064 — never a numeric) show BOTH
+    consistency=="high" and data_coverage=="high", ordered by Sharpe ratio
+    descending. `is_segregated` excluded."""
+    candidates = [
+        f
+        for f in funds
+        if not f.get("is_segregated")
+        and f.get("sharpe_ratio") is not None
+        and (f.get("confidence_factors") or {}).get("consistency") == "high"
+        and (f.get("confidence_factors") or {}).get("data_coverage") == "high"
+    ]
+
+    def _key(f: dict) -> float:
+        return -f["sharpe_ratio"]
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["sharpe_ratio"], metric_unit="sharpe_ratio")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _build_leaderboard_ai_spotlight(boards: dict[str, list[dict]]) -> list[dict]:
+    """ai_spotlight (§9b D2 — the "AI Recommended" rename) — funds appearing
+    across the MOST other boards materialized this run: honest cross-board
+    consensus, no AI call needed. A champions row counts its winner/runner_up
+    isins. Pure function over the `boards` dict already built this run (no DB
+    access, called AFTER every other board so it can see them all); requires
+    >= 2 distinct-board appearances; ties break by top100 standing (better
+    percentile first), then isin for determinism."""
+    top100_rows = boards.get("top100", [])
+    top100_position = {r["isin"]: i for i, r in enumerate(top100_rows)}
+
+    counts: dict[str, int] = defaultdict(int)
+    row_by_isin: dict[str, dict] = {}
+    for rows in boards.values():
+        seen_this_board: set[str] = set()
+        for row in rows:
+            fund_rows = []
+            if "winner" in row or "runner_up" in row:  # champions row shape
+                if row.get("winner"):
+                    fund_rows.append(row["winner"])
+                if row.get("runner_up"):
+                    fund_rows.append(row["runner_up"])
+            elif "isin" in row:  # plain FundRow shape
+                fund_rows.append(row)
+            for fund_row in fund_rows:
+                isin = fund_row["isin"]
+                row_by_isin.setdefault(isin, fund_row)
+                if isin not in seen_this_board:
+                    counts[isin] += 1
+                    seen_this_board.add(isin)
+
+    eligible = [isin for isin, n in counts.items() if n >= 2]
+
+    def _key(isin: str) -> tuple[int, int, str]:
+        return (-counts[isin], top100_position.get(isin, len(top100_rows) + 1), isin)
+
+    eligible.sort(key=_key)
+    return [
+        _leaderboard_fund_row(row_by_isin[isin], metric_value=counts[isin], metric_unit="boards")
+        for isin in eligible[:_LEADERBOARD_TOP_N]
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3b — manager_facts (§9b) — a NEW row shape (`leaderboard.manager_row`,
+# never a plain FundRow): factual per-manager aggregates over
+# fund_manager_history, current managers only (end_date IS NULL).
+# ---------------------------------------------------------------------------
+
+_LEADERBOARD_MANAGER_MIN_FUNDS = 2  # a 1-fund "manager" aggregate isn't meaningful
+_LEADERBOARD_MANAGER_TOP_N = 6
+
+
+def _manager_percentile_word(avg_percentile: float) -> str:
+    """§9b — word-only aggregate quality (never the raw percentile number,
+    non-neg #2): Strong = category top-quartile average standing, Good = top
+    half, Fair = everything else."""
+    if avg_percentile <= 0.25:
+        return "Strong"
+    if avg_percentile <= 0.5:
+        return "Good"
+    return "Fair"
+
+
+def _build_leaderboard_manager_facts(manager_rows: list[dict], as_of_date: date) -> list[dict]:
+    """manager_facts (§9b) — factual per-manager aggregate joined on
+    `fund_manager_history.scheme_uid == mf_fund_ranks.isin` (current managers
+    only, latest as_of).
+
+    Name-string identity limitation (documented per §9b, not a bug in this
+    builder): a manager is identified ONLY by exact `manager_name` text — two
+    different people who share a name are merged, and the same person spelled
+    two different ways across AMCs is split. No manager-entity resolution
+    exists yet; coverage is ~13.5% of schemes (disclosed in the UI copy).
+
+    `tenure_years` is computed relative to `as_of_date` (the leaderboard run's
+    own as_of, not wall-clock "today" — keeps the builder pure/deterministic
+    and testable, same convention as `_leaderboard_is_stale`'s injectable
+    `today`). Requires >= `_LEADERBOARD_MANAGER_MIN_FUNDS` SCHEME_KEY-deduped
+    funds under management. Output is the `leaderboard.manager_row` shape ONLY
+    — manager_name/amc_name/funds_count/tenure_years/percentile_word/
+    top_fund_name — no score, no success %, no stars, no raw percentile
+    number (mf/serialization.py's allowlist enforces this a second time)."""
+
+    def _percentile(r: dict) -> float:
+        return r["category_rank"] / r["category_total"]
+
+    by_manager: dict[str, list[dict]] = defaultdict(list)
+    for r in manager_rows:
+        by_manager[r["manager_name"]].append(r)
+
+    scored: list[tuple[float, dict]] = []
+    for name, rows in by_manager.items():
+        deduped = _dedupe_leaderboard_variants(rows, _percentile)
+        if len(deduped) < _LEADERBOARD_MANAGER_MIN_FUNDS:
+            continue
+        avg_percentile = sum(_percentile(r) for r in deduped) / len(deduped)
+        deduped.sort(key=_percentile)
+        top_fund = deduped[0]
+        earliest_start = min(r["start_date"] for r in rows)
+        tenure_years = round((as_of_date - earliest_start).days / 365.25, 1)
+        amc_counts = Counter(r["amc_name"] for r in deduped if r.get("amc_name"))
+        row = {
+            "manager_name": name,
+            "amc_name": amc_counts.most_common(1)[0][0] if amc_counts else None,
+            "funds_count": len(deduped),
+            "tenure_years": tenure_years,
+            "percentile_word": _manager_percentile_word(avg_percentile),
+            "top_fund_name": top_fund.get("fund_name_short") or top_fund.get("scheme_name"),
+        }
+        scored.append((avg_percentile, row))
+
+    scored.sort(key=lambda pair: pair[0])
+    return [row for _, row in scored[:_LEADERBOARD_MANAGER_TOP_N]]
 
 
 def _build_leaderboard_hero(
@@ -4095,6 +4358,7 @@ async def _leaderboard_refresh_pipeline() -> str:
         MfAumHistory,
         MfCategoryFlows,
         MfFund,
+        MfFundManagerHistory,
         MfFundMetrics,
         MfFundRanks,
         MfLeaderboardBoard,
@@ -4144,6 +4408,9 @@ async def _leaderboard_refresh_pipeline() -> str:
                     MfFundRanks.verb_label,
                     MfFundRanks.confidence_band,
                     MfFundRanks.contributing_signals,
+                    # W2 (migration 0064) — quality board (§9b) gate: named confidence
+                    # bands (consistency/data_coverage/...), never the numeric confidence.
+                    MfFundRanks.confidence_factors,
                     MfFund.fund_name_short,
                     MfFund.scheme_name,
                     MfFund.amc_name,
@@ -4238,6 +4505,30 @@ async def _leaderboard_refresh_pipeline() -> str:
             )
         ).all()
 
+        # manager_facts (Phase 3b, §9b) — current managers only (end_date IS
+        # NULL), joined on scheme_uid == isin against THIS run's latest
+        # mf_fund_ranks (same latest_date every other board reads).
+        manager_rows_raw = (
+            await db.execute(
+                select(
+                    MfFundManagerHistory.manager_name,
+                    MfFundManagerHistory.start_date,
+                    MfFundRanks.isin,
+                    MfFundRanks.rank,
+                    MfFundRanks.total_in_cat,
+                    MfFund.fund_name_short,
+                    MfFund.scheme_name,
+                    MfFund.amc_name,
+                )
+                .join(MfFundRanks, MfFundRanks.isin == MfFundManagerHistory.scheme_uid)
+                .join(MfFund, MfFund.isin == MfFundRanks.isin)
+                .where(
+                    MfFundManagerHistory.end_date.is_(None),
+                    MfFundRanks.as_of_date == latest_date,
+                )
+            )
+        ).all()
+
     # --- normalize into plain, JSON-safe dicts (Decimal -> float, date -> isoformat)
     # -- everything below this line is PURE / DB-independent (unit-testable as such).
     prev_by_isin = {
@@ -4278,6 +4569,9 @@ async def _leaderboard_refresh_pipeline() -> str:
                 "volatility_pct": r.volatility_pct,
                 "launch_date": r.launch_date,
                 "contributing_signals": r.contributing_signals or [],
+                # quality board (§9b) filter key only — not in
+                # _LEADERBOARD_FUND_FIELDS, never reaches the client.
+                "confidence_factors": r.confidence_factors or {},
                 # Phase 2 batch metrics (migration 0081) — not in
                 # _LEADERBOARD_FUND_FIELDS (board value travels via metric_value
                 # only); used purely as sort/filter keys by the builders below.
@@ -4321,6 +4615,20 @@ async def _leaderboard_refresh_pipeline() -> str:
             "period_month": r.period_month.isoformat(),
         }
         for r in flow_rows_raw
+    ]
+
+    manager_rows = [
+        {
+            "manager_name": r.manager_name,
+            "start_date": r.start_date,
+            "isin": r.isin,
+            "category_rank": r.rank,
+            "category_total": r.total_in_cat,
+            "fund_name_short": r.fund_name_short,
+            "scheme_name": r.scheme_name,
+            "amc_name": r.amc_name,
+        }
+        for r in manager_rows_raw
     ]
 
     # No-silent-caps logging (data-quality hardening, 2026-08-16, §4 of this change)
@@ -4381,7 +4689,19 @@ async def _leaderboard_refresh_pipeline() -> str:
         "sip_5y": _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct"),
         "sip_consistency": _build_leaderboard_sip_consistency(funds),
         "risk_recovery": _build_leaderboard_risk_recovery(funds),
+        # Phase 3a (design doc §9b) — 4 new boards.
+        "hidden_gems": _build_leaderboard_hidden_gems(funds),
+        "future_leaders": _build_leaderboard_future_leaders(funds),
+        "momentum": _build_leaderboard_momentum(funds),
+        "quality": _build_leaderboard_quality(funds),
     }
+    # ai_spotlight (§9b D2) is built LAST — it counts appearances across every
+    # board already in `boards` above (never counts itself).
+    boards["ai_spotlight"] = _build_leaderboard_ai_spotlight(boards)
+    # manager_facts (Phase 3b, §9b) — a distinct row shape (no isin key at the
+    # top level of a manager row), fed by its own query above, not `funds`.
+    boards["manager_facts"] = _build_leaderboard_manager_facts(manager_rows, latest_date)
+
     hero = _build_leaderboard_hero(funds, prev_by_isin, top100_rows, live_board_count=len(boards))
 
     payload_rows = [

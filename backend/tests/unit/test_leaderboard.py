@@ -34,16 +34,23 @@ from fastapi import Response
 
 from dhanradar.mf.serialization import FORBIDDEN_SCORE_KEYS, serialize_leaderboard_response
 from dhanradar.tasks.mf import (
+    _build_leaderboard_ai_spotlight,
     _build_leaderboard_champions,
+    _build_leaderboard_future_leaders,
     _build_leaderboard_hero,
+    _build_leaderboard_hidden_gems,
     _build_leaderboard_label_upgrades,
+    _build_leaderboard_manager_facts,
+    _build_leaderboard_momentum,
     _build_leaderboard_movers,
+    _build_leaderboard_quality,
     _build_leaderboard_risk_recovery,
     _build_leaderboard_sip_consistency,
     _build_leaderboard_sip_rail,
     _build_leaderboard_top100,
     _build_leaderboard_wealth_creator,
     _dedupe_leaderboard_variants,
+    _leaderboard_fund_row,
     _leaderboard_is_growth_category,
     _leaderboard_is_stale,
     _since_launch_multiple,
@@ -389,6 +396,46 @@ def test_risk_recovery_excludes_segregated_and_non_growth() -> None:
     assert [r["isin"] for r in rows] == ["INE_OK"]
 
 
+def test_wealth_creator_excludes_non_growth_categories() -> None:
+    """Phase 2.2 (2nd live run): ICICI Overnight topped at '10.01x' — a debt fund's
+    decades-long face-value drift is not this board's promise of growth compounding."""
+    funds = [
+        _fund("INE_WEQ"),
+        _fund("INE_WCASH", category="Debt Scheme - Overnight Fund"),
+    ]
+    multiples_by_isin = {"INE_WEQ": 6.0, "INE_WCASH": 10.0}
+    rows = _build_leaderboard_wealth_creator(funds, multiples_by_isin)
+    assert [r["isin"] for r in rows] == ["INE_WEQ"]
+
+
+def test_sip_consistency_excludes_arbitrage_funds() -> None:
+    """Phase 2.2 (2nd live run): ITI Arbitrage topped at 100% — arbitrage sits in
+    the Hybrid bucket but is cash-like by construction (same vacuous-winner problem)."""
+    funds = [
+        _fund("INE_OK2", rolling_1y_pct_positive=90.0, return_3y_pct=12.0),
+        _fund(
+            "INE_ARB",
+            rolling_1y_pct_positive=100.0,
+            return_3y_pct=7.0,
+            category="Hybrid Scheme - Arbitrage Fund",
+        ),
+    ]
+    rows = _build_leaderboard_sip_consistency(funds)
+    assert [r["isin"] for r in rows] == ["INE_OK2"]
+
+
+def test_risk_recovery_requires_a_real_fall() -> None:
+    """Phase 2.2 (2nd live run): a CRISIL IBX AAA debt index fund 'recovered' in 2
+    days from a rounding-sized dip — recovery is only meaningful from a drawdown an
+    investor would actually feel (max_drawdown >= 5%)."""
+    funds = [
+        _fund("INE_REAL", recovery_days=60, max_drawdown_pct=12.0),
+        _fund("INE_DIP", recovery_days=2, max_drawdown_pct=0.4),
+    ]
+    rows = _build_leaderboard_risk_recovery(funds)
+    assert [r["isin"] for r in rows] == ["INE_REAL"]
+
+
 def test_leaderboard_is_growth_category_matches_real_canonical_strings() -> None:
     """Against the actual mf/taxonomy.py canonical leaf strings, not a paraphrase —
     Equity/Hybrid/Solution-Oriented + the Index-funds bucket are growth; Debt and the
@@ -402,6 +449,196 @@ def test_leaderboard_is_growth_category_matches_real_canonical_strings() -> None
     assert _leaderboard_is_growth_category("Debt Scheme - Overnight Fund") is False
     assert _leaderboard_is_growth_category("Other Scheme - Gold ETF") is False
     assert _leaderboard_is_growth_category(None) is False
+
+
+# ---------------------------------------------------------------------------
+# 2g — Phase 3a boards (docs/features/leaderboard-data-backend.md §9b): hidden
+# gems, future leaders, momentum, quality, cross-board AI spotlight.
+# ---------------------------------------------------------------------------
+
+
+def test_hidden_gems_requires_top_quartile_rank_and_below_category_median_aum() -> None:
+    # category AUM pool (excl. HG5's None) = {10, 500, 20, 600, 30, 700}
+    # -> sorted [10, 20, 30, 500, 600, 700] -> median = (30 + 500) / 2 = 265.
+    funds = [
+        _fund("INE_HG1", category="Small Cap Fund", rank=1, total=20, aum_crore=10.0),  # gem: top-quartile, well below median
+        _fund("INE_HG2", category="Small Cap Fund", rank=2, total=20, aum_crore=500.0),  # top-quartile but ABOVE median -> excluded
+        _fund("INE_HG3", category="Small Cap Fund", rank=15, total=20, aum_crore=20.0),  # below median but NOT top-quartile -> excluded
+        _fund("INE_HG4", category="Small Cap Fund", rank=10, total=20, aum_crore=600.0),  # pool filler, not top-quartile
+        _fund("INE_HG5", category="Small Cap Fund", rank=4, total=20, aum_crore=None),  # no AUM -> excluded, never in the median pool
+        _fund(
+            "INE_HG6", category="Small Cap Fund", rank=1, total=20, aum_crore=30.0, is_segregated=True
+        ),  # otherwise qualifies (top-quartile, below median) but segregated -> excluded
+        _fund("INE_HG7", category="Small Cap Fund", rank=11, total=20, aum_crore=700.0),  # pool filler, not top-quartile
+    ]
+    rows = _build_leaderboard_hidden_gems(funds)
+    assert [r["isin"] for r in rows] == ["INE_HG1"]
+    assert rows[0]["metric_value"] is None
+    assert rows[0]["metric_unit"] == "gem"
+
+
+def test_future_leaders_requires_positive_delta_and_top_half_category_rank() -> None:
+    funds = [
+        _fund("INE_FL1", rank=5, total=20, rank_delta=3),  # top half (0.25) + rising -> leader
+        _fund("INE_FL2", rank=3, total=20, rank_delta=1),  # top half, smaller delta -> ranks after FL1
+        _fund("INE_FL3", rank=15, total=20, rank_delta=5),  # bigger delta but bottom half (0.75) -> excluded
+        _fund("INE_FL4", rank=2, total=20, rank_delta=-1),  # top half but falling -> excluded
+        _fund("INE_FL5", rank=1, total=20, rank_delta=None),  # no delta (no prior rank) -> excluded
+    ]
+    rows = _build_leaderboard_future_leaders(funds)
+    assert [r["isin"] for r in rows] == ["INE_FL1", "INE_FL2"]
+    assert rows[0]["metric_value"] == 3
+    assert rows[0]["metric_unit"] == "rank_delta"
+
+
+def test_momentum_requires_ahead_of_peers_signal_and_positive_delta() -> None:
+    from dhanradar.scoring.engine.signal_names import SignalName, display
+
+    ahead_1y = display(SignalName.COHORT_1Y_AHEAD)
+    ahead_3y = display(SignalName.COHORT_3Y_AHEAD)
+    funds = [
+        _fund("INE_M1", rank_delta=5, return_1y_pct=20.0, contributing_signals=[ahead_1y]),
+        # Same delta as M1, higher 1Y return -> wins the tie-break.
+        _fund("INE_M2", rank_delta=5, return_1y_pct=25.0, contributing_signals=[ahead_3y]),
+        _fund("INE_M3", rank_delta=-2, contributing_signals=[ahead_1y]),  # falling -> excluded
+        _fund(
+            "INE_M4", rank_delta=8, contributing_signals=["drawdown contained versus category peers"]
+        ),  # rising but no ahead-of-peers phrase -> excluded
+    ]
+    rows = _build_leaderboard_momentum(funds)
+    assert [r["isin"] for r in rows] == ["INE_M2", "INE_M1"]
+    assert rows[0]["metric_value"] == 5
+    assert rows[0]["metric_unit"] == "rank_delta"
+
+
+def test_quality_requires_high_consistency_and_data_coverage_orders_by_sharpe() -> None:
+    funds = [
+        _fund("INE_Q1", sharpe_ratio=1.5, confidence_factors={"consistency": "high", "data_coverage": "high"}),
+        _fund(
+            "INE_Q2", sharpe_ratio=2.0, confidence_factors={"consistency": "high", "data_coverage": "medium"}
+        ),  # data_coverage not high -> excluded
+        _fund("INE_Q3", sharpe_ratio=1.8, confidence_factors={"consistency": "high", "data_coverage": "high"}),
+        _fund(
+            "INE_Q4",
+            sharpe_ratio=3.0,
+            confidence_factors={"consistency": "high", "data_coverage": "high"},
+            is_segregated=True,
+        ),  # segregated -> excluded
+    ]
+    rows = _build_leaderboard_quality(funds)
+    assert [r["isin"] for r in rows] == ["INE_Q3", "INE_Q1"]
+    assert rows[0]["metric_value"] == 1.8
+    assert rows[0]["metric_unit"] == "sharpe_ratio"
+
+
+def test_ai_spotlight_counts_cross_board_appearances_including_champion_winners() -> None:
+    fund_row_a = _leaderboard_fund_row(_fund("INE_AI1", fund_name_short="Alpha"))
+    fund_row_b = _leaderboard_fund_row(_fund("INE_AI2", fund_name_short="Beta"))
+    fund_row_c = _leaderboard_fund_row(_fund("INE_AI3", fund_name_short="Gamma"))
+    boards = {
+        "top100": [fund_row_a, fund_row_b, fund_row_c],
+        "perf_1y": [fund_row_a],
+        "risk_sharpe": [fund_row_a],
+        "champions": [{"category": "Large Cap Fund", "winner": fund_row_b, "runner_up": None, "why": "x"}],
+        "value_ter": [fund_row_b],
+        "amc_facts": [{"amc_name": "Test AMC", "fund_count": 1}],  # no isin — never crashes
+    }
+    rows = _build_leaderboard_ai_spotlight(boards)
+    # AI1: top100+perf_1y+risk_sharpe=3; AI2: top100+champions(winner)+value_ter=3;
+    # AI3: top100 only=1 -> below the >=2 gate, excluded. Tie breaks by top100 position.
+    assert [r["isin"] for r in rows] == ["INE_AI1", "INE_AI2"]
+    assert rows[0]["metric_value"] == 3
+    assert rows[0]["metric_unit"] == "boards"
+
+
+# ---------------------------------------------------------------------------
+# 2h — Phase 3b manager_facts (docs/features/leaderboard-data-backend.md §9b):
+# aggregate dedup, tenure, percentile word, the >=2-fund gate, no number leak.
+# ---------------------------------------------------------------------------
+
+
+def test_manager_facts_dedupes_gates_on_two_funds_and_computes_tenure_and_word() -> None:
+    manager_rows = [
+        {
+            "manager_name": "Jane Doe",
+            "start_date": date(2020, 1, 1),
+            "isin": "INE_MG1",
+            "category_rank": 2,
+            "category_total": 20,  # percentile 0.10
+            "fund_name_short": "Fund One",
+            "scheme_name": "Fund One - Direct - Growth",
+            "amc_name": "Alpha AMC",
+        },
+        {
+            # Same scheme, plan/option variant of Fund One — must collapse (SCHEME_KEY dedup).
+            "manager_name": "Jane Doe",
+            "start_date": date(2020, 1, 1),
+            "isin": "INE_MG1V",
+            "category_rank": 5,
+            "category_total": 20,
+            "fund_name_short": "Fund One",
+            "scheme_name": "Fund One - Regular - Growth",
+            "amc_name": "Alpha AMC",
+        },
+        {
+            "manager_name": "Jane Doe",
+            "start_date": date(2016, 8, 16),  # earliest -> drives tenure
+            "isin": "INE_MG2",
+            "category_rank": 1,
+            "category_total": 20,  # percentile 0.05 — best -> top_fund
+            "fund_name_short": "Fund Two",
+            "scheme_name": "Fund Two - Direct - Growth",
+            "amc_name": "Alpha AMC",
+        },
+        {
+            "manager_name": "Solo Manager",  # only ONE fund -> gated out (< 2 funds)
+            "start_date": date(2015, 1, 1),
+            "isin": "INE_SOLO",
+            "category_rank": 1,
+            "category_total": 5,
+            "fund_name_short": "Solo Fund",
+            "scheme_name": "Solo Fund - Direct - Growth",
+            "amc_name": "Beta AMC",
+        },
+    ]
+    as_of = date(2026, 8, 16)
+    rows = _build_leaderboard_manager_facts(manager_rows, as_of_date=as_of)
+
+    assert [r["manager_name"] for r in rows] == ["Jane Doe"]  # Solo Manager gated out
+    row = rows[0]
+    assert row["funds_count"] == 2  # variant collapsed: Fund One + Fund Two
+    assert row["amc_name"] == "Alpha AMC"
+    assert row["top_fund_name"] == "Fund Two"  # best percentile (0.05 vs Fund One's 0.10)
+    assert row["percentile_word"] == "Strong"  # avg (0.05+0.10)/2=0.075 <= 0.25
+    expected_tenure = round((as_of - date(2016, 8, 16)).days / 365.25, 1)
+    assert row["tenure_years"] == expected_tenure
+    # leaderboard.manager_row shape only — no raw percentile number, no score.
+    assert set(row) == {
+        "manager_name",
+        "amc_name",
+        "funds_count",
+        "tenure_years",
+        "percentile_word",
+        "top_fund_name",
+    }
+
+
+def test_manager_facts_percentile_word_bands() -> None:
+    manager_rows = [
+        {
+            "manager_name": "Good Manager",
+            "start_date": date(2020, 1, 1),
+            "isin": f"INE_GM{i}",
+            "category_rank": 8,
+            "category_total": 20,  # percentile 0.4 -> "Good" (<= 0.5)
+            "fund_name_short": f"Fund {i}",
+            "scheme_name": f"Fund {i} - Direct - Growth",
+            "amc_name": "Gamma AMC",
+        }
+        for i in range(2)
+    ]
+    rows = _build_leaderboard_manager_facts(manager_rows, as_of_date=date(2026, 8, 16))
+    assert rows[0]["percentile_word"] == "Good"
 
 
 # ---------------------------------------------------------------------------
@@ -532,3 +769,61 @@ def test_full_leaderboard_response_has_no_forbidden_score_keys() -> None:
     blob = json.dumps(envelope, default=str)
     for key in FORBIDDEN_SCORE_KEYS:
         assert key not in blob, f"forbidden score key {key!r} leaked into the leaderboard response"
+
+
+def test_manager_row_allowlist_strips_raw_percentile_and_forbidden_score_keys() -> None:
+    """`leaderboard.manager_row` (§9b) — a manager row must never leak the raw
+    averaged percentile number or any FORBIDDEN_SCORE_KEYS, whether smuggled in
+    directly or produced via the real `_build_leaderboard_manager_facts` path."""
+    poisoned_row = {
+        "manager_name": "Jane Doe",
+        "amc_name": "Alpha AMC",
+        "funds_count": 2,
+        "tenure_years": 5.0,
+        "percentile_word": "Strong",
+        "top_fund_name": "Fund One",
+        "avg_percentile": 0.1,  # not in the allowlist — must never reach a client
+        "unified_score": 87,  # forbidden-key tripwire too
+    }
+    envelope = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"manager_facts": {"title": "t", "rows": [poisoned_row]}},
+    )
+    assert envelope["boards"]["manager_facts"]["rows"][0] == {
+        "manager_name": "Jane Doe",
+        "amc_name": "Alpha AMC",
+        "funds_count": 2,
+        "tenure_years": 5.0,
+        "percentile_word": "Strong",
+        "top_fund_name": "Fund One",
+    }
+    blob = json.dumps(envelope, default=str)
+    assert "avg_percentile" not in blob
+    assert "unified_score" not in blob
+
+    # Real builder path — same guarantee end to end.
+    manager_rows = [
+        {
+            "manager_name": "Real Manager",
+            "start_date": date(2018, 1, 1),
+            "isin": f"INE_RM{i}",
+            "category_rank": 3,
+            "category_total": 12,
+            "fund_name_short": f"Real Fund {i}",
+            "scheme_name": f"Real Fund {i} - Direct - Growth",
+            "amc_name": "Delta AMC",
+        }
+        for i in range(2)
+    ]
+    manager_facts_rows = _build_leaderboard_manager_facts(manager_rows, as_of_date=date(2026, 8, 15))
+    envelope2 = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"manager_facts": {"title": "t", "rows": manager_facts_rows}},
+    )
+    blob2 = json.dumps(envelope2, default=str)
+    for key in FORBIDDEN_SCORE_KEYS:
+        assert key not in blob2
+    assert "avg_percentile" not in blob2
+    assert "percentile_word" in blob2

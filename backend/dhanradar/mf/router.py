@@ -1010,6 +1010,13 @@ _LEADERBOARD_BOARD_TITLES: dict[str, str] = {
     "sip_5y": "Best 5-Year SIP",
     "sip_consistency": "Steadiest SIP Consistency",
     "risk_recovery": "Fastest Drawdown Recovery",
+    # Phase 3a/3b (leaderboard-data-backend.md §9b).
+    "hidden_gems": "Hidden Gems",
+    "future_leaders": "Future Leaders",
+    "momentum": "Highest Momentum",
+    "quality": "Best Portfolio Quality",
+    "ai_spotlight": "AI Spotlight",
+    "manager_facts": "Best Fund Managers — covered schemes",
 }
 
 
