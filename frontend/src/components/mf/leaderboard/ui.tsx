@@ -223,7 +223,10 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
               <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
               <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
               {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
-              <span className="shrink-0 font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
+              <span className="flex shrink-0 flex-col items-end">
+                <span className="font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
+                {r.sub && <span className="text-[9.5px] text-ink-muted">{r.sub}</span>}
+              </span>
             </>
           );
           return r.href ? (

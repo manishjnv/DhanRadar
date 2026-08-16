@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
@@ -47,7 +47,10 @@ import { BeginnerPicks } from '@/components/mf/explore/BeginnerPicks';
 import { AiFeed } from '@/components/mf/explore/AiFeed';
 import { Shortlist } from '@/components/mf/explore/Shortlist';
 import { SectionHeader, Section } from '@/components/mf/explore/ExploreSection';
-import { AI_DISCOVERY, FUND_FLOW, SEARCH_TAGS } from '@/components/mf/explore/sampleData';
+import { AI_DISCOVERY, FUND_FLOW } from '@/components/mf/explore/sampleData';
+import { QUICK_INTENTS, type QuickIntent } from '@/features/mf/quickIntents';
+
+const TRY_INTENTS = QUICK_INTENTS.filter((q) => q.backing.kind === 'category');
 
 type PlanFilter   = 'all' | 'direct' | 'regular';
 type OptionFilter = 'all' | 'growth' | 'idcw';
@@ -201,6 +204,7 @@ function Pagination({ page, total, limit, onPage, leftSlot }: {
 // ── body ───────────────────────────────────────────────────────────────────
 
 function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
+  const router = useRouter();
   const { data: catData, isLoading: catsLoading } = useFundCategories();
   const { data: moodData } = useMoodCurrent();
 
@@ -213,8 +217,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
   const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
   const [perPage, setPerPage]               = React.useState(20);
   const [view, setView]                     = React.useState<ViewMode>('table');
-  const [activeChip, setActiveChip]         = React.useState<string | null>(null);
-  const [activeQuick, setActiveQuick]       = React.useState<string | null>(null);
+  const [activeIntentId, setActiveIntentId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!catData?.categories.length || activeCategory) return;
@@ -232,16 +235,15 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
     setPage(1);
   };
 
-  // Quick-discovery chip: a few map to real sort, the rest are preview presets.
-  const handleChip = (chip: string) => {
-    setActiveChip((c) => (c === chip ? null : chip));
-    if (chip === '⭐ Top Rated') { setSort('rank'); setSortDir('asc'); setPage(1); }
+  // Shared quick-intent handler (Phase C) — every intent's backing is a real
+  // category filter, a real sort, or a real page/anchor link.
+  const handleIntent = (intent: QuickIntent) => {
+    setActiveIntentId(intent.id);
+    if (intent.backing.kind === 'category') handleCategoryChange(intent.backing.category);
+    else if (intent.backing.kind === 'sort') { setSort(intent.backing.sort as SortKey); setSortDir(intent.backing.dir); setPage(1); }
+    else router.push(intent.backing.href);
   };
-  // Hero quick action: 'Highest Return' maps to real sort; rest are visual.
-  const handleQuick = (name: string) => {
-    setActiveQuick((q) => (q === name ? null : name));
-    if (name === 'Highest Return') { setSort('return_1y'); setSortDir('desc'); setPage(1); }
-  };
+  const activeIntent = QUICK_INTENTS.find((q) => q.id === activeIntentId) ?? null;
 
   const { data, isLoading: fundsLoading, isError } = useFundExplorer({
     category: activeCategory, sort, sortDir,
@@ -279,17 +281,18 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
   return (
     <div className="flex flex-col">
       {/* HERO */}
-      <ExploreHero totalFunds={totalRanked} categoryCount={catData?.categories.length ?? null} moodRegime={moodData?.regime ?? null} onQuick={handleQuick} activeQuick={activeQuick} />
+      <ExploreHero totalFunds={totalRanked} categoryCount={catData?.categories.length ?? null} moodRegime={moodData?.regime ?? null} onIntent={handleIntent} activeIntentId={activeIntentId} />
 
-      {/* SEARCH + suggestion tags */}
+      {/* SEARCH + category quick-jump tags (Phase C: real category filters, not search-text shortcuts) */}
       <Section>
         <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} size="lg" />
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <span className="text-caption text-ink-muted font-medium mr-1">Try:</span>
-          {SEARCH_TAGS.map((t) => (
-            <button key={t} type="button" onClick={() => { setSearch(t); setPage(1); }}
+          {TRY_INTENTS.map((intent) => (
+            <button key={intent.id} type="button" title={intent.rule} onClick={() => handleIntent(intent)}
+              aria-pressed={activeIntentId === intent.id}
               className="rounded-lg border border-line bg-surface px-2.5 py-1 text-caption font-medium text-ink-secondary hover:border-royal hover:text-royal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-              {t}
+              {intent.label}
             </button>
           ))}
         </div>
@@ -314,7 +317,10 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
               <PillGroup label="Option" options={OPTION_OPTIONS} value={optionFilter} onChange={(k) => { setOptionFilter(k); setPage(1); }} />
               {data && <span className="font-mono text-caption text-ink-muted whitespace-nowrap ml-auto">{data.total} funds</span>}
             </div>
-            <QuickChips active={activeChip} onSelect={handleChip} />
+            <QuickChips active={activeIntentId} onSelect={handleIntent} />
+            {activeIntent && (
+              <p className="mt-2 text-caption text-ink-muted">How this list is built: {activeIntent.rule}</p>
+            )}
           </Section>
 
           {/* ADVANCED FILTERS */}

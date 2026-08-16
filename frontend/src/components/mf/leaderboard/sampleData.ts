@@ -193,7 +193,10 @@ export const CHAMP: Champ[] = [
 ];
 
 // ── Mini-leaderboard rails ───────────────────────────────────────────────────
-export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean; href?: string };
+// V1: `sub` is a tiny muted caption under `val` — e.g. a category-average
+// comparison ("cat avg 14.1%") or (V6) a short flow explainer. Optional; rows
+// without it render exactly as before.
+export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean; href?: string; sub?: string };
 /** `live` marks a rail as fed by a wired board (renders a small LiveBadge in its header). */
 export type Rail = { title: string; q: string; icon: string; color: string; rows: RailRow[]; live?: boolean };
 
@@ -258,6 +261,20 @@ export const DMMI = {
   sip: [f('Bandhan Small Cap', 'B', B), f('Kotak Emerging', 'K', E), f('Mirae ELSS', 'M', V)],
   lump: [f('ICICI Bluechip', 'I', O), f('HDFC Bal Adv', 'H', R), f('Parag Parikh', 'P', N)],
   out: [f('Motilal Nasdaq', 'M', V), f('ICICI Tech', 'I', O), f('Gold FOFs', 'G', A)],
+};
+
+// ── V5 — regime teach-mode copy (MarketSection) ─────────────────────────────
+// Static, reviewed, educational. Describes what a phase has historically meant
+// for volatility/investor behaviour — NEVER predicts what happens next, never
+// advice. Keyed by the real mood Regime enum (components/mood/MoodGauge.tsx);
+// 'insufficient_data'/'data_unavailable' are intentionally absent — the
+// section renders nothing new for those (honest: no phase to describe).
+export const REGIME_EXPLAINER: Record<string, string> = {
+  extreme_fear: 'In sharp downturns like this, markets have historically swung more than usual and many investors have favoured steadier, lower-volatility funds. Phases pass — this describes today’s mood, it predicts nothing.',
+  fear: 'In cautious phases, markets tend to swing more and investors often favour steadier funds. Phases pass — this describes today, it predicts nothing.',
+  neutral: 'In neutral phases, market direction has been more balanced and swings closer to average. This describes current conditions — it is not a forecast.',
+  greed: 'In confident phases, markets tend to run hotter and valuations can stretch further. This describes today’s mood — it says nothing about what happens next.',
+  extreme_greed: 'In euphoric phases, markets have historically been more prone to sharp swings once sentiment turns. This describes today, not a prediction.',
 };
 
 // ── Best managers ────────────────────────────────────────────────────────────
