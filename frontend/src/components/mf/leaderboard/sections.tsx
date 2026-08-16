@@ -185,7 +185,7 @@ export function HeroSection({ hero, moodWord, moodBand, moodColor }: {
       <div className="pointer-events-none absolute -right-12 -top-16 h-80 w-80 rounded-full" style={{ background: 'radial-gradient(circle,rgba(212,160,23,.28),transparent 70%)' }} aria-hidden="true" />
       <div className="pointer-events-none absolute -bottom-32 left-[32%] h-72 w-72 rounded-full" style={{ background: 'radial-gradient(circle,rgba(37,99,235,.3),transparent 70%)' }} aria-hidden="true" />
       <div className="relative z-[2]">
-        <h1 className="mb-2 font-sans text-[28px] font-extrabold leading-[1.05] tracking-[-0.03em] sm:text-[34px]">Mutual Fund Rankings</h1>
+        <h1 className="mb-2 font-sans text-[28px] font-bold leading-[1.05] tracking-[-0.03em] sm:text-[34px]">Mutual Fund Rankings</h1>
         <p className="mb-5 max-w-[600px] text-small leading-relaxed text-slate-300 sm:text-body">
           Discover India’s highest-rated mutual funds using DhanRadar Intelligence — best funds first, every question answered.
         </p>
@@ -194,7 +194,7 @@ export function HeroSection({ hero, moodWord, moodBand, moodColor }: {
             const inner = (
               <>
                 <div className="text-[9.5px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{k.label}</div>
-                <div className="mt-1 font-sans font-extrabold leading-tight" style={{ fontSize: k.small ? 14 : 19, color: k.valueColor }}>
+                <div className="mt-1 font-sans font-bold leading-tight" style={{ fontSize: k.small ? 14 : 19, color: k.valueColor }}>
                   {k.value}{k.sub && <span className="ml-1 text-[11px] font-semibold opacity-85">{k.sub}</span>}
                 </div>
               </>
@@ -453,21 +453,21 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                   className={cn('hover:bg-surface-2', row.rank <= 3 && 'bg-amber/[0.08]', row.href && 'cursor-pointer')}
                   onClick={row.href ? () => router.push(row.href!) : undefined}
                 >
-                  <td className="border-b border-line px-3.5 py-2.5 text-left">
-                    <span className="inline-flex w-10 items-center gap-1.5 font-sans text-base font-extrabold text-ink">
+                  <td className="border-b border-line px-3.5 py-2 text-left">
+                    <span className="inline-flex w-10 items-center gap-1.5 font-sans text-[15px] font-bold text-ink">
                       {medal(row.rank - 1) ?? `#${row.rank}`}
                     </span>
                   </td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-left">
+                  <td className="border-b border-line px-3.5 py-2 text-left">
                     <div className="flex min-w-[220px] items-center gap-2.5">
                       <Logo letter={row.logo} color={row.color} />
                       <div>
                         {row.href ? (
-                          <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block text-small font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                          <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
                             {row.name}
                           </Link>
                         ) : (
-                          <div className="text-small font-bold leading-tight text-ink">{row.name}</div>
+                          <div className="text-small font-semibold leading-tight text-ink">{row.name}</div>
                         )}
                         <div className="mt-0.5 text-[11px] font-medium text-ink-muted">
                           {row.amc} ·{' '}
@@ -485,22 +485,22 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                       </div>
                     </div>
                   </td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right">
+                  <td className="border-b border-line px-3.5 py-2 text-right">
                     <span className="inline-flex items-center justify-end gap-1.5"><RingCell ring={row.ring} /><EduPill word={row.labelWord} color={row.labelColor} /></span>
                   </td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right"><RiskBadge risk={row.risk} /></td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-bold text-emerald">{pctSigned(row.r3)}</td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-bold text-emerald">{pctSigned(row.r5)}</td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-bold text-ink">{row.sipWord}</td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-bold text-ink">{ter1(row.exp)}</td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono font-bold text-ink">{row.aum != null ? aum(row.aum) : '—'}</td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right">
+                  <td className="border-b border-line px-3.5 py-2 text-right"><RiskBadge risk={row.risk} /></td>
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-emerald">{pctSigned(row.r3)}</td>
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-emerald">{pctSigned(row.r5)}</td>
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.sipWord}</td>
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{ter1(row.exp)}</td>
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? aum(row.aum) : '—'}</td>
+                  <td className="border-b border-line px-3.5 py-2 text-right">
                     <span className="inline-flex items-center justify-end gap-1.5 font-mono font-bold" style={{ color: up ? E : down ? '#E5484D' : 'var(--text-muted)' }}>
                       {up ? '▲' : down ? '▼' : '–'} {row.rankd}
                       <MiniSpark seed={row.name.charCodeAt(0) * 5} up={!down} />
                     </span>
                   </td>
-                  <td className="border-b border-line px-3.5 py-2.5 text-right">
+                  <td className="border-b border-line px-3.5 py-2 text-right">
                     <span className="inline-flex gap-1.5">
                       <IconBtn title="Compare" aria-pressed={selected.has(row.key)} onClick={(e) => { e.stopPropagation(); toggle(row.key); }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4v16M20 4v16M9 8l-5 4 5 4M15 8l5 4-5 4" /></svg>
@@ -533,20 +533,20 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
               onClick={() => toggle(row.key)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(row.key); } }}
               className={cn(
-                'mb-2 flex w-full cursor-pointer items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                'mb-2 flex w-full cursor-pointer items-center gap-2.5 rounded-xl border border-line bg-surface p-2.5 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
                 row.rank <= 3 && 'bg-amber/[0.08]',
                 selected.has(row.key) && 'ring-2 ring-royal/40',
               )}
             >
-              <span className="w-7 shrink-0 text-center font-sans text-[17px] font-extrabold text-ink">{medal(row.rank - 1) ?? `#${row.rank}`}</span>
+              <span className="w-7 shrink-0 text-center font-sans text-[15px] font-bold text-ink">{medal(row.rank - 1) ?? `#${row.rank}`}</span>
               <Logo letter={row.logo} color={row.color} size={38} radius={10} font={14} />
               <div className="min-w-0 flex-1">
                 {row.href ? (
-                  <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                  <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
                     {row.name}
                   </Link>
                 ) : (
-                  <div className="truncate text-small font-bold leading-tight text-ink">{row.name}</div>
+                  <div className="truncate text-small font-semibold leading-tight text-ink">{row.name}</div>
                 )}
                 <div className="mt-0.5 text-[10.5px] text-ink-muted">{row.amc} · {row.cat}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -936,7 +936,7 @@ export function MarketSection({ regime }: { regime?: string } = {}) {
       <div className="grid items-center gap-6 lg:grid-cols-[230px_1fr]">
         <div className="text-center">
           <Semicircle val={DMMI.value} />
-          <div className="font-sans text-xl font-extrabold text-amber">{DMMI.mood}</div>
+          <div className="font-sans text-xl font-bold text-amber">{DMMI.mood}</div>
           <div className="mt-0.5 text-[11.5px] text-ink-muted">{DMMI.phase}</div>
           <div className="mt-2.5">
             <span className="rounded-lg bg-royal/[0.08] px-3 py-1.5 font-mono text-[11px] font-bold text-royal">{DMMI.strategy}</span>
@@ -969,7 +969,7 @@ export function MarketSection({ regime }: { regime?: string } = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 function ScoreWord({ score }: { score: number }) {
   const s = toStrength(score);
-  return <span className="font-mono font-extrabold" style={{ color: STRENGTH_COLOR[s] }}>{STRENGTH_WORD[s]}</span>;
+  return <span className="font-mono font-semibold" style={{ color: STRENGTH_COLOR[s] }}>{STRENGTH_WORD[s]}</span>;
 }
 // Live rows carry no composite manager score, no third-party star rating, and no
 // 'years beating benchmark'/'success %' figures (those don't exist on the live
@@ -1018,8 +1018,8 @@ export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.key}>
-                  <td className="border-b border-line px-3.5 py-3 text-left font-sans font-extrabold text-ink-muted">{i + 1}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-left">
+                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-muted">{i + 1}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <div className="flex items-center gap-2.5">
                       <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
                       <div>
@@ -1028,13 +1028,13 @@ export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
                       </div>
                     </div>
                   </td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.exp}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.funds}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right"><QualityCell quality={m.quality} /></td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.beating}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono text-emerald">{m.success}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right text-ink-secondary">{m.topFund}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right tracking-[1px] text-amber">{m.rating}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.exp}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.funds}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right"><QualityCell quality={m.quality} /></td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.beating}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono text-emerald">{m.success}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right text-ink-secondary">{m.topFund}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right tracking-[1px] text-amber">{m.rating}</td>
                 </tr>
               ))}
             </tbody>
@@ -1045,7 +1045,7 @@ export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
       <Card className="p-4 lg:hidden">
         {rows.map((m, i) => (
           <div key={m.key} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
-            <span className="w-4 shrink-0 font-sans font-extrabold text-ink-muted">{i + 1}</span>
+            <span className="w-4 shrink-0 font-sans font-semibold text-ink-muted">{i + 1}</span>
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
             <div className="min-w-0 flex-1">
               <div className="truncate text-small font-bold text-ink">{m.name}</div>
@@ -1072,7 +1072,7 @@ type QualitySpec = { kind: 'score'; score: number } | { kind: 'word'; word: stri
 function QualityCell({ quality }: { quality: QualitySpec }) {
   return quality.kind === 'score'
     ? <ScoreWord score={quality.score} />
-    : <span className="font-mono font-extrabold" style={{ color: quality.color }}>{quality.word}</span>;
+    : <span className="font-mono font-semibold" style={{ color: quality.color }}>{quality.word}</span>;
 }
 type AmcRow = {
   key: string; name: string; av: string; color: string; quality: QualitySpec;
@@ -1118,8 +1118,8 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.key}>
-                  <td className="border-b border-line px-3.5 py-3 text-left font-sans font-extrabold text-ink-muted">{i + 1}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-left">
+                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-muted">{i + 1}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <div className="flex items-center gap-2.5">
                       <Logo letter={m.av} color={m.color} />
                       {live ? (
@@ -1131,13 +1131,13 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
                       )}
                     </div>
                   </td>
-                  <td className="border-b border-line px-3.5 py-3 text-right"><QualityCell quality={m.quality} /></td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.topFunds}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.confidence}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.aum}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.age}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.indexFunds}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right tracking-[1px] text-amber">{m.trust}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right"><QualityCell quality={m.quality} /></td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.topFunds}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.confidence}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.aum}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.age}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right font-mono">{m.indexFunds}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-right tracking-[1px] text-amber">{m.trust}</td>
                 </tr>
               ))}
             </tbody>
@@ -1147,7 +1147,7 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
       <Card className="p-4 lg:hidden">
         {rows.map((m, i) => (
           <div key={m.key} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
-            <span className="w-4 shrink-0 font-sans font-extrabold text-ink-muted">{i + 1}</span>
+            <span className="w-4 shrink-0 font-sans font-semibold text-ink-muted">{i + 1}</span>
             <Logo letter={m.av} color={m.color} size={36} radius={9} />
             <div className="min-w-0 flex-1">
               {live ? (
