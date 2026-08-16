@@ -193,7 +193,9 @@ celery_app.conf.task_routes = {
 # ---------------------------------------------------------------------------
 _FAST_BUCKET_TASKS = {
     # DB-only nightly/monthly compute — no network calls.
-    "dhanradar.tasks.mf.mf_metrics_refresh",
+    # (mf_metrics_refresh moved to _LONG_RUNNING_TASKS 2026-08-16: Phase 2 SIP-XIRR
+    # — 2 scipy root-findings x ~22k ISINs — legitimately outgrew the 240s bucket;
+    # first manual fire hit SoftTimeLimitExceeded at exactly 240s.)
     "dhanradar.tasks.mf.compute_market_ranks",
     "dhanradar.tasks.mf.fund_events_refresh",
     "dhanradar.tasks.mf.monthly_rescore_plus_users",
@@ -238,6 +240,11 @@ _FAST_BUCKET_TASKS = {
 # the global 30-min default would kill a legitimate run partway through).
 _LONG_RUNNING_TASKS = {
     "dhanradar.tasks.mf.nav_backfill": (6300, 6600),  # 105 min / 110 min
+    # Phase 2 (migration 0081): SIP XIRR (2 scipy brentq roots/fund x ~22k ISINs)
+    # + recovery-days pushed the nightly metrics compute past the 240s fast
+    # bucket (hit empirically 2026-08-16 at 240.0s). 15/18 min = ~4x headroom,
+    # still bounded so a hang can never wedge the batch queue for long.
+    "dhanradar.tasks.mf.mf_metrics_refresh": (900, 1080),  # 15 min / 18 min
 }
 
 
