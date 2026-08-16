@@ -1072,7 +1072,11 @@ async def leaderboard(
 
     hero_payload = latest_by_key.pop("hero", None)
     boards_payload = {
-        key: {"title": _LEADERBOARD_BOARD_TITLES.get(key, key), "rows": (row.payload or {}).get("rows", [])}
+        key: {
+            "title": _LEADERBOARD_BOARD_TITLES.get(key, key),
+            "rows": (row.payload or {}).get("rows", []),
+            "takeaway": (row.payload or {}).get("takeaway"),
+        }
         for key, row in latest_by_key.items()
     }
 

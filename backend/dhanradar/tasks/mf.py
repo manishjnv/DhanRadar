@@ -3544,14 +3544,65 @@ def _leaderboard_log_hardening_exclusions(
     )
 
 
+# Category-context metrics (V1, 2026-08-16) — the exact set a board's own metric
+# can be compared against; means are computed once per pipeline run and threaded
+# into the handful of builders below that display one of these metrics.
+_LEADERBOARD_CATEGORY_AVG_METRICS: tuple[str, ...] = (
+    "return_1y_pct",
+    "return_3y_pct",
+    "return_5y_pct",
+    "expense_ratio_pct",
+    "sip_xirr_3y_pct",
+    "sip_xirr_5y_pct",
+)
+
+
+def _leaderboard_category_means(funds: list[dict]) -> dict[str, dict[str, float]]:
+    """Per-sebi_category arithmetic mean of each `_LEADERBOARD_CATEGORY_AVG_METRICS`
+    metric, non-null values only, rounded 2dp. `is_segregated` funds are excluded
+    entirely (a side-pocket NAV artifact must not skew a category's honest average —
+    same discipline as the sip-rail DATA-ARTIFACT guards above). A category with
+    zero non-null values for a metric simply has no key for it — never a fabricated
+    0.0 or None placeholder (matches how a builder's own metric_value behaves).
+    SIP-XIRR values above `_LEADERBOARD_MAX_SIP_XIRR_PCT` are excluded from the
+    means too — the boards treat them as corrupted-NAV artifacts, so an honest
+    category average must not include what the boards refuse to display."""
+    values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for f in funds:
+        if f.get("is_segregated"):
+            continue
+        cat = f.get("sebi_category")
+        if cat is None:
+            continue
+        for metric in _LEADERBOARD_CATEGORY_AVG_METRICS:
+            v = f.get(metric)
+            if v is None:
+                continue
+            if metric.startswith("sip_xirr") and v > _LEADERBOARD_MAX_SIP_XIRR_PCT:
+                continue
+            values[cat][metric].append(v)
+    return {
+        cat: {metric: round(sum(vals) / len(vals), 2) for metric, vals in metrics.items()}
+        for cat, metrics in values.items()
+    }
+
+
 def _leaderboard_fund_row(
-    fund: dict, *, metric_value: Any = None, metric_unit: str | None = None
+    fund: dict,
+    *,
+    metric_value: Any = None,
+    metric_unit: str | None = None,
+    category_avg: float | None = None,
 ) -> dict:
     """Shape one universe entry into the FundRow contract (§5) — exactly the
-    allowlisted field set, nothing else (a score field can never enter this dict)."""
+    allowlisted field set, nothing else (a score field can never enter this dict).
+    `category_avg` (V1) is the mean of the SAME metric the board displays, over the
+    row's own sebi_category — always present as `metric_category_avg`, None when a
+    caller doesn't supply one (same optionality convention as `metric_value`)."""
     row = {k: fund.get(k) for k in _LEADERBOARD_FUND_FIELDS}
     row["metric_value"] = metric_value
     row["metric_unit"] = metric_unit
+    row["metric_category_avg"] = category_avg
     return row
 
 
@@ -3624,12 +3675,20 @@ def _build_leaderboard_champions(funds: list[dict]) -> list[dict]:
     return rows
 
 
-def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit: str) -> list[dict]:
+def _build_leaderboard_perf_rail(
+    funds: list[dict],
+    metric_key: str,
+    metric_unit: str,
+    category_means: dict[str, dict[str, float]] | None = None,
+) -> list[dict]:
     """perf_1y / perf_3y / perf_5y (§5) — top 4 by the given return column,
     descending, "highest non-null wins". (sip_3y/sip_5y no longer reuse this
     directly — see `_build_leaderboard_sip_rail` below, which adds the DATA-ARTIFACT
-    plausibility guards a raw XIRR column needs that a NAV-derived return doesn't.)"""
+    plausibility guards a raw XIRR column needs that a NAV-derived return doesn't.)
+    `category_means` (V1, `_leaderboard_category_means`) attaches each row's own
+    sebi_category average of THIS metric; omitted/absent → metric_category_avg=None."""
     candidates = [f for f in funds if f.get(metric_key) is not None]
+    means = category_means or {}
 
     def _key(f: dict) -> float:
         return -f[metric_key]
@@ -3637,12 +3696,21 @@ def _build_leaderboard_perf_rail(funds: list[dict], metric_key: str, metric_unit
     deduped = _dedupe_leaderboard_variants(candidates, _key)
     deduped.sort(key=_key)
     return [
-        _leaderboard_fund_row(f, metric_value=f[metric_key], metric_unit=metric_unit)
+        _leaderboard_fund_row(
+            f,
+            metric_value=f[metric_key],
+            metric_unit=metric_unit,
+            category_avg=means.get(f.get("sebi_category"), {}).get(metric_key),
+        )
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
 
-def _build_leaderboard_sip_rail(funds: list[dict], metric_key: str) -> list[dict]:
+def _build_leaderboard_sip_rail(
+    funds: list[dict],
+    metric_key: str,
+    category_means: dict[str, dict[str, float]] | None = None,
+) -> list[dict]:
     """sip_3y / sip_5y (Phase 2, §8) — top 4 by monthly-SIP XIRR (sip_xirr_3y_pct /
     sip_xirr_5y_pct), descending. Same "highest non-null wins" shape as
     `_build_leaderboard_perf_rail`, plus three DATA-ARTIFACT guards a raw XIRR
@@ -3651,7 +3719,8 @@ def _build_leaderboard_sip_rail(funds: list[dict], metric_key: str) -> list[dict
     non-growth categories excluded (a SIP-XIRR board is only meaningful for
     growth-oriented schemes — prod example: ICICI Overnight sip_5y showed 53.24%),
     and any XIRR above `_LEADERBOARD_MAX_SIP_XIRR_PCT` excluded (implausible —
-    signals a corrupted NAV series, not real performance)."""
+    signals a corrupted NAV series, not real performance). `category_means` (V1)
+    attaches each row's own sebi_category average of THIS metric."""
     candidates = [
         f
         for f in funds
@@ -3660,6 +3729,7 @@ def _build_leaderboard_sip_rail(funds: list[dict], metric_key: str) -> list[dict
         and _leaderboard_is_growth_category(f.get("sebi_category"))
         and f[metric_key] <= _LEADERBOARD_MAX_SIP_XIRR_PCT
     ]
+    means = category_means or {}
 
     def _key(f: dict) -> float:
         return -f[metric_key]
@@ -3667,7 +3737,12 @@ def _build_leaderboard_sip_rail(funds: list[dict], metric_key: str) -> list[dict
     deduped = _dedupe_leaderboard_variants(candidates, _key)
     deduped.sort(key=_key)
     return [
-        _leaderboard_fund_row(f, metric_value=f[metric_key], metric_unit="pct_sip_xirr")
+        _leaderboard_fund_row(
+            f,
+            metric_value=f[metric_key],
+            metric_unit="pct_sip_xirr",
+            category_avg=means.get(f.get("sebi_category"), {}).get(metric_key),
+        )
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
@@ -3721,9 +3796,13 @@ def _build_leaderboard_risk_sharpe(funds: list[dict]) -> list[dict]:
     ]
 
 
-def _build_leaderboard_value_ter(funds: list[dict]) -> list[dict]:
-    """value_ter (§5) — lowest expense ratio (non-null, > 0)."""
+def _build_leaderboard_value_ter(
+    funds: list[dict], category_means: dict[str, dict[str, float]] | None = None
+) -> list[dict]:
+    """value_ter (§5) — lowest expense ratio (non-null, > 0). `category_means` (V1)
+    attaches each row's own sebi_category average expense_ratio_pct."""
     candidates = [f for f in funds if (f.get("expense_ratio_pct") or 0) > 0]
+    means = category_means or {}
 
     def _key(f: dict) -> float:
         return f["expense_ratio_pct"]
@@ -3731,7 +3810,12 @@ def _build_leaderboard_value_ter(funds: list[dict]) -> list[dict]:
     deduped = _dedupe_leaderboard_variants(candidates, _key)
     deduped.sort(key=_key)
     return [
-        _leaderboard_fund_row(f, metric_value=f["expense_ratio_pct"], metric_unit="pct_ter")
+        _leaderboard_fund_row(
+            f,
+            metric_value=f["expense_ratio_pct"],
+            metric_unit="pct_ter",
+            category_avg=means.get(f.get("sebi_category"), {}).get("expense_ratio_pct"),
+        )
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
@@ -4045,7 +4129,9 @@ def _leaderboard_is_beginner_category(sebi_category: str | None) -> bool:
     return sebi_category.startswith("Hybrid Scheme") and "Arbitrage" not in sebi_category
 
 
-def _build_leaderboard_sip_beginner(funds: list[dict]) -> list[dict]:
+def _build_leaderboard_sip_beginner(
+    funds: list[dict], category_means: dict[str, dict[str, float]] | None = None
+) -> list[dict]:
     """sip_beginner (S6 4th rail, founder decision D4 signed off 2026-08-16) — a
     PUBLISHED editorial rule, education not advice (the rule is stated in the UI
     copy + FAQ): large-cap or hybrid (ex-arbitrage) schemes whose educational
@@ -4054,7 +4140,8 @@ def _build_leaderboard_sip_beginner(funds: list[dict]) -> list[dict]:
     display metric. Inherits the sip-rail DATA-ARTIFACT guards (`is_segregated`,
     implausible-XIRR bound). Prod distribution check 2026-08-16: 505
     label-qualified funds in the rule categories, 408 with both metrics — the
-    rule cannot ship an empty board."""
+    rule cannot ship an empty board. `category_means` (V1) attaches each row's
+    own sebi_category average sip_xirr_3y_pct."""
     candidates = [
         f
         for f in funds
@@ -4065,6 +4152,7 @@ def _build_leaderboard_sip_beginner(funds: list[dict]) -> list[dict]:
         and not f.get("is_segregated")
         and f["sip_xirr_3y_pct"] <= _LEADERBOARD_MAX_SIP_XIRR_PCT
     ]
+    means = category_means or {}
 
     def _key(f: dict) -> tuple[float, str]:
         return (-f["rolling_1y_pct_positive"], f["isin"])
@@ -4072,7 +4160,12 @@ def _build_leaderboard_sip_beginner(funds: list[dict]) -> list[dict]:
     deduped = _dedupe_leaderboard_variants(candidates, _key)
     deduped.sort(key=_key)
     return [
-        _leaderboard_fund_row(f, metric_value=f["sip_xirr_3y_pct"], metric_unit="pct_sip_xirr")
+        _leaderboard_fund_row(
+            f,
+            metric_value=f["sip_xirr_3y_pct"],
+            metric_unit="pct_sip_xirr",
+            category_avg=means.get(f.get("sebi_category"), {}).get("sip_xirr_3y_pct"),
+        )
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
@@ -4390,6 +4483,81 @@ def _build_leaderboard_hero(
         "trending_category": trending_category,
         "live_board_count": live_board_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# V2 — deterministic takeaway sentences (2026-08-16). Pure template strings off a
+# board's OWN already-materialized rows — no LLM call, nothing invented. The
+# pipeline runs each sentence through the AI gateway's canonical advisory-verb
+# screen (`_ADVISORY_RE`) before persisting, same defense-in-depth discipline as
+# `screen_insights` for the S17 AI cards, even though this text is template-only.
+# ---------------------------------------------------------------------------
+
+# metric field each supported board reads its min/max headline number from.
+_LEADERBOARD_TAKEAWAY_METRIC: dict[str, str] = {
+    "perf_3y": "return_3y_pct",
+    "sip_3y": "metric_value",  # sip_xirr_3y_pct isn't a FundRow field — only metric_value carries it
+    "risk_drawdown": "max_drawdown_pct",
+    "value_ter": "expense_ratio_pct",
+}
+
+
+def _leaderboard_dominant_category(rows: list[dict]) -> str | None:
+    """Most common sebi_category among rows, with the canonical "X Scheme - "
+    prefix (mf/taxonomy.py) stripped for plain-English display — e.g. "Equity
+    Scheme - Large Cap Fund" -> "Large Cap Fund". None if no row carries a
+    category."""
+    cats = [r["sebi_category"] for r in rows if r.get("sebi_category")]
+    if not cats:
+        return None
+    winner = Counter(cats).most_common(1)[0][0]
+    return winner.split(" Scheme - ", 1)[-1]
+
+
+def _leaderboard_takeaway(board_key: str, rows: list[dict]) -> str | None:
+    """One plain-English educational takeaway sentence for a board, built purely
+    from that board's own materialized `rows` — None for every unsupported
+    board_key and for empty rows (never a fabricated sentence off no data)."""
+    if not rows or board_key not in {*_LEADERBOARD_TAKEAWAY_METRIC, "momentum", "category_inflows"}:
+        return None
+
+    if board_key == "category_inflows":
+        top = rows[0]
+        if top.get("category") is None or top.get("net_flow_cr") is None:
+            return None
+        return (
+            f"Investor money moved most into {top['category']} last month "
+            f"(₹{top['net_flow_cr']:,.1f} crore net)."
+        )
+
+    dominant = _leaderboard_dominant_category(rows)
+    if dominant is None:
+        return None
+
+    if board_key == "momentum":
+        return f"{dominant} funds are climbing the rankings fastest this period."
+
+    metric_field = _LEADERBOARD_TAKEAWAY_METRIC[board_key]
+    values = [r[metric_field] for r in rows if r.get(metric_field) is not None]
+    if not values:
+        return None
+
+    if board_key == "perf_3y":
+        return (
+            f"Most of the strongest 3-year performers right now are {dominant} funds, "
+            f"with top returns around {max(values):.1f}%."
+        )
+    if board_key == "sip_3y":
+        return f"{dominant} funds lead the 3-year SIP boards, with top XIRRs around {max(values):.1f}%."
+    if board_key == "risk_drawdown":
+        return (
+            f"The smallest recent falls among ranked funds are around {min(values):.1f}% "
+            f"— mostly {dominant} funds."
+        )
+    # value_ter — index dominance only claimed when strictly over half the rows are Index.
+    index_heavy = sum(1 for r in rows if "Index" in (r.get("sebi_category") or "")) > len(rows) / 2
+    tail = "index funds dominate this board." if index_heavy else f"mostly {dominant} funds."
+    return f"The lowest-cost funds charge about {min(values):.1f}% a year — {tail}"
 
 
 @celery_app.task(name="dhanradar.tasks.mf.leaderboard_refresh")
@@ -4724,16 +4892,19 @@ async def _leaderboard_refresh_pipeline() -> str:
     )
 
     top100_rows = _build_leaderboard_top100(funds)
+    # V1 category-context (2026-08-16) — computed once, threaded into the 4
+    # builders whose rows display one of `_LEADERBOARD_CATEGORY_AVG_METRICS`.
+    category_means = _leaderboard_category_means(funds)
     boards: dict[str, list[dict]] = {
         "top100": top100_rows,
         "champions": _build_leaderboard_champions(funds),
-        "perf_1y": _build_leaderboard_perf_rail(funds, "return_1y_pct", "pct_1y"),
-        "perf_3y": _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y"),
-        "perf_5y": _build_leaderboard_perf_rail(funds, "return_5y_pct", "pct_5y"),
+        "perf_1y": _build_leaderboard_perf_rail(funds, "return_1y_pct", "pct_1y", category_means),
+        "perf_3y": _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y", category_means),
+        "perf_5y": _build_leaderboard_perf_rail(funds, "return_5y_pct", "pct_5y", category_means),
         "risk_lowest": _build_leaderboard_risk_lowest(funds),
         "risk_drawdown": _build_leaderboard_risk_drawdown(funds),
         "risk_sharpe": _build_leaderboard_risk_sharpe(funds),
-        "value_ter": _build_leaderboard_value_ter(funds),
+        "value_ter": _build_leaderboard_value_ter(funds, category_means),
         "value_efficiency": _build_leaderboard_value_efficiency(funds),
         "value_index": _build_leaderboard_value_index(funds),
         "movers_up": _build_leaderboard_movers(funds, prev_by_isin, direction="up"),
@@ -4745,11 +4916,11 @@ async def _leaderboard_refresh_pipeline() -> str:
         "amc_facts": _build_leaderboard_amc_facts(funds),
         # Phase 2 (migration 0081, leaderboard-data-backend.md §8) — 5 new boards.
         "wealth_creator": _build_leaderboard_wealth_creator(funds, multiples_by_isin),
-        "sip_3y": _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct"),
-        "sip_5y": _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct"),
+        "sip_3y": _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct", category_means),
+        "sip_5y": _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct", category_means),
         "sip_consistency": _build_leaderboard_sip_consistency(funds),
         # sip_beginner (D4, 2026-08-16) — published-rule educational rail, S6 4th slot.
-        "sip_beginner": _build_leaderboard_sip_beginner(funds),
+        "sip_beginner": _build_leaderboard_sip_beginner(funds, category_means),
         "risk_recovery": _build_leaderboard_risk_recovery(funds),
         # Phase 3a (design doc §9b) — 4 new boards.
         "hidden_gems": _build_leaderboard_hidden_gems(funds),
@@ -4802,10 +4973,25 @@ async def _leaderboard_refresh_pipeline() -> str:
 
     hero = _build_leaderboard_hero(funds, prev_by_isin, top100_rows, live_board_count=len(boards))
 
-    payload_rows = [
-        {"board_key": key, "as_of_date": latest_date, "payload": {"rows": rows}, "source_run_id": run_id}
-        for key, rows in boards.items()
-    ]
+    # V2 takeaway sentences (2026-08-16) — pure template, screened through the
+    # gateway's canonical advisory-verb regex before persist (defense in depth,
+    # non-neg #1 — same discipline as `screen_insights` for the S17 AI cards even
+    # though no LLM is involved here). A hit drops the sentence and logs, never
+    # blocks the board's rows.
+    from dhanradar.ai_gateway.quality import _ADVISORY_RE
+
+    payload_rows = []
+    for key, rows in boards.items():
+        board_payload: dict[str, Any] = {"rows": rows}
+        takeaway = _leaderboard_takeaway(key, rows)
+        if takeaway is not None and _ADVISORY_RE.search(takeaway):
+            logger.error("leaderboard_refresh: advisory verb in %s takeaway — dropped", key)
+            takeaway = None
+        if takeaway is not None:
+            board_payload["takeaway"] = takeaway
+        payload_rows.append(
+            {"board_key": key, "as_of_date": latest_date, "payload": board_payload, "source_run_id": run_id}
+        )
     payload_rows.append(
         {"board_key": "hero", "as_of_date": latest_date, "payload": hero, "source_run_id": run_id}
     )
