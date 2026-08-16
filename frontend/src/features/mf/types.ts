@@ -729,6 +729,9 @@ export interface LeaderboardBoards {
   manager_facts?: LbBoard<LbManagerRow>;
   /** Phase 3c — governed-gateway educational insight cards. */
   ai_insights?: LbBoard<LbInsightRow>;
+  /** V3 — top quartile of own category on return_3y / max_drawdown / expense
+   *  at once; unit pct_3y (display order metric, published in the rule). */
+  three_lens?: LbBoard<LbFundRow>;
 }
 
 export interface LeaderboardResponse {

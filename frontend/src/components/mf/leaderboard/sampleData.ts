@@ -322,6 +322,7 @@ export const FAQ: [string, string][] = [
   ['How is the "Steady SIP Starters" list built?', 'By a fixed, published rule — not advice: large-cap and hybrid funds (excluding arbitrage) whose educational label is On Track or better, ordered by how steady their rolling 1-year returns have been. It is an educational shortlist for learning what steadier funds look like, never a recommendation.'],
   ['How often are rankings updated?', 'Scores and ranks recompute daily after market close using the latest NAV, portfolio disclosures and flow data.'],
   ['What is a Hidden Gem?', 'A fund that scores highly on DhanRadar intelligence but hasn’t yet attracted big inflows or wide attention — strong fundamentals before the crowd notices.'],
+  ['How is "Strong on All Three Lenses" built?', 'By a fixed, published rule — not advice: active growth funds that sit in the top quarter of their own category on all three lenses at once — 3-year return, deepest fall, and yearly cost — shown by highest 3-year return. Only categories with at least 8 fully-measured funds qualify. It exists to show the trade-off: being strong on returns, risk control and cost together is rare.'],
 ];
 
 // ── Filter sheet (mobile) ────────────────────────────────────────────────────

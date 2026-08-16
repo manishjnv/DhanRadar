@@ -302,6 +302,9 @@ _LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
     "manager_facts": "leaderboard.manager_row",
     # Phase 3c (leaderboard-data-backend.md §9b) — S17 AI insight cards.
     "ai_insights": "leaderboard.insight_row",
+    # V3 (founder 2026-08-16) — three-lenses board, plain FundRow shape (the
+    # three lens metrics are already allowlisted fund_row fields).
+    "three_lens": "leaderboard.fund_row",
 }
 
 

@@ -3850,6 +3850,59 @@ def _build_leaderboard_risk_drawdown(funds: list[dict]) -> list[dict]:
     ]
 
 
+# V3 (founder 2026-08-16) — a category must have at least this many funds with
+# all three lens metrics non-null for its quartiles to mean anything.
+_THREE_LENS_MIN_CATEGORY = 8
+
+
+def _build_leaderboard_three_lens(funds: list[dict]) -> list[dict]:
+    """three_lens (V3, founder 2026-08-16) — funds in the TOP QUARTILE of their
+    own sebi_category on ALL THREE lenses at once: return_3y_pct (higher is
+    better), max_drawdown_pct (lower is better), expense_ratio_pct (lower is
+    better). The insight is the trade-off — strong-on-all-three is rare (prod
+    check 2026-08-16: 71 growth qualifiers of ~8.3k). ACTIVE-growth scoped
+    (same `_LEADERBOARD_GROWTH_PREFIXES` scoping as top100/risk_drawdown —
+    cash/debt categories have near-zero drawdown/TER variance, making their
+    quartiles noise). Quartile membership is a SET TEST per metric; no
+    composite score exists or is stored (non-neg #2). Display order is the
+    plain 3y-return metric, published as part of the rule."""
+    by_cat: dict[str, list[dict]] = defaultdict(list)
+    for f in funds:
+        if not (f.get("sebi_category") or "").startswith(_LEADERBOARD_GROWTH_PREFIXES):
+            continue
+        if (
+            f.get("return_3y_pct") is None
+            or f.get("max_drawdown_pct") is None
+            or f.get("expense_ratio_pct") is None
+        ):
+            continue
+        by_cat[f["sebi_category"]].append(f)
+
+    qualifiers: list[dict] = []
+    for members in by_cat.values():
+        if len(members) < _THREE_LENS_MIN_CATEGORY:
+            continue
+        quarter = max(1, len(members) // 4)
+
+        def _top(key: str, reverse: bool, members: list[dict] = members, quarter: int = quarter) -> set[str]:
+            ordered = sorted(members, key=lambda f: f[key], reverse=reverse)
+            return {f["isin"] for f in ordered[:quarter]}
+
+        keep = (
+            _top("return_3y_pct", True)
+            & _top("max_drawdown_pct", False)
+            & _top("expense_ratio_pct", False)
+        )
+        qualifiers.extend(f for f in members if f["isin"] in keep)
+
+    deduped = _dedupe_leaderboard_variants(qualifiers, lambda f: -f["return_3y_pct"])
+    deduped.sort(key=lambda f: -f["return_3y_pct"])
+    return [
+        _leaderboard_fund_row(f, metric_value=f["return_3y_pct"], metric_unit="pct_3y")
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
 def _build_leaderboard_risk_sharpe(funds: list[dict]) -> list[dict]:
     """risk_sharpe (§5) — highest Sharpe ratio."""
     candidates = [f for f in funds if f.get("sharpe_ratio") is not None]
@@ -5034,6 +5087,9 @@ async def _leaderboard_refresh_pipeline() -> str:
         "future_leaders": _build_leaderboard_future_leaders(funds),
         "momentum": _build_leaderboard_momentum(funds),
         "quality": _build_leaderboard_quality(funds),
+        # V3 (founder 2026-08-16) — ADDITIVE three-lenses view; the perf/risk/
+        # value rails it complements stay untouched.
+        "three_lens": _build_leaderboard_three_lens(funds),
     }
     # ai_spotlight (§9b D2) is built LAST — it counts appearances across every
     # board already in `boards` above (never counts itself).

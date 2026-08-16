@@ -33,7 +33,7 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import type {
-  LeaderboardHero, LeaderboardBoards,
+  LeaderboardHero, LeaderboardBoards, LbBoard,
   LbFundRow, LbChampionRow, LbLabelUpgradeRow, LbAmcFactRow, LbManagerRow, LbInsightRow,
 } from '@/features/mf/types';
 
@@ -782,8 +782,63 @@ export function ValueSection({ boards }: { boards?: LeaderboardBoards } = {}) {
   return (
     <>
       <RailSection rails={rails} />
+      <ThreeLensCard board={boards?.three_lens} />
       {takeaway && <SoWhat><LiveBadge className="mr-1.5 align-middle" /><RichText text={takeaway} /></SoWhat>}
     </>
+  );
+}
+
+// V3 (founder 2026-08-16) — ADDITIVE three-lenses view; the value rails above
+// stay. One row per fund with return / deepest fall / cost side by side — the
+// insight is the trade-off (strong-on-all-three is rare). Published rule in
+// the caption; label + band only, no composite anywhere (non-neg #1/#2).
+const THREE_LENS_RULE =
+  'How this list is built: active growth funds in the top quarter of their own category on all three lenses at once — 3-year return, deepest fall, and cost — shown by highest 3-year return. Categories need at least 8 funds with all three measured.';
+
+function ThreeLensCard({ board }: { board?: LbBoard<LbFundRow> }) {
+  const rows = board?.rows ?? [];
+  return (
+    <Card className="mt-3.5 p-4">
+      <div className="mb-1 flex items-center gap-2">
+        <h3 className="font-sans text-[15px] font-bold text-ink">Strong on All Three Lenses</h3>
+        {rows.length > 0 && <LiveBadge />}
+      </div>
+      <p className="mb-3 text-[11px] leading-relaxed text-ink-muted">{THREE_LENS_RULE}</p>
+      {rows.length === 0 ? (
+        <EmptyState title="No qualifying funds yet" description="This list publishes after the nightly refresh once category quartiles are computed." />
+      ) : (
+        <div className="grid gap-2">
+          {rows.map((r) => {
+            const name = fundName(r);
+            return (
+              <Link
+                key={r.isin}
+                href={`/mf/fund/${r.isin}`}
+                className="grid grid-cols-1 items-center gap-2 rounded-xl border border-line bg-surface-2 p-3 transition-colors hover:border-royal/50 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:grid-cols-[minmax(200px,1.4fr)_repeat(3,1fr)]"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <Logo letter={initialOf(name)} color={colorFor(r.isin)} />
+                  <div className="min-w-0">
+                    <div className="truncate text-small font-bold text-ink">{name}</div>
+                    <div className="truncate text-[10.5px] text-ink-muted">{r.sebi_category}</div>
+                  </div>
+                </div>
+                {([
+                  ['Return · 3Y', pctSigned(r.return_3y_pct), E],
+                  ['Deepest fall', r.max_drawdown_pct != null ? `−${r.max_drawdown_pct.toFixed(1)}%` : '—', 'var(--text-primary)'],
+                  ['Cost / yr', ter1(r.expense_ratio_pct), 'var(--text-primary)'],
+                ] as const).map(([lens, val, color]) => (
+                  <div key={lens} className="flex items-baseline justify-between gap-2 sm:block sm:text-right">
+                    <span className="font-mono text-[9.5px] font-bold uppercase tracking-[0.04em] text-ink-muted">{lens}</span>
+                    <div className="font-mono text-[13px] font-bold" style={{ color }}>{val}</div>
+                  </div>
+                ))}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </Card>
   );
 }
 
