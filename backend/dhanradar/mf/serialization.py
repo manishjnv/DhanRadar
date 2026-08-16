@@ -288,6 +288,8 @@ _LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
     "sip_3y": "leaderboard.fund_row",
     "sip_5y": "leaderboard.fund_row",
     "sip_consistency": "leaderboard.fund_row",
+    # D4 (2026-08-16) — published-rule beginner rail, S6 4th slot.
+    "sip_beginner": "leaderboard.fund_row",
     "risk_recovery": "leaderboard.fund_row",
     # Phase 3a/3b (leaderboard-data-backend.md §9b) — 6 new boards.
     "hidden_gems": "leaderboard.fund_row",

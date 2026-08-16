@@ -3556,14 +3556,29 @@ def _leaderboard_fund_row(
 
 
 def _build_leaderboard_top100(funds: list[dict]) -> list[dict]:
-    """top100 (§5, founder decision D1a) — cross-category, ordered by within-category
+    """top100 (§5, founder decisions D1a + D1 follow-up 2026-08-16) — the flagship
+    is scoped to growth-oriented schemes (Equity/Hybrid/Solution) and excludes
+    segregated portfolios: pure percentile ordering let giant passive/debt cohorts
+    dominate (an index fund at rank 1/1341 took #1; overnight/liquid funds hit the
+    top-10 on cohort-size artifacts, one at ₹0 Cr AUM). Ordered by within-category
     percentile (rank/total) ascending, bigger cohort breaks ties, ISIN alphabetical
-    last (deterministic) — never a persisted global rank (no scoring-engine change)."""
+    last (deterministic) — never a persisted global rank (no scoring-engine change).
+    NOTE: uses the ACTIVE growth prefixes directly, not `_leaderboard_is_growth_category`
+    — that helper admits the Index-funds bucket, and the 1,341-fund index cohort's
+    percentile artifact taking #1 is precisely the D1 complaint (index funds keep
+    their own value_index board)."""
+    candidates = [
+        f
+        for f in funds
+        if not f.get("is_segregated")
+        and (f.get("sebi_category") or "").startswith(_LEADERBOARD_GROWTH_PREFIXES)
+    ]
+    _leaderboard_log_hardening_exclusions("top100", funds)
 
     def _key(f: dict) -> tuple[float, int, str]:
         return (f["category_rank"] / f["category_total"], -f["category_total"], f["isin"])
 
-    deduped = _dedupe_leaderboard_variants(funds, _key)
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
     deduped.sort(key=_key)
     return [_leaderboard_fund_row(f) for f in deduped[:100]]
 
@@ -4016,6 +4031,48 @@ def _build_leaderboard_sip_consistency(funds: list[dict]) -> list[dict]:
         _leaderboard_fund_row(
             f, metric_value=f["rolling_1y_pct_positive"], metric_unit="pct_rolling_positive"
         )
+        for f in deduped[:_LEADERBOARD_TOP_N]
+    ]
+
+
+def _leaderboard_is_beginner_category(sebi_category: str | None) -> bool:
+    """D4 rule categories: Large Cap, or any Hybrid except arbitrage (cash-like by
+    construction — same vacuous-winner exclusion the consistency board uses)."""
+    if not sebi_category:
+        return False
+    if sebi_category == "Equity Scheme - Large Cap Fund":
+        return True
+    return sebi_category.startswith("Hybrid Scheme") and "Arbitrage" not in sebi_category
+
+
+def _build_leaderboard_sip_beginner(funds: list[dict]) -> list[dict]:
+    """sip_beginner (S6 4th rail, founder decision D4 signed off 2026-08-16) — a
+    PUBLISHED editorial rule, education not advice (the rule is stated in the UI
+    copy + FAQ): large-cap or hybrid (ex-arbitrage) schemes whose educational
+    label is on_track or better, ordered steadiest-first by
+    rolling_1y_pct_positive (ties → ISIN, deterministic); 3Y SIP XIRR is the
+    display metric. Inherits the sip-rail DATA-ARTIFACT guards (`is_segregated`,
+    implausible-XIRR bound). Prod distribution check 2026-08-16: 505
+    label-qualified funds in the rule categories, 408 with both metrics — the
+    rule cannot ship an empty board."""
+    candidates = [
+        f
+        for f in funds
+        if _leaderboard_is_beginner_category(f.get("sebi_category"))
+        and f.get("verb_label") in ("in_form", "on_track")
+        and f.get("sip_xirr_3y_pct") is not None
+        and f.get("rolling_1y_pct_positive") is not None
+        and not f.get("is_segregated")
+        and f["sip_xirr_3y_pct"] <= _LEADERBOARD_MAX_SIP_XIRR_PCT
+    ]
+
+    def _key(f: dict) -> tuple[float, str]:
+        return (-f["rolling_1y_pct_positive"], f["isin"])
+
+    deduped = _dedupe_leaderboard_variants(candidates, _key)
+    deduped.sort(key=_key)
+    return [
+        _leaderboard_fund_row(f, metric_value=f["sip_xirr_3y_pct"], metric_unit="pct_sip_xirr")
         for f in deduped[:_LEADERBOARD_TOP_N]
     ]
 
@@ -4691,6 +4748,8 @@ async def _leaderboard_refresh_pipeline() -> str:
         "sip_3y": _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct"),
         "sip_5y": _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct"),
         "sip_consistency": _build_leaderboard_sip_consistency(funds),
+        # sip_beginner (D4, 2026-08-16) — published-rule educational rail, S6 4th slot.
+        "sip_beginner": _build_leaderboard_sip_beginner(funds),
         "risk_recovery": _build_leaderboard_risk_recovery(funds),
         # Phase 3a (design doc §9b) — 4 new boards.
         "hidden_gems": _build_leaderboard_hidden_gems(funds),

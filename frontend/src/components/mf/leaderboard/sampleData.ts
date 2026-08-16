@@ -186,7 +186,7 @@ export const SIP_RAIL: Rail[] = [
   { title: 'Best 3Y SIP', q: 'Top monthly return', icon: '💰', color: B, rows: [row('Quant Small Cap', 'Q', V, '28.1'), row('Bandhan SC', 'B', B, '24.0'), row('HDFC Healthcare', 'H', R, '22.6'), row('SBI Contra', 'S', B, '23.1')] },
   { title: 'Best 5Y SIP', q: '5-year monthly', icon: '📈', color: E, rows: [row('Quant Small Cap', 'Q', V, '21.2'), row('Nippon SC', 'N', E, '19.8'), row('Bandhan SC', 'B', B, '18.6'), row('ICICI Tech', 'I', O, '25.2')] },
   { title: 'Best SIP Consistency', q: 'Steadiest monthly', icon: '🎯', color: T, rows: [row('Parag Parikh', 'P', N, 'Strong'), row('ICICI Bluechip', 'I', O, 'Strong'), row('HDFC Bal Adv', 'H', R, 'Good'), row('Mirae ELSS', 'M', V, 'Good')] },
-  { title: 'Best SIP for Beginners', q: 'Low-drama picks', icon: '❤️', color: P, rows: [row('Parag Parikh', 'P', N, 'Top'), row('ICICI Bluechip', 'I', O, 'Safe'), row('Mirae Large', 'M', C, 'Easy'), row('HDFC Bal Adv', 'H', R, 'Calm')] },
+  { title: 'Steady SIP Starters', q: 'Rule-based · no advice', icon: '❤️', color: P, rows: [row('Parag Parikh', 'P', N, 'Top'), row('ICICI Bluechip', 'I', O, 'Safe'), row('Mirae Large', 'M', C, 'Easy'), row('HDFC Bal Adv', 'H', R, 'Calm')] },
 ];
 export const RISK_RAIL: Rail[] = [
   { title: 'Lowest Risk', q: 'Safest funds', icon: '🛡', color: E, rows: [row('Edelweiss Liquid', 'E', E, 'Very Low', false), row('HDFC Corp Bond', 'H', R, 'Low', false), row('ICICI Bal Adv', 'I', O, 'Mod', false), row('HDFC Bal Adv', 'H', R, 'Mod', false)] },
@@ -266,38 +266,21 @@ export const AMC: Amc[] = [
   { name: 'Axis Mutual Fund', av: 'A', color: R, score: 84, topFunds: 7, confidence: 'Moderate', aum: '₹3.1L Cr', age: '15 yrs', indexFunds: 42, trust: '★★★★☆' },
 ];
 
-// ── Trusted across agencies ──────────────────────────────────────────────────
-export type Provider = { name: string; value: string; kind: 'score' | 'stars' | 'rank' };
-export type Rating = { name: string; logo: string; color: string; agree: number; providers: Provider[] };
-export const RATINGS: Rating[] = [
-  { name: 'Parag Parikh Flexi Cap', logo: 'P', color: N, agree: 96, providers: [{ name: 'DhanRadar', value: 'In Form', kind: 'score' }, { name: 'Morningstar', value: '★★★★★', kind: 'stars' }, { name: 'CRISIL', value: 'Rank 1', kind: 'rank' }, { name: 'Value Research', value: '★★★★★', kind: 'stars' }] },
-  { name: 'ICICI Pru Bluechip', logo: 'I', color: O, agree: 92, providers: [{ name: 'DhanRadar', value: 'In Form', kind: 'score' }, { name: 'Morningstar', value: '★★★★★', kind: 'stars' }, { name: 'CRISIL', value: 'Rank 1', kind: 'rank' }, { name: 'Value Research', value: '★★★★☆', kind: 'stars' }] },
-  { name: 'Bandhan Small Cap', logo: 'B', color: B, agree: 89, providers: [{ name: 'DhanRadar', value: 'In Form', kind: 'score' }, { name: 'Morningstar', value: '★★★★☆', kind: 'stars' }, { name: 'CRISIL', value: 'Rank 2', kind: 'rank' }, { name: 'Value Research', value: '★★★★★', kind: 'stars' }] },
-  { name: 'Mirae ELSS Tax Saver', logo: 'M', color: V, agree: 90, providers: [{ name: 'DhanRadar', value: 'On Track', kind: 'score' }, { name: 'Morningstar', value: '★★★★★', kind: 'stars' }, { name: 'CRISIL', value: 'Rank 1', kind: 'rank' }, { name: 'Value Research', value: '★★★★★', kind: 'stars' }] },
-];
-/** Agreement band word + fill (replaces the raw consensus number). */
-export function agreeBand(agree: number): { word: string; fill: number } {
-  if (agree >= 90) return { word: 'Very High', fill: 92 };
-  if (agree >= 75) return { word: 'High', fill: 72 };
-  return { word: 'Moderate', fill: 52 };
-}
-
 // ── AI insights ──────────────────────────────────────────────────────────────
 export const AI_INSIGHTS = [
   '**Small Cap continues to dominate long-term rankings** — but the gap with Flexi Cap on a risk-adjusted basis is narrowing.',
   '**Index funds now lead cost efficiency** — UTI Nifty 50 returns the most per rupee of fee, at just 0.20%.',
   '**Healthcare funds are climbing rapidly** — HDFC Healthcare jumped 11 ranks on strong pharma earnings.',
   '**Current DMMI favors Flexi Cap funds** — they balance the upside of this market with protection if it turns.',
-  '**4 funds are top-rated by all agencies** — Parag Parikh, ICICI Bluechip, Bandhan SC and Mirae ELSS.',
+  '**Category money is on the move** — Flexi Cap and Small Cap drew the largest net inflows this month.',
   '**International funds are out of favour** — high valuations and a strong rupee have pulled them down the rankings.',
 ];
 
 // ── FAQ ──────────────────────────────────────────────────────────────────────
 export const FAQ: [string, string][] = [
   ['How are DhanRadar rankings calculated?', 'We score every fund 0–100 on six factors — returns, risk control, consistency, cost, manager quality and portfolio quality — normalised within each category so funds are compared fairly. Funds are then ranked by this composite, not by past returns alone.'],
-  ['Why do ratings differ between agencies?', 'Each agency weights factors differently. Morningstar leans on risk-adjusted returns, CRISIL on a mix of return and risk, Value Research on long-term consistency. When they agree, confidence is highest — that’s what our Agreement reading measures.'],
-  ['Which rating should I trust?', 'No single rating is perfect. The strongest signal is when multiple independent agencies — plus DhanRadar — rank a fund highly. Use the "Trusted Across Agencies" section to find those funds.'],
-  ['How often are rankings updated?', 'Scores and ranks recompute daily after market close using the latest NAV, portfolio disclosures and flow data. Third-party ratings update on their own (usually monthly or quarterly) schedules.'],
+  ['How is the "Steady SIP Starters" list built?', 'By a fixed, published rule — not advice: large-cap and hybrid funds (excluding arbitrage) whose educational label is On Track or better, ordered by how steady their rolling 1-year returns have been. It is an educational shortlist for learning what steadier funds look like, never a recommendation.'],
+  ['How often are rankings updated?', 'Scores and ranks recompute daily after market close using the latest NAV, portfolio disclosures and flow data.'],
   ['What is a Hidden Gem?', 'A fund that scores highly on DhanRadar intelligence but hasn’t yet attracted big inflows or wide attention — strong fundamentals before the crowd notices.'],
 ];
 
@@ -306,7 +289,6 @@ export const FILTER_GROUPS: [string, string[]][] = [
   ['Category', ['Equity', 'Debt', 'Hybrid', 'Index', 'ELSS', 'International']],
   ['Sub-category', ['Large Cap', 'Flexi Cap', 'Mid Cap', 'Small Cap', 'Value']],
   ['Risk', ['Low', 'Moderate', 'Mod. High', 'High', 'Very High']],
-  ['Rating Provider', ['DhanRadar In Form', 'Morningstar 5★', 'CRISIL Rank 1', 'Value Research 5★']],
   ['DMMI Fit', ['Best in Fear', 'Best in Recovery', 'Best in Bull']],
 ];
 
@@ -324,6 +306,5 @@ export const CATNAV: { id: string; label: string }[] = [
   { id: 'improved', label: 'Improved' },
   { id: 'managers', label: 'Managers' },
   { id: 'amc', label: 'AMCs' },
-  { id: 'ratings', label: 'Ratings' },
   { id: 'trending', label: 'Trending' },
 ];

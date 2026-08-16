@@ -1009,6 +1009,8 @@ _LEADERBOARD_BOARD_TITLES: dict[str, str] = {
     "sip_3y": "Best 3-Year SIP",
     "sip_5y": "Best 5-Year SIP",
     "sip_consistency": "Steadiest SIP Consistency",
+    # D4 (2026-08-16) — published-rule educational rail (no advisory framing).
+    "sip_beginner": "Steady SIP Starters",
     "risk_recovery": "Fastest Drawdown Recovery",
     # Phase 3a/3b (leaderboard-data-backend.md §9b).
     "hidden_gems": "Hidden Gems",

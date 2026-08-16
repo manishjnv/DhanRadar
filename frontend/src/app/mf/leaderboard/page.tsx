@@ -37,7 +37,7 @@ import {
   Anchor, HeroSection, CatNav, DiscoverSection, Top100Section, ChampionsSection,
   PerformanceSection, SipSection, RiskSection, ValueSection, IntelligenceSection,
   MarketSection, FlowsSection, ImprovedSection, ManagersSection, AmcSection,
-  RatingsSection, AiInsightsSection, FaqSection, FilterSheet, TrendingSection,
+  AiInsightsSection, FaqSection, FilterSheet, TrendingSection,
 } from '@/components/mf/leaderboard/sections';
 
 function LeaderboardSkeleton() {
@@ -189,33 +189,30 @@ function LeaderboardView() {
         <AmcSection live={boards?.amc_facts?.rows} />
       </Anchor>
 
-      {/* S15 — Trusted Ratings */}
-      <Anchor id="ratings">
-        <SectionHeader index="14" title="Trusted Across Agencies" info="funds rated highly by everyone" />
-        <RatingsSection />
-      </Anchor>
+      {/* S15 (Trusted Ratings) removed — founder decision 2026-08-16: third-party
+          ratings not required. Sections below renumbered. */}
 
-      {/* S16 — Trending (mixed coverage: per-rail chip, see TrendingSection) */}
+      {/* S15 — Trending (mixed coverage: per-rail chip, see TrendingSection) */}
       <Anchor id="trending">
-        <SectionHeader index="15" title="Trending Now" info="biggest movers this week" />
+        <SectionHeader index="14" title="Trending Now" info="biggest movers this week" />
         <TrendingSection boards={boards} />
       </Anchor>
 
-      {/* S17 — AI Insights */}
+      {/* S16 — AI Insights */}
       <Anchor>
-        <SectionHeader index="16" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
+        <SectionHeader index="15" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
         <AiInsightsSection live={boards?.ai_insights?.rows} />
       </Anchor>
 
-      {/* S18 — FAQ */}
+      {/* S17 — FAQ */}
       <Anchor>
-        <SectionHeader index="17" title="Rankings FAQ" />
+        <SectionHeader index="16" title="Rankings FAQ" />
         <FaqSection />
       </Anchor>
 
       {/* Disclosure (educational boundary) */}
       <div className="mt-7 rounded-2xl border border-line bg-surface-2 p-4">
-        <DisclosureBundle notAdvice="For education only — not investment advice. These rankings, scores, third-party ratings and the figures shown (many illustrative previews while data feeds are built) are educational signals derived from factual data, not recommendations to buy, sell, or hold any fund. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not indicate future returns." />
+        <DisclosureBundle notAdvice="For education only — not investment advice. These rankings, scores and the figures shown (some illustrative previews while data feeds are built) are educational signals derived from factual data, not recommendations to buy, sell, or hold any fund. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not indicate future returns." />
       </div>
 
       <FilterSheet open={filterOpen} onClose={() => setFilterOpen(false)} />

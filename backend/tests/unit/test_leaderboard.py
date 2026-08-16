@@ -45,6 +45,7 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_movers,
     _build_leaderboard_quality,
     _build_leaderboard_risk_recovery,
+    _build_leaderboard_sip_beginner,
     _build_leaderboard_sip_consistency,
     _build_leaderboard_sip_rail,
     _build_leaderboard_top100,
@@ -139,11 +140,11 @@ def test_migration_0080_wiring() -> None:
 
 def test_top100_orders_by_percentile_and_dedupes_scheme_variants() -> None:
     funds = [
-        _fund("INE000A01011", fund_name_short="Alpha Fund", category="Large Cap Fund", rank=1, total=10),
+        _fund("INE000A01011", fund_name_short="Alpha Fund", rank=1, total=10),
         # Same scheme, worse-ranked plan variant — must be dropped, never shown twice.
-        _fund("INE000A01022", fund_name_short="Alpha Fund", category="Large Cap Fund", rank=4, total=10),
+        _fund("INE000A01022", fund_name_short="Alpha Fund", rank=4, total=10),
         # Better within-category percentile (1/50=0.02) than Alpha's 1/10=0.1.
-        _fund("INE000B02011", fund_name_short="Beta Fund", category="Mid Cap Fund", rank=1, total=50),
+        _fund("INE000B02011", fund_name_short="Beta Fund", category="Equity Scheme - Mid Cap Fund", rank=1, total=50),
     ]
     rows = _build_leaderboard_top100(funds)
     isins = [r["isin"] for r in rows]
@@ -151,6 +152,55 @@ def test_top100_orders_by_percentile_and_dedupes_scheme_variants() -> None:
     assert "INE000A01022" not in isins, "duplicate scheme plan/option variant must not appear"
     assert isins == ["INE000B02011", "INE000A01011"]
     # FundRow shape only — never a score field.
+    assert set(rows[0]) & FORBIDDEN_SCORE_KEYS == set()
+
+
+def test_top100_is_growth_scoped_and_excludes_segregated() -> None:
+    """D1 follow-up (2026-08-16): the flagship excludes debt/passive-bucket cohort
+    artifacts (an index fund at 1/1341 took #1; liquid funds hit the top-10) and
+    segregated portfolios."""
+    funds = [
+        _fund("INE000E05011", category="Equity Scheme - Small Cap Fund", rank=2, total=10),
+        # Would win on percentile (1/1341) — but sits in the passive "Other" bucket.
+        _fund("INE000I01011", category="Other Scheme - Index Funds", rank=1, total=1341),
+        # Would win on percentile — but debt/liquid never enters the flagship.
+        _fund("INE000L02011", category="Debt Scheme - Liquid Fund", rank=1, total=487),
+        # Growth category but segregated — excluded.
+        _fund("INE000S03011", category="Equity Scheme - Flexi Cap Fund", rank=1, total=10, is_segregated=True),
+    ]
+    rows = _build_leaderboard_top100(funds)
+    assert [r["isin"] for r in rows] == ["INE000E05011"]
+
+
+# ---------------------------------------------------------------------------
+# 2a-bis — sip_beginner (D4 published rule)
+# ---------------------------------------------------------------------------
+
+
+def test_sip_beginner_applies_published_rule_and_orders_steadiest_first() -> None:
+    """D4 rule: large-cap or hybrid (ex-arbitrage), label on_track or better,
+    steadiest rolling-1Y first; 3Y SIP XIRR is the display metric; sip-rail
+    artifact guards inherited."""
+    ok = dict(sip_xirr_3y_pct=12.0, rolling_1y_pct_positive=90.0)
+    funds = [
+        _fund("INE000A01011", **ok),  # large-cap on_track — in
+        _fund(
+            "INE000B01011",
+            category="Hybrid Scheme - Dynamic Asset Allocation or Balanced Advantage",
+            sip_xirr_3y_pct=11.0,
+            rolling_1y_pct_positive=95.0,  # steadier -> ranks first
+        ),
+        _fund("INE000C01011", category="Hybrid Scheme - Arbitrage Fund", **ok),  # cash-like — out
+        _fund("INE000D01011", verb_label="off_track", **ok),  # label below On Track — out
+        _fund("INE000E01011", category="Equity Scheme - Small Cap Fund", **ok),  # not a rule category — out
+        _fund("INE000F01011", is_segregated=True, **ok),  # artifact guard — out
+        _fund("INE000G01011", sip_xirr_3y_pct=55.0, rolling_1y_pct_positive=99.0),  # implausible XIRR — out
+        _fund("INE000H01011", sip_xirr_3y_pct=12.0, rolling_1y_pct_positive=None),  # no steadiness metric — out
+    ]
+    rows = _build_leaderboard_sip_beginner(funds)
+    assert [r["isin"] for r in rows] == ["INE000B01011", "INE000A01011"]
+    assert rows[0]["metric_value"] == 11.0
+    assert rows[0]["metric_unit"] == "pct_sip_xirr"
     assert set(rows[0]) & FORBIDDEN_SCORE_KEYS == set()
 
 
