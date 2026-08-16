@@ -77,6 +77,7 @@ export const queryKeys = {
     fundComparison:     (isin: string, window: string, benchmarkKey: string | null) =>
                           ['mf', 'fund-comparison', isin, window, benchmarkKey] as const,
     leaderboard:        () => ['mf', 'leaderboard'] as const,
+    holdingsIsins:      () => ['mf', 'portfolio', 'holdings-isins'] as const,
   },
   notifications: {
     preferences: () => ['notifications', 'preferences'] as const,

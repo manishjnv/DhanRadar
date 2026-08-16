@@ -734,6 +734,12 @@ export interface LeaderboardBoards {
   three_lens?: LbBoard<LbFundRow>;
 }
 
+/** GET /mf/portfolio/holdings-isins (V4) — the caller's latest portfolio's
+ *  distinct holding ISINs and nothing else (label-only pill surfaces). */
+export interface PortfolioHoldingsIsinsResponse {
+  isins: string[];
+}
+
 export interface LeaderboardResponse {
   /** null until the first nightly refresh has ever published boards. */
   as_of: string | null;

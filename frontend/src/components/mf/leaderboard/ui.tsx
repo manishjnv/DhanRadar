@@ -207,9 +207,24 @@ export function DiscCard({ icon, name, count, color, anchor }: { icon: string; n
   );
 }
 
+// ── Portfolio connection (V4) ────────────────────────────────────────────────
+// The logged-in user's holding ISINs, provided once by the page. Label-only —
+// nothing numeric about the user's money ever renders here (non-neg #2).
+// Default empty set = logged-out / no portfolio / consent absent → no pills.
+export const PortfolioIsinsContext = React.createContext<ReadonlySet<string>>(new Set());
+
+export function PortfolioPill({ className }: { className?: string }) {
+  return (
+    <span className={cn('inline-block whitespace-nowrap rounded bg-royal/10 px-1.5 py-0.5 text-[9px] font-bold text-royal', className)}>
+      In your portfolio
+    </span>
+  );
+}
+
 // ── Mini-leaderboard rail card ───────────────────────────────────────────────
 import type { Rail } from './sampleData';
 export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; width?: number; spark?: boolean }) {
+  const pfIsins = React.useContext(PortfolioIsinsContext);
   return (
     <div className="shrink-0 overflow-hidden rounded-xl border border-line bg-surface shadow-sm" style={{ width, scrollSnapAlign: 'start' }}>
       <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
@@ -228,7 +243,10 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
             <>
               <span className="w-4 shrink-0 font-sans text-xs font-extrabold text-ink-faint">{i + 1}</span>
               <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
-              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
+                {r.isin != null && pfIsins.has(r.isin) && <PortfolioPill />}
+              </span>
               {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
               <span className="flex shrink-0 flex-col items-end">
                 <span className="font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
