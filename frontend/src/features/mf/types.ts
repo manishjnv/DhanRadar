@@ -647,6 +647,17 @@ export interface LbAmcFactRow {
   index_fund_count: number;
 }
 
+/** `manager_facts` rows — factual manager aggregates only; no composite score/stars. */
+export interface LbManagerRow {
+  manager_name: string;
+  amc_name: string;
+  funds_count: number;
+  tenure_years: number;
+  /** Word band only ('Strong'/'Good'/'Fair') — never the underlying percentile number. */
+  percentile_word: string;
+  top_fund_name: string;
+}
+
 export interface LeaderboardHero {
   funds_ranked: number;
   categories: number;
@@ -684,6 +695,17 @@ export interface LeaderboardBoards {
   aum_growth?: { title: string; rows: LbFundRow[] };
   category_inflows?: { title: string; rows: LbCategoryInflowRow[] };
   amc_facts?: { title: string; rows: LbAmcFactRow[] };
+  /** unit 'gem' — no metric_value semantics beyond board membership. */
+  hidden_gems?: { title: string; rows: LbFundRow[] };
+  /** unit 'rank_delta' — metric_value is a signed rank-delta integer. */
+  future_leaders?: { title: string; rows: LbFundRow[] };
+  /** unit 'rank_delta' — metric_value is a signed rank-delta integer. */
+  momentum?: { title: string; rows: LbFundRow[] };
+  /** unit 'sharpe_ratio' — metric_value is the Sharpe ratio. */
+  quality?: { title: string; rows: LbFundRow[] };
+  /** unit 'boards' — metric_value is the count of boards the fund appears on. */
+  ai_spotlight?: { title: string; rows: LbFundRow[] };
+  manager_facts?: { title: string; rows: LbManagerRow[] };
 }
 
 export interface LeaderboardResponse {

@@ -247,6 +247,12 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "leaderboard.hero": frozenset(
         {"funds_ranked", "categories", "top_fund", "trending_category", "live_board_count"}
     ),
+    # Phase 3b manager_facts (leaderboard-data-backend.md §9b) — a NEW row shape,
+    # NOT a FundRow: factual per-manager aggregate only. No score, no success %,
+    # no stars, no raw percentile number (percentile_word is the word-only band).
+    "leaderboard.manager_row": frozenset(
+        {"manager_name", "amc_name", "funds_count", "tenure_years", "percentile_word", "top_fund_name"}
+    ),
 }
 
 #: Maps a leaderboard `board_key` to the `ALLOWED_FIELDS` entry its rows are shaped
@@ -280,6 +286,13 @@ _LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
     "sip_5y": "leaderboard.fund_row",
     "sip_consistency": "leaderboard.fund_row",
     "risk_recovery": "leaderboard.fund_row",
+    # Phase 3a/3b (leaderboard-data-backend.md §9b) — 6 new boards.
+    "hidden_gems": "leaderboard.fund_row",
+    "future_leaders": "leaderboard.fund_row",
+    "momentum": "leaderboard.fund_row",
+    "quality": "leaderboard.fund_row",
+    "ai_spotlight": "leaderboard.fund_row",
+    "manager_facts": "leaderboard.manager_row",
 }
 
 

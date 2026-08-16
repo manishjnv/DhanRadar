@@ -32,7 +32,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import type {
   LeaderboardHero, LeaderboardBoards,
-  LbFundRow, LbChampionRow, LbLabelUpgradeRow, LbAmcFactRow,
+  LbFundRow, LbChampionRow, LbLabelUpgradeRow, LbAmcFactRow, LbManagerRow,
 } from '@/features/mf/types';
 
 const { E } = COLORS;
@@ -548,8 +548,19 @@ export function RailSection({ rails }: { rails: Rail[] }) {
   return <HScroll>{rails.map((r) => <MiniLbCard key={r.title + r.icon} rail={r} />)}</HScroll>;
 }
 
-// Untouched — S9 Intelligence extras are not wired this session.
-export const IntelligenceSection = () => <RailSection rails={INTEL_RAIL} />;
+// S9 — full coverage (all 5 rails live) → section badge (intelLive in page.tsx);
+// any subset live → per-rail chip (coverageRail pattern, same as Performance/Risk).
+export function IntelligenceSection({ boards }: { boards?: LeaderboardBoards } = {}) {
+  const allLive = !!(boards?.hidden_gems && boards?.future_leaders && boards?.momentum && boards?.quality && boards?.ai_spotlight);
+  const rails: Rail[] = [
+    coverageRail(allLive, INTEL_RAIL[0], boards?.hidden_gems, (r) => fundRailRow(r, 'Gem', true)),
+    coverageRail(allLive, INTEL_RAIL[1], boards?.future_leaders, (r) => fundRailRow(r, fmtDelta(r.metric_value), true)),
+    coverageRail(allLive, INTEL_RAIL[2], boards?.momentum, (r) => fundRailRow(r, fmtDelta(r.metric_value), true)),
+    coverageRail(allLive, INTEL_RAIL[3], boards?.quality, (r) => fundRailRow(r, r.metric_value != null ? r.metric_value.toFixed(2) : '—', true)),
+    coverageRail(allLive, INTEL_RAIL[4], boards?.ai_spotlight, (r) => fundRailRow(r, r.metric_value != null ? `In ${r.metric_value} boards` : '—', true)),
+  ];
+  return <RailSection rails={rails} />;
+}
 
 // S5 — full coverage (perf_1y/3y/5y + wealth_creator all live) → section badge;
 // any subset live → per-rail chip (coverageRail, page.tsx computes the same allLive).
@@ -697,7 +708,37 @@ function ScoreWord({ score }: { score: number }) {
   const s = toStrength(score);
   return <span className="font-mono font-extrabold" style={{ color: STRENGTH_COLOR[s] }}>{STRENGTH_WORD[s]}</span>;
 }
-export function ManagersSection() {
+// Live rows carry no composite manager score, no third-party star rating, and no
+// 'years beating benchmark'/'success %' figures (those don't exist on the live
+// contract) — Quality reuses the AMC QualityCell word style (Strong=emerald,
+// Good=cyan, Fair=amber) off percentile_word; Yrs Beating/Success/Rating render
+// '—', same "no live equivalent" convention as AmcSection's Confidence/Trust.
+const PCTL_WORD_COLOR: Record<string, string> = { Strong: E, Good: COLORS.C, Fair: COLORS.A };
+type MgrRow = {
+  key: string; name: string; amc: string | null; av: string; color: string;
+  exp: string; funds: string; quality: QualitySpec; beating: string; success: string;
+  topFund: string; rating: string;
+};
+function sampleMgrRow(m: typeof MGR[number]): MgrRow {
+  return {
+    key: m.name, name: m.name, amc: null, av: m.av, color: m.color,
+    exp: m.exp, funds: m.funds, quality: { kind: 'score', score: m.score },
+    beating: m.beating, success: m.success, topFund: m.topFund, rating: m.rating,
+  };
+}
+function liveMgrRow(r: LbManagerRow): MgrRow {
+  return {
+    key: r.manager_name, name: r.manager_name, amc: r.amc_name, av: initialOf(r.manager_name), color: colorFor(r.manager_name),
+    exp: `${Math.round(r.tenure_years)} yrs`, funds: `${r.funds_count} funds`,
+    quality: { kind: 'word', word: r.percentile_word, color: PCTL_WORD_COLOR[r.percentile_word] ?? COLORS.A },
+    beating: '—', success: '—', topFund: r.top_fund_name, rating: '—',
+  };
+}
+export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
+  if (live && live.length === 0) {
+    return <EmptyState title="No manager data yet" description="Manager facts publish once the nightly refresh has enough covered schemes." />;
+  }
+  const rows: MgrRow[] = live ? live.map(liveMgrRow) : MGR.map(sampleMgrRow);
   return (
     <>
       {/* desktop table */}
@@ -712,18 +753,21 @@ export function ManagersSection() {
               </tr>
             </thead>
             <tbody>
-              {MGR.map((m, i) => (
-                <tr key={m.name}>
+              {rows.map((m, i) => (
+                <tr key={m.key}>
                   <td className="border-b border-line px-3.5 py-3 text-left font-sans font-extrabold text-ink-muted">{i + 1}</td>
                   <td className="border-b border-line px-3.5 py-3 text-left">
                     <div className="flex items-center gap-2.5">
                       <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
-                      <span className="font-medium text-ink">{m.name}</span>
+                      <div>
+                        <div className="font-medium text-ink">{m.name}</div>
+                        {m.amc && <div className="mt-0.5 text-[11px] font-medium text-ink-muted">{m.amc}</div>}
+                      </div>
                     </div>
                   </td>
                   <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.exp}</td>
                   <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.funds}</td>
-                  <td className="border-b border-line px-3.5 py-3 text-right"><ScoreWord score={m.score} /></td>
+                  <td className="border-b border-line px-3.5 py-3 text-right"><QualityCell quality={m.quality} /></td>
                   <td className="border-b border-line px-3.5 py-3 text-right font-mono">{m.beating}</td>
                   <td className="border-b border-line px-3.5 py-3 text-right font-mono text-emerald">{m.success}</td>
                   <td className="border-b border-line px-3.5 py-3 text-right text-ink-secondary">{m.topFund}</td>
@@ -736,16 +780,16 @@ export function ManagersSection() {
       </Card>
       {/* mobile list */}
       <Card className="p-4 lg:hidden">
-        {MGR.map((m, i) => (
-          <div key={m.name} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
+        {rows.map((m, i) => (
+          <div key={m.key} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
             <span className="w-4 shrink-0 font-sans font-extrabold text-ink-muted">{i + 1}</span>
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
             <div className="min-w-0 flex-1">
               <div className="truncate text-small font-bold text-ink">{m.name}</div>
-              <div className="text-[10.5px] text-ink-muted">{m.exp} · {m.topFund}</div>
+              <div className="truncate text-[10.5px] text-ink-muted">{m.amc ? `${m.amc} · ` : ''}{m.exp} · {m.topFund}</div>
             </div>
             <div className="shrink-0 text-right">
-              <div className="text-[15px]"><ScoreWord score={m.score} /></div>
+              <div className="text-[15px]"><QualityCell quality={m.quality} /></div>
               <div className="text-[11px] tracking-[0.5px] text-amber">{m.rating}</div>
             </div>
           </div>

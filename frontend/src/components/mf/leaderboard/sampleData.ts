@@ -204,7 +204,7 @@ export const INTEL_RAIL: Rail[] = [
   { title: 'Future Leaders', q: 'Rising fast', icon: '🚀', color: O, rows: [row('Bandhan SC', 'B', B, '+12'), row('HDFC Healthcare', 'H', R, '+11'), row('Quant SC', 'Q', V, '+9'), row('SBI Contra', 'S', B, '+7')] },
   { title: 'Highest Momentum', q: 'Strongest trend', icon: '⚡', color: A, rows: [row('Quant Small Cap', 'Q', V, 'Strong'), row('Bandhan SC', 'B', B, 'Strong'), row('HDFC Healthcare', 'H', R, 'High'), row('SBI Contra', 'S', B, 'High')] },
   { title: 'Best Portfolio Quality', q: 'Cleanest holdings', icon: '✨', color: B, rows: [row('Parag Parikh', 'P', N, 'Strong'), row('ICICI Bluechip', 'I', O, 'Strong'), row('Mirae Large', 'M', C, 'Good'), row('Kotak EE', 'K', E, 'Good')] },
-  { title: 'AI Recommended', q: 'DhanRadar picks', icon: '🧠', color: V, rows: [row('Parag Parikh', 'P', N, 'Pick'), row('Bandhan SC', 'B', B, 'Pick'), row('ICICI Bluechip', 'I', O, 'Pick'), row('SBI Contra', 'S', B, 'Pick')] },
+  { title: 'AI Spotlight', q: 'In Form across the most boards', icon: '🧠', color: V, rows: [row('Parag Parikh', 'P', N, 'Pick'), row('Bandhan SC', 'B', B, 'Pick'), row('ICICI Bluechip', 'I', O, 'Pick'), row('SBI Contra', 'S', B, 'Pick')] },
 ];
 export const FLOW_RAIL: Rail[] = [
   { title: 'Highest Net Inflows', q: 'Most new money', icon: '📥', color: E, rows: [row('Parag Parikh', 'P', N, '+8.9k Cr'), row('HDFC Bal Adv', 'H', R, '+6.4k Cr'), row('Nippon SC', 'N', E, '+6.1k Cr'), row('ICICI Bluechip', 'I', O, '+5.6k Cr')] },
