@@ -36,7 +36,7 @@ import { useMe } from '@/features/auth/api';
 import { useMoodCurrent } from '@/features/mood/api';
 import { PortfolioIsinsContext } from '@/components/mf/leaderboard/ui';
 import {
-  Anchor, HeroSection, CatNav, DiscoverSection, Top100Section, ChampionsSection,
+  Anchor, HeroSection, CatNav, Top100Section, Top100Tabs, ChampionsSection,
   PerformanceSection, SipSection, RiskSection, ValueSection, IntelligenceSection,
   MarketSection, FlowsSection, ImprovedSection, ManagersSection, AmcSection,
   AiInsightsSection, FaqSection, FilterSheet, TrendingSection, type T100Filters,
@@ -70,6 +70,9 @@ function LeaderboardView() {
   // I4 — Top-100 client-side filters; owned here because the mobile FilterSheet
   // (page-level toolbar) and the Top100Section table both read/write them.
   const [t100Filters, setT100Filters] = React.useState<T100Filters>({});
+  // F-4 — Top-100 depth tab lives here so the section-header control and the
+  // table share it.
+  const [t100Tab, setT100Tab] = React.useState('10');
 
   // Real leaderboard feed (docs/features/leaderboard-data-backend.md §5/§6). One
   // request feeds every board below; a board absent from `boards` (endpoint not
@@ -124,69 +127,76 @@ function LeaderboardView() {
       {/* Sticky category nav */}
       <CatNav />
 
-      {/* S2 — Discover */}
-      <Anchor>
-        <SectionHeader index="01" title="Discover" info="jump to what you’re looking for" />
-        <DiscoverSection />
-      </Anchor>
+      {/* Discover section REMOVED (F-1) — duplicated hero chips + sticky nav. */}
 
-      {/* S3 — Top 100 */}
+      {/* Top 100 (depth tabs live in the header badge slot — F-4) */}
       <Anchor id="top100">
-        <SectionHeader index="02" title="DhanRadar Top 100" tag="Flagship" info="the best funds in India, ranked" badge={boards?.top100 ? <LiveBadge /> : undefined} />
-        <Top100Section live={boards?.top100?.rows} filters={t100Filters} />
+        <SectionHeader
+          index="01"
+          title="DhanRadar Top 100"
+          tag="Flagship"
+          info="the best funds in India, ranked"
+          badge={
+            <span className="inline-flex items-center gap-2">
+              {boards?.top100 && <LiveBadge />}
+              <Top100Tabs tab={t100Tab} onTabChange={setT100Tab} />
+            </span>
+          }
+        />
+        <Top100Section live={boards?.top100?.rows} filters={t100Filters} tab={t100Tab} />
       </Anchor>
 
       {/* S4 — Category Champions */}
       <Anchor id="champions">
-        <SectionHeader index="03" title="Category Champions" info="the best fund in every category" badge={boards?.champions ? <LiveBadge /> : undefined} />
+        <SectionHeader index="02" title="Category Champions" info="the best fund in every category" badge={boards?.champions ? <LiveBadge /> : undefined} />
         <ChampionsSection live={boards?.champions?.rows} />
       </Anchor>
 
       {/* S5 — Performance (all 4 rails live → section badge, else per-rail chip; see PerformanceSection) */}
       <Anchor id="performance">
-        <SectionHeader index="04" title="Performance Leaderboards" info="highest returns by period" badge={perfLive ? <LiveBadge /> : undefined} />
+        <SectionHeader index="03" title="Performance Leaderboards" info="highest returns by period" badge={perfLive ? <LiveBadge /> : undefined} />
         <PerformanceSection boards={boards} />
       </Anchor>
 
       {/* S6 — SIP (mixed coverage: per-rail chip, see SipSection) */}
       <Anchor id="sip">
-        <SectionHeader index="05" title="SIP Leaderboards" info="best for monthly investors" />
+        <SectionHeader index="04" title="SIP Leaderboards" info="best for monthly investors" />
         <SipSection boards={boards} />
       </Anchor>
 
       {/* S7 — Risk (all 4 rails live → section badge, else per-rail chip; see RiskSection) */}
       <Anchor id="risk">
-        <SectionHeader index="06" title="Risk Leaderboards" info="safest & steadiest funds" badge={riskLive ? <LiveBadge /> : undefined} />
+        <SectionHeader index="05" title="Risk Leaderboards" info="safest & steadiest funds" badge={riskLive ? <LiveBadge /> : undefined} />
         <RiskSection boards={boards} />
       </Anchor>
 
       {/* S8 — Value (all 3 rails live → section badge) */}
       <Anchor id="value">
-        <SectionHeader index="07" title="Value Leaderboards" info="best return for the cost" badge={valueLive ? <LiveBadge /> : undefined} />
+        <SectionHeader index="06" title="Value Leaderboards" info="best return for the cost" badge={valueLive ? <LiveBadge /> : undefined} />
         <ValueSection boards={boards} />
       </Anchor>
 
       {/* S9 — Intelligence (all 5 rails live → section badge, else per-rail chip; see IntelligenceSection) */}
       <Anchor id="intelligence">
-        <SectionHeader index="08" title="DhanRadar Intelligence" tag="Proprietary" info="our unique rankings" badge={intelLive ? <LiveBadge /> : undefined} />
+        <SectionHeader index="07" title="DhanRadar Intelligence" tag="Proprietary" info="our unique rankings" badge={intelLive ? <LiveBadge /> : undefined} />
         <IntelligenceSection boards={boards} />
       </Anchor>
 
       {/* S10 — Current Market */}
       <Anchor id="market">
-        <SectionHeader index="09" title="Current Market Leaders" tag="DMMI" info="what fits today’s market" />
+        <SectionHeader index="08" title="Current Market Leaders" tag="DMMI" info="what fits today’s market" />
         <MarketSection regime={moodHealthy ? mood.data!.regime : undefined} moodWord={moodWord} moodBand={moodBand} moodColor={moodColor} />
       </Anchor>
 
       {/* S11 — Fund Flows (mixed coverage: per-rail chip, see FlowsSection) */}
       <Anchor id="flows">
-        <SectionHeader index="10" title="Fund Flow Leaders" info="where the money is moving" />
+        <SectionHeader index="09" title="Fund Flow Leaders" info="where the money is moving" />
         <FlowsSection boards={boards} />
       </Anchor>
 
       {/* S12 — Most Improved (movers_up + label_upgrades + top10_entries live → section badge) */}
       <Anchor id="improved">
-        <SectionHeader index="11" title="Most Improved & Future Stars" info="funds on the rise" badge={improvedLive ? <LiveBadge /> : undefined} />
+        <SectionHeader index="10" title="Most Improved & Future Stars" info="funds on the rise" badge={improvedLive ? <LiveBadge /> : undefined} />
         <ImprovedSection boards={boards} />
       </Anchor>
 
@@ -196,31 +206,31 @@ function LeaderboardView() {
 
       {/* Trending (mixed coverage: per-rail chip, see TrendingSection) */}
       <Anchor id="trending">
-        <SectionHeader index="12" title="Trending Now" info="biggest movers this week" />
+        <SectionHeader index="11" title="Trending Now" info="biggest movers this week" />
         <TrendingSection boards={boards} />
       </Anchor>
 
       {/* AI Insights */}
       <Anchor>
-        <SectionHeader index="13" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
+        <SectionHeader index="12" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
         <AiInsightsSection live={boards?.ai_insights?.rows} />
       </Anchor>
 
       {/* Managers */}
       <Anchor id="managers">
-        <SectionHeader index="14" title="Best Fund Managers" info={managersInfo} badge={boards?.manager_facts ? <LiveBadge /> : undefined} />
+        <SectionHeader index="13" title="Best Fund Managers" info={managersInfo} badge={boards?.manager_facts ? <LiveBadge /> : undefined} />
         <ManagersSection live={boards?.manager_facts?.rows} />
       </Anchor>
 
       {/* AMCs */}
       <Anchor id="amc">
-        <SectionHeader index="15" title="Best AMCs" info="the most trusted fund houses" badge={boards?.amc_facts ? <LiveBadge /> : undefined} />
+        <SectionHeader index="14" title="Best AMCs" info="the most trusted fund houses" badge={boards?.amc_facts ? <LiveBadge /> : undefined} />
         <AmcSection live={boards?.amc_facts?.rows} />
       </Anchor>
 
       {/* FAQ */}
       <Anchor>
-        <SectionHeader index="16" title="Rankings FAQ" />
+        <SectionHeader index="15" title="Rankings FAQ" />
         <FaqSection />
       </Anchor>
 
