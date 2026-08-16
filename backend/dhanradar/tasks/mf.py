@@ -4718,21 +4718,26 @@ async def _leaderboard_refresh_pipeline() -> str:
             screen_insights,
         )
 
-        # 30 s (not the report-commentary 12 s): this is a nightly batch task with
-        # no user waiting, and free-tier model latency straddles 12 s (observed
-        # 5-16 s on the verified pool, 2026-08-16).
+        # 60 s (not the report-commentary 12 s): nightly batch, no user waiting.
+        # Free-tier latency is spiky — 2026-08-16 live runs saw one success at
+        # ~20 s then two straight >30 s stalls (slow model + 429 fallback
+        # retries), so the cap leaves room for one stall plus a pool fallback.
+        _insights_cap_s = 60.0
         insight_texts = screen_insights(
             await asyncio.wait_for(
                 generate_leaderboard_insights(
                     OpenRouterGateway(), boards=boards, as_of=latest_date
                 ),
-                timeout=30.0,
+                timeout=_insights_cap_s,
             )
         )
         if insight_texts:
             boards["ai_insights"] = [{"text": t} for t in insight_texts]
     except TimeoutError:
-        logger.warning("leaderboard_refresh: ai_insights timed out after 12 s — board skipped")
+        logger.warning(
+            "leaderboard_refresh: ai_insights timed out after %.0f s — board skipped",
+            _insights_cap_s,
+        )
     except Exception:  # noqa: BLE001 — insights are best-effort spillover
         logger.exception("leaderboard_refresh: ai_insights failed — board skipped")
 
