@@ -175,7 +175,7 @@ function LeaderboardView() {
       {/* S10 — Current Market */}
       <Anchor id="market">
         <SectionHeader index="09" title="Current Market Leaders" tag="DMMI" info="what fits today’s market" />
-        <MarketSection regime={moodHealthy ? mood.data!.regime : undefined} />
+        <MarketSection regime={moodHealthy ? mood.data!.regime : undefined} moodWord={moodWord} moodBand={moodBand} moodColor={moodColor} />
       </Anchor>
 
       {/* S11 — Fund Flows (mixed coverage: per-rail chip, see FlowsSection) */}
@@ -190,34 +190,35 @@ function LeaderboardView() {
         <ImprovedSection boards={boards} />
       </Anchor>
 
-      {/* S13 — Managers */}
-      <Anchor id="managers">
-        <SectionHeader index="12" title="Best Fund Managers" info={managersInfo} badge={boards?.manager_facts ? <LiveBadge /> : undefined} />
-        <ManagersSection live={boards?.manager_facts?.rows} />
-      </Anchor>
-
-      {/* S14 — AMCs */}
-      <Anchor id="amc">
-        <SectionHeader index="13" title="Best AMCs" info="the most trusted fund houses" badge={boards?.amc_facts ? <LiveBadge /> : undefined} />
-        <AmcSection live={boards?.amc_facts?.rows} />
-      </Anchor>
-
       {/* S15 (Trusted Ratings) removed — founder decision 2026-08-16: third-party
-          ratings not required. Sections below renumbered. */}
+          ratings not required. D-3 (same day): Managers + AMCs are reference
+          material, moved to the end after AI Insights; FAQ stays last. */}
 
-      {/* S15 — Trending (mixed coverage: per-rail chip, see TrendingSection) */}
+      {/* Trending (mixed coverage: per-rail chip, see TrendingSection) */}
       <Anchor id="trending">
-        <SectionHeader index="14" title="Trending Now" info="biggest movers this week" />
+        <SectionHeader index="12" title="Trending Now" info="biggest movers this week" />
         <TrendingSection boards={boards} />
       </Anchor>
 
-      {/* S16 — AI Insights */}
+      {/* AI Insights */}
       <Anchor>
-        <SectionHeader index="15" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
+        <SectionHeader index="13" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
         <AiInsightsSection live={boards?.ai_insights?.rows} />
       </Anchor>
 
-      {/* S17 — FAQ */}
+      {/* Managers */}
+      <Anchor id="managers">
+        <SectionHeader index="14" title="Best Fund Managers" info={managersInfo} badge={boards?.manager_facts ? <LiveBadge /> : undefined} />
+        <ManagersSection live={boards?.manager_facts?.rows} />
+      </Anchor>
+
+      {/* AMCs */}
+      <Anchor id="amc">
+        <SectionHeader index="15" title="Best AMCs" info="the most trusted fund houses" badge={boards?.amc_facts ? <LiveBadge /> : undefined} />
+        <AmcSection live={boards?.amc_facts?.rows} />
+      </Anchor>
+
+      {/* FAQ */}
       <Anchor>
         <SectionHeader index="16" title="Rankings FAQ" />
         <FaqSection />
