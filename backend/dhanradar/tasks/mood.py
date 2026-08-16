@@ -55,6 +55,7 @@ def compute_mood_snapshot() -> str:
     from dhanradar.config import settings
     from dhanradar.market_data.adapter import MarketDataAdapter
     from dhanradar.market_data.config import DataKind, DataRequest, load_ladders
+    from dhanradar.market_data.events import MacroSignalReceived
     from dhanradar.market_data.providers.macro import NseMacroProvider
     from dhanradar.market_data.providers.upstox import UpstoxAnalyticsProvider
     from dhanradar.market_data.providers.yahoo import YahooMacroProvider
@@ -123,6 +124,26 @@ def compute_mood_snapshot() -> str:
                 # OUTSIDE the run block: a cache hiccup must never mark the run failed.
                 if upstox_event is not None and upstox_event.signals:
                     await service.cache_market_flows(upstox_event.signals)
+                    # mood_v2 (plan §11.3): the engine normalizes flows/PCR over
+                    # 5-day means, not one day. cache_market_flows has just
+                    # appended today's raws, so the means include the freshest
+                    # values. Only signals the provider returned TODAY are
+                    # smoothed (no back-fill from history = no impute). A cold
+                    # or failed history read leaves the single-day raw standing.
+                    means = await service.get_flows_5d_means()
+                    smoothed = dict(upstox_event.signals)
+                    for src, dst in (
+                        ("fii", "fii_flows"),
+                        ("dii", "dii_flows"),
+                        ("pcr", "put_call_ratio"),
+                    ):
+                        if means.get(src) is not None and dst in smoothed:
+                            smoothed[dst] = means[src]
+                    upstox_event = MacroSignalReceived(
+                        source=upstox_event.source,
+                        signals=smoothed,
+                        fetched_at=upstox_event.fetched_at,
+                    )
             except Exception:  # noqa: BLE001 — health/flows recording must never crash the snapshot
                 logger.warning("mood: upstox health/flows recording failed — continuing")
                 upstox_event = None

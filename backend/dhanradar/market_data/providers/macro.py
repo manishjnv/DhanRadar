@@ -51,8 +51,6 @@ _HEADERS = {
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 
 # NSE public JSON endpoints (undocumented, best-effort)
-_NIFTY50_QUOTE_URL = "https://www.nseindia.com/api/quote-equity?symbol=NIFTY%2050&series=EQ"
-_VIX_QUOTE_URL = "https://www.nseindia.com/api/quote-equity?symbol=INDIA%20VIX&series=EQ"
 _MARKET_STATUS_URL = "https://www.nseindia.com/api/market-status"
 _PCR_URL = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
 
@@ -71,37 +69,6 @@ async def _get_json(client: httpx.AsyncClient, url: str) -> dict | list | None:
         return resp.json()
     except Exception as exc:  # noqa: BLE001 — each signal independent
         logger.debug("nse_macro: fetch failed for %s: %s", url, exc)
-        return None
-
-
-async def _fetch_nifty_trend(client: httpx.AsyncClient) -> float | None:
-    """Return NIFTY 50 % daily change (raw, not normalised)."""
-    try:
-        data = await _get_json(client, _NIFTY50_QUOTE_URL)
-        if not isinstance(data, dict):
-            return None
-        # NSE priceInfo path
-        price_info = data.get("priceInfo", {})
-        pct = price_info.get("pChange") or price_info.get("change")
-        if pct is not None:
-            return float(pct)
-        return None
-    except Exception:  # noqa: BLE001
-        return None
-
-
-async def _fetch_india_vix(client: httpx.AsyncClient) -> float | None:
-    """Return India VIX value (raw, not normalised)."""
-    try:
-        data = await _get_json(client, _VIX_QUOTE_URL)
-        if not isinstance(data, dict):
-            return None
-        price_info = data.get("priceInfo", {})
-        vix = price_info.get("lastPrice")
-        if vix is not None:
-            return float(vix)
-        return None
-    except Exception:  # noqa: BLE001
         return None
 
 
@@ -151,10 +118,16 @@ class NseMacroProvider(MarketDataProvider):
     """
     Best-effort NSE public JSON macro signal provider.
 
-    Fetches {nifty_trend, india_vix, market_breadth, put_call_ratio} from
-    NSE public endpoints.  Each signal is fetched independently — a per-signal
-    failure yields None for that signal; the rest proceed.  The whole fetch
-    raises ProviderError only on a catastrophic structural failure.
+    Fetches {market_breadth, put_call_ratio} from NSE public endpoints.
+    mood_v2 (MOOD_IMPROVEMENT_PLAN §11.3): nifty_trend / india_vix are NO
+    LONGER emitted here — their raw contract changed to MA-deviations, which
+    this quote endpoint cannot compute; emitting the old one-day-%/level raws
+    would be silently mis-normalized. (Prod impact: none — NSE is geo-blocked
+    from KVM4 and this fallback never wins the ladder there.) Breadth is
+    unchanged; the single-day PCR through the 5-day-average normalizer is the
+    documented short-history fallback.  Each signal is fetched independently —
+    a per-signal failure yields None for that signal; the rest proceed.  The
+    whole fetch raises ProviderError only on a catastrophic structural failure.
 
     BEST-EFFORT, NOT deploy-hardened: NSE endpoints are undocumented and may
     break without notice.  The Mood Compass degrades gracefully to
@@ -186,9 +159,7 @@ class NseMacroProvider(MarketDataProvider):
                 except Exception:  # noqa: BLE001 — session warmup is best-effort
                     logger.debug("nse_macro: session warmup failed — proceeding anyway")
 
-                nifty_pct, vix, breadth, pcr = (
-                    await _fetch_nifty_trend(client),
-                    await _fetch_india_vix(client),
+                breadth, pcr = (
                     await _fetch_market_breadth(client),
                     await _fetch_put_call_ratio(client),
                 )
@@ -196,10 +167,6 @@ class NseMacroProvider(MarketDataProvider):
             raise ProviderError(self.name, f"httpx not available: {exc}") from exc
 
         signals: dict[str, float] = {}
-        if nifty_pct is not None:
-            signals["nifty_trend"] = nifty_pct
-        if vix is not None:
-            signals["india_vix"] = vix
         if breadth is not None:
             signals["market_breadth"] = breadth
         if pcr is not None:
@@ -208,7 +175,7 @@ class NseMacroProvider(MarketDataProvider):
         logger.info(
             "nse_macro: fetched %d/%d signals: %s",
             len(signals),
-            4,
+            2,
             list(signals.keys()),
         )
         return MacroSignalReceived(

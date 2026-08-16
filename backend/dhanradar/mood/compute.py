@@ -28,10 +28,13 @@ WEIGHTS: dict[str, float] = {
     "news_sentiment": 0.06,
 }
 
-# Regime buckets by 0–100 score (architecture: extreme_fear 0-19 / fear 20-39 /
-# neutral 40-59 / greed 60-79 / extreme_greed 80-100). Implemented with contiguous
-# half-open upper bounds so a NON-integer score (e.g. 19.5) cannot fall into a gap.
-_BUCKET_BOUNDS = [(20.0, "extreme_fear"), (40.0, "fear"), (60.0, "neutral"), (80.0, "greed")]
+# Regime buckets by 0–100 score — mood_v2 industry-standard zones (CNN Fear &
+# Greed convention; MOOD_IMPROVEMENT_PLAN §11.2): extreme_fear 0-24 / fear 25-44 /
+# neutral 45-54 / greed 55-74 / extreme_greed 75-100. The v1 40-59 neutral band
+# (20 points wide) was half of the structural-neutral bug — a diversified average
+# almost never escaped it. Implemented with contiguous half-open upper bounds so a
+# NON-integer score (e.g. 24.5) cannot fall into a gap.
+_BUCKET_BOUNDS = [(25.0, "extreme_fear"), (45.0, "fear"), (55.0, "neutral"), (75.0, "greed")]
 
 # Refuse floor (non-neg #4): below this confidence the regime is not asserted — the
 # served regime is coerced to `insufficient_data` (band already degrades there too).

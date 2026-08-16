@@ -7,7 +7,7 @@ Covered:
   * All inputs 0.9 → extreme_greed, correct aggregates.
   * All inputs 0.1 → extreme_fear.
   * All inputs 0.5 → neutral.
-  * regime_for() bucket boundaries (19/20/40/59/60/79/80/100).
+  * regime_for() bucket boundaries (mood_v2 zones: 25/45/55/75).
   * Degraded: <7 present inputs → data_quality="degraded", commentary_allowed=False,
     confidence_score ≤ 0.40.
   * Contributing/contradicting factor separation.
@@ -103,15 +103,16 @@ def test_compute_mood_all_neutral():
 @pytest.mark.parametrize(
     "score, expected",
     [
+        # mood_v2 industry-standard zones (plan §11.2): 25 / 45 / 55 / 75.
         (0.0, "extreme_fear"),
-        (19.0, "extreme_fear"),
-        (20.0, "fear"),
-        (39.0, "fear"),
-        (40.0, "neutral"),
-        (59.0, "neutral"),
-        (60.0, "greed"),
-        (79.0, "greed"),
-        (80.0, "extreme_greed"),
+        (24.0, "extreme_fear"),
+        (25.0, "fear"),
+        (44.0, "fear"),
+        (45.0, "neutral"),
+        (54.0, "neutral"),
+        (55.0, "greed"),
+        (74.0, "greed"),
+        (75.0, "extreme_greed"),
         (100.0, "extreme_greed"),
     ],
 )
@@ -190,14 +191,54 @@ async def test_post_public_card_no_channel_id(monkeypatch):
 
 def test_regime_for_non_integer_scores_have_no_gap():
     # Contiguous buckets — a non-integer score between old integer ranges must NOT
-    # fall through to neutral (the pre-fix bug).
-    assert regime_for(19.5) == "extreme_fear"
-    assert regime_for(39.9) == "fear"
-    assert regime_for(59.5) == "neutral"
-    assert regime_for(79.99) == "greed"
-    assert regime_for(80.0) == "extreme_greed"
+    # fall through to neutral (the pre-fix bug). mood_v2 bounds.
+    assert regime_for(24.5) == "extreme_fear"
+    assert regime_for(44.9) == "fear"
+    assert regime_for(54.5) == "neutral"
+    assert regime_for(74.99) == "greed"
+    assert regime_for(75.0) == "extreme_greed"
     assert regime_for(0.0) == "extreme_fear"
     assert regime_for(100.0) == "extreme_greed"
+
+
+# --- mood_v2 golden fixtures (skill Inv. 10 sanity: a sustained move must move
+# --- the regime; the v1 structural-neutral bug would have failed all three) ---
+
+def _v2_inputs(sign: float) -> dict:
+    """Normalized inputs for a sustained rally (+1) / selloff (−1) / flat (0)."""
+    from dhanradar.mood import signals as s
+
+    return {
+        "nifty_trend": s.norm_nifty_trend(4.5 * sign),        # % vs 125-DMA
+        "market_breadth": 0.5 + 0.22 * sign,
+        "india_vix": s.norm_india_vix(-15.0 * sign),          # VIX % vs 50-DMA (inverted)
+        "fii_flows": s.norm_fii_flows(3_000.0 * sign),        # 5-day mean ₹Cr
+        "global_indices": s.norm_global_indices(3.0 * sign),
+        "dii_flows": s.norm_dii_flows(2_500.0 * sign),
+        "us_bond_10y": s.norm_us_bond_10y(-0.2 * sign),       # pp vs 50-DMA
+        "oil_brent": s.norm_oil_brent(-8.0 * sign),           # % vs 50-DMA
+        "usd_inr": s.norm_usd_inr(-0.5 * sign),               # % vs 50-DMA
+        "put_call_ratio": s.norm_put_call_ratio(1.0 - 0.15 * sign),
+        "news_sentiment": 0.5 + 0.2 * sign,
+    }
+
+
+def test_golden_sustained_rally_reads_greed_side():
+    r = compute_mood(_v2_inputs(+1.0))
+    assert r is not None
+    assert r.regime in ("greed", "extreme_greed"), f"score={r.mood_score}"
+
+
+def test_golden_sustained_selloff_reads_fear_side():
+    r = compute_mood(_v2_inputs(-1.0))
+    assert r is not None
+    assert r.regime in ("fear", "extreme_fear"), f"score={r.mood_score}"
+
+
+def test_golden_flat_market_reads_neutral():
+    r = compute_mood(_v2_inputs(0.0))
+    assert r is not None
+    assert r.regime == "neutral", f"score={r.mood_score}"
 
 
 def test_sub_030_confidence_coerces_regime_to_insufficient_data():

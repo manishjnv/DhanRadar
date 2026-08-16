@@ -39,7 +39,7 @@ _LATEST_KEY = "mood:latest"
 _WHY_KEY = "mood:why-today"
 _EMBED_KEY = "mood:embed"
 _TTL_12H = 12 * 3600
-MODEL_VERSION = "mood_v1"
+MODEL_VERSION = "mood_v2"  # v2 = relative/momentum normalization + narrow neutral band (plan §11)
 
 # ---------------------------------------------------------------------------
 # Human-readable factor labels (GAP d)
@@ -376,9 +376,16 @@ async def get_why_today(db: Any) -> WhyToday | None:
 _VIX_CACHE_KEY = "signal:vix:last"
 _BREADTH_CACHE_KEY = "signal:breadth:last"
 _FLOWS_CACHE_KEY = "signal:flows:last"
+# mood_v2 (plan §11.3): rolling per-day raw flow history so the snapshot can use
+# 5-day aggregates (industry-standard PCR/flow smoothing). Newest entry first;
+# one entry per IST day (a same-day re-run replaces the head). Redis restart
+# loses it → the mean falls back to the days present and converges in a week.
+_FLOWS_HISTORY_KEY = "signal:flows:history"
+_FLOWS_HISTORY_MAX = 10
 _TTL_VIX_SEC = 24 * 3600
 _TTL_BREADTH_SEC = 3600
 _TTL_FLOWS_SEC = _TTL_12H  # 12 h — matches the twice-daily snapshot cadence
+_TTL_FLOWS_HISTORY_SEC = 30 * 24 * 3600  # refreshed on every write
 
 _IST = ZoneInfo("Asia/Kolkata")
 
@@ -575,6 +582,61 @@ async def cache_market_flows(raw_signals: dict) -> None:
         await get_redis().set(_FLOWS_CACHE_KEY, payload, ex=_TTL_FLOWS_SEC)
     except Exception:  # noqa: BLE001
         logger.warning("mood: cache_market_flows failed — flows cache not updated")
+
+    # mood_v2: append today's raw values to the rolling per-day history list.
+    entry = json.dumps({
+        "d": datetime.now(_IST).date().isoformat(),
+        "fii": raw_signals.get("fii_flows"),
+        "dii": raw_signals.get("dii_flows"),
+        "pcr": raw_signals.get("put_call_ratio"),
+    })
+    try:
+        redis = get_redis()
+        head = await redis.lindex(_FLOWS_HISTORY_KEY, 0)  # type: ignore[misc]
+        head_day = None
+        if head:
+            try:
+                head_day = json.loads(head if isinstance(head, str) else head.decode()).get("d")
+            except (ValueError, UnicodeDecodeError):
+                head_day = None
+        if head_day == json.loads(entry)["d"]:
+            await redis.lset(_FLOWS_HISTORY_KEY, 0, entry)  # type: ignore[misc] — same-day re-run replaces
+        else:
+            await redis.lpush(_FLOWS_HISTORY_KEY, entry)  # type: ignore[misc]
+            await redis.ltrim(_FLOWS_HISTORY_KEY, 0, _FLOWS_HISTORY_MAX - 1)  # type: ignore[misc]
+        await redis.expire(_FLOWS_HISTORY_KEY, _TTL_FLOWS_HISTORY_SEC)  # type: ignore[misc]
+    except Exception:  # noqa: BLE001
+        logger.warning("mood: flows history append failed — 5-day mean will be shorter")
+
+
+async def get_flows_5d_means() -> dict[str, float | None]:
+    """Mean of the last ≤ 5 daily raw flow entries (including today's) from the
+    rolling history list — the mood_v2 smoothed inputs for fii_flows / dii_flows /
+    put_call_ratio (plan §11.3). Per key: mean over the entries where the key is
+    present, or None when no entry carries it (signal stays absent; never imputed).
+    Best-effort: any Redis/parse failure returns all-None."""
+    from dhanradar.redis_client import get_redis
+
+    out: dict[str, float | None] = {"fii": None, "dii": None, "pcr": None}
+    try:
+        raw_rows = await get_redis().lrange(_FLOWS_HISTORY_KEY, 0, 4)  # type: ignore[misc]
+    except Exception:  # noqa: BLE001
+        logger.warning("mood: flows history read failed — falling back to single-day raw")
+        return out
+    series: dict[str, list[float]] = {"fii": [], "dii": [], "pcr": []}
+    for raw in raw_rows or []:
+        try:
+            row = json.loads(raw if isinstance(raw, str) else raw.decode())
+        except (ValueError, UnicodeDecodeError):
+            continue
+        for key in series:
+            value = row.get(key)
+            if value is not None:
+                series[key].append(float(value))
+    for key, values in series.items():
+        if values:
+            out[key] = sum(values) / len(values)
+    return out
 
 
 async def get_flows():  # returns FlowsOut

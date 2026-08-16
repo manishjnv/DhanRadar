@@ -335,43 +335,45 @@ async def test_get_embed_html_cache_hit():
 
 
 class TestNormNiftyTrend:
-    def test_plus_three_clamps_to_one(self):
+    # mood_v2: input is the % deviation from the 125-DMA, scale ±6 %.
+    def test_plus_six_clamps_to_one(self):
         from dhanradar.mood.signals import norm_nifty_trend
-        assert norm_nifty_trend(3.0) == 1.0
+        assert norm_nifty_trend(6.0) == 1.0
 
-    def test_minus_three_clamps_to_zero(self):
+    def test_minus_six_clamps_to_zero(self):
         from dhanradar.mood.signals import norm_nifty_trend
-        assert norm_nifty_trend(-3.0) == 0.0
+        assert norm_nifty_trend(-6.0) == 0.0
 
-    def test_zero_is_half(self):
+    def test_on_ma_is_half(self):
         from dhanradar.mood.signals import norm_nifty_trend
         assert abs(norm_nifty_trend(0.0) - 0.5) < 1e-9
 
-    def test_beyond_plus_three_clamped(self):
+    def test_beyond_plus_six_clamped(self):
         from dhanradar.mood.signals import norm_nifty_trend
-        assert norm_nifty_trend(10.0) == 1.0
+        assert norm_nifty_trend(15.0) == 1.0
 
-    def test_beyond_minus_three_clamped(self):
+    def test_beyond_minus_six_clamped(self):
         from dhanradar.mood.signals import norm_nifty_trend
-        assert norm_nifty_trend(-10.0) == 0.0
+        assert norm_nifty_trend(-15.0) == 0.0
 
 
 class TestNormIndiaVix:
-    def test_high_vix_yields_low_value(self):
-        """VIX = 30 (high fear) → 0.0"""
+    # mood_v2: input is VIX's % deviation from its own 50-DMA, scale ±25 %.
+    def test_vix_spike_above_ma_yields_low_value(self):
+        """VIX 25 % above its 50-DMA (fear spike) → 0.0"""
         from dhanradar.mood.signals import norm_india_vix
-        assert norm_india_vix(30.0) == 0.0
+        assert norm_india_vix(25.0) == 0.0
 
-    def test_low_vix_yields_high_value(self):
-        """VIX = 10 (low fear) → 1.0"""
+    def test_vix_calm_below_ma_yields_high_value(self):
+        """VIX 25 % below its 50-DMA (unusual calm) → 1.0"""
         from dhanradar.mood.signals import norm_india_vix
-        assert norm_india_vix(10.0) == 1.0
+        assert norm_india_vix(-25.0) == 1.0
 
-    def test_mid_vix_is_half(self):
+    def test_vix_on_ma_is_half(self):
         from dhanradar.mood.signals import norm_india_vix
-        assert abs(norm_india_vix(20.0) - 0.5) < 1e-9
+        assert abs(norm_india_vix(0.0) - 0.5) < 1e-9
 
-    def test_very_high_vix_clamps_to_zero(self):
+    def test_extreme_spike_clamps_to_zero(self):
         from dhanradar.mood.signals import norm_india_vix
         assert norm_india_vix(80.0) == 0.0
 
