@@ -1017,6 +1017,8 @@ _LEADERBOARD_BOARD_TITLES: dict[str, str] = {
     "quality": "Best Portfolio Quality",
     "ai_spotlight": "AI Spotlight",
     "manager_facts": "Best Fund Managers — covered schemes",
+    # Phase 3c (leaderboard-data-backend.md §9b) — S17 AI insight cards.
+    "ai_insights": "AI Insights",
 }
 
 

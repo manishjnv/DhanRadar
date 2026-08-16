@@ -32,7 +32,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import type {
   LeaderboardHero, LeaderboardBoards,
-  LbFundRow, LbChampionRow, LbLabelUpgradeRow, LbAmcFactRow, LbManagerRow,
+  LbFundRow, LbChampionRow, LbLabelUpgradeRow, LbAmcFactRow, LbManagerRow, LbInsightRow,
 } from '@/features/mf/types';
 
 const { E } = COLORS;
@@ -948,10 +948,12 @@ export function RatingsSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S16 — AI INSIGHTS
 // ═══════════════════════════════════════════════════════════════════════════
-export function AiInsightsSection() {
+export function AiInsightsSection({ live }: { live?: LbInsightRow[] }) {
+  // Live cards from the governed gateway when the board exists; Preview sample otherwise.
+  const texts = live && live.length > 0 ? live.map((r) => r.text) : AI_INSIGHTS;
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      {AI_INSIGHTS.map((t, i) => (
+      {texts.map((t, i) => (
         <div key={i} className="flex gap-3 rounded-xl border border-line p-3.5" style={{ background: 'linear-gradient(135deg,#FAFBFF,#fff)' }}>
           <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-lg" style={{ background: 'rgba(139,92,246,.10)', color: '#8B5CF6' }} aria-hidden="true">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 L13.5 9 L19 10.5 L13.5 12 L12 18 L10.5 12 L5 10.5 L10.5 9 Z" /></svg>
