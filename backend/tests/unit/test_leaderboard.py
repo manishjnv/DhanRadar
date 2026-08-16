@@ -511,17 +511,20 @@ def test_momentum_requires_ahead_of_peers_signal_and_positive_delta() -> None:
     assert rows[0]["metric_unit"] == "rank_delta"
 
 
-def test_quality_requires_high_consistency_and_data_coverage_orders_by_sharpe() -> None:
+def test_quality_requires_high_consistency_orders_by_sharpe() -> None:
+    """data_coverage deliberately NOT gated (2026-08-16): uniformly 'low'
+    platform-wide (0/~8,300 at high) — the two-factor gate shipped an empty
+    board. consistency=='high' is the engine's own discriminating signal."""
     funds = [
-        _fund("INE_Q1", sharpe_ratio=1.5, confidence_factors={"consistency": "high", "data_coverage": "high"}),
+        _fund("INE_Q1", sharpe_ratio=1.5, confidence_factors={"consistency": "high", "data_coverage": "low"}),
         _fund(
-            "INE_Q2", sharpe_ratio=2.0, confidence_factors={"consistency": "high", "data_coverage": "medium"}
-        ),  # data_coverage not high -> excluded
-        _fund("INE_Q3", sharpe_ratio=1.8, confidence_factors={"consistency": "high", "data_coverage": "high"}),
+            "INE_Q2", sharpe_ratio=2.0, confidence_factors={"consistency": "medium", "data_coverage": "low"}
+        ),  # consistency not high -> excluded
+        _fund("INE_Q3", sharpe_ratio=1.8, confidence_factors={"consistency": "high", "data_coverage": "low"}),
         _fund(
             "INE_Q4",
             sharpe_ratio=3.0,
-            confidence_factors={"consistency": "high", "data_coverage": "high"},
+            confidence_factors={"consistency": "high", "data_coverage": "low"},
             is_segregated=True,
         ),  # segregated -> excluded
     ]

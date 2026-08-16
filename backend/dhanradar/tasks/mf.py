@@ -4158,16 +4158,19 @@ def _build_leaderboard_momentum(funds: list[dict]) -> list[dict]:
 
 def _build_leaderboard_quality(funds: list[dict]) -> list[dict]:
     """quality (§9b) — funds whose `confidence_factors` (the engine's own named
-    confidence-quality bands, W2/migration 0064 — never a numeric) show BOTH
-    consistency=="high" and data_coverage=="high", ordered by Sharpe ratio
-    descending. `is_segregated` excluded."""
+    confidence-quality bands, W2/migration 0064 — never a numeric) show
+    consistency=="high", ordered by Sharpe ratio descending. `is_segregated`
+    excluded. data_coverage was DROPPED from the gate 2026-08-16: prod query
+    showed it is uniformly "low" platform-wide (0 of ~8,300 ranked funds at
+    high/medium — source-coverage gaps, not fund quality), so the two-factor
+    gate matched nothing and the board shipped empty. Re-add it when the band
+    has actual variance."""
     candidates = [
         f
         for f in funds
         if not f.get("is_segregated")
         and f.get("sharpe_ratio") is not None
         and (f.get("confidence_factors") or {}).get("consistency") == "high"
-        and (f.get("confidence_factors") or {}).get("data_coverage") == "high"
     ]
 
     def _key(f: dict) -> float:
