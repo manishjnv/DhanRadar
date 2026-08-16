@@ -38,3 +38,28 @@ describe('fundDisplayName (E-3, display-only)', () => {
     expect(fundDisplayName('Direct Plan - Growth Option').name).not.toBe('');
   });
 });
+
+import { shortenAmcName, categoryDisplayName } from './explorer-format';
+
+describe('shortenAmcName (Phase H)', () => {
+  it('collapses every legal-suffix family to AMC', () => {
+    expect(shortenAmcName('HSBC Asset Management (India) Private Ltd.')).toBe('HSBC AMC');
+    expect(shortenAmcName('quant Money Managers Limited')).toBe('quant AMC');
+    expect(shortenAmcName('SBI Funds Management Limited')).toBe('SBI AMC');
+    expect(shortenAmcName('Bank of India Investment Managers Private Limited')).toBe('Bank of India AMC');
+    expect(shortenAmcName('ITI Asset Management Limited')).toBe('ITI AMC');
+  });
+  it('leaves already-clean names alone', () => {
+    expect(shortenAmcName('Zerodha AMC')).toBe('Zerodha AMC');
+  });
+});
+
+describe('categoryDisplayName (Phase H)', () => {
+  it('drops Scheme/Fund and shortens conjunctions', () => {
+    expect(categoryDisplayName('Equity Scheme - Flexi Cap Fund')).toBe('Equity · Flexi Cap');
+    expect(categoryDisplayName('Debt Scheme - Banking and PSU Fund')).toBe('Debt · Banking & PSU');
+    expect(categoryDisplayName('Equity Scheme - ELSS')).toBe('Equity · ELSS');
+    expect(categoryDisplayName('Other Scheme - Index Funds')).toBe('Other · Index');
+    expect(categoryDisplayName('Solution Oriented Scheme - Retirement Fund')).toBe('Solution · Retirement');
+  });
+});
