@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import {
   Logo, BandRing, BandRingLive, Semicircle, MiniSpark, EduPill, RiskBadge, Card, SoWhat,
-  RichText, HScroll, IconBtn, CTA, DiscCard, MiniLbCard,
+  RichText, HScroll, IconBtn, CTA, DiscCard, MiniLbCard, PortfolioIsinsContext, PortfolioPill,
 } from './ui';
 import {
   COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
@@ -112,13 +112,13 @@ function recoveryMonths(r: LbFundRow): string {
 function fundRailRow(r: LbFundRow, val: string, up?: boolean, catAvg?: number | null): RailRow {
   const name = fundName(r);
   const sub = catAvg != null ? `cat avg ${catAvg.toFixed(1)}%` : undefined;
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}`, sub };
+  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}`, sub, isin: r.isin };
 }
 function upgradeRailRow(r: LbLabelUpgradeRow): RailRow {
   const name = fundName(r);
   const from = eduWordFromLabel(r.label_from).word;
   const to = eduWordFromLabel(r.label_to).word;
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val: `${from} → ${to}`, up: true, href: `/mf/fund/${r.isin}` };
+  return { name, logo: initialOf(name), color: colorFor(r.isin), val: `${from} → ${to}`, up: true, href: `/mf/fund/${r.isin}`, isin: r.isin };
 }
 /** Marks a rail live and swaps in real rows — used for MIXED-coverage sections
  * (per-rail chip, not a section badge). Absent board → untouched sample rail. */
@@ -345,6 +345,8 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
   // selected funds. Cap 3 = the compare page's slot count (page.tsx slice(0,3)).
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [sort, setSort] = React.useState<{ col: T100SortCol; dir: 1 | -1 } | null>(null);
+  // V4 — live row keys are ISINs; sample keys are names and never match.
+  const pfIsins = React.useContext(PortfolioIsinsContext);
 
   if (live && live.length === 0) {
     return <EmptyState title="No ranked funds yet" description="Rankings refresh nightly after markets close — check back soon." />;
@@ -478,6 +480,7 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                               {row.cat}
                             </Link>
                           ) : row.cat}
+                          {pfIsins.has(row.key) && <PortfolioPill className="ml-1.5 align-middle" />}
                         </div>
                       </div>
                     </div>
@@ -548,6 +551,7 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                 <div className="mt-0.5 text-[10.5px] text-ink-muted">{row.amc} · {row.cat}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <EduPill word={row.labelWord} color={row.labelColor} />
+                  {pfIsins.has(row.key) && <PortfolioPill />}
                   <span className="rounded px-1.5 py-0.5 text-[9px] font-bold" style={{ background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>{pctSigned(row.r3)} 3Y</span>
                   <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[9px] font-bold" style={{ color: up ? E : down ? '#E5484D' : 'var(--text-muted)' }}>{up ? '▲' : down ? '▼' : '–'}{row.rankd}</span>
                 </div>

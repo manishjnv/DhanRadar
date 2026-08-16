@@ -65,6 +65,7 @@ from dhanradar.mf.schemas import (
     MFResearchAskResponse,
     PortfolioCreateRequest,
     PortfolioHistoryResponse,
+    PortfolioHoldingsIsinsResponse,
     PortfolioLatestResponse,
     PortfolioListResponse,
     PortfolioReport,
@@ -74,7 +75,13 @@ from dhanradar.mf.schemas import (
     WatchlistResponse,
 )
 from dhanradar.models.auth import UserActivityLog
-from dhanradar.models.mf import MfCasJob, MfLeaderboardBoard, MfPortfolio, MfWatchlistItem
+from dhanradar.models.mf import (
+    MfCasJob,
+    MfLeaderboardBoard,
+    MfPortfolio,
+    MfUserHolding,
+    MfWatchlistItem,
+)
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
@@ -601,6 +608,42 @@ async def portfolio_latest(
         portfolio_id=str(portfolio.id),
         portfolio_name=portfolio.name,
     )
+
+
+@router.get("/portfolio/holdings-isins", response_model=PortfolioHoldingsIsinsResponse)
+async def portfolio_holdings_isins(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+) -> PortfolioHoldingsIsinsResponse:
+    """V4 (2026-08-16) — the caller's latest portfolio's DISTINCT holding
+    ISINs, nothing else: no fund names, values, units or folio data ever leave
+    this endpoint, so a public board can render a label-only "In your
+    portfolio" pill (non-neg #2 — a label, never a number). Auth'd +
+    consent-gated like every portfolio read; ownership is the user_id
+    predicate below (belt) on top of the mf_user_holdings RLS policy
+    (braces). No portfolio yet → empty list, not 404 — a pill surface treats
+    "no portfolio" as "no pills", it is not an error."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+    await _require_mf_consent(user=user, db=db)
+
+    portfolio_id = (
+        await db.execute(
+            select(MfPortfolio.id)
+            .where(MfPortfolio.user_id == user.user_id)
+            .order_by(MfPortfolio.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if portfolio_id is None:
+        return PortfolioHoldingsIsinsResponse(isins=[])
+
+    rows = (
+        await db.execute(
+            select(MfUserHolding.isin).distinct().where(MfUserHolding.portfolio_id == portfolio_id)
+        )
+    ).scalars()
+    return PortfolioHoldingsIsinsResponse(isins=sorted(rows))
 
 
 # ---------------------------------------------------------------------------

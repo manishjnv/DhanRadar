@@ -32,6 +32,7 @@ import type {
   FundFit,
   FundComparisonResponse,
   LeaderboardResponse,
+  PortfolioHoldingsIsinsResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -592,6 +593,19 @@ export function useFundPortfolioFit(portfolioId: string, isin: string) {
 // illustrative sample when a key is absent (endpoint not deployed yet, or that
 // board isn't wired server-side) — same 404-tolerant shape as useFundDetail.
 // ---------------------------------------------------------------------------
+/** V4 — the logged-in user's holding ISINs (label-only pill surfaces). Enabled
+ *  only when the caller knows the user is authed; 401/403 (logged out, consent
+ *  absent) just means "no pills" — never retried, never an error surface. */
+export function usePortfolioHoldingsIsins(enabled: boolean) {
+  return useQuery<PortfolioHoldingsIsinsResponse>({
+    queryKey: queryKeys.mf.holdingsIsins(),
+    queryFn: () => api.get<PortfolioHoldingsIsinsResponse>('/mf/portfolio/holdings-isins'),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useLeaderboard() {
   return useQuery<LeaderboardResponse>({
     queryKey: queryKeys.mf.leaderboard(),

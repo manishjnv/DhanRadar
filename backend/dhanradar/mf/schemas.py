@@ -47,6 +47,15 @@ class PortfolioLatestResponse(BaseModel):
     portfolio_name: str
 
 
+class PortfolioHoldingsIsinsResponse(BaseModel):
+    """Returned by GET /mf/portfolio/holdings-isins — the caller's latest
+    portfolio's distinct holding ISINs and NOTHING else (no names, amounts,
+    units or folio data): the lightest payload for label-only "In your
+    portfolio" pills on public boards (V4, non-neg #2)."""
+
+    isins: list[str]
+
+
 class PortfolioCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
 

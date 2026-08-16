@@ -31,8 +31,10 @@ import { SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { REGIME_DISPLAY, REGIME_COLOR } from '@/components/mood/MoodGauge';
-import { useLeaderboard } from '@/features/mf/api';
+import { useLeaderboard, usePortfolioHoldingsIsins } from '@/features/mf/api';
+import { useMe } from '@/features/auth/api';
 import { useMoodCurrent } from '@/features/mood/api';
+import { PortfolioIsinsContext } from '@/components/mf/leaderboard/ui';
 import {
   Anchor, HeroSection, CatNav, DiscoverSection, Top100Section, ChampionsSection,
   PerformanceSection, SipSection, RiskSection, ValueSection, IntelligenceSection,
@@ -77,6 +79,13 @@ function LeaderboardView() {
   const boards = lb.data?.boards;
   const hero = lb.data?.hero ?? undefined;
 
+  // V4 — "In your portfolio" pills: the logged-in user's holding ISINs, fetched
+  // only when authed (MaybeShell page — useMe resolves the auth state). Logged
+  // out / no portfolio / consent absent all collapse to the empty set: no pills.
+  const { data: me } = useMe();
+  const { data: pfHoldings } = usePortfolioHoldingsIsins(!!me);
+  const pfIsins = React.useMemo(() => new Set(pfHoldings?.isins ?? []), [pfHoldings]);
+
   // DMMI hero tile — regime WORD + band only, reusing the same mood hook and
   // word/colour maps as Fund Explorer's DmmiSection (never a number).
   const mood = useMoodCurrent();
@@ -94,6 +103,7 @@ function LeaderboardView() {
   const managersInfo = boards?.manager_facts ? 'the people behind the returns — covered schemes only' : 'the people behind the returns';
 
   return (
+    <PortfolioIsinsContext.Provider value={pfIsins}>
     <div className="w-full pb-24">
       <div className="mb-4 flex items-start justify-between gap-3">
         <Crumb />
@@ -220,6 +230,7 @@ function LeaderboardView() {
 
       <FilterSheet open={filterOpen} onClose={() => setFilterOpen(false)} value={t100Filters} onChange={setT100Filters} />
     </div>
+    </PortfolioIsinsContext.Provider>
   );
 }
 
