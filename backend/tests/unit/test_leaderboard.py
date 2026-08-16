@@ -54,6 +54,7 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_value_ter,
     _build_leaderboard_wealth_creator,
     _dedupe_leaderboard_variants,
+    _fund_name_is_unclaimed,
     _leaderboard_category_means,
     _leaderboard_fund_row,
     _leaderboard_is_growth_category,
@@ -298,6 +299,20 @@ def test_three_lens_dedupes_scheme_variants_and_orders_by_3y_return() -> None:
     values = [r["metric_value"] for r in rows]
     assert values == sorted(values, reverse=True)
     assert all(r["metric_unit"] == "pct_3y" for r in rows)
+
+
+def test_unclaimed_scheme_detection_covers_both_name_fields() -> None:
+    # Prod shapes (2026-08-16): the qualifier can live in either name column.
+    assert _fund_name_is_unclaimed(
+        {"scheme_name": "ICICI Prudential Overnight Fund",
+         "fund_name_short": "ICICI Prudential Overnight fund - Direct Plan - Unclaimed IDCW Transitory Scheme"}
+    )
+    assert _fund_name_is_unclaimed(
+        {"scheme_name": "X - UNCLAIMED Redemption Stable Scheme", "fund_name_short": None}
+    )
+    assert not _fund_name_is_unclaimed(
+        {"scheme_name": "ICICI Prudential Overnight Fund", "fund_name_short": "ICICI Prudential Overnight Fund"}
+    )
 
 
 def test_nav_freshness_gate_bounds_and_fail_closed() -> None:

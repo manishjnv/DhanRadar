@@ -3436,6 +3436,19 @@ async def _fund_events_refresh_pipeline() -> str:
 _LEADERBOARD_STALE_DAYS = 3
 _LEADERBOARD_TOP_N = 4  # every rail board except top100 caps at 4 rows (§5 contract)
 
+# DATA-ARTIFACT guard (2026-08-16 live review #2): a fund whose NAV series
+# contains a SINGLE-STEP jump beyond these bounds within a <=7-day gap is
+# corrupted, not performing — prod forensics: ICICI Overnight variants showed
+# "+1217%" 5y returns off a one-day +900% re-denomination (₹100→₹1000 on
+# 2022-08-17); the prod sweep flagged 606 isins (383 ranked) and every sampled
+# one was an artifact class (zero-NAV rows, segregated carve-out spikes,
+# unadjusted unit splits like HDFC ETF 1:10 2023-10-23). Discontinuity — not
+# magnitude — defines the artifact: the NAV-verified-real 315% Taiwan and
+# ~100% silver 1y figures have smooth series and stay.
+_LEADERBOARD_NAV_JUMP_HI = 1.5
+_LEADERBOARD_NAV_JUMP_LO = 0.5
+_LEADERBOARD_NAV_JUMP_MAX_GAP_DAYS = 7
+
 # DATA-ARTIFACT guard (2026-08-16 live review): a fund whose NAV series has STOPPED
 # (wound-up scheme, discontinued plan, dead ETF feed) must not compete on any
 # "current" board — its metrics are anchored to its own last NAV, however old.
@@ -3516,6 +3529,17 @@ def _leaderboard_is_stale(latest_date: date, today: date | None = None) -> bool:
     real current date."""
     ref = today if today is not None else date.today()
     return (ref - latest_date).days > _LEADERBOARD_STALE_DAYS
+
+
+def _fund_name_is_unclaimed(fund: dict) -> bool:
+    """True for 'Unclaimed Redemption / Unclaimed IDCW Transitory' schemes —
+    regulatory holding pots for investor money that was never claimed, NOT
+    investable products (2026-08-16 live review #2: three ICICI Overnight
+    'Unclaimed … Transitory' variants filled perf_5y at '+1205%' off a
+    re-denominated series; 29 such schemes in prod). Same universe-level
+    exclusion rationale as segregated side-pockets."""
+    name = f"{fund.get('scheme_name') or ''} {fund.get('fund_name_short') or ''}"
+    return "unclaimed" in name.lower()
 
 
 def _leaderboard_nav_is_fresh(last_nav_date: date | None, as_of: date) -> bool:
@@ -4847,6 +4871,36 @@ async def _leaderboard_refresh_pipeline() -> str:
         # (not the ~1900d-capped window _metrics_refresh_pipeline loads). Each
         # query is a single indexed scan of the (isin, nav_date) PK via DISTINCT
         # ON isin — cheap regardless of table size.
+        # NAV-DISCONTINUITY scan (E-1, 2026-08-16 live review #2 — see the
+        # _LEADERBOARD_NAV_JUMP_* constants' comment for the forensics). Full
+        # mf_nav_history window scan — ~55 s measured in prod, acceptable once
+        # nightly; the alternative (persisting a per-isin flag) is a schema
+        # change this gate doesn't need yet.
+        from sqlalchemy import text as sa_text
+
+        discontinuity_rows = (
+            await db.execute(
+                sa_text(
+                    """
+                    WITH j AS (
+                      SELECT isin, nav_date, nav,
+                             lag(nav) OVER (PARTITION BY isin ORDER BY nav_date) AS pnav,
+                             lag(nav_date) OVER (PARTITION BY isin ORDER BY nav_date) AS pdate
+                      FROM mf.mf_nav_history)
+                    SELECT DISTINCT isin FROM j
+                    WHERE pnav > 0
+                      AND nav_date - pdate <= :max_gap
+                      AND (nav / pnav > :hi OR nav / pnav < :lo)
+                    """
+                ),
+                {
+                    "max_gap": _LEADERBOARD_NAV_JUMP_MAX_GAP_DAYS,
+                    "hi": _LEADERBOARD_NAV_JUMP_HI,
+                    "lo": _LEADERBOARD_NAV_JUMP_LO,
+                },
+            )
+        ).all()
+
         first_nav_rows = (
             await db.execute(
                 select(MfNavHistory.isin, MfNavHistory.nav_date, MfNavHistory.nav)
@@ -4953,8 +5007,23 @@ async def _leaderboard_refresh_pipeline() -> str:
     funds = [
         f
         for f in funds
-        if not f["is_segregated"] and not _scheme_name_is_segregated(f.get("scheme_name") or "")
+        if not f["is_segregated"]
+        and not _scheme_name_is_segregated(f.get("scheme_name") or "")
+        # E-2 (2026-08-16 live review #2) — unclaimed transitory pots are not
+        # investable products; same universe-level rationale as side pockets.
+        and not _fund_name_is_unclaimed(f)
     ]
+    # E-1 — NAV-series discontinuity gate (see the scan query above): a series
+    # with a >±50% single-step jump produces garbage returns no matter which
+    # board reads it; excluded at the universe level like freshness below.
+    discontinuity_isins = {r.isin for r in discontinuity_rows}
+    pre_discontinuity_count = len(funds)
+    funds = [f for f in funds if f["isin"] not in discontinuity_isins]
+    logger.info(
+        "leaderboard universe: %d of %d funds dropped by NAV-discontinuity gate",
+        pre_discontinuity_count - len(funds),
+        pre_discontinuity_count,
+    )
     # UNIVERSE-LEVEL NAV-freshness gate (2026-08-16 live review, root-cause fix):
     # dead NAV series (wound-up schemes, discontinued plans) carry metrics anchored
     # to their own last NAV — however old — and top "current" boards with numbers

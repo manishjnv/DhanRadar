@@ -11,6 +11,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
+import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import { FundAvatar } from './FundAvatar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LabelChip } from '@/components/ui/LabelChip';
@@ -43,7 +44,7 @@ export function CategoryLeaders({
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {leaders.slice(0, 3).map((fund, i) => {
         const detailHref = `/mf/fund/${fund.isin}?category=${encodeURIComponent(fund.sebi_category)}`;
-        const name = fund.fund_name_short ?? cleanSchemeName(fund.scheme_name);
+        const name = fundDisplayName(fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)).name;
         const r3 = fund.return_3y_pct;
         return (
           <Link

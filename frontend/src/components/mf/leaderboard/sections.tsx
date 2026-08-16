@@ -31,6 +31,7 @@ import {
   type Fund, type Rail, type RailRow,
 } from './sampleData';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import type {
   LeaderboardHero, LeaderboardBoards, LbBoard,
@@ -110,15 +111,17 @@ function recoveryMonths(r: LbFundRow): string {
  *  a rank/word/multiple rail has no comparable "cat avg %" to show). Absent or
  *  null → row renders exactly as before (no sub line). */
 function fundRailRow(r: LbFundRow, val: string, up?: boolean, catAvg?: number | null): RailRow {
-  const name = fundName(r);
+  const raw = fundName(r);
+  const d = fundDisplayName(raw); // E-3 — display-only short name + qualifier tag
   const sub = catAvg != null ? `cat avg ${catAvg.toFixed(1)}%` : undefined;
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}`, sub, isin: r.isin };
+  return { name: d.name, tag: d.tag, fullName: raw, logo: initialOf(raw), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}`, sub, isin: r.isin };
 }
 function upgradeRailRow(r: LbLabelUpgradeRow): RailRow {
-  const name = fundName(r);
+  const raw = fundName(r);
+  const d = fundDisplayName(raw);
   const from = eduWordFromLabel(r.label_from).word;
   const to = eduWordFromLabel(r.label_to).word;
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val: `${from} → ${to}`, up: true, href: `/mf/fund/${r.isin}`, isin: r.isin };
+  return { name: d.name, tag: d.tag, fullName: raw, logo: initialOf(raw), color: colorFor(r.isin), val: `${from} → ${to}`, up: true, href: `/mf/fund/${r.isin}`, isin: r.isin };
 }
 /** Marks a rail live and swaps in real rows — used for MIXED-coverage sections
  * (per-rail chip, not a section badge). Absent board → untouched sample rail. */
@@ -305,6 +308,7 @@ type T100Row = {
   ring: RingSpec; labelWord: string; labelColor: string; risk: string;
   r3: number | null; r5: number | null; sipWord: string; exp: number | null; aum: number | null;
   rankd: string; trend: 'up' | 'down' | 'flat'; href?: string; rank: number;
+  tag?: string; fullName?: string;
 };
 
 // I4 — Top-100 client-side filters (mobile FilterSheet). Every option maps to a
@@ -334,11 +338,13 @@ function sampleT100Row(fnd: Fund): Omit<T100Row, 'rank'> {
   };
 }
 function liveT100Row(r: LbFundRow): Omit<T100Row, 'rank'> {
-  const name = fundName(r);
+  const raw = fundName(r);
+  const d = fundDisplayName(raw); // E-3 — display-only short name + tag
+  const name = d.name;
   const lbl = eduWordFromLabel(r.verb_label);
   const trend: T100Row['trend'] = (r.rank_delta ?? 0) > 0 ? 'up' : (r.rank_delta ?? 0) < 0 ? 'down' : 'flat';
   return {
-    key: r.isin, name, amc: r.amc_name, cat: r.sebi_category, logo: initialOf(name), color: colorFor(r.isin),
+    key: r.isin, name, tag: d.tag, fullName: raw, amc: r.amc_name, cat: r.sebi_category, logo: initialOf(raw), color: colorFor(r.isin),
     ring: { kind: 'band', band: r.confidence_band, color: lbl.color }, labelWord: lbl.word, labelColor: lbl.color,
     risk: r.riskometer ?? '—', r3: r.return_3y_pct, r5: r.return_5y_pct, sipWord: '—',
     exp: r.expense_ratio_pct, aum: r.aum_crore, rankd: fmtDelta(r.rank_delta), trend,
@@ -472,8 +478,9 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                     <div className="min-w-[220px]">
                       <div>
                         {row.href ? (
-                          <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                          <Link href={row.href} title={row.fullName ?? row.name} onClick={(e) => e.stopPropagation()} className="block text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
                             {row.name}
+                            {row.tag && <span className="ml-1.5 inline-block rounded bg-surface-3 px-1 py-px align-middle text-[8.5px] font-semibold text-ink-secondary">{row.tag}</span>}
                           </Link>
                         ) : (
                           <div className="text-small font-semibold leading-tight text-ink">{row.name}</div>
@@ -550,7 +557,7 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
               <span className="w-7 shrink-0 text-center font-sans text-[15px] font-bold text-ink">{medal(row.rank - 1) ?? `#${row.rank}`}</span>
               <div className="min-w-0 flex-1">
                 {row.href ? (
-                  <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                  <Link href={row.href} title={row.fullName ?? row.name} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
                     {row.name}
                   </Link>
                 ) : (
@@ -629,10 +636,10 @@ function sampleChampView(c: typeof CHAMP[number]): ChampView {
 }
 function liveChampView(c: LbChampionRow): ChampView {
   const wName = fundName(c.winner);
-  const rName = c.runner_up ? fundName(c.runner_up) : '—';
+  const rName = c.runner_up ? fundDisplayName(fundName(c.runner_up)).name : '—';
   const lbl = eduWordFromLabel(c.winner.verb_label);
   return {
-    key: c.category, cat: c.category, winner: wName, wLogo: initialOf(wName), wColor: colorFor(c.winner.isin),
+    key: c.category, cat: c.category, winner: fundDisplayName(wName).name, wLogo: initialOf(wName), wColor: colorFor(c.winner.isin),
     ring: { kind: 'band', band: c.winner.confidence_band, color: lbl.color },
     ret: `${pct1(c.winner.return_3y_pct)} 3Y`, runner: rName,
     rLogo: c.runner_up ? initialOf(rName) : '·', rColor: c.runner_up ? colorFor(c.runner_up.isin) : 'var(--surface-3)',
@@ -821,7 +828,7 @@ function ThreeLensCard({ board }: { board?: LbBoard<LbFundRow> }) {
                 className="grid grid-cols-1 items-center gap-2 rounded-xl border border-line bg-surface-2 p-3 transition-colors hover:border-royal/50 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:grid-cols-[minmax(200px,1.4fr)_repeat(3,1fr)]"
               >
                 <div className="min-w-0">
-                  <div title={name} className="line-clamp-2 text-small font-bold leading-tight text-ink">{name}</div>
+                  <div title={name} className="line-clamp-2 text-small font-bold leading-tight text-ink">{fundDisplayName(name).name}</div>
                   <div className="truncate text-[10.5px] text-ink-muted">{r.sebi_category}</div>
                 </div>
                 {([
