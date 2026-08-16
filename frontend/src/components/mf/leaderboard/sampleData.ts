@@ -121,21 +121,21 @@ export const MOBILE_QUICK: QuickLink[] = [
   { label: 'Index', href: '/mf/explore?category=Other%20Scheme%20-%20Index%20Funds' },
 ];
 
-// ── Discovery shortcuts ──────────────────────────────────────────────────────
-export type Disc = { icon: string; name: string; count: string; color: string; anchor: string };
+// ── Discovery shortcuts (D-4, founder 2026-08-16: compact text chips, no icons,
+// no invented counts; 'Highest Rated · Multi-agency' DELETED — the third-party
+// ratings section was removed with S15, the tile promised a dead surface) ─────
+export type Disc = { name: string; anchor: string };
 export const DISC: Disc[] = [
-  { icon: '🏆', name: 'Best Overall', count: 'Top 100', color: G, anchor: '#top100' },
-  { icon: '📈', name: 'Best Returns', count: '9 boards', color: E, anchor: '#performance' },
-  { icon: '💰', name: 'Best SIP', count: '6 boards', color: B, anchor: '#sip' },
-  { icon: '🛡', name: 'Lowest Risk', count: '8 boards', color: T, anchor: '#risk' },
-  { icon: '⭐', name: 'Highest Rated', count: 'Multi-agency', color: A, anchor: '#top100' },
-  { icon: '📊', name: 'Best Categories', count: '32 winners', color: V, anchor: '#champions' },
-  { icon: '🏦', name: 'Best AMC', count: 'Top houses', color: C, anchor: '#amc' },
-  { icon: '👤', name: 'Best Managers', count: 'Track records', color: P, anchor: '#managers' },
-  { icon: '📉', name: 'Lowest Cost', count: 'Value boards', color: E, anchor: '#value' },
-  { icon: '🚀', name: 'Trending', count: 'Hot now', color: O, anchor: '#trending' },
-  { icon: '🧠', name: 'AI Spotlight', count: 'In-form funds', color: V, anchor: '#intelligence' },
-  { icon: '🌍', name: 'International', count: 'Global funds', color: B, anchor: '#intelligence' },
+  { name: 'Top 100', anchor: '#top100' },
+  { name: 'Category Champions', anchor: '#champions' },
+  { name: 'Best Returns', anchor: '#performance' },
+  { name: 'SIP Lists', anchor: '#sip' },
+  { name: 'Lowest Risk', anchor: '#risk' },
+  { name: 'Best Value', anchor: '#value' },
+  { name: 'Best AMCs', anchor: '#amc' },
+  { name: 'Fund Managers', anchor: '#managers' },
+  { name: 'Trending', anchor: '#trending' },
+  { name: 'AI Spotlight', anchor: '#intelligence' },
 ];
 
 // ── Top 100 funds ────────────────────────────────────────────────────────────
@@ -345,7 +345,7 @@ export const CATNAV: { id: string; label: string }[] = [
   { id: 'market', label: 'Market Now' },
   { id: 'flows', label: 'Flows' },
   { id: 'improved', label: 'Improved' },
+  { id: 'trending', label: 'Trending' },
   { id: 'managers', label: 'Managers' },
   { id: 'amc', label: 'AMCs' },
-  { id: 'trending', label: 'Trending' },
 ];

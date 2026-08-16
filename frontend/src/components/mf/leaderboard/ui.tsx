@@ -245,9 +245,11 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
           // weights. Tiles stay in the wide Top-100/Champions surfaces.
           const inner = (
             <>
-              <span className="w-4 shrink-0 font-sans text-xs font-semibold text-ink-faint">{i + 1}</span>
+              {/* D-2: one token step darker than the old text-ink-faint */}
+              <span className="w-4 shrink-0 font-sans text-xs font-semibold text-ink-muted">{i + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[11.5px] font-medium text-ink">{r.name}</span>
+                {/* D-6: wrap to 2 lines instead of cutting the name; full name on hover */}
+                <span title={r.name} className="block line-clamp-2 text-[11.5px] font-medium leading-snug text-ink">{r.name}</span>
                 {r.isin != null && pfIsins.has(r.isin) && <PortfolioPill />}
               </span>
               {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}

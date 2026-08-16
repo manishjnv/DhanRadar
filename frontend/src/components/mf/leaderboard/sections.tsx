@@ -20,11 +20,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import {
-  Logo, BandRing, BandRingLive, Semicircle, MiniSpark, EduPill, RiskBadge, Card, SoWhat,
-  RichText, HScroll, IconBtn, CTA, DiscCard, MiniLbCard, PortfolioIsinsContext, PortfolioPill,
+  BandRing, BandRingLive, MiniSpark, EduPill, RiskBadge, Card, SoWhat,
+  RichText, HScroll, IconBtn, CTA, MiniLbCard, PortfolioIsinsContext, PortfolioPill,
 } from './ui';
 import {
-  COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
+  COLORS, FUNDS, DISC, CHAMP, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
   HERO_KPIS, HERO_QUICK, REGIME_EXPLAINER,
   PERF_RAIL, SIP_RAIL, RISK_RAIL, VALUE_RAIL, INTEL_RAIL, FLOW_RAIL, IMPROVED_RAIL, TREND_RAIL,
   eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, aum,
@@ -263,10 +263,20 @@ export function CatNav() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S2 — DISCOVERY SHORTCUTS
 // ═══════════════════════════════════════════════════════════════════════════
+// D-4 (founder 2026-08-16): compact text-chip row — the sticky CATNAV already
+// jumps to sections, so the old icon-card grid duplicated it at 3× the height.
 export function DiscoverSection() {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      {DISC.map((d) => <DiscCard key={d.name} {...d} />)}
+    <div className="flex flex-wrap gap-2">
+      {DISC.map((d) => (
+        <a
+          key={d.name}
+          href={d.anchor}
+          className="rounded-lg border border-line bg-surface px-3.5 py-2 text-[12.5px] font-semibold text-ink-secondary shadow-sm transition-colors hover:border-royal hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+        >
+          {d.name}
+        </a>
+      ))}
     </div>
   );
 }
@@ -459,8 +469,7 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
                     </span>
                   </td>
                   <td className="border-b border-line px-3.5 py-2 text-left">
-                    <div className="flex min-w-[220px] items-center gap-2.5">
-                      <Logo letter={row.logo} color={row.color} />
+                    <div className="min-w-[220px]">
                       <div>
                         {row.href ? (
                           <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
@@ -539,7 +548,6 @@ export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?:
               )}
             >
               <span className="w-7 shrink-0 text-center font-sans text-[15px] font-bold text-ink">{medal(row.rank - 1) ?? `#${row.rank}`}</span>
-              <Logo letter={row.logo} color={row.color} size={38} radius={10} font={14} />
               <div className="min-w-0 flex-1">
                 {row.href ? (
                   <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-semibold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
@@ -591,13 +599,6 @@ function CompareTray({ master, selected, live, onClear }: { master: T100Row[]; s
   return (
     <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3.5 rounded-2xl bg-navy px-4 py-3 text-white shadow-lg">
       <span className="text-[12.5px] font-bold">{selected.size} selected</span>
-      <div className="flex">
-        {rows.map((r, k) => (
-          <span key={r.key} className="grid h-[30px] w-[30px] place-items-center rounded-lg font-sans text-[11px] font-extrabold text-white" style={{ background: r.color, border: '2px solid #0B1F3A', marginLeft: k === 0 ? 0 : -8 }}>
-            {r.logo}
-          </span>
-        ))}
-      </div>
       <button
         type="button"
         disabled={isins.length === 0}
@@ -648,21 +649,20 @@ function ChampCard({ c, rail = false }: { c: ChampView; rail?: boolean }) {
         <span>🏆 {c.catHref ? <Link href={c.catHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.cat}</Link> : c.cat}</span>
         <span className="cursor-pointer text-royal">More →</span>
       </div>
+      {/* D-1: letter tiles dropped page-wide; D-6: names wrap 2 lines, full name on hover */}
       <div className="my-3 flex items-center gap-2.5 rounded-xl bg-amber/[0.14] p-2.5">
-        <Logo letter={c.wLogo} color={c.wColor} />
         <div className="min-w-0">
           {c.wHref ? (
-            <Link href={c.wHref} className="block truncate text-[12.5px] font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.winner}</Link>
+            <Link href={c.wHref} title={c.winner} className="block line-clamp-2 text-[12.5px] font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.winner}</Link>
           ) : (
-            <div className="truncate text-[12.5px] font-bold leading-tight text-ink">{c.winner}</div>
+            <div title={c.winner} className="line-clamp-2 text-[12.5px] font-bold leading-tight text-ink">{c.winner}</div>
           )}
           <div className="text-[10px] text-ink-muted">Winner · {c.ret}</div>
         </div>
         <span className="ml-auto shrink-0"><RingCell ring={c.ring} size={28} stroke={4} /></span>
       </div>
-      <div className="flex items-center gap-2.5 px-2.5 py-1 text-[11.5px] text-ink-secondary">
-        <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-md font-sans text-[9px] font-extrabold text-white" style={{ background: c.rColor }}>{c.rLogo}</span>
-        Runner-up · {c.rHref ? <Link href={c.rHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.runner}</Link> : c.runner}
+      <div className="px-2.5 py-1 text-[11.5px] leading-snug text-ink-secondary">
+        Runner-up · {c.rHref ? <Link href={c.rHref} title={c.runner} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.runner}</Link> : c.runner}
       </div>
       <div className="mt-2.5 flex gap-1.5 border-t border-dashed border-line pt-2.5 text-[10.5px] leading-snug text-ink-muted">
         <span className="shrink-0 font-extrabold text-emerald" aria-hidden="true">✓</span>
@@ -820,12 +820,9 @@ function ThreeLensCard({ board }: { board?: LbBoard<LbFundRow> }) {
                 href={`/mf/fund/${r.isin}`}
                 className="grid grid-cols-1 items-center gap-2 rounded-xl border border-line bg-surface-2 p-3 transition-colors hover:border-royal/50 hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 sm:grid-cols-[minmax(200px,1.4fr)_repeat(3,1fr)]"
               >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <Logo letter={initialOf(name)} color={colorFor(r.isin)} />
-                  <div className="min-w-0">
-                    <div className="truncate text-small font-bold text-ink">{name}</div>
-                    <div className="truncate text-[10.5px] text-ink-muted">{r.sebi_category}</div>
-                  </div>
+                <div className="min-w-0">
+                  <div title={name} className="line-clamp-2 text-small font-bold leading-tight text-ink">{name}</div>
+                  <div className="truncate text-[10.5px] text-ink-muted">{r.sebi_category}</div>
                 </div>
                 {([
                   ['Return · 3Y', pctSigned(r.return_3y_pct), E],
@@ -911,55 +908,58 @@ export function TrendingSection({ boards }: { boards?: LeaderboardBoards } = {})
 // ═══════════════════════════════════════════════════════════════════════════
 // S10 — CURRENT MARKET (DMMI)
 // ═══════════════════════════════════════════════════════════════════════════
-function DmmiList({ rows }: { rows: { name: string; logo: string; color: string }[] }) {
-  return (
-    <div>
-      {rows.map((r) => (
-        <div key={r.name} className="flex items-center gap-2 py-1 text-[12px]">
-          <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-md font-sans text-[9px] font-extrabold text-white" style={{ background: r.color }}>{r.logo}</span>
-          <span className="flex-1 font-semibold text-ink-secondary">{r.name}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-export function MarketSection({ regime }: { regime?: string } = {}) {
+// D-5 (founder 2026-08-16): the four sample lists ("Best funds for now" /
+// "Out of favour now") were advisory-adjacent framing over data we do NOT have
+// (regime fit needs ≥1y mood history — the S10 blocker), and the numeric
+// semicircle + static takeaway were hard-coded sample values presented as
+// current fact. Replaced by the real regime WORD (+ band, never a number) and
+// three backed, clickable cards — describe, never predict.
+const MARKET_CARDS: { label: string; body: string; href: string; cta: string }[] = [
+  {
+    label: 'What this phase means',
+    body: 'A plain-words guide to the current market mood — what phases like this have historically meant for volatility and steady investing.',
+    href: '/mood',
+    cta: 'Explore Market Mood →',
+  },
+  {
+    label: 'Steady SIP Starters',
+    body: 'A published-rule list: large-cap and hybrid funds with the steadiest rolling 1-year returns — for learning what steadier funds look like.',
+    href: '#sip',
+    cta: 'See the SIP boards →',
+  },
+  {
+    label: 'Smallest falls — growth funds',
+    body: 'Which active growth funds fell least from their peaks — the honest risk lens on real NAV history.',
+    href: '#risk',
+    cta: 'See the risk boards →',
+  },
+];
+
+export function MarketSection({ regime, moodWord, moodBand, moodColor }: { regime?: string; moodWord?: string; moodBand?: string; moodColor?: string } = {}) {
   const regimeNote = regime ? REGIME_EXPLAINER[regime] : undefined;
-  const blocks: { label: string; color: string; rows: typeof DMMI.best }[] = [
-    { label: 'Best funds for now', color: 'var(--emerald)', rows: DMMI.best },
-    { label: 'Best SIP today', color: 'var(--royal)', rows: DMMI.sip },
-    { label: 'Best lumpsum today', color: 'var(--amber)', rows: DMMI.lump },
-    { label: 'Out of favour now', color: 'var(--red)', rows: DMMI.out },
-  ];
   return (
     <Card className="p-5">
-      <div className="grid items-center gap-6 lg:grid-cols-[230px_1fr]">
+      <div className="grid items-center gap-6 lg:grid-cols-[210px_1fr]">
         <div className="text-center">
-          <Semicircle val={DMMI.value} />
-          <div className="font-sans text-xl font-bold text-amber">{DMMI.mood}</div>
-          <div className="mt-0.5 text-[11.5px] text-ink-muted">{DMMI.phase}</div>
-          <div className="mt-2.5">
-            <span className="rounded-lg bg-royal/[0.08] px-3 py-1.5 font-mono text-[11px] font-bold text-royal">{DMMI.strategy}</span>
-          </div>
+          <div className="font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-ink-muted">Market mood today</div>
+          <div className="mt-1 font-sans text-xl font-bold" style={{ color: moodColor ?? 'var(--text-primary)' }}>{moodWord ?? 'Updating…'}</div>
+          {moodBand && <div className="mt-0.5 text-[11.5px] text-ink-muted">confidence: {moodBand}</div>}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {blocks.map((bl) => (
-            <div key={bl.label} className="rounded-xl border border-line p-3.5">
-              <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.03em]" style={{ color: bl.color }}>{bl.label}</div>
-              <DmmiList rows={bl.rows} />
-            </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {MARKET_CARDS.map((c) => (
+            <Link
+              key={c.label}
+              href={c.href}
+              className="group rounded-xl border border-line p-3.5 transition-colors hover:border-royal/50 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+            >
+              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.03em] text-ink">{c.label}</div>
+              <p className="m-0 text-caption leading-relaxed text-ink-muted">{c.body}</p>
+              <div className="mt-2 text-[12px] font-semibold text-royal group-hover:underline">{c.cta}</div>
+            </Link>
           ))}
         </div>
       </div>
-      <div className="mt-3.5">
-        <Link href="/mood" className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
-          Explore Market Mood →
-        </Link>
-      </div>
-      <SoWhat>
-        <RichText text="**Market mood is Cautiously Optimistic — typical phase: accumulation.** In similar phases, Flexi Cap & quality Small Cap funds led. This is an educational read of conditions, not a recommendation." />
-      </SoWhat>
-      {regimeNote && <p className="mt-3 text-caption leading-relaxed text-ink-muted">{regimeNote}</p>}
+      {regimeNote && <p className="mt-3.5 text-caption leading-relaxed text-ink-muted">{regimeNote}</p>}
     </Card>
   );
 }
@@ -1018,7 +1018,7 @@ export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.key}>
-                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-muted">{i + 1}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-secondary">{i + 1}</td>
                   <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <div className="flex items-center gap-2.5">
                       <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
@@ -1045,7 +1045,7 @@ export function ManagersSection({ live }: { live?: LbManagerRow[] } = {}) {
       <Card className="p-4 lg:hidden">
         {rows.map((m, i) => (
           <div key={m.key} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
-            <span className="w-4 shrink-0 font-sans font-semibold text-ink-muted">{i + 1}</span>
+            <span className="w-4 shrink-0 font-sans font-semibold text-ink-secondary">{i + 1}</span>
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-sans text-xs font-bold text-white" style={{ background: m.color }}>{m.av}</span>
             <div className="min-w-0 flex-1">
               <div className="truncate text-small font-bold text-ink">{m.name}</div>
@@ -1118,10 +1118,9 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.key}>
-                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-muted">{i + 1}</td>
+                  <td className="border-b border-line px-3.5 py-2.5 text-left font-sans font-semibold text-ink-secondary">{i + 1}</td>
                   <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <div className="flex items-center gap-2.5">
-                      <Logo letter={m.av} color={m.color} />
                       {live ? (
                         <Link href={`/mf/explore?q=${encodeURIComponent(m.name)}`} className="font-medium text-ink hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
                           {m.name}
@@ -1147,8 +1146,7 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
       <Card className="p-4 lg:hidden">
         {rows.map((m, i) => (
           <div key={m.key} className="flex items-center gap-3 border-b border-line py-3 last:border-b-0">
-            <span className="w-4 shrink-0 font-sans font-semibold text-ink-muted">{i + 1}</span>
-            <Logo letter={m.av} color={m.color} size={36} radius={9} />
+            <span className="w-4 shrink-0 font-sans font-semibold text-ink-secondary">{i + 1}</span>
             <div className="min-w-0 flex-1">
               {live ? (
                 <Link href={`/mf/explore?q=${encodeURIComponent(m.name)}`} className="block truncate text-small font-bold text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
