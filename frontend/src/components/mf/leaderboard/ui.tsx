@@ -14,6 +14,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { toBand, ringColor, riskColor } from './sampleData';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
@@ -186,16 +187,16 @@ export function CTA({ children, variant = 'ghost', className, ...rest }: React.B
 }
 
 // ── Discovery shortcut card ──────────────────────────────────────────────────
-export function DiscCard({ icon, name, count, color }: { icon: string; name: string; count?: string; color: string }) {
+export function DiscCard({ icon, name, count, color, anchor }: { icon: string; name: string; count?: string; color: string; anchor: string }) {
   return (
-    <button
-      type="button"
+    <a
+      href={anchor}
       className="group cursor-pointer rounded-xl border border-line bg-surface p-4 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:border-royal hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
     >
       <span className="mx-auto mb-2.5 grid h-11 w-11 place-items-center rounded-xl text-xl" style={{ background: `${color}1A`, color }} aria-hidden="true">{icon}</span>
       <span className="block text-small font-bold leading-tight text-ink">{name}</span>
       {count && <span className="mt-0.5 block text-caption text-ink-muted">{count}</span>}
-    </button>
+    </a>
   );
 }
 
@@ -215,15 +216,26 @@ export function MiniLbCard({ rail, width = 280, spark = true }: { rail: Rail; wi
       {rail.rows.length === 0 ? (
         <div className="px-4 py-3 text-caption text-ink-muted">No funds yet</div>
       ) : (
-        rail.rows.map((r, i) => (
-          <div key={i} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-b-0">
-            <span className="w-4 shrink-0 font-sans text-xs font-extrabold text-ink-faint">{i + 1}</span>
-            <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
-            <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
-            {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
-            <span className="shrink-0 font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
-          </div>
-        ))
+        rail.rows.map((r, i) => {
+          const inner = (
+            <>
+              <span className="w-4 shrink-0 font-sans text-xs font-extrabold text-ink-faint">{i + 1}</span>
+              <Logo letter={r.logo} color={r.color} size={26} radius={7} font={10} />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-ink">{r.name}</span>
+              {spark && <MiniSpark seed={r.name.charCodeAt(0) * 3} up={r.up !== false} />}
+              <span className="shrink-0 font-mono text-xs font-extrabold" style={{ color: rail.color }}>{r.val}</span>
+            </>
+          );
+          return r.href ? (
+            <Link key={i} href={r.href} className="flex cursor-pointer items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-b-0 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
+              {inner}
+            </Link>
+          ) : (
+            <div key={i} className="flex items-center gap-2.5 border-b border-line px-4 py-2.5 last:border-b-0">
+              {inner}
+            </div>
+          );
+        })
       )}
     </div>
   );

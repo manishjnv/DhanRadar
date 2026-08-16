@@ -16,6 +16,8 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import {
   Logo, BandRing, BandRingLive, Semicircle, MiniSpark, EduPill, RiskBadge, Card, SoWhat,
@@ -105,13 +107,13 @@ function recoveryMonths(r: LbFundRow): string {
 }
 function fundRailRow(r: LbFundRow, val: string, up?: boolean): RailRow {
   const name = fundName(r);
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up };
+  return { name, logo: initialOf(name), color: colorFor(r.isin), val, up, href: `/mf/fund/${r.isin}` };
 }
 function upgradeRailRow(r: LbLabelUpgradeRow): RailRow {
   const name = fundName(r);
   const from = eduWordFromLabel(r.label_from).word;
   const to = eduWordFromLabel(r.label_to).word;
-  return { name, logo: initialOf(name), color: colorFor(r.isin), val: `${from} → ${to}`, up: true };
+  return { name, logo: initialOf(name), color: colorFor(r.isin), val: `${from} → ${to}`, up: true, href: `/mf/fund/${r.isin}` };
 }
 /** Marks a rail live and swaps in real rows — used for MIXED-coverage sections
  * (per-rail chip, not a section badge). Absent board → untouched sample rail. */
@@ -154,11 +156,16 @@ export function HeroSection({ hero, moodWord, moodBand, moodColor }: {
   moodColor?: string;
 } = {}) {
   const [active, setActive] = React.useState(0);
-  const kpis = hero ? [
+  const kpis: (typeof HERO_KPIS[number] & { href?: string })[] = hero ? [
     { label: 'Funds Ranked', value: hero.funds_ranked.toLocaleString('en-IN') },
     { label: 'Categories', value: String(hero.categories) },
     { label: 'Live Boards', value: String(hero.live_board_count) },
-    { label: 'Top Rated Today', value: hero.top_fund ? (hero.top_fund.fund_name_short ?? hero.top_fund.scheme_name) : '—', small: true },
+    {
+      label: 'Top Rated Today',
+      value: hero.top_fund ? (hero.top_fund.fund_name_short ?? hero.top_fund.scheme_name) : '—',
+      small: true,
+      href: hero.top_fund ? `/mf/fund/${hero.top_fund.isin}` : undefined,
+    },
     { label: 'Trending', value: hero.trending_category ?? '—', small: true },
     {
       label: 'DMMI',
@@ -178,28 +185,39 @@ export function HeroSection({ hero, moodWord, moodBand, moodColor }: {
           Discover India’s highest-rated mutual funds using DhanRadar Intelligence — best funds first, every question answered.
         </p>
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl bg-white/10 lg:grid-cols-6">
-          {kpis.map((k) => (
-            <div key={k.label} className="bg-white/[0.04] px-3.5 py-3">
-              <div className="text-[9.5px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{k.label}</div>
-              <div className="mt-1 font-sans font-extrabold leading-tight" style={{ fontSize: k.small ? 14 : 19, color: k.valueColor }}>
-                {k.value}{k.sub && <span className="ml-1 text-[11px] font-semibold opacity-85">{k.sub}</span>}
+          {kpis.map((k) => {
+            const inner = (
+              <>
+                <div className="text-[9.5px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{k.label}</div>
+                <div className="mt-1 font-sans font-extrabold leading-tight" style={{ fontSize: k.small ? 14 : 19, color: k.valueColor }}>
+                  {k.value}{k.sub && <span className="ml-1 text-[11px] font-semibold opacity-85">{k.sub}</span>}
+                </div>
+              </>
+            );
+            return k.href ? (
+              <Link key={k.label} href={k.href} className="block bg-white/[0.04] px-3.5 py-3 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
+                {inner}
+              </Link>
+            ) : (
+              <div key={k.label} className="bg-white/[0.04] px-3.5 py-3">
+                {inner}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {HERO_QUICK.map((t, i) => (
-            <button
-              key={t}
-              type="button"
+            <Link
+              key={t.label}
+              href={t.href}
               onClick={() => setActive(i)}
               className={cn(
                 'shrink-0 whitespace-nowrap rounded-xl border px-3.5 py-2 text-caption font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
                 active === i ? 'border-white bg-white text-navy' : 'border-white/20 bg-white/10 text-white hover:bg-white/20',
               )}
             >
-              {t}
-            </button>
+              {t.label}
+            </Link>
           ))}
         </div>
       </div>
@@ -269,7 +287,7 @@ type T100Row = {
   key: string; name: string; amc: string; cat: string; logo: string; color: string;
   ring: RingSpec; labelWord: string; labelColor: string; risk: string;
   r3: number | null; r5: number | null; sipWord: string; exp: number | null; aum: number | null;
-  rankd: string; trend: 'up' | 'down' | 'flat';
+  rankd: string; trend: 'up' | 'down' | 'flat'; href?: string;
 };
 function sampleT100Row(fnd: Fund): T100Row {
   const lbl = eduLabel(fnd.score);
@@ -289,10 +307,12 @@ function liveT100Row(r: LbFundRow): T100Row {
     ring: { kind: 'band', band: r.confidence_band, color: lbl.color }, labelWord: lbl.word, labelColor: lbl.color,
     risk: r.riskometer ?? '—', r3: r.return_3y_pct, r5: r.return_5y_pct, sipWord: '—',
     exp: r.expense_ratio_pct, aum: r.aum_crore, rankd: fmtDelta(r.rank_delta), trend,
+    href: `/mf/fund/${r.isin}`,
   };
 }
 
 export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
+  const router = useRouter();
   const [tab, setTab] = React.useState('10');
   const [mobileAll, setMobileAll] = React.useState(false);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
@@ -355,7 +375,11 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
             {list.map((row, i) => {
               const up = row.trend === 'up', down = row.trend === 'down';
               return (
-                <tr key={row.key} className={cn('hover:bg-surface-2', i < 3 && 'bg-amber/[0.08]')}>
+                <tr
+                  key={row.key}
+                  className={cn('hover:bg-surface-2', i < 3 && 'bg-amber/[0.08]', row.href && 'cursor-pointer')}
+                  onClick={row.href ? () => router.push(row.href!) : undefined}
+                >
                   <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <span className="inline-flex w-10 items-center gap-1.5 font-sans text-base font-extrabold text-ink">
                       {medal(i) ?? `#${i + 1}`}
@@ -365,8 +389,25 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
                     <div className="flex min-w-[220px] items-center gap-2.5">
                       <Logo letter={row.logo} color={row.color} />
                       <div>
-                        <div className="text-small font-bold leading-tight text-ink">{row.name}</div>
-                        <div className="mt-0.5 text-[11px] font-medium text-ink-muted">{row.amc} · {row.cat}</div>
+                        {row.href ? (
+                          <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block text-small font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                            {row.name}
+                          </Link>
+                        ) : (
+                          <div className="text-small font-bold leading-tight text-ink">{row.name}</div>
+                        )}
+                        <div className="mt-0.5 text-[11px] font-medium text-ink-muted">
+                          {row.amc} ·{' '}
+                          {row.href ? (
+                            <Link
+                              href={`/mf/explore?category=${encodeURIComponent(row.cat)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded"
+                            >
+                              {row.cat}
+                            </Link>
+                          ) : row.cat}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -406,13 +447,19 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
       <div className="md:hidden">
         {mobileList.map((row, i) => {
           const up = row.trend === 'up', down = row.trend === 'down';
+          // ponytail: compare-toggle already owns the row tap; nesting a Link
+          // inside a <button> is invalid HTML, so the wrapper becomes a
+          // role="button" div (keyboard-equivalent) and the fund-name Link
+          // (stopPropagation) is the accessible fund-page entry point.
           return (
-            <button
+            <div
               key={row.key}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => toggle(i)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(i); } }}
               className={cn(
-                'mb-2 flex w-full items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                'mb-2 flex w-full cursor-pointer items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
                 i < 3 && 'bg-amber/[0.08]',
                 selected.has(i) && 'ring-2 ring-royal/40',
               )}
@@ -420,7 +467,13 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
               <span className="w-7 shrink-0 text-center font-sans text-[17px] font-extrabold text-ink">{medal(i) ?? `#${i + 1}`}</span>
               <Logo letter={row.logo} color={row.color} size={38} radius={10} font={14} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-small font-bold leading-tight text-ink">{row.name}</div>
+                {row.href ? (
+                  <Link href={row.href} onClick={(e) => e.stopPropagation()} className="block truncate text-small font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                    {row.name}
+                  </Link>
+                ) : (
+                  <div className="truncate text-small font-bold leading-tight text-ink">{row.name}</div>
+                )}
                 <div className="mt-0.5 text-[10.5px] text-ink-muted">{row.amc} · {row.cat}</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <EduPill word={row.labelWord} color={row.labelColor} />
@@ -429,7 +482,7 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
                 </div>
               </div>
               <RingCell ring={row.ring} size={40} stroke={5} />
-            </button>
+            </div>
           );
         })}
         <button
@@ -477,6 +530,7 @@ function CompareTray({ master, selected, onClear }: { master: T100Row[]; selecte
 type ChampView = {
   key: string; cat: string; winner: string; wLogo: string; wColor: string; ring: RingSpec;
   ret: string; runner: string; rLogo: string; rColor: string; why: string;
+  wHref?: string; rHref?: string; catHref?: string;
 };
 function sampleChampView(c: typeof CHAMP[number]): ChampView {
   return {
@@ -494,26 +548,33 @@ function liveChampView(c: LbChampionRow): ChampView {
     ret: `${pct1(c.winner.return_3y_pct)} 3Y`, runner: rName,
     rLogo: c.runner_up ? initialOf(rName) : '·', rColor: c.runner_up ? colorFor(c.runner_up.isin) : 'var(--surface-3)',
     why: c.why,
+    wHref: `/mf/fund/${c.winner.isin}`,
+    rHref: c.runner_up ? `/mf/fund/${c.runner_up.isin}` : undefined,
+    catHref: `/mf/explore?category=${encodeURIComponent(c.category)}`,
   };
 }
 function ChampCard({ c, rail = false }: { c: ChampView; rail?: boolean }) {
   return (
     <div className={cn('rounded-xl border border-line bg-surface p-4 shadow-sm', rail && 'w-60 shrink-0')} style={rail ? { scrollSnapAlign: 'start' } : undefined}>
       <div className="flex items-center justify-between font-mono text-[9.5px] font-bold uppercase tracking-[0.04em] text-ink-muted">
-        <span>🏆 {c.cat}</span>
+        <span>🏆 {c.catHref ? <Link href={c.catHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.cat}</Link> : c.cat}</span>
         <span className="cursor-pointer text-royal">More →</span>
       </div>
       <div className="my-3 flex items-center gap-2.5 rounded-xl bg-amber/[0.14] p-2.5">
         <Logo letter={c.wLogo} color={c.wColor} />
         <div className="min-w-0">
-          <div className="truncate text-[12.5px] font-bold leading-tight text-ink">{c.winner}</div>
+          {c.wHref ? (
+            <Link href={c.wHref} className="block truncate text-[12.5px] font-bold leading-tight text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.winner}</Link>
+          ) : (
+            <div className="truncate text-[12.5px] font-bold leading-tight text-ink">{c.winner}</div>
+          )}
           <div className="text-[10px] text-ink-muted">Winner · {c.ret}</div>
         </div>
         <span className="ml-auto shrink-0"><RingCell ring={c.ring} size={28} stroke={4} /></span>
       </div>
       <div className="flex items-center gap-2.5 px-2.5 py-1 text-[11.5px] text-ink-secondary">
         <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-md font-sans text-[9px] font-extrabold text-white" style={{ background: c.rColor }}>{c.rLogo}</span>
-        Runner-up · {c.runner}
+        Runner-up · {c.rHref ? <Link href={c.rHref} className="hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">{c.runner}</Link> : c.runner}
       </div>
       <div className="mt-2.5 flex gap-1.5 border-t border-dashed border-line pt-2.5 text-[10.5px] leading-snug text-ink-muted">
         <span className="shrink-0 font-extrabold text-emerald" aria-hidden="true">✓</span>
@@ -620,7 +681,10 @@ export function FlowsSection({ boards }: { boards?: LeaderboardBoards } = {}) {
         title: 'Category Inflow Leaders', q: 'AMFI category-level net flow', icon: FLOW_RAIL[0].icon, color: FLOW_RAIL[0].color, live: true,
         rows: boards.category_inflows.rows.map((r): RailRow => {
           const val = `${r.net_flow_cr >= 0 ? '+' : '−'}${aum(Math.abs(r.net_flow_cr))}`;
-          return { name: r.category, logo: initialOf(r.category), color: colorFor(r.category), val, up: r.net_flow_cr >= 0 };
+          return {
+            name: r.category, logo: initialOf(r.category), color: colorFor(r.category), val, up: r.net_flow_cr >= 0,
+            href: `/mf/explore?category=${encodeURIComponent(r.category)}`,
+          };
         }),
       }
     : FLOW_RAIL[0];
@@ -693,6 +757,11 @@ export function MarketSection() {
             </div>
           ))}
         </div>
+      </div>
+      <div className="mt-3.5">
+        <Link href="/mood" className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+          Explore Market Mood →
+        </Link>
       </div>
       <SoWhat>
         <RichText text="**Market mood is Cautiously Optimistic — typical phase: accumulation.** In similar phases, Flexi Cap & quality Small Cap funds led. This is an educational read of conditions, not a recommendation." />

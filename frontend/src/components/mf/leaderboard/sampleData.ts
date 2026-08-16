@@ -92,27 +92,50 @@ export const HERO_KPIS: { label: string; value: string; sub?: string; valueColor
   { label: 'Trending', value: 'Small Cap', small: true },
   { label: 'DMMI', value: '62', sub: 'Caut+', valueColor: '#FBBF24' },
 ];
-export const HERO_QUICK = [
-  'Top Rated', 'Best SIP', 'Highest Returns', 'Lowest Risk', 'Best Value', 'Most Consistent',
-  'Trending', 'Hidden Gems', 'AI Picks', 'Tax Saving', 'Retirement', 'Index', 'International',
+export type QuickLink = { label: string; href: string };
+export const HERO_QUICK: QuickLink[] = [
+  { label: 'Top Rated', href: '#top100' },
+  { label: 'Best SIP', href: '#sip' },
+  { label: 'Highest Returns', href: '#performance' },
+  { label: 'Lowest Risk', href: '#risk' },
+  { label: 'Best Value', href: '#value' },
+  { label: 'Most Consistent', href: '#sip' },
+  { label: 'Trending', href: '#trending' },
+  { label: 'Hidden Gems', href: '#intelligence' },
+  { label: 'AI Spotlight', href: '#intelligence' },
+  { label: 'Tax Saving', href: '/mf/explore?category=Equity%20Scheme%20-%20ELSS' },
+  { label: 'Retirement', href: '/mf/explore?category=Solution%20Oriented%20Scheme%20-%20Retirement%20Fund' },
+  { label: 'Index', href: '/mf/explore?category=Other%20Scheme%20-%20Index%20Funds' },
+  { label: 'International', href: '/mf/explore' },
 ];
-export const MOBILE_QUICK = ['Top Rated', 'Best SIP', 'Highest Returns', 'Lowest Risk', 'Best Value', 'Trending', 'Hidden Gems', 'AI Picks', 'ELSS', 'Index'];
+export const MOBILE_QUICK: QuickLink[] = [
+  { label: 'Top Rated', href: '#top100' },
+  { label: 'Best SIP', href: '#sip' },
+  { label: 'Highest Returns', href: '#performance' },
+  { label: 'Lowest Risk', href: '#risk' },
+  { label: 'Best Value', href: '#value' },
+  { label: 'Trending', href: '#trending' },
+  { label: 'Hidden Gems', href: '#intelligence' },
+  { label: 'AI Spotlight', href: '#intelligence' },
+  { label: 'ELSS', href: '/mf/explore?category=Equity%20Scheme%20-%20ELSS' },
+  { label: 'Index', href: '/mf/explore?category=Other%20Scheme%20-%20Index%20Funds' },
+];
 
 // ── Discovery shortcuts ──────────────────────────────────────────────────────
-export type Disc = { icon: string; name: string; count: string; color: string };
+export type Disc = { icon: string; name: string; count: string; color: string; anchor: string };
 export const DISC: Disc[] = [
-  { icon: '🏆', name: 'Best Overall', count: 'Top 100', color: G },
-  { icon: '📈', name: 'Best Returns', count: '9 boards', color: E },
-  { icon: '💰', name: 'Best SIP', count: '6 boards', color: B },
-  { icon: '🛡', name: 'Lowest Risk', count: '8 boards', color: T },
-  { icon: '⭐', name: 'Highest Rated', count: 'Multi-agency', color: A },
-  { icon: '📊', name: 'Best Categories', count: '32 winners', color: V },
-  { icon: '🏦', name: 'Best AMC', count: 'Top houses', color: C },
-  { icon: '👤', name: 'Best Managers', count: 'Track records', color: P },
-  { icon: '📉', name: 'Lowest Cost', count: 'Value boards', color: E },
-  { icon: '🚀', name: 'Trending', count: 'Hot now', color: O },
-  { icon: '🧠', name: 'AI Picks', count: 'Smart picks', color: V },
-  { icon: '🌍', name: 'International', count: 'Global funds', color: B },
+  { icon: '🏆', name: 'Best Overall', count: 'Top 100', color: G, anchor: '#top100' },
+  { icon: '📈', name: 'Best Returns', count: '9 boards', color: E, anchor: '#performance' },
+  { icon: '💰', name: 'Best SIP', count: '6 boards', color: B, anchor: '#sip' },
+  { icon: '🛡', name: 'Lowest Risk', count: '8 boards', color: T, anchor: '#risk' },
+  { icon: '⭐', name: 'Highest Rated', count: 'Multi-agency', color: A, anchor: '#top100' },
+  { icon: '📊', name: 'Best Categories', count: '32 winners', color: V, anchor: '#champions' },
+  { icon: '🏦', name: 'Best AMC', count: 'Top houses', color: C, anchor: '#amc' },
+  { icon: '👤', name: 'Best Managers', count: 'Track records', color: P, anchor: '#managers' },
+  { icon: '📉', name: 'Lowest Cost', count: 'Value boards', color: E, anchor: '#value' },
+  { icon: '🚀', name: 'Trending', count: 'Hot now', color: O, anchor: '#trending' },
+  { icon: '🧠', name: 'AI Spotlight', count: 'In-form funds', color: V, anchor: '#intelligence' },
+  { icon: '🌍', name: 'International', count: 'Global funds', color: B, anchor: '#intelligence' },
 ];
 
 // ── Top 100 funds ────────────────────────────────────────────────────────────
@@ -170,7 +193,7 @@ export const CHAMP: Champ[] = [
 ];
 
 // ── Mini-leaderboard rails ───────────────────────────────────────────────────
-export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean };
+export type RailRow = { name: string; logo: string; color: string; val: string; up?: boolean; href?: string };
 /** `live` marks a rail as fed by a wired board (renders a small LiveBadge in its header). */
 export type Rail = { title: string; q: string; icon: string; color: string; rows: RailRow[]; live?: boolean };
 

@@ -70,7 +70,7 @@ export const SEARCH_TAGS = ['Small Cap', 'Large Cap', 'Healthcare', 'Best SIP', 
 // ── S3 quick-discovery chips (15) ──
 export const DISCOVERY_CHIPS = [
   '🔥 Trending', '⭐ Top Rated', '💰 Highest SIP Return', '🛡 Lowest Risk', '📈 Momentum Leaders',
-  '💎 Undervalued', '🚀 Fastest AUM', '🏆 Consistent', '🧠 AI Picks', '💸 Lowest Cost',
+  '💎 Undervalued', '🚀 Fastest AUM', '🏆 Consistent', '🧠 AI Spotlight', '💸 Lowest Cost',
   '❤️ Beginner Friendly', '🎯 Retirement', '🏦 Tax Saving ELSS', '🌍 International', '📊 Index Funds',
 ];
 
