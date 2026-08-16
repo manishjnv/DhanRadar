@@ -380,6 +380,27 @@ async def _batch_nav_upserts(
             yield batch
 
 
+# Side-pocket naming variants across AMCs (prod audit 2026-08-16: 358 schemes
+# carry "segregated" in the name, only 170 were flagged by the old
+# '"segregated portfolio" in name' substring):
+#   "... - Segregated Portfolio 1"        (Franklin/Nippon side pockets)  → flag
+#   "UTI - Bond Fund ( Segregated - 17022020 )"                           → flag
+#   "Franklin ... (No. of segregated portfolios- 3)"    MAIN scheme note  → never
+#   "Nippon ... (Existing Number of Segregated Portfolio...)" MAIN scheme → never
+_SEGREGATED_PAREN_RE = re.compile(r"\(\s*segregated\s*-", re.IGNORECASE)
+_SEGREGATED_COUNT_MENTION_RE = re.compile(r"(no\.|number)\s*of\s*segregated", re.IGNORECASE)
+
+
+def _scheme_name_is_segregated(scheme_name: str) -> bool:
+    """True only for an actual side-pocket scheme — never for a MAIN scheme whose
+    name merely counts its segregated portfolios (flagging those would exclude
+    real investable funds platform-wide)."""
+    name_l = scheme_name.lower()
+    if _SEGREGATED_PAREN_RE.search(name_l):
+        return True
+    return "segregated portfolio" in name_l and not _SEGREGATED_COUNT_MENTION_RE.search(name_l)
+
+
 def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
     """
     Map a list of NavRow → list of dicts ready for mf_funds upsert.
@@ -407,7 +428,7 @@ def _navrows_to_fund_upserts(rows: Any) -> list[dict]:
         if isin is None:
             continue
         plan_type, option_type = parse_plan_option(row.scheme_name)
-        is_segregated = "segregated portfolio" in row.scheme_name.lower()
+        is_segregated = _scheme_name_is_segregated(row.scheme_name)
         # B66 (2026-07-10): umbrella legacy headers ("Income"/"Growth", ~5.5k
         # live rows) can't classify from the header — the scheme NAME usually
         # states the category; conservative inference fills only when the
@@ -4835,8 +4856,15 @@ async def _leaderboard_refresh_pipeline() -> str:
     # reach (a Segregated Portfolio 1 topped risk_drawdown at 0.0% after the
     # growth-scope fix). Side pockets are not investable schemes — no board,
     # count, or takeaway should ever include one. The per-builder is_segregated
-    # guards stay as belt-and-braces.
-    funds = [f for f in funds if not f["is_segregated"]]
+    # guards stay as belt-and-braces. The NAME check backs up the DB flag: the
+    # flag derivation missed AMC naming variants (UTI "( Segregated - date )")
+    # until 2026-08-16 and stored flags lag until the next nav_daily_fetch
+    # re-derives them.
+    funds = [
+        f
+        for f in funds
+        if not f["is_segregated"] and not _scheme_name_is_segregated(f.get("scheme_name") or "")
+    ]
     funds_by_isin = {f["isin"]: f for f in funds}
 
     # wealth_creator's TRUE since-launch multiples (design correction, §8) —
