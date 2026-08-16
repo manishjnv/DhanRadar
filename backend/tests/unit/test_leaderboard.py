@@ -16,6 +16,11 @@ Coverage:
      absent from `boards` (never a 500, never a fabricated empty entry).
   4. Leak tests — no FORBIDDEN_SCORE_KEYS key can reach a serialized response,
      whether smuggled in (fail-closed raise) or via the real builder path.
+  5. Phase 2 data-quality hardening (2026-08-16) — the DATA-ARTIFACT plausibility
+     guards on sip_3y/sip_5y/sip_consistency/risk_recovery/wealth_creator: implausible
+     SIP-XIRR cap, is_segregated exclusion, non-growth-category exclusion, the
+     since-launch CAGR bound, and the growth-category helper against real
+     mf/taxonomy.py canonical strings.
 """
 
 from __future__ import annotations
@@ -33,12 +38,13 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_hero,
     _build_leaderboard_label_upgrades,
     _build_leaderboard_movers,
-    _build_leaderboard_perf_rail,
     _build_leaderboard_risk_recovery,
     _build_leaderboard_sip_consistency,
+    _build_leaderboard_sip_rail,
     _build_leaderboard_top100,
     _build_leaderboard_wealth_creator,
     _dedupe_leaderboard_variants,
+    _leaderboard_is_growth_category,
     _leaderboard_is_stale,
     _since_launch_multiple,
 )
@@ -58,7 +64,14 @@ def _assert_no_advisory_verb(sentence: str) -> None:
     assert not hit, f"advisory verb {hit} leaked into: {sentence!r}"
 
 
-def _fund(isin: str, *, category: str = "Large Cap Fund", rank: int = 1, total: int = 10, **extra: Any) -> dict:
+def _fund(
+    isin: str,
+    *,
+    category: str = "Equity Scheme - Large Cap Fund",
+    rank: int = 1,
+    total: int = 10,
+    **extra: Any,
+) -> dict:
     base = {
         "isin": isin,
         "fund_name_short": None,
@@ -81,6 +94,7 @@ def _fund(isin: str, *, category: str = "Large Cap Fund", rank: int = 1, total: 
         "volatility_pct": 5.0,
         "launch_date": None,
         "contributing_signals": [],
+        "is_segregated": False,
     }
     base.update(extra)
     return base
@@ -242,8 +256,8 @@ def test_staleness_guard_skips_beyond_3_days() -> None:
 
 # ---------------------------------------------------------------------------
 # 2f — Phase 2 boards (docs/features/leaderboard-data-backend.md §8): wealth
-# creator, SIP rails (reused _build_leaderboard_perf_rail), SIP consistency,
-# drawdown recovery.
+# creator, SIP rails (_build_leaderboard_sip_rail), SIP consistency, drawdown
+# recovery.
 # ---------------------------------------------------------------------------
 
 
@@ -262,6 +276,20 @@ def test_since_launch_multiple_computes_ratio_over_5y_guard() -> None:
     assert result == 4.0
 
 
+def test_since_launch_multiple_cagr_guard_rejects_implausible_compounding() -> None:
+    """178x over 12y implies ~54%/yr — the real prod artifact (Edelweiss Liquid Fund
+    178.78x) off a corrupted early NAV row, not genuine compounding."""
+    result = _since_launch_multiple(date(2014, 1, 1), 1.0, date(2026, 1, 1), 178.0)
+    assert result is None
+
+
+def test_since_launch_multiple_cagr_guard_keeps_honest_high_multiple() -> None:
+    """8x over 15y implies ~15%/yr — a real, plausible long-run equity multiple; the
+    CAGR guard must not reject an honest high-multiple fund."""
+    result = _since_launch_multiple(date(2011, 1, 1), 25.0, date(2026, 1, 1), 200.0)
+    assert result == 8.0
+
+
 def test_wealth_creator_orders_by_since_launch_multiple_excludes_null() -> None:
     funds = [
         _fund("INE_W1"),
@@ -275,18 +303,37 @@ def test_wealth_creator_orders_by_since_launch_multiple_excludes_null() -> None:
     assert rows[0]["metric_unit"] == "x_since_launch"
 
 
-def test_sip_rails_reuse_perf_rail_over_sip_xirr_columns() -> None:
-    """sip_3y / sip_5y aren't a new builder — they call the already-tested
-    generic _build_leaderboard_perf_rail over the new SIP XIRR columns."""
+def test_wealth_creator_excludes_segregated_funds() -> None:
+    funds = [_fund("INE_WOK"), _fund("INE_WSEG", is_segregated=True)]
+    multiples_by_isin = {"INE_WOK": 5.0, "INE_WSEG": 6.0}
+    rows = _build_leaderboard_wealth_creator(funds, multiples_by_isin)
+    assert [r["isin"] for r in rows] == ["INE_WOK"]
+
+
+def test_sip_rail_orders_descending_excludes_null() -> None:
     funds = [
         _fund("INE_S1", sip_xirr_3y_pct=10.0, sip_xirr_5y_pct=9.0),
         _fund("INE_S2", sip_xirr_3y_pct=14.0, sip_xirr_5y_pct=None),
     ]
-    sip_3y = _build_leaderboard_perf_rail(funds, "sip_xirr_3y_pct", "pct_sip_xirr")
-    sip_5y = _build_leaderboard_perf_rail(funds, "sip_xirr_5y_pct", "pct_sip_xirr")
+    sip_3y = _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct")
+    sip_5y = _build_leaderboard_sip_rail(funds, "sip_xirr_5y_pct")
     assert [r["isin"] for r in sip_3y] == ["INE_S2", "INE_S1"]
     assert [r["isin"] for r in sip_5y] == ["INE_S1"]  # null sip_xirr_5y_pct excluded
     assert sip_3y[0]["metric_unit"] == "pct_sip_xirr"
+
+
+def test_sip_rail_excludes_segregated_non_growth_and_implausible_xirr() -> None:
+    """The three DATA-ARTIFACT guards, each independently excluding a candidate that
+    would otherwise win the board — mirrors the real prod artifacts (Franklin India
+    Short-Term 89.25% segregated spike, ICICI Overnight 53.24% cash-fund win)."""
+    funds = [
+        _fund("INE_OK", sip_xirr_3y_pct=18.0),
+        _fund("INE_SEG", sip_xirr_3y_pct=20.0, is_segregated=True),
+        _fund("INE_CASH", sip_xirr_3y_pct=6.0, category="Debt Scheme - Liquid Fund"),
+        _fund("INE_SPIKE", sip_xirr_3y_pct=89.25),
+    ]
+    rows = _build_leaderboard_sip_rail(funds, "sip_xirr_3y_pct")
+    assert [r["isin"] for r in rows] == ["INE_OK"]
 
 
 def test_sip_consistency_requires_3y_history_and_orders_by_pct_positive() -> None:
@@ -301,6 +348,23 @@ def test_sip_consistency_requires_3y_history_and_orders_by_pct_positive() -> Non
     assert rows[0]["metric_unit"] == "pct_rolling_positive"
 
 
+def test_sip_consistency_excludes_segregated_and_non_growth() -> None:
+    """A cash fund is 100%-positive by construction — vacuous (prod artifact: ITI
+    Liquid Fund topped this board at 100%)."""
+    funds = [
+        _fund("INE_OK", rolling_1y_pct_positive=90.0, return_3y_pct=12.0),
+        _fund("INE_SEG", rolling_1y_pct_positive=95.0, return_3y_pct=12.0, is_segregated=True),
+        _fund(
+            "INE_CASH",
+            rolling_1y_pct_positive=100.0,
+            return_3y_pct=6.0,
+            category="Debt Scheme - Liquid Fund",
+        ),
+    ]
+    rows = _build_leaderboard_sip_consistency(funds)
+    assert [r["isin"] for r in rows] == ["INE_OK"]
+
+
 def test_risk_recovery_orders_ascending_excludes_never_recovered() -> None:
     funds = [
         _fund("INE_R1", recovery_days=120),
@@ -311,6 +375,33 @@ def test_risk_recovery_orders_ascending_excludes_never_recovered() -> None:
     assert [r["isin"] for r in rows] == ["INE_R2", "INE_R1"]
     assert rows[0]["metric_value"] == 30
     assert rows[0]["metric_unit"] == "days_recovery"
+
+
+def test_risk_recovery_excludes_segregated_and_non_growth() -> None:
+    """An overnight fund 'recovering' in 2 days is definitionally meaningless (prod
+    artifact: TRUST Overnight Fund - 2 Days topped this board)."""
+    funds = [
+        _fund("INE_OK", recovery_days=45),
+        _fund("INE_SEG", recovery_days=10, is_segregated=True),
+        _fund("INE_CASH", recovery_days=2, category="Debt Scheme - Overnight Fund"),
+    ]
+    rows = _build_leaderboard_risk_recovery(funds)
+    assert [r["isin"] for r in rows] == ["INE_OK"]
+
+
+def test_leaderboard_is_growth_category_matches_real_canonical_strings() -> None:
+    """Against the actual mf/taxonomy.py canonical leaf strings, not a paraphrase —
+    Equity/Hybrid/Solution-Oriented + the Index-funds bucket are growth; Debt and the
+    remaining Other Scheme leaves (Gold ETF here) are not."""
+    assert _leaderboard_is_growth_category("Equity Scheme - Large Cap Fund") is True
+    assert _leaderboard_is_growth_category("Equity Scheme - Sectoral/ Thematic") is True
+    assert _leaderboard_is_growth_category("Hybrid Scheme - Aggressive Hybrid Fund") is True
+    assert _leaderboard_is_growth_category("Solution Oriented Scheme - Retirement Fund") is True
+    assert _leaderboard_is_growth_category("Other Scheme - Index Funds") is True
+    assert _leaderboard_is_growth_category("Debt Scheme - Liquid Fund") is False
+    assert _leaderboard_is_growth_category("Debt Scheme - Overnight Fund") is False
+    assert _leaderboard_is_growth_category("Other Scheme - Gold ETF") is False
+    assert _leaderboard_is_growth_category(None) is False
 
 
 # ---------------------------------------------------------------------------
