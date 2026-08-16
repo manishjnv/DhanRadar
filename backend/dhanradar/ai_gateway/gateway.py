@@ -30,7 +30,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from openai import APIStatusError, RateLimitError
+from openai import APIConnectionError, APIStatusError, RateLimitError
 from structlog.contextvars import bind_contextvars
 
 from dhanradar.ai_gateway.errors import (
@@ -64,6 +64,10 @@ HIGH_STAKES_TASKS: frozenset[str] = frozenset(
 # premium budget counter (soft $0.50 / hard $9.50); not a billing source of truth.
 _SONNET_USD_PER_1M_TOKENS = 6.0
 _STRIKE_LIMIT = 3
+# B106: per-request bound for the premium Sonnet spillover — longer than the
+# free-pool AI_REQUEST_TIMEOUT_S because a high-stakes response can legitimately
+# exceed 20 s and there is no next model to rotate to.
+_SONNET_TIMEOUT_S = 60.0
 
 
 @dataclass
@@ -226,6 +230,10 @@ class OpenRouterGateway:
                     res = await self._call(model, messages)
                 except RateLimitError:
                     continue  # 429 → rotate, NO sleep, no call billed
+                except APIConnectionError:
+                    # B106: hung/unreachable model (incl. the per-request timeout,
+                    # APITimeoutError) → rotate to the next model, never stall.
+                    continue
                 except APIStatusError as exc:
                     if getattr(exc, "status_code", None) == 402:
                         raise CreditExhaustedError(
@@ -312,18 +320,30 @@ class OpenRouterGateway:
             self._client = AsyncOpenAI(
                 base_url=settings.OPENROUTER_BASE_URL,
                 api_key=settings.OPENROUTER_API_KEY,
+                # B106: bound every request — the client default (600 s timeout,
+                # 2 same-model retries) let ONE hung free-model request silently
+                # consume a caller's whole wait_for budget. Pool rotation is the
+                # retry strategy here, so same-model retries are disabled.
+                timeout=settings.AI_REQUEST_TIMEOUT_S,
+                max_retries=0,
             )
         return self._client
 
-    async def _call(self, model: str, messages: list[dict[str, str]]) -> _LLMResult:
+    async def _call(
+        self, model: str, messages: list[dict[str, str]], *, timeout: float | None = None
+    ) -> _LLMResult:
         """One LLM call. Raises RateLimitError/APIStatusError (handled upstream)
-        or json.JSONDecodeError if the content is not JSON."""
+        or json.JSONDecodeError if the content is not JSON. ``timeout`` overrides
+        the client-level B106 per-request cap for calls that legitimately run
+        longer (Sonnet spillover)."""
         client = self._get_client()
         started = time.monotonic()
+        extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
         resp = await client.chat.completions.create(
             model=model,
             messages=messages,
             response_format={"type": "json_object"},
+            **extra,
         )
         # Record the wall-clock latency of this served response (non-fatal). A
         # rate-limited / 402 call raises inside create() above and never reaches
@@ -357,7 +377,16 @@ class OpenRouterGateway:
         block so a quality failure still propagates with the spend recorded."""
         async with budget_guard("premium") as meter:
             try:
-                res = await self._call(self._sonnet_model, messages)
+                # B106: premium spillover gets a longer per-request bound than the
+                # free pool — a high-stakes Sonnet response can legitimately run
+                # past 20 s, and there is no next model to rotate to.
+                res = await self._call(self._sonnet_model, messages, timeout=_SONNET_TIMEOUT_S)
+            except APIConnectionError as exc:
+                # Typed escape (B106): consumers handle GatewayError; a raw
+                # connection/timeout error must not leave the gateway taxonomy.
+                raise AllFreeModelsFailedError(
+                    f"sonnet spillover hung/timed out after {_SONNET_TIMEOUT_S:.0f}s"
+                ) from exc
             except APIStatusError as exc:
                 if getattr(exc, "status_code", None) == 402:
                     raise CreditExhaustedError(
@@ -397,6 +426,8 @@ class OpenRouterGateway:
                     res = await self._call(model, messages)
                 except RateLimitError:
                     continue  # 429 → try the next fallback model
+                except APIConnectionError:
+                    continue  # B106: hung/timed-out → try the next fallback model
                 except APIStatusError as exc:
                     if getattr(exc, "status_code", None) == 402:
                         raise CreditExhaustedError(
@@ -487,8 +518,8 @@ class OpenRouterGateway:
         for model in self._free_models:
             try:
                 data = await self._judge_call(model, judge_messages)
-            except (RateLimitError, APIStatusError, json.JSONDecodeError):
-                continue  # judge model unavailable / non-JSON → try the next
+            except (RateLimitError, APIConnectionError, APIStatusError, json.JSONDecodeError):
+                continue  # judge model unavailable / hung / non-JSON → try the next
             raw = data.get("grounded")
             if isinstance(raw, (int, float)):
                 return float(raw)
@@ -502,8 +533,8 @@ class OpenRouterGateway:
                 raw = data.get("grounded")
                 if isinstance(raw, (int, float)):
                     return float(raw)
-            except (RateLimitError, APIStatusError, json.JSONDecodeError):
-                pass  # paid judge also failed → fall through to None
+            except (RateLimitError, APIConnectionError, APIStatusError, json.JSONDecodeError):
+                pass  # paid judge also failed / hung → fall through to None
         return None
 
     async def _judge_call(self, model: str, messages: list[dict[str, str]]) -> dict:

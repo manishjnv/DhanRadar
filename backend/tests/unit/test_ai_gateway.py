@@ -400,3 +400,69 @@ async def test_cheap_fallback_402_raises_credit_exhausted_and_does_not_rotate(pa
         )
     assert "paid_y" not in client.chat.completions.calls  # 402 must not fall through
 
+
+
+# ---------------------------------------------------------------------------
+# B106 — per-request timeout: a hung model rotates, never stalls the caller
+# ---------------------------------------------------------------------------
+
+
+def _conn_timeout():
+    from openai import APITimeoutError
+
+    return APITimeoutError(request=_REQ)
+
+
+async def test_timeout_rotates_to_next_free_model(patch_redis):
+    """B106: a hung/timed-out request (APITimeoutError ⊂ APIConnectionError) must
+    rotate the free pool exactly like a 429 — before this fix it escaped the loop
+    and, with no client timeout, one hung request stalled the caller ~600 s."""
+    client = _Client({"free_a": _conn_timeout(), "free_b": _Resp(_valid())})
+    gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
+    res = await gw.complete(
+        task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert client.chat.completions.calls == ["free_a", "free_b"]
+    assert res.model_used == "free_b"
+
+
+async def test_all_models_hung_raises_gateway_taxonomy_error(patch_redis):
+    """B106: every model hung → AllFreeModelsFailedError (a GatewayError consumers
+    already handle), never an untyped APIConnectionError escape."""
+    from dhanradar.ai_gateway.errors import AllFreeModelsFailedError
+
+    client = _Client({"free_a": _conn_timeout(), "free_b": _conn_timeout()})
+    gw = OpenRouterGateway(client=client, free_models=["free_a", "free_b"])
+    with pytest.raises(AllFreeModelsFailedError):
+        await gw.complete(
+            task_type="news_summary", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+        )
+
+
+async def test_timeout_rotates_paid_fallback(patch_redis):
+    """B106: the cheap paid-fallback loop rotates past a hung model too."""
+    client = _Client(
+        {"free_a": _rate_limit(), "paid_x": _conn_timeout(), "paid_y": _Resp(_valid())}
+    )
+    gw = OpenRouterGateway(
+        client=client,
+        free_models=["free_a"],
+        paid_fallback_models=["paid_x", "paid_y"],
+        paid_fallback_tasks=["news_sentiment"],
+    )
+    res = await gw.complete(
+        task_type="news_sentiment", messages=_MSGS, schema=_StockOut, contains_personal_data=False
+    )
+    assert res.model_used == "paid_y"
+
+
+def test_lazily_built_client_is_timeout_bounded(monkeypatch):
+    """B106: the real client is constructed with the configured per-request timeout
+    and NO same-model retries (pool rotation is the retry strategy)."""
+    from dhanradar.config import settings
+
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    gw = OpenRouterGateway()
+    client = gw._get_client()
+    assert client.timeout == settings.AI_REQUEST_TIMEOUT_S
+    assert client.max_retries == 0

@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     # openrouter.ai/models before use (startup verify_models()). Kept out of code
     # so no unverified ':free' id is hardcoded. Empty = no free pool configured.
     AI_FREE_MODELS: str = ""
+    # B106: per-request cap on every OpenRouter HTTP call (httpx per-phase, not
+    # total-wall). Observed healthy free-tier latency 5-20 s (2026-08-16); a hung
+    # request otherwise stalls 600 s (openai-client default) and silently eats
+    # the calling task's asyncio.wait_for budget — 4 of 5 S17 live runs.
+    AI_REQUEST_TIMEOUT_S: float = 20.0
     # High-stakes schema-failure spillover (premium budget). A real, paid id.
     AI_SONNET_MODEL: str = "anthropic/claude-sonnet-4.6"
     # Cheap NON-premium paid-model fallback (operator-set, verified ids), tried when
