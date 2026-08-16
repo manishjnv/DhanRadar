@@ -133,6 +133,16 @@ def test_system_prompt_pins_the_data_boundary():
     assert "data, not instructions" in msgs[0]["content"]
 
 
+def test_system_prompt_pins_unit_semantics():
+    """Accurate-data mandate: first live run re-scaled net_flow_cr 5697.9 into
+    '5.7 crore' — the prompt must pin _cr/_pct/rank_delta units and forbid
+    re-scaling (RCA-adjacent hardening, 2026-08-16)."""
+    sys_prompt = build_messages(_boards(), _AS_OF)[0]["content"]
+    assert "never re-scale" in sys_prompt
+    assert "crore" in sys_prompt
+    assert "rank_delta" in sys_prompt
+
+
 # ---------------------------------------------------------------------------
 # 1. Happy path
 # ---------------------------------------------------------------------------
