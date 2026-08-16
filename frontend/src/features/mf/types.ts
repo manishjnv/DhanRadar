@@ -647,6 +647,11 @@ export interface LbAmcFactRow {
   index_fund_count: number;
 }
 
+/** `ai_insights` rows (Phase 3c) — governed-gateway educational cards; text only. */
+export interface LbInsightRow {
+  text: string;
+}
+
 /** `manager_facts` rows — factual manager aggregates only; no composite score/stars. */
 export interface LbManagerRow {
   manager_name: string;
@@ -706,6 +711,8 @@ export interface LeaderboardBoards {
   /** unit 'boards' — metric_value is the count of boards the fund appears on. */
   ai_spotlight?: { title: string; rows: LbFundRow[] };
   manager_facts?: { title: string; rows: LbManagerRow[] };
+  /** Phase 3c — governed-gateway educational insight cards. */
+  ai_insights?: { title: string; rows: LbInsightRow[] };
 }
 
 export interface LeaderboardResponse {

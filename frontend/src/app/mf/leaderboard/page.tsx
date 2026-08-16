@@ -203,8 +203,8 @@ function LeaderboardView() {
 
       {/* S17 — AI Insights */}
       <Anchor>
-        <SectionHeader index="16" title="AI Insights" tag="DhanRadar AI" />
-        <AiInsightsSection />
+        <SectionHeader index="16" title="AI Insights" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
+        <AiInsightsSection live={boards?.ai_insights?.rows} />
       </Anchor>
 
       {/* S18 — FAQ */}

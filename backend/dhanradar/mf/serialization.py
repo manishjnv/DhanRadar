@@ -253,6 +253,9 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "leaderboard.manager_row": frozenset(
         {"manager_name", "amc_name", "funds_count", "tenure_years", "percentile_word", "top_fund_name"}
     ),
+    # Phase 3c ai_insights (leaderboard-data-backend.md §9b) — governed-gateway
+    # educational cards; `text` is the ONLY key a row may carry (fail-closed).
+    "leaderboard.insight_row": frozenset({"text"}),
 }
 
 #: Maps a leaderboard `board_key` to the `ALLOWED_FIELDS` entry its rows are shaped
@@ -293,6 +296,8 @@ _LEADERBOARD_ROW_CONCEPT: dict[str, str] = {
     "quality": "leaderboard.fund_row",
     "ai_spotlight": "leaderboard.fund_row",
     "manager_facts": "leaderboard.manager_row",
+    # Phase 3c (leaderboard-data-backend.md §9b) — S17 AI insight cards.
+    "ai_insights": "leaderboard.insight_row",
 }
 
 

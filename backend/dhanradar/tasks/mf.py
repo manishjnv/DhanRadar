@@ -4705,6 +4705,34 @@ async def _leaderboard_refresh_pipeline() -> str:
     # top level of a manager row), fed by its own query above, not `funds`.
     boards["manager_facts"] = _build_leaderboard_manager_facts(manager_rows, latest_date)
 
+    # ai_insights (S17, Phase 3c, §9b) — governed AI-gateway consumer, best-effort:
+    # a gateway/model failure NEVER blocks the other boards. The 12 s cap mirrors
+    # the report-commentary wiring; `screen_insights` is the second advisory-verb
+    # screen BEFORE persist (defense in depth, non-neg #1, mirrors mood/service).
+    # The board row is written only on success — an absent board keeps the
+    # frontend Preview sample.
+    try:
+        from dhanradar.ai_gateway.gateway import OpenRouterGateway
+        from dhanradar.mf.leaderboard_insights import (
+            generate_leaderboard_insights,
+            screen_insights,
+        )
+
+        insight_texts = screen_insights(
+            await asyncio.wait_for(
+                generate_leaderboard_insights(
+                    OpenRouterGateway(), boards=boards, as_of=latest_date
+                ),
+                timeout=12.0,
+            )
+        )
+        if insight_texts:
+            boards["ai_insights"] = [{"text": t} for t in insight_texts]
+    except TimeoutError:
+        logger.warning("leaderboard_refresh: ai_insights timed out after 12 s — board skipped")
+    except Exception:  # noqa: BLE001 — insights are best-effort spillover
+        logger.exception("leaderboard_refresh: ai_insights failed — board skipped")
+
     hero = _build_leaderboard_hero(funds, prev_by_isin, top100_rows, live_board_count=len(boards))
 
     payload_rows = [
