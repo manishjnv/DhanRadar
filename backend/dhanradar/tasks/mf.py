@@ -4830,6 +4830,13 @@ async def _leaderboard_refresh_pipeline() -> str:
                 "is_segregated": bool(r.is_segregated),
             }
         )
+    # UNIVERSE-LEVEL segregated exclusion (2026-08-16 live review, root-cause fix):
+    # a side-pocket's flat NAV makes it a vacuous "winner" on any board it can
+    # reach (a Segregated Portfolio 1 topped risk_drawdown at 0.0% after the
+    # growth-scope fix). Side pockets are not investable schemes — no board,
+    # count, or takeaway should ever include one. The per-builder is_segregated
+    # guards stay as belt-and-braces.
+    funds = [f for f in funds if not f["is_segregated"]]
     funds_by_isin = {f["isin"]: f for f in funds}
 
     # wealth_creator's TRUE since-launch multiples (design correction, §8) —
