@@ -41,7 +41,14 @@ export interface ApiProblem {
 
 export class ApiError extends Error {
   constructor(public readonly problem: ApiProblem) {
-    super(`${problem.status} ${problem.title}`);
+    // FastAPI's plain HTTPException body is {"detail": "..."} with no title —
+    // without the detail the UI degrades to "502 Unknown error" (hit three
+    // times during BSE UAT testing). Always surface the most specific text.
+    const detail =
+      typeof problem.detail === 'string' && problem.detail.trim() && problem.detail !== problem.title
+        ? ` — ${problem.detail}`
+        : '';
+    super(`${problem.status} ${problem.title || 'error'}${detail}`);
     this.name = 'ApiError';
   }
 }
