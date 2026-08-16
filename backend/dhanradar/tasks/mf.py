@@ -4706,8 +4706,8 @@ async def _leaderboard_refresh_pipeline() -> str:
     boards["manager_facts"] = _build_leaderboard_manager_facts(manager_rows, latest_date)
 
     # ai_insights (S17, Phase 3c, §9b) — governed AI-gateway consumer, best-effort:
-    # a gateway/model failure NEVER blocks the other boards. The 12 s cap mirrors
-    # the report-commentary wiring; `screen_insights` is the second advisory-verb
+    # a gateway/model failure NEVER blocks the other boards. Capped with wait_for
+    # (report-commentary pattern); `screen_insights` is the second advisory-verb
     # screen BEFORE persist (defense in depth, non-neg #1, mirrors mood/service).
     # The board row is written only on success — an absent board keeps the
     # frontend Preview sample.
@@ -4718,12 +4718,15 @@ async def _leaderboard_refresh_pipeline() -> str:
             screen_insights,
         )
 
+        # 30 s (not the report-commentary 12 s): this is a nightly batch task with
+        # no user waiting, and free-tier model latency straddles 12 s (observed
+        # 5-16 s on the verified pool, 2026-08-16).
         insight_texts = screen_insights(
             await asyncio.wait_for(
                 generate_leaderboard_insights(
                     OpenRouterGateway(), boards=boards, as_of=latest_date
                 ),
-                timeout=12.0,
+                timeout=30.0,
             )
         )
         if insight_texts:
