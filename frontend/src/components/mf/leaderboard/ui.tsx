@@ -151,14 +151,21 @@ export function HScroll({ children, className }: { children: React.ReactNode; cl
   );
 }
 
-// Icon button (compare / watch)
+// Icon button (compare / watch) — aria-pressed drives the selected visual so
+// the desktop compare toggle shows its state (I3).
 export function IconBtn({ title, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const pressed = rest['aria-pressed'] === true;
   return (
     <button
       type="button"
       title={title}
       aria-label={title}
-      className="grid h-7 w-7 place-items-center rounded-md border border-line bg-surface-2 text-ink-secondary transition-colors hover:border-royal hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+      className={cn(
+        'grid h-7 w-7 place-items-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+        pressed
+          ? 'border-royal bg-royal/10 text-royal'
+          : 'border-line bg-surface-2 text-ink-secondary hover:border-royal hover:text-royal',
+      )}
       {...rest}
     >
       {children}

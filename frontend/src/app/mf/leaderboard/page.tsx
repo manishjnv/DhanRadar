@@ -37,7 +37,7 @@ import {
   Anchor, HeroSection, CatNav, DiscoverSection, Top100Section, ChampionsSection,
   PerformanceSection, SipSection, RiskSection, ValueSection, IntelligenceSection,
   MarketSection, FlowsSection, ImprovedSection, ManagersSection, AmcSection,
-  AiInsightsSection, FaqSection, FilterSheet, TrendingSection,
+  AiInsightsSection, FaqSection, FilterSheet, TrendingSection, type T100Filters,
 } from '@/components/mf/leaderboard/sections';
 
 function LeaderboardSkeleton() {
@@ -65,6 +65,9 @@ function Crumb() {
 
 function LeaderboardView() {
   const [filterOpen, setFilterOpen] = React.useState(false);
+  // I4 — Top-100 client-side filters; owned here because the mobile FilterSheet
+  // (page-level toolbar) and the Top100Section table both read/write them.
+  const [t100Filters, setT100Filters] = React.useState<T100Filters>({});
 
   // Real leaderboard feed (docs/features/leaderboard-data-backend.md §5/§6). One
   // request feeds every board below; a board absent from `boards` (endpoint not
@@ -120,7 +123,7 @@ function LeaderboardView() {
       {/* S3 — Top 100 */}
       <Anchor id="top100">
         <SectionHeader index="02" title="DhanRadar Top 100" tag="Flagship" info="the best funds in India, ranked" badge={boards?.top100 ? <LiveBadge /> : undefined} />
-        <Top100Section live={boards?.top100?.rows} />
+        <Top100Section live={boards?.top100?.rows} filters={t100Filters} />
       </Anchor>
 
       {/* S4 — Category Champions */}
@@ -215,7 +218,7 @@ function LeaderboardView() {
         <DisclosureBundle notAdvice="For education only — not investment advice. These rankings, scores and the figures shown (some illustrative previews while data feeds are built) are educational signals derived from factual data, not recommendations to buy, sell, or hold any fund. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not indicate future returns." />
       </div>
 
-      <FilterSheet open={filterOpen} onClose={() => setFilterOpen(false)} />
+      <FilterSheet open={filterOpen} onClose={() => setFilterOpen(false)} value={t100Filters} onChange={setT100Filters} />
     </div>
   );
 }

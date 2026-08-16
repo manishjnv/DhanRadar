@@ -25,7 +25,7 @@ import {
 } from './ui';
 import {
   COLORS, FUNDS, DISC, CHAMP, DMMI, MGR, AMC, AI_INSIGHTS, FAQ, CATNAV,
-  HERO_KPIS, HERO_QUICK, FILTER_GROUPS, REGIME_EXPLAINER,
+  HERO_KPIS, HERO_QUICK, REGIME_EXPLAINER,
   PERF_RAIL, SIP_RAIL, RISK_RAIL, VALUE_RAIL, INTEL_RAIL, FLOW_RAIL, IMPROVED_RAIL, TREND_RAIL,
   eduLabel, eduWordFromLabel, toStrength, STRENGTH_WORD, STRENGTH_COLOR, aum,
   type Fund, type Rail, type RailRow,
@@ -276,9 +276,9 @@ export function DiscoverSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 const T100_TABS = [
   { key: '10', label: 'Top 10', limit: 10 },
-  { key: '25', label: 'Top 25', limit: 20 },
-  { key: '50', label: 'Top 50', limit: 20 },
-  { key: '100', label: 'Top 100', limit: 20 },
+  { key: '25', label: 'Top 25', limit: 25 },
+  { key: '50', label: 'Top 50', limit: 50 },
+  { key: '100', label: 'Top 100', limit: 100 },
 ];
 const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '3Y', '5Y', 'SIP', 'Cost', 'Size', 'Momentum', ''];
 
@@ -288,13 +288,33 @@ function medal(i: number) {
 
 // Unified row shape the table/cards render from — sample (score-based ring) and
 // live (label/band-based ring, no score) both normalise into this before JSX.
+// `rank` = the fund's original board position (1-based) — client-side sort and
+// filters (I4) reorder the display, but the shown rank/medal stays the board's.
 type T100Row = {
   key: string; name: string; amc: string; cat: string; logo: string; color: string;
   ring: RingSpec; labelWord: string; labelColor: string; risk: string;
   r3: number | null; r5: number | null; sipWord: string; exp: number | null; aum: number | null;
-  rankd: string; trend: 'up' | 'down' | 'flat'; href?: string;
+  rankd: string; trend: 'up' | 'down' | 'flat'; href?: string; rank: number;
 };
-function sampleT100Row(fnd: Fund): T100Row {
+
+// I4 — Top-100 client-side filters (mobile FilterSheet). Every option maps to a
+// REAL field on the live rows (same "a chip is a saved query or it does not
+// exist" rule as quickIntents): category class prefix on sebi_category, the
+// SEBI riskometer band string, or the page's educational label word.
+export type T100Filters = { group?: string; risk?: string; label?: string };
+
+// I4 — client-side sortable columns (desktop table headers). `best` = the sort
+// direction that puts the conventionally-better value first on the FIRST click
+// (higher returns / bigger AUM = -1 desc; lower cost = 1 asc).
+type T100SortCol = 'r3' | 'r5' | 'exp' | 'aum';
+const T100_SORTABLE: Record<string, { col: T100SortCol; best: 1 | -1 }> = {
+  '3Y': { col: 'r3', best: -1 },
+  '5Y': { col: 'r5', best: -1 },
+  Cost: { col: 'exp', best: 1 },
+  Size: { col: 'aum', best: -1 },
+};
+
+function sampleT100Row(fnd: Fund): Omit<T100Row, 'rank'> {
   const lbl = eduLabel(fnd.score);
   return {
     key: fnd.name, name: fnd.name, amc: fnd.amc, cat: fnd.cat, logo: fnd.logo, color: fnd.color,
@@ -303,7 +323,7 @@ function sampleT100Row(fnd: Fund): T100Row {
     exp: fnd.exp, aum: fnd.aum, rankd: fnd.rankd, trend: fnd.trend,
   };
 }
-function liveT100Row(r: LbFundRow): T100Row {
+function liveT100Row(r: LbFundRow): Omit<T100Row, 'rank'> {
   const name = fundName(r);
   const lbl = eduWordFromLabel(r.verb_label);
   const trend: T100Row['trend'] = (r.rank_delta ?? 0) > 0 ? 'up' : (r.rank_delta ?? 0) < 0 ? 'down' : 'flat';
@@ -316,28 +336,57 @@ function liveT100Row(r: LbFundRow): T100Row {
   };
 }
 
-export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
+export function Top100Section({ live, filters }: { live?: LbFundRow[]; filters?: T100Filters } = {}) {
   const router = useRouter();
   const [tab, setTab] = React.useState('10');
   const [mobileAll, setMobileAll] = React.useState(false);
-  const [selected, setSelected] = React.useState<Set<number>>(new Set());
+  // I3 — selection keyed by row.key (the ISIN on live rows), never by render
+  // index: sort/filter reorder the list, an index would silently swap the
+  // selected funds. Cap 3 = the compare page's slot count (page.tsx slice(0,3)).
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [sort, setSort] = React.useState<{ col: T100SortCol; dir: 1 | -1 } | null>(null);
 
   if (live && live.length === 0) {
     return <EmptyState title="No ranked funds yet" description="Rankings refresh nightly after markets close — check back soon." />;
   }
 
-  const master: T100Row[] = live ? live.map(liveT100Row) : FUNDS.map(sampleT100Row);
+  const master: T100Row[] = (live ? live.map(liveT100Row) : FUNDS.map(sampleT100Row))
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  // Filters only bite on live rows — sample rows carry preview-era category
+  // strings the live vocabulary doesn't match (honest: preview doesn't filter).
+  const filtered = live
+    ? master.filter((r) =>
+        (!filters?.group || r.cat.startsWith(filters.group)) &&
+        (!filters?.risk || r.risk === filters.risk) &&
+        (!filters?.label || r.labelWord === filters.label))
+    : master;
   const limit = T100_TABS.find((t) => t.key === tab)!.limit;
-  const list = master.slice(0, limit);
-  const mobileList = master.slice(0, mobileAll ? master.length : 8);
+  const list = filtered.slice(0, limit);
+  if (sort) {
+    list.sort((a, b) => {
+      const av = a[sort.col], bv = b[sort.col];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1; // nulls always last, either direction
+      if (bv == null) return -1;
+      return (av - bv) * sort.dir;
+    });
+  }
+  const mobileList = filtered.slice(0, mobileAll ? filtered.length : 8);
 
-  const toggle = (idx: number) =>
+  const toggle = (key: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else if (next.size < 4) next.add(idx);
+      if (next.has(key)) next.delete(key);
+      else if (next.size < 3) next.add(key);
       return next;
     });
+
+  const headerSort = (label: string) => {
+    const spec = T100_SORTABLE[label];
+    if (!spec) return;
+    setSort((prev) =>
+      prev?.col === spec.col ? { col: spec.col, dir: -prev.dir as 1 | -1 } : { col: spec.col, dir: spec.best });
+  };
 
   return (
     <>
@@ -363,31 +412,48 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
         <table className="w-full min-w-[1040px] border-collapse text-small">
           <thead>
             <tr>
-              {T100_COLS.map((c, i) => (
-                <th
-                  key={i}
-                  className={cn(
-                    'sticky top-0 z-[2] border-b-2 border-line bg-surface-2 px-3.5 py-2.5 font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-ink-muted',
-                    i < 2 ? 'text-left' : 'text-right',
-                  )}
-                >
-                  {c}
-                </th>
-              ))}
+              {T100_COLS.map((c, i) => {
+                const sortable = T100_SORTABLE[c];
+                const active = sortable && sort?.col === sortable.col;
+                return (
+                  <th
+                    key={i}
+                    aria-sort={active ? (sort!.dir === 1 ? 'ascending' : 'descending') : undefined}
+                    className={cn(
+                      'sticky top-0 z-[2] border-b-2 border-line bg-surface-2 px-3.5 py-2.5 font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-ink-muted',
+                      i < 2 ? 'text-left' : 'text-right',
+                    )}
+                  >
+                    {sortable ? (
+                      <button
+                        type="button"
+                        onClick={() => headerSort(c)}
+                        className={cn(
+                          'inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-[0.04em] hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded',
+                          active ? 'text-royal' : 'text-ink-muted',
+                        )}
+                      >
+                        {c}
+                        <span aria-hidden="true">{active ? (sort!.dir === 1 ? '▲' : '▼') : '↕'}</span>
+                      </button>
+                    ) : c}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {list.map((row, i) => {
+            {list.map((row) => {
               const up = row.trend === 'up', down = row.trend === 'down';
               return (
                 <tr
                   key={row.key}
-                  className={cn('hover:bg-surface-2', i < 3 && 'bg-amber/[0.08]', row.href && 'cursor-pointer')}
+                  className={cn('hover:bg-surface-2', row.rank <= 3 && 'bg-amber/[0.08]', row.href && 'cursor-pointer')}
                   onClick={row.href ? () => router.push(row.href!) : undefined}
                 >
                   <td className="border-b border-line px-3.5 py-2.5 text-left">
                     <span className="inline-flex w-10 items-center gap-1.5 font-sans text-base font-extrabold text-ink">
-                      {medal(i) ?? `#${i + 1}`}
+                      {medal(row.rank - 1) ?? `#${row.rank}`}
                     </span>
                   </td>
                   <td className="border-b border-line px-3.5 py-2.5 text-left">
@@ -433,7 +499,7 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
                   </td>
                   <td className="border-b border-line px-3.5 py-2.5 text-right">
                     <span className="inline-flex gap-1.5">
-                      <IconBtn title="Compare" aria-pressed={selected.has(i)} onClick={() => toggle(i)}>
+                      <IconBtn title="Compare" aria-pressed={selected.has(row.key)} onClick={(e) => { e.stopPropagation(); toggle(row.key); }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4v16M20 4v16M9 8l-5 4 5 4M15 8l5 4-5 4" /></svg>
                       </IconBtn>
                       <IconBtn title="Watch">
@@ -450,7 +516,7 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
 
       {/* MOBILE ranking cards */}
       <div className="md:hidden">
-        {mobileList.map((row, i) => {
+        {mobileList.map((row) => {
           const up = row.trend === 'up', down = row.trend === 'down';
           // ponytail: compare-toggle already owns the row tap; nesting a Link
           // inside a <button> is invalid HTML, so the wrapper becomes a
@@ -461,15 +527,15 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
               key={row.key}
               role="button"
               tabIndex={0}
-              onClick={() => toggle(i)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(i); } }}
+              onClick={() => toggle(row.key)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(row.key); } }}
               className={cn(
                 'mb-2 flex w-full cursor-pointer items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-                i < 3 && 'bg-amber/[0.08]',
-                selected.has(i) && 'ring-2 ring-royal/40',
+                row.rank <= 3 && 'bg-amber/[0.08]',
+                selected.has(row.key) && 'ring-2 ring-royal/40',
               )}
             >
-              <span className="w-7 shrink-0 text-center font-sans text-[17px] font-extrabold text-ink">{medal(i) ?? `#${i + 1}`}</span>
+              <span className="w-7 shrink-0 text-center font-sans text-[17px] font-extrabold text-ink">{medal(row.rank - 1) ?? `#${row.rank}`}</span>
               <Logo letter={row.logo} color={row.color} size={38} radius={10} font={14} />
               <div className="min-w-0 flex-1">
                 {row.href ? (
@@ -505,25 +571,38 @@ export function Top100Section({ live }: { live?: LbFundRow[] } = {}) {
           : <RichText text="**Parag Parikh Flexi Cap leads the board** — the highest blend of returns, consistency, low cost and manager quality. Funds are ranked on the DhanRadar Score, not just past returns, so a high-return-high-risk fund can rank below a steadier one." />}
       </SoWhat>
 
-      <CompareTray master={master} selected={selected} onClear={() => setSelected(new Set())} />
+      <CompareTray master={master} selected={selected} live={!!live} onClear={() => setSelected(new Set())} />
     </>
   );
 }
 
-function CompareTray({ master, selected, onClear }: { master: T100Row[]; selected: Set<number>; onClear: () => void }) {
+function CompareTray({ master, selected, live, onClear }: { master: T100Row[]; selected: Set<string>; live: boolean; onClear: () => void }) {
+  const router = useRouter();
   if (selected.size === 0) return null;
+  const rows = master.filter((r) => selected.has(r.key));
+  // I3 — live row keys ARE ISINs (liveT100Row: key = r.isin); sample keys are
+  // fund names, so preview mode keeps the CTA disabled (same "only LIVE rows
+  // deep-link" rule as every other board link).
+  const isins = live ? rows.map((r) => r.key) : [];
   return (
     <div className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3.5 rounded-2xl bg-navy px-4 py-3 text-white shadow-lg">
       <span className="text-[12.5px] font-bold">{selected.size} selected</span>
       <div className="flex">
-        {[...selected].map((i, k) => (
-          <span key={i} className="grid h-[30px] w-[30px] place-items-center rounded-lg font-sans text-[11px] font-extrabold text-white" style={{ background: master[i].color, border: '2px solid #0B1F3A', marginLeft: k === 0 ? 0 : -8 }}>
-            {master[i].logo}
+        {rows.map((r, k) => (
+          <span key={r.key} className="grid h-[30px] w-[30px] place-items-center rounded-lg font-sans text-[11px] font-extrabold text-white" style={{ background: r.color, border: '2px solid #0B1F3A', marginLeft: k === 0 ? 0 : -8 }}>
+            {r.logo}
           </span>
         ))}
       </div>
-      <button type="button" className="rounded-lg bg-royal px-3.5 py-2 text-xs font-bold text-white">Compare →</button>
-      <button type="button" className="rounded-lg bg-white/10 px-3.5 py-2 text-xs font-bold text-white">★ Watchlist</button>
+      <button
+        type="button"
+        disabled={isins.length === 0}
+        title={isins.length === 0 ? 'Compare opens with live fund data' : undefined}
+        onClick={isins.length > 0 ? () => router.push(`/mf/compare?funds=${isins.join(',')}`) : undefined}
+        className={cn('rounded-lg bg-royal px-3.5 py-2 text-xs font-bold text-white', isins.length === 0 && 'cursor-not-allowed opacity-50')}
+      >
+        Compare →
+      </button>
       <button type="button" onClick={onClear} className="rounded-lg bg-white/10 px-3.5 py-2 text-xs font-bold text-white">Clear</button>
     </div>
   );
@@ -984,7 +1063,13 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
                   <td className="border-b border-line px-3.5 py-3 text-left">
                     <div className="flex items-center gap-2.5">
                       <Logo letter={m.av} color={m.color} />
-                      <span className="font-medium text-ink">{m.name}</span>
+                      {live ? (
+                        <Link href={`/mf/explore?q=${encodeURIComponent(m.name)}`} className="font-medium text-ink hover:text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                          {m.name}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-ink">{m.name}</span>
+                      )}
                     </div>
                   </td>
                   <td className="border-b border-line px-3.5 py-3 text-right"><QualityCell quality={m.quality} /></td>
@@ -1006,7 +1091,13 @@ export function AmcSection({ live }: { live?: LbAmcFactRow[] } = {}) {
             <span className="w-4 shrink-0 font-sans font-extrabold text-ink-muted">{i + 1}</span>
             <Logo letter={m.av} color={m.color} size={36} radius={9} />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-small font-bold text-ink">{m.name}</div>
+              {live ? (
+                <Link href={`/mf/explore?q=${encodeURIComponent(m.name)}`} className="block truncate text-small font-bold text-ink hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40 rounded">
+                  {m.name}
+                </Link>
+              ) : (
+                <div className="truncate text-small font-bold text-ink">{m.name}</div>
+              )}
               <div className="text-[10.5px] text-ink-muted">AUM {m.aum}</div>
             </div>
             <div className="shrink-0 text-right">
@@ -1074,7 +1165,28 @@ export function FaqSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // Mobile filter sheet (toolbar trigger lives in the page)
 // ═══════════════════════════════════════════════════════════════════════════
-export function FilterSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+// I4 — every option maps to a REAL field on the live Top-100 rows (no
+// decorative chips): category class prefix, SEBI riskometer band, educational
+// label word. Single-select per group; tapping the active option clears it.
+const T100_SHEET_GROUPS: { title: string; key: keyof T100Filters; options: [string, string][] }[] = [
+  {
+    title: 'Category',
+    key: 'group',
+    options: [['Equity', 'Equity Scheme'], ['Hybrid', 'Hybrid Scheme'], ['Solution-Oriented', 'Solution Oriented Scheme']],
+  },
+  {
+    title: 'Riskometer',
+    key: 'risk',
+    options: (['Low', 'Low to Moderate', 'Moderate', 'Moderately High', 'High', 'Very High'] as const).map((r) => [r, r]),
+  },
+  {
+    title: 'Reading',
+    key: 'label',
+    options: (['In Form', 'On Track', 'Watch', 'Off Form'] as const).map((w) => [w, w]),
+  },
+];
+
+export function FilterSheet({ open, onClose, value, onChange }: { open: boolean; onClose: () => void; value: T100Filters; onChange: (v: T100Filters) => void }) {
   return (
     <>
       <div className={cn('fixed inset-0 z-40 bg-black/50 transition-opacity md:hidden', open ? 'opacity-100' : 'pointer-events-none opacity-0')} onClick={onClose} aria-hidden="true" />
@@ -1090,29 +1202,35 @@ export function FilterSheet({ open, onClose }: { open: boolean; onClose: () => v
           <CTA onClick={onClose}>Done</CTA>
         </div>
         <div className="px-[18px] py-4">
-          {FILTER_GROUPS.map(([h, opts]) => (
-            <div key={h} className="mb-4">
-              <h4 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-ink-muted">{h}</h4>
+          <p className="mb-3 text-[11px] text-ink-muted">Filters apply to the Top 100 table.</p>
+          {T100_SHEET_GROUPS.map(({ title, key, options }) => (
+            <div key={title} className="mb-4">
+              <h4 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-ink-muted">{title}</h4>
               <div className="flex flex-wrap gap-1.5">
-                {opts.map((o, i) => (
-                  <button
-                    key={o}
-                    type="button"
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors',
-                      i === 0 && h === 'Category' ? 'border-royal bg-royal text-white' : 'border-line bg-surface-2 text-ink-secondary',
-                    )}
-                  >
-                    {o}
-                  </button>
-                ))}
+                {options.map(([label, optValue]) => {
+                  const active = value[key] === optValue;
+                  return (
+                    <button
+                      key={optValue}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => onChange({ ...value, [key]: active ? undefined : optValue })}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
+                        active ? 'border-royal bg-royal text-white' : 'border-line bg-surface-2 text-ink-secondary',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
         <div className="sticky bottom-0 flex gap-2.5 border-t border-line bg-surface px-[18px] py-3.5">
-          <CTA variant="primary" className="flex-1">Apply</CTA>
-          <CTA>Reset</CTA>
+          <CTA variant="primary" className="flex-1" onClick={onClose}>Apply</CTA>
+          <CTA onClick={() => onChange({})}>Reset</CTA>
         </div>
       </div>
     </>

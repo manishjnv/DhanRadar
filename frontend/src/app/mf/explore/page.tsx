@@ -203,7 +203,7 @@ function Pagination({ page, total, limit, onPage, leftSlot }: {
 
 // ── body ───────────────────────────────────────────────────────────────────
 
-function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
+function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: string | null; initialQuery: string | null }) {
   const router = useRouter();
   const { data: catData, isLoading: catsLoading } = useFundCategories();
   const { data: moodData } = useMoodCurrent();
@@ -212,7 +212,7 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
   const [sort, setSort]                     = React.useState<SortKey>('rank');
   const [sortDir, setSortDir]               = React.useState<'asc' | 'desc'>('desc');
   const [page, setPage]                     = React.useState(1);
-  const [search, setSearch]                 = React.useState('');
+  const [search, setSearch]                 = React.useState(initialQuery ?? '');
   const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
   const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
   const [perPage, setPerPage]               = React.useState(20);
@@ -443,9 +443,12 @@ function ExplorerBody({ initialCategory }: { initialCategory: string | null }) {
 function ExplorePageContent() {
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get('category');
+  // ?q= prefill (I4) — lets AMC cards on the leaderboard land here with the
+  // AMC name already in the search box (client-side name/AMC filter).
+  const initialQuery = searchParams.get('q');
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12 py-6">
-      <ExplorerBody initialCategory={initialCategory} />
+      <ExplorerBody initialCategory={initialCategory} initialQuery={initialQuery} />
     </div>
   );
 }
