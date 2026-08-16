@@ -43,17 +43,21 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_manager_facts,
     _build_leaderboard_momentum,
     _build_leaderboard_movers,
+    _build_leaderboard_perf_rail,
     _build_leaderboard_quality,
     _build_leaderboard_risk_recovery,
     _build_leaderboard_sip_beginner,
     _build_leaderboard_sip_consistency,
     _build_leaderboard_sip_rail,
     _build_leaderboard_top100,
+    _build_leaderboard_value_ter,
     _build_leaderboard_wealth_creator,
     _dedupe_leaderboard_variants,
+    _leaderboard_category_means,
     _leaderboard_fund_row,
     _leaderboard_is_growth_category,
     _leaderboard_is_stale,
+    _leaderboard_takeaway,
     _since_launch_multiple,
 )
 
@@ -880,3 +884,177 @@ def test_manager_row_allowlist_strips_raw_percentile_and_forbidden_score_keys() 
         assert key not in blob2
     assert "avg_percentile" not in blob2
     assert "percentile_word" in blob2
+
+
+# ---------------------------------------------------------------------------
+# 5 — V1 category-context numbers (2026-08-16)
+# ---------------------------------------------------------------------------
+
+
+def test_leaderboard_category_means_computes_mean_excludes_segregated_and_missing_metric() -> None:
+    funds = [
+        _fund("INE_M1", category="Equity Scheme - Large Cap Fund", return_1y_pct=10.0, expense_ratio_pct=1.0),
+        _fund("INE_M2", category="Equity Scheme - Large Cap Fund", return_1y_pct=20.0, expense_ratio_pct=2.0),
+        # segregated — excluded from the mean entirely, even though it carries a value.
+        _fund("INE_M3", category="Equity Scheme - Large Cap Fund", return_1y_pct=100.0, is_segregated=True),
+    ]
+    means = _leaderboard_category_means(funds)
+    cat = means["Equity Scheme - Large Cap Fund"]
+    assert cat["return_1y_pct"] == 15.0  # (10+20)/2 — 100.0 (segregated) never counted
+    assert cat["expense_ratio_pct"] == 1.5
+    # No fund in this category supplies sip_xirr_3y_pct -> the key is simply absent.
+    assert "sip_xirr_3y_pct" not in cat
+
+
+def test_perf_rail_attaches_category_avg_matching_computed_means() -> None:
+    funds = [
+        _fund("INE_P1", category="Equity Scheme - Large Cap Fund", return_3y_pct=20.0),
+        _fund("INE_P2", category="Equity Scheme - Large Cap Fund", return_3y_pct=10.0),
+    ]
+    means = _leaderboard_category_means(funds)
+    rows = _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y", means)
+    assert rows[0]["metric_category_avg"] == means["Equity Scheme - Large Cap Fund"]["return_3y_pct"]
+    assert rows[0]["metric_category_avg"] == 15.0
+
+
+def test_perf_rail_without_category_means_leaves_avg_none() -> None:
+    """A builder call that doesn't pass `category_means` (the pre-V1 call shape)
+    keeps working unchanged — metric_category_avg simply stays None."""
+    funds = [_fund("INE_P3", return_3y_pct=20.0)]
+    rows = _build_leaderboard_perf_rail(funds, "return_3y_pct", "pct_3y")
+    assert rows[0]["metric_category_avg"] is None
+
+
+def test_value_ter_attaches_category_avg() -> None:
+    funds = [
+        _fund("INE_T1", category="Equity Scheme - Large Cap Fund", expense_ratio_pct=1.0),
+        _fund("INE_T2", category="Equity Scheme - Large Cap Fund", expense_ratio_pct=2.0),
+    ]
+    means = _leaderboard_category_means(funds)
+    rows = _build_leaderboard_value_ter(funds, means)
+    assert rows[0]["metric_category_avg"] == 1.5
+
+
+# ---------------------------------------------------------------------------
+# 6 — V2 deterministic takeaway sentences (2026-08-16, no LLM)
+# ---------------------------------------------------------------------------
+
+
+def test_takeaway_perf_3y() -> None:
+    rows = [
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "return_3y_pct": 18.456},
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "return_3y_pct": 15.0},
+        {"sebi_category": "Debt Scheme - Liquid Fund", "return_3y_pct": 10.0},
+    ]
+    text = _leaderboard_takeaway("perf_3y", rows)
+    assert text == (
+        "Most of the strongest 3-year performers right now are Large Cap Fund funds, "
+        "with top returns around 18.5%."
+    )
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_sip_3y() -> None:
+    rows = [
+        {"sebi_category": "Equity Scheme - Mid Cap Fund", "metric_value": 22.3},
+        {"sebi_category": "Equity Scheme - Mid Cap Fund", "metric_value": 20.0},
+        {"sebi_category": "Hybrid Scheme - Aggressive Hybrid Fund", "metric_value": 15.0},
+    ]
+    text = _leaderboard_takeaway("sip_3y", rows)
+    assert text == "Mid Cap Fund funds lead the 3-year SIP boards, with top XIRRs around 22.3%."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_risk_drawdown() -> None:
+    rows = [
+        {"sebi_category": "Debt Scheme - Liquid Fund", "max_drawdown_pct": 0.8},
+        {"sebi_category": "Debt Scheme - Liquid Fund", "max_drawdown_pct": 1.2},
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "max_drawdown_pct": 5.0},
+    ]
+    text = _leaderboard_takeaway("risk_drawdown", rows)
+    assert text == "The smallest recent falls among ranked funds are around 0.8% — mostly Liquid Fund funds."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_value_ter_index_dominant() -> None:
+    rows = [
+        {"sebi_category": "Other Scheme - Index Funds", "expense_ratio_pct": 0.2},
+        {"sebi_category": "Other Scheme - Index Funds", "expense_ratio_pct": 0.3},
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "expense_ratio_pct": 1.0},
+    ]
+    text = _leaderboard_takeaway("value_ter", rows)
+    assert text == "The lowest-cost funds charge about 0.2% a year — index funds dominate this board."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_value_ter_non_index_dominant() -> None:
+    rows = [
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "expense_ratio_pct": 0.5},
+        {"sebi_category": "Equity Scheme - Large Cap Fund", "expense_ratio_pct": 0.6},
+        {"sebi_category": "Other Scheme - Index Funds", "expense_ratio_pct": 0.2},
+    ]
+    text = _leaderboard_takeaway("value_ter", rows)
+    assert text == "The lowest-cost funds charge about 0.2% a year — mostly Large Cap Fund funds."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_momentum() -> None:
+    rows = [
+        {"sebi_category": "Equity Scheme - Flexi Cap Fund"},
+        {"sebi_category": "Equity Scheme - Flexi Cap Fund"},
+        {"sebi_category": "Hybrid Scheme - Aggressive Hybrid Fund"},
+    ]
+    text = _leaderboard_takeaway("momentum", rows)
+    assert text == "Flexi Cap Fund funds are climbing the rankings fastest this period."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_category_inflows() -> None:
+    rows = [
+        {"category": "Equity Scheme - Large Cap Fund", "net_flow_cr": 12345.678, "period_month": "2026-07"},
+    ]
+    text = _leaderboard_takeaway("category_inflows", rows)
+    assert text == "Investor money moved most into Equity Scheme - Large Cap Fund last month (₹12,345.7 crore net)."
+    _assert_no_advisory_verb(text)
+
+
+def test_takeaway_unsupported_board_key_returns_none() -> None:
+    rows = [{"sebi_category": "Equity Scheme - Large Cap Fund", "max_drawdown_pct": 5.0}]
+    assert _leaderboard_takeaway("risk_lowest", rows) is None
+
+
+def test_takeaway_empty_rows_returns_none() -> None:
+    assert _leaderboard_takeaway("perf_3y", []) is None
+    assert _leaderboard_takeaway("category_inflows", []) is None
+
+
+# ---------------------------------------------------------------------------
+# 7 — serializer: takeaway pass-through (fail-closed on non-str)
+# ---------------------------------------------------------------------------
+
+
+def test_serialize_leaderboard_response_passes_through_str_takeaway() -> None:
+    envelope = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"perf_3y": {"title": "t", "rows": [], "takeaway": "Large Cap Fund funds lead."}},
+    )
+    assert envelope["boards"]["perf_3y"]["takeaway"] == "Large Cap Fund funds lead."
+
+
+def test_serialize_leaderboard_response_drops_non_str_takeaway() -> None:
+    envelope = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"perf_3y": {"title": "t", "rows": [], "takeaway": 42}},
+    )
+    assert "takeaway" not in envelope["boards"]["perf_3y"]
+
+
+def test_serialize_leaderboard_response_omits_absent_takeaway() -> None:
+    envelope = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"perf_3y": {"title": "t", "rows": []}},
+    )
+    assert "takeaway" not in envelope["boards"]["perf_3y"]

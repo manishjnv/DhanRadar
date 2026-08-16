@@ -204,6 +204,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "max_drawdown_pct",
             "metric_value",
             "metric_unit",
+            "metric_category_avg",
         }
     ),
     "leaderboard.label_upgrade_row": frozenset(
@@ -228,6 +229,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "max_drawdown_pct",
             "metric_value",
             "metric_unit",
+            "metric_category_avg",
             "label_from",
             "label_to",
         }
@@ -520,6 +522,12 @@ def serialize_leaderboard_response(
                 "_LEADERBOARD_ROW_CONCEPT (mf/serialization.py) — add one before serving it"
             )
         rows = [_serialize_leaderboard_row(concept_id, row) for row in board.get("rows", [])]
-        boards_clean[key] = {"title": board.get("title"), "rows": rows}
+        out_board: dict[str, Any] = {"title": board.get("title"), "rows": rows}
+        # V2 takeaway sentence (2026-08-16) — fail-closed: only a plain str passes
+        # through; any other type (or absent key) is dropped silently, never raised.
+        takeaway = board.get("takeaway")
+        if isinstance(takeaway, str):
+            out_board["takeaway"] = takeaway
+        boards_clean[key] = out_board
 
     return {"as_of": as_of, "hero": hero_clean, "boards": boards_clean}
