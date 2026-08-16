@@ -36,28 +36,33 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
-def norm_nifty_trend(pct_change: float) -> float:
+def norm_nifty_trend(dev_pct_vs_125dma: float) -> float:
     """
-    Map NIFTY % daily change to [0, 1].
+    Map NIFTY 50 momentum — the % deviation of the latest price from its
+    125-day moving average — to [0, 1] (industry-standard fear/greed momentum
+    component; mood_v2, MOOD_IMPROVEMENT_PLAN §11).
 
-    Formula: clamp((pct + 3) / 6, 0, 1)
-    - +3 % → 1.0 (strong bullish)
-    - −3 % → 0.0 (strong bearish)
-    - 0 % → 0.5 (flat/neutral)
+    Formula: clamp((dev + 6) / 12, 0, 1)
+    - +6 % above the 125-DMA → 1.0 (strong bullish momentum)
+    - −6 % below the 125-DMA → 0.0 (strong bearish momentum)
+    - on the 125-DMA → 0.5 (flat/neutral)
     """
-    return _clamp((pct_change + 3.0) / 6.0)
+    return _clamp((dev_pct_vs_125dma + 6.0) / 12.0)
 
 
-def norm_india_vix(vix: float) -> float:
+def norm_india_vix(dev_pct_vs_50dma: float) -> float:
     """
-    Map India VIX to [0, 1].  High VIX = fear → low value.
+    Map India VIX RELATIVE to its own 50-day moving average to [0, 1] —
+    volatility above its recent norm = rising fear → low value (mood_v2).
+    A fixed-level anchor (the v1 formula) sat at ~0.5 whenever VIX hovered
+    near 20 regardless of regime; the relative form moves with the market.
 
-    Formula: clamp((30 − vix) / 20, 0, 1)
-    - VIX = 10 → 1.0 (low fear = greed zone)
-    - VIX = 30 → 0.0 (high fear)
-    - VIX = 20 → 0.5
+    Formula: clamp((25 − dev) / 50, 0, 1)
+    - VIX 25 % ABOVE its 50-DMA → 0.0 (fear spike)
+    - VIX 25 % BELOW its 50-DMA → 1.0 (unusually calm = greed zone)
+    - VIX on its 50-DMA → 0.5
     """
-    return _clamp((30.0 - vix) / 20.0)
+    return _clamp((25.0 - dev_pct_vs_50dma) / 50.0)
 
 
 def norm_market_breadth(ratio: float) -> float:
@@ -70,68 +75,76 @@ def norm_market_breadth(ratio: float) -> float:
     return _clamp(ratio)
 
 
-def norm_put_call_ratio(pcr: float) -> float:
+def norm_put_call_ratio(pcr_5d_avg: float) -> float:
     """
-    Map Put-Call Ratio to [0, 1].  High PCR = fear → low value.
+    Map the Put-Call Ratio — as a 5-day average (industry standard; a
+    single-day PCR is noise-dominated) — to [0, 1]. High PCR = hedging /
+    fear → low value. When fewer than 5 days of history exist the caller
+    passes the mean of the days available (≥ 1 = today; documented
+    short-history fallback, mood_v2 plan §11.3).
 
     Formula: clamp((1.3 − pcr) / 0.6, 0, 1)
     - PCR = 0.7 → 1.0 (low PCR = greed)
     - PCR = 1.3 → 0.0 (high PCR = fear)
     - PCR = 1.0 → 0.5
     """
-    return _clamp((1.3 - pcr) / 0.6)
+    return _clamp((1.3 - pcr_5d_avg) / 0.6)
 
 
-def norm_global_indices(pct_change: float) -> float:
+def norm_global_indices(dev_pct_vs_125dma: float) -> float:
     """
-    Map a global benchmark's (S&P 500) % daily change to [0, 1] — same
-    risk-on/off convention as NIFTY: global strength lifts EM sentiment.
+    Map the global benchmark's (S&P 500) momentum — % deviation of the latest
+    price from its 125-day moving average — to [0, 1]; same risk-on/off
+    convention and scale as NIFTY momentum (mood_v2).
 
-    Formula: clamp((pct + 3) / 6, 0, 1)  (+3 % → 1.0, −3 % → 0.0, 0 → 0.5)
+    Formula: clamp((dev + 6) / 12, 0, 1)  (+6 % → 1.0, −6 % → 0.0, on-MA → 0.5)
     """
-    return _clamp((pct_change + 3.0) / 6.0)
+    return _clamp((dev_pct_vs_125dma + 6.0) / 12.0)
 
 
-def norm_us_bond_10y(yield_pct: float) -> float:
+def norm_us_bond_10y(dev_pp_vs_50dma: float) -> float:
     """
-    Map the US 10-year Treasury yield LEVEL (in %, e.g. 4.55) to [0, 1].
-    Higher US yields tighten global liquidity and pull capital from EM
-    equities → risk-off (fear); lower yields → risk-on (greed).
+    Map the US 10-year Treasury yield's deviation — in percentage POINTS from
+    its own 50-day moving average — to [0, 1] (mood_v2). Yields rising above
+    their recent norm = tightening global liquidity → risk-off; falling below
+    = easing → risk-on. The v1 fixed 4 %-anchor barely moved day to day.
 
-    Formula: clamp((5.0 − yield) / 2.0, 0, 1)
-    - 3.0 % → 1.0 (easy liquidity = greed)
-    - 5.0 % → 0.0 (tight liquidity = fear)
-    - 4.0 % → 0.5
+    Formula: clamp((0.5 − dev) / 1.0, 0, 1)
+    - 0.5 pp ABOVE the 50-DMA → 0.0 (tightening = fear)
+    - 0.5 pp BELOW the 50-DMA → 1.0 (easing = greed)
+    - on the 50-DMA → 0.5
     """
-    return _clamp((5.0 - yield_pct) / 2.0)
+    return _clamp((0.5 - dev_pp_vs_50dma) / 1.0)
 
 
-def norm_oil_brent(price_usd: float) -> float:
+def norm_oil_brent(dev_pct_vs_50dma: float) -> float:
     """
-    Map Brent crude price LEVEL (USD/bbl) to [0, 1].  India is a large net
-    oil importer, so high oil = trade-deficit / inflation pressure (fear);
-    low oil = tailwind (greed).
+    Map Brent crude's % deviation from its own 50-day moving average to
+    [0, 1] (mood_v2). India is a large net oil importer, so oil spiking above
+    its recent norm = trade-deficit / inflation pressure (fear); oil sliding
+    below it = tailwind (greed). The v1 fixed $80 anchor was static ballast.
 
-    Formula: clamp((100 − price) / 40, 0, 1)
-    - $60 → 1.0 (cheap oil = greed)
-    - $100 → 0.0 (expensive oil = fear)
-    - $80 → 0.5
+    Formula: clamp((15 − dev) / 30, 0, 1)
+    - 15 % ABOVE the 50-DMA → 0.0 (importer stress = fear)
+    - 15 % BELOW the 50-DMA → 1.0 (tailwind = greed)
+    - on the 50-DMA → 0.5
     """
-    return _clamp((100.0 - price_usd) / 40.0)
+    return _clamp((15.0 - dev_pct_vs_50dma) / 30.0)
 
 
-def norm_usd_inr(pct_change: float) -> float:
+def norm_usd_inr(dev_pct_vs_50dma: float) -> float:
     """
-    Map the USD/INR pair's % daily change to [0, 1].  INR appreciation
-    (USD/INR falling → negative %) signals capital inflows / risk-on (greed);
-    INR depreciation (USD/INR rising → positive %) signals outflows (fear).
+    Map USD/INR's % deviation from its own 50-day moving average to [0, 1]
+    (mood_v2). The pair ABOVE its recent norm = INR weaker than trend =
+    outflows (fear); BELOW it = INR stronger than trend = inflows (greed).
+    The v1 one-day % change (typical day ±0.2 %) pinned this signal at ~0.5.
 
-    Formula: clamp((−pct + 1.0) / 2.0, 0, 1)
-    - USD/INR −1 % (INR strengthens) → 1.0 (greed)
-    - USD/INR +1 % (INR weakens)    → 0.0 (fear)
-    - 0 % → 0.5
+    Formula: clamp((2 − dev) / 4, 0, 1)
+    - USD/INR 2 % ABOVE its 50-DMA → 0.0 (fear)
+    - USD/INR 2 % BELOW its 50-DMA → 1.0 (greed)
+    - on the 50-DMA → 0.5
     """
-    return _clamp((-pct_change + 1.0) / 2.0)
+    return _clamp((2.0 - dev_pct_vs_50dma) / 4.0)
 
 
 # News-sentiment tone → [0, 1] (1 = greed/bullish). The tone is a DESCRIPTIVE
@@ -160,52 +173,44 @@ def norm_news_sentiment(tone: str) -> float | None:
     return _NEWS_TONE_SCORES.get(tone)
 
 
-# Institutional net-flow saturation thresholds (₹Cr). A daily net flow of this
-# magnitude maps to ≈0.88 (greed) / ≈0.12 (fear) via tanh; larger days asymptote
-# toward 1 / 0 without ever pegging.
+# Institutional net-flow saturation thresholds (₹Cr) — mood_v2: the input is the
+# 5-DAY MEAN of daily net flows (rolling Redis history, plan §11.3), not a single
+# day. A sustained streak averaging this magnitude maps to ≈0.88 (greed) /
+# ≈0.12 (fear) via tanh; larger streaks asymptote toward 1 / 0 without pegging.
 #
-# FII vs DII are differentiated: FII cash-market days run LARGER and more volatile
-# (single-day swings routinely ±10–20k ₹Cr), so FII needs a higher saturation so a
-# big-but-ordinary FII day does not peg the signal; DII flows (SIP-driven, steadier)
-# saturate sooner. Equal constants over-weighted ordinary DII days and under-reacted
-# to large FII days.
+# FII vs DII are differentiated: a sustained FII streak runs larger (±4–6k ₹Cr/day
+# over a week is a strong conviction move) than the steadier SIP-driven DII flow.
+# The v1 single-day constants (15k/10k) mapped a normal ±3k ₹Cr day to ~0.52 and
+# were the flows half of the structural-neutral bug (plan §11.1).
 #
-# PROVISIONAL — normalization curve pending scoring/compliance gate. The dig
-# (docs/research/mood-data-sourcing-2026-06-21.md §2) recommends scaling net flow
-# against a ROLLING WINDOW rather than a fixed constant; that refinement is a
-# Tier-C scoring decision deferred to the gate. These fixed-threshold tanh values
-# are a documented first-pass only.
-_FII_FLOW_SATURATION_CR = 15_000.0
-_DII_FLOW_SATURATION_CR = 10_000.0
+# When history is short (< 5 entries, e.g. after a Redis restart) the caller
+# passes the mean of the days available — same formula, graceful convergence.
+_FII_FLOW_SATURATION_CR = 4_000.0
+_DII_FLOW_SATURATION_CR = 3_000.0
 
 
-def norm_fii_flows(net_flow_cr: float) -> float:
+def norm_fii_flows(mean_flow_cr_5d: float) -> float:
     """
-    Map FII daily net cash-market flow (₹Cr) to [0, 1]; 1 = greed/bullish.
+    Map the FII 5-day mean net cash-market flow (₹Cr) to [0, 1]; 1 = greed.
 
-    net_flow_cr = buy_amount − sell_amount. Net inflow (buying) → toward 1,
-    net outflow (selling) → toward 0. Formula: clamp(0.5 + 0.5·tanh(flow / S))
-    with S = 15,000 ₹Cr (FII days run larger than DII; see saturation note above).
-    - 0 ₹Cr        → 0.50 (neutral)
-    - +15,000 ₹Cr  → ≈0.88 (greed)
-    - −15,000 ₹Cr  → ≈0.12 (fear)
-
-    PROVISIONAL — normalization curve pending scoring/compliance gate.
+    Each day's net = buy_amount − sell_amount; the input is the mean of the
+    last ≤ 5 daily nets. Sustained inflow → toward 1, sustained outflow →
+    toward 0. Formula: clamp(0.5 + 0.5·tanh(mean / S)), S = 4,000 ₹Cr.
+    - 0 ₹Cr mean       → 0.50 (neutral)
+    - +4,000 ₹Cr mean  → ≈0.88 (greed)
+    - −4,000 ₹Cr mean  → ≈0.12 (fear)
     """
-    return _clamp(0.5 + 0.5 * math.tanh(net_flow_cr / _FII_FLOW_SATURATION_CR))
+    return _clamp(0.5 + 0.5 * math.tanh(mean_flow_cr_5d / _FII_FLOW_SATURATION_CR))
 
 
-def norm_dii_flows(net_flow_cr: float) -> float:
+def norm_dii_flows(mean_flow_cr_5d: float) -> float:
     """
-    Map DII daily net cash-market flow (₹Cr) to [0, 1]; 1 = greed/bullish.
+    Map the DII 5-day mean net cash-market flow (₹Cr) to [0, 1]; 1 = greed.
 
-    Same convention/formula as norm_fii_flows with the DII saturation constant:
-    net inflow → toward 1, net outflow → toward 0,
-    clamp(0.5 + 0.5·tanh(flow / S)); 0 ₹Cr → 0.50.
-
-    PROVISIONAL — normalization curve pending scoring/compliance gate.
+    Same convention/formula as norm_fii_flows with the DII saturation constant
+    (S = 3,000 ₹Cr): clamp(0.5 + 0.5·tanh(mean / S)); 0 ₹Cr → 0.50.
     """
-    return _clamp(0.5 + 0.5 * math.tanh(net_flow_cr / _DII_FLOW_SATURATION_CR))
+    return _clamp(0.5 + 0.5 * math.tanh(mean_flow_cr_5d / _DII_FLOW_SATURATION_CR))
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +265,9 @@ async def fetch_mood_inputs(
     dict expected by ``compute_mood``.
 
     The PRIMARY adapter runs the MACRO_SIGNAL ladder (Yahoo primary supplies
-    nifty_trend, india_vix, global_indices, us_bond_10y, oil_brent, usd_inr; the
-    NSE fallback supplies nifty_trend, india_vix, market_breadth, put_call_ratio).
+    nifty_trend, india_vix, global_indices, us_bond_10y, oil_brent, usd_inr as
+    MA-deviation raws — mood_v2; the NSE fallback supplies market_breadth and
+    put_call_ratio only, its quote endpoints can't compute MA deviations).
 
     Each SUPPLEMENTAL adapter is fetched ADDITIVELY and merged in — used for the
     Upstox Analytics provider, which contributes fii_flows / dii_flows /

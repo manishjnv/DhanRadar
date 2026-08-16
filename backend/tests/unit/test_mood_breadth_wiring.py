@@ -31,14 +31,20 @@ from dhanradar.mood.signals import fetch_mood_inputs, norm_market_breadth
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SIX_CHART_METAS = {
-    "^NSEI":     {"regularMarketPrice": 103.0, "chartPreviousClose": 100.0},   # +3.0%
-    "^INDIAVIX": {"regularMarketPrice": 15.0},                                  # level
-    "^GSPC":     {"regularMarketPrice": 99.0,  "chartPreviousClose": 100.0},   # -1.0%
-    "^TNX":      {"regularMarketPrice": 4.5},                                   # level
-    "BZ=F":      {"regularMarketPrice": 90.0},                                  # level
-    "INR=X":     {"regularMarketPrice": 99.5,  "chartPreviousClose": 100.0},   # -0.5%
+# mood_v2: the provider derives each signal from (meta, 1y daily closes) via
+# _chart_series — flat closes at a base make every deviation deterministic.
+_SIX_CHART_SERIES = {
+    "^NSEI":     ({"regularMarketPrice": 103.0}, [100.0] * 130),  # +3.0% vs 125-DMA
+    "^INDIAVIX": ({"regularMarketPrice": 15.0}, [20.0] * 60),     # −25.0% vs 50-DMA
+    "^GSPC":     ({"regularMarketPrice": 99.0}, [100.0] * 130),   # −1.0% vs 125-DMA
+    "^TNX":      ({"regularMarketPrice": 4.5}, [4.0] * 60),       # +0.5 pp vs 50-DMA
+    "BZ=F":      ({"regularMarketPrice": 90.0}, [80.0] * 60),     # +12.5% vs 50-DMA
+    "INR=X":     ({"regularMarketPrice": 99.5}, [100.0] * 60),    # −0.5% vs 50-DMA
 }
+
+
+async def _fake_chart_series(_client, symbol):
+    return _SIX_CHART_SERIES.get(symbol, (None, []))
 
 
 # ---------------------------------------------------------------------------
@@ -50,11 +56,8 @@ async def test_yahoo_provider_emits_market_breadth_from_cache(monkeypatch):
     market_breadth = advances/(advances+declines), not advances/declines."""
     from dhanradar.market_data.providers import yahoo
 
-    # Stub all chart symbol fetches with the known metas
-    async def fake_meta(_client, symbol):
-        return _SIX_CHART_METAS.get(symbol)
-
-    monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
+    # Stub all chart symbol fetches with the known (meta, closes) series
+    monkeypatch.setattr(yahoo, "_chart_series", _fake_chart_series)
 
     # Stub Redis: cache contains advances=35, declines=15 â†’ ratio = 35/50 = 0.70
     advances, declines = 35, 15
@@ -138,10 +141,7 @@ async def test_yahoo_provider_breadth_failure_omits_key_no_exception(monkeypatch
     signals. The six chart signals are still returned. No exception is raised."""
     from dhanradar.market_data.providers import yahoo
 
-    async def fake_meta(_client, symbol):
-        return _SIX_CHART_METAS.get(symbol)
-
-    monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
+    monkeypatch.setattr(yahoo, "_chart_series", _fake_chart_series)
 
     async def failing_breadth():
         return None  # simulates any internal failure
@@ -165,11 +165,11 @@ async def test_yahoo_provider_no_provider_error_on_breadth_failure(monkeypatch):
     chart symbol succeeds â€” breadth failure is not a catastrophic failure."""
     from dhanradar.market_data.providers import yahoo
 
-    async def fake_meta(_client, symbol):
+    async def fake_series(_client, symbol):
         # Only NIFTY resolves
-        return _SIX_CHART_METAS.get(symbol) if symbol == "^NSEI" else None
+        return _SIX_CHART_SERIES.get(symbol) if symbol == "^NSEI" else (None, [])
 
-    monkeypatch.setattr(yahoo, "_quote_meta", fake_meta)
+    monkeypatch.setattr(yahoo, "_chart_series", fake_series)
 
     async def failing_breadth():
         raise RuntimeError("simulated Redis + yfinance failure")  # noqa: EM101

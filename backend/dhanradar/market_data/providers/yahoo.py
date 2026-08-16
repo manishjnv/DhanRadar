@@ -7,14 +7,22 @@ snapshot. Yahoo Finance's public chart API is reachable from servers worldwide
 with no auth and serves the India symbols we need, so it is the Mood Compass's
 primary macro source.
 
-Signals fetched (raw values; normalisation lives in mood/signals.py):
-  - nifty_trend    : NIFTY 50 (^NSEI)      -- % daily change
-  - india_vix      : India VIX (^INDIAVIX) -- level
-  - global_indices : S&P 500 (^GSPC)       -- % daily change
-  - us_bond_10y    : US 10Y yield (^TNX)   -- level, in percent
-  - oil_brent      : Brent crude (BZ=F)    -- price level, USD/bbl
-  - usd_inr        : USD/INR (INR=X)       -- % daily change
+Signals fetched (raw values; normalisation lives in mood/signals.py). mood_v2
+(MOOD_IMPROVEMENT_PLAN §11): every Yahoo signal is measured RELATIVE to its own
+recent history (deviation from a moving average) instead of a one-day change or
+a fixed level anchor -- the industry-standard fear/greed construction. The MA is
+computed here from the same single chart call per symbol (range=1y daily closes,
+a ~250-float array -- NOT the heavy yfinance path):
+  - nifty_trend    : NIFTY 50 (^NSEI)      -- % deviation from its 125-day MA
+  - india_vix      : India VIX (^INDIAVIX) -- % deviation from its 50-day MA
+  - global_indices : S&P 500 (^GSPC)       -- % deviation from its 125-day MA
+  - us_bond_10y    : US 10Y yield (^TNX)   -- deviation in points from its 50-day MA
+  - oil_brent      : Brent crude (BZ=F)    -- % deviation from its 50-day MA
+  - usd_inr        : USD/INR (INR=X)       -- % deviation from its 50-day MA
   - market_breadth : NIFTY-50 constituent A/D -- advances/(advances+declines) [0,1]
+
+Fewer valid closes than the MA window -> the signal is OMITTED (never imputed);
+the engine degrades gracefully, matching the house no-impute discipline.
 
 Each symbol is fetched independently -- a per-symbol failure yields None for that
 signal (omitted from the payload); the rest proceed. ProviderError is raised only
@@ -55,15 +63,17 @@ _CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DhanRadar/1.0; +https://dhanradar.com)"}
 _TIMEOUT = httpx.Timeout(15.0, connect=8.0)
 
-# signal-key -> (yahoo symbol, mode) where mode is "pct" (daily % change) or
-# "level" (the latest price/level as-is).
-_SYMBOLS: dict[str, tuple[str, str]] = {
-    "nifty_trend": ("^NSEI", "pct"),
-    "india_vix": ("^INDIAVIX", "level"),
-    "global_indices": ("^GSPC", "pct"),
-    "us_bond_10y": ("^TNX", "level"),
-    "oil_brent": ("BZ=F", "level"),
-    "usd_inr": ("INR=X", "pct"),
+# signal-key -> (yahoo symbol, mode, ma_window) where mode is:
+#   "ma_dev_pct" -- % deviation of the latest price from its ma_window-day MA
+#   "ma_dev_abs" -- deviation in absolute points from its ma_window-day MA
+# 125 days for equity momentum, 50 for vol/macro (CNN Fear & Greed convention).
+_SYMBOLS: dict[str, tuple[str, str, int]] = {
+    "nifty_trend": ("^NSEI", "ma_dev_pct", 125),
+    "india_vix": ("^INDIAVIX", "ma_dev_pct", 50),
+    "global_indices": ("^GSPC", "ma_dev_pct", 125),
+    "us_bond_10y": ("^TNX", "ma_dev_abs", 50),
+    "oil_brent": ("BZ=F", "ma_dev_pct", 50),
+    "usd_inr": ("INR=X", "ma_dev_pct", 50),
 }
 
 
@@ -90,7 +100,10 @@ async def _quote_meta(client: httpx.AsyncClient, symbol: str) -> dict | None:
 
 
 def _signal_value(meta: dict, mode: str) -> float | None:
-    """Derive the raw signal from a chart meta block: a % daily change or a level."""
+    """Derive a quote value from a chart meta block: a % daily change ("pct") or
+    a level ("level"). No longer used by the mood provider (mood_v2 uses MA
+    deviations below) but still the canonical helper for public quote surfaces
+    (dashboard/indices.py)."""
     price = meta.get("regularMarketPrice")
     if not price:  # None or 0 -- a 0 price/level is meaningless, treat as missing
         return None
@@ -101,6 +114,56 @@ def _signal_value(meta: dict, mode: str) -> float | None:
     if not prev:  # None or 0 -> can't compute a % change
         return None
     return (float(price) - float(prev)) / float(prev) * 100.0
+
+
+async def _chart_series(
+    client: httpx.AsyncClient, symbol: str
+) -> tuple[dict | None, list[float]]:
+    """Return (meta, daily closes) for a symbol from ONE chart call with
+    range=1y&interval=1d, or (None, []) on any error. Yahoo pads the close
+    array with nulls (holidays/halts); those are filtered out here."""
+    url = _CHART_URL.format(symbol=quote(symbol))
+    try:
+        resp = await client.get(
+            url,
+            headers=_HEADERS,
+            timeout=_TIMEOUT,
+            params={"range": "1y", "interval": "1d"},
+        )
+        if resp.status_code != 200:
+            logger.debug("yahoo_macro: HTTP %s for %s", resp.status_code, symbol)
+            return None, []
+        result = resp.json().get("chart", {}).get("result") or []
+        if not result:
+            return None, []
+        meta = result[0].get("meta")
+        quotes = (result[0].get("indicators", {}).get("quote") or [{}])[0]
+        closes = [float(c) for c in (quotes.get("close") or []) if c is not None]
+        return (meta if isinstance(meta, dict) else None), closes
+    except Exception as exc:  # noqa: BLE001 -- each symbol is independent best-effort
+        logger.debug("yahoo_macro: chart fetch failed for %s: %s", symbol, exc)
+        return None, []
+
+
+def _ma_deviation(
+    meta: dict | None, closes: list[float], mode: str, window: int
+) -> float | None:
+    """Derive the raw mood_v2 signal: the latest value's deviation from its
+    window-day moving average -- as a % ("ma_dev_pct") or in absolute points
+    ("ma_dev_abs"). Latest = regularMarketPrice (intraday-fresh) when present,
+    else the last daily close. Fewer valid closes than the window, or a
+    zero/negative MA -> None (signal omitted; never imputed)."""
+    if len(closes) < window:
+        return None
+    last = (meta or {}).get("regularMarketPrice") or closes[-1]
+    if not last:
+        return None
+    ma = sum(closes[-window:]) / float(window)
+    if ma <= 0:
+        return None
+    if mode == "ma_dev_abs":
+        return float(last) - ma
+    return (float(last) - ma) / ma * 100.0
 
 
 # Public quotes endpoint metadata. The mood signals are derived from RAW PUBLIC
@@ -137,7 +200,7 @@ async def fetch_macro_quotes() -> list[dict]:
 
     out: list[dict] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        for key, (symbol, _mode) in _SYMBOLS.items():
+        for key, (symbol, _mode, _window) in _SYMBOLS.items():
             meta = await _quote_meta(client, symbol)
             if not meta:
                 continue
@@ -207,11 +270,9 @@ class YahooMacroProvider(MarketDataProvider):
         signals: dict[str, float] = {}
         try:
             async with httpx.AsyncClient() as client:
-                for key, (symbol, mode) in _SYMBOLS.items():
-                    meta = await _quote_meta(client, symbol)
-                    if meta is None:
-                        continue
-                    value = _signal_value(meta, mode)
+                for key, (symbol, mode, window) in _SYMBOLS.items():
+                    meta, closes = await _chart_series(client, symbol)
+                    value = _ma_deviation(meta, closes, mode, window)
                     if value is not None:
                         signals[key] = value
         except ImportError as exc:  # pragma: no cover -- httpx is a hard dep
