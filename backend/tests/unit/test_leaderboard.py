@@ -49,6 +49,7 @@ from dhanradar.tasks.mf import (
     _build_leaderboard_sip_beginner,
     _build_leaderboard_sip_consistency,
     _build_leaderboard_sip_rail,
+    _build_leaderboard_three_lens,
     _build_leaderboard_top100,
     _build_leaderboard_value_ter,
     _build_leaderboard_wealth_creator,
@@ -239,6 +240,64 @@ def test_dedupe_variants_falls_back_to_isin_when_short_name_missing_or_empty() -
     ]
     out = _dedupe_leaderboard_variants(variants, sort_key=lambda f: f["isin"])
     assert {f["isin"] for f in out} == {"N1", "N2", "N3"}
+
+
+def _three_lens_member(isin: str, r3: float, dd: float, ter: float, **extra: Any) -> dict:
+    return _fund(isin, return_3y_pct=r3, max_drawdown_pct=dd, expense_ratio_pct=ter, **extra)
+
+
+def test_three_lens_requires_top_quartile_on_all_three_within_category() -> None:
+    # 8 large-cap funds; F0 is top-quarter on all three lenses (best r3, lowest
+    # dd, lowest ter). F1 has the 2nd-best r3 but the WORST cost — return alone
+    # must not qualify it. quarter = 8 // 4 = 2.
+    members = [
+        _three_lens_member("F0", r3=30.0, dd=5.0, ter=0.3),
+        _three_lens_member("F1", r3=28.0, dd=6.0, ter=2.4),
+        _three_lens_member("F2", r3=20.0, dd=5.5, ter=0.4),
+    ] + [
+        _three_lens_member(f"F{i}", r3=10.0 + i, dd=10.0 + i, ter=1.0 + i / 10)
+        for i in range(3, 8)
+    ]
+    rows = _build_leaderboard_three_lens(members)
+    isins = [r["isin"] for r in rows]
+    assert "F0" in isins
+    assert "F1" not in isins  # top return, bottom cost — the set test rejects it
+    for r in rows:
+        assert set(r) & FORBIDDEN_SCORE_KEYS == set()
+
+
+def test_three_lens_skips_small_categories_non_growth_and_null_metrics() -> None:
+    # 7 members < _THREE_LENS_MIN_CATEGORY=8 → whole category skipped.
+    small_cat = [
+        _three_lens_member(f"S{i}", r3=20.0 - i, dd=5.0 + i, ter=0.5 + i / 10, category="Equity Scheme - Small Cap Fund")
+        for i in range(7)
+    ]
+    # Debt category never qualifies regardless of size (growth-scoped).
+    debt = [
+        _three_lens_member(f"D{i}", r3=8.0, dd=0.1, ter=0.2, category="Debt Scheme - Liquid Fund")
+        for i in range(10)
+    ]
+    # A null on ANY lens excludes the fund from its category pool.
+    nulls = [_fund("N1", return_3y_pct=None), _fund("N2", max_drawdown_pct=None), _fund("N3", expense_ratio_pct=None)]
+    assert _build_leaderboard_three_lens(small_cat + debt + nulls) == []
+
+
+def test_three_lens_dedupes_scheme_variants_and_orders_by_3y_return() -> None:
+    # 8 hybrid funds; two plan variants of the winner (case-variant short name)
+    # both qualify — only one row survives, ordered by r3 desc.
+    members = [
+        _three_lens_member("H0", r3=25.0, dd=4.0, ter=0.3, category="Hybrid Scheme - Aggressive Hybrid Fund", fund_name_short="Alpha Hybrid"),
+        _three_lens_member("H1", r3=24.9, dd=4.1, ter=0.31, category="Hybrid Scheme - Aggressive Hybrid Fund", fund_name_short="ALPHA HYBRID"),
+    ] + [
+        _three_lens_member(f"H{i}", r3=10.0 + i, dd=8.0 + i, ter=1.0 + i / 10, category="Hybrid Scheme - Aggressive Hybrid Fund")
+        for i in range(2, 8)
+    ]
+    rows = _build_leaderboard_three_lens(members)
+    names = [r["fund_name_short"] for r in rows]
+    assert names.count("Alpha Hybrid") + names.count("ALPHA HYBRID") == 1
+    values = [r["metric_value"] for r in rows]
+    assert values == sorted(values, reverse=True)
+    assert all(r["metric_unit"] == "pct_3y" for r in rows)
 
 
 def test_nav_freshness_gate_bounds_and_fail_closed() -> None:

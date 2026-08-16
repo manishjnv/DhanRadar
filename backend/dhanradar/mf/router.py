@@ -1021,6 +1021,8 @@ _LEADERBOARD_BOARD_TITLES: dict[str, str] = {
     "manager_facts": "Best Fund Managers — covered schemes",
     # Phase 3c (leaderboard-data-backend.md §9b) — S17 AI insight cards.
     "ai_insights": "AI Insights",
+    # V3 (founder 2026-08-16) — three-lenses view.
+    "three_lens": "Strong on All Three Lenses",
 }
 
 
