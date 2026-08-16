@@ -654,6 +654,10 @@ export interface LbAmcFactRow {
 /** `ai_insights` rows (Phase 3c) — governed-gateway educational cards; text only. */
 export interface LbInsightRow {
   text: string;
+  /** Entity links (2026-08-16) — deterministic post-hoc matches of the exact
+   *  fund names the prompt carried; the model never emits these. Absent when
+   *  no known-good name appears in the card. */
+  links?: { name: string; isin: string }[];
 }
 
 /** `manager_facts` rows — factual manager aggregates only; no composite score/stars. */

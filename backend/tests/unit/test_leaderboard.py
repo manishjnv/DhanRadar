@@ -885,6 +885,36 @@ async def test_leaderboard_endpoint_empty_table_returns_null_as_of() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_insight_row_links_nested_scrub_is_fail_closed() -> None:
+    """Entity links (2026-08-16): `links` survives serialization ONLY as
+    [{name: str, isin: 12-char A-Z0-9}] — malformed items dropped, items REBUILT
+    key-by-key (extra keys can't ride through), non-list values drop the key."""
+    rows = [
+        # Valid link + a poisoned sibling (path-segment isin) + an extra key.
+        {
+            "text": "Alpha Fund led the movers.",
+            "links": [
+                {"name": "Alpha Fund", "isin": "INF000A01011", "unified_score": 93},
+                {"name": "Evil", "isin": "../../../etc/passwd"},
+                {"name": "", "isin": "INF000A01012"},
+                "not-a-dict",
+            ],
+        },
+        {"text": "No links here.", "links": "not-a-list"},
+        {"text": "Plain card."},
+    ]
+    envelope = serialize_leaderboard_response(
+        as_of="2026-08-15",
+        hero=None,
+        boards={"ai_insights": {"title": "AI Insights", "rows": rows}},
+    )
+    out = envelope["boards"]["ai_insights"]["rows"]
+    assert out[0]["links"] == [{"name": "Alpha Fund", "isin": "INF000A01011"}]
+    assert "links" not in out[1]
+    assert "links" not in out[2]
+    assert "unified_score" not in json.dumps(envelope, default=str)
+
+
 def test_forbidden_score_key_smuggled_in_is_stripped_not_leaked() -> None:
     """`_scrub` drops a FORBIDDEN_SCORE_KEYS key silently (the #2 backstop) — a
     leaderboard response never surfaces one, whether stripped here or excluded by
