@@ -1061,3 +1061,25 @@ def test_serialize_leaderboard_response_omits_absent_takeaway() -> None:
         boards={"perf_3y": {"title": "t", "rows": []}},
     )
     assert "takeaway" not in envelope["boards"]["perf_3y"]
+
+
+# ---------------------------------------------------------------------------
+# Segregated side-pocket name detection (2026-08-16 live review — prod audit:
+# 358 segregated-named schemes, 170 flagged; the UTI paren variant escaped and
+# topped risk_drawdown at 0.0%)
+# ---------------------------------------------------------------------------
+
+
+def test_scheme_name_is_segregated_variants() -> None:
+    from dhanradar.tasks.mf import _scheme_name_is_segregated as seg
+
+    # Actual side pockets — every AMC naming variant must flag.
+    assert seg("Franklin India Low Duration Fund - Segregated Portfolio 1 - Growth")
+    assert seg("UTI - Regular Saving Fund (Segregated - 17022020) - Monthly Payment")
+    assert seg("UTI - Bond Fund ( Segregated - 17022020 ) - Growth")
+    # MAIN schemes that merely COUNT their side pockets — must never flag
+    # (flagging them would exclude real investable funds platform-wide).
+    assert not seg("Franklin India Dynamic Accrual Fund (No. of segregated portfolios- 3)")
+    assert not seg("Nippon India Credit Risk Fund (Existing Number of Segregated Portfolios - 2)")
+    # Ordinary funds.
+    assert not seg("Parag Parikh Flexi Cap Fund - Direct - Growth")
