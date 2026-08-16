@@ -196,6 +196,10 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "category_total",
             "rank_delta",
             "riskometer",
+            # Phase G (2026-08-16) — full return spectrum on the Top-100 table.
+            "return_1d_pct",
+            "return_1m_pct",
+            "return_3m_pct",
             "return_1y_pct",
             "return_3y_pct",
             "return_5y_pct",

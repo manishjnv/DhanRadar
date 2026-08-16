@@ -61,6 +61,7 @@ from dhanradar.tasks.mf import (
     _leaderboard_is_stale,
     _leaderboard_nav_is_fresh,
     _leaderboard_takeaway,
+    _nav_window_return_pct,
     _since_launch_multiple,
 )
 
@@ -299,6 +300,20 @@ def test_three_lens_dedupes_scheme_variants_and_orders_by_3y_return() -> None:
     values = [r["metric_value"] for r in rows]
     assert values == sorted(values, reverse=True)
     assert all(r["metric_unit"] == "pct_3y" for r in rows)
+
+
+def test_nav_window_return_pct_gap_guarded_never_fabricated() -> None:
+    d = date(2026, 8, 15)
+    # Honest 1-day move.
+    v = _nav_window_return_pct((d, 101.0), (d - timedelta(days=1), 100.0), max_gap_days=7)
+    assert v is not None and abs(v - 1.0) < 1e-9
+    # A "1-day" return across a month-long hole is refused, not fabricated.
+    assert _nav_window_return_pct((d, 101.0), (d - timedelta(days=30), 100.0), max_gap_days=7) is None
+    # Missing points / bad ordering / non-positive earlier NAV → None.
+    assert _nav_window_return_pct(None, (d, 100.0), max_gap_days=7) is None
+    assert _nav_window_return_pct((d, 101.0), None, max_gap_days=7) is None
+    assert _nav_window_return_pct((d, 101.0), (d, 100.0), max_gap_days=7) is None
+    assert _nav_window_return_pct((d, 101.0), (d - timedelta(days=1), 0.0), max_gap_days=7) is None
 
 
 def test_unclaimed_scheme_detection_covers_both_name_fields() -> None:

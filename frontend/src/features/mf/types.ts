@@ -602,6 +602,11 @@ export interface LbFundRow {
   category_total: number | null;
   rank_delta: number | null;
   riskometer: string | null;
+  /** Phase G — 1d/1m are pipeline-computed from NAV (gap-guarded, absent on
+   *  pre-Phase-G payloads); 3m comes from stored metrics. */
+  return_1d_pct?: number | null;
+  return_1m_pct?: number | null;
+  return_3m_pct?: number | null;
   return_1y_pct: number | null;
   return_3y_pct: number | null;
   return_5y_pct: number | null;

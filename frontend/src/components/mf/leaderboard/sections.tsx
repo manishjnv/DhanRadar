@@ -280,7 +280,9 @@ const T100_TABS = [
   { key: '50', label: 'Top 50', limit: 50 },
   { key: '100', label: 'Top 100', limit: 100 },
 ];
-const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '3Y', '5Y', 'SIP', 'Cost', 'Size', 'Momentum', ''];
+// Phase G — full return spectrum; the dead SIP column (live rows had no SIP
+// word) made room for 1D/1M/3M/1Y.
+const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '1D', '1M', '3M', '1Y', '3Y', '5Y', 'Cost', 'Size', 'Momentum', ''];
 
 function medal(i: number) {
   return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
@@ -293,7 +295,8 @@ function medal(i: number) {
 type T100Row = {
   key: string; name: string; amc: string; cat: string; logo: string; color: string;
   ring: RingSpec; labelWord: string; labelColor: string; risk: string;
-  r3: number | null; r5: number | null; sipWord: string; exp: number | null; aum: number | null;
+  r1d: number | null; r1m: number | null; r3m: number | null; r1y: number | null;
+  r3: number | null; r5: number | null; exp: number | null; aum: number | null;
   rankd: string; trend: 'up' | 'down' | 'flat'; href?: string; rank: number;
   tag?: string; fullName?: string;
 };
@@ -307,8 +310,12 @@ export type T100Filters = { group?: string; risk?: string; label?: string };
 // I4 — client-side sortable columns (desktop table headers). `best` = the sort
 // direction that puts the conventionally-better value first on the FIRST click
 // (higher returns / bigger AUM = -1 desc; lower cost = 1 asc).
-type T100SortCol = 'r3' | 'r5' | 'exp' | 'aum';
+type T100SortCol = 'r1d' | 'r1m' | 'r3m' | 'r1y' | 'r3' | 'r5' | 'exp' | 'aum';
 const T100_SORTABLE: Record<string, { col: T100SortCol; best: 1 | -1 }> = {
+  '1D': { col: 'r1d', best: -1 },
+  '1M': { col: 'r1m', best: -1 },
+  '3M': { col: 'r3m', best: -1 },
+  '1Y': { col: 'r1y', best: -1 },
   '3Y': { col: 'r3', best: -1 },
   '5Y': { col: 'r5', best: -1 },
   Cost: { col: 'exp', best: 1 },
@@ -320,7 +327,7 @@ function sampleT100Row(fnd: Fund): Omit<T100Row, 'rank'> {
   return {
     key: fnd.name, name: fnd.name, amc: fnd.amc, cat: fnd.cat, logo: fnd.logo, color: fnd.color,
     ring: { kind: 'score', score: fnd.score }, labelWord: lbl.word, labelColor: lbl.color,
-    risk: fnd.risk, r3: fnd.r3, r5: fnd.r5, sipWord: STRENGTH_WORD[toStrength(fnd.sip)],
+    risk: fnd.risk, r1d: null, r1m: null, r3m: null, r1y: null, r3: fnd.r3, r5: fnd.r5,
     exp: fnd.exp, aum: fnd.aum, rankd: fnd.rankd, trend: fnd.trend,
   };
 }
@@ -333,7 +340,9 @@ function liveT100Row(r: LbFundRow): Omit<T100Row, 'rank'> {
   return {
     key: r.isin, name, tag: d.tag, fullName: raw, amc: r.amc_name, cat: r.sebi_category, logo: initialOf(raw), color: colorFor(r.isin),
     ring: { kind: 'band', band: r.confidence_band, color: lbl.color }, labelWord: lbl.word, labelColor: lbl.color,
-    risk: r.riskometer ?? '—', r3: r.return_3y_pct, r5: r.return_5y_pct, sipWord: '—',
+    risk: r.riskometer ?? '—',
+    r1d: r.return_1d_pct ?? null, r1m: r.return_1m_pct ?? null, r3m: r.return_3m_pct ?? null,
+    r1y: r.return_1y_pct, r3: r.return_3y_pct, r5: r.return_5y_pct,
     exp: r.expense_ratio_pct, aum: r.aum_crore, rankd: fmtDelta(r.rank_delta), trend,
     href: `/mf/fund/${r.isin}`,
   };
@@ -419,7 +428,7 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
     <>
       {/* DESKTOP table */}
       <div className="hidden overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm md:block">
-        <table className="w-full min-w-[1040px] border-collapse text-small">
+        <table className="w-full min-w-[1220px] border-collapse text-small">
           <thead>
             <tr>
               {T100_COLS.map((c, i) => {
@@ -497,9 +506,12 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                     <span className="inline-flex items-center justify-end gap-1.5"><RingCell ring={row.ring} /><EduPill word={row.labelWord} color={row.labelColor} /></span>
                   </td>
                   <td className="border-b border-line px-3.5 py-2 text-right"><RiskBadge risk={row.risk} /></td>
-                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-emerald">{pctSigned(row.r3)}</td>
-                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-emerald">{pctSigned(row.r5)}</td>
-                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.sipWord}</td>
+                  {/* Phase G — full return spectrum, sign-coloured (E-4 rule) */}
+                  {([row.r1d, row.r1m, row.r3m, row.r1y, row.r3, row.r5] as const).map((v, ci) => (
+                    <td key={ci} className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold" style={{ color: v == null ? 'var(--text-muted)' : v >= 0 ? E : COLORS.R }}>
+                      {pctSigned(v)}
+                    </td>
+                  ))}
                   <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{ter1(row.exp)}</td>
                   <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? aum(row.aum) : '—'}</td>
                   <td className="border-b border-line px-3.5 py-2 text-right">
@@ -559,7 +571,8 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <EduPill word={row.labelWord} color={row.labelColor} />
                   {pfIsins.has(row.key) && <PortfolioPill />}
-                  <span className="rounded px-1.5 py-0.5 text-[9px] font-bold" style={{ background: 'var(--surface-2)', color: 'var(--text-secondary)' }}>{pctSigned(row.r3)} 3Y</span>
+                  {row.r1y != null && <span className="rounded px-1.5 py-0.5 text-[9px] font-bold" style={{ background: 'var(--surface-2)', color: row.r1y >= 0 ? E : COLORS.R }}>{pctSigned(row.r1y)} 1Y</span>}
+                  <span className="rounded px-1.5 py-0.5 text-[9px] font-bold" style={{ background: 'var(--surface-2)', color: (row.r3 ?? 0) >= 0 ? E : COLORS.R }}>{pctSigned(row.r3)} 3Y</span>
                   <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[9px] font-bold" style={{ color: up ? E : down ? '#E5484D' : 'var(--text-muted)' }}>{up ? '▲' : down ? '▼' : '–'}{row.rankd}</span>
                 </div>
               </div>
