@@ -27,7 +27,9 @@ export function SectionHeader({
   tag?: string;
   /** Inline badge slot (e.g. <LiveBadge/>) — renders ON the header line, never below it. */
   badge?: React.ReactNode;
-  /** Muted right-aligned context line (e.g. "684 funds"). */
+  /** Context line (e.g. "684 funds") — renders INLINE after the title/badge,
+   *  left-aligned, as a readable royal highlight (founder 2026-08-17: the old
+   *  right-aligned muted text was invisible). */
   info?: React.ReactNode;
   className?: string;
 }) {
@@ -45,7 +47,11 @@ export function SectionHeader({
         </span>
       )}
       {badge}
-      {info && <span className="ml-auto text-caption text-ink-muted">{info}</span>}
+      {info && (
+        <span className="text-caption font-semibold text-royal bg-royal/10 px-2 py-0.5 rounded-md">
+          {info}
+        </span>
+      )}
     </div>
   );
 }
