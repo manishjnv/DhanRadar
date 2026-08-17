@@ -148,7 +148,8 @@ function LeaderboardView() {
 
       {/* S4 — Category Champions */}
       <Anchor id="champions">
-        <SectionHeader index="02" title="Category Champions" info="the best fund in every category" badge={boards?.champions ? <LiveBadge /> : undefined} />
+        {/* Method note lives HERE inline (founder 2026-08-17), not repeated on every card */}
+        <SectionHeader index="02" title="Category Champions" info="the best fund in every category · returns computed from NAV history" badge={boards?.champions ? <LiveBadge /> : undefined} />
         <ChampionsSection live={boards?.champions?.rows} />
       </Anchor>
 
