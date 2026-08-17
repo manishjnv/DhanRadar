@@ -73,6 +73,17 @@
   --text-secondary: #3B414E;
   --text-muted:     #6B7280;
   --text-faint:     #9CA0AA;
+
+  /* --- Channel triplets (alpha-capable Tailwind colours, e.g. bg-surface/95) --- */
+  --bg-rgb: 247 246 242;
+  --bg-elev-rgb: 255 255 255;
+  --surface-rgb: 255 255 255;
+  --surface-2-rgb: 241 239 233;
+  --surface-3-rgb: 232 230 223;
+  --text-rgb: 11 15 26;
+  --text-secondary-rgb: 59 65 78;
+  --text-muted-rgb: 107 114 128;
+  --text-faint-rgb: 156 160 170;
 }
 
 /* Dark theme — applied via .theme-dark class on <html> or a parent */
@@ -99,4 +110,15 @@
   --royal-blue-soft: rgba(77,128,255,0.14);
   --red-soft:        rgba(255,97,102,0.14);
   --amber-soft:      rgba(255,179,71,0.14);
+
+  /* Channel triplets (alpha-capable Tailwind colours) */
+  --bg-rgb: 7 9 15;
+  --bg-elev-rgb: 11 15 26;
+  --surface-rgb: 14 18 30;
+  --surface-2-rgb: 20 25 40;
+  --surface-3-rgb: 27 33 51;
+  --text-rgb: 236 238 245;
+  --text-secondary-rgb: 185 191 207;
+  --text-muted-rgb: 126 134 153;
+  --text-faint-rgb: 82 88 104;
 }
