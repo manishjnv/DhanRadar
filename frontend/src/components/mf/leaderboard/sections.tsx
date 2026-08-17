@@ -287,7 +287,7 @@ const T100_TABS = [
 ];
 // Phase G — full return spectrum; the dead SIP column (live rows had no SIP
 // word) made room for 1D/1M/3M/1Y.
-const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '1D', '1M', '3M', '1Y', '3Y', '5Y', 'Cost', 'Size (₹ Cr)', 'Momentum', ''];
+const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '1D', '1M', '3M', '1Y', '3Y', '5Y', 'Cost', 'Size (Cr)', 'Momentum', ''];
 
 function medal(i: number) {
   return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
@@ -326,7 +326,7 @@ const T100_SORTABLE: Record<string, { col: T100SortCol; best: 1 | -1 }> = {
   '3Y': { col: 'r3', best: -1 },
   '5Y': { col: 'r5', best: -1 },
   Cost: { col: 'exp', best: 1 },
-  'Size (₹ Cr)': { col: 'aum', best: -1 },
+  'Size (Cr)': { col: 'aum', best: -1 },
 };
 
 function sampleT100Row(fnd: Fund): Omit<T100Row, 'rank'> {
@@ -523,8 +523,8 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                     </td>
                   ))}
                   <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{ter1(row.exp)}</td>
-                  {/* Founder 2026-08-17: unit lives in the header (Size ₹ Cr); cells are bare 1-dp numbers */}
-                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? row.aum.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}</td>
+                  {/* Founder 2026-08-17 (rev 2): Cr lives in the header; each cell keeps the ₹ symbol, 1-dp */}
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? `₹${row.aum.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}` : '—'}</td>
                   <td className="border-b border-line px-3.5 py-2 text-right">
                     <span className="inline-flex items-center justify-end gap-1.5 font-mono font-bold" style={{ color: up ? E : down ? '#E5484D' : 'var(--text-muted)' }}>
                       {up ? '▲' : down ? '▼' : '–'} {row.rankd}
