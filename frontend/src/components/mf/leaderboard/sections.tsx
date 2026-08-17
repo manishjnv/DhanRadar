@@ -246,7 +246,11 @@ export function CatNav() {
   return (
     // F-3 (founder 2026-08-16): text tabs + active underline, NOT pills — so
     // the page reads one chip row + one navigation, never four chip rows.
-    <div className="sticky top-0 z-20 -mx-4 mt-6 border-y border-line bg-surface/95 backdrop-blur sm:-mx-6">
+    // top offset: 0 inside AppShell (inner scrollport starts below the chrome);
+    // below banner+ticker+SiteHeader on the standalone public chrome (the var is
+    // scoped on MaybeShell's anon branch). Fixes the nav sliding under the
+    // header with a see-through band above it.
+    <div className="sticky top-[var(--content-sticky-top,0px)] z-20 -mx-4 mt-6 border-y border-line bg-surface/95 backdrop-blur sm:-mx-6">
       <div className="flex gap-4 overflow-x-auto px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
         {CATNAV.map((c) => (
           <button
@@ -283,7 +287,7 @@ const T100_TABS = [
 ];
 // Phase G — full return spectrum; the dead SIP column (live rows had no SIP
 // word) made room for 1D/1M/3M/1Y.
-const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '1D', '1M', '3M', '1Y', '3Y', '5Y', 'Cost', 'Size', 'Momentum', ''];
+const T100_COLS = ['#', 'Fund', 'Read', 'Risk', '1D', '1M', '3M', '1Y', '3Y', '5Y', 'Cost', 'Size (₹ Cr)', 'Momentum', ''];
 
 function medal(i: number) {
   return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
@@ -310,9 +314,11 @@ export type T100Filters = { group?: string; risk?: string; label?: string };
 
 // I4 — client-side sortable columns (desktop table headers). `best` = the sort
 // direction that puts the conventionally-better value first on the FIRST click
-// (higher returns / bigger AUM = -1 desc; lower cost = 1 asc).
-type T100SortCol = 'r1d' | 'r1m' | 'r3m' | 'r1y' | 'r3' | 'r5' | 'exp' | 'aum';
+// (higher returns / bigger AUM = -1 desc; lower cost / rank #1 / A→Z = 1 asc).
+type T100SortCol = 'rank' | 'name' | 'r1d' | 'r1m' | 'r3m' | 'r1y' | 'r3' | 'r5' | 'exp' | 'aum';
 const T100_SORTABLE: Record<string, { col: T100SortCol; best: 1 | -1 }> = {
+  '#': { col: 'rank', best: 1 },
+  Fund: { col: 'name', best: 1 },
   '1D': { col: 'r1d', best: -1 },
   '1M': { col: 'r1m', best: -1 },
   '3M': { col: 'r3m', best: -1 },
@@ -320,7 +326,7 @@ const T100_SORTABLE: Record<string, { col: T100SortCol; best: 1 | -1 }> = {
   '3Y': { col: 'r3', best: -1 },
   '5Y': { col: 'r5', best: -1 },
   Cost: { col: 'exp', best: 1 },
-  Size: { col: 'aum', best: -1 },
+  'Size (₹ Cr)': { col: 'aum', best: -1 },
 };
 
 function sampleT100Row(fnd: Fund): Omit<T100Row, 'rank'> {
@@ -405,7 +411,9 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
       if (av == null && bv == null) return 0;
       if (av == null) return 1; // nulls always last, either direction
       if (bv == null) return -1;
-      return (av - bv) * sort.dir;
+      const cmp =
+        typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return cmp * sort.dir;
     });
   }
   const mobileList = filtered.slice(0, mobileAll ? filtered.length : 8);
@@ -515,7 +523,8 @@ export function Top100Section({ live, filters, tab = '10' }: { live?: LbFundRow[
                     </td>
                   ))}
                   <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{ter1(row.exp)}</td>
-                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? aum(row.aum) : '—'}</td>
+                  {/* Founder 2026-08-17: unit lives in the header (Size ₹ Cr); cells are bare 1-dp numbers */}
+                  <td className="border-b border-line px-3.5 py-2 text-right font-mono font-semibold text-ink">{row.aum != null ? row.aum.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'}</td>
                   <td className="border-b border-line px-3.5 py-2 text-right">
                     <span className="inline-flex items-center justify-end gap-1.5 font-mono font-bold" style={{ color: up ? E : down ? '#E5484D' : 'var(--text-muted)' }}>
                       {up ? '▲' : down ? '▼' : '–'} {row.rankd}
@@ -695,7 +704,14 @@ export function ChampionsSection({ live }: { live?: LbChampionRow[] } = {}) {
   if (live && live.length === 0) {
     return <EmptyState title="No category champions yet" description="Champions publish once a category has enough ranked funds." />;
   }
-  const champs: ChampView[] = live ? live.map(liveChampView) : CHAMP.map(sampleChampView);
+  // Founder 2026-08-17: order champion cards by the winner's 3Y return, highest
+  // first (display order only — the champion per category is still the ranked
+  // winner). Missing returns sort last.
+  const champs: ChampView[] = live
+    ? [...live]
+        .sort((a, b) => (b.winner.return_3y_pct ?? -Infinity) - (a.winner.return_3y_pct ?? -Infinity))
+        .map(liveChampView)
+    : CHAMP.map(sampleChampView);
   return (
     <>
       {/* desktop grid */}

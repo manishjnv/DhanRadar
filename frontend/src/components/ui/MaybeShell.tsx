@@ -63,7 +63,12 @@ export function MaybeShell({
   // the logged-out experience is consistent on web and mobile. SiteFooter
   // carries the standing <Disclaimer/>.
   return (
-    <div className="flex min-h-screen flex-col bg-bg">
+    // --content-sticky-top: how far in-page sticky elements (leaderboard CatNav,
+    // …) must offset to pin BELOW the public chrome (banner + ticker + header).
+    // Only defined on this standalone branch — inside AppShell the inner
+    // scrollport already starts below the chrome, so consumers' 0px fallback is
+    // correct there.
+    <div className="flex min-h-screen flex-col bg-bg [--content-sticky-top:calc(var(--dev-banner-h,0px)_+_var(--ticker-h,0px)_+_var(--siteheader-h,0px))]">
       <SiteHeader />
       <main className={cn('mx-auto w-full flex-1 px-4 py-4 sm:px-6', widthClass)}>
         {children}

@@ -46,6 +46,25 @@ function isActive(pathname: string, href: string) {
 export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
+  const headerRef = React.useRef<HTMLElement>(null);
+
+  // Publish the live header height as --siteheader-h on <html> (same pattern
+  // as TickerBar's --ticker-h / DevBanner's --dev-banner-h) so in-page sticky
+  // elements (e.g. the leaderboard CatNav) can pin BELOW the public chrome
+  // instead of sliding underneath it. Collapses to 0 on unmount (AppShell mode).
+  React.useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const publish = () =>
+      document.documentElement.style.setProperty('--siteheader-h', `${el.offsetHeight}px`);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.setProperty('--siteheader-h', '0px');
+    };
+  }, []);
 
   // Close the mobile menu whenever the route changes.
   React.useEffect(() => {
@@ -65,7 +84,7 @@ export function SiteHeader() {
   // sticky top offsets BOTH bars above (fixed dev banner + sticky ticker) so
   // the pinned ticker is never covered when the header sticks on scroll.
   return (
-    <header className="sticky top-[calc(var(--dev-banner-h,0px)_+_var(--ticker-h,0px))] z-30 border-b border-line bg-surface/95 backdrop-blur-sm">
+    <header ref={headerRef} className="sticky top-[calc(var(--dev-banner-h,0px)_+_var(--ticker-h,0px))] z-30 border-b border-line bg-surface/95 backdrop-blur-sm">
       <nav
         aria-label="Main navigation"
         className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2 sm:px-6"

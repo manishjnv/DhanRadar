@@ -20,17 +20,19 @@ module.exports = {
         'red-soft':        'var(--red-soft)',
         'amber-soft':      'var(--amber-soft)',
 
-        // Semantic surface/ink/line keys — CSS-var-backed for theme switching
-        // Must match the var names emitted in tokens.css above
-        bg:              'var(--bg)',
-        'bg-elev':       'var(--bg-elev)',
-        surface:         'var(--surface)',
-        'surface-2':     'var(--surface-2)',
-        'surface-3':     'var(--surface-3)',
-        ink:             'var(--text)',
-        'ink-secondary': 'var(--text-secondary)',
-        'ink-muted':     'var(--text-muted)',
-        'ink-faint':     'var(--text-faint)',
+        // Semantic surface/ink/line keys — CSS-var-backed for theme switching.
+        // rgb(var(--x-rgb) / <alpha-value>) so the /N alpha modifier works
+        // (plain var(--x) colours silently drop /N utilities — RCA 2026-08-17).
+        // line/line-strong stay plain vars: their dark values are rgba() strings.
+        bg:              'rgb(var(--bg-rgb) / <alpha-value>)',
+        'bg-elev':       'rgb(var(--bg-elev-rgb) / <alpha-value>)',
+        surface:         'rgb(var(--surface-rgb) / <alpha-value>)',
+        'surface-2':     'rgb(var(--surface-2-rgb) / <alpha-value>)',
+        'surface-3':     'rgb(var(--surface-3-rgb) / <alpha-value>)',
+        ink:             'rgb(var(--text-rgb) / <alpha-value>)',
+        'ink-secondary': 'rgb(var(--text-secondary-rgb) / <alpha-value>)',
+        'ink-muted':     'rgb(var(--text-muted-rgb) / <alpha-value>)',
+        'ink-faint':     'rgb(var(--text-faint-rgb) / <alpha-value>)',
         line:            'var(--border)',
         'line-strong':   'var(--border-strong)',
       },
