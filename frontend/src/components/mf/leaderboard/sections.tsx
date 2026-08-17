@@ -643,6 +643,10 @@ type ChampView = {
   key: string; cat: string; winner: string; wLogo: string; wColor: string; ring: RingSpec;
   ret: string; runner: string; rLogo: string; rColor: string; why: string;
   wHref?: string; rHref?: string; catHref?: string; catAvg?: number | null; retUp?: boolean;
+  // Founder 2026-08-17: the ✓ row shows the winner's 3Y lead over the category
+  // average (pp) instead of the old templated method sentence (which now lives
+  // once in the section header). null → fall back to `why` (sample cards).
+  margin?: number | null;
 };
 function sampleChampView(c: typeof CHAMP[number]): ChampView {
   return {
@@ -660,6 +664,10 @@ function liveChampView(c: LbChampionRow): ChampView {
     ret: `${pct1(c.winner.return_3y_pct)} 3Y`, runner: rName,
     // Phase H — the category's honest 3y benchmark next to the winner's 3Y.
     catAvg: c.winner.metric_category_avg, retUp: (c.winner.return_3y_pct ?? 0) >= 0,
+    margin:
+      c.winner.return_3y_pct != null && c.winner.metric_category_avg != null
+        ? c.winner.return_3y_pct - c.winner.metric_category_avg
+        : null,
     rLogo: c.runner_up ? initialOf(rName) : '·', rColor: c.runner_up ? colorFor(c.runner_up.isin) : 'var(--surface-3)',
     why: c.why,
     wHref: `/mf/fund/${c.winner.isin}`,
@@ -695,7 +703,12 @@ function ChampCard({ c, rail = false }: { c: ChampView; rail?: boolean }) {
       </div>
       <div className="mt-2.5 flex gap-1.5 border-t border-dashed border-line pt-2.5 text-[10.5px] leading-snug text-ink-muted">
         <span className="shrink-0 font-extrabold text-emerald" aria-hidden="true">✓</span>
-        <span>{c.why}</span>
+        {/* Per-fund fact (lead margin) instead of the old templated method line */}
+        <span>
+          {c.margin != null
+            ? `${c.margin >= 0 ? '+' : '−'}${Math.abs(c.margin).toFixed(1)} pp ${c.margin >= 0 ? 'above' : 'below'} the category average (3Y)`
+            : c.why}
+        </span>
       </div>
     </div>
   );
