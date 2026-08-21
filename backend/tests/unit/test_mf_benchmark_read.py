@@ -40,12 +40,30 @@ async def test_mapped_series_wins_over_category_fallback() -> None:
     mapped = SimpleNamespace(index_key="nifty50_tri")
     tri_rows = [
         SimpleNamespace(tri_date=date(2024, 1, 1), tri_value=100),
+        SimpleNamespace(tri_date=date(2025, 1, 1), tri_value=110),
         SimpleNamespace(tri_date=date(2026, 1, 1), tri_value=120),
     ]
     result = await get_benchmark_row(_Session(fund, mapped, tri_rows, []), fund.isin)
     assert result["source"] == "benchmark"
     assert result["label"] == "Nifty 50 TRI"
     assert result["returns"]["1y"] is not None
+
+
+@pytest.mark.asyncio
+async def test_short_series_never_reports_longer_windows() -> None:
+    """A 2-year series must yield 1Y only — 3Y/5Y stay None, never a relabelled
+    shorter-window return (window-start tolerance guard)."""
+    fund = SimpleNamespace(isin="INF174K01KH7", benchmark_index="Nifty 50 TRI", sebi_category="Equity")
+    mapped = SimpleNamespace(index_key="nifty50_tri")
+    tri_rows = [
+        SimpleNamespace(tri_date=date(2024, 1, 1), tri_value=100),
+        SimpleNamespace(tri_date=date(2025, 1, 1), tri_value=110),
+        SimpleNamespace(tri_date=date(2026, 1, 1), tri_value=120),
+    ]
+    result = await get_benchmark_row(_Session(fund, mapped, tri_rows, []), fund.isin)
+    assert result["returns"]["1y"] is not None
+    assert result["returns"]["3y"] is None
+    assert result["returns"]["5y"] is None
 
 
 @pytest.mark.asyncio

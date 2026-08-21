@@ -11,6 +11,11 @@ from dhanradar.models.mf import MfBenchmarkMap, MfBenchmarkTri, MfCategorySeries
 
 _BENCHMARK_WINDOWS = (365, 1095, 1825)
 _MIN_CATEGORY_FUND_COUNT = 5
+# A window's return is only honest when the series actually covers it: the first
+# point at/after the requested start must sit within this many days of it, else
+# a short series would report e.g. a 2-year move labelled "5y" (mirrors the
+# `_trailing_return_with_min_age` guard on the fund side of the same table row).
+_WINDOW_START_TOLERANCE_DAYS = 31
 
 
 async def get_benchmark_row(session: AsyncSession, isin: str) -> dict:
@@ -62,6 +67,8 @@ async def get_benchmark_row(session: AsyncSession, isin: str) -> dict:
     for name, days in zip(("1y", "3y", "5y"), _BENCHMARK_WINDOWS, strict=True):
         start_date = end_date - timedelta(days=days)
         start = next(((d, value) for d, value in rows if d >= start_date), None)
+        if start is not None and (start[0] - start_date).days > _WINDOW_START_TOLERANCE_DAYS:
+            start = None
         if start is None or start[1] == 0:
             values[name] = None
         else:

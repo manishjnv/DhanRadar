@@ -945,7 +945,22 @@ function meanOfReturns(values: (number | null | undefined)[]): number | null {
 }
 
 export function LivePerfSection({ cards }: { cards: WatchlistCard[] }) {
-  const benchmark = cards[0]?.benchmark_row;
+  // The watchlist-average row spans every card, so a single benchmark row is
+  // only honest when ALL cards share the same mapped index (source 'benchmark'
+  // — the 'Category median' fallback label can hide different categories).
+  // A mixed watchlist keeps the row visible but empty, labelled as mixed.
+  const benchRows = cards.map((c) => c.benchmark_row).filter((b) => b && !b.no_data);
+  const sharedBench =
+    benchRows.length === cards.length &&
+    benchRows.every((b) => !b.no_data && b.source === 'benchmark' && b.label === benchRows[0].label)
+      ? benchRows[0]
+      : null;
+  const benchmark = sharedBench && !sharedBench.no_data ? sharedBench : null;
+  const benchLabel = benchmark
+    ? benchmark.label
+    : benchRows.length > 0
+      ? 'Benchmark (varies by fund)'
+      : 'Benchmark unavailable';
   const rows: { label: string; r1: number | null; r3: number | null; r5: number | null }[] = [
     {
       label: 'Your watchlist (avg)',
@@ -954,10 +969,10 @@ export function LivePerfSection({ cards }: { cards: WatchlistCard[] }) {
       r5: meanOfReturns(cards.map((c) => c.return_5y_pct)),
     },
     {
-      label: benchmark && !benchmark.no_data ? benchmark.label : 'Benchmark unavailable',
-      r1: benchmark && !benchmark.no_data ? benchmark.returns['1y'] : null,
-      r3: benchmark && !benchmark.no_data ? benchmark.returns['3y'] : null,
-      r5: benchmark && !benchmark.no_data ? benchmark.returns['5y'] : null,
+      label: benchLabel,
+      r1: benchmark ? benchmark.returns['1y'] : null,
+      r3: benchmark ? benchmark.returns['3y'] : null,
+      r5: benchmark ? benchmark.returns['5y'] : null,
     },
     {
       // No mf_category_stats metric_key covers a 5Y window — never fabricated.
