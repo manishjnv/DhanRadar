@@ -159,16 +159,6 @@ export const FILTER_CHIPS: [string, number][] = [
 ];
 export const SORT_OPTIONS = ['Recently Added', 'DhanRadar Strength', 'Returns', 'Risk', 'Fund Size', 'Alphabetical'];
 
-// ── What changed ─────────────────────────────────────────────────────────────
-export const CHANGED: [string, string, string, string, string, string, string][] = [
-  ['Kotak Emerging', 'K', E, 'Rank improved from #6 to #4', '📈', E, '2 days ago'],
-  ['SBI Contra', 'S', B, 'DhanRadar strength rose into the strong band', '⬆', E, '3 days ago'],
-  ['HDFC Smallcap Index', 'H', B, 'Fund flows increased +₹420 Cr', '🐋', B, '4 days ago'],
-  ['Mirae ELSS', 'M', V, 'Annual cost reduced 0.62% → 0.58%', '💰', E, '5 days ago'],
-  ['Quant Small Cap', 'Q', V, 'Risk increased — price swings up 18%', '⚠', R, '6 days ago'],
-  ['Axis Small Cap', 'A', R, 'Sector allocation updated — added pharma', '🔄', B, '1 week ago'],
-];
-
 // ── Opportunities ────────────────────────────────────────────────────────────
 export const OPPORTUNITIES: [string, string, string, string, string, string][] = [
   ['Best SIP Fund', 'HDFC SC Index', 'H', B, 'Strong', 'SIP fit'],
@@ -179,51 +169,6 @@ export const OPPORTUNITIES: [string, string, string, string, string, string][] =
   ['Best DMMI Match', 'ICICI Bluechip', 'I', O, 'Excellent', 'Market fit'],
   ['Best Beginner', 'Parag Parikh', 'P', N, 'Top pick', 'Low drama'],
   ['Highest Rated', 'Parag Parikh', 'P', N, 'Strong', 'DhanRadar'],
-];
-
-// ── DMMI ─────────────────────────────────────────────────────────────────────
-export const DMMI = {
-  value: 62,
-  mood: 'Cautiously Optimistic',
-  phase: 'Accumulation phase',
-  best: [
-    ['Parag Parikh', 'P', N, '+ Best fit'],
-    ['ICICI Bluechip', 'I', O, '+ Stable'],
-    ['SBI Contra', 'S', B, '+ Value play'],
-  ] as [string, string, string, string][],
-  risk: [
-    ['Quant Small Cap', 'Q', V, 'High swings'],
-    ['Axis Small Cap', 'A', R, 'Stretched'],
-    ['HDFC SC Index', 'H', B, 'Watch'],
-  ] as [string, string, string, string][],
-  soWhat:
-    '**Market mood is Cautiously Optimistic (62/100).** 5 of your 8 funds are well-positioned for this accumulation phase. The two small-cap funds carry the most short-term swing risk if sentiment turns.',
-};
-
-// ── Performance ──────────────────────────────────────────────────────────────
-export const PERF_TABS = ['Returns', 'Rolling Returns', 'Ranking Trend', 'SIP Growth'];
-export const PERF_HEAD = ['Series', '1M', '3M', '6M', '1Y', '3Y', '5Y'];
-export const PERF_ROWS: [string, number, number, number, number, number, number][] = [
-  ['Watchlist Avg', 2.1, 6.8, 11.2, 18.4, 25.6, 23.1],
-  ['Category Avg', 1.6, 5.1, 9.4, 14.8, 19.2, 17.4],
-  ['NIFTY 50', 1.2, 4.2, 8.1, 12.6, 15.2, 14.1],
-];
-
-// ── Smart alerts ─────────────────────────────────────────────────────────────
-export const ALERTS: [string, string, string, string, string][] = [
-  ['Fund entered Top 10', 'Kotak Emerging is now #4 in Mid Cap', '📈', E, '2d'],
-  ['Strength downgraded', 'Quant Small Cap eased to the good band', '⬇', R, '3d'],
-  ['Risk increased', 'Quant Small Cap price swings up 18%', '⚠', O, '3d'],
-  ['Annual cost changed', 'Mirae ELSS cut cost to 0.58%', '💰', E, '5d'],
-  ['Fund manager changed', 'HDFC Mid Cap got a new manager', '👤', A, '1w'],
-  ['AUM crossed milestone', 'Parag Parikh crossed ₹78,000 Cr', '🏆', B, '1w'],
-];
-
-// ── Similar funds ────────────────────────────────────────────────────────────
-export const SIMILAR: [string, string, string, string, string[]][] = [
-  ['↗ Higher return than Axis Small Cap', 'Nippon India Small Cap', 'N', E, ['+1.3% better 5Y return', 'Larger, more stable AUM', 'Strong band']],
-  ['↗ Lower risk than Quant Small Cap', 'Kotak Small Cap', 'K', E, ['Smoother ride, lower swings', 'Better downside protection', 'Good band']],
-  ['↗ Higher strength than HDFC SC Index', 'Bandhan Small Cap', 'B', B, ['Active management edge', 'Strong vs good band', 'Lower drawdown']],
 ];
 
 // ── Statistics ───────────────────────────────────────────────────────────────
@@ -249,19 +194,10 @@ export const DISCOVERY: [string, string, string, string][] = [
   ['📊', 'Best Index', 'Lowest cost', N],
 ];
 
-// ── Recently viewed ──────────────────────────────────────────────────────────
-export const RECENTLY_VIEWED: [string, string, string, string][] = [
-  ['Nippon India Small Cap', 'N', E, 'Small Cap · Strong'],
-  ['Bandhan Small Cap', 'B', B, 'Small Cap · Strong'],
-  ['Canara Robeco Bluechip', 'C', B, 'Large Cap · Good'],
-  ['Motilal Nasdaq 100', 'M', V, 'Intl · Fair'],
-  ['HDFC Balanced Adv', 'H', R, 'Hybrid · Good'],
-];
-
 // ── FAQ ──────────────────────────────────────────────────────────────────────
 export const FAQ: [string, string][] = [
   ['How does the Watchlist work?', 'Save any fund you’re researching and DhanRadar tracks its NAV, strength, ranking, risk and DMMI fit daily. It surfaces what changed, flags what needs attention, and helps you decide when to keep watching or compare.'],
-  ['Will my watchlist update automatically?', 'Yes. Strength bands, NAVs, rankings and flows refresh daily after market close. The “What Changed” and “Smart Alerts” sections highlight anything that moved since you last checked.'],
+  ['Will my watchlist update automatically?', 'Yes. Strength bands, NAVs, rankings and flows refresh daily after market close. The “What Changed” section highlights tracked updates since you last checked.'],
   ['How is the DhanRadar strength band calculated?', 'A composite of returns, risk control, consistency, cost, manager quality and portfolio quality — normalised within each category so funds are compared fairly, and shown as an educational band rather than a raw number.'],
   ['How do I compare funds?', 'Tap ⇄ on any fund card to shortlist it. Select up to 4, then open Compare in the tray to see them side by side across every metric.'],
   ['Can I export my watchlist?', 'Yes — use Export in the action bar to download your watchlist with all metrics as a CSV or PDF.'],

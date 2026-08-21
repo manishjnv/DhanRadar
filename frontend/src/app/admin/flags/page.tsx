@@ -176,7 +176,7 @@ type PageCoverage = {
 };
 
 const UI_COVERAGE: PageCoverage[] = [
-  { page: 'Watchlist', route: '/mf/watchlist', total: 16, live: 6, pending: 'AI summary, what changed, DMMI, performance, smart alerts, similar funds, insights, discovery, recently viewed, FAQ (10 preview sections; StickyBar removed)' },
+  { page: 'Watchlist', route: '/mf/watchlist', total: 15, live: 11, pending: 'AI summary, insights, discovery, FAQ (4 preview sections; Smart Alerts removed, folded into What Changed)' },
   { page: 'Fund Compare', route: '/mf/compare', total: 24, live: 4, pending: 'All but hero, performance, ranking, cost (20 sample sections)' },
   { page: 'Pricing', route: '/pricing', total: 4, live: 1, pending: 'Hero, comparison table, FAQ (plans list is live)' },
   { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 6, pending: 'Health, goals, overlap, cost, AMC, timeline, projections, AI, report + 8 more' },

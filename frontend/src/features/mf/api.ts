@@ -34,6 +34,8 @@ import type {
   LeaderboardResponse,
   PortfolioHoldingsIsinsResponse,
   WatchlistCardsResponse,
+  WatchlistChangesResponse,
+  WatchlistSimilarResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -619,6 +621,46 @@ export function useWatchlistCards(enabled: boolean) {
   return useQuery<WatchlistCardsResponse>({
     queryKey: queryKeys.mf.watchlistCards(),
     queryFn: () => api.get<WatchlistCardsResponse>('/mf/watchlist/cards'),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `GET /mf/watchlist/changes` (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 1) — the
+ * caller's saved ISINs' most recent tracked changes (rank/TER/holding/AUM), in
+ * one payload. Auth-required — `enabled` is passed in by the caller (gated on
+ * `showLive`, same convention as `useWatchlistCards`). `since`/`limit` are
+ * optional query params; `limit` defaults to the backend's own default (9)
+ * when omitted.
+ */
+export function useWatchlistChanges(enabled: boolean, since?: string, limit?: number) {
+  return useQuery<WatchlistChangesResponse>({
+    queryKey: queryKeys.mf.watchlistChanges(since, limit),
+    queryFn: () => {
+      const qs = new URLSearchParams();
+      if (since) qs.set('since', since);
+      if (limit != null) qs.set('limit', String(limit));
+      const suffix = qs.toString();
+      return api.get<WatchlistChangesResponse>(`/mf/watchlist/changes${suffix ? `?${suffix}` : ''}`);
+    },
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `GET /mf/watchlist/similar` (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 2) —
+ * same-category peers of the caller's saved funds, deduped, excluding every
+ * saved ISIN, capped at 6. Auth-required, same `enabled` convention as
+ * `useWatchlistCards`.
+ */
+export function useWatchlistSimilar(enabled: boolean) {
+  return useQuery<WatchlistSimilarResponse>({
+    queryKey: queryKeys.mf.watchlistSimilar(),
+    queryFn: () => api.get<WatchlistSimilarResponse>('/mf/watchlist/similar'),
     enabled,
     retry: false,
     staleTime: 5 * 60 * 1000,

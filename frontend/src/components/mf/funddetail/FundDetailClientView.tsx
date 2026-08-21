@@ -54,6 +54,7 @@ import { fundDisplayTitle, optionDisplay } from '@/features/mf/explorer-format';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { useFundDetail, useFundComposition, useFundFactors, useLatestPortfolio } from '@/features/mf/api';
 import { usePortfolioHoldings } from '@/features/portfolio/api';
+import { pushRecentlyViewed } from '@/hooks/useRecentlyViewed';
 import type { FundHead as ApiFundHead } from '@/features/mf/types';
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
 
@@ -144,6 +145,15 @@ function FundDetailView({ initialFundHead }: { initialFundHead?: ApiFundHead }) 
   const portfolioId = latestPortfolio?.portfolio_id ?? '';
   const { data: holdingsEnv } = usePortfolioHoldings(portfolioId);
   const myHolding = holdingsEnv?.data?.holdings.find((h) => h.isin === isin) ?? null;
+
+  // WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (S13 Recently Viewed) — push this view onto
+  // the localStorage ring buffer the watchlist page reads. Client-only (guarded
+  // inside pushRecentlyViewed), fires once per real fund load, never on the
+  // loading/not-found paths below.
+  React.useEffect(() => {
+    if (!fund) return;
+    pushRecentlyViewed(isin, fundDisplayTitle(fund));
+  }, [isin, fund]);
 
   if (isLoading) return <FundDetailSkeleton />;
   if (!fund) return <FundNotFound backHref={backHref} />;

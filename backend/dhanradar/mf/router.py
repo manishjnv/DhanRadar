@@ -27,6 +27,7 @@ import logging
 import os
 import tempfile
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import (
@@ -417,6 +418,105 @@ async def watchlist_cards(
     )
     response.headers["Cache-Control"] = "private"
     return serialize_watchlist_cards_response(as_of=as_of, items=cards)
+
+
+_WATCHLIST_SIMILAR_CAP = 6  # WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 2
+
+
+@router.get("/watchlist/changes")
+async def watchlist_changes(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    since: Annotated[
+        str | None, Query(description="ISO date YYYY-MM-DD — only events on/after this date")
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 9,
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`GET /mf/watchlist/changes` (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 1) — the
+    caller's saved ISINs' most recent tracked changes (rank/TER/holding/AUM), newest
+    first, in one payload (`mf/fund_read.get_watchlist_changes`).
+
+    Auth required (401 anonymous) — same RLS owner-scoping as `GET /mf/watchlist`
+    above. ONE bounded query across every saved ISIN (never a per-ISIN loop/HTTP
+    fan-out, same architect condition as `/watchlist/cards`). `severity` is derived
+    from `event_type` server-side (`mf/fund_events.derive_event_severity`), never
+    from client input.
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    since_date: date | None = None
+    if since is not None:
+        try:
+            since_date = date.fromisoformat(since)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid_since"
+            ) from None
+
+    from dhanradar.mf.fund_read import get_watchlist_changes
+    from dhanradar.mf.serialization import serialize_watchlist_changes_response
+
+    uid = uuid.UUID(user.user_id)
+    isins = (
+        (
+            await db.execute(
+                select(MfWatchlistItem.isin)
+                .where(MfWatchlistItem.user_id == uid)
+                .order_by(MfWatchlistItem.created_at)
+                .limit(_WATCHLIST_MAX_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    items = await get_watchlist_changes(db, isins, since=since_date, limit=limit)
+    as_of = max((item["as_of"] for item in items), default=None)
+    response.headers["Cache-Control"] = "private"
+    return serialize_watchlist_changes_response(as_of=as_of, items=items)
+
+
+@router.get("/watchlist/similar")
+async def watchlist_similar(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`GET /mf/watchlist/similar` (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 2) — same-
+    category peers of the caller's saved funds, deduped, excluding every saved ISIN,
+    capped at 6 (`mf/fund_read.get_watchlist_similar`).
+
+    Auth required (401 anonymous) — same RLS owner-scoping as `GET /mf/watchlist`
+    above. Two bounded queries total regardless of watchlist size (never a per-ISIN
+    loop/HTTP fan-out).
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    from dhanradar.mf.fund_read import get_watchlist_similar
+    from dhanradar.mf.serialization import serialize_watchlist_similar_response
+
+    uid = uuid.UUID(user.user_id)
+    isins = (
+        (
+            await db.execute(
+                select(MfWatchlistItem.isin)
+                .where(MfWatchlistItem.user_id == uid)
+                .order_by(MfWatchlistItem.created_at)
+                .limit(_WATCHLIST_MAX_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    items, as_of = await get_watchlist_similar(db, isins, cap=_WATCHLIST_SIMILAR_CAP)
+    response.headers["Cache-Control"] = "private"
+    return serialize_watchlist_similar_response(as_of=as_of, items=items)
 
 
 # ---------------------------------------------------------------------------
