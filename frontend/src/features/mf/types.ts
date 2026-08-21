@@ -757,3 +757,42 @@ export interface LeaderboardResponse {
   disclosure: unknown;
   not_advice: string;
 }
+
+// ---------------------------------------------------------------------------
+// GET /mf/watchlist/cards (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — one payload
+// composing every ISIN on the caller's watchlist into a display-ready card.
+// ---------------------------------------------------------------------------
+
+export interface WatchlistCardNavPoint {
+  /** ISO date (YYYY-MM-DD) */
+  d: string;
+  nav: number;
+}
+
+export interface WatchlistCard {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  sebi_category: string | null;
+  category: string | null;
+  expense_ratio_pct: number | null;
+  risk_o_meter: string | null;
+  nav_latest: number | null;
+  nav_change_pct: number | null;
+  /** Up to 30 most recent NAV points, ascending by date. */
+  nav_sparkline: WatchlistCardNavPoint[];
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  return_5y_pct: number | null;
+  verb_label: Label | null;
+  /** Real once the fund is ranked; null when unranked or insufficient_data. */
+  confidence_band: ConfidenceBand | null;
+}
+
+export interface WatchlistCardsResponse {
+  /** Freshest NAV date across all cards; null when the watchlist is empty. */
+  as_of: string | null;
+  items: WatchlistCard[];
+}
+

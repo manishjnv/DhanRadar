@@ -353,6 +353,72 @@ async def remove_watchlist_item(
         await db.commit()
 
 
+_WATCHLIST_CARD_CACHE_TTL = 300  # 5 min — public fund-fact fragment, shared across every caller
+
+
+@router.get("/watchlist/cards")
+async def watchlist_cards(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`GET /mf/watchlist/cards` (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — one payload
+    composing every ISIN on the caller's watchlist into a display-ready card (fund
+    head facts + a 30-point NAV sparkline; `mf/fund_read.get_watchlist_card`).
+
+    Auth required (401 anonymous) — the ISIN list is the caller's own personal data
+    (RLS owner_isolation via WHERE user_id, same scoping as GET /mf/watchlist above).
+    The per-ISIN card CONTENTS are public fund facts, so each fragment is cached in
+    Redis (TTL 300s) keyed by isin only — shared across every caller who watches
+    that fund, bounding cost to O(cache-miss) even at the 200-item cap (non-neg #3;
+    a per-ISIN hook fan-out was rejected by architect review — the rate limiter's
+    per-path buckets can't bound it). `serialize_watchlist_cards_response` applies
+    the same #2 scrub + field allowlist `serialize_concept` uses; unified_score is
+    never selected (`get_watchlist_card` reuses `get_fund_head`'s read-only query set).
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    from dhanradar.mf.fund_read import get_watchlist_card
+    from dhanradar.mf.serialization import serialize_watchlist_cards_response
+
+    uid = uuid.UUID(user.user_id)
+    isins = (
+        (
+            await db.execute(
+                select(MfWatchlistItem.isin)
+                .where(MfWatchlistItem.user_id == uid)
+                .order_by(MfWatchlistItem.created_at)
+                .limit(_WATCHLIST_MAX_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    redis = get_redis()
+    cards: list[dict] = []
+    for isin in isins:
+        cache_key = f"mf:watchlist_card:{isin}"
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            cards.append(json.loads(cached))
+            continue
+        card = await get_watchlist_card(db, isin)
+        if card is None:
+            continue
+        await redis.set(cache_key, json.dumps(card), ex=_WATCHLIST_CARD_CACHE_TTL)
+        cards.append(card)
+
+    as_of = max(
+        (c["nav_sparkline"][-1]["d"] for c in cards if c.get("nav_sparkline")),
+        default=None,
+    )
+    response.headers["Cache-Control"] = "private"
+    return serialize_watchlist_cards_response(as_of=as_of, items=cards)
+
+
 # ---------------------------------------------------------------------------
 # CAS upload
 # ---------------------------------------------------------------------------

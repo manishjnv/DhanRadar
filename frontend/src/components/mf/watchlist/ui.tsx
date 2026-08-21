@@ -47,6 +47,27 @@ export function Spark({ seed, up, width = 290, height = 30, color }: { seed: num
   );
 }
 
+// ── Real-data sparkline (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — same visual as
+// Spark above, but the line is drawn from ACTUAL NAV points, not a seeded walk.
+export function RealSpark({
+  points, up, width = 290, height = 30, color,
+}: { points: { d: string; nav: number }[]; up: boolean; width?: number; height?: number; color?: string }) {
+  const data = points.map((p) => p.nav);
+  const lo = Math.min(...data);
+  const hi = Math.max(...data);
+  const range = hi - lo || 1;
+  const stepX = width / (Math.max(data.length, 2) - 1);
+  const pts = data.map((d, i) => [i * stepX, height - ((d - lo) / range) * (height - 2) - 1]);
+  const line = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const col = color ?? (up ? '#00B386' : '#E5484D');
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block w-full" aria-hidden="true">
+      <path d={`${line} L ${width},${height} L 0,${height} Z`} fill={col} opacity={0.12} />
+      <path d={line} fill="none" stroke={col} strokeWidth={1.5} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // ── Verdict / status pill (educational label) ────────────────────────────────
 export function Pill({ label, color, className }: { label: string; color: string; className?: string }) {
   return (

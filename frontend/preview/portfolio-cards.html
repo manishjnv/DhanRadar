@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<!--
+  DhanRadar — Portfolio StatCard Before/After Preview
+  Self-contained: double-click to open in any browser. No server, no build, no npm.
+  Fonts: Geist Sans + Geist Mono from Google Fonts CDN (requires internet on first open;
+         falls back to system monospace/sans-serif offline).
+  Tokens: inlined from frontend/src/styles/tokens.css + frontend/tailwind.tokens.cjs
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DhanRadar — StatCard Before / After</title>
+
+<!-- Geist Sans + Geist Mono (CDN) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+/* ── Token variables (from frontend/src/styles/tokens.css) ─────────────── */
+:root {
+  /* Brand colours */
+  --dr-navy:        #0B1F3A;
+  --dr-royal:       #1E5EFF;
+  --dr-emerald:     #00B386;
+  --dr-amber:       #F5A623;
+  --dr-red:         #E5484D;
+
+  /* Light theme semantic tokens */
+  --surface:        #FFFFFF;
+  --surface-2:      #F1EFE9;
+  --surface-3:      #E8E6DF;
+  --border:         #E4E1D9;
+  --text:           #0B0F1A;
+  --text-secondary: #3B414E;
+  --text-muted:     #6B7280;
+  --text-faint:     #9CA0AA;
+
+  /* Spacing (from tokens.json) */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+
+  /* Radii */
+  --r-xl:  14px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(15,20,35,0.04);
+
+  /* Font families */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Type scale (from tailwind.tokens.cjs) */
+  /* h3:      18px / 1.3 / -0.01em / weight 500 */
+  /* body:    15px / 1.55 / -0.005em */
+  /* small:   13px / 1.45 */
+  /* caption: 11px / 1.3 / +0.08em / weight 500 / UPPERCASE */
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  background: #F7F6F2;
+  color: var(--text);
+  padding: 32px 24px 64px;
+  font-size: 15px;
+}
+
+/* ── Page layout ────────────────────────────────────────────────────────── */
+h1 {
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--dr-navy);
+  margin-bottom: 6px;
+}
+.subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 32px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  max-width: 1100px;
+}
+.column-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  display: inline-block;
+}
+.column-label.after { background: rgba(30,94,255,0.08); color: var(--dr-royal); }
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 28px 0 10px;
+}
+
+/* ── Shared card container ──────────────────────────────────────────────── */
+.card-grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+.card-grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+.card-grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+
+/* ───────────────────────────────────────────────────────────────────────── *
+ *  BEFORE  — hand-rolled stat cards with arbitrary px sizes                *
+ * ───────────────────────────────────────────────────────────────────────── */
+/* Exact classes from sections.tsx before the StatCard refactor */
+.before-card {
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 16px; /* p-4 */
+}
+/* text-caption text-ink-muted */
+.before-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* arbitrary: text-[15px] font-extrabold */
+.before-value-15 {
+  font-family: var(--font-mono);
+  font-size: 15px;       /* arbitrary pixel */
+  font-weight: 800;      /* extrabold */
+  color: var(--text);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+/* arbitrary: text-[18px] font-extrabold */
+.before-value-18 {
+  font-family: var(--font-mono);
+  font-size: 18px;       /* arbitrary pixel */
+  font-weight: 800;      /* extrabold */
+  color: var(--text);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+/* arbitrary: font-bold text-ink (for text names in concentration) */
+.before-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* caption secondary */
+.before-caption {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+/* text-caption text-ink-secondary */
+.before-caption-small {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
+
+/* ───────────────────────────────────────────────────────────────────────── *
+ *  AFTER  — StatCard (text-h3 · font-mono · tabular-nums · token scale)    *
+ * ───────────────────────────────────────────────────────────────────────── */
+.stat-card {
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 16px; /* p-4 */
+}
+/* text-caption text-ink-muted */
+.stat-label {
+  font-size: 11px;        /* caption token: 11px */
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* text-h3 font-mono tabular-nums font-medium */
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 18px;        /* h3 token: 18px */
+  font-weight: 500;       /* medium (not extrabold) */
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--text);
+  margin-top: 4px;        /* mt-1 */
+  font-feature-settings: 'tnum'; /* tabular-nums */
+}
+/* text-body font-medium (numeric=false — text names) */
+.stat-value-text {
+  font-family: var(--font-sans);
+  font-size: 15px;        /* body token: 15px */
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--text);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* text-small text-ink-secondary */
+.stat-caption {
+  font-size: 13px;        /* small token: 13px */
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin-top: 4px;        /* mt-1 */
+}
+
+/* ── Divider between sections ──────────────────────────────────────────── */
+hr { border: none; border-top: 1px solid var(--border); margin: 36px 0 0; }
+
+/* ── Diff highlight ────────────────────────────────────────────────────── */
+.diff-note {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--dr-royal);
+  margin-top: 8px;
+  opacity: 0.7;
+}
+</style>
+</head>
+
+<body>
+<h1>StatCard — Before / After</h1>
+<p class="subtitle">
+  PR #420 · feat/stat-card-component · Double-click to open, no server needed.
+  LEFT = before (hand-rolled, arbitrary px). RIGHT = after (shared StatCard, token scale).
+</p>
+
+<div class="columns">
+
+<!-- ═══════════════════════ LEFT — BEFORE ══════════════════════════════ -->
+<div>
+  <div class="column-label">← Before: hand-rolled</div>
+
+  <!-- CONCENTRATION -->
+  <div class="section-title">Concentration panel</div>
+  <div class="card-grid-3">
+    <div class="before-card">
+      <div class="before-label">Largest fund</div>
+      <div class="before-name">Mirae Asset Large Cap</div>
+      <div class="before-value-15">22%</div>
+    </div>
+    <div class="before-card">
+      <div class="before-label">Biggest fund house</div>
+      <div class="before-name">HDFC Mutual Fund</div>
+      <div class="before-value-15">28%</div>
+    </div>
+    <div class="before-card">
+      <div class="before-label">Spread</div>
+      <div class="before-name">Some concentration</div>
+      <div class="before-caption">4 fund houses · 9 funds</div>
+    </div>
+  </div>
+  <div class="diff-note">font-mono text-[15px] font-extrabold · font-bold text-ink</div>
+
+  <!-- DIVERSIFICATION -->
+  <div class="section-title">Diversification stats</div>
+  <div class="card-grid-2">
+    <div class="before-card">
+      <div class="before-label">Fund categories</div>
+      <div class="before-value-18">5</div>
+      <div class="before-caption-small">Across 9 funds.</div>
+    </div>
+    <div class="before-card">
+      <div class="before-label">Largest category</div>
+      <div class="before-name">Small Cap</div>
+      <div class="before-value-15">38%</div>
+    </div>
+  </div>
+  <div class="diff-note">font-mono text-[18px] font-extrabold · text-[15px] font-extrabold</div>
+
+  <!-- RISK -->
+  <div class="section-title">Risk cards</div>
+  <div class="card-grid-2">
+    <div class="before-card">
+      <div class="before-label">Price Swings</div>
+      <div class="before-value-18">±16.4%</div>
+      <div class="before-caption-small">Average annualised volatility (indicative).</div>
+    </div>
+    <div class="before-card">
+      <div class="before-label">Coverage</div>
+      <div class="before-value-15">7/9 funds</div>
+      <div class="before-caption-small">Funds with enough data.</div>
+    </div>
+  </div>
+  <div class="diff-note">font-mono text-[18px] / text-[15px] font-extrabold</div>
+
+  <!-- ADVANCED -->
+  <div class="section-title">Advanced — Rolling 1Y Avg</div>
+  <div class="card-grid-2">
+    <div class="before-card">
+      <div class="before-label">Rolling 1Y Avg</div>
+      <div class="before-value-15">14.2%</div>
+      <div class="before-caption-small">Average 1-year rolling return.</div>
+    </div>
+    <div class="before-card" style="opacity:.4">
+      <div class="before-label">Sharpe Ratio</div>
+      <div class="before-value-15" style="color:var(--text-faint)">— Coming soon</div>
+      <div class="before-caption-small">Needs portfolio history.</div>
+    </div>
+  </div>
+  <div class="diff-note">font-mono text-[15px] font-extrabold</div>
+</div>
+
+<!-- ═══════════════════════ RIGHT — AFTER ═══════════════════════════════ -->
+<div>
+  <div class="column-label after">→ After: shared StatCard</div>
+
+  <!-- CONCENTRATION -->
+  <div class="section-title">Concentration panel</div>
+  <div class="card-grid-3">
+    <div class="stat-card">
+      <div class="stat-label">Largest fund</div>
+      <div class="stat-value-text">Mirae Asset Large Cap</div>
+      <div class="stat-caption">22%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Biggest fund house</div>
+      <div class="stat-value-text">HDFC Mutual Fund</div>
+      <div class="stat-caption">28%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Spread</div>
+      <div class="stat-value-text">Some concentration</div>
+      <div class="stat-caption">4 fund houses · 9 funds</div>
+    </div>
+  </div>
+  <div class="diff-note">text-body font-medium (numeric=false) + text-small caption</div>
+
+  <!-- DIVERSIFICATION -->
+  <div class="section-title">Diversification stats</div>
+  <div class="card-grid-2">
+    <div class="stat-card">
+      <div class="stat-label">Fund categories</div>
+      <div class="stat-value">5</div>
+      <div class="stat-caption">Across 9 funds.</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Largest category</div>
+      <div class="stat-value-text">Small Cap</div>
+      <div class="stat-caption">38%</div>
+    </div>
+  </div>
+  <div class="diff-note">text-h3 (18px) font-mono tabular-nums font-medium</div>
+
+  <!-- RISK -->
+  <div class="section-title">Risk cards</div>
+  <div class="card-grid-2">
+    <div class="stat-card">
+      <div class="stat-label">Price Swings</div>
+      <div class="stat-value">±16.4%</div>
+      <div class="stat-caption">Average annualised volatility (indicative).</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Coverage</div>
+      <div class="stat-value">7/9 funds</div>
+      <div class="stat-caption">Funds with enough data.</div>
+    </div>
+  </div>
+  <div class="diff-note">text-h3 (18px) font-mono tabular-nums font-medium</div>
+
+  <!-- ADVANCED -->
+  <div class="section-title">Advanced — Rolling 1Y Avg</div>
+  <div class="card-grid-2">
+    <div class="stat-card">
+      <div class="stat-label">Rolling 1Y Avg</div>
+      <div class="stat-value">14.2%</div>
+      <div class="stat-caption">Average 1-year rolling return.</div>
+    </div>
+    <div class="stat-card" style="opacity:.4">
+      <div class="stat-label">Sharpe Ratio</div>
+      <div class="stat-value" style="color:var(--text-faint)">— Coming soon</div>
+      <div class="stat-caption">Needs portfolio history.</div>
+    </div>
+  </div>
+  <div class="diff-note">text-h3 (18px) font-mono tabular-nums font-medium</div>
+</div>
+
+</div><!-- /columns -->
+
+<hr />
+
+<!-- ── Token diff legend ─────────────────────────────────────────────────── -->
+<div style="margin-top:28px;max-width:700px">
+  <p style="font-size:13px;color:var(--text-muted);line-height:1.7">
+    <strong style="color:var(--text)">Key differences</strong><br>
+    <span style="font-family:var(--font-mono);font-size:12px;background:var(--surface-2);padding:1px 6px;border-radius:4px">font-size: 15px/18px · font-weight: 800</span>
+    →
+    <span style="font-family:var(--font-mono);font-size:12px;background:rgba(30,94,255,0.06);padding:1px 6px;border-radius:4px;color:var(--dr-royal)">font-size: 18px (h3 token) · font-weight: 500 · font-feature-settings: 'tnum'</span><br>
+    <span style="font-size:12px;color:var(--text-faint)">
+      Caption below value: was text-[11px] uppercase → now text-small (13px) text-ink-secondary (readable prose, not SHOUTED).
+      8 hand-rolled divs → single &lt;StatCard&gt; primitive.
+    </span>
+  </p>
+</div>
+</body>
+</html>

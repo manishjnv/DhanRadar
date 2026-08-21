@@ -33,6 +33,7 @@ import type {
   FundComparisonResponse,
   LeaderboardResponse,
   PortfolioHoldingsIsinsResponse,
+  WatchlistCardsResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -600,6 +601,24 @@ export function usePortfolioHoldingsIsins(enabled: boolean) {
   return useQuery<PortfolioHoldingsIsinsResponse>({
     queryKey: queryKeys.mf.holdingsIsins(),
     queryFn: () => api.get<PortfolioHoldingsIsinsResponse>('/mf/portfolio/holdings-isins'),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `GET /mf/watchlist/cards` (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — one payload
+ * composing every ISIN on the caller's watchlist into a display-ready card (fund
+ * head facts + a 30-point NAV sparkline). Auth-required (same 401 shape as
+ * `usePortfolioHoldingsIsins`) — `enabled` is passed in by the caller (gated on
+ * `useMe()`) so this never fires for an anonymous visitor. Not a `DataEnvelope`
+ * (plain `{as_of, items}`, same shape convention as `useLeaderboard`).
+ */
+export function useWatchlistCards(enabled: boolean) {
+  return useQuery<WatchlistCardsResponse>({
+    queryKey: queryKeys.mf.watchlistCards(),
+    queryFn: () => api.get<WatchlistCardsResponse>('/mf/watchlist/cards'),
     enabled,
     retry: false,
     staleTime: 5 * 60 * 1000,

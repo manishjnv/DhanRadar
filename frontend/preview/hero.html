@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Portfolio Hero + Portfolio vs Market — preview</title>
+<style>
+  :root { font-family: "Geist", -apple-system, "Segoe UI", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0f1115; color:#e8edf5; padding:16px; }
+  h2 { font-weight:600; font-size:14px; color:#94a3b8; margin:16px 0 8px; }
+  .wrap { max-width:1280px; margin:0 auto; }
+
+  .hero { position:relative; overflow:hidden; border-radius:18px; padding:14px; color:#fff;
+          box-shadow:0 10px 30px rgba(0,0,0,.35);
+          background:linear-gradient(135deg,#0B1F3A 0%,#16335E 58%,#1E40AF 100%); }
+  .blob { position:absolute; border-radius:9999px; pointer-events:none; }
+  .blob.gold { right:-48px; top:-64px; width:300px; height:300px; background:radial-gradient(circle,rgba(212,160,23,.26),transparent 70%); }
+  .blob.blue { bottom:-120px; left:30%; width:280px; height:280px; background:radial-gradient(circle,rgba(37,99,235,.28),transparent 70%); }
+  .inner { position:relative; z-index:2; }
+  .eyebrow { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#94a3b8; }
+  .i { display:inline-grid; place-items:center; width:14px; height:14px; border-radius:9999px; background:rgba(255,255,255,.18); color:#cbd5e1; font-size:9px; font-style:normal; }
+
+  /* ---- hero card ---- */
+  .top { display:flex; gap:20px; align-items:flex-start; justify-content:space-between; }
+  .top3 { display:flex; gap:28px; align-items:flex-start; }
+  .t-left { flex:0 0 auto; }
+  .t-center { flex:1 1 auto; min-width:0; padding-top:4px; }
+  .sc-head { display:flex; justify-content:space-between; gap:8px; font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+  .spark2 { display:block; }
+  .sc-link { display:inline-block; margin-top:6px; font-size:11px; color:#9cc0ff; text-decoration:none; }
+  .sc-link:hover { text-decoration:underline; }
+  .empty-hero { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .btn-primary { background:#1E5EFF; color:#fff; border:none; border-radius:10px; padding:9px 16px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
+  .btn-ghost { background:rgba(255,255,255,.1); color:#cbd5e1; border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:9px 16px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
+  .e-div { border:0; border-top:1px solid rgba(255,255,255,.1); margin:18px 0; }
+  .mlabel { display:flex; gap:20px; margin-top:8px; font-size:12px; color:#cbd5e1; }
+  .mlabel b { font-variant-numeric:tabular-nums; }
+  .ab { display:flex; gap:16px; flex-wrap:wrap; }
+  .ab-card { flex:1; min-width:340px; }
+  .ab-tag { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .ab-sub { font-size:11px; color:#94a3b8; margin-top:2px; }
+  .ab-mini { display:block; margin-top:12px; }
+  .ab-list { list-style:none; padding:0; margin:12px 0 0; font-size:12px; line-height:1.5; }
+  .ab-list .ok { color:#9fdcc0; }
+  .ab-list .no { color:#fca5a5; }
+  .total { font-size:44px; font-weight:700; line-height:1; letter-spacing:-.02em; margin-top:4px; }
+  .ret-row { display:flex; gap:28px; margin-top:14px; }
+  .ret-l { font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:.08em; color:#94a3b8; }
+  .ret-v { margin-top:2px; font-size:15px; font-weight:600; color:#6ee7b7; }
+  .conf { flex:0 0 auto; text-align:right; }
+  .conf .eyebrow { justify-content:flex-end; }
+  .chip { display:inline-flex; align-items:center; gap:8px; background:rgba(255,255,255,.1); border-radius:9999px; padding:5px 11px; margin-top:5px; }
+  .dot { width:10px; height:10px; border-radius:9999px; background:#1E5EFF; }
+  .chip span { font-size:17px; font-weight:600; color:#1E5EFF; }
+  .conf-mean { margin-top:6px; font-size:14px; font-weight:500; color:#cbd5e1; }
+  .conf-sub { margin-top:2px; font-size:13px; color:#94a3b8; }
+  .qtag { display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:500; color:#cbd5e1; background:rgba(255,255,255,.08); border-radius:9999px; padding:6px 12px; }
+  .qdot { width:9px; height:9px; border-radius:9999px; display:inline-block; }
+  .qmeter i { display:inline-block; width:8px; height:8px; border-radius:9999px; margin-right:3px; }
+  .vopt { flex:1 1 210px; min-width:210px; }
+  .vopt .lbl { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+  .stats { display:flex; justify-content:space-between; gap:18px; border-top:1px solid rgba(255,255,255,.1); padding-top:12px; margin-top:14px; }
+  .stat-label { display:flex; align-items:center; gap:4px; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:.08em; color:#94a3b8; }
+  .stat-value { margin-top:2px; font-size:20px; font-weight:600; line-height:1.15; }
+  .stat-hint { margin-top:2px; font-size:10px; color:#64748b; }
+  .pos { color:#6ee7b7; } .white { color:#fff; }
+
+  /* ---- comparison panel (compact) ---- */
+  .hero.tight { padding:11px; }
+  .cmp-head { display:flex; align-items:flex-start; justify-content:space-between; }
+  .cmp-title { font-size:15px; font-weight:600; color:#fff; }
+  .cmp-sub { margin-top:1px; font-size:11px; color:#94a3b8; }
+  .cmp-chips { display:flex; align-items:stretch; gap:0; margin-top:10px; }
+  .cc { flex:1; border-radius:11px; padding:7px 11px; }
+  .cc.you { background:rgba(91,140,255,.16); }
+  .cc.nf  { background:rgba(245,196,81,.13); }
+  .cc-label { font-size:11px; font-weight:600; }
+  .cc.you .cc-label { color:#9cc0ff; } .cc.nf .cc-label { color:#f5c451; }
+  .cc-pct { margin-top:1px; font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .cc.nf .cc-pct { color:#ffe39a; }
+  .cc-val { margin-top:0; font-size:10px; color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .cmp-vs { align-self:center; font-size:9px; font-weight:700; color:#94a3b8; background:#0B1F3A; border:1px solid rgba(255,255,255,.15); border-radius:9999px; padding:2px 6px; margin:0 -9px; z-index:3; }
+  #cmpwrap { position:relative; margin-top:8px; }
+  #cmp { cursor:crosshair; display:block; touch-action:none; }
+  .cmp-axis { display:flex; justify-content:space-between; margin-top:3px; font-size:10px; color:#64748b; }
+  .cmp-pills { display:flex; gap:4px; margin-top:10px; background:rgba(255,255,255,.06); border-radius:10px; padding:3px; }
+  .pill { flex:1; text-align:center; font-size:12px; font-weight:600; color:#94a3b8; padding:5px 0; border-radius:8px; cursor:pointer; user-select:none; border:none; background:transparent; font-family:inherit; }
+  .pill.on { background:#1E5EFF; color:#fff; }
+  .cmp-foot { margin-top:7px; font-size:10px; color:#64748b; }
+  .lg { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+  .ctip { position:absolute; min-width:142px; pointer-events:none; display:none; background:rgba(8,18,38,.97); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:8px 10px; box-shadow:0 6px 20px rgba(0,0,0,.45); z-index:6; }
+  .ct-d { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#94a3b8; margin-bottom:5px; }
+  .ct-r { display:flex; align-items:center; font-size:13px; color:#e8edf5; gap:6px; }
+  .ct-r b { margin-left:auto; font-variant-numeric:tabular-nums; }
+  .ct-g { margin-top:5px; padding-top:5px; border-top:1px solid rgba(255,255,255,.1); font-size:12px; font-weight:600; }
+
+  @media (max-width:520px){
+    body { padding:14px; }
+    .hero { padding:11px; }
+    .total { font-size:38px; }
+    .top { flex-direction:column; gap:14px; }
+    .top3 { flex-direction:column; gap:16px; }
+    .t-center { width:100%; order:3; }
+    .qmeter { justify-content:flex-start; }
+    .conf, .conf .eyebrow { text-align:left; }
+    .conf .eyebrow { justify-content:flex-start; }
+    .stats { gap:10px; }
+    .stat-value { font-size:17px; }
+    .cc-pct { font-size:19px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h2>Path A (ships now, forward-only) vs Path B (later, after backfill) — identical UI, different data depth</h2>
+  <div class="ab">
+
+    <div class="hero tight ab-card">
+      <div class="blob blue"></div>
+      <div class="inner">
+        <div class="ab-tag" style="color:#9cc0ff;">Path A · today</div>
+        <div class="ab-sub">Forward-only. Real now, grows daily.</div>
+        <div class="stats" style="margin-top:12px;border:0;padding:0;">
+          <div><div class="stat-label">Invested</div><div class="stat-value white">₹1,47,000</div></div>
+          <div><div class="stat-label">Day Change</div><div class="stat-value pos">+₹2,340 (2.34%)</div></div>
+          <div><div class="stat-label">Lifetime XIRR</div><div class="stat-value pos">+18.40%</div></div>
+        </div>
+        <svg class="ab-mini" viewBox="0 0 320 88" preserveAspectRatio="none" width="100%" height="84" aria-hidden="true">
+          <line x1="0" y1="62" x2="320" y2="62" stroke="rgba(255,255,255,.14)" stroke-dasharray="3 4"/>
+          <text x="112" y="40" text-anchor="middle" fill="#64748b" font-size="11">Building — 21 days so far</text>
+          <text x="112" y="54" text-anchor="middle" fill="#475569" font-size="9">(fills daily)</text>
+          <path d="M232,60 L250,55 L268,57 L286,47 L304,43 L320,37" fill="none" stroke="#f5c451" stroke-width="1.8"/>
+          <path d="M232,60 L250,52 L268,55 L286,43 L304,38 L320,31" fill="none" stroke="#5b8cff" stroke-width="2.2"/>
+        </svg>
+        <ul class="ab-list">
+          <li class="ok">✓ Value · Gain · Day Change · Lifetime XIRR · Data Completeness</li>
+          <li class="ok">✓ Chart + sparkline over the days tracked so far (1M soon)</li>
+          <li class="no">✗ 1-Year XIRR &nbsp;·&nbsp; ✗ full 6M / 1Y / 3Y / ALL history</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="hero tight ab-card">
+      <div class="blob gold"></div>
+      <div class="inner">
+        <div class="ab-tag" style="color:#9fdcc0;">Path B · after backfill</div>
+        <div class="ab-sub">Replays your transactions × past NAVs.</div>
+        <div class="stats" style="margin-top:12px;border:0;padding:0;gap:10px;">
+          <div><div class="stat-label">Invested</div><div class="stat-value white">₹1,47,000</div></div>
+          <div><div class="stat-label">Day Change</div><div class="stat-value pos">+₹2,340</div></div>
+          <div><div class="stat-label">XIRR</div><div class="stat-value pos">+14.20%</div><div class="stat-hint">1 year</div></div>
+          <div><div class="stat-label">Lifetime XIRR</div><div class="stat-value pos">+18.40%</div></div>
+        </div>
+        <svg class="ab-mini" viewBox="0 0 320 88" preserveAspectRatio="none" width="100%" height="84" aria-hidden="true">
+          <line x1="0" y1="62" x2="320" y2="62" stroke="rgba(255,255,255,.14)" stroke-dasharray="3 4"/>
+          <path d="M0,62 L40,60 L80,61 L120,55 L160,57 L200,49 L240,44 L280,36 L320,30" fill="none" stroke="#f5c451" stroke-width="1.8"/>
+          <path d="M0,62 L40,58 L80,60 L120,49 L160,52 L200,39 L240,30 L280,18 L320,8" fill="none" stroke="#5b8cff" stroke-width="2.2"/>
+        </svg>
+        <ul class="ab-list">
+          <li class="ok">✓ Everything in A, plus —</li>
+          <li class="ok">✓ 1-Year XIRR (4th stat)</li>
+          <li class="ok">✓ Full 6M / 1Y / 3Y / ALL history, real from day one</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>1 · Hero (current design)</h2>
+  <div class="hero">
+    <div class="blob gold"></div><div class="blob blue"></div>
+    <div class="inner">
+      <div class="top3">
+        <div class="t-left">
+          <div class="eyebrow">Total Portfolio Value <i class="i">i</i></div>
+          <div class="total">₹2,95,000</div>
+          <div class="ret-row">
+            <div><div class="ret-l">Total Gain</div><div class="ret-v">+₹1,48,000</div></div>
+            <div><div class="ret-l">Total Return</div><div class="ret-v">+100.68%</div></div>
+          </div>
+        </div>
+        <div class="t-center">
+          <div class="sc-head"><span>You vs Nifty · 90d</span><span><b style="color:#9cc0ff">You +12.4%</b> · <b style="color:#f5c451">Nifty +8.1%</b></span></div>
+          <svg class="spark2" viewBox="0 0 320 78" preserveAspectRatio="none" width="100%" height="70" aria-hidden="true">
+            <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b8cff" stop-opacity=".35"/><stop offset="1" stop-color="#5b8cff" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0,62 L26,58 L52,60 L78,49 L104,52 L130,39 L156,35 L182,26 L208,30 L234,17 L260,14 L286,9 L320,6 L320,78 L0,78 Z" fill="url(#sg)"/>
+            <path d="M0,62 L26,61 L52,61 L78,56 L104,57 L130,51 L156,49 L182,45 L208,46 L234,39 L260,37 L286,31 L320,26" fill="none" stroke="#f5c451" stroke-width="1.6"/>
+            <path d="M0,62 L26,58 L52,60 L78,49 L104,52 L130,39 L156,35 L182,26 L208,30 L234,17 L260,14 L286,9 L320,6" fill="none" stroke="#5b8cff" stroke-width="2"/>
+          </svg>
+          <a class="sc-link" href="#cmpwrap">Open full comparison ↓</a>
+        </div>
+        <div class="conf">
+          <div class="eyebrow">Data Completeness <i class="i">i</i></div>
+          <div class="qmeter" style="margin-top:6px;"><i style="background:#1E5EFF"></i><i style="background:#1E5EFF"></i><i style="background:rgba(255,255,255,.25)"></i> <span style="font-size:14px;font-weight:600;color:#cbd5e1;margin-left:4px;">Mostly complete</span></div>
+          <div class="conf-sub" style="margin-top:6px;">✓ All 21 funds analysed</div>
+        </div>
+      </div>
+      <div class="stats">
+        <div><div class="stat-label">Invested</div><div class="stat-value white">₹1,47,000</div></div>
+        <div><div class="stat-label">Day Change</div><div class="stat-value pos">+₹2,340 (2.34%)</div><div class="stat-hint" style="color:#f5c451">Nifty +1.80% today</div></div>
+        <div><div class="stat-label">XIRR <i class="i">i</i></div><div class="stat-value pos">+14.20%</div><div class="stat-hint">Past 1 year</div></div>
+        <div><div class="stat-label">Lifetime XIRR <i class="i">i</i></div><div class="stat-value pos">+18.40%</div><div class="stat-hint">Since you invested</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>2 · Portfolio vs Market — compact, full-width. Drag the chart; tap the pills.</h2>
+  <div class="hero tight">
+    <div class="blob gold"></div><div class="blob blue"></div>
+    <div class="inner">
+      <div class="cmp-head">
+        <div>
+          <div class="cmp-title">Portfolio vs Market</div>
+          <div class="cmp-sub" id="cmpSub">6M · % return</div>
+        </div>
+        <i class="i">?</i>
+      </div>
+      <div class="cmp-chips">
+        <div class="cc you">
+          <div class="cc-label">Your Portfolio</div>
+          <div class="cc-pct" id="youPct">+0%</div>
+          <div class="cc-val" id="youVal">₹0</div>
+        </div>
+        <div class="cmp-vs">VS</div>
+        <div class="cc nf">
+          <div class="cc-label">Nifty 50</div>
+          <div class="cc-pct" id="nfPct">+0%</div>
+          <div class="cc-val" id="nfVal">₹0</div>
+        </div>
+      </div>
+      <div id="cmpwrap">
+        <svg id="cmp" width="100%" height="150" viewBox="0 0 680 190" preserveAspectRatio="none"></svg>
+        <div id="ctip" class="ctip"></div>
+      </div>
+      <div class="cmp-axis" id="cmpAxis"></div>
+      <div class="cmp-pills" id="cmpPills"></div>
+      <div class="cmp-foot">vs Nifty 50 (price index) · excludes dividends · illustrative data, real curve fills as daily history accrues</div>
+    </div>
+  </div>
+
+  <h2>3 · Before upload (empty state) — show the market + drive the upload</h2>
+  <div class="hero tight">
+    <div class="blob gold"></div><div class="blob blue"></div>
+    <div class="inner">
+      <div class="empty-hero">
+        <div>
+          <div class="eyebrow">Your Portfolio</div>
+          <div style="font-size:20px;font-weight:600;margin-top:5px;">Upload your CAS to get started</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:3px;">See your funds, returns, and how you compare with the market.</div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn-primary">Upload CAS</button>
+          <button class="btn-ghost">Sync portfolio</button>
+        </div>
+      </div>
+      <hr class="e-div" />
+      <div class="cmp-head"><div><div class="cmp-title">Markets while you wait</div><div class="cmp-sub">6 months · % return · upload to add your line</div></div></div>
+      <svg viewBox="0 0 680 120" preserveAspectRatio="none" width="100%" height="110" style="display:block;margin-top:8px;" aria-hidden="true">
+        <line x1="0" y1="88" x2="680" y2="88" stroke="rgba(255,255,255,.16)" stroke-dasharray="3 4"/>
+        <path d="M0,88 L50,82 L100,94 L150,72 L200,84 L250,62 L300,74 L350,54 L400,64 L450,44 L500,56 L550,38 L600,46 L680,32" fill="none" stroke="#cbd5e1" stroke-width="1.8"/>
+        <path d="M0,88 L50,80 L100,93 L150,68 L200,82 L250,58 L300,70 L350,48 L400,60 L450,38 L500,50 L550,32 L600,40 L680,26" fill="none" stroke="#f5c451" stroke-width="2.2"/>
+      </svg>
+      <div class="mlabel">
+        <span><i class="lg" style="background:#f5c451"></i>Nifty 50 <b style="color:#ffe39a">+8.1%</b></span>
+        <span><i class="lg" style="background:#cbd5e1"></i>Sensex <b>+7.4%</b></span>
+      </div>
+      <div class="cmp-foot">Public market data · <b style="color:#9cc0ff">upload your CAS</b> to add your portfolio line and compare</div>
+    </div>
+  </div>
+
+</div>
+<script>
+(function(){
+  const W=680,H=190,mL=4,mR=6,mT=14,mB=10;
+  const START=250000;                       // illustrative window-start value
+  const END=new Date(2026,5,30);            // 30 Jun 2026
+  const PERIODS=[
+    {k:'1M',days:30, ey:3.2, en:1.8},
+    {k:'3M',days:90, ey:7.0, en:4.2},
+    {k:'6M',days:180,ey:12.4,en:7.1},
+    {k:'1Y',days:365,ey:18.4,en:12.0},
+    {k:'3Y',days:1095,ey:46,  en:33},
+    {k:'ALL',days:1460,ey:62, en:40},
+  ];
+  let cur=2, hoverIdx=null, S=null;
+  const reb=a=>a.map(v=>v-a[0]);
+  const inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+  const sgn=v=>(v>=0?'+':'')+v.toFixed(2)+'%';
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function gen(p,idx){
+    const pts=Math.min(p.days,160), you=[],nf=[];
+    for(let i=0;i<=pts;i++){
+      const t=i/pts;
+      you.push(p.ey*t + (p.ey*0.18)*Math.sin(i/6+idx) + (p.ey*0.09)*Math.sin(i/2.3+idx*2));
+      nf.push (p.en*t + (p.en*0.22)*Math.sin(i/5+1+idx) + (p.en*0.11)*Math.sin(i/3+idx));
+    }
+    return {you:reb(you), nf:reb(nf), pts, days:p.days};
+  }
+  const x=i=> mL+(i/S.pts)*(W-mL-mR);
+  function yScale(){const a=S.you.concat(S.nf);const lo=Math.min(...a,0),hi=Math.max(...a,0),pad=(hi-lo)*0.16||1;return v=> mT+(1-(v-(lo-pad))/((hi+pad)-(lo-pad)))*(H-mT-mB);}
+  const path=(a,y)=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(v).toFixed(1)).join(' ');
+  const dateAt=i=>{const d=new Date(END); d.setDate(d.getDate()-Math.round((1-i/S.pts)*S.days)); return d;};
+  const fmtD=d=>d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear();
+
+  function draw(){
+    const y=yScale(), z=y(0).toFixed(1);
+    document.getElementById('cmp').innerHTML=
+      '<line x1="'+mL+'" y1="'+z+'" x2="'+(W-mR)+'" y2="'+z+'" stroke="rgba(255,255,255,.18)" stroke-dasharray="3 4"/>'+
+      '<path d="'+path(S.nf,y)+'" fill="none" stroke="#f5c451" stroke-width="2"/>'+
+      '<path d="'+path(S.you,y)+'" fill="none" stroke="#5b8cff" stroke-width="2.5"/>'+
+      '<line id="cx" x1="0" y1="'+mT+'" x2="0" y2="'+(H-mB)+'" stroke="rgba(255,255,255,.35)" visibility="hidden"/>'+
+      '<circle id="dy" r="4" fill="#5b8cff" stroke="#0B1F3A" stroke-width="1.5" visibility="hidden"/>'+
+      '<circle id="dn" r="4" fill="#f5c451" stroke="#0B1F3A" stroke-width="1.5" visibility="hidden"/>'+
+      '<rect id="hit" x="0" y="0" width="'+W+'" height="'+H+'" fill="transparent"/>';
+    document.getElementById('cmp').querySelector('#hit').addEventListener('mousemove',onMove);
+    document.getElementById('cmp').querySelector('#hit').addEventListener('touchmove',onTouch,{passive:false});
+    // axis: 5 ticks
+    let ax='';
+    for(let f=0;f<=4;f++){const d=dateAt(f/4*S.pts); ax+='<span>'+MON[d.getMonth()]+"'"+String(d.getFullYear()).slice(2)+'</span>';}
+    document.getElementById('cmpAxis').innerHTML=ax;
+    update();
+  }
+  function update(){
+    const i=hoverIdx==null?S.pts:hoverIdx;
+    const yv=S.you[i], nv=S.nf[i];
+    const beat=yv>=nv, youEl=document.getElementById('youPct');
+    youEl.textContent=(beat?'▲ ':'▼ ')+sgn(yv);   // green/▲ when ahead of Nifty, red/▼ when behind
+    youEl.style.color=beat?'#6ee7b7':'#fca5a5';
+    document.getElementById('nfPct').textContent=sgn(nv);
+    document.getElementById('youVal').textContent=inr(START*(1+yv/100));
+    document.getElementById('nfVal').textContent=inr(START*(1+nv/100))+' if in Nifty';
+    document.getElementById('cmpSub').textContent= hoverIdx==null
+      ? (PERIODS[cur].k+' · % return')
+      : fmtD(dateAt(i));
+    const y=yScale(), svg=document.getElementById('cmp'), tip=document.getElementById('ctip');
+    const cx=svg.querySelector('#cx'),dy=svg.querySelector('#dy'),dn=svg.querySelector('#dn');
+    if(hoverIdx==null){cx.setAttribute('visibility','hidden');dy.setAttribute('visibility','hidden');dn.setAttribute('visibility','hidden');tip.style.display='none';return;}
+    const px=x(i);
+    cx.setAttribute('x1',px);cx.setAttribute('x2',px);cx.setAttribute('visibility','visible');
+    dy.setAttribute('cx',px);dy.setAttribute('cy',y(yv));dy.setAttribute('visibility','visible');
+    dn.setAttribute('cx',px);dn.setAttribute('cy',y(nv));dn.setAttribute('visibility','visible');
+    const diff=yv-nv;
+    tip.innerHTML='<div class="ct-d">'+fmtD(dateAt(i))+'</div>'+
+      '<div class="ct-r"><i class="lg" style="background:#5b8cff"></i>You<b>'+sgn(yv)+'</b></div>'+
+      '<div class="ct-r"><i class="lg" style="background:#f5c451"></i>Nifty<b>'+sgn(nv)+'</b></div>'+
+      '<div class="ct-g" style="color:'+(diff>=0?'#6ee7b7':'#fca5a5')+'">'+(diff>=0?'+':'')+diff.toFixed(2)+'% vs Nifty</div>';
+    tip.style.display='block';
+    const wr=document.getElementById('cmpwrap').getBoundingClientRect();
+    const relpx=(px/W)*wr.width; let left=relpx+14; if(left>wr.width-152) left=relpx-152;
+    tip.style.left=Math.max(0,left)+'px'; tip.style.top='4px';
+  }
+  function idxFromClientX(clientX){
+    const r=document.getElementById('cmp').getBoundingClientRect();
+    let t=(clientX-r.left)/r.width; t=Math.max(0,Math.min(1,t));
+    return Math.round(t*S.pts);
+  }
+  function onMove(e){hoverIdx=idxFromClientX(e.clientX);update();}
+  function onTouch(e){e.preventDefault();hoverIdx=idxFromClientX(e.touches[0].clientX);update();}
+  document.getElementById('cmp').addEventListener('mouseleave',()=>{hoverIdx=null;update();});
+  document.getElementById('cmp').addEventListener('touchend',()=>{hoverIdx=null;update();});
+
+  // pills
+  const pillsEl=document.getElementById('cmpPills');
+  pillsEl.innerHTML=PERIODS.map((p,i)=>'<button class="pill'+(i===cur?' on':'')+'" data-i="'+i+'">'+p.k+'</button>').join('');
+  pillsEl.addEventListener('click',e=>{const b=e.target.closest('.pill');if(!b)return;cur=+b.dataset.i;hoverIdx=null;
+    [...pillsEl.children].forEach((c,i)=>c.classList.toggle('on',i===cur));
+    S=gen(PERIODS[cur],cur);draw();});
+
+  S=gen(PERIODS[cur],cur); draw();
+})();
+</script>
+</body>
+</html>

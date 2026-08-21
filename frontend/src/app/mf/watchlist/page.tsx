@@ -1,29 +1,30 @@
 'use client';
 
 /**
- * Watchlist Monitor — /mf/watchlist  (V1)
+ * Watchlist Monitor — /mf/watchlist  (V1 + Wave 1 live rewire)
  *
  * Public educational destination for tracking a shortlist of mutual funds,
- * built 1:1 to the approved WatchlistPageV1 desktop + mobile mockups. Two
- * states: empty (get-started CTA) and dashboard (full 15-section monitor).
- * Reached from the workspace nav or directly by URL — no auth required, wrapped
- * in <MaybeShell> so anonymous visitors get clean standalone chrome and
- * logged-in users keep the workspace shell (same flat-route + MaybeShell +
- * Suspense model as Portfolio V1 / Fund Detail V3 / Leaderboard V1).
+ * built 1:1 to the approved WatchlistPageV1 desktop + mobile mockups.
  *
- * PURE-UI build: every section renders illustrative PREVIEW data from
- * components/mf/watchlist/sampleData.ts; the real watchlist pipeline (save /
- * track / alerts / compare / export) is wired in a later session (founder call
- * 2026-06-25 — build all UI now, wire later).
+ * WATCHLIST_LIVE_DATA_PLAN.md Wave 1 (2026-08-21): page state now derives from
+ * the real saved list (`saved.length === 0` → EmptyHero; else dashboard). For a
+ * signed-in caller with a non-empty watchlist, Hero KPIs / Filter&Sort / the
+ * Funds grid / Category Leaders / Leaderboard / Statistics render the real
+ * `GET /api/v1/mf/watchlist/cards` payload (tag="LIVE"); every other section
+ * (What Changed, DMMI, Performance, Smart Alerts, Similar Funds, AI cards,
+ * Discovery, Recently Viewed, FAQ) still renders illustrative sample data
+ * (tag="PREVIEW") — those are Wave 2/3 scope. An anonymous visitor, or a
+ * signed-in caller with an empty watchlist who opts into "View Sample
+ * Watchlist", sees the full illustrative dashboard unchanged.
  *
  * Compliance bridges honoured:
- *   1. No raw DhanRadar composite score in DOM — BandRing + strength WORD only.
+ *   1. No raw DhanRadar composite score in DOM — BandRing/FundScoreCell +
+ *      strength WORD only.
  *   2. Educational verdict / momentum labels only — no advisory verbs.
  */
 
 import * as React from 'react';
 import Link from 'next/link';
-import { cn } from '@/lib/cn';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { SectionHeader } from '@/components/mf/explore/ExploreSection';
@@ -33,15 +34,22 @@ import {
   OpportunitiesSection, DmmiSection, PerfSection, LeaderboardSection,
   AlertsSection, SimilarSection, StatsSection, DiscoverySection,
   RecentlyViewedSection, FaqSection, EmptyHero, BenefitsGrid,
-  CompareTray, StickyBar,
+  CompareTray,
+  LiveFilterSection, LiveFundsSection, LiveCategoryLeadersSection,
+  LiveLeaderboardSection, LiveStatsSection,
+  sortWatchlistCards, watchlistCardMatchesSearch, computeCategoryLeaders,
+  type LiveSortKey,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
 import { useWatchlist, type WatchlistEntry } from '@/hooks/useWatchlist';
-import { useFundDetail } from '@/features/mf/api';
+import { useFundDetail, useWatchlistCards } from '@/features/mf/api';
+import { useMe } from '@/features/auth/api';
 import { EDU_LABELS } from '@/lib/displayLabel';
+import type { WatchlistCard } from '@/features/mf/types';
 
-// Rich saved-fund card — real facts from fund.head; null facts are omitted,
-// never fabricated. Label renders as the educational WORD only (non-neg #1/#2).
+// Rich saved-fund card (anonymous/preview path) — real facts from fund.head;
+// null facts are omitted, never fabricated. Label renders as the educational
+// WORD only (non-neg #1/#2).
 function WatchlistFundCard({ entry, onRemove }: { entry: WatchlistEntry; onRemove: () => void }) {
   const { data: head, isLoading } = useFundDetail(entry.isin);
 
@@ -92,13 +100,47 @@ function WatchlistSkeleton() {
   );
 }
 
-type PageState = 'empty' | 'dash';
+function computeHeroStats(cards: WatchlistCard[]) {
+  const bandCounts: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 0, low: 0 };
+  let upToday = 0;
+  let downToday = 0;
+  const categories = new Set<string>();
+  for (const c of cards) {
+    if (c.confidence_band) bandCounts[c.confidence_band] += 1;
+    if (c.nav_change_pct != null) {
+      if (c.nav_change_pct > 0) upToday += 1;
+      else if (c.nav_change_pct < 0) downToday += 1;
+    }
+    const category = c.category ?? c.sebi_category;
+    if (category) categories.add(category);
+  }
+  return { fundsTracked: cards.length, upToday, downToday, bandCounts, categoriesCovered: categories.size };
+}
 
 function WatchlistView() {
-  const [pageState, setPageState] = React.useState<PageState>('dash');
   const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
-  // Real saved funds (localStorage, shared with the fund-detail hero star).
+  const [previewSample, setPreviewSample] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+  const [sort, setSort] = React.useState<LiveSortKey>('recent');
+
+  const { data: me } = useMe();
+  const isLoggedIn = !!me;
+  // Real saved funds — localStorage (anonymous) or mf.mf_watchlist_items (logged in).
   const { list: saved, toggle: toggleSaved } = useWatchlist();
+
+  const showDashboard = saved.length > 0 || previewSample;
+  const showLive = isLoggedIn && saved.length > 0;
+
+  const { data: cardsResp, isLoading: cardsLoading } = useWatchlistCards(showLive);
+  const cards = React.useMemo(() => cardsResp?.items ?? [], [cardsResp]);
+
+  const visibleCards = React.useMemo(() => {
+    const filtered = cards.filter((c) => watchlistCardMatchesSearch(c, search));
+    return sortWatchlistCards(filtered, sort);
+  }, [cards, search, sort]);
+
+  const heroStats = React.useMemo(() => computeHeroStats(cards), [cards]);
+  const categoryLeaders = React.useMemo(() => computeCategoryLeaders(cards), [cards]);
 
   const toggle = React.useCallback((i: number) => {
     setSelected((prev) => {
@@ -109,37 +151,38 @@ function WatchlistView() {
     });
   }, []);
   const clear = React.useCallback(() => setSelected(new Set()), []);
+  const removeByIsin = React.useCallback(
+    (isin: string) => toggleSaved({ isin, name: '', category: null }),
+    [toggleSaved],
+  );
+
+  const selectedIsins = [...selected].map((i) => visibleCards[i]?.isin).filter((v): v is string => !!v);
+  const compareChips = [...selected].map((i) => {
+    const c = visibleCards[i];
+    return c ? { key: c.isin, letter: (c.fund_name_short ?? c.scheme_name)[0]?.toUpperCase() ?? '?', color: '#1E5EFF' } : null;
+  }).filter((v): v is { key: string; letter: string; color: string } => !!v);
 
   return (
     <div className="w-full pb-32">
-      {/* Breadcrumb + state toggle */}
+      {/* Breadcrumb */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <nav className="flex flex-wrap items-center gap-1.5 text-caption text-ink-muted" aria-label="Breadcrumb">
           <Link href="/mf/explore" className="hover:text-ink">Watchlist</Link>
           <span className="text-ink-faint">›</span>
-          <span className="font-semibold text-ink-secondary">{pageState === 'empty' ? 'Get Started' : 'My Watchlist'}</span>
-          {pageState === 'dash' && (
+          <span className="font-semibold text-ink-secondary">{showDashboard ? 'My Watchlist' : 'Get Started'}</span>
+          {showDashboard && (
             <>
               <span className="text-ink-faint">·</span>
-              <span className="text-ink-faint">8 funds tracked</span>
+              <span className="text-ink-faint">{saved.length} fund{saved.length === 1 ? '' : 's'} tracked</span>
             </>
           )}
         </nav>
-        <div className="flex rounded-xl border border-line bg-surface-2 p-1">
-          {(['empty', 'dash'] as PageState[]).map((s) => (
-            <button key={s} type="button" onClick={() => setPageState(s)}
-              className={cn('whitespace-nowrap rounded-lg px-3 py-1.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-none',
-                pageState === s ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink')}>
-              {s === 'empty' ? 'Empty' : 'Watchlist'}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ── EMPTY STATE ──────────────────────────────────────────────────────── */}
-      {pageState === 'empty' && (
+      {!showDashboard && (
         <div className="flex flex-col gap-6">
-          <EmptyHero onViewSample={() => setPageState('dash')} />
+          <EmptyHero onViewSample={() => setPreviewSample(true)} />
           <section>
             <SectionHeader title="What you'll get" />
             <BenefitsGrid />
@@ -148,106 +191,127 @@ function WatchlistView() {
       )}
 
       {/* ── DASHBOARD STATE ──────────────────────────────────────────────────── */}
-      {pageState === 'dash' && (
+      {showDashboard && (
         <div className="flex flex-col gap-6">
-          <HeroSection />
+          <HeroSection stats={showLive ? heroStats : undefined} />
 
           <section>
-            <SectionHeader index="01" title="AI Watchlist Summary" tag="DhanRadar AI" />
+            <SectionHeader index="01" title="AI Watchlist Summary" tag="PREVIEW" />
             <AiCardsGrid items={AI_SUMMARY} />
           </section>
 
           <section>
-            <SectionHeader index="02" title="Filter & Sort" info="Category · AMC · risk · strength · DMMI fit · momentum" />
-            <FilterSection />
+            <SectionHeader index="02" title="Filter & Sort" tag={showLive ? 'LIVE' : 'PREVIEW'}
+              info={showLive ? `${visibleCards.length} of ${cards.length} funds` : 'Category · AMC · risk · strength · DMMI fit · momentum'} />
+            {showLive
+              ? <LiveFilterSection search={search} onSearchChange={setSearch} sort={sort} onSortChange={setSort} />
+              : <FilterSection />}
           </section>
 
           <section>
-            <SectionHeader index="03" title="Watchlist Funds" info="8 funds · tap ⇄ to shortlist" />
-            {/* Real saved funds first (fund-detail hero star); preview cards below stay illustrative. */}
-            {saved.length > 0 && (
-              <div className="mb-3">
-                <p className="mb-2 text-caption font-semibold text-ink-secondary">Your saved funds ({saved.length})</p>
-                <div className="flex flex-col gap-2">
-                  {saved.map((e) => (
-                    <WatchlistFundCard key={e.isin} entry={e} onRemove={() => toggleSaved(e)} />
-                  ))}
+            <SectionHeader index="03" title="Watchlist Funds" tag={showLive ? 'LIVE' : 'PREVIEW'}
+              info={showLive ? `${saved.length} funds` : `${saved.length} funds · tap ⇄ to shortlist`} />
+            {showLive ? (
+              cardsLoading ? (
+                <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-72 rounded-2xl" />)}
                 </div>
-              </div>
+              ) : (
+                <LiveFundsSection cards={visibleCards} selected={selected} onToggle={toggle} onRemove={removeByIsin} />
+              )
+            ) : (
+              <>
+                {/* Anonymous preview: real saved funds first (fund-detail hero star). */}
+                {saved.length > 0 && (
+                  <div className="mb-3">
+                    <p className="mb-2 text-caption font-semibold text-ink-secondary">Your saved funds ({saved.length})</p>
+                    <div className="flex flex-col gap-2">
+                      {saved.map((e) => (
+                        <WatchlistFundCard key={e.isin} entry={e} onRemove={() => toggleSaved(e)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <FundsSection selected={selected} onToggle={toggle} />
+              </>
             )}
-            <FundsSection selected={selected} onToggle={toggle} />
           </section>
 
           <section>
-            <SectionHeader index="04" title="What Changed" info="Since last week" />
+            <SectionHeader index="04" title="What Changed" info="Since last week" tag="PREVIEW" />
             <ChangedSection />
           </section>
 
           <section>
-            <SectionHeader index="05" title="Best Opportunities" info="In your watchlist" />
-            <OpportunitiesSection />
+            <SectionHeader index="05" title={showLive ? 'Category Leaders' : 'Best Opportunities'}
+              info={showLive ? 'Top 1Y return in your watchlist, per category' : 'In your watchlist'} tag={showLive ? 'LIVE' : 'PREVIEW'} />
+            {showLive ? <LiveCategoryLeadersSection leaders={categoryLeaders} /> : <OpportunitiesSection />}
           </section>
 
           <section>
-            <SectionHeader index="06" title="DMMI Watchlist Analysis" tag="DhanRadar Mood" />
+            <SectionHeader index="06" title="DMMI Watchlist Analysis" tag="PREVIEW" />
             <DmmiSection />
           </section>
 
           <section>
-            <SectionHeader index="07" title="Watchlist Performance" info="vs category & benchmark" />
+            <SectionHeader index="07" title="Watchlist Performance" info="vs category & benchmark" tag="PREVIEW" />
             <PerfSection />
           </section>
 
           <section>
-            <SectionHeader index="08" title="Watchlist Leaderboard" info="Ranked by strength" />
-            <LeaderboardSection />
+            <SectionHeader index="08" title="Watchlist Leaderboard" info="Ranked by 1Y return" tag={showLive ? 'LIVE' : 'PREVIEW'} />
+            {showLive ? <LiveLeaderboardSection cards={cards} /> : <LeaderboardSection />}
           </section>
 
           <section>
-            <SectionHeader index="09" title="Smart Alerts" info="6 new" />
+            <SectionHeader index="09" title="Smart Alerts" info="6 new" tag="PREVIEW" />
             <AlertsSection />
           </section>
 
           <section>
-            <SectionHeader index="10" title="Similar Funds Worth Watching" tag="Recommended" />
+            <SectionHeader index="10" title="Similar Funds Worth Watching" tag="PREVIEW" />
             <SimilarSection />
           </section>
 
           <section>
-            <SectionHeader index="11" title="Watchlist Insights" tag="AI" />
+            <SectionHeader index="11" title="Watchlist Insights" tag="PREVIEW" />
             <AiCardsGrid items={INSIGHTS} />
           </section>
 
           <section>
-            <SectionHeader index="12" title="Watchlist Statistics" />
-            <StatsSection />
+            <SectionHeader index="12" title="Watchlist Statistics" tag={showLive ? 'LIVE' : 'PREVIEW'} />
+            {showLive ? <LiveStatsSection cards={cards} /> : <StatsSection />}
           </section>
 
           <section>
-            <SectionHeader index="13" title="Discover More" info="Add to your watchlist" />
+            <SectionHeader index="13" title="Discover More" info="Add to your watchlist" tag="PREVIEW" />
             <DiscoverySection />
           </section>
 
           <section>
-            <SectionHeader index="14" title="Recently Viewed" />
+            <SectionHeader index="14" title="Recently Viewed" tag="PREVIEW" />
             <RecentlyViewedSection />
           </section>
 
           <section>
-            <SectionHeader index="15" title="Watchlist FAQ" />
+            <SectionHeader index="15" title="Watchlist FAQ" tag="PREVIEW" />
             <FaqSection />
           </section>
 
           <p className="mx-auto max-w-[880px] text-center text-caption text-ink-faint leading-relaxed">
-            DhanRadar is a research &amp; analytics platform, not an investment advisor. Watchlist data shown is illustrative. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not guarantee future returns.
+            DhanRadar is a research &amp; analytics platform, not an investment advisor. Sections tagged PREVIEW show illustrative data. Mutual fund investments are subject to market risks; read all scheme-related documents carefully. Past performance does not guarantee future returns.
           </p>
 
           <div className="rounded-2xl border border-line bg-surface-2 p-4">
-            <DisclosureBundle notAdvice="For education only — not investment advice. All watchlist values, strength bands, and labels shown are illustrative preview data; the real watchlist pipeline will be wired in a later session. Mutual fund investments are subject to market risks. Past performance does not indicate future returns." />
+            <DisclosureBundle notAdvice="For education only — not investment advice. Sections tagged PREVIEW show illustrative preview data. Mutual fund investments are subject to market risks. Past performance does not indicate future returns." />
           </div>
 
-          <CompareTray selected={selected} onClear={clear} />
-          <StickyBar />
+          <CompareTray
+            selected={selected}
+            onClear={clear}
+            chips={showLive ? compareChips : undefined}
+            compareHref={showLive && selectedIsins.length > 0 ? `/mf/compare?isins=${selectedIsins.join(',')}` : undefined}
+          />
         </div>
       )}
     </div>
