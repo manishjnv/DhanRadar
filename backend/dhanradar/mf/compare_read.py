@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import SessionLocal
+from dhanradar.mf.benchmark_read import get_benchmark_row
 from dhanradar.mf.fund_events import derive_event_severity
 from dhanradar.mf.fund_read import (
     _category_avg_returns,
@@ -178,6 +179,7 @@ async def get_compare_fragment(session: AsyncSession, isin: str) -> dict | None:
             "points": bench.get("points", []),
             "window": _CMP_BENCHMARK_WINDOW,
         }
+    benchmark_row = await get_benchmark_row(session, isin)
 
     # --- C2: composition ---
     comp_raw = await get_fund_composition(session, isin)
@@ -297,6 +299,7 @@ async def get_compare_fragment(session: AsyncSession, isin: str) -> dict | None:
         "sip_10y": sip_10y,
         # C1 — benchmark comparison (rebased 1Y series)
         "benchmark": benchmark,
+        "benchmark_row": benchmark_row,
         # C2 — depth fragments
         "composition": composition,
         "people": people,
