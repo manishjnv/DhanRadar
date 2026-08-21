@@ -83,6 +83,9 @@ class _FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.store.get(key)
 
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [self.store.get(k) for k in keys]
+
     async def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.store[key] = value
         self.set_calls.append(key)

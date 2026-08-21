@@ -183,15 +183,18 @@ export const CATEGORY_MIX: [string, number, string][] = [
 ];
 
 // ── Discovery ────────────────────────────────────────────────────────────────
-export const DISCOVERY: [string, string, string, string][] = [
-  ['🔥', 'Trending Funds', 'Hot this week', O],
-  ['✨', 'New Launches', 'Fresh NFOs', V],
-  ['⭐', 'Top Rated', 'Strong band', E],
-  ['📈', 'Most Improved', 'Climbing ranks', B],
-  ['🐋', 'Highest Inflows', 'Smart money', C],
-  ['💰', 'Best SIP', 'Top monthly', E],
-  ['🏦', 'Best ELSS', 'Tax savers', A],
-  ['📊', 'Best Index', 'Lowest cost', N],
+// Nav tiles: icon · title · sub · colour · real route (leaderboard board anchors
+// where one exists, /mf/explore otherwise). Labels use the leaderboard's own
+// non-advisory vocabulary (champions/leaders), never rated/best-pick framing.
+export const DISCOVERY: [string, string, string, string, string][] = [
+  ['🔥', 'Trending Funds', 'Hot this week', O, '/mf/leaderboard#trending'],
+  ['✨', 'New Launches', 'Fresh NFOs', V, '/mf/explore'],
+  ['⭐', 'Category Champions', 'Strong band', E, '/mf/leaderboard#champions'],
+  ['📈', 'Most Improved', 'Climbing ranks', B, '/mf/leaderboard#improved'],
+  ['🐋', 'Highest Inflows', 'Fund flows', C, '/mf/leaderboard#flows'],
+  ['💰', 'SIP Leaders', 'Top monthly', E, '/mf/leaderboard#sip'],
+  ['🏦', 'Tax Savers (ELSS)', 'Explore the category', A, '/mf/explore'],
+  ['📊', 'Low-Cost Index', 'Value for money', N, '/mf/leaderboard#value'],
 ];
 
 // ── FAQ ──────────────────────────────────────────────────────────────────────

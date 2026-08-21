@@ -407,15 +407,15 @@ export function StatsSection() {
 export function DiscoverySection() {
   return (
     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-      {DISCOVERY.map(([ic, t, d, col]) => (
-        <button key={t} type="button"
+      {DISCOVERY.map(([ic, t, d, col, href]) => (
+        <Link key={t} href={href}
           className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-royal hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
           <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[11px] text-[17px]" style={{ background: `${col}1A`, color: col }} aria-hidden="true">{ic}</span>
           <div>
             <div className="text-[12.5px] font-bold text-ink">{t}</div>
             <div className="mt-px text-[10.5px] text-ink-muted">{d}</div>
           </div>
-        </button>
+        </Link>
       ))}
     </div>
   );
