@@ -332,6 +332,35 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     # a poisoned dict (e.g. a smuggled numeric/score key) is stripped down to plain
     # text — see `serialize_watchlist_ai_response` below.
     "mf.watchlist_ai_item": frozenset({"text"}),
+    # COMPARE_LIVE_DATA_PLAN.md Wave C1 (2026-08-21) — `GET /mf/compare/bundle`
+    # row shapes. Three nested shapes + one top-level wrapper, each independently
+    # allowlisted so the benchmark series is never embedded raw (architect condition).
+    "mf.compare_benchmark": frozenset({"label", "is_fallback", "points", "window"}),
+    "mf.compare_sip": frozenset(
+        {"amount", "years", "months_invested", "total_invested", "final_value", "xirr_pct", "as_of", "assumptions"}
+    ),
+    "mf.compare_fragment": frozenset(
+        {
+            # head fields
+            "isin", "scheme_name", "fund_name_short", "amc_name",
+            "sebi_category", "category", "plan_type", "option_type",
+            "launch_date", "expense_ratio_pct", "is_segregated",
+            "verb_label", "confidence_band", "category_rank", "category_total",
+            "return_3m_pct", "return_6m_pct", "return_1y_pct", "return_3y_pct", "return_5y_pct",
+            "nav_latest", "nav_date", "nav_change_pct", "aum_crore",
+            # analytics subset (DOM-allowed standard ratios + rolling returns)
+            "sharpe_ratio", "sortino_ratio", "volatility_pct", "max_drawdown_pct",
+            "rolling_1y_avg_pct", "rolling_1y_min_pct", "rolling_1y_max_pct", "rolling_1y_pct_positive",
+            "rolling_3y_avg_pct", "rolling_3y_min_pct", "rolling_3y_max_pct", "rolling_3y_pct_positive",
+            # category medians
+            "category_median_return_1y_pct", "category_median_return_3y_pct", "category_median_ter_pct",
+            # SIP illustrations (nested mf.compare_sip shape, scrubbed separately)
+            "sip_5y", "sip_10y",
+            # benchmark comparison (nested mf.compare_benchmark shape, scrubbed separately)
+            "benchmark",
+        }
+    ),
+    "mf.compare_bundle": frozenset({"isins", "fragments", "as_of"}),
 }
 
 #: Entity-link isin shape (2026-08-16) — read-boundary re-validation of the same
@@ -723,3 +752,41 @@ def serialize_watchlist_ai_response(
         "not_advice": data["not_advice"],
         "disclaimer_version": data["disclaimer_version"],
     }
+
+
+def serialize_compare_bundle_response(
+    *, isins: list[str], fragments: dict[str, Any], as_of: str | None
+) -> dict[str, Any]:
+    """Fail-closed serialization for ``GET /mf/compare/bundle`` (COMPARE_LIVE_DATA_
+    PLAN.md Wave C1) — same #2 scrub + B87 allowlist bypass pattern as
+    ``serialize_leaderboard_response``.
+
+    Three nested allowlists enforce defence-in-depth on the benchmark series
+    (``mf.compare_benchmark``), SIP illustrations (``mf.compare_sip``), and each
+    per-ISIN fragment (``mf.compare_fragment``) — the architect review condition
+    that the benchmark be "serialized through new mf.compare_* allowlists, never
+    embedded raw" is satisfied by the nested scrub below (a benchmark dict with any
+    extra key is reduced to only {label, is_fallback, points, window} before it can
+    reach the client).
+    """
+    data = _scrub({"isins": isins, "fragments": fragments, "as_of": as_of})
+    _assert_no_forbidden(data)
+
+    clean_fragments: dict[str, dict[str, Any] | None] = {}
+    for isin, frag in (data["fragments"] or {}).items():
+        if frag is None:
+            clean_fragments[isin] = None
+            continue
+        frag = _apply_allowlist("mf.compare_fragment", frag)
+        # Nested benchmark allowlist — never embedded raw (architect condition).
+        if frag.get("benchmark") is not None:
+            frag["benchmark"] = _apply_allowlist("mf.compare_benchmark", frag["benchmark"])
+        # Nested SIP allowlists (one per fixed illustration slot).
+        for sip_key in ("sip_5y", "sip_10y"):
+            if frag.get(sip_key) is not None:
+                frag[sip_key] = _apply_allowlist("mf.compare_sip", frag[sip_key])
+        clean_fragments[isin] = frag
+
+    bundle = _apply_allowlist("mf.compare_bundle", data)
+    bundle["fragments"] = clean_fragments
+    return bundle

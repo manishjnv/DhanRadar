@@ -865,3 +865,85 @@ export interface WatchlistAISummaryResponse {
   disclaimer_version: string;
 }
 
+// ---------------------------------------------------------------------------
+// C1 — Compare bundle (GET /api/v1/mf/compare/bundle — COMPARE_LIVE_DATA_PLAN)
+// One batch endpoint replaces per-ISIN fanout for the compare page (2–4 ISINs).
+// ---------------------------------------------------------------------------
+/** Compact SIP illustration embedded in each compare fragment (5Y and 10Y). */
+export interface CompareSipCompact {
+  amount: number;
+  years: number;
+  total_invested: number | null;
+  final_value: number | null;
+  xirr_pct: number | null;
+  as_of: string | null;
+}
+
+export interface CompareBenchmark {
+  label: string | null;
+  is_fallback: boolean;
+  points: { d: string; v: number }[];
+  window: '1y';
+}
+
+/** Per-ISIN fragment returned inside CompareBundle.fragments.
+ *  Includes head facts, standard risk/analytics, rolling windows,
+ *  category p50 medians, SIP illustrations, and benchmark summary.
+ *  No DhanRadar composite score — only factual/published metrics. */
+export interface CompareFragment {
+  // head facts
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  sebi_category: string | null;
+  category: string | null;
+  plan_type: 'direct' | 'regular' | null;
+  launch_date: string | null;
+  expense_ratio_pct: number | null;
+  verb_label: Label | null;
+  confidence_band: ConfidenceBand | null;
+  category_rank: number | null;
+  category_total: number | null;
+  nav_latest: number | null;
+  nav_date: string | null;
+  nav_change_pct: number | null;
+  aum_crore: number | null;
+  return_3m_pct: number | null;
+  return_6m_pct: number | null;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  return_5y_pct: number | null;
+  // standard risk ratios (DOM-allowed per architecture)
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  volatility_pct: number | null;
+  max_drawdown_pct: number | null;
+  // rolling windows (1Y and 3Y — no 5Y field in source)
+  rolling_1y_avg_pct: number | null;
+  rolling_1y_min_pct: number | null;
+  rolling_1y_max_pct: number | null;
+  rolling_1y_pct_positive: number | null;
+  rolling_3y_avg_pct: number | null;
+  rolling_3y_min_pct: number | null;
+  rolling_3y_max_pct: number | null;
+  rolling_3y_pct_positive: number | null;
+  // category p50 medians (from mf_category_stats)
+  category_median_return_1y_pct: number | null;
+  category_median_return_3y_pct: number | null;
+  category_median_ter_pct: number | null;
+  // SIP illustrations (deterministic math, educational)
+  sip_5y: CompareSipCompact | null;
+  sip_10y: CompareSipCompact | null;
+  // benchmark series (scrubbed through compare allowlist)
+  benchmark: CompareBenchmark | null;
+}
+
+/** Response from GET /api/v1/mf/compare/bundle?isins=a,b[,c,d] (2–4 ISINs).
+ *  fragments[isin] is null when the ISIN is unknown or data is unavailable. */
+export interface CompareBundle {
+  isins: string[];
+  fragments: Record<string, CompareFragment | null>;
+  as_of: string | null;
+}
+

@@ -37,6 +37,7 @@ import type {
   WatchlistChangesResponse,
   WatchlistSimilarResponse,
   WatchlistAISummaryResponse,
+  CompareBundle,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -698,5 +699,26 @@ export function useLeaderboard() {
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `GET /mf/compare/bundle?isins=...` (COMPARE_LIVE_DATA_PLAN C1) — one batch
+ * request for the compare page (2–4 distinct ISINs, sorted for cache stability).
+ * Replaces the 3× useFundDetail fanout; sections read their slice of the bundle.
+ * Enabled only for 2–4 distinct, non-empty ISINs. 404/400 are not retried
+ * (endpoint not yet deployed; callers fall back to sample/preview gracefully).
+ */
+export function useCompareBundle(isins: string[]) {
+  const sorted = [...new Set(isins.filter(Boolean))].sort();
+  return useQuery<CompareBundle>({
+    queryKey: queryKeys.mf.compareBundle(sorted),
+    queryFn: () => api.get<CompareBundle>(`/mf/compare/bundle?isins=${sorted.join(',')}`),
+    enabled: sorted.length >= 2 && sorted.length <= 4,
+    staleTime: 5 * 60 * 1000,
+    retry: (count, error) => {
+      if (error instanceof ApiError && [400, 404].includes(error.problem.status)) return false;
+      return count < 1;
+    },
   });
 }
