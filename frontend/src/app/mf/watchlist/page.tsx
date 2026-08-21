@@ -44,14 +44,14 @@ import {
   LiveFilterSection, LiveFundsSection, LiveCategoryLeadersSection,
   LiveLeaderboardSection, LiveStatsSection,
   LiveChangedSection, LiveDmmiSection, LivePerfSection, LiveSimilarSection,
-  LiveRecentlyViewedSection,
+  LiveRecentlyViewedSection, LiveAiSection,
   sortWatchlistCards, watchlistCardMatchesSearch, computeCategoryLeaders,
   type LiveSortKey,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
 import { useWatchlist, type WatchlistEntry } from '@/hooks/useWatchlist';
 import { useRecentlyViewed } from '@/hooks/useRecentlyViewed';
-import { useFundDetail, useWatchlistCards, useWatchlistChanges, useWatchlistSimilar } from '@/features/mf/api';
+import { useFundDetail, useWatchlistCards, useWatchlistChanges, useWatchlistSimilar, useWatchlistSummary } from '@/features/mf/api';
 import { useMe } from '@/features/auth/api';
 import { EDU_LABELS } from '@/lib/displayLabel';
 import type { WatchlistCard } from '@/features/mf/types';
@@ -148,6 +148,15 @@ function WatchlistView() {
   // never a decorative sample).
   const { data: changesResp } = useWatchlistChanges(showLive);
   const { data: similarResp } = useWatchlistSimilar(showLive);
+  // Wave 3 — governed AI-gateway summary/insights (S01 + S11). `LIVE` tag is
+  // reserved for a genuine served result — while loading or when a real
+  // attempt withheld output, the tag stays PREVIEW-ish but the CONTENT is the
+  // honest loading/unavailable state, never the illustrative sample text.
+  const { data: summaryResp, isLoading: summaryLoading } = useWatchlistSummary(showLive);
+  const summaryItems = summaryResp?.summary_items ?? [];
+  const insightItems = summaryResp?.insight_items ?? [];
+  const summaryIsLive = showLive && !summaryLoading && summaryItems.length > 0;
+  const insightsIsLive = showLive && !summaryLoading && insightItems.length > 0;
   const recentlyViewed = useRecentlyViewed();
 
   const visibleCards = React.useMemo(() => {
@@ -218,8 +227,19 @@ function WatchlistView() {
           <HeroSection stats={showLive ? heroStats : undefined} />
 
           <section>
-            <SectionHeader index="01" title="AI Watchlist Summary" tag="PREVIEW" />
-            <AiCardsGrid items={AI_SUMMARY} />
+            <SectionHeader index="01" title="AI Watchlist Summary" tag={summaryIsLive ? 'LIVE' : 'PREVIEW'} />
+            {showLive ? (
+              summaryLoading ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <Skeleton className="h-20 rounded-2xl" />
+                  <Skeleton className="h-20 rounded-2xl" />
+                </div>
+              ) : (
+                <LiveAiSection items={summaryItems} disclosure={summaryResp?.disclosure} notAdvice={summaryResp?.not_advice} />
+              )
+            ) : (
+              <AiCardsGrid items={AI_SUMMARY} />
+            )}
           </section>
 
           <section>
@@ -291,8 +311,19 @@ function WatchlistView() {
           </section>
 
           <section>
-            <SectionHeader index="11" title="Watchlist Insights" tag="PREVIEW" />
-            <AiCardsGrid items={INSIGHTS} />
+            <SectionHeader index="11" title="Watchlist Insights" tag={insightsIsLive ? 'LIVE' : 'PREVIEW'} />
+            {showLive ? (
+              summaryLoading ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <Skeleton className="h-20 rounded-2xl" />
+                  <Skeleton className="h-20 rounded-2xl" />
+                </div>
+              ) : (
+                <LiveAiSection items={insightItems} disclosure={summaryResp?.disclosure} notAdvice={summaryResp?.not_advice} />
+              )
+            ) : (
+              <AiCardsGrid items={INSIGHTS} />
+            )}
           </section>
 
           <section>
