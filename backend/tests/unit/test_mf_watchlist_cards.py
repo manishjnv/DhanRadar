@@ -55,6 +55,9 @@ class _FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.store.get(key)
 
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [self.store.get(k) for k in keys]
+
     async def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.store[key] = value
         self.set_calls.append(key)
@@ -215,3 +218,24 @@ async def test_watchlist_cards_response_header_is_private(monkeypatch) -> None:
     await watchlist_cards(db=db, response=resp, user=_user())
 
     assert resp.headers["Cache-Control"] == "private"
+
+
+# 7 — mixed cache hit + miss in one request keeps order and composes only the miss
+
+
+async def test_watchlist_cards_mixed_hit_and_miss_keeps_order(monkeypatch) -> None:
+    cached_card = _card(ISIN_A, last_nav_date="2026-08-18")
+    fake_redis = _FakeRedis(seed={f"mf:watchlist_card:{ISIN_A}": json.dumps(cached_card)})
+    monkeypatch.setattr("dhanradar.mf.router.get_redis", lambda: fake_redis)
+
+    async def fake_get_watchlist_card(session: Any, isin: str) -> dict[str, Any]:
+        assert isin == ISIN_B, "compositor must only run for the cache miss"
+        return _card(isin)
+
+    monkeypatch.setattr("dhanradar.mf.fund_read.get_watchlist_card", fake_get_watchlist_card)
+    db = _FakeCardsDB(isins=[ISIN_A, ISIN_B])
+
+    envelope = await watchlist_cards(db=db, response=Response(), user=_user())
+
+    assert [c["isin"] for c in envelope["items"]] == [ISIN_A, ISIN_B]
+    assert fake_redis.set_calls == [f"mf:watchlist_card:{ISIN_B}"]

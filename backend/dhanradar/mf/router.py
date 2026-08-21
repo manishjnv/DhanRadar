@@ -366,11 +366,22 @@ async def _load_watchlist_cards_cached(db: AsyncSession, isins: list[str]) -> li
     """
     from dhanradar.mf.fund_read import get_watchlist_card
 
+    if not isins:
+        return []
+
+    # One MGET round trip for the whole list (was: one GET per ISIN — the N
+    # round trips dominated warm-path latency at the 200-item cap). Cache
+    # MISSES still compose sequentially ON PURPOSE: an asyncio.gather over
+    # `get_watchlist_card(db, ...)` would run concurrent queries on the ONE
+    # shared AsyncSession, which SQLAlchemy forbids; per-task sessions would
+    # gamble with the connection pool. Misses are rare in practice — fragments
+    # are shared across every caller who watches the fund.
     redis = get_redis()
+    keys = [f"mf:watchlist_card:{isin}" for isin in isins]
+    cached_vals = await redis.mget(keys)
+
     cards: list[dict] = []
-    for isin in isins:
-        cache_key = f"mf:watchlist_card:{isin}"
-        cached = await redis.get(cache_key)
+    for isin, cache_key, cached in zip(isins, keys, cached_vals, strict=True):
         if cached is not None:
             cards.append(json.loads(cached))
             continue
