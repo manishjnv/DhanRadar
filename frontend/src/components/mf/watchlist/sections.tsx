@@ -33,7 +33,8 @@ import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import { shortenAmcName } from '@/features/mf/explorer-format';
 import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
 import { CONFIDENCE_BAND_LABELS } from '@/lib/displayLabel';
-import type { WatchlistCard, WatchlistChangeItem, WatchlistSimilarItem } from '@/features/mf/types';
+import type { WatchlistCard, WatchlistChangeItem, WatchlistSimilarItem, WatchlistAlert } from '@/features/mf/types';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useMoodCurrent } from '@/features/mood/api';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { relativeTime } from '@/features/mood/relative-time';
@@ -1040,6 +1041,51 @@ export function LiveSimilarSection({
               {item.expense_ratio_pct != null && <span>Cost {item.expense_ratio_pct.toFixed(2)}%</span>}
             </div>
             <CTA variant="ghost" className="mt-3 w-full" onClick={() => onAdd(item.isin, name)}>+ Add</CTA>
+          </div>
+        );
+      })}
+    </Rail>
+  );
+}
+
+// ── LIVE S09 ALERTS ──────────────────────────────────────────────────────────
+
+const ALERT_TYPE_ICON: Record<string, string> = {
+  label_change: '📊',
+  rank_change: '📈',
+  ter_change: '💰',
+  price_move: '📈',
+  holding_change: '🔄',
+  aum_change: '💼',
+};
+
+export function LiveAlertsSection({ items }: { items: WatchlistAlert[] }) {
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        title="No active alerts"
+        description="Alerts appear here when tracked funds have notable changes."
+        className="py-8"
+      />
+    );
+  }
+  return (
+    <Rail cols="sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((alert) => {
+        const name = fundDisplayName(alert.fund_name_short ?? alert.scheme_name).name;
+        const color = avatarColorFor(alert.isin);
+        const icon = ALERT_TYPE_ICON[alert.alert_type] ?? '🔔';
+        return (
+          <div key={alert.id} className="flex w-[240px] shrink-0 items-start gap-3 rounded-xl border border-line bg-surface p-3.5 sm:w-auto">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-sm bg-royal/10 text-royal" aria-hidden="true">
+              {icon}
+            </span>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-ink"><MiniLogo letter={name[0]?.toUpperCase() ?? '?'} color={color} />{name}</div>
+              <div className="mt-0.5 text-[12.5px] font-semibold leading-snug text-ink">{alert.title}</div>
+              <div className="mt-0.5 text-[11.5px] leading-snug text-ink-secondary">{alert.body}</div>
+              <div className="mt-1.5 font-mono text-[10px] text-ink-faint">{relativeTime(alert.triggered_on)}</div>
+            </div>
           </div>
         );
       })}

@@ -52,6 +52,8 @@ PERSONAL_TABLES: tuple[str, ...] = (
     "mf.portfolio_statement_checkpoints",
     # fund watchlist (added 2026-07-13, migration 0079)
     "mf.mf_watchlist_items",
+    # watchlist alerts (added 2026-08-21, migration 0082)
+    "mf.mf_watchlist_alerts",
     # signal / notify / auth / compliance (classified PERSONAL; RLS enforcement = PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",
@@ -87,6 +89,8 @@ RLS_ENFORCED: tuple[str, ...] = (
     "mf.portfolio_statement_checkpoints",
     # fund watchlist (added 2026-07-13, migration 0079)
     "mf.mf_watchlist_items",
+    # watchlist alerts (added 2026-08-21, migration 0082)
+    "mf.mf_watchlist_alerts",
     # signal / notify / auth / compliance (PR-2)
     "signal.signal_rules",
     "signal.signal_dip_fund",

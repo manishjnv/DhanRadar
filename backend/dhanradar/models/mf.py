@@ -340,6 +340,44 @@ class MfWatchlistItem(Base):
     )
 
 
+class MfWatchlistAlert(Base):
+    """Per-user watchlist alert (nav_move / label_change).
+
+    Written by tasks.watchlist_alerts daily; read by GET /mf/watchlist/alerts.
+    Deduped on (user_id, isin, alert_type, triggered_on) via UNIQUE constraint
+    (INSERT ON CONFLICT DO NOTHING at the task layer).
+    Owner-scoped: RLS-enforced (db_security PERSONAL_TABLES/RLS_ENFORCED, 0082).
+    """
+
+    __tablename__ = "mf_watchlist_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "isin", "alert_type", "triggered_on",
+            name="uq_mf_watchlist_alert",
+        ),
+        Index("ix_mf_watchlist_alerts_user_created", "user_id", "created_at"),
+        CheckConstraint("alert_type IN ('nav_move', 'label_change')", name="ck_mf_watchlist_alert_type"),
+        _SCHEMA,
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth.users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    alert_type: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    triggered_on: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class MfPortfolio(Base):
     """Named portfolio container — one per Free user, unlimited for Plus."""
 
