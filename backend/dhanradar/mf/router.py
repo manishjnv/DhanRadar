@@ -617,6 +617,9 @@ async def get_watchlist_alerts(
         for r in rows
     ]
     return serialize_watchlist_alerts_response(items=items)
+
+
+@router.get("/watchlist/summary")
 async def watchlist_summary(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
