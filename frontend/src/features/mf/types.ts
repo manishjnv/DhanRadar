@@ -792,7 +792,18 @@ export interface WatchlistCard {
    *  (mf_category_stats.p50). No 5Y category metric exists server-side. */
   category_return_1y_pct: number | null;
   category_return_3y_pct: number | null;
+  benchmark_row: BenchmarkRow;
 }
+
+export type BenchmarkRow =
+  | { no_data: true; reason: 'benchmark_unmapped' | 'fund_not_found' }
+  | {
+      no_data?: false;
+      source: 'benchmark' | 'category_median';
+      label: string;
+      returns: { '1y': number | null; '3y': number | null; '5y': number | null };
+      as_of: string;
+    };
 
 export interface WatchlistCardsResponse {
   /** Freshest NAV date across all cards; null when the watchlist is empty. */
@@ -937,6 +948,7 @@ export interface CompareFragment {
   sip_10y: CompareSipCompact | null;
   // benchmark series (scrubbed through compare allowlist)
   benchmark: CompareBenchmark | null;
+  benchmark_row: BenchmarkRow;
   composition: CompareCompositionFragment;
   people: ComparePeopleFragment;
   flows: CompareFlowFragment;

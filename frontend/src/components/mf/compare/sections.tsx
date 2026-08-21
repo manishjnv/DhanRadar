@@ -200,8 +200,8 @@ export function MoodSection() {
 }
 
 // ── S7 — Performance center ──────────────────────────────────────────────────
-export function PerformanceSection({ rows = PERF, funds, live = false, catRows }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; catRows?: Row[] }) {
-  const displayRows = catRows ? [...rows, ...catRows] : rows;
+export function PerformanceSection({ rows = PERF, funds, live = false, catRows, benchmarkRows }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; catRows?: Row[]; benchmarkRows?: Row[] }) {
+  const displayRows = benchmarkRows ? [...rows, ...catRows ?? [], ...benchmarkRows] : catRows ? [...rows, ...catRows] : rows;
   return (
     <Panel>
       <CompareTable rows={displayRows} firstCol="Period" showCategory={!live} funds={funds} />

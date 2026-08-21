@@ -176,6 +176,18 @@ function CompareView() {
     ];
   }, [live, fragments]);
 
+  const benchmarkRows = React.useMemo<Row[] | undefined>(() => {
+    if (!live) return undefined;
+    const rows = ['1y', '3y', '5y'] as const;
+    return rows.map((window) => ({
+      label: `Benchmark (${fragments[0]?.benchmark_row && !fragments[0].benchmark_row.no_data ? fragments[0].benchmark_row.label : 'unavailable'}) ${window.toUpperCase()}`,
+      vals: fragments.map((fragment) => {
+        const value = fragment.benchmark_row?.no_data ? null : fragment.benchmark_row.returns[window];
+        return value == null ? null : round1(value);
+      }),
+    }));
+  }, [live, fragments]);
+
   const costRows = React.useMemo<Row[] | undefined>(() => {
     if (!live) return undefined;
     return [
@@ -356,7 +368,7 @@ function CompareView() {
       {/* S7 — Performance */}
       <Section>
         <SectionHeader index="07" title="Performance Center" info="Strongest highlighted per period" badge={live ? <LiveBadge /> : undefined} />
-        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} />
+        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} />
       </Section>
 
       {/* S8 — SIP */}

@@ -291,6 +291,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             # return (mf_category_stats.p50); no 5Y metric_key exists there.
             "category_return_1y_pct",
             "category_return_3y_pct",
+            "benchmark_row",
         }
     ),
     # WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (2026-08-21) — `GET /mf/watchlist/changes`
@@ -336,6 +337,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     # row shapes. Three nested shapes + one top-level wrapper, each independently
     # allowlisted so the benchmark series is never embedded raw (architect condition).
     "mf.compare_benchmark": frozenset({"label", "is_fallback", "points", "window"}),
+    "mf.compare_benchmark_row": frozenset({"source", "label", "returns", "as_of", "no_data", "reason"}),
     "mf.compare_sip": frozenset(
         {"amount", "years", "months_invested", "total_invested", "final_value", "xirr_pct", "as_of", "assumptions"}
     ),
@@ -358,6 +360,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "sip_5y", "sip_10y",
             # benchmark comparison (nested mf.compare_benchmark shape, scrubbed separately)
             "benchmark",
+            "benchmark_row",
             # C2 depth fragments (nested shapes, each scrubbed separately)
             "composition", "people", "flows", "events", "amc", "alternatives",
         }
@@ -816,6 +819,8 @@ def serialize_compare_bundle_response(
         # C1: benchmark + SIP nested allowlists (unchanged from C1).
         if frag.get("benchmark") is not None:
             frag["benchmark"] = _apply_allowlist("mf.compare_benchmark", frag["benchmark"])
+        if frag.get("benchmark_row") is not None:
+            frag["benchmark_row"] = _apply_allowlist("mf.compare_benchmark_row", frag["benchmark_row"])
         for sip_key in ("sip_5y", "sip_10y"):
             if frag.get(sip_key) is not None:
                 frag[sip_key] = _apply_allowlist("mf.compare_sip", frag[sip_key])

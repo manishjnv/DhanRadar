@@ -313,6 +313,9 @@ async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
         {"d": d.isoformat(), "nav": nav} for d, nav in nav_points[-_WATCHLIST_SPARKLINE_POINTS:]
     ]
     category_returns = await _category_avg_returns(session, head["sebi_category"])
+    from dhanradar.mf.benchmark_read import get_benchmark_row
+
+    benchmark_row = await get_benchmark_row(session, isin)
 
     return {
         "isin": head["isin"],
@@ -333,6 +336,7 @@ async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
         "confidence_band": head["confidence_band"],
         "category_return_1y_pct": category_returns["return_1y_pct"],
         "category_return_3y_pct": category_returns["return_3y_pct"],
+        "benchmark_row": benchmark_row,
     }
 
 

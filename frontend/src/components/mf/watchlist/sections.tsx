@@ -945,12 +945,19 @@ function meanOfReturns(values: (number | null | undefined)[]): number | null {
 }
 
 export function LivePerfSection({ cards }: { cards: WatchlistCard[] }) {
+  const benchmark = cards[0]?.benchmark_row;
   const rows: { label: string; r1: number | null; r3: number | null; r5: number | null }[] = [
     {
       label: 'Your watchlist (avg)',
       r1: meanOfReturns(cards.map((c) => c.return_1y_pct)),
       r3: meanOfReturns(cards.map((c) => c.return_3y_pct)),
       r5: meanOfReturns(cards.map((c) => c.return_5y_pct)),
+    },
+    {
+      label: benchmark && !benchmark.no_data ? benchmark.label : 'Benchmark unavailable',
+      r1: benchmark && !benchmark.no_data ? benchmark.returns['1y'] : null,
+      r3: benchmark && !benchmark.no_data ? benchmark.returns['3y'] : null,
+      r5: benchmark && !benchmark.no_data ? benchmark.returns['5y'] : null,
     },
     {
       // No mf_category_stats metric_key covers a 5Y window — never fabricated.
