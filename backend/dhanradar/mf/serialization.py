@@ -326,6 +326,12 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "similar_to",
         }
     ),
+    # WATCHLIST_LIVE_DATA_PLAN.md Wave 3 (2026-08-21) — `GET /mf/watchlist/summary`
+    # per-item row shape (governed AI-gateway consumer, `mf/watchlist_ai.py`). Each
+    # summary/insight item is wrapped `{"text": str}` before this allowlist runs so
+    # a poisoned dict (e.g. a smuggled numeric/score key) is stripped down to plain
+    # text — see `serialize_watchlist_ai_response` below.
+    "mf.watchlist_ai_item": frozenset({"text"}),
 }
 
 #: Entity-link isin shape (2026-08-16) — read-boundary re-validation of the same
@@ -544,7 +550,6 @@ def serialize_concept(
         },
     }
 
-
 def is_tier_withheld(envelope: dict[str, Any]) -> bool:
     """True iff this envelope was withheld for TIER — the route raises HTTP 402 (tier-gate = 402, §6)."""
     return envelope["status"] == "withheld" and envelope["meta"]["reason"] == "tier"
@@ -679,3 +684,42 @@ def serialize_watchlist_similar_response(
     _assert_no_forbidden(data)
     rows = [_apply_allowlist("mf.watchlist_similar", item) for item in data["items"]]
     return {"as_of": as_of, "items": rows}
+
+
+def serialize_watchlist_ai_response(
+    *,
+    summary_items: list[str],
+    insight_items: list[str],
+    disclosure: str,
+    not_advice: str,
+    disclaimer_version: str,
+) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/watchlist/summary` (WATCHLIST_LIVE_
+    DATA_PLAN.md Wave 3) — same #2 scrub + B87 allowlist bypass pattern as
+    `serialize_watchlist_cards_response`. Each item is wrapped `{"text": item}`
+    before the scrub/allowlist run, so a poisoned item dict (e.g. a smuggled
+    `score`/`unified_score` key riding along with the text) is caught by
+    `_assert_no_forbidden` and stripped to `text` only by the `mf.watchlist_ai_item`
+    allowlist — only plain item TEXT plus the four top-level compliance fields
+    ever reach the client; no model name, confidence float, or raw gateway
+    metadata is ever passed in.
+    """
+    data = _scrub(
+        {
+            "summary_items": [{"text": t} for t in summary_items],
+            "insight_items": [{"text": t} for t in insight_items],
+            "disclosure": disclosure,
+            "not_advice": not_advice,
+            "disclaimer_version": disclaimer_version,
+        }
+    )
+    _assert_no_forbidden(data)
+    summary = [_apply_allowlist("mf.watchlist_ai_item", item).get("text", "") for item in data["summary_items"]]
+    insights = [_apply_allowlist("mf.watchlist_ai_item", item).get("text", "") for item in data["insight_items"]]
+    return {
+        "summary_items": summary,
+        "insight_items": insights,
+        "disclosure": data["disclosure"],
+        "not_advice": data["not_advice"],
+        "disclaimer_version": data["disclaimer_version"],
+    }

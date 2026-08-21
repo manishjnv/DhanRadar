@@ -18,6 +18,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import {
   Logo, BandRing, Donut, Card, RichText, CTA,
   Spark, RealSpark, Pill, Chip, MetricTile, MiniLogo, SoftPill,
@@ -54,6 +55,32 @@ export function AiCardsGrid({ items }: { items: string[] }) {
           <p className="m-0 text-small leading-relaxed text-ink-secondary"><RichText text={t} /></p>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── LIVE S01/S11 AI SUMMARY + INSIGHTS (WATCHLIST_LIVE_DATA_PLAN.md Wave 3) ──
+/** Renders the governed AI-gateway watchlist summary/insights (`GET
+ *  /mf/watchlist/summary`). Empty `items` means a gate withheld output
+ *  (consent/tier/gateway/confidence) — this NEVER falls back to sample text;
+ *  it renders the honest "unavailable" state instead (non-neg #1/#9). */
+export function LiveAiSection({
+  items, disclosure, notAdvice,
+}: {
+  items: string[];
+  disclosure?: string;
+  notAdvice?: string;
+}) {
+  if (items.length === 0) {
+    return <p className="text-caption text-ink-muted">AI summary unavailable right now</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <AiCardsGrid items={items} />
+      <DisclosureBundle
+        disclosure={disclosure}
+        notAdvice={notAdvice || 'For education only — not investment advice.'}
+      />
     </div>
   );
 }

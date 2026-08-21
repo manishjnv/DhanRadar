@@ -22,6 +22,7 @@ dedup is not implemented in this slice (noted for next iteration, non-neg #6).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -357,6 +358,30 @@ async def remove_watchlist_item(
 _WATCHLIST_CARD_CACHE_TTL = 300  # 5 min — public fund-fact fragment, shared across every caller
 
 
+async def _load_watchlist_cards_cached(db: AsyncSession, isins: list[str]) -> list[dict]:
+    """Shared per-ISIN card-fragment loader (Redis TTL 300s, `mf:watchlist_card:
+    {isin}`) — used by both `GET /watchlist/cards` and `GET /watchlist/summary`
+    (Wave 3): the AI summary composes its prompt from the SAME public fund facts
+    the cards grid renders, never a second/duplicate read path.
+    """
+    from dhanradar.mf.fund_read import get_watchlist_card
+
+    redis = get_redis()
+    cards: list[dict] = []
+    for isin in isins:
+        cache_key = f"mf:watchlist_card:{isin}"
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            cards.append(json.loads(cached))
+            continue
+        card = await get_watchlist_card(db, isin)
+        if card is None:
+            continue
+        await redis.set(cache_key, json.dumps(card), ex=_WATCHLIST_CARD_CACHE_TTL)
+        cards.append(card)
+    return cards
+
+
 @router.get("/watchlist/cards")
 async def watchlist_cards(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -381,7 +406,6 @@ async def watchlist_cards(
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
 
-    from dhanradar.mf.fund_read import get_watchlist_card
     from dhanradar.mf.serialization import serialize_watchlist_cards_response
 
     uid = uuid.UUID(user.user_id)
@@ -398,19 +422,7 @@ async def watchlist_cards(
         .all()
     )
 
-    redis = get_redis()
-    cards: list[dict] = []
-    for isin in isins:
-        cache_key = f"mf:watchlist_card:{isin}"
-        cached = await redis.get(cache_key)
-        if cached is not None:
-            cards.append(json.loads(cached))
-            continue
-        card = await get_watchlist_card(db, isin)
-        if card is None:
-            continue
-        await redis.set(cache_key, json.dumps(card), ex=_WATCHLIST_CARD_CACHE_TTL)
-        cards.append(card)
+    cards = await _load_watchlist_cards_cached(db, isins)
 
     as_of = max(
         (c["nav_sparkline"][-1]["d"] for c in cards if c.get("nav_sparkline")),
@@ -517,6 +529,141 @@ async def watchlist_similar(
     items, as_of = await get_watchlist_similar(db, isins, cap=_WATCHLIST_SIMILAR_CAP)
     response.headers["Cache-Control"] = "private"
     return serialize_watchlist_similar_response(as_of=as_of, items=items)
+
+
+_WATCHLIST_AI_CACHE_TTL = 6 * 3600  # 6h — governed AI-gateway result, per-user only
+
+
+@router.get("/watchlist/summary")
+async def watchlist_summary(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    _rl: Annotated[None, Depends(_rl_explorer)] = None,
+) -> dict:
+    """`GET /mf/watchlist/summary` (WATCHLIST_LIVE_DATA_PLAN.md Wave 3) — the
+    fourth governed AI-gateway consumer: a short educational summary + insight
+    cards describing the caller's own watchlist (S01 AI Watchlist Summary + S11
+    Watchlist Insights). Gate order mirrors `mf_commentary`: consent → entitlement
+    → gateway → confidence floor → audit (`mf/watchlist_ai.py::
+    generate_watchlist_summary`).
+
+    Auth required (401 anonymous) — same RLS owner-scoping as `GET /mf/watchlist`
+    above. An empty watchlist short-circuits to empty items with NO consent check
+    and NO gateway call (nothing to describe). The prompt is composed from the
+    SAME public card facts `/watchlist/cards` serves (`_load_watchlist_cards_cached`)
+    — short names, categories, confidence bands, educational labels, TER, factual
+    returns only; never the caller's user id/email/name/amounts.
+
+    The served result is cached per user in Redis (TTL 6h) keyed by a SHA-256 hash
+    of the user id (never the raw id) — a cache hit never calls the gateway. A
+    cache read/write failure degrades to (or from) a live call; it never fails the
+    request (fail-open on the cache only — the consent/entitlement/advisory gates
+    above stay fail-closed regardless).
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    from dhanradar.mf.serialization import serialize_watchlist_ai_response
+    from dhanradar.mf.watchlist_ai import (
+        generate_watchlist_summary,
+        watchlist_ai_cache_entitled,
+        watchlist_ai_consent_granted,
+    )
+
+    response.headers["Cache-Control"] = "private"
+
+    uid = uuid.UUID(user.user_id)
+    isins = (
+        (
+            await db.execute(
+                select(MfWatchlistItem.isin)
+                .where(MfWatchlistItem.user_id == uid)
+                .order_by(MfWatchlistItem.created_at)
+                .limit(_WATCHLIST_MAX_ITEMS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    if not isins:
+        from dhanradar.scoring.engine.schemas import (
+            DISCLAIMER_VERSION,
+            DISCLOSURE_BUNDLE,
+            NOT_ADVICE,
+        )
+
+        return serialize_watchlist_ai_response(
+            summary_items=[],
+            insight_items=[],
+            disclosure=DISCLOSURE_BUNDLE,
+            not_advice=NOT_ADVICE,
+            disclaimer_version=DISCLAIMER_VERSION,
+        )
+
+    if not await watchlist_ai_consent_granted(user.user_id, db):
+        from dhanradar.scoring.engine.schemas import (
+            DISCLAIMER_VERSION,
+            DISCLOSURE_BUNDLE,
+            NOT_ADVICE,
+        )
+
+        return serialize_watchlist_ai_response(
+            summary_items=[],
+            insight_items=[],
+            disclosure=DISCLOSURE_BUNDLE,
+            not_advice=NOT_ADVICE,
+            disclaimer_version=DISCLAIMER_VERSION,
+        )
+
+    if not await watchlist_ai_cache_entitled(user.user_id, db):
+        from dhanradar.scoring.engine.schemas import (
+            DISCLAIMER_VERSION,
+            DISCLOSURE_BUNDLE,
+            NOT_ADVICE,
+        )
+
+        return serialize_watchlist_ai_response(
+            summary_items=[],
+            insight_items=[],
+            disclosure=DISCLOSURE_BUNDLE,
+            not_advice=NOT_ADVICE,
+            disclaimer_version=DISCLAIMER_VERSION,
+        )
+
+    redis = get_redis()
+    cache_key = "mf:watchlist_ai:" + hashlib.sha256(str(uid).encode("utf-8")).hexdigest()
+    try:
+        cached = await redis.get(cache_key)
+    except Exception:  # noqa: BLE001 — cache is best-effort, never fail the request
+        cached = None
+    if cached is not None:
+        cached_envelope = json.loads(cached)
+        from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+
+        if cached_envelope.get("disclaimer_version") == DISCLAIMER_VERSION:
+            return serialize_watchlist_ai_response(**cached_envelope)
+
+    from dhanradar.ai_gateway.gateway import OpenRouterGateway
+
+    cards = await _load_watchlist_cards_cached(db, isins)
+    result = await generate_watchlist_summary(
+        OpenRouterGateway(),
+        user_id=user.user_id,
+        db=db,
+        cards=cards,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    envelope = serialize_watchlist_ai_response(**result)
+
+    try:
+        await redis.set(cache_key, json.dumps(envelope), ex=_WATCHLIST_AI_CACHE_TTL)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        pass
+
+    return envelope
 
 
 # ---------------------------------------------------------------------------

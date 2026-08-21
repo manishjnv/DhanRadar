@@ -36,6 +36,7 @@ import type {
   WatchlistCardsResponse,
   WatchlistChangesResponse,
   WatchlistSimilarResponse,
+  WatchlistAISummaryResponse,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -661,6 +662,27 @@ export function useWatchlistSimilar(enabled: boolean) {
   return useQuery<WatchlistSimilarResponse>({
     queryKey: queryKeys.mf.watchlistSimilar(),
     queryFn: () => api.get<WatchlistSimilarResponse>('/mf/watchlist/similar'),
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * `GET /mf/watchlist/summary` (WATCHLIST_LIVE_DATA_PLAN.md Wave 3) — the
+ * fourth governed AI-gateway consumer: a short educational summary + insight
+ * cards describing the caller's own watchlist (S01 AI Watchlist Summary + S11
+ * Watchlist Insights). Auth-required, same `enabled` convention as
+ * `useWatchlistCards`. One batch request — never a per-fund fan-out. Empty
+ * `summary_items`/`insight_items` mean a gate withheld output (consent/tier/
+ * gateway/confidence) — the caller renders the honest "unavailable" state,
+ * never sample text. The backend caches the served result per user (Redis,
+ * 6h), so this rarely re-triggers the governed AI call across reloads.
+ */
+export function useWatchlistSummary(enabled: boolean) {
+  return useQuery<WatchlistAISummaryResponse>({
+    queryKey: queryKeys.mf.watchlistSummary(),
+    queryFn: () => api.get<WatchlistAISummaryResponse>('/mf/watchlist/summary'),
     enabled,
     retry: false,
     staleTime: 5 * 60 * 1000,

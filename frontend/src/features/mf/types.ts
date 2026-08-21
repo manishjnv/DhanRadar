@@ -850,3 +850,18 @@ export interface WatchlistSimilarResponse {
   items: WatchlistSimilarItem[];
 }
 
+// ---------------------------------------------------------------------------
+// GET /mf/watchlist/summary (WATCHLIST_LIVE_DATA_PLAN.md Wave 3) — governed
+// AI-gateway consumer describing the caller's watchlist (S01 AI Watchlist
+// Summary + S11 Watchlist Insights). Empty arrays mean the gate withheld
+// output (consent/tier/gateway/confidence) — never sample text.
+// ---------------------------------------------------------------------------
+
+export interface WatchlistAISummaryResponse {
+  summary_items: string[];
+  insight_items: string[];
+  disclosure: string;
+  not_advice: string;
+  disclaimer_version: string;
+}
+
