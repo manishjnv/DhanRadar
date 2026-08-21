@@ -937,6 +937,12 @@ export interface CompareFragment {
   sip_10y: CompareSipCompact | null;
   // benchmark series (scrubbed through compare allowlist)
   benchmark: CompareBenchmark | null;
+  composition: CompareCompositionFragment;
+  people: ComparePeopleFragment;
+  flows: CompareFlowFragment;
+  events: CompareEventsFragment;
+  amc: CompareAmcFragment;
+  alternatives: CompareAlternativesFragment;
 }
 
 /** Response from GET /api/v1/mf/compare/bundle?isins=a,b[,c,d] (2–4 ISINs).
@@ -945,5 +951,98 @@ export interface CompareBundle {
   isins: string[];
   fragments: Record<string, CompareFragment | null>;
   as_of: string | null;
+  pairwise?: Record<string, ComparePairwiseOverlap>;
 }
+
+// ---------------------------------------------------------------------------
+// C2 — Compare bundle depth fragment shapes (COMPARE_LIVE_DATA_PLAN Wave C2)
+// ---------------------------------------------------------------------------
+
+/** C2 — per-fund disclosed top-holdings + sector split. */
+export interface CompareCompositionData {
+  holdings: { name: string; weight_pct: number | null; sector: string | null }[];
+  sectors: { name: string; weight_pct: number }[];
+  coverage: { holdings_count: number; weight_covered_pct: number | null };
+  as_of_month: string | null;
+}
+/** Discriminated union: `no_data` when the fund has no constituent rows. */
+export type CompareCompositionFragment =
+  | { no_data: false; data: CompareCompositionData }
+  | { no_data: true };
+
+/** C2 — one manager record embedded in the people fragment. */
+export interface CompareManagerRecord {
+  name: string;
+  start_date: string;
+  tenure_years: number;
+  tenure_return_pct?: number;
+  tenure_return_as_of?: string;
+}
+/** Discriminated union: `no_data` when people data is absent (coverage ~13.5%). */
+export type ComparePeopleFragment =
+  | { no_data: false; managers: CompareManagerRecord[]; manager_changes_5y: number }
+  | { no_data: true };
+
+/** C2 — category-level flow data (NEVER per-scheme — compliance §14.3). */
+export interface CompareFlowData {
+  /** Most recent trailing-12-month AMFI category-flow points. */
+  points: { period_month: string; net_flow_cr: number | null }[];
+  scheme_category: string | null;
+  as_of_month: string | null;
+}
+/** Discriminated union: `source_blocked` when category flow data is unavailable. */
+export type CompareFlowFragment =
+  | { points: { period_month: string; net_flow_cr: number | null; net_aum_cr?: number | null }[]; scheme_category: string | null; as_of_month: string | null; source_blocked?: false }
+  | { points: never[]; scheme_category: string | null; as_of_month: null; source_blocked: true };
+
+/** C2 — severity of a compare event item. */
+export type CompareEventSeverity = 'notable' | 'info';
+
+/** C2 — one factual change event for a compared fund, capped at 5 per fund.
+ *  `summary` is server-templated factual copy — render verbatim. */
+export interface CompareEventItem {
+  event_type: 'rank_change' | 'ter_change' | 'holding_change';
+  as_of: string;
+  summary: string;
+  severity: CompareEventSeverity;
+}
+export interface CompareEventsFragment { events: CompareEventItem[]; source_blocked?: boolean }
+
+/** C2 — AMC-level facts for a compared fund.
+ *  `amc_level_aum_crore` is the AMC aggregate (ADR-0035), NEVER a per-scheme figure. */
+export interface CompareAmcFragment {
+  amc_name: string | null;
+  scheme_count: number;
+  category_count: number;
+  amc_level_aum_crore: number | null;
+  source_blocked?: boolean;
+}
+export interface CompareAlternativesFragment { peers: CompareAlternative[]; no_data?: boolean }
+
+/** C2 — one alternative fund (same category, excluding compared ISINs). */
+export interface CompareAlternative {
+  isin: string;
+  fund_name_short: string | null;
+  scheme_name: string;
+  amc_name: string | null;
+  sebi_category: string | null;
+  verb_label: Label | null;
+  confidence_band: ConfidenceBand | null;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  expense_ratio_pct: number | null;
+}
+
+/** C2 — pairwise disclosed-holdings overlap between two compared funds.
+ *  `no_data: true` when either fund lacks constituent rows — NEVER render "0%"
+ *  for no_data (it would be a fabricated fact). */
+export type ComparePairwiseOverlap =
+  | {
+      no_data: false;
+      isin_a: string;
+      isin_b: string;
+      overlap_pct: number;
+      common_holdings: { name: string; weight_a: number | null; weight_b: number | null }[];
+    }
+  | { no_data: true; isin_a: string; isin_b: string; reason?: string };
 

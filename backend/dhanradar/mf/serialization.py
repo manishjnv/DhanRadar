@@ -358,9 +358,36 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "sip_5y", "sip_10y",
             # benchmark comparison (nested mf.compare_benchmark shape, scrubbed separately)
             "benchmark",
+            # C2 depth fragments (nested shapes, each scrubbed separately)
+            "composition", "people", "flows", "events", "amc", "alternatives",
         }
     ),
-    "mf.compare_bundle": frozenset({"isins", "fragments", "as_of"}),
+    "mf.compare_bundle": frozenset({"isins", "fragments", "pairwise", "as_of"}),
+    # C2 nested shapes — one allowlist per distinct dict shape.
+    # Every new shape has a poisoned-field test in test_mf_compare_c2.py.
+    "mf.compare_composition_holding": frozenset({"name", "sector", "weight_pct"}),
+    "mf.compare_composition": frozenset(
+        {"holdings", "sectors", "as_of_month", "coverage", "no_data"}
+    ),
+    "mf.compare_people": frozenset({"managers", "manager_changes_5y", "no_data"}),
+    "mf.compare_flows": frozenset(
+        {"points", "scheme_category", "as_of_month", "source_blocked", "no_data"}
+    ),
+    "mf.compare_event": frozenset({"event_type", "as_of", "summary", "severity"}),
+    "mf.compare_events": frozenset({"events", "source_blocked", "no_data"}),
+    "mf.compare_amc": frozenset({"amc_name", "scheme_count", "category_count", "amc_level_aum_crore", "source_blocked", "no_data"}),
+    "mf.compare_alternative": frozenset(
+        {
+            "isin", "scheme_name", "fund_name_short", "amc_name",
+            "verb_label", "category_rank",
+            "return_1y_pct", "return_3y_pct", "expense_ratio_pct", "volatility_pct",
+        }
+    ),
+    "mf.compare_alternatives": frozenset({"peers", "no_data"}),
+    "mf.compare_overlap": frozenset(
+        {"isin_a", "isin_b", "overlap_pct", "common_holdings", "as_of_month_a", "as_of_month_b", "basis", "no_data", "reason"}
+    ),
+    "mf.compare_overlap_holding": frozenset({"name", "weight_a", "weight_b"}),
 }
 
 #: Entity-link isin shape (2026-08-16) — read-boundary re-validation of the same
@@ -755,21 +782,28 @@ def serialize_watchlist_ai_response(
 
 
 def serialize_compare_bundle_response(
-    *, isins: list[str], fragments: dict[str, Any], as_of: str | None
+    *,
+    isins: list[str],
+    fragments: dict[str, Any],
+    as_of: str | None,
+    pairwise: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fail-closed serialization for ``GET /mf/compare/bundle`` (COMPARE_LIVE_DATA_
-    PLAN.md Wave C1) — same #2 scrub + B87 allowlist bypass pattern as
+    PLAN.md Waves C1 + C2) — same #2 scrub + B87 allowlist bypass pattern as
     ``serialize_leaderboard_response``.
 
-    Three nested allowlists enforce defence-in-depth on the benchmark series
+    C1: Three nested allowlists enforce defence-in-depth on benchmark series
     (``mf.compare_benchmark``), SIP illustrations (``mf.compare_sip``), and each
-    per-ISIN fragment (``mf.compare_fragment``) — the architect review condition
-    that the benchmark be "serialized through new mf.compare_* allowlists, never
-    embedded raw" is satisfied by the nested scrub below (a benchmark dict with any
-    extra key is reduced to only {label, is_fallback, points, window} before it can
-    reach the client).
+    per-ISIN fragment (``mf.compare_fragment``).
+
+    C2: Additional nested allowlists for composition, people, flows, events, amc,
+    and alternatives fragments; pairwise overlap serialized via ``mf.compare_overlap``.
+    Alternatives are filtered to exclude compared ISINs and capped at 6.
     """
-    data = _scrub({"isins": isins, "fragments": fragments, "as_of": as_of})
+    compared_isin_set = frozenset(isins)
+    _ALTERNATIVES_CAP = 6
+
+    data = _scrub({"isins": isins, "fragments": fragments, "pairwise": pairwise, "as_of": as_of})
     _assert_no_forbidden(data)
 
     clean_fragments: dict[str, dict[str, Any] | None] = {}
@@ -778,15 +812,84 @@ def serialize_compare_bundle_response(
             clean_fragments[isin] = None
             continue
         frag = _apply_allowlist("mf.compare_fragment", frag)
-        # Nested benchmark allowlist — never embedded raw (architect condition).
+
+        # C1: benchmark + SIP nested allowlists (unchanged from C1).
         if frag.get("benchmark") is not None:
             frag["benchmark"] = _apply_allowlist("mf.compare_benchmark", frag["benchmark"])
-        # Nested SIP allowlists (one per fixed illustration slot).
         for sip_key in ("sip_5y", "sip_10y"):
             if frag.get(sip_key) is not None:
                 frag[sip_key] = _apply_allowlist("mf.compare_sip", frag[sip_key])
+
+        # C2: composition nested allowlist (holdings list scrubbed per-item).
+        if frag.get("composition") is not None:
+            comp = _apply_allowlist("mf.compare_composition", frag["composition"])
+            raw_holdings = comp.get("holdings")
+            if isinstance(raw_holdings, list):
+                comp["holdings"] = [
+                    _apply_allowlist("mf.compare_composition_holding", h)
+                    for h in raw_holdings
+                ]
+            frag["composition"] = comp
+
+        # C2: people nested allowlist.
+        if frag.get("people") is not None:
+            frag["people"] = _apply_allowlist("mf.compare_people", frag["people"])
+
+        # C2: flows nested allowlist.
+        if frag.get("flows") is not None:
+            frag["flows"] = _apply_allowlist("mf.compare_flows", frag["flows"])
+
+        # C2: events nested allowlist (each event item scrubbed separately).
+        if frag.get("events") is not None:
+            ev_wrapper = _apply_allowlist("mf.compare_events", frag["events"])
+            raw_events = ev_wrapper.get("events")
+            if isinstance(raw_events, list):
+                ev_wrapper["events"] = [
+                    _apply_allowlist("mf.compare_event", e) for e in raw_events
+                ]
+            frag["events"] = ev_wrapper
+
+        # C2: AMC facts nested allowlist.
+        if frag.get("amc") is not None:
+            frag["amc"] = _apply_allowlist("mf.compare_amc", frag["amc"])
+
+        # C2: alternatives — filter compared ISINs, cap at 6, scrub each peer.
+        if frag.get("alternatives") is not None:
+            alt = _apply_allowlist("mf.compare_alternatives", frag["alternatives"])
+            raw_peers = alt.get("peers")
+            if isinstance(raw_peers, list):
+                seen_alternative_isins: set[str] = set()
+                filtered: list[dict[str, Any]] = []
+                for peer in raw_peers:
+                    if not isinstance(peer, dict):
+                        continue
+                    peer_isin = peer.get("isin")
+                    if peer_isin in compared_isin_set or peer_isin in seen_alternative_isins:
+                        continue
+                    if isinstance(peer_isin, str):
+                        seen_alternative_isins.add(peer_isin)
+                    filtered.append(_apply_allowlist("mf.compare_alternative", peer))
+                alt["peers"] = filtered[:_ALTERNATIVES_CAP]
+            frag["alternatives"] = alt
+
         clean_fragments[isin] = frag
+
+    # C2: pairwise overlap — allowlist each entry.
+    clean_pairwise: dict[str, Any] = {}
+    for pair_key, overlap in (data.get("pairwise") or {}).items():
+        if isinstance(overlap, dict):
+            clean_overlap = _apply_allowlist("mf.compare_overlap", overlap)
+            if isinstance(clean_overlap.get("common_holdings"), list):
+                clean_overlap["common_holdings"] = [
+                    _apply_allowlist("mf.compare_overlap_holding", item)
+                    for item in clean_overlap["common_holdings"]
+                    if isinstance(item, dict)
+                ]
+            clean_pairwise[pair_key] = clean_overlap
+        else:
+            clean_pairwise[pair_key] = overlap
 
     bundle = _apply_allowlist("mf.compare_bundle", data)
     bundle["fragments"] = clean_fragments
+    bundle["pairwise"] = clean_pairwise
     return bundle

@@ -34,7 +34,6 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { Section, SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
-import { Preview } from '@/components/mf/compare/ui';
 import {
   HeroSection, EduReadSection, ScoreboardSection,
   MoodSection, PerformanceSection, SipSection, RollingSection, RankingSection,
@@ -299,6 +298,30 @@ function CompareView() {
     return fragments.map((f) => f.category ?? f.sebi_category ?? '');
   }, [live, fragments]);
 
+  // C2 depth data is nested inside each public per-ISIN fragment. Pairwise
+  // overlap is keyed by the sorted `isin_a|isin_b` pair in the bundle.
+  const c2Comp = live
+    ? Object.fromEntries(fragments.map((fragment) => [fragment.isin, fragment.composition]))
+    : undefined;
+  const c2People = live
+    ? Object.fromEntries(fragments.map((fragment) => [fragment.isin, fragment.people]))
+    : undefined;
+  const c2Flows = live
+    ? Object.fromEntries(fragments.map((fragment) => [fragment.isin, fragment.flows]))
+    : undefined;
+  const c2Events = live
+    ? Object.fromEntries(fragments.map((fragment) => [fragment.isin, fragment.events.events]))
+    : undefined;
+  const c2Amc = live
+    ? Object.fromEntries(fragments.map((fragment) => [fragment.isin, fragment.amc]))
+    : undefined;
+  const c2Alts = live
+    ? fragments.flatMap((fragment) => fragment.alternatives.peers)
+    : undefined;
+  const c2Overlap = live && bundleQuery.data?.pairwise
+    ? Object.values(bundleQuery.data.pairwise).map((pair) => pair)
+    : undefined;
+
   if (isLoading) return <CompareSkeleton />;
 
   const count = live ? realFunds.length : 3;
@@ -328,7 +351,7 @@ function CompareView() {
       </Section>
 
       {/* S6 — Market mood */}
-      <Section><SectionHeader index="06" title="Market Mood Comparison" tag="DMMI" info={<Preview />} /><MoodSection /></Section>
+      <Section><SectionHeader index="06" title="Market Mood" badge={<LiveBadge />} /><MoodSection /></Section>
 
       {/* S7 — Performance */}
       <Section>
@@ -361,19 +384,34 @@ function CompareView() {
       </Section>
 
       {/* S12 — Portfolio fit */}
-      <Section><SectionHeader index="12" title="Portfolio Fit Comparison" tag="Exclusive" info={<Preview />} /><FitSection /></Section>
+      <Section>
+        <SectionHeader index="12" title="Portfolio Fit Comparison" tag="Exclusive" badge={live ? <LiveBadge /> : undefined} />
+        <FitSection isins={live ? sortedIsins : undefined} funds={live ? realFunds : undefined} />
+      </Section>
 
       {/* S13 — Holdings */}
-      <Section><SectionHeader index="13" title="Portfolio Holdings Comparison" info={<Preview />} /><HoldingsSection /></Section>
+      <Section>
+        <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={c2Comp || c2Overlap ? <LiveBadge /> : undefined} />
+        <HoldingsSection compositions={c2Comp} pairwiseOverlap={c2Overlap} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+      </Section>
 
       {/* S14 — Fund flow */}
-      <Section><SectionHeader index="14" title="Fund Flow Intelligence" info={<Preview />} /><FlowSection /></Section>
+      <Section>
+        <SectionHeader index="14" title="Fund Flow Intelligence" badge={c2Flows ? <LiveBadge /> : undefined} />
+        <FlowSection flows={c2Flows} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+      </Section>
 
       {/* S15 — Managers */}
-      <Section><SectionHeader index="15" title="Fund Manager Comparison" /><ManagerSection /></Section>
+      <Section>
+        <SectionHeader index="15" title="Fund Manager Comparison" badge={c2People ? <LiveBadge /> : undefined} />
+        <ManagerSection people={c2People} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+      </Section>
 
       {/* S16 — AMC */}
-      <Section><SectionHeader index="16" title="AMC Quality Comparison" /><AmcSection /></Section>
+      <Section>
+        <SectionHeader index="16" title="AMC Comparison" badge={c2Amc ? <LiveBadge /> : undefined} />
+        <AmcSection amcData={c2Amc} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+      </Section>
 
       {/* S17 — Cost */}
       <Section>
@@ -388,10 +426,16 @@ function CompareView() {
       </Section>
 
       {/* S20 — What changed */}
-      <Section><SectionHeader index="20" title="What Changed Recently" tag="AI" /><ChangesSection /></Section>
+      <Section>
+        <SectionHeader index="20" title="What Changed Recently" badge={c2Events ? <LiveBadge /> : undefined} />
+        <ChangesSection events={c2Events} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+      </Section>
 
       {/* S21 — Similar funds in this category */}
-      <Section><SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" /><AltsSection /></Section>
+      <Section>
+        <SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" badge={c2Alts ? <LiveBadge /> : undefined} />
+        <AltsSection alternatives={c2Alts} />
+      </Section>
 
       {/* S22 — AI insights */}
       <Section><SectionHeader index="22" title="AI Insights Center" tag="AI" /><AiInsightsSection /></Section>

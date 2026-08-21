@@ -289,8 +289,9 @@ async def test_compare_bundle_cache_hit_mget_skips_compositor(monkeypatch) -> No
     assert result["isins"] == [ISIN_A, ISIN_B]
     assert result["fragments"][ISIN_A]["isin"] == ISIN_A
     assert result["fragments"][ISIN_B]["isin"] == ISIN_B
-    # Nothing written back (cache was already warm)
-    assert fake_redis.set_calls == []
+    # Per-ISIN fragment keys must not be re-written (they were cache-warm)
+    isin_writes = [k for k in fake_redis.set_calls if "overlap" not in k]
+    assert isin_writes == []
 
 
 # ---------------------------------------------------------------------------
