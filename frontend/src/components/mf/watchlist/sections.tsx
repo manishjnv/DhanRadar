@@ -19,23 +19,26 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import {
-  Logo, BandRing, Semicircle, Donut, Card, SoWhat, RichText, CTA,
+  Logo, BandRing, Donut, Card, RichText, CTA,
   Spark, RealSpark, Pill, Chip, MetricTile, MiniLogo, SoftPill,
 } from './ui';
 import {
   COLORS, FUNDS, type Fund, HERO, BENEFITS, AI_SUMMARY, INSIGHTS,
-  FILTER_CHIPS, SORT_OPTIONS, CHANGED, OPPORTUNITIES, DMMI, PERF_TABS,
-  PERF_HEAD, PERF_ROWS, ALERTS, SIMILAR, STATS, CATEGORY_MIX, DISCOVERY,
-  RECENTLY_VIEWED, FAQ, FILTER_GROUPS,
+  FILTER_CHIPS, SORT_OPTIONS, OPPORTUNITIES, STATS, CATEGORY_MIX, DISCOVERY,
+  FAQ, FILTER_GROUPS,
   toStrength, STRENGTH_WORD, riskColor, verdictOf, momentumOf, fmtAum, DMMI_COLOR,
 } from './sampleData';
 import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import { shortenAmcName } from '@/features/mf/explorer-format';
 import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
 import { CONFIDENCE_BAND_LABELS } from '@/lib/displayLabel';
-import type { WatchlistCard } from '@/features/mf/types';
+import type { WatchlistCard, WatchlistChangeItem, WatchlistSimilarItem } from '@/features/mf/types';
+import { useMoodCurrent } from '@/features/mood/api';
+import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { relativeTime } from '@/features/mood/relative-time';
+import type { RecentlyViewedEntry } from '@/hooks/useRecentlyViewed';
 
-const { E, B, A, R, O } = COLORS;
+const { B, A } = COLORS;
 
 // ── Generic AI-insight card grid (AI Summary + Insights) ─────────────────────
 export function AiCardsGrid({ items }: { items: string[] }) {
@@ -278,23 +281,6 @@ function Rail({ children, cols }: { children: React.ReactNode; cols: string }) {
   );
 }
 
-// ── S5 WHAT CHANGED ──────────────────────────────────────────────────────────
-export function ChangedSection() {
-  return (
-    <Rail cols="sm:grid-cols-2 lg:grid-cols-3">
-      {CHANGED.map(([fund, logo, lc, change, ic, col, time]) => (
-        <div key={fund + time} className="flex w-[230px] shrink-0 items-start gap-3 rounded-xl border border-line bg-surface p-3.5 sm:w-auto">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-sm" style={{ background: `${col}1A`, color: col }} aria-hidden="true">{ic}</span>
-          <div>
-            <div className="text-xs font-bold text-ink"><MiniLogo letter={logo} color={lc} />{fund}</div>
-            <div className="mt-0.5 text-[11.5px] leading-snug text-ink-secondary">{change}</div>
-            <div className="mt-1.5 font-mono text-[10px] text-ink-faint">{time}</div>
-          </div>
-        </div>
-      ))}
-    </Rail>
-  );
-}
 
 // ── S6 BEST OPPORTUNITIES ────────────────────────────────────────────────────
 export function OpportunitiesSection() {
@@ -312,82 +298,6 @@ export function OpportunitiesSection() {
         </div>
       ))}
     </Rail>
-  );
-}
-
-// ── S7 DMMI ──────────────────────────────────────────────────────────────────
-export function DmmiSection() {
-  return (
-    <Card className="p-5">
-      <div className="grid items-center gap-6 lg:grid-cols-[230px_1fr]">
-        <div className="text-center">
-          <Semicircle val={DMMI.value} size={200} />
-          <div className="mt-1.5 font-sans text-xl font-extrabold text-amber">{DMMI.mood}</div>
-          <div className="mt-0.5 text-[11.5px] text-ink-muted">{DMMI.phase}</div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <DmmiColumn title="Best positioned now" color={E} rows={DMMI.best} valueColor={E} />
-          <DmmiColumn title="At risk in this market" color={R} rows={DMMI.risk} valueColor={R} />
-        </div>
-      </div>
-      <SoWhat><RichText text={DMMI.soWhat} /></SoWhat>
-    </Card>
-  );
-}
-function DmmiColumn({ title, color, rows, valueColor }: { title: string; color: string; rows: [string, string, string, string][]; valueColor: string }) {
-  return (
-    <div>
-      <h5 className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color }}>{title}</h5>
-      {rows.map(([n, l, c, d]) => (
-        <div key={n} className="flex items-center gap-2.5 border-b border-line py-2 text-caption last:border-b-0">
-          <Logo letter={l} color={c} size={24} radius={7} font={10} />
-          <span className="flex-1 font-semibold text-ink">{n}</span>
-          <span className="text-[11px] font-bold" style={{ color: valueColor }}>{d}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── S8 PERFORMANCE ───────────────────────────────────────────────────────────
-export function PerfSection() {
-  const [tab, setTab] = React.useState(0);
-  return (
-    <Card className="p-5">
-      <div className="mb-4 flex w-max max-w-full gap-1 overflow-x-auto rounded-xl bg-surface-2 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {PERF_TABS.map((t, i) => (
-          <button key={t} type="button" onClick={() => setTab(i)}
-            className={cn('shrink-0 rounded-lg px-3.5 py-2 text-caption font-semibold transition-colors focus-visible:outline-none',
-              i === tab ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink')}>
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-small">
-          <thead>
-            <tr>{PERF_HEAD.map((h, i) => (
-              <th key={h} className={cn('border-b-2 border-line px-3 py-2.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted', i === 0 ? 'text-left' : 'text-right')}>{h}</th>
-            ))}</tr>
-          </thead>
-          <tbody>
-            {PERF_ROWS.map((row, i) => {
-              const dot = i === 0 ? B : i === 1 ? COLORS.S : O;
-              return (
-                <tr key={row[0] as string}>
-                  <td className="border-b border-line px-3 py-3 text-left font-semibold text-ink last:border-b-0">
-                    <span className="mr-1.5" style={{ color: dot }}>●</span>{row[0]}
-                  </td>
-                  {(row.slice(1) as number[]).map((v, j) => (
-                    <td key={j} className={cn('border-b border-line px-3 py-3 text-right font-mono font-bold', i === 0 ? 'text-emerald' : 'text-ink-secondary')}>{v}%</td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
   );
 }
 
@@ -441,49 +351,6 @@ export function LeaderboardSection() {
   );
 }
 
-// ── S11 SMART ALERTS ─────────────────────────────────────────────────────────
-export function AlertsSection() {
-  return (
-    <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
-      {ALERTS.map(([title, desc, ic, col, time]) => (
-        <div key={title + time} className="flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5">
-          <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px] text-[15px]" style={{ background: `${col}1A`, color: col }} aria-hidden="true">{ic}</span>
-          <div className="flex-1">
-            <div className="text-[13px] font-bold text-ink">{title}</div>
-            <div className="mt-0.5 text-[11.5px] leading-snug text-ink-muted">{desc}</div>
-          </div>
-          <span className="shrink-0 text-[10px] text-ink-faint">{time}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── S12 SIMILAR FUNDS ────────────────────────────────────────────────────────
-export function SimilarSection() {
-  return (
-    <Rail cols="sm:grid-cols-2 lg:grid-cols-3">
-      {SIMILAR.map(([forTxt, name, logo, col, benefits]) => (
-        <div key={name} className="w-[240px] shrink-0 rounded-2xl border border-line bg-surface p-4 sm:w-auto">
-          <div className="text-[10.5px] font-semibold text-ink-muted">{forTxt}</div>
-          <div className="my-2.5 flex items-center gap-2.5">
-            <Logo letter={logo} color={col} size={34} radius={9} font={12} />
-            <div className="text-[12.5px] font-bold text-ink">{name}</div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {benefits.map((b) => (
-              <div key={b} className="flex items-center gap-2 text-[11px] text-ink-secondary">
-                <span className="shrink-0 font-extrabold text-emerald">✓</span>{b}
-              </div>
-            ))}
-          </div>
-          <CTA variant="ghost" className="mt-3 w-full">+ Add to watchlist</CTA>
-        </div>
-      ))}
-    </Rail>
-  );
-}
-
 // ── S14 STATISTICS ───────────────────────────────────────────────────────────
 export function StatsSection() {
   return (
@@ -522,26 +389,6 @@ export function DiscoverySection() {
             <div className="mt-px text-[10.5px] text-ink-muted">{d}</div>
           </div>
         </button>
-      ))}
-    </div>
-  );
-}
-
-// ── S16 RECENTLY VIEWED ──────────────────────────────────────────────────────
-export function RecentlyViewedSection() {
-  return (
-    <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {RECENTLY_VIEWED.map(([name, logo, col, meta]) => (
-        <div key={name} className="w-[200px] shrink-0 rounded-xl border border-line bg-surface p-3.5">
-          <div className="flex items-center gap-2.5">
-            <Logo letter={logo} color={col} size={32} radius={9} font={12} />
-            <div className="min-w-0">
-              <div className="text-xs font-bold leading-tight text-ink">{name}</div>
-              <div className="text-[10px] text-ink-muted">{meta}</div>
-            </div>
-          </div>
-          <CTA variant="ghost" className="mt-3 w-full">+ Add</CTA>
-        </div>
       ))}
     </div>
   );
@@ -986,6 +833,195 @@ export function LiveStatsSection({ cards }: { cards: WatchlistCard[] }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LIVE sections (WATCHLIST_LIVE_DATA_PLAN.md Wave 2) — What Changed, Similar
+// Funds, DMMI, Performance, Recently Viewed. Same #2/#1 discipline as Wave 1's
+// Live* sections above: band/word only, no advisory verb, no raw score.
+// ---------------------------------------------------------------------------
+
+const CHANGE_SEVERITY_ICON: Record<WatchlistChangeItem['severity'], string> = { notable: '⚠', info: 'ℹ' };
+const CHANGE_SEVERITY_COLOR: Record<WatchlistChangeItem['severity'], string> = { notable: COLORS.A, info: COLORS.B };
+
+// ── LIVE S04 WHAT CHANGED ─────────────────────────────────────────────────────
+export function LiveChangedSection({ items }: { items: WatchlistChangeItem[] }) {
+  if (items.length === 0) {
+    return <p className="text-caption text-ink-muted">No tracked changes yet — check back after the next update.</p>;
+  }
+  return (
+    <Rail cols="sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => {
+        const name = fundDisplayName(item.fund_name_short ?? item.scheme_name).name;
+        const color = avatarColorFor(item.isin);
+        const icon = CHANGE_SEVERITY_ICON[item.severity];
+        const sevColor = CHANGE_SEVERITY_COLOR[item.severity];
+        return (
+          <div key={`${item.isin}-${item.event_type}-${item.as_of}`} className="flex w-[230px] shrink-0 items-start gap-3 rounded-xl border border-line bg-surface p-3.5 sm:w-auto">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-sm" style={{ background: `${sevColor}1A`, color: sevColor }} aria-hidden="true">
+              {icon}
+            </span>
+            <div>
+              <div className="text-xs font-bold text-ink"><MiniLogo letter={name[0]?.toUpperCase() ?? '?'} color={color} />{name}</div>
+              <div className="mt-0.5 text-[11.5px] leading-snug text-ink-secondary">{item.summary}</div>
+              <div className="mt-1.5 font-mono text-[10px] text-ink-faint">{relativeTime(item.as_of)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </Rail>
+  );
+}
+
+// ── LIVE S06 DMMI ─────────────────────────────────────────────────────────────
+export function LiveDmmiSection() {
+  const { data, isLoading } = useMoodCurrent();
+  const healthy =
+    !!data && data.data_quality !== 'unavailable' &&
+    data.regime !== 'data_unavailable' && data.regime !== 'insufficient_data';
+
+  if (isLoading) {
+    return <Card className="p-5"><p className="text-caption text-ink-muted">Loading market mood…</p></Card>;
+  }
+  if (!data || !healthy) {
+    return <Card className="p-5"><p className="text-caption text-ink-muted">Market mood is temporarily unavailable.</p></Card>;
+  }
+
+  const word = REGIME_DISPLAY[data.regime] ?? REGIME_DISPLAY.insufficient_data;
+  return (
+    <Card className="p-5">
+      <div className="grid items-center gap-6 lg:grid-cols-[230px_1fr]">
+        <div className="flex justify-center">
+          <MoodGauge regime={data.regime} confidenceBand={data.confidence_band} />
+        </div>
+        <div>
+          <p className="text-small leading-relaxed text-ink-secondary">
+            Market mood reads <span className="font-semibold text-ink">{word}</span> today. DMMI describes
+            present market conditions — it does not predict what happens next, and it is not
+            personalised to any specific fund in your watchlist.
+          </p>
+          <Link href="/mood" className="mt-3 inline-flex items-center gap-1 text-caption font-semibold text-royal hover:underline">
+            See the full Market Mood breakdown →
+          </Link>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ── LIVE S07 PERFORMANCE ──────────────────────────────────────────────────────
+function meanOfReturns(values: (number | null | undefined)[]): number | null {
+  const nums = values.filter((v): v is number => v != null);
+  return nums.length ? nums.reduce((s, v) => s + v, 0) / nums.length : null;
+}
+
+export function LivePerfSection({ cards }: { cards: WatchlistCard[] }) {
+  const rows: { label: string; r1: number | null; r3: number | null; r5: number | null }[] = [
+    {
+      label: 'Your watchlist (avg)',
+      r1: meanOfReturns(cards.map((c) => c.return_1y_pct)),
+      r3: meanOfReturns(cards.map((c) => c.return_3y_pct)),
+      r5: meanOfReturns(cards.map((c) => c.return_5y_pct)),
+    },
+    {
+      // No mf_category_stats metric_key covers a 5Y window — never fabricated.
+      label: 'Category average',
+      r1: meanOfReturns(cards.map((c) => c.category_return_1y_pct)),
+      r3: meanOfReturns(cards.map((c) => c.category_return_3y_pct)),
+      r5: null,
+    },
+  ];
+  const fmt = (v: number | null) => (v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` : '—');
+
+  return (
+    <Card className="p-5">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-small">
+          <thead>
+            <tr>{['Series', '1Y', '3Y', '5Y'].map((h, i) => (
+              <th key={h} className={cn('border-b-2 border-line px-3 py-2.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted', i === 0 ? 'text-left' : 'text-right')}>{h}</th>
+            ))}</tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={row.label}>
+                <td className="border-b border-line px-3 py-3 text-left font-semibold text-ink last:border-b-0">
+                  <span className="mr-1.5" style={{ color: i === 0 ? B : COLORS.S }}>●</span>{row.label}
+                </td>
+                {[row.r1, row.r3, row.r5].map((v, j) => (
+                  <td key={j} className={cn('border-b border-line px-3 py-3 text-right font-mono font-bold', v != null && v >= 0 ? 'text-emerald' : 'text-ink-secondary')}>{fmt(v)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-caption text-ink-faint">Benchmark comparison coming.</p>
+    </Card>
+  );
+}
+
+// ── LIVE S10 SIMILAR FUNDS ────────────────────────────────────────────────────
+export function LiveSimilarSection({
+  items, onAdd,
+}: { items: WatchlistSimilarItem[]; onAdd: (isin: string, name: string) => void }) {
+  if (items.length === 0) {
+    return <p className="text-caption text-ink-muted">Add more funds to your watchlist to see similar funds here.</p>;
+  }
+  return (
+    <Rail cols="sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => {
+        const name = fundDisplayName(item.fund_name_short ?? item.scheme_name).name;
+        const color = avatarColorFor(item.isin);
+        return (
+          <div key={item.isin} className="w-[240px] shrink-0 rounded-2xl border border-line bg-surface p-4 sm:w-auto">
+            <div className="text-[10.5px] font-semibold text-ink-muted">
+              {item.similar_to ? `Funds similar to ${item.similar_to}` : 'Similar to funds in your watchlist'}
+            </div>
+            <div className="my-2.5 flex items-center gap-2.5">
+              <Logo letter={name[0]?.toUpperCase() ?? '?'} color={color} size={34} radius={9} font={12} />
+              <div className="text-[12.5px] font-bold text-ink">{name}</div>
+            </div>
+            <FundScoreCell label={item.verb_label ?? 'insufficient_data'} confidenceBand={item.confidence_band} ringSize={32} />
+            <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-secondary">
+              {item.return_1y_pct != null && <span>1Y {item.return_1y_pct.toFixed(1)}%</span>}
+              {item.return_3y_pct != null && <span>3Y {item.return_3y_pct.toFixed(1)}%</span>}
+              {item.expense_ratio_pct != null && <span>Cost {item.expense_ratio_pct.toFixed(2)}%</span>}
+            </div>
+            <CTA variant="ghost" className="mt-3 w-full" onClick={() => onAdd(item.isin, name)}>+ Add</CTA>
+          </div>
+        );
+      })}
+    </Rail>
+  );
+}
+
+// ── LIVE S13 RECENTLY VIEWED ──────────────────────────────────────────────────
+export function LiveRecentlyViewedSection({
+  entries, onAdd,
+}: { entries: RecentlyViewedEntry[]; onAdd: (isin: string, name: string) => void }) {
+  if (entries.length === 0) {
+    return <p className="text-caption text-ink-muted">Funds you view will show up here.</p>;
+  }
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {entries.map((e) => {
+        const color = avatarColorFor(e.isin);
+        return (
+          <div key={e.isin} className="w-[200px] shrink-0 rounded-xl border border-line bg-surface p-3.5">
+            <div className="flex items-center gap-2.5">
+              <Logo letter={e.name[0]?.toUpperCase() ?? '?'} color={color} size={32} radius={9} font={12} />
+              <div className="min-w-0">
+                <Link href={`/mf/fund/${e.isin}`} className="block truncate text-xs font-bold leading-tight text-ink hover:text-royal">{e.name}</Link>
+                <div className="text-[10px] text-ink-muted">{relativeTime(e.at)}</div>
+              </div>
+            </div>
+            <CTA variant="ghost" className="mt-3 w-full" onClick={() => onAdd(e.isin, e.name)}>+ Add</CTA>
+          </div>
+        );
+      })}
     </div>
   );
 }

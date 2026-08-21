@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Watchlist Monitor — /mf/watchlist  (V1 + Wave 1 live rewire)
+ * Watchlist Monitor — /mf/watchlist  (V1 + Wave 1/2 live rewire)
  *
  * Public educational destination for tracking a shortlist of mutual funds,
  * built 1:1 to the approved WatchlistPageV1 desktop + mobile mockups.
@@ -10,12 +10,19 @@
  * the real saved list (`saved.length === 0` → EmptyHero; else dashboard). For a
  * signed-in caller with a non-empty watchlist, Hero KPIs / Filter&Sort / the
  * Funds grid / Category Leaders / Leaderboard / Statistics render the real
- * `GET /api/v1/mf/watchlist/cards` payload (tag="LIVE"); every other section
- * (What Changed, DMMI, Performance, Smart Alerts, Similar Funds, AI cards,
- * Discovery, Recently Viewed, FAQ) still renders illustrative sample data
- * (tag="PREVIEW") — those are Wave 2/3 scope. An anonymous visitor, or a
- * signed-in caller with an empty watchlist who opts into "View Sample
+ * `GET /api/v1/mf/watchlist/cards` payload (tag="LIVE"). An anonymous visitor,
+ * or a signed-in caller with an empty watchlist who opts into "View Sample
  * Watchlist", sees the full illustrative dashboard unchanged.
+ *
+ * Wave 2 (2026-08-21): What Changed / Similar Funds wire to the new batch
+ * endpoints (gated on `showLive`, same convention as the cards payload — an
+ * empty/disabled fetch renders the section's own honest empty state, never a
+ * decorative sample). DMMI (public `useMoodCurrent`) and Recently Viewed (pure
+ * localStorage) need no watchlist data at all and are always live. Performance
+ * derives its "watchlist average" from the cards payload and its "category
+ * average" from the cards' own `category_return_*_pct` fields (Wave 2 cards
+ * extension) — no fabricated 5Y category figure, no benchmark row yet. Smart
+ * Alerts is removed (folded into What Changed).
  *
  * Compliance bridges honoured:
  *   1. No raw DhanRadar composite score in DOM — BandRing/FundScoreCell +
@@ -30,19 +37,21 @@ import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import {
-  AiCardsGrid, HeroSection, FilterSection, FundsSection, ChangedSection,
-  OpportunitiesSection, DmmiSection, PerfSection, LeaderboardSection,
-  AlertsSection, SimilarSection, StatsSection, DiscoverySection,
-  RecentlyViewedSection, FaqSection, EmptyHero, BenefitsGrid,
+  AiCardsGrid, HeroSection, FilterSection, FundsSection,
+  OpportunitiesSection, LeaderboardSection, StatsSection, DiscoverySection,
+  FaqSection, EmptyHero, BenefitsGrid,
   CompareTray,
   LiveFilterSection, LiveFundsSection, LiveCategoryLeadersSection,
   LiveLeaderboardSection, LiveStatsSection,
+  LiveChangedSection, LiveDmmiSection, LivePerfSection, LiveSimilarSection,
+  LiveRecentlyViewedSection,
   sortWatchlistCards, watchlistCardMatchesSearch, computeCategoryLeaders,
   type LiveSortKey,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
 import { useWatchlist, type WatchlistEntry } from '@/hooks/useWatchlist';
-import { useFundDetail, useWatchlistCards } from '@/features/mf/api';
+import { useRecentlyViewed } from '@/hooks/useRecentlyViewed';
+import { useFundDetail, useWatchlistCards, useWatchlistChanges, useWatchlistSimilar } from '@/features/mf/api';
 import { useMe } from '@/features/auth/api';
 import { EDU_LABELS } from '@/lib/displayLabel';
 import type { WatchlistCard } from '@/features/mf/types';
@@ -134,6 +143,13 @@ function WatchlistView() {
   const { data: cardsResp, isLoading: cardsLoading } = useWatchlistCards(showLive);
   const cards = React.useMemo(() => cardsResp?.items ?? [], [cardsResp]);
 
+  // Wave 2 — gated the same way as the cards payload (an anonymous or empty
+  // watchlist renders each Live* section's own honest empty state below,
+  // never a decorative sample).
+  const { data: changesResp } = useWatchlistChanges(showLive);
+  const { data: similarResp } = useWatchlistSimilar(showLive);
+  const recentlyViewed = useRecentlyViewed();
+
   const visibleCards = React.useMemo(() => {
     const filtered = cards.filter((c) => watchlistCardMatchesSearch(c, search));
     return sortWatchlistCards(filtered, sort);
@@ -153,6 +169,12 @@ function WatchlistView() {
   const clear = React.useCallback(() => setSelected(new Set()), []);
   const removeByIsin = React.useCallback(
     (isin: string) => toggleSaved({ isin, name: '', category: null }),
+    [toggleSaved],
+  );
+  // Wave 2 — Similar Funds / Recently Viewed "+ Add" both toggle the same real
+  // watchlist store (mirrors the fund-detail hero star).
+  const addToWatchlist = React.useCallback(
+    (isin: string, name: string) => toggleSaved({ isin, name, category: null }),
     [toggleSaved],
   );
 
@@ -238,8 +260,8 @@ function WatchlistView() {
           </section>
 
           <section>
-            <SectionHeader index="04" title="What Changed" info="Since last week" tag="PREVIEW" />
-            <ChangedSection />
+            <SectionHeader index="04" title="What Changed" info="Since last week" tag="LIVE" />
+            <LiveChangedSection items={changesResp?.items ?? []} />
           </section>
 
           <section>
@@ -249,13 +271,13 @@ function WatchlistView() {
           </section>
 
           <section>
-            <SectionHeader index="06" title="DMMI Watchlist Analysis" tag="PREVIEW" />
-            <DmmiSection />
+            <SectionHeader index="06" title="DMMI Watchlist Analysis" tag="LIVE" />
+            <LiveDmmiSection />
           </section>
 
           <section>
-            <SectionHeader index="07" title="Watchlist Performance" info="vs category & benchmark" tag="PREVIEW" />
-            <PerfSection />
+            <SectionHeader index="07" title="Watchlist Performance" info="vs category · benchmark coming" tag="LIVE" />
+            <LivePerfSection cards={cards} />
           </section>
 
           <section>
@@ -264,13 +286,8 @@ function WatchlistView() {
           </section>
 
           <section>
-            <SectionHeader index="09" title="Smart Alerts" info="6 new" tag="PREVIEW" />
-            <AlertsSection />
-          </section>
-
-          <section>
-            <SectionHeader index="10" title="Similar Funds Worth Watching" tag="PREVIEW" />
-            <SimilarSection />
+            <SectionHeader index="10" title="Similar Funds Worth Watching" tag="LIVE" />
+            <LiveSimilarSection items={similarResp?.items ?? []} onAdd={addToWatchlist} />
           </section>
 
           <section>
@@ -289,8 +306,8 @@ function WatchlistView() {
           </section>
 
           <section>
-            <SectionHeader index="14" title="Recently Viewed" tag="PREVIEW" />
-            <RecentlyViewedSection />
+            <SectionHeader index="14" title="Recently Viewed" tag="LIVE" />
+            <LiveRecentlyViewedSection entries={recentlyViewed} onAdd={addToWatchlist} />
           </section>
 
           <section>

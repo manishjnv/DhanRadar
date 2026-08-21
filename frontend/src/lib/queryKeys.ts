@@ -75,6 +75,8 @@ export const queryKeys = {
     fundEvents:         (isin: string) => ['mf', 'fund-events', isin] as const,
     watchlist:          () => ['mf', 'watchlist'] as const,
     watchlistCards:     () => ['mf', 'watchlist-cards'] as const,
+    watchlistChanges:   (since?: string, limit?: number) => ['mf', 'watchlist-changes', since ?? null, limit ?? null] as const,
+    watchlistSimilar:   () => ['mf', 'watchlist-similar'] as const,
     fundComparison:     (isin: string, window: string, benchmarkKey: string | null) =>
                           ['mf', 'fund-comparison', isin, window, benchmarkKey] as const,
     leaderboard:        () => ['mf', 'leaderboard'] as const,

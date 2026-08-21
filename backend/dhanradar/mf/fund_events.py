@@ -181,3 +181,26 @@ def summarize_event(event_type: str, payload: dict) -> str:
     if template is None:
         return "This fund had a tracked change."
     return template(payload)
+
+
+# ---------------------------------------------------------------------------
+# WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (§04 What Changed) — `severity` for
+# `GET /mf/watchlist/changes`. Derived ONLY from `event_type` + the event's own
+# stored `payload` (never client input, non-neg #1): "notable" (worth a second
+# look) / "info" (routine tracked change) — neutral words, not an advisory verb.
+# ---------------------------------------------------------------------------
+
+EVENT_SEVERITIES: tuple[str, ...] = ("notable", "info")
+
+
+def derive_event_severity(event_type: str, payload: dict) -> str:
+    """Facts-only severity band for one `mf_fund_events` row."""
+    if event_type in ("rank_change", "aum_change"):
+        return "notable" if payload.get("direction") == "down" else "info"
+    if event_type == "ter_change":
+        old_ter = payload.get("old_ter")
+        new_ter = payload.get("new_ter")
+        if old_ter is not None and new_ter is not None and new_ter > old_ter:
+            return "notable"
+        return "info"
+    return "info"

@@ -788,11 +788,65 @@ export interface WatchlistCard {
   verb_label: Label | null;
   /** Real once the fund is ranked; null when unranked or insufficient_data. */
   confidence_band: ConfidenceBand | null;
+  /** Wave 2 (S07 Performance) — the fund's own category median 1Y/3Y return
+   *  (mf_category_stats.p50). No 5Y category metric exists server-side. */
+  category_return_1y_pct: number | null;
+  category_return_3y_pct: number | null;
 }
 
 export interface WatchlistCardsResponse {
   /** Freshest NAV date across all cards; null when the watchlist is empty. */
   as_of: string | null;
   items: WatchlistCard[];
+}
+
+// ---------------------------------------------------------------------------
+// GET /mf/watchlist/changes (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 1) — the
+// caller's saved ISINs' most recent tracked changes, newest first.
+// ---------------------------------------------------------------------------
+
+export type WatchlistChangeSeverity = 'notable' | 'info';
+
+export interface WatchlistChangeItem {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  event_type: 'rank_change' | 'ter_change' | 'holding_change' | 'aum_change';
+  /** ISO date (YYYY-MM-DD) */
+  as_of: string;
+  summary: string;
+  severity: WatchlistChangeSeverity;
+}
+
+export interface WatchlistChangesResponse {
+  /** Freshest event date across all items; null when there are none. */
+  as_of: string | null;
+  items: WatchlistChangeItem[];
+}
+
+// ---------------------------------------------------------------------------
+// GET /mf/watchlist/similar (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 2) — same-
+// category peers of the caller's saved funds, excluding every saved ISIN.
+// ---------------------------------------------------------------------------
+
+export interface WatchlistSimilarItem {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  category: string | null;
+  sebi_category: string | null;
+  verb_label: Label | null;
+  confidence_band: ConfidenceBand | null;
+  return_1y_pct: number | null;
+  return_3y_pct: number | null;
+  expense_ratio_pct: number | null;
+  /** Display name of the watched fund whose category surfaced this suggestion. */
+  similar_to: string | null;
+}
+
+export interface WatchlistSimilarResponse {
+  as_of: string | null;
+  items: WatchlistSimilarItem[];
 }
 

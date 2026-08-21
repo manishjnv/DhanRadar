@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.mf.benchmark_map import INDEX_DISPLAY_NAME, NIFTY50_TRI
@@ -26,7 +26,7 @@ from dhanradar.mf.comparison import (
     nearest_value_on_or_before,
     rebase_series,
 )
-from dhanradar.mf.fund_events import summarize_event
+from dhanradar.mf.fund_events import derive_event_severity, summarize_event
 from dhanradar.mf.risk import (
     SIP_MIN_MONTHS_FOR_ILLUSTRATION,
     _nav_on_or_before,
@@ -251,12 +251,58 @@ async def get_fund_nav_series(
 _WATCHLIST_SPARKLINE_POINTS = 30  # WATCHLIST_LIVE_DATA_PLAN.md Wave 1 — S03 card sparkline
 
 
+async def _category_avg_returns(
+    session: AsyncSession, sebi_category: str | None
+) -> dict[str, float | None]:
+    """WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (S07 Performance) — the category's most
+    recently published return_1y_pct/return_3y_pct MEDIAN (`mf_category_stats.p50`,
+    the same nightly cohort stat `fund.analytics`'s `category_percentiles` reads) as
+    the honest "category average" row. `mf_category_stats` has no 5Y metric_key
+    (only return_1y_pct/return_3y_pct/max_drawdown_pct are computed) — that window
+    is never fabricated, callers must show it as unavailable.
+    """
+    result: dict[str, float | None] = {"return_1y_pct": None, "return_3y_pct": None}
+    if sebi_category is None:
+        return result
+
+    max_as_of = (
+        await session.execute(
+            select(func.max(MfCategoryStats.as_of)).where(
+                MfCategoryStats.sebi_category == sebi_category
+            )
+        )
+    ).scalar_one_or_none()
+    if max_as_of is None:
+        return result
+
+    rows = (
+        (
+            await session.execute(
+                select(MfCategoryStats).where(
+                    MfCategoryStats.sebi_category == sebi_category,
+                    MfCategoryStats.as_of == max_as_of,
+                    MfCategoryStats.metric_key.in_(("return_1y_pct", "return_3y_pct")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        result[row.metric_key] = row.p50
+    return result
+
+
 async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
     """One row for `GET /mf/watchlist/cards` (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) —
     composes `get_fund_head`'s headline facts (name/AMC/category/TER/riskometer/NAV/
     day-change/returns/label/confidence-band) with a 30-point NAV sparkline. Reuses
     `get_fund_head` + `_load_nav_points` — the same read-only tables `fund.head`
     already queries, no new query shape; never selects unified_score/rank weights.
+
+    Wave 2 (S07 Performance) adds the fund's own category's median 1Y/3Y return
+    (`_category_avg_returns`) — a cheap point lookup on top of the same read, not
+    a second endpoint (WATCHLIST_LIVE_DATA_PLAN.md Wave 2 item 3).
     """
     head = await get_fund_head(session, isin)
     if head is None:
@@ -266,6 +312,7 @@ async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
     sparkline = [
         {"d": d.isoformat(), "nav": nav} for d, nav in nav_points[-_WATCHLIST_SPARKLINE_POINTS:]
     ]
+    category_returns = await _category_avg_returns(session, head["sebi_category"])
 
     return {
         "isin": head["isin"],
@@ -284,7 +331,182 @@ async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
         "return_5y_pct": head["return_5y_pct"],
         "verb_label": head["verb_label"],
         "confidence_band": head["confidence_band"],
+        "category_return_1y_pct": category_returns["return_1y_pct"],
+        "category_return_3y_pct": category_returns["return_3y_pct"],
     }
+
+
+# ---------------------------------------------------------------------------
+# WATCHLIST_LIVE_DATA_PLAN.md Wave 2 — `fund.changes` + `fund.peers` batch
+# composers for GET /mf/watchlist/changes and GET /mf/watchlist/similar. Each is
+# ONE (or two) bounded queries across every ISIN on the caller's watchlist —
+# never a per-ISIN loop or HTTP fan-out (same architect condition Wave 1's
+# `get_watchlist_card` cost model was reviewed against).
+# ---------------------------------------------------------------------------
+
+
+async def get_watchlist_changes(
+    session: AsyncSession,
+    isins: list[str],
+    *,
+    since: date | None = None,
+    limit: int = 9,
+) -> list[dict]:
+    """`fund.changes` batch composer for `GET /mf/watchlist/changes` (Wave 2 item 1).
+
+    ONE query across every saved ISIN — newest tracked change first, capped at
+    `limit`. Reuses the same `mf_fund_events` table + `summarize_event`/
+    `derive_event_severity` templates as the single-fund `get_fund_events` above;
+    `severity` is derived from `event_type` + the event's own stored `payload`,
+    never from client input.
+    """
+    if not isins:
+        return []
+
+    stmt = (
+        select(MfFundEvent, MfFund.scheme_name, MfFund.fund_name_short)
+        .join(MfFund, MfFund.isin == MfFundEvent.isin)
+        .where(MfFundEvent.isin.in_(isins))
+    )
+    if since is not None:
+        stmt = stmt.where(MfFundEvent.as_of >= since)
+    stmt = stmt.order_by(MfFundEvent.as_of.desc(), MfFundEvent.created_at.desc()).limit(limit)
+
+    rows = (await session.execute(stmt)).all()
+    return [
+        {
+            "isin": ev.isin,
+            "scheme_name": scheme_name,
+            "fund_name_short": fund_name_short,
+            "event_type": ev.event_type,
+            "as_of": ev.as_of.isoformat(),
+            "summary": summarize_event(ev.event_type, ev.payload),
+            "severity": derive_event_severity(ev.event_type, ev.payload),
+        }
+        for ev, scheme_name, fund_name_short in rows
+    ]
+
+
+def _shape_similar_row(
+    rank_row: MfFundRanks,
+    fund: MfFund,
+    metrics: MfFundMetrics | None,
+    similar_to: str | None,
+) -> dict:
+    """One `GET /mf/watchlist/similar` row — same field set as `get_fund_peers`
+    plus `confidence_band`/`category` (never a raw score)."""
+    nav_points = metrics.nav_points if metrics else 0
+    return {
+        "isin": fund.isin,
+        "scheme_name": fund.scheme_name,
+        "fund_name_short": fund.fund_name_short,
+        "amc_name": fund.amc_name,
+        "category": fund.category,
+        "sebi_category": fund.sebi_category,
+        "verb_label": rank_row.verb_label,
+        "confidence_band": rank_row.confidence_band,
+        "return_1y_pct": metrics.return_1y_pct
+        if metrics and nav_points >= _MIN_NAV_POINTS_1Y
+        else None,
+        "return_3y_pct": metrics.return_3y_pct
+        if metrics and nav_points >= _MIN_NAV_POINTS_3Y
+        else None,
+        "expense_ratio_pct": float(fund.expense_ratio_pct)
+        if fund.expense_ratio_pct is not None
+        else None,
+        "similar_to": similar_to,
+    }
+
+
+def dedupe_similar_candidates(
+    candidates: list[tuple[MfFundRanks, MfFund, MfFundMetrics | None]],
+    *,
+    excluded_isins: set[str],
+    anchor_name_by_category: dict[str, str],
+    cap: int,
+) -> list[dict]:
+    """Pure step of `get_watchlist_similar` (Wave 2 item 2): drops any caller-saved
+    ISIN, keeps only the FIRST occurrence of a candidate ISIN (a fund can rank in
+    more than one anchor category+run pair the caller's watchlist touches), and
+    caps at `cap`. Split out from the DB fetch so the dedupe/exclude/cap contract
+    is unit-testable without a database (mirrors the `mf/fund_events.py` pure-
+    detector convention).
+    """
+    seen: set[str] = set()
+    out: list[dict] = []
+    for rank_row, fund, metrics in candidates:
+        if rank_row.isin in excluded_isins or rank_row.isin in seen:
+            continue
+        seen.add(rank_row.isin)
+        out.append(
+            _shape_similar_row(
+                rank_row, fund, metrics, anchor_name_by_category.get(rank_row.sebi_category)
+            )
+        )
+        if len(out) >= cap:
+            break
+    return out
+
+
+async def get_watchlist_similar(
+    session: AsyncSession, isins: list[str], cap: int = 6
+) -> tuple[list[dict], str | None]:
+    """`fund.peers` batch composer for `GET /mf/watchlist/similar` (Wave 2 item 2).
+
+    Two bounded queries (never a per-ISIN loop): (1) the caller's saved funds'
+    latest category-rank rows, (2) every same-category/same-run peer in one shot
+    — `dedupe_similar_candidates` then excludes every saved ISIN, dedupes, and
+    caps. Returns `(items, as_of)` where `as_of` is the freshest rank date behind
+    the suggestions, or `None` when nothing qualifies (no fabrication).
+    """
+    if not isins:
+        return [], None
+
+    anchor_rows = (
+        await session.execute(
+            select(MfFundRanks, MfFund.fund_name_short, MfFund.scheme_name)
+            .join(MfFund, MfFund.isin == MfFundRanks.isin)
+            .where(MfFundRanks.isin.in_(isins))
+            .order_by(MfFundRanks.isin, MfFundRanks.as_of_date.desc())
+        )
+    ).all()
+
+    latest_by_isin: dict[str, tuple[MfFundRanks, str | None, str]] = {}
+    for rank_row, fund_name_short, scheme_name in anchor_rows:
+        latest_by_isin.setdefault(rank_row.isin, (rank_row, fund_name_short, scheme_name))
+    if not latest_by_isin:
+        return [], None
+
+    # First watched fund's display name anchors a category's "similar to" copy —
+    # display framing only; every candidate still legitimately shares that
+    # category + ranking run regardless of which watched fund is named.
+    anchor_name_by_category: dict[str, str] = {}
+    pairs: set[tuple[str, date]] = set()
+    for rank_row, fund_name_short, scheme_name in latest_by_isin.values():
+        pairs.add((rank_row.sebi_category, rank_row.as_of_date))
+        anchor_name_by_category.setdefault(rank_row.sebi_category, fund_name_short or scheme_name)
+
+    as_of = max(r.as_of_date for r, _fn, _sn in latest_by_isin.values()).isoformat()
+
+    candidates = (
+        await session.execute(
+            select(MfFundRanks, MfFund, MfFundMetrics)
+            .join(MfFund, MfFund.isin == MfFundRanks.isin)
+            .outerjoin(MfFundMetrics, MfFundMetrics.isin == MfFundRanks.isin)
+            .where(tuple_(MfFundRanks.sebi_category, MfFundRanks.as_of_date).in_(pairs))
+            .where(MfFundRanks.isin.notin_(isins))
+            .where(MfFund.is_segregated.is_(False))
+            .order_by(MfFundRanks.rank.asc())
+        )
+    ).all()
+
+    items = dedupe_similar_candidates(
+        list(candidates),
+        excluded_isins=set(isins),
+        anchor_name_by_category=anchor_name_by_category,
+        cap=cap,
+    )
+    return items, as_of
 
 
 def _percentile_of_score(value: float, cohort: list[float]) -> float:

@@ -287,6 +287,43 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "return_5y_pct",
             "verb_label",
             "confidence_band",
+            # Wave 2 (S07 Performance) — the fund's own category median 1Y/3Y
+            # return (mf_category_stats.p50); no 5Y metric_key exists there.
+            "category_return_1y_pct",
+            "category_return_3y_pct",
+        }
+    ),
+    # WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (2026-08-21) — `GET /mf/watchlist/changes`
+    # row shape (fund.changes batch composer). Facts only: event_type/as_of/
+    # summary/severity, never a score.
+    "mf.watchlist_change": frozenset(
+        {
+            "isin",
+            "scheme_name",
+            "fund_name_short",
+            "event_type",
+            "as_of",
+            "summary",
+            "severity",
+        }
+    ),
+    # WATCHLIST_LIVE_DATA_PLAN.md Wave 2 (2026-08-21) — `GET /mf/watchlist/similar`
+    # row shape (fund.peers batch composer). Same field set as `fund.peers` plus
+    # `confidence_band`/`category`/`similar_to` — never a raw score.
+    "mf.watchlist_similar": frozenset(
+        {
+            "isin",
+            "scheme_name",
+            "fund_name_short",
+            "amc_name",
+            "category",
+            "sebi_category",
+            "verb_label",
+            "confidence_band",
+            "return_1y_pct",
+            "return_3y_pct",
+            "expense_ratio_pct",
+            "similar_to",
         }
     ),
 }
@@ -614,3 +651,31 @@ def serialize_watchlist_cards_response(
     _assert_no_forbidden(data)
     cards = [_apply_allowlist("mf.watchlist_card", item) for item in data["items"]]
     return {"as_of": as_of, "items": cards}
+
+
+def serialize_watchlist_changes_response(
+    *, as_of: str | None, items: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/watchlist/changes` (WATCHLIST_LIVE_
+    DATA_PLAN.md Wave 2) — same #2 scrub + B87 allowlist bypass pattern as
+    `serialize_watchlist_cards_response`, applied via the `mf.watchlist_change`
+    row shape.
+    """
+    data = _scrub({"items": items})
+    _assert_no_forbidden(data)
+    rows = [_apply_allowlist("mf.watchlist_change", item) for item in data["items"]]
+    return {"as_of": as_of, "items": rows}
+
+
+def serialize_watchlist_similar_response(
+    *, as_of: str | None, items: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/watchlist/similar` (WATCHLIST_LIVE_
+    DATA_PLAN.md Wave 2) — same #2 scrub + B87 allowlist bypass pattern as
+    `serialize_watchlist_cards_response`, applied via the `mf.watchlist_similar`
+    row shape.
+    """
+    data = _scrub({"items": items})
+    _assert_no_forbidden(data)
+    rows = [_apply_allowlist("mf.watchlist_similar", item) for item in data["items"]]
+    return {"as_of": as_of, "items": rows}

@@ -11,6 +11,7 @@ import datetime
 
 from dhanradar.mf.fund_events import (
     cap_fund_events,
+    derive_event_severity,
     detect_aum_change,
     detect_holding_change,
     detect_rank_change,
@@ -283,3 +284,41 @@ def test_summary_aum_change_is_factual_and_short():
 def test_summary_unknown_event_type_falls_back_safely():
     sentence = summarize_event("something_new", {})
     _assert_no_advisory_verb(sentence)
+
+
+# ---------------------------------------------------------------------------
+# derive_event_severity (WATCHLIST_LIVE_DATA_PLAN.md Wave 2, §04 What Changed) —
+# derived only from event_type + the event's own payload, never client input.
+# ---------------------------------------------------------------------------
+
+
+def test_severity_rank_change_down_is_notable():
+    assert derive_event_severity("rank_change", {"direction": "down"}) == "notable"
+
+
+def test_severity_rank_change_up_is_info():
+    assert derive_event_severity("rank_change", {"direction": "up"}) == "info"
+
+
+def test_severity_aum_change_down_is_notable():
+    assert derive_event_severity("aum_change", {"direction": "down"}) == "notable"
+
+
+def test_severity_aum_change_up_is_info():
+    assert derive_event_severity("aum_change", {"direction": "up"}) == "info"
+
+
+def test_severity_ter_increase_is_notable():
+    assert derive_event_severity("ter_change", {"old_ter": 0.5, "new_ter": 0.6}) == "notable"
+
+
+def test_severity_ter_decrease_is_info():
+    assert derive_event_severity("ter_change", {"old_ter": 0.6, "new_ter": 0.5}) == "info"
+
+
+def test_severity_holding_change_is_info():
+    assert derive_event_severity("holding_change", {}) == "info"
+
+
+def test_severity_unknown_event_type_falls_back_to_info():
+    assert derive_event_severity("something_new", {}) == "info"
