@@ -43,6 +43,8 @@ import {
   type SipEntry,
 } from '@/components/mf/compare/sections';
 import { useCompareBundle } from '@/features/mf/api';
+import { useCompareAI } from '@/features/mf/api';
+import { useMe } from '@/features/auth/api';
 import { FUNDS, type CompareFund, type Row } from '@/components/mf/compare/sampleData';
 import type { CompareFragment } from '@/features/mf/types';
 
@@ -136,6 +138,7 @@ function CompareView() {
 
   // One batch request replaces 3× useFundDetail; disabled in sample mode
   const bundleQuery = useCompareBundle(sampleMode ? [] : sortedIsins);
+  const { data: me } = useMe();
   const isLoading = !sampleMode && bundleQuery.isLoading;
 
   // Extract ordered fragments (null fragments excluded)
@@ -148,6 +151,7 @@ function CompareView() {
 
   // Live mode requires 2+ resolved fragments
   const live = !sampleMode && fragments.length >= 2;
+  const compareAiQuery = useCompareAI(sortedIsins, live && !!me);
 
   const realFunds = React.useMemo<CompareFund[]>(
     () => fragments.map((f, i) => buildCompareFundFromFragment(f, i)),
@@ -362,7 +366,7 @@ function CompareView() {
       <HeroSection funds={heroFunds} />
 
       {/* S2 — DhanRadar educational read (AI wave) */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag="AI" /><EduReadSection /></Section>
+      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag={compareAiQuery.data?.summary_items?.length ? 'LIVE' : 'PREVIEW'} /><EduReadSection items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S3 — Scoreboard */}
       <Section>
@@ -458,7 +462,7 @@ function CompareView() {
       </Section>
 
       {/* S22 — AI insights */}
-      <Section><SectionHeader index="22" title="AI Insights Center" tag="AI" /><AiInsightsSection /></Section>
+      <Section><SectionHeader index="22" title="AI Insights Center" tag={compareAiQuery.data?.insight_items?.length ? 'LIVE' : 'PREVIEW'} /><AiInsightsSection items={live && me ? (compareAiQuery.data?.insight_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S23 — FAQ */}
       <Section><SectionHeader index="23" title="Frequently Asked" /><FaqSection /></Section>

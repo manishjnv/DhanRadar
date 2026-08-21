@@ -15,6 +15,7 @@ _REQUIRED_PATHS = {
     "/mf/watchlist/summary",
     "/mf/watchlist/cards",
     "/mf/compare/bundle",
+    "/mf/compare/ai",
     "/mf/search",
 }
 

@@ -177,7 +177,7 @@ type PageCoverage = {
 
 const UI_COVERAGE: PageCoverage[] = [
   { page: 'Watchlist', route: '/mf/watchlist', total: 15, live: 14, pending: 'FAQ (static by design)' },
-  { page: 'Fund Compare', route: '/mf/compare', total: 21, live: 18, pending: 'EduRead + AI Insights (C3 AI wave); FAQ (static by design)' },
+  { page: 'Fund Compare', route: '/mf/compare', total: 21, live: 20, pending: 'FAQ (static by design)' },
   { page: 'Pricing', route: '/pricing', total: 4, live: 1, pending: 'Hero, comparison table, FAQ (plans list is live)' },
   { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 6, pending: 'Health, goals, overlap, cost, AMC, timeline, projections, AI, report + 8 more' },
   { page: 'Fund Explorer', route: '/mf/explore', total: 16, live: 5, pending: 'AI discovery, category leaderboards, fund flow, momentum, consistency, low-cost, beginner picks, AI feed, shortlist, filters, FAQ' },

@@ -37,6 +37,7 @@ import type {
   WatchlistChangesResponse,
   WatchlistSimilarResponse,
   WatchlistAISummaryResponse,
+  CompareAISummaryResponse,
   WatchlistAlertsResponse,
   CompareBundle,
 } from './types';
@@ -735,5 +736,16 @@ export function useCompareBundle(isins: string[]) {
       if (error instanceof ApiError && [400, 404].includes(error.problem.status)) return false;
       return count < 1;
     },
+  });
+}
+
+export function useCompareAI(isins: string[], enabled: boolean) {
+  const sorted = [...new Set(isins.filter(Boolean))].sort();
+  return useQuery<CompareAISummaryResponse>({
+    queryKey: ['mf', 'compare-ai', sorted.join(',')],
+    queryFn: () => api.get<CompareAISummaryResponse>(`/mf/compare/ai?isins=${sorted.join(',')}`),
+    enabled: enabled && sorted.length >= 2 && sorted.length <= 4,
+    retry: false,
+    staleTime: 6 * 60 * 60 * 1000,
   });
 }

@@ -11,6 +11,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/cn';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { HeroRing, Accordion, ChipToggle } from '@/components/mf/funddetail/parts';
 import {
   FUNDS, EDU_READ, SCOREBOARD, PERF, ROLLING, RANKT, RANK_SERIES,
@@ -97,7 +98,17 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
 }
 
 // ── S2 — DhanRadar educational read (was Winner card) ────────────────────────
-export function EduReadSection() {
+export function EduReadSection({ items, disclosure, notAdvice }: { items?: string[]; disclosure?: string; notAdvice?: string }) {
+  if (items) {
+    return items.length > 0 ? (
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {items.map((item) => <div key={item} className="rounded-2xl border border-line bg-surface p-4 text-small text-ink-secondary"><RichText text={item} /></div>)}
+        </div>
+        <DisclosureBundle disclosure={disclosure} notAdvice={notAdvice || 'For education only — not investment advice.'} />
+      </div>
+    ) : <EmptyState title="Educational read unavailable" description="The comparison read is unavailable for this request." />;
+  }
   return (
     <section className="relative overflow-hidden rounded-3xl p-6 text-white shadow-lg sm:p-7" style={{ background: 'linear-gradient(135deg,#052E26,#064E3B 70%)' }}>
       <div className="relative flex flex-wrap items-center gap-5">
@@ -1066,7 +1077,17 @@ export function AltsSection({ alternatives }: { alternatives?: CompareAlternativ
 }
 
 // ── S22 — AI insights ────────────────────────────────────────────────────────
-export function AiInsightsSection() {
+export function AiInsightsSection({ items, disclosure, notAdvice }: { items?: string[]; disclosure?: string; notAdvice?: string }) {
+  if (items) {
+    return items.length > 0 ? (
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {items.map((item) => <div key={item} className="rounded-2xl border border-line bg-surface p-4 text-small text-ink-secondary"><RichText text={item} /></div>)}
+        </div>
+        <DisclosureBundle disclosure={disclosure} notAdvice={notAdvice || 'For education only — not investment advice.'} />
+      </div>
+    ) : <EmptyState title="AI insights unavailable" description="No validated comparison insights are available for this request." />;
+  }
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {AI_INSIGHTS.map((t, i) => (
