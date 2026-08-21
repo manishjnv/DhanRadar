@@ -84,6 +84,7 @@ from dhanradar.models.mf import (
     MfLeaderboardBoard,
     MfPortfolio,
     MfUserHolding,
+    MfWatchlistAlert,
     MfWatchlistItem,
 )
 from dhanradar.ratelimit import RateLimit
@@ -554,9 +555,68 @@ async def watchlist_similar(
 
 
 _WATCHLIST_AI_CACHE_TTL = 6 * 3600  # 6h — governed AI-gateway result, per-user only
+_rl_alerts = RateLimit(max_requests=30, window_seconds=60)  # same as explorer; sibling bucket
+
+_ALERTS_MAX_ROWS = 50
 
 
-@router.get("/watchlist/summary")
+@router.get("/watchlist/alerts")
+async def get_watchlist_alerts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    _rl: Annotated[None, Depends(_rl_alerts)] = None,
+) -> dict:
+    """`GET /mf/watchlist/alerts` (P2 backend) — newest-first, max 50 alert rows
+    for the caller's watchlist (nav_move / label_change triggers).
+
+    Auth required (401 anonymous). Owner-scoped via RLS (app.user_id GUC set by
+    FastAPI middleware) + explicit WHERE user_id clause. No cross-user row is
+    reachable. `serialize_watchlist_alerts_response` applies the #2 scrub + the
+    `mf.watchlist_alert` field allowlist — no raw score/weights reach the client.
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    from dhanradar.mf.serialization import serialize_watchlist_alerts_response
+    from dhanradar.models.mf import MfFund
+
+    uid = uuid.UUID(user.user_id)
+
+    rows = (
+        await db.execute(
+            select(
+                MfWatchlistAlert.id,
+                MfWatchlistAlert.isin,
+                MfWatchlistAlert.alert_type,
+                MfWatchlistAlert.title,
+                MfWatchlistAlert.body,
+                MfWatchlistAlert.triggered_on,
+                MfWatchlistAlert.created_at,
+                MfFund.fund_name_short,
+                MfFund.scheme_name,
+            )
+            .outerjoin(MfFund, MfFund.isin == MfWatchlistAlert.isin)
+            .where(MfWatchlistAlert.user_id == uid)
+            .order_by(MfWatchlistAlert.created_at.desc())
+            .limit(_ALERTS_MAX_ROWS)
+        )
+    ).all()
+
+    items = [
+        {
+            "id": str(r.id),
+            "isin": r.isin,
+            "alert_type": r.alert_type,
+            "title": r.title,
+            "body": r.body,
+            "triggered_on": r.triggered_on.isoformat(),
+            "created_at": r.created_at.isoformat(),
+            "fund_name_short": r.fund_name_short,
+            "scheme_name": r.scheme_name,
+        }
+        for r in rows
+    ]
+    return serialize_watchlist_alerts_response(items=items)
 async def watchlist_summary(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],

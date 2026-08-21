@@ -44,14 +44,14 @@ import {
   LiveFilterSection, LiveFundsSection, LiveCategoryLeadersSection,
   LiveLeaderboardSection, LiveStatsSection,
   LiveChangedSection, LiveDmmiSection, LivePerfSection, LiveSimilarSection,
-  LiveRecentlyViewedSection, LiveAiSection,
+  LiveRecentlyViewedSection, LiveAiSection, LiveAlertsSection,
   sortWatchlistCards, watchlistCardMatchesSearch, computeCategoryLeaders,
   type LiveSortKey,
 } from '@/components/mf/watchlist/sections';
 import { AI_SUMMARY, INSIGHTS } from '@/components/mf/watchlist/sampleData';
 import { useWatchlist, type WatchlistEntry } from '@/hooks/useWatchlist';
 import { useRecentlyViewed } from '@/hooks/useRecentlyViewed';
-import { useFundDetail, useWatchlistCards, useWatchlistChanges, useWatchlistSimilar, useWatchlistSummary } from '@/features/mf/api';
+import { useFundDetail, useWatchlistCards, useWatchlistChanges, useWatchlistSimilar, useWatchlistSummary, useWatchlistAlerts } from '@/features/mf/api';
 import { useMe } from '@/features/auth/api';
 import { EDU_LABELS } from '@/lib/displayLabel';
 import type { WatchlistCard } from '@/features/mf/types';
@@ -153,6 +153,7 @@ function WatchlistView() {
   // attempt withheld output, the tag stays PREVIEW-ish but the CONTENT is the
   // honest loading/unavailable state, never the illustrative sample text.
   const { data: summaryResp, isLoading: summaryLoading } = useWatchlistSummary(showLive);
+  const { data: alertsResp } = useWatchlistAlerts(showLive);
   const summaryItems = summaryResp?.summary_items ?? [];
   const insightItems = summaryResp?.insight_items ?? [];
   const summaryIsLive = showLive && !summaryLoading && summaryItems.length > 0;
@@ -303,6 +304,11 @@ function WatchlistView() {
           <section>
             <SectionHeader index="08" title="Watchlist Leaderboard" info="Ranked by 1Y return" tag={showLive ? 'LIVE' : 'PREVIEW'} />
             {showLive ? <LiveLeaderboardSection cards={cards} /> : <LeaderboardSection />}
+          </section>
+
+          <section>
+            <SectionHeader index="09" title="Watchlist Alerts" tag={showLive ? 'LIVE' : 'PREVIEW'} />
+            <LiveAlertsSection items={alertsResp?.items ?? []} />
           </section>
 
           <section>

@@ -877,6 +877,28 @@ export interface WatchlistAISummaryResponse {
 }
 
 // ---------------------------------------------------------------------------
+// GET /mf/watchlist/alerts — per-fund alerts for the caller's watchlist.
+// ---------------------------------------------------------------------------
+
+export interface WatchlistAlert {
+  id: string;
+  isin: string;
+  fund_name_short: string | null;
+  scheme_name: string;
+  alert_type: string;
+  title: string;
+  body: string;
+  /** ISO date (YYYY-MM-DD) or ISO datetime when the condition was met. */
+  triggered_on: string;
+  /** ISO datetime when the alert record was created. */
+  created_at: string;
+}
+
+export interface WatchlistAlertsResponse {
+  items: WatchlistAlert[];
+}
+
+// ---------------------------------------------------------------------------
 // C1 — Compare bundle (GET /api/v1/mf/compare/bundle — COMPARE_LIVE_DATA_PLAN)
 // One batch endpoint replaces per-ISIN fanout for the compare page (2–4 ISINs).
 // ---------------------------------------------------------------------------

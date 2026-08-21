@@ -66,6 +66,8 @@ celery_app = Celery(
         # Manual disclosure ingestion inbox (ADR-0033(a) human side-channel for
         # HDFC/SBI/ICICI-Pru/Kotak/Axis, which block the scraper).
         "dhanradar.tasks.manual_ingest",
+        # P2 watchlist alerts — daily nav_move / label_change digest.
+        "dhanradar.tasks.watchlist_alerts",
     ],
 )
 
@@ -140,6 +142,8 @@ celery_app.conf.task_routes = {
     "dhanradar.tasks.news.*": {"queue": "batch"},
     # Signal daily alerts run in the batch queue (low-volume, once-daily).
     "dhanradar.tasks.signal_alerts.*": {"queue": "batch"},
+    # Watchlist alerts — daily batch scan, same queue as signal_alerts.
+    "dhanradar.tasks.watchlist_alerts.*": {"queue": "batch"},
     # BSE webhook processing — misc queue (NOT mood; mood worker is mem-capped).
     "dhanradar.tasks.bse.*": {"queue": "misc"},
     # Manual disclosure inbox — batch queue (same volume + memory headroom as
@@ -228,6 +232,8 @@ _FAST_BUCKET_TASKS = {
     "dhanradar.tasks.signal_alerts.auto_log_no_action",
     "dhanradar.tasks.signal_alerts.sip_reminder",
     "dhanradar.tasks.signal_alerts.check_achievements",
+    # Watchlist alerts — DB-only scan (no external HTTP) → fast bucket.
+    "dhanradar.tasks.watchlist_alerts.daily_watchlist_alerts",
     "dhanradar.tasks.compliance.archive_audit_daily",
     "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
     "dhanradar.tasks.news.refresh_market_news",
@@ -354,6 +360,13 @@ celery_app.conf.beat_schedule = {
     "compliance-reconcile-disclaimers": {
         "task": "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
         "schedule": crontab(hour=2, minute=30),
+    },
+    # Watchlist alerts — 02:45 IST daily; after compute_market_ranks (01:00) and
+    # nav_daily_fetch (23:30) are complete, off-market-hours. Scans watchlist items
+    # for nav_move (>=+/-2%) and label_change from persisted mf_fund_ranks.
+    "mf-watchlist-alerts": {
+        "task": "dhanradar.tasks.watchlist_alerts.daily_watchlist_alerts",
+        "schedule": crontab(hour=2, minute=45),
     },
     # Mood Compass twice-daily snapshot — 09:00 & 16:00 IST (architecture cadence).
     "mood-compute-snapshot": {

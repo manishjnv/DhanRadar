@@ -333,6 +333,21 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     # a poisoned dict (e.g. a smuggled numeric/score key) is stripped down to plain
     # text — see `serialize_watchlist_ai_response` below.
     "mf.watchlist_ai_item": frozenset({"text"}),
+    # P2 watchlist alerts (2026-08-21) — `GET /mf/watchlist/alerts` response row.
+    # No raw score/weights; fund display name comes from the joined mf_funds row.
+    "mf.watchlist_alert": frozenset(
+        {
+            "id",
+            "isin",
+            "fund_name_short",
+            "scheme_name",
+            "alert_type",
+            "title",
+            "body",
+            "triggered_on",
+            "created_at",
+        }
+    ),
     # COMPARE_LIVE_DATA_PLAN.md Wave C1 (2026-08-21) — `GET /mf/compare/bundle`
     # row shapes. Three nested shapes + one top-level wrapper, each independently
     # allowlisted so the benchmark series is never embedded raw (architect condition).
@@ -743,6 +758,18 @@ def serialize_watchlist_similar_response(
     _assert_no_forbidden(data)
     rows = [_apply_allowlist("mf.watchlist_similar", item) for item in data["items"]]
     return {"as_of": as_of, "items": rows}
+
+
+def serialize_watchlist_alerts_response(*, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/watchlist/alerts` (P2 backend).
+
+    Same #2 scrub + B87 allowlist bypass pattern as the other watchlist serializers.
+    Row shape: `mf.watchlist_alert` — no raw score/weights, no advisory verbs.
+    """
+    data = _scrub({"items": items})
+    _assert_no_forbidden(data)
+    rows = [_apply_allowlist("mf.watchlist_alert", item) for item in data["items"]]
+    return {"items": rows}
 
 
 def serialize_watchlist_ai_response(

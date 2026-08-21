@@ -37,6 +37,7 @@ import type {
   WatchlistChangesResponse,
   WatchlistSimilarResponse,
   WatchlistAISummaryResponse,
+  WatchlistAlertsResponse,
   CompareBundle,
 } from './types';
 
@@ -699,6 +700,20 @@ export function useLeaderboard() {
       return count < 1;
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Watchlist alerts — GET /mf/watchlist/alerts
+// ---------------------------------------------------------------------------
+
+export function useWatchlistAlerts(enabled: boolean) {
+  return useQuery<WatchlistAlertsResponse>({
+    queryKey: queryKeys.mf.watchlistAlerts(),
+    queryFn: () => api.get<WatchlistAlertsResponse>('/mf/watchlist/alerts'),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 }
 
