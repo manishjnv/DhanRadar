@@ -13,9 +13,9 @@ import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { HeroRing, Accordion, ChipToggle } from '@/components/mf/funddetail/parts';
 import {
-  FUNDS, EDU_READ, SCOREBOARD, PERSONAS, MATRIX, DMMI, PERF, ROLLING, RANKT, RANK_SERIES,
+  FUNDS, EDU_READ, SCOREBOARD, DMMI, PERF, ROLLING, RANKT, RANK_SERIES,
   RISK_HEAT, ADV_RISK, FIT, HOLD_STATS, HOLDINGS, FLOW, MGRS, AMC, COST, COST_VIS, TAX,
-  VAL, VAL_VERDICT, CHANGES, ALTS, AI_INSIGHTS, FAQ, STICKY, SIPDATA, SIP_AMOUNTS,
+  CHANGES, ALTS, AI_INSIGHTS, FAQ, STICKY, SIPDATA, SIP_AMOUNTS,
   SIP_DURATIONS, fmtCr, toStrength,
 } from './sampleData';
 import type { CompareFund, Row } from './sampleData';
@@ -34,14 +34,8 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
       {funds.map((f) => (
         <div
           key={f.key}
-          className={cn(
-            'relative overflow-hidden rounded-2xl border bg-surface shadow-sm',
-            f.isTopMatch ? 'border-emerald shadow-[0_0_0_1px_var(--dr-emerald,#00B386)]' : 'border-line',
-          )}
+          className="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
         >
-          {f.isTopMatch && (
-            <div className="absolute right-0 top-3 z-[2] rounded-l-md bg-emerald px-2.5 py-1 font-mono text-[9.5px] font-bold tracking-[0.04em] text-white">🏆 TOP MATCH</div>
-          )}
           <div className="relative overflow-hidden px-4.5 py-4 text-white" style={{ background: f.topGradient, paddingLeft: 18, paddingRight: 18 }}>
             <div className="relative flex items-center gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white shadow-md">
@@ -131,62 +125,22 @@ export function EduReadSection() {
   );
 }
 
-// ── S3 — Scoreboard (strength words, no numbers) ─────────────────────────────
-export function ScoreboardSection() {
+// ── S3 — Scoreboard (strength words in sample; real facts when live) ──────────
+export function ScoreboardSection({ funds = FUNDS, rows: liveRows }: { funds?: CompareFund[]; rows?: Row[] }) {
   return (
     <Panel>
       <div className="mb-3 flex flex-wrap gap-2">
-        {FUNDS.map((f) => (
-          <span key={f.key} className={cn('inline-flex items-center gap-1.5 rounded-full border bg-surface px-3 py-1.5 text-caption font-semibold shadow-sm', f.isTopMatch ? 'border-emerald' : 'border-line')}>
+        {funds.map((f) => (
+          <span key={f.key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-caption font-semibold shadow-sm">
             <span className="grid h-5 w-5 place-items-center rounded-md text-[11px] font-extrabold text-white" style={{ background: f.topGradient }}>{f.logo}</span>{f.short}
           </span>
         ))}
       </div>
-      <ScoreboardRows rows={SCOREBOARD} />
+      {liveRows
+        ? <CompareTable rows={liveRows} firstCol="Metric" funds={funds} />
+        : <ScoreboardRows rows={SCOREBOARD} />
+      }
     </Panel>
-  );
-}
-
-// ── S4 — Who each fund suits ─────────────────────────────────────────────────
-export function PersonaSection() {
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {PERSONAS.map((p) => {
-        const f = FUNDS.find((x) => x.short === p.best)!;
-        return (
-          <div key={p.name} className="rounded-2xl border border-line p-4">
-            <div className="mb-2.5 grid h-9 w-9 place-items-center rounded-xl text-lg" style={{ background: `${p.tone}1A` }} aria-hidden="true">{p.ico}</div>
-            <div className="text-small font-bold text-ink">{p.name}</div>
-            <div className="mt-2 flex items-center gap-1.5 text-[13.5px] font-bold" style={{ color: f.color }}><Dot color={f.color} size={9} />{p.best}</div>
-            <div className="mt-1.5 text-caption leading-snug text-ink-muted">{p.why}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── S5 — Decision matrix ─────────────────────────────────────────────────────
-export function MatrixSection() {
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {MATRIX.map((m) => {
-        const f = FUNDS.find((x) => x.short === m.win);
-        const color = f?.color ?? '#64748B';
-        return (
-          <div key={m.q} className="flex flex-col gap-2.5 rounded-2xl border border-line p-4">
-            <div className="flex items-center gap-2 text-small font-semibold text-ink-secondary">
-              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-royal" aria-hidden="true">{m.ico}</span>{m.q}
-            </div>
-            <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5" style={{ background: `${color}14` }}>
-              <Dot color={color} size={9} />
-              <span className="flex-1 text-small font-bold text-ink">{m.win}</span>
-              <span className="font-mono text-caption font-bold" style={{ color }}>{m.val}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -195,21 +149,22 @@ export function MoodSection() {
   return (
     <Panel>
       <CompareTable rows={DMMI} firstCol="Market phase" />
-      <SoWhat><RichText text="**Current mood: Optimistic.** In similar phases, **Bandhan** has historically had the best balance (milder drawdowns, steady hit-rate). For fresh money now, a **staggered SIP into Bandhan** has read best; for lump-sum, **Nippon** has the strongest record entering optimistic phases. Educational context, not advice." /></SoWhat>
+      <SoWhat><RichText text="**Shared market context.** These funds operate in the same market environment. The phase shown is a factual current reading — how each fund has historically behaved in a given phase does not predict behaviour in future similar phases." /></SoWhat>
     </Panel>
   );
 }
 
 // ── S7 — Performance center ──────────────────────────────────────────────────
-export function PerformanceSection({ rows = PERF, funds, live = false }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean }) {
+export function PerformanceSection({ rows = PERF, funds, live = false, catRows }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; catRows?: Row[] }) {
+  const displayRows = catRows ? [...rows, ...catRows] : rows;
   return (
     <Panel>
-      <CompareTable rows={rows} firstCol="Period" showCategory={!live} funds={funds} />
+      <CompareTable rows={displayRows} firstCol="Period" showCategory={!live} funds={funds} />
       <SoWhat>
         <RichText
           text={
             live
-              ? '**So what:** Period returns are factual point-in-time figures — read them alongside risk and cost, never in isolation. Past performance does not indicate future returns.'
+              ? 'Period returns are factual point-in-time figures — read them alongside risk and cost, never in isolation. Category p50 rows show the median fund in each period. Past performance does not indicate future returns.'
               : '**So what:** Quant leads on raw 3Y/5Y returns, but Bandhan is close behind with a far smoother ride. Over 1Y all three beat the category — small-caps have been in form.'
           }
         />
@@ -218,13 +173,60 @@ export function PerformanceSection({ rows = PERF, funds, live = false }: { rows?
   );
 }
 
-// ── S8 — SIP comparison (interactive) ────────────────────────────────────────
-export function SipSection() {
+// ── S8 — SIP comparison ──────────────────────────────────────────────────────
+
+/** One fund's SIP entry from the compare bundle (two fixed durations). */
+export interface SipEntry {
+  fund: CompareFund;
+  sip_5y: { amount: number; total_invested: number | null; final_value: number | null; xirr_pct: number | null } | null;
+  sip_10y: { amount: number; total_invested: number | null; final_value: number | null; xirr_pct: number | null } | null;
+}
+
+function fmtLakh(v: number | null): string {
+  if (v == null) return '—';
+  return `₹${(v / 100000).toFixed(2)} L`;
+}
+
+export function SipSection({ live = false, entries }: { live?: boolean; entries?: SipEntry[] }) {
   const [amt, setAmt] = React.useState('10000');
   const [dur, setDur] = React.useState('5');
+
+  if (live && entries && entries.length > 0) {
+    const amount = entries[0].sip_5y?.amount ?? entries[0].sip_10y?.amount ?? 10000;
+    return (
+      <Panel>
+        <div className="mb-3 text-small text-ink-muted">
+          Historical SIP illustration — ₹{amount.toLocaleString('en-IN')}/month based on actual past NAVs. Not a projection.
+        </div>
+        <div className="grid gap-3">
+          {entries.map(({ fund, sip_5y, sip_10y }) => (
+            <div key={fund.key} className="flex flex-wrap items-center gap-4 rounded-2xl border border-line p-4">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl font-extrabold text-white" style={{ background: fund.topGradient }}>{fund.logo}</div>
+              <div className="min-w-[120px] flex-1">
+                <div className="text-small font-bold text-ink">{fund.short}</div>
+                <div className="text-caption text-ink-muted">₹{amount.toLocaleString('en-IN')}/month SIP</div>
+              </div>
+              <div className="ml-auto grid grid-cols-2 gap-6 sm:gap-8">
+                {([['5 years', sip_5y], ['10 years', sip_10y]] as [string, SipEntry['sip_5y']][]).map(([label, s]) => (
+                  <div key={label} className="text-right">
+                    <div className="font-mono text-[15px] font-bold text-ink">{fmtLakh(s?.final_value ?? null)}</div>
+                    <div className="mt-0.5 text-[10px] font-semibold uppercase text-ink-muted">{label}</div>
+                    <div className="mt-0.5 font-mono text-[11px] text-emerald">{s?.xirr_pct != null ? `${s.xirr_pct.toFixed(1)}% XIRR` : '—'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <SoWhat>
+          <RichText text="Historical SIP figures show what a fixed monthly contribution grew to over the stated period, based on actual past NAVs. Past outcomes do not predict future results. Illustrative only — not advice." />
+        </SoWhat>
+      </Panel>
+    );
+  }
+
+  // Sample / preview fallback (interactive amount + duration toggles)
   const [invested, vals, xirrs] = SIPDATA[`${amt}_${dur}`];
-  const maxVal = Math.max(...vals);
-  const best = FUNDS[vals.indexOf(maxVal)].short;
   return (
     <Panel>
       <div className="mb-4 flex flex-wrap gap-2">
@@ -235,16 +237,15 @@ export function SipSection() {
         {FUNDS.map((f, i) => {
           const cur = vals[i] * 1000;
           const profit = cur - invested;
-          const win = vals[i] === maxVal;
           return (
-            <div key={f.key} className={cn('flex flex-wrap items-center gap-4 rounded-2xl border p-4', win ? 'border-emerald bg-emerald/10' : 'border-line')}>
+            <div key={f.key} className="flex flex-wrap items-center gap-4 rounded-2xl border border-line p-4">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl font-extrabold text-white" style={{ background: f.topGradient }}>{f.logo}</div>
               <div>
-                <div className="flex items-center gap-1.5 text-small font-bold text-ink">{f.short} {win && <WinChip>🏆 Most wealth</WinChip>}</div>
+                <div className="text-small font-bold text-ink">{f.short}</div>
                 <div className="text-caption text-ink-muted">Invested ₹{invested.toLocaleString('en-IN')} · {dur}Y</div>
               </div>
               <div className="ml-auto grid grid-cols-3 gap-5 sm:gap-6">
-                {[[fmtCr(vals[i]), 'Value', 'text-ink'], [`+${fmtCr(profit / 1000)}`, 'Profit', 'text-emerald'], [`${xirrs[i]}%`, 'XIRR', 'text-emerald']].map(([v, l, c]) => (
+                {([[fmtCr(vals[i]), 'Value', 'text-ink'], [`+${fmtCr(profit / 1000)}`, 'Profit', 'text-emerald'], [`${xirrs[i]}%`, 'XIRR', 'text-emerald']] as [string, string, string][]).map(([v, l, c]) => (
                   <div key={l} className="text-right">
                     <div className={cn('font-mono text-[15px] font-bold', c)}>{v}</div>
                     <div className="mt-0.5 text-[10px] font-semibold uppercase text-ink-muted">{l}</div>
@@ -255,17 +256,24 @@ export function SipSection() {
           );
         })}
       </div>
-      <SoWhat><RichText text={`**So what:** Over ${dur} years, a ₹${(+amt).toLocaleString('en-IN')} SIP in ${best} created the most wealth, but Bandhan delivered a large share of it with materially lower volatility — the smoother risk-adjusted SIP. Illustrative, not advice.`} /></SoWhat>
+      <SoWhat>
+        <RichText text={`Historical SIP figures for ₹${(+amt).toLocaleString('en-IN')}/month over ${dur} years, based on past NAVs. Not a projection. Illustrative only — not advice.`} />
+      </SoWhat>
     </Panel>
   );
 }
 
 // ── S9 — Rolling returns ─────────────────────────────────────────────────────
-export function RollingSection() {
+export function RollingSection({ rows = ROLLING, live = false }: { rows?: Row[]; live?: boolean }) {
   return (
     <Panel>
-      <CompareTable rows={ROLLING} firstCol="Rolling window" />
-      <SoWhat><RichText text="**So what:** Rolling returns reward consistency. **Bandhan** beat its category in **78%** of rolling 3-yr windows — the highest hit-rate of the three." /></SoWhat>
+      <CompareTable rows={rows} firstCol="Rolling window" />
+      <SoWhat>
+        <RichText text={live
+          ? "Rolling figures show average past return and the fraction of overlapping windows that ended positive. A higher percentage of positive windows reflects steadier past outcomes — not a forecast of future consistency."
+          : "**So what:** Rolling returns reward consistency. **Bandhan** beat its category in **78%** of rolling 3-yr windows — the highest hit-rate of the three."
+        } />
+      </SoWhat>
     </Panel>
   );
 }
@@ -323,15 +331,20 @@ export function RankingSection({ rows = RANKT, funds, live = false }: { rows?: R
 }
 
 // ── S11 — Risk center + advanced accordion ───────────────────────────────────
-export function RiskSection() {
+export function RiskSection({ liveRows }: { liveRows?: Row[] }) {
   return (
     <Panel>
       <div className="mb-3 text-small text-ink-muted">Traffic-light read — green is lower risk / better protection:</div>
       <HeatTable rows={RISK_HEAT} />
-      <Accordion title={<span>▸ Advanced risk metrics <span className="text-caption font-normal text-ink-faint">(Sharpe, Sortino, Alpha, Beta, Treynor, Info Ratio…)</span></span>}>
-        <CompareTable rows={ADV_RISK} firstCol="Metric" />
+      <Accordion title={<span>▸ Standard risk ratios <span className="text-caption font-normal text-ink-faint">(Sharpe, Sortino, std dev, max drawdown)</span></span>}>
+        <CompareTable rows={liveRows ?? ADV_RISK} firstCol="Metric" />
       </Accordion>
-      <SoWhat><RichText text="**So what:** **Bandhan** is the lowest-risk of the three — best downside capture and drawdown. **Quant** takes the most risk for the most reward. Match the choice to your own comfort with swings." /></SoWhat>
+      <SoWhat>
+        <RichText text={liveRows
+          ? "Sharpe and Sortino ratios measure return per unit of total and downside risk respectively — higher values indicate more return for the risk taken historically. Max drawdown shows the worst peak-to-trough fall in the period. Standard published ratios only — not the DhanRadar composite."
+          : "**So what:** **Bandhan** is the lowest-risk of the three — best downside capture and drawdown. **Quant** takes the most risk for the most reward. Match the choice to your own comfort with swings."
+        } />
+      </SoWhat>
     </Panel>
   );
 }
@@ -476,24 +489,46 @@ export function CostSection({ rows = COST, vis = COST_VIS, funds, live = false }
 }
 
 // ── S18 — Tax ────────────────────────────────────────────────────────────────
-export function TaxSection() {
+function taxRuleFromCategory(cat: string): { ltcg: string; stcg: string; holding: string } {
+  const c = cat.toLowerCase();
+  const isDebt = c.includes('debt') || c.includes('liquid') || c.includes('overnight') ||
+    c.includes('gilt') || c.includes('money market') || c.includes('banking and psu') ||
+    (c.includes('hybrid') && (c.includes('conservative') || c.includes('arbitrage')));
+  if (isDebt) {
+    return { ltcg: 'Marginal rate (no LTCG window)', stcg: 'Marginal rate', holding: 'No LTCG window' };
+  }
+  return { ltcg: '12.5% (gains > ₹1.25 L/yr)', stcg: '20%', holding: '1 year' };
+}
+
+export function TaxSection({ categories }: { categories?: string[] }) {
+  if (categories && categories.length > 0) {
+    const rules = categories.map((c) => taxRuleFromCategory(c));
+    const liveRows: Row[] = [
+      { label: 'LTCG rate', vals: rules.map((r) => r.ltcg) },
+      { label: 'STCG rate', vals: rules.map((r) => r.stcg) },
+      { label: 'LTCG holding period', vals: rules.map((r) => r.holding) },
+    ];
+    const allEquity = rules.every((r) => r.ltcg.startsWith('12.5'));
+    return (
+      <Panel>
+        <CompareTable rows={liveRows} firstCol="Tax (on ₹2 L gain)" />
+        <SoWhat>
+          <RichText text={allEquity
+            ? "All compared funds fall under the equity tax category — LTCG at 12.5% applies after 1 year, with ₹1.25 lakh exemption annually. Verify exit load schedules in the scheme documents."
+            : "Tax treatment varies by category — equity-oriented funds qualify for LTCG after 1 year; debt-oriented funds are taxed at your marginal rate regardless of holding period. Verify with current applicable rules."
+          } />
+        </SoWhat>
+      </Panel>
+    );
+  }
   return (
     <Panel>
       <CompareTable rows={TAX} firstCol="On ₹2L gain (>1yr)" />
-      <SoWhat><RichText text="**So what:** All three are equity funds taxed identically — the LTCG outcome is the same. The real differentiator is exit load: all waive it after 1 year." /></SoWhat>
+      <SoWhat><RichText text="All three are equity funds — LTCG applies after 1 year, with ₹1.25 lakh annual exemption. Verify exit load schedules in each scheme’s SID." /></SoWhat>
     </Panel>
   );
 }
 
-// ── S19 — Valuation ──────────────────────────────────────────────────────────
-export function ValuationSection() {
-  return (
-    <Panel>
-      <CompareTable rows={VAL} firstCol="Metric" verdict={VAL_VERDICT} />
-      <SoWhat><RichText text="**So what:** **Quant** runs the most expensive book (high-momentum names); **Bandhan** holds a fairer-valued, higher-quality portfolio (better ROE/ROCE) — historically more defensive if the market wobbles." /></SoWhat>
-    </Panel>
-  );
-}
 
 // ── S20 — What changed ───────────────────────────────────────────────────────
 const TL_COLOR = { up: '#00B386', down: '#E5484D', info: '#1E5EFF' };

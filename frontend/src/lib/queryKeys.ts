@@ -82,6 +82,7 @@ export const queryKeys = {
                           ['mf', 'fund-comparison', isin, window, benchmarkKey] as const,
     leaderboard:        () => ['mf', 'leaderboard'] as const,
     holdingsIsins:      () => ['mf', 'portfolio', 'holdings-isins'] as const,
+    compareBundle:      (sortedIsins: string[]) => ['mf', 'compare-bundle', sortedIsins.join(',')] as const,
   },
   notifications: {
     preferences: () => ['notifications', 'preferences'] as const,
