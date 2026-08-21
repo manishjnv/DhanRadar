@@ -179,8 +179,16 @@ function CompareView() {
   const benchmarkRows = React.useMemo<Row[] | undefined>(() => {
     if (!live) return undefined;
     const rows = ['1y', '3y', '5y'] as const;
+    // Funds can track different benchmarks — only name the index in the row
+    // label when every compared fund shares it; otherwise each column is that
+    // fund's own benchmark and the label must say so, not claim fund #1's name.
+    const labels = fragments
+      .map((f) => (f.benchmark_row && !f.benchmark_row.no_data ? f.benchmark_row.label : null))
+      .filter((l): l is string => l != null);
+    const shared = labels.length > 0 && labels.every((l) => l === labels[0]);
+    const rowName = labels.length === 0 ? 'unavailable' : shared ? labels[0] : "each fund's own";
     return rows.map((window) => ({
-      label: `Benchmark (${fragments[0]?.benchmark_row && !fragments[0].benchmark_row.no_data ? fragments[0].benchmark_row.label : 'unavailable'}) ${window.toUpperCase()}`,
+      label: `Benchmark (${rowName}) ${window.toUpperCase()}`,
       vals: fragments.map((fragment) => {
         const value = fragment.benchmark_row?.no_data ? null : fragment.benchmark_row.returns[window];
         return value == null ? null : round1(value);
