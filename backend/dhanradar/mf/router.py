@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import uuid
 from datetime import date
@@ -93,7 +94,15 @@ logger = logging.getLogger(__name__)
 _MAX_CAS_BYTES = 15 * 1024 * 1024  # 15 MB cap on the upload
 _rl_upload = RateLimit(max_requests=10, window_seconds=60)
 _rl_explorer = RateLimit(max_requests=30, window_seconds=60)  # public explorer endpoints
+# Dedicated compare bucket: tighter than the explorer bucket (COMPARE_LIVE_DATA_PLAN.md §Architecture).
+_rl_compare = RateLimit(max_requests=20, window_seconds=60)
 _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-processing gate
+
+# Per-IP distinct-ISIN budget for /compare/bundle (unauthenticated combinatorial endpoint).
+_COMPARE_ISIN_BUDGET = 40
+_COMPARE_ISIN_BUDGET_WINDOW = 600  # 10 minutes
+_COMPARE_ISIN_RE = re.compile(r"^[A-Z0-9]{12}$")
+_COMPARE_FRAGMENT_TTL = 300  # Redis TTL for mf:cmp:* keys (5 minutes)
 
 # Validated sort-column whitelist — column expressions only, never interpolated from user input.
 _SORT_COL: dict[str, str] = {
@@ -664,6 +673,112 @@ async def watchlist_summary(
         pass
 
     return envelope
+
+
+# ---------------------------------------------------------------------------
+# Compare bundle (COMPARE_LIVE_DATA_PLAN.md Wave C1)
+# ---------------------------------------------------------------------------
+
+
+async def _check_isin_budget(request: Request, isins: list[str]) -> None:
+    """Per-IP distinct-ISIN budget (≤40 distinct ISINs per 10 min).
+
+    Tracks seen ISINs in a per-IP Redis SET with a fixed-window TTL.  If the
+    cumulative distinct count exceeds the budget, 429 is raised before any DB
+    query is made.  Keyed by CF-Connecting-IP via `RateLimit._get_client_ip`
+    (same trust model as the rate limiter — CF edge header, not XFF).
+    """
+    ip = RateLimit._get_client_ip(request)
+    redis = get_redis()
+    key = f"ratelimit:cmp:isin:{ip}"
+    await redis.sadd(key, *isins)
+    ttl = await redis.ttl(key)
+    if ttl == -1:  # key exists but has no expiry (first SADD created it)
+        await redis.expire(key, _COMPARE_ISIN_BUDGET_WINDOW)
+    count = await redis.scard(key)
+    if count > _COMPARE_ISIN_BUDGET:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="isin_budget_exceeded",
+            headers={"Retry-After": str(_COMPARE_ISIN_BUDGET_WINDOW)},
+        )
+
+
+@router.get("/compare/bundle")
+async def compare_bundle(
+    request: Request,
+    response: Response,
+    isins: Annotated[
+        str,
+        Query(description="Comma-separated list of 2–4 distinct ISINs"),
+    ],
+    _rl: Annotated[None, Depends(_rl_compare)] = None,
+) -> dict:
+    """``GET /mf/compare/bundle?isins=A,B,C[,D]`` (COMPARE_LIVE_DATA_PLAN.md Wave C1).
+
+    Public (no auth) — bundles per-ISIN compare fragments.  Each fragment is
+    Redis-cached at ``mf:cmp:{isin}`` (TTL 300 s) and composed on a cache miss
+    via ``asyncio.gather`` with one ``SessionLocal`` session per task (never
+    the shared request ``AsyncSession``), bounded by a semaphore ≤ 4.
+
+    Two rate controls: a dedicated 20/min per-IP bucket (``_rl_compare``) PLUS
+    a per-IP distinct-ISIN budget (≤40/10 min) that bounds novel-ISIN cycling
+    which would defeat the fragment cache. ``Cache-Control: public, max-age=300``
+    — no personal data in the bundle.
+    """
+    # Parse and validate ISINs (RFC7807-compatible 400 on any violation).
+    raw_parts = [s.strip() for s in isins.split(",") if s.strip()]
+    if len(raw_parts) < 2 or len(raw_parts) > 4:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="compare_isin_count",
+        )
+    if len(set(raw_parts)) != len(raw_parts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="compare_isin_duplicate",
+        )
+    if not all(_COMPARE_ISIN_RE.match(isin) for isin in raw_parts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="compare_isin_invalid",
+        )
+
+    # Per-IP distinct-ISIN budget check (checked before any DB composition).
+    await _check_isin_budget(request, raw_parts)
+
+    # Batch MGET — one round-trip for all fragment cache keys.
+    redis = get_redis()
+    cache_keys = [f"mf:cmp:{isin}" for isin in raw_parts]
+    cached_values = await redis.mget(*cache_keys)
+
+    fragments: dict[str, dict | None] = {}
+    cold_isins: list[str] = []
+    for isin, cached in zip(raw_parts, cached_values):
+        if cached is not None:
+            fragments[isin] = json.loads(cached)
+        else:
+            cold_isins.append(isin)
+
+    if cold_isins:
+        from dhanradar.mf.compare_read import compose_compare_bundle_fragments
+
+        cold = await compose_compare_bundle_fragments(cold_isins)
+        for isin, frag in cold.items():
+            fragments[isin] = frag
+            if frag is not None:
+                await redis.set(f"mf:cmp:{isin}", json.dumps(frag), ex=_COMPARE_FRAGMENT_TTL)
+
+    # as_of: freshest nav_date across all non-null fragments.
+    as_of = max(
+        (frag["nav_date"] for frag in fragments.values() if frag and frag.get("nav_date")),
+        default=None,
+    )
+
+    from dhanradar.mf.serialization import serialize_compare_bundle_response
+
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return serialize_compare_bundle_response(isins=raw_parts, fragments=fragments, as_of=as_of)
 
 
 # ---------------------------------------------------------------------------

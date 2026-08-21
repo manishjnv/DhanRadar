@@ -879,6 +879,13 @@ export interface CompareSipCompact {
   as_of: string | null;
 }
 
+export interface CompareBenchmark {
+  label: string | null;
+  is_fallback: boolean;
+  points: { d: string; v: number }[];
+  window: '1y';
+}
+
 /** Per-ISIN fragment returned inside CompareBundle.fragments.
  *  Includes head facts, standard risk/analytics, rolling windows,
  *  category p50 medians, SIP illustrations, and benchmark summary.
@@ -928,11 +935,8 @@ export interface CompareFragment {
   // SIP illustrations (deterministic math, educational)
   sip_5y: CompareSipCompact | null;
   sip_10y: CompareSipCompact | null;
-  // benchmark summary (scrubbed through compare allowlist)
-  benchmark_key: string | null;
-  benchmark_name: string | null;
-  benchmark_1y_pct: number | null;
-  benchmark_3y_pct: number | null;
+  // benchmark series (scrubbed through compare allowlist)
+  benchmark: CompareBenchmark | null;
 }
 
 /** Response from GET /api/v1/mf/compare/bundle?isins=a,b[,c,d] (2–4 ISINs).
