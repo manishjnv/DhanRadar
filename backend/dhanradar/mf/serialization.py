@@ -333,6 +333,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     # a poisoned dict (e.g. a smuggled numeric/score key) is stripped down to plain
     # text — see `serialize_watchlist_ai_response` below.
     "mf.watchlist_ai_item": frozenset({"text"}),
+    "mf.compare_ai_item": frozenset({"text"}),
     # P2 watchlist alerts (2026-08-21) — `GET /mf/watchlist/alerts` response row.
     # No raw score/weights; fund display name comes from the joined mf_funds row.
     "mf.watchlist_alert": frozenset(
@@ -805,6 +806,33 @@ def serialize_watchlist_ai_response(
     return {
         "summary_items": summary,
         "insight_items": insights,
+        "disclosure": data["disclosure"],
+        "not_advice": data["not_advice"],
+        "disclaimer_version": data["disclaimer_version"],
+    }
+
+
+def serialize_compare_ai_response(
+    *, summary_items: list[str], insight_items: list[str], disclosure: str,
+    not_advice: str, disclaimer_version: str,
+) -> dict[str, Any]:
+    data = _scrub({
+        "summary_items": [{"text": item} for item in summary_items],
+        "insight_items": [{"text": item} for item in insight_items],
+        "disclosure": disclosure,
+        "not_advice": not_advice,
+        "disclaimer_version": disclaimer_version,
+    })
+    _assert_no_forbidden(data)
+    return {
+        "summary_items": [
+            _apply_allowlist("mf.compare_ai_item", item).get("text", "")
+            for item in data["summary_items"]
+        ],
+        "insight_items": [
+            _apply_allowlist("mf.compare_ai_item", item).get("text", "")
+            for item in data["insight_items"]
+        ],
         "disclosure": data["disclosure"],
         "not_advice": data["not_advice"],
         "disclaimer_version": data["disclaimer_version"],

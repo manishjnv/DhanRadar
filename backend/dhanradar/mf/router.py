@@ -53,7 +53,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
-from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous, is_plus
+from dhanradar.deps import (
+    RequireConsent,
+    UserContext,
+    assert_consent,
+    current_user_or_anonymous,
+    is_plus,
+)
 from dhanradar.mf import history as mf_history
 from dhanradar.mf import service
 from dhanradar.mf.ledger import allow_ledger_purge
@@ -555,6 +561,8 @@ async def watchlist_similar(
 
 
 _WATCHLIST_AI_CACHE_TTL = 6 * 3600  # 6h — governed AI-gateway result, per-user only
+_COMPARE_AI_CACHE_TTL = 6 * 3600
+_rl_compare_ai = RateLimit(max_requests=20, window_seconds=60)
 _rl_alerts = RateLimit(max_requests=30, window_seconds=60)  # same as explorer; sibling bucket
 
 _ALERTS_MAX_ROWS = 50
@@ -617,6 +625,9 @@ async def get_watchlist_alerts(
         for r in rows
     ]
     return serialize_watchlist_alerts_response(items=items)
+
+
+@router.get("/watchlist/summary")
 async def watchlist_summary(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -873,6 +884,67 @@ async def compare_bundle(
     return serialize_compare_bundle_response(
         isins=raw_parts, fragments=fragments, as_of=as_of, pairwise=pairwise
     )
+
+
+@router.get("/compare/ai")
+async def compare_ai(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    isins: Annotated[str, Query(description="Comma-separated list of 2–4 distinct ISINs")],
+    _rl: Annotated[None, Depends(_rl_compare_ai)] = None,
+) -> dict:
+    """Governed AI comparison read for authenticated users (C3)."""
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    raw_parts = [value.strip() for value in isins.split(",") if value.strip()]
+    if len(raw_parts) < 2 or len(raw_parts) > 4 or len(set(raw_parts)) != len(raw_parts):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="compare_isin_invalid")
+    if not all(_COMPARE_ISIN_RE.match(value) for value in raw_parts):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="compare_isin_invalid")
+
+    from dhanradar.mf.compare_ai import generate_compare_ai
+    from dhanradar.mf.compare_read import get_compare_fragment
+    from dhanradar.mf.serialization import serialize_compare_ai_response
+
+    await assert_consent(user.user_id, "cross_border_ai", db)
+    from dhanradar.mf.commentary import is_commentary_entitled
+
+    if not await is_commentary_entitled(user.user_id, db):
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="upgrade_required")
+
+    cache_key = "mf:compare_ai:" + hashlib.sha256(
+        f"{user.user_id}:{','.join(sorted(raw_parts))}".encode()
+    ).hexdigest()
+    redis = get_redis()
+    try:
+        cached = await redis.get(cache_key)
+    except Exception:  # noqa: BLE001
+        cached = None
+    if cached is not None:
+        envelope = json.loads(cached)
+        response.headers["Cache-Control"] = "private"
+        return serialize_compare_ai_response(**envelope)
+
+    fragments = [fragment for isin in raw_parts if (fragment := await get_compare_fragment(db, isin))]
+    from dhanradar.ai_gateway.gateway import OpenRouterGateway
+
+    result = await generate_compare_ai(
+        OpenRouterGateway(),
+        user_id=user.user_id,
+        db=db,
+        fragments=fragments,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    envelope = serialize_compare_ai_response(**result)
+    try:
+        await redis.set(cache_key, json.dumps(envelope), ex=_COMPARE_AI_CACHE_TTL)
+    except Exception:  # noqa: BLE001
+        pass
+    response.headers["Cache-Control"] = "private"
+    return envelope
 
 
 # ---------------------------------------------------------------------------

@@ -876,6 +876,14 @@ export interface WatchlistAISummaryResponse {
   disclaimer_version: string;
 }
 
+export interface CompareAISummaryResponse {
+  summary_items: string[];
+  insight_items: string[];
+  disclosure: string;
+  not_advice: string;
+  disclaimer_version: string;
+}
+
 // ---------------------------------------------------------------------------
 // GET /mf/watchlist/alerts — per-fund alerts for the caller's watchlist.
 // ---------------------------------------------------------------------------
