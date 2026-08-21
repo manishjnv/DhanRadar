@@ -265,6 +265,30 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     # 2026-08-16) are the ONLY keys a row may carry; `links` additionally passes
     # the nested shape scrub in `_serialize_leaderboard_row` (fail-closed).
     "leaderboard.insight_row": frozenset({"text", "links"}),
+    # WATCHLIST_LIVE_DATA_PLAN.md Wave 1 (2026-08-21) — one row shape for
+    # GET /mf/watchlist/cards, same #2 bypass pattern as the leaderboard row
+    # shapes above (public fund facts composed server-side per caller ISIN,
+    # not a registry-gated concept — see serialize_watchlist_cards_response).
+    "mf.watchlist_card": frozenset(
+        {
+            "isin",
+            "scheme_name",
+            "fund_name_short",
+            "amc_name",
+            "sebi_category",
+            "category",
+            "expense_ratio_pct",
+            "risk_o_meter",
+            "nav_latest",
+            "nav_change_pct",
+            "nav_sparkline",
+            "return_1y_pct",
+            "return_3y_pct",
+            "return_5y_pct",
+            "verb_label",
+            "confidence_band",
+        }
+    ),
 }
 
 #: Entity-link isin shape (2026-08-16) — read-boundary re-validation of the same
@@ -572,3 +596,21 @@ def serialize_leaderboard_response(
         boards_clean[key] = out_board
 
     return {"as_of": as_of, "hero": hero_clean, "boards": boards_clean}
+
+
+def serialize_watchlist_cards_response(
+    *, as_of: str | None, items: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fail-closed serialization for `GET /mf/watchlist/cards` (WATCHLIST_LIVE_DATA_
+    PLAN.md Wave 1) — the same #2 scrub + B87 allowlist mechanism as
+    `serialize_concept`, applied per card via the `mf.watchlist_card` row shape (the
+    same bypass `serialize_leaderboard_response` uses above): a watchlist card is
+    public fund-fact content composed server-side per caller ISIN, not itself a
+    registry-gated concept, so this skips `get_concept()`/the withheld-status
+    envelope and applies the #2 scrub + fail-closed allowlist directly — the same
+    structural guarantee, a score field can never reach this response.
+    """
+    data = _scrub({"items": items})
+    _assert_no_forbidden(data)
+    cards = [_apply_allowlist("mf.watchlist_card", item) for item in data["items"]]
+    return {"as_of": as_of, "items": cards}

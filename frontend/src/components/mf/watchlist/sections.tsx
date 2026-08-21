@@ -6,18 +6,21 @@
  * Best Opportunities, Similar Funds, Recently Viewed) become horizontal
  * scrollers on phones and grids on larger screens — matching the mobile mockup.
  *
- * PURE-UI: every value is illustrative preview data from sampleData.ts. Buttons
- * are visual placeholders; selection + accordion + tab/chip toggles are local
- * view state only (no API, no business logic).
+ * PREVIEW sections (unprefixed exports below) render illustrative sample data
+ * from sampleData.ts — buttons are visual placeholders, no API, no business
+ * logic. LIVE sections (the `Live*` exports, WATCHLIST_LIVE_DATA_PLAN.md
+ * Wave 1) render the real `GET /mf/watchlist/cards` payload — band ring/word
+ * only (no raw score, non-neg #2), no advisory verbs.
  */
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import {
   Logo, BandRing, Semicircle, Donut, Card, SoWhat, RichText, CTA,
-  Spark, Pill, Chip, MetricTile, MiniLogo, SoftPill,
+  Spark, RealSpark, Pill, Chip, MetricTile, MiniLogo, SoftPill,
 } from './ui';
 import {
   COLORS, FUNDS, type Fund, HERO, BENEFITS, AI_SUMMARY, INSIGHTS,
@@ -26,6 +29,11 @@ import {
   RECENTLY_VIEWED, FAQ, FILTER_GROUPS,
   toStrength, STRENGTH_WORD, riskColor, verdictOf, momentumOf, fmtAum, DMMI_COLOR,
 } from './sampleData';
+import { fundDisplayName } from '@/features/mf/fundDisplayName';
+import { shortenAmcName } from '@/features/mf/explorer-format';
+import { FundScoreCell } from '@/components/mf/explore/FundScoreCell';
+import { CONFIDENCE_BAND_LABELS } from '@/lib/displayLabel';
+import type { WatchlistCard } from '@/features/mf/types';
 
 const { E, B, A, R, O } = COLORS;
 
@@ -48,7 +56,31 @@ export function AiCardsGrid({ items }: { items: string[] }) {
 }
 
 // ── S1 HERO ──────────────────────────────────────────────────────────────────
-export function HeroSection({ onCompare }: { onCompare?: () => void }) {
+/** Real Hero KPI inputs (WATCHLIST_LIVE_DATA_PLAN.md Wave 1 item 4) — computed
+ *  by the page from the `GET /mf/watchlist/cards` payload. */
+export interface LiveHeroStats {
+  fundsTracked: number;
+  upToday: number;
+  downToday: number;
+  bandCounts: Record<'high' | 'medium' | 'low', number>;
+  categoriesCovered: number;
+}
+
+export function HeroSection({ onCompare, stats }: { onCompare?: () => void; stats?: LiveHeroStats }) {
+  const kpis = stats
+    ? [
+        { label: 'Funds Tracked', value: String(stats.fundsTracked) },
+        { label: 'Up Today', value: String(stats.upToday), color: '#6EE7B7' },
+        { label: 'Down Today', value: String(stats.downToday), color: '#FCA5A5' },
+        { label: 'High Confidence', value: String(stats.bandCounts.high) },
+        { label: 'Medium Confidence', value: String(stats.bandCounts.medium) },
+        { label: 'Categories', value: String(stats.categoriesCovered) },
+      ]
+    : HERO.kpis;
+  const sub = stats
+    ? `${stats.fundsTracked} fund${stats.fundsTracked === 1 ? '' : 's'} you\u2019re tracking`
+    : HERO.sub;
+
   return (
     <div className="relative overflow-hidden rounded-3xl px-6 py-6 text-white shadow-xl sm:px-7"
       style={{ background: 'linear-gradient(135deg,#0B1F3A 0%,#16335E 60%,#1E40AF 100%)' }}>
@@ -58,7 +90,7 @@ export function HeroSection({ onCompare }: { onCompare?: () => void }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="font-sans text-[24px] font-extrabold tracking-tight">{HERO.title}</h1>
-            <div className="mt-1 text-small text-slate-300">{HERO.sub}</div>
+            <div className="mt-1 text-small text-slate-300">{sub}</div>
           </div>
           <div className="flex flex-wrap gap-2">
             {HERO.actions.map((a) => (
@@ -75,26 +107,35 @@ export function HeroSection({ onCompare }: { onCompare?: () => void }) {
 
         {/* KPIs */}
         <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-white/10 sm:grid-cols-3 lg:grid-cols-6">
-          {HERO.kpis.map((k) => (
+          {kpis.map((k) => (
             <div key={k.label} className="bg-white/[0.04] px-3.5 py-3">
               <div className="text-[9.5px] font-semibold uppercase leading-tight tracking-wide text-slate-400">{k.label}</div>
-              <div className={cn('mt-1 font-sans font-extrabold leading-tight', k.small ? 'text-sm' : 'text-[19px]')}
+              <div className={cn('mt-1 font-sans font-extrabold leading-tight', 'small' in k && k.small ? 'text-sm' : 'text-[19px]')}
                 style={{ color: k.color }}>
-                {k.value}{k.sub && <small className="ml-1 text-[11px] font-semibold opacity-85">{k.sub}</small>}
+                {k.value}{'sub' in k && k.sub && <small className="ml-1 text-[11px] font-semibold opacity-85">{k.sub}</small>}
               </div>
             </div>
           ))}
         </div>
 
-        {/* Summary pills */}
+        {/* Summary pills — sample DMMI/label mix when illustrative; band-count
+            breakdown (no mood/DMMI — that's Wave 2) when real. */}
         <div className="mt-4 flex flex-wrap gap-2.5">
-          {HERO.summary.map((s, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-caption font-semibold">
-              {s.prefix
-                ? <>{s.text} <span className="font-mono font-extrabold" style={{ color: s.color }}>{s.n}</span></>
-                : <><span className="font-mono font-extrabold" style={{ color: s.color }}>{s.n}</span> {s.text}</>}
-            </span>
-          ))}
+          {stats
+            ? (['high', 'medium', 'low'] as const)
+                .filter((band) => stats.bandCounts[band] > 0)
+                .map((band) => (
+                  <span key={band} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-caption font-semibold">
+                    <span className="font-mono font-extrabold">{stats.bandCounts[band]}</span> {CONFIDENCE_BAND_LABELS[band]}
+                  </span>
+                ))
+            : HERO.summary.map((s, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-caption font-semibold">
+                  {s.prefix
+                    ? <>{s.text} <span className="font-mono font-extrabold" style={{ color: s.color }}>{s.n}</span></>
+                    : <><span className="font-mono font-extrabold" style={{ color: s.color }}>{s.n}</span> {s.text}</>}
+                </span>
+              ))}
         </div>
       </div>
     </div>
@@ -570,8 +611,28 @@ export function BenefitsGrid() {
 }
 
 // ── COMPARE TRAY (bottom, shows when funds selected) ─────────────────────────
-export function CompareTray({ selected, onClear }: { selected: Set<number>; onClear: () => void }) {
+export interface CompareChip {
+  key: string;
+  letter: string;
+  color: string;
+}
+
+export function CompareTray({
+  selected, onClear, chips, compareHref,
+}: {
+  selected: Set<number>;
+  onClear: () => void;
+  /** Live override (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — render these avatar
+   *  chips instead of indexing the illustrative FUNDS sample array. */
+  chips?: CompareChip[];
+  /** Live override — when set, "Compare →" navigates here (/mf/compare?isins=…)
+   *  instead of being a decorative sample button. */
+  compareHref?: string;
+}) {
+  const router = useRouter();
   const show = selected.size > 0;
+  const items: CompareChip[] =
+    chips ?? [...selected].map((i) => ({ key: String(i), letter: FUNDS[i]?.logo ?? '?', color: FUNDS[i]?.color ?? COLORS.S }));
   return (
     <div className={cn(
       'fixed bottom-[78px] left-1/2 z-[54] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3.5 rounded-2xl border border-line-strong bg-surface px-4 py-3 shadow-xl transition-transform duration-300',
@@ -579,39 +640,353 @@ export function CompareTray({ selected, onClear }: { selected: Set<number>; onCl
     )}>
       <span className="text-caption font-bold text-ink">{selected.size} selected</span>
       <div className="flex">
-        {[...selected].map((i) => (
-          <span key={i} className="-ml-2 grid h-[30px] w-[30px] place-items-center rounded-lg border-2 border-surface font-sans text-[11px] font-extrabold text-white first:ml-0" style={{ background: FUNDS[i].color }} aria-hidden="true">
-            {FUNDS[i].logo}
+        {items.map((it) => (
+          <span key={it.key} className="-ml-2 grid h-[30px] w-[30px] place-items-center rounded-lg border-2 border-surface font-sans text-[11px] font-extrabold text-white first:ml-0" style={{ background: it.color }} aria-hidden="true">
+            {it.letter}
           </span>
         ))}
       </div>
       <span className="hidden text-[11px] text-ink-muted sm:inline">Select up to 4</span>
-      <CTA variant="primary">Compare →</CTA>
+      <CTA variant="primary" onClick={compareHref ? () => router.push(compareHref) : undefined}>Compare →</CTA>
       <CTA variant="ghost" onClick={onClear}>Clear</CTA>
     </div>
   );
 }
 
-// ── STICKY ACTION BAR ────────────────────────────────────────────────────────
-export function StickyBar() {
-  const actions = [
-    { label: '+ Add Funds', primary: true },
-    { label: '⇄ Compare' },
-    { label: '⬇ Export' },
-    { label: '🔍 Explore' },
-  ];
+// ---------------------------------------------------------------------------
+// LIVE sections (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) — real `GET
+// /mf/watchlist/cards` payload. Band ring/word only, no raw score (non-neg
+// #2); no advisory verbs. Deterministic avatar colour keeps every live tile
+// visually consistent with the PREVIEW palette without a stored brand map.
+// ---------------------------------------------------------------------------
+
+const AVATAR_PALETTE = [COLORS.N, COLORS.B, COLORS.E, COLORS.O, COLORS.V, COLORS.C, COLORS.A, COLORS.P, COLORS.T] as const;
+
+function avatarColorFor(seedText: string): string {
+  const code = (seedText.charCodeAt(0) || 0) + (seedText.charCodeAt(1) || 0);
+  return AVATAR_PALETTE[code % AVATAR_PALETTE.length];
+}
+
+function liveFundName(card: WatchlistCard): string {
+  return fundDisplayName(card.fund_name_short ?? card.scheme_name).name;
+}
+
+// ── LIVE S3 FUND CARD + GRID ─────────────────────────────────────────────────
+function LiveFundCard({
+  card, index, selected, onToggle, onRemove,
+}: { card: WatchlistCard; index: number; selected: boolean; onToggle: (i: number) => void; onRemove: () => void }) {
+  const name = liveFundName(card);
+  const amc = card.amc_name ? shortenAmcName(card.amc_name) : null;
+  const category = card.category ?? card.sebi_category;
+  const color = avatarColorFor(card.isin);
+  const letter = name[0]?.toUpperCase() ?? '?';
+
   return (
-    <div className="fixed bottom-4 left-1/2 z-[55] max-w-[calc(100%-1.25rem)] -translate-x-1/2 rounded-[16px] shadow-xl"
-      style={{ background: 'rgba(11,31,58,.97)', backdropFilter: 'blur(12px)' }}>
-      <div className="flex items-center gap-1.5 overflow-x-auto px-3 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {actions.map((a) => (
-          <button key={a.label} type="button"
-            className={cn('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3.5 py-2 text-small font-semibold text-white transition-colors focus-visible:outline-none',
-              a.primary ? 'border-royal bg-royal' : 'border-white/14 bg-white/10 hover:bg-white/20')}>
-            {a.label}
-          </button>
-        ))}
+    <div className="relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+      <button type="button" onClick={() => onToggle(index)} aria-pressed={selected}
+        aria-label={selected ? `Remove ${name} from comparison` : `Add ${name} to comparison`}
+        className={cn(
+          'absolute right-3 top-3 z-[3] grid h-[22px] w-[22px] place-items-center rounded-[7px] border-2 text-xs font-extrabold transition-colors',
+          selected ? 'border-royal bg-royal text-white' : 'border-line-strong bg-surface text-transparent',
+        )}>
+        ✓
+      </button>
+      <div className="flex-1 p-4">
+        <div className="flex items-start gap-3 pr-7">
+          <Logo letter={letter} color={color} size={40} radius={11} font={15} />
+          <div className="min-w-0">
+            <div className="text-[13.5px] font-bold leading-tight text-ink">{name}</div>
+            <div className="mt-0.5 text-[11px] text-ink-muted">{[amc, category].filter(Boolean).join(' · ')}</div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-end justify-between">
+          <div>
+            <div className="font-mono text-lg font-extrabold text-ink">
+              {card.nav_latest != null ? `₹${card.nav_latest.toFixed(2)}` : '—'}
+            </div>
+            <div className="text-[9.5px] font-semibold uppercase tracking-wide text-ink-muted">NAV</div>
+          </div>
+          {card.nav_change_pct != null && (
+            <div className="text-right">
+              <div className={cn('font-mono text-xs font-bold', card.nav_change_pct >= 0 ? 'text-emerald' : 'text-red')}>
+                {card.nav_change_pct >= 0 ? '+' : ''}{card.nav_change_pct.toFixed(2)}%
+              </div>
+              <div className="text-[9.5px] text-ink-muted">today</div>
+            </div>
+          )}
+        </div>
+
+        {card.nav_sparkline.length > 1 && (
+          <div className="mt-2">
+            <RealSpark points={card.nav_sparkline} up={(card.nav_change_pct ?? 0) >= 0} />
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center gap-3 border-t border-line pt-3">
+          <FundScoreCell label={card.verb_label ?? 'insufficient_data'} confidenceBand={card.confidence_band} ringSize={44} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-1.5">
+          <MetricTile value={card.return_1y_pct != null ? `${card.return_1y_pct.toFixed(1)}%` : '—'} label="1Y" tone="pos" />
+          <MetricTile value={card.return_3y_pct != null ? `${card.return_3y_pct.toFixed(1)}%` : '—'} label="3Y" tone="pos" />
+          <MetricTile value={card.expense_ratio_pct != null ? `${card.expense_ratio_pct.toFixed(2)}%` : '—'} label="Cost" />
+        </div>
+
+        {card.risk_o_meter && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            <SoftPill>{card.risk_o_meter}</SoftPill>
+          </div>
+        )}
+      </div>
+
+      <div className="flex border-t border-line">
+        <Link href={`/mf/fund/${card.isin}`}
+          className="flex flex-1 items-center justify-center gap-1.5 border-r border-line px-1 py-2.5 text-[11.5px] font-semibold text-ink-secondary transition-colors hover:bg-surface-2 hover:text-royal">
+          👁 Details
+        </Link>
+        <button type="button" onClick={() => onToggle(index)}
+          className="flex flex-1 items-center justify-center gap-1.5 border-r border-line px-1 py-2.5 text-[11.5px] font-semibold text-ink-secondary transition-colors hover:bg-surface-2 hover:text-royal">
+          ⇄ Compare
+        </button>
+        <button type="button" onClick={onRemove}
+          className="flex flex-1 items-center justify-center gap-1.5 border-r border-line px-1 py-2.5 text-[11.5px] font-semibold text-ink-secondary transition-colors hover:bg-surface-2 hover:text-royal">
+          ✕ Remove
+        </button>
+        <Link href={`/mf/fund/${card.isin}`}
+          className="flex flex-1 items-center justify-center gap-1.5 px-1 py-2.5 text-[11.5px] font-bold text-royal transition-colors hover:bg-surface-2">
+          View Fund
+        </Link>
       </div>
     </div>
   );
 }
+
+export function LiveFundsSection({
+  cards, selected, onToggle, onRemove,
+}: { cards: WatchlistCard[]; selected: Set<number>; onToggle: (i: number) => void; onRemove: (isin: string) => void }) {
+  if (cards.length === 0) {
+    return <p className="text-caption text-ink-muted">No funds match the current search/filter.</p>;
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+      {cards.map((c, i) => (
+        <LiveFundCard key={c.isin} card={c} index={i} selected={selected.has(i)} onToggle={onToggle} onRemove={() => onRemove(c.isin)} />
+      ))}
+    </div>
+  );
+}
+
+// ── LIVE S2 FILTER & SORT ────────────────────────────────────────────────────
+export type LiveSortKey = 'recent' | 'return_1y_desc' | 'return_3y_desc' | 'name_asc';
+
+/** Same `sort` state drives both the <select> value and this comparator — the
+ *  selected option can never drift from the sort actually applied (the
+ *  "atomic with headers" leaderboard trap the plan calls out). */
+export function sortWatchlistCards(cards: WatchlistCard[], sort: LiveSortKey): WatchlistCard[] {
+  const out = [...cards];
+  switch (sort) {
+    case 'return_1y_desc':
+      out.sort((a, b) => (b.return_1y_pct ?? -Infinity) - (a.return_1y_pct ?? -Infinity));
+      break;
+    case 'return_3y_desc':
+      out.sort((a, b) => (b.return_3y_pct ?? -Infinity) - (a.return_3y_pct ?? -Infinity));
+      break;
+    case 'name_asc':
+      out.sort((a, b) => liveFundName(a).localeCompare(liveFundName(b)));
+      break;
+    case 'recent':
+    default:
+      break; // keep the payload's own (watchlist-add) order
+  }
+  return out;
+}
+
+export function watchlistCardMatchesSearch(card: WatchlistCard, search: string): boolean {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [card.fund_name_short, card.scheme_name, card.amc_name].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(q);
+}
+
+export function LiveFilterSection({
+  search, onSearchChange, sort, onSortChange,
+}: { search: string; onSearchChange: (v: string) => void; sort: LiveSortKey; onSortChange: (v: LiveSortKey) => void }) {
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className="relative min-w-[200px] flex-1 sm:max-w-[320px]">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path d="M16 16 L21 21" />
+          </svg>
+          <input type="search" value={search} onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search watchlist…" aria-label="Search watchlist"
+            className="h-10 w-full rounded-xl border border-line-strong bg-surface pl-9 pr-3 text-small text-ink outline-none focus:border-royal focus:ring-2 focus:ring-royal/20" />
+        </div>
+        <label className="ml-auto flex items-center gap-2 text-caption text-ink-muted">
+          Sort
+          <select value={sort} onChange={(e) => onSortChange(e.target.value as LiveSortKey)}
+            className="cursor-pointer rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-caption font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
+            <option value="recent">Recently Added</option>
+            <option value="return_1y_desc">1Y Return</option>
+            <option value="return_3y_desc">3Y Return</option>
+            <option value="name_asc">Alphabetical</option>
+          </select>
+        </label>
+      </div>
+    </Card>
+  );
+}
+
+// ── LIVE S5 CATEGORY LEADERS (renamed from "Best Opportunities") ────────────
+export interface CategoryLeader {
+  category: string;
+  card: WatchlistCard;
+}
+
+export function computeCategoryLeaders(cards: WatchlistCard[]): CategoryLeader[] {
+  const byCategory = new Map<string, WatchlistCard>();
+  for (const c of cards) {
+    const category = c.category ?? c.sebi_category;
+    if (!category || c.return_1y_pct == null) continue;
+    const cur = byCategory.get(category);
+    if (!cur || (cur.return_1y_pct ?? -Infinity) < c.return_1y_pct) byCategory.set(category, c);
+  }
+  return [...byCategory.entries()].map(([category, card]) => ({ category, card }));
+}
+
+export function LiveCategoryLeadersSection({ leaders }: { leaders: CategoryLeader[] }) {
+  if (leaders.length === 0) {
+    return <p className="text-caption text-ink-muted">Add funds across different categories to see category leaders here.</p>;
+  }
+  return (
+    <Rail cols="sm:grid-cols-2 lg:grid-cols-4">
+      {leaders.map(({ category, card }) => {
+        const name = liveFundName(card);
+        const color = avatarColorFor(card.isin);
+        return (
+          <div key={category} className="w-[160px] shrink-0 rounded-2xl border border-line bg-surface p-4 sm:w-auto">
+            <div className="font-mono text-[9.5px] font-bold uppercase tracking-wide text-ink-muted">⭐ {category}</div>
+            <div className="mt-2.5 flex items-center gap-2.5">
+              <Logo letter={name[0]?.toUpperCase() ?? '?'} color={color} size={32} radius={9} font={12} />
+              <div className="text-xs font-bold leading-tight text-ink">{name}</div>
+            </div>
+            <div className="mt-2.5 font-sans text-lg font-extrabold text-emerald">
+              {card.return_1y_pct != null ? `${card.return_1y_pct.toFixed(1)}%` : '—'}
+            </div>
+            <div className="mt-0.5 text-[10.5px] text-ink-muted">1Y return, in your watchlist</div>
+          </div>
+        );
+      })}
+    </Rail>
+  );
+}
+
+// ── LIVE S8 LEADERBOARD ──────────────────────────────────────────────────────
+export function LiveLeaderboardSection({ cards }: { cards: WatchlistCard[] }) {
+  const ranked = React.useMemo(
+    () => [...cards].sort((a, b) => (b.return_1y_pct ?? -Infinity) - (a.return_1y_pct ?? -Infinity)),
+    [cards],
+  );
+  if (ranked.length === 0) {
+    return <p className="text-caption text-ink-muted">Save funds to see them ranked here.</p>;
+  }
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-small">
+          <thead>
+            <tr>
+              {['#', 'Fund', 'Label', 'Risk', '1Y Return'].map((h, i) => (
+                <th key={h} className={cn('border-b-2 border-line px-3.5 py-2.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-muted', i <= 1 ? 'text-left' : 'text-right')}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ranked.map((c, i) => {
+              const name = liveFundName(c);
+              const color = avatarColorFor(c.isin);
+              return (
+                <tr key={c.isin}>
+                  <td className="border-b border-line px-3.5 py-3 text-left font-sans font-extrabold text-ink-muted last:border-b-0">{i + 1}</td>
+                  <td className="border-b border-line px-3.5 py-3 text-left">
+                    <div className="flex items-center gap-2.5">
+                      <Logo letter={name[0]?.toUpperCase() ?? '?'} color={color} size={30} radius={8} font={12} />
+                      <div>
+                        <div className="text-[12.5px] font-bold text-ink">{name}</div>
+                        <div className="text-[10.5px] font-medium text-ink-muted">{c.category ?? c.sebi_category ?? '—'}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border-b border-line px-3.5 py-3 text-right">
+                    <FundScoreCell label={c.verb_label ?? 'insufficient_data'} confidenceBand={c.confidence_band} ringSize={28} />
+                  </td>
+                  <td className="border-b border-line px-3.5 py-3 text-right"><span className="text-[11px] text-ink-secondary">{c.risk_o_meter ?? '—'}</span></td>
+                  <td className={cn('border-b border-line px-3.5 py-3 text-right font-mono font-bold', (c.return_1y_pct ?? 0) >= 0 ? 'text-emerald' : 'text-red')}>
+                    {c.return_1y_pct != null ? `${c.return_1y_pct >= 0 ? '+' : ''}${c.return_1y_pct.toFixed(1)}%` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// ── LIVE S11 STATISTICS ──────────────────────────────────────────────────────
+export function LiveStatsSection({ cards }: { cards: WatchlistCard[] }) {
+  const withReturn = cards.filter((c) => c.return_1y_pct != null);
+  const avgReturn = withReturn.length
+    ? withReturn.reduce((s, c) => s + (c.return_1y_pct ?? 0), 0) / withReturn.length
+    : null;
+  const withExpense = cards.filter((c) => c.expense_ratio_pct != null);
+  const avgExpense = withExpense.length
+    ? withExpense.reduce((s, c) => s + (c.expense_ratio_pct ?? 0), 0) / withExpense.length
+    : null;
+
+  const bandCounts: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 0, low: 0 };
+  for (const c of cards) if (c.confidence_band) bandCounts[c.confidence_band] += 1;
+  const topBand = (Object.entries(bandCounts) as ['high' | 'medium' | 'low', number][])
+    .sort((a, b) => b[1] - a[1])[0];
+
+  const catCounts = new Map<string, number>();
+  for (const c of cards) {
+    const category = c.category ?? c.sebi_category ?? 'Other';
+    catCounts.set(category, (catCounts.get(category) ?? 0) + 1);
+  }
+  const categoryMix: [string, number, string][] = [...catCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count], i) => [name, count, AVATAR_PALETTE[i % AVATAR_PALETTE.length]]);
+
+  const stats: [string, string, string][] = [
+    [avgReturn != null ? `${avgReturn >= 0 ? '+' : ''}${avgReturn.toFixed(1)}%` : '—', 'Avg 1Y Return', COLORS.E],
+    [topBand && topBand[1] > 0 ? CONFIDENCE_BAND_LABELS[topBand[0]] : '—', 'Most Common Confidence', COLORS.B],
+    [avgExpense != null ? `${avgExpense.toFixed(2)}%` : '—', 'Avg Cost', 'var(--ink, #0F172A)'],
+    [String(cards.length), 'Funds Tracked', COLORS.B],
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-[repeat(4,1fr)_1.2fr]">
+      {stats.map(([v, l, c]) => (
+        <div key={l} className="rounded-2xl border border-line bg-surface p-4 text-center">
+          <div className="font-sans text-[22px] font-extrabold" style={{ color: c }}>{v}</div>
+          <div className="mt-1 text-[11px] font-semibold text-ink-muted">{l}</div>
+        </div>
+      ))}
+      <div className="col-span-2 flex items-center gap-3.5 rounded-2xl border border-line bg-surface p-4 lg:col-span-1">
+        <Donut data={categoryMix} size={90} thick={16} />
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-muted">Category Mix</div>
+          {categoryMix.slice(0, 4).map(([n, v, c]) => (
+            <div key={n} className="flex items-center gap-1.5 py-px text-[11px] text-ink-secondary">
+              <span className="h-2 w-2 rounded-sm" style={{ background: c }} />{n} · {v}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+

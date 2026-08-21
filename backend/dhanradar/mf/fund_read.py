@@ -248,6 +248,45 @@ async def get_fund_nav_series(
     }
 
 
+_WATCHLIST_SPARKLINE_POINTS = 30  # WATCHLIST_LIVE_DATA_PLAN.md Wave 1 — S03 card sparkline
+
+
+async def get_watchlist_card(session: AsyncSession, isin: str) -> dict | None:
+    """One row for `GET /mf/watchlist/cards` (WATCHLIST_LIVE_DATA_PLAN.md Wave 1) —
+    composes `get_fund_head`'s headline facts (name/AMC/category/TER/riskometer/NAV/
+    day-change/returns/label/confidence-band) with a 30-point NAV sparkline. Reuses
+    `get_fund_head` + `_load_nav_points` — the same read-only tables `fund.head`
+    already queries, no new query shape; never selects unified_score/rank weights.
+    """
+    head = await get_fund_head(session, isin)
+    if head is None:
+        return None
+
+    nav_points = await _load_nav_points(session, isin)
+    sparkline = [
+        {"d": d.isoformat(), "nav": nav} for d, nav in nav_points[-_WATCHLIST_SPARKLINE_POINTS:]
+    ]
+
+    return {
+        "isin": head["isin"],
+        "scheme_name": head["scheme_name"],
+        "fund_name_short": head["fund_name_short"],
+        "amc_name": head["amc_name"],
+        "sebi_category": head["sebi_category"],
+        "category": head["category"],
+        "expense_ratio_pct": head["expense_ratio_pct"],
+        "risk_o_meter": head["risk_o_meter"],
+        "nav_latest": head["nav_latest"],
+        "nav_change_pct": head["nav_change_pct"],
+        "nav_sparkline": sparkline,
+        "return_1y_pct": head["return_1y_pct"],
+        "return_3y_pct": head["return_3y_pct"],
+        "return_5y_pct": head["return_5y_pct"],
+        "verb_label": head["verb_label"],
+        "confidence_band": head["confidence_band"],
+    }
+
+
 def _percentile_of_score(value: float, cohort: list[float]) -> float:
     """Percentile RANK (0-100) of `value` within `cohort` (weak method, ties averaged).
 
