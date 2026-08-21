@@ -159,6 +159,120 @@ function FlagsTable({ flags }: { flags: AdminFlag[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// UI section coverage — static build-tracker (measured from frontend code,
+// not derivable from any API). Re-measure and update when a page's sections
+// get wired to live data. Census method: top-level sections per page,
+// "live" = fed by a features/*/api hook, apiClient, or /api/v1 fetch.
+// ---------------------------------------------------------------------------
+const COVERAGE_AS_OF = '21 Aug 2026';
+
+type PageCoverage = {
+  page: string;
+  route: string;
+  total: number;
+  live: number;
+  pending: string; // sections still on sample/static data, plain words
+  byDesign?: boolean; // static on purpose — not a gap
+};
+
+const UI_COVERAGE: PageCoverage[] = [
+  { page: 'Watchlist', route: '/mf/watchlist', total: 16, live: 1, pending: 'Everything except the saved-funds list (15 preview sections)' },
+  { page: 'Fund Compare', route: '/mf/compare', total: 24, live: 4, pending: 'All but hero, performance, ranking, cost (20 sample sections)' },
+  { page: 'Pricing', route: '/pricing', total: 4, live: 1, pending: 'Hero, comparison table, FAQ (plans list is live)' },
+  { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 6, pending: 'Health, goals, overlap, cost, AMC, timeline, projections, AI, report + 8 more' },
+  { page: 'Fund Explorer', route: '/mf/explore', total: 16, live: 5, pending: 'AI discovery, category leaderboards, fund flow, momentum, consistency, low-cost, beginner picks, AI feed, shortlist, filters, FAQ' },
+  { page: 'Signal', route: '/signal', total: 13, live: 12, pending: '"How Signal works" explainer copy' },
+  { page: 'Leaderboard', route: '/mf/leaderboard', total: 16, live: 15, pending: 'FAQ copy' },
+  { page: 'Fund Detail', route: '/mf/fund/[isin]', total: 22, live: 21, pending: 'Entry-timing explainer' },
+  { page: 'Invest (BSE UAT)', route: '/mf/invest/[isin]', total: 1, live: 1, pending: '—' },
+  { page: 'Market Mood', route: '/mood', total: 8, live: 8, pending: '—' },
+  { page: 'Learn', route: '/learn', total: 2, live: 2, pending: '—' },
+  { page: 'Settings', route: '/settings/*', total: 4, live: 4, pending: '—' },
+  { page: 'Calculators', route: '/calculators', total: 7, live: 0, pending: 'Pure client-side engines — no backend needed', byDesign: true },
+  { page: 'Landing', route: '/', total: 5, live: 0, pending: 'Marketing copy — static on purpose', byDesign: true },
+];
+
+function CoverageBadge({ pct, byDesign }: { pct: number; byDesign?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-caption font-medium tabular-nums',
+        byDesign
+          ? 'bg-surface-2 text-ink-muted border border-line'
+          : pct >= 90
+            ? 'bg-emerald/10 text-emerald'
+            : pct >= 50
+              ? 'bg-royal/10 text-royal'
+              : 'bg-amber/10 text-amber',
+      )}
+    >
+      {byDesign ? 'by design' : `${pct}%`}
+    </span>
+  );
+}
+
+function UiCoverageTable() {
+  const rows = [...UI_COVERAGE].sort((a, b) => {
+    if (!!a.byDesign !== !!b.byDesign) return a.byDesign ? 1 : -1;
+    return a.live / a.total - b.live / b.total;
+  });
+  const tracked = UI_COVERAGE.filter((r) => !r.byDesign);
+  const totalSections = tracked.reduce((s, r) => s + r.total, 0);
+  const totalLive = tracked.reduce((s, r) => s + r.live, 0);
+
+  return (
+    <section aria-labelledby="section-ui-coverage">
+      <Card>
+        <CardHeader>
+          <CardTitle id="section-ui-coverage">UI Section Coverage</CardTitle>
+          <p className="mt-1 text-small text-ink-muted">
+            How many sections on each page show live data versus sample or placeholder content.
+            Measured from the frontend code on {COVERAGE_AS_OF} — {totalLive} of {totalSections} tracked
+            sections are live. Update this list when a page gets wired up.
+          </p>
+        </CardHeader>
+        <CardBody>
+          <div className="overflow-x-auto">
+            <table className="w-full text-small">
+              <caption className="sr-only">Per-page count of UI sections fed by live backend data</caption>
+              <thead>
+                <tr className="border-b border-line">
+                  <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Page</th>
+                  <th scope="col" className="pb-2 pr-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Sections</th>
+                  <th scope="col" className="pb-2 pr-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Live</th>
+                  <th scope="col" className="pb-2 pr-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Needs data</th>
+                  <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Waiting on live data</th>
+                  <th scope="col" className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.route} className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors">
+                    <td className="py-3 pr-4 whitespace-nowrap">
+                      <span className="text-small font-medium text-ink">{r.page}</span>
+                      <span className="block font-mono text-[10px] text-ink-faint mt-0.5">{r.route}</span>
+                    </td>
+                    <td className="py-3 pr-4 text-right tabular-nums text-ink-secondary">{r.total}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums text-ink-secondary">{r.live}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums font-medium text-ink">
+                      {r.byDesign ? '—' : r.total - r.live}
+                    </td>
+                    <td className="py-3 pr-4 text-caption text-ink-muted max-w-md">{r.pending}</td>
+                    <td className="py-3">
+                      <CoverageBadge pct={Math.round((r.live / r.total) * 100)} byDesign={r.byDesign} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardBody>
+      </Card>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Flags page
 // ---------------------------------------------------------------------------
 export default function AdminFlagsPage() {
@@ -216,6 +330,9 @@ export default function AdminFlagsPage() {
           </CardBody>
         </Card>
       </section>
+
+      {/* UI section coverage — static build tracker */}
+      <UiCoverageTable />
     </div>
   );
 }
