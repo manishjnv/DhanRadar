@@ -30,6 +30,7 @@ import re
 import tempfile
 import uuid
 from datetime import date
+from itertools import combinations
 from typing import Annotated
 
 from fastapi import (
@@ -97,6 +98,7 @@ _rl_explorer = RateLimit(max_requests=30, window_seconds=60)  # public explorer 
 # Dedicated compare bucket: tighter than the explorer bucket (COMPARE_LIVE_DATA_PLAN.md §Architecture).
 _rl_compare = RateLimit(max_requests=20, window_seconds=60)
 _require_mf_consent = RequireConsent("mf_analytics")  # B20 — DPDP data-processing gate
+_CMP_OVERLAP_TTL = 21_600  # 6-hour TTL for mf:cmp:overlap:{a}:{b} Redis keys
 
 # Per-IP distinct-ISIN budget for /compare/bundle (unauthenticated combinatorial endpoint).
 _COMPARE_ISIN_BUDGET = 40
@@ -758,14 +760,20 @@ async def compare_bundle(
     # Per-IP distinct-ISIN budget check (checked before any DB composition).
     await _check_isin_budget(request, raw_parts)
 
-    # Batch MGET — one round-trip for all fragment cache keys.
+    # Sorted ISIN pairs for pairwise overlap (key = sorted pair, TTL 6h).
+    sorted_pairs = [(min(a, b), max(a, b)) for a, b in combinations(raw_parts, 2)]
+
+    # Batch MGET — one round-trip: per-ISIN fragment keys + pairwise overlap keys.
     redis = get_redis()
-    cache_keys = [f"mf:cmp:{isin}" for isin in raw_parts]
-    cached_values = await redis.mget(*cache_keys)
+    isin_keys = [f"mf:cmp:{isin}" for isin in raw_parts]
+    overlap_keys = [f"mf:cmp:overlap:{a}:{b}" for a, b in sorted_pairs]
+    all_cached = await redis.mget(*(isin_keys + overlap_keys))
+    isin_cached = all_cached[: len(isin_keys)]
+    overlap_cached = all_cached[len(isin_keys) :]
 
     fragments: dict[str, dict | None] = {}
     cold_isins: list[str] = []
-    for isin, cached in zip(raw_parts, cached_values):
+    for isin, cached in zip(raw_parts, isin_cached):
         if cached is not None:
             fragments[isin] = json.loads(cached)
         else:
@@ -780,6 +788,19 @@ async def compare_bundle(
             if frag is not None:
                 await redis.set(f"mf:cmp:{isin}", json.dumps(frag), ex=_COMPARE_FRAGMENT_TTL)
 
+    # Pairwise overlap: read from cache or compute and cache (TTL 6h).
+    from dhanradar.mf.compare_read import build_pairwise_overlap
+
+    pairwise: dict[str, dict] = {}
+    for (a, b), cached_overlap in zip(sorted_pairs, overlap_cached):
+        pair_key = f"{a}|{b}"
+        if cached_overlap is not None:
+            pairwise[pair_key] = json.loads(cached_overlap)
+        else:
+            result = build_pairwise_overlap(fragments.get(a), fragments.get(b), a, b)
+            pairwise[pair_key] = result
+            await redis.set(f"mf:cmp:overlap:{a}:{b}", json.dumps(result), ex=_CMP_OVERLAP_TTL)
+
     # as_of: freshest nav_date across all non-null fragments.
     as_of = max(
         (frag["nav_date"] for frag in fragments.values() if frag and frag.get("nav_date")),
@@ -789,7 +810,9 @@ async def compare_bundle(
     from dhanradar.mf.serialization import serialize_compare_bundle_response
 
     response.headers["Cache-Control"] = "public, max-age=300"
-    return serialize_compare_bundle_response(isins=raw_parts, fragments=fragments, as_of=as_of)
+    return serialize_compare_bundle_response(
+        isins=raw_parts, fragments=fragments, as_of=as_of, pairwise=pairwise
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import * as React from 'react';
 import { cn } from '@/lib/cn';
 import { HeroRing, Accordion, ChipToggle } from '@/components/mf/funddetail/parts';
 import {
-  FUNDS, EDU_READ, SCOREBOARD, DMMI, PERF, ROLLING, RANKT, RANK_SERIES,
+  FUNDS, EDU_READ, SCOREBOARD, PERF, ROLLING, RANKT, RANK_SERIES,
   RISK_HEAT, ADV_RISK, FIT, HOLD_STATS, HOLDINGS, FLOW, MGRS, AMC, COST, COST_VIS, TAX,
   CHANGES, ALTS, AI_INSIGHTS, FAQ, STICKY, SIPDATA, SIP_AMOUNTS,
   SIP_DURATIONS, fmtCr, toStrength,
@@ -22,6 +22,18 @@ import type { CompareFund, Row } from './sampleData';
 import {
   SoWhat, RichText, Panel, WinChip, Dot, CompareTable, ScoreboardRows, HeatTable, CTA,
 } from './ui';
+import Link from 'next/link';
+import { useMoodCurrent } from '@/features/mood/api';
+import { useMe } from '@/features/auth/api';
+import { useFundPortfolioFit, useLatestPortfolio } from '@/features/mf/api';
+import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { relativeTime } from '@/features/mood/relative-time';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import type {
+  CompareCompositionFragment, ComparePeopleFragment, CompareFlowFragment,
+  CompareEventItem, CompareAmcFragment, CompareAlternative, ComparePairwiseOverlap,
+} from '@/features/mf/types';
 
 const STRENGTH_WORD = { strong: 'Strong', good: 'Good', moderate: 'Moderate', soft: 'Soft' } as const;
 const ASSESS_TOP = { in_form: 'In Form', on_track: 'On Track', off_track: 'Off Track', out_of_form: 'Out of Form', insufficient_data: '—' } as const;
@@ -144,12 +156,45 @@ export function ScoreboardSection({ funds = FUNDS, rows: liveRows }: { funds?: C
   );
 }
 
-// ── S6 — Market mood (DMMI) — band word, no index number ─────────────────────
+// ── S6 — Market mood — shared regime gauge (live via useMoodCurrent) ─────────
 export function MoodSection() {
+  const { data: mood, isLoading, isError } = useMoodCurrent();
+
+  if (isLoading) {
+    return <Panel><Skeleton className="h-28 w-full rounded-xl" /></Panel>;
+  }
+
+  if (isError || !mood || mood.data_quality === 'unavailable') {
+    return (
+      <Panel>
+        <EmptyState
+          title="Market mood unavailable"
+          description="The market mood snapshot could not be loaded. Check back shortly."
+        />
+      </Panel>
+    );
+  }
+
+  const regimeLabel = REGIME_DISPLAY[mood.regime] ?? REGIME_DISPLAY.insufficient_data;
+
   return (
     <Panel>
-      <CompareTable rows={DMMI} firstCol="Market phase" />
-      <SoWhat><RichText text="**Shared market context.** These funds operate in the same market environment. The phase shown is a factual current reading — how each fund has historically behaved in a given phase does not predict behaviour in future similar phases." /></SoWhat>
+      <div className="flex flex-wrap items-center gap-6">
+        <MoodGauge regime={mood.regime} confidenceBand={mood.confidence_band} className="shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold text-ink">{regimeLabel}</div>
+          <div className="mt-1.5 text-small leading-relaxed text-ink-muted">
+            All compared funds operate in the same market environment. The current regime is a
+            factual reading — past behaviour in a given regime does not predict future results.
+          </div>
+          <Link
+            href="/mood"
+            className="mt-2 inline-flex items-center gap-1 text-caption font-semibold text-royal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          >
+            Full market mood →
+          </Link>
+        </div>
+      </div>
     </Panel>
   );
 }
@@ -350,91 +395,410 @@ export function RiskSection({ liveRows }: { liveRows?: Row[] }) {
 }
 
 // ── S12 — Portfolio fit ──────────────────────────────────────────────────────
-export function FitSection() {
+// Per-fund child: useFundPortfolioFit is always called unconditionally inside.
+function FundFitCard({ portfolioId, isin, fund }: { portfolioId: string; isin: string; fund: CompareFund }) {
+  const { data: envelope, isLoading, isError } = useFundPortfolioFit(portfolioId, isin);
+  const fit = envelope?.data ?? null;
+
   return (
-    <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-3">
-      {FIT.map((c) => {
-        const f = FUNDS.find((x) => x.key === c.key)!;
-        return (
-          <div key={c.key} className={cn('rounded-2xl border p-4.5', c.best ? 'border-emerald shadow-[0_0_0_1px_var(--dr-emerald,#00B386)]' : 'border-line')} style={{ padding: 18 }}>
-            <span className="inline-block rounded-md px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.05em]" style={{ background: `${c.tone}1A`, color: c.tone }}>{c.label}</span>
-            <div className="mt-3 text-sm font-bold text-ink">{f.short}</div>
-            <div className="mt-3">
-              {c.rows.map(([l, v], i, a) => (
-                <div key={l} className={cn('flex justify-between py-1.5 text-caption', i < a.length - 1 && 'border-b border-line')}>
-                  <span className="text-ink-muted">{l}</span><span className="font-mono font-bold text-ink">{v}</span>
+    <div className="rounded-2xl border border-line p-4">
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl font-extrabold text-white" style={{ background: fund.topGradient }}>{fund.logo}</div>
+        <div className="text-sm font-bold text-ink">{fund.short}</div>
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-20 w-full rounded-xl" />
+      ) : isError || !fit ? (
+        <EmptyState
+          title="Portfolio fit unavailable"
+          description="Upload your CAS statement to see how this fund relates to your portfolio."
+          className="py-4"
+        />
+      ) : (
+        <div className="space-y-1">
+          {fit.category_allocation_pct != null && (
+            <div className="flex justify-between py-1 text-caption border-b border-line">
+              <span className="text-ink-muted">Category in your portfolio</span>
+              <span className="font-mono font-bold text-ink">{fit.category_allocation_pct.toFixed(1)}%</span>
+            </div>
+          )}
+          {fit.fund_count_in_category != null && (
+            <div className="flex justify-between py-1 text-caption border-b border-line">
+              <span className="text-ink-muted">Funds in category you hold</span>
+              <span className="font-mono font-bold text-ink">{fit.fund_count_in_category}</span>
+            </div>
+          )}
+          {fit.overlap.length > 0 && (
+            <div className="mt-2">
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-ink-muted">Holdings overlap with funds you hold</div>
+              {fit.overlap.slice(0, 3).map((entry) => (
+                <div key={entry.holding_name} className="flex justify-between py-1 text-caption">
+                  <span className="truncate text-ink-secondary">{entry.holding_name}</span>
+                  <span className="ml-2 shrink-0 font-mono font-bold text-ink">{entry.overlap_pct.toFixed(1)}%</span>
                 </div>
               ))}
             </div>
-          </div>
-        );
-      })}
+          )}
+          <div className="mt-2 rounded-lg bg-surface-2 p-2.5 text-[11px] leading-snug text-ink-muted">{fit.observation}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function FitSection({ isins, funds }: { isins?: string[]; funds?: CompareFund[] }) {
+  // Always called unconditionally; FundFitCard also calls its hook unconditionally.
+  const { data: me, isLoading: meLoading, isError: meIsError } = useMe();
+  const { data: latestPortfolio } = useLatestPortfolio();
+  const portfolioId = latestPortfolio?.portfolio_id ?? '';
+  const isAnonymous = !meLoading && (meIsError || !me);
+  const live = !!isins && isins.length >= 2 && !!funds;
+
+  if (!live) {
+    return (
+      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-3">
+        {FIT.map((c) => {
+          const f = FUNDS.find((x) => x.key === c.key)!;
+          return (
+            <div key={c.key} className="rounded-2xl border border-line p-4.5" style={{ padding: 18 }}>
+              <div className="text-sm font-bold text-ink">{f.short}</div>
+              <div className="mt-3">
+                {c.rows.map(([l, v], i, a) => (
+                  <div key={l} className={cn('flex justify-between py-1.5 text-caption', i < a.length - 1 && 'border-b border-line')}>
+                    <span className="text-ink-muted">{l}</span><span className="font-mono font-bold text-ink">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (meLoading) {
+    return <Panel><Skeleton className="h-48 w-full rounded-xl" /></Panel>;
+  }
+
+  if (isAnonymous) {
+    return (
+      <Panel>
+        <EmptyState
+          title="Sign in to see portfolio fit"
+          description="Compare these funds with your own holdings after uploading your CAS statement."
+        />
+      </Panel>
+    );
+  }
+
+  if (!portfolioId) {
+    return (
+      <Panel>
+        <EmptyState
+          title="No portfolio on file"
+          description="Upload your CAS statement to compare these funds against your own portfolio."
+        />
+      </Panel>
+    );
+  }
+
+  return (
+    <div className={cn('grid grid-cols-1 gap-3.5', funds.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3')}>
+      {funds.map((fund, i) => (
+        <FundFitCard key={fund.key} portfolioId={portfolioId} isin={isins[i]!} fund={fund} />
+      ))}
     </div>
   );
 }
 
 // ── S13 — Holdings comparison ────────────────────────────────────────────────
-export function HoldingsSection() {
-  return (
-    <Panel>
-      <div className="mb-4 flex flex-wrap items-center gap-3.5">
-        <div className="flex items-center gap-2.5">
-          <div className="text-3xl font-extrabold text-amber">31%</div>
-          <div className="text-caption leading-tight text-ink-muted">Portfolio similarity<br />between all 3 funds</div>
-        </div>
-        <div className="min-w-[200px] flex-1 text-small leading-relaxed text-ink-secondary">They share <b className="text-ink">18 common stocks</b> but weight them very differently — so holding two of these adds less diversification than you&apos;d think.</div>
-      </div>
-      <CompareTable rows={HOLD_STATS} firstCol="Metric" />
-      <div className="mt-4 grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-        {FUNDS.map((f) => (
-          <div key={f.key}>
-            <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short} · top 5</h4>
-            {HOLDINGS[f.key].map(([n, w, shared]) => (
-              <div key={n} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
-                <div className="flex-1 text-caption font-semibold text-ink">{n} {shared && <span className="rounded bg-amber/15 px-1.5 py-px font-mono text-[8.5px] font-bold text-amber">SHARED</span>}</div>
-                <div className="font-mono text-caption font-bold text-ink">{w}%</div>
-              </div>
-            ))}
+export function HoldingsSection({
+  compositions,
+  pairwiseOverlap,
+  funds = FUNDS,
+  isins,
+}: {
+  compositions?: Record<string, CompareCompositionFragment | null>;
+  pairwiseOverlap?: ComparePairwiseOverlap[];
+  funds?: CompareFund[];
+  isins?: string[];
+}) {
+  if (!compositions || !pairwiseOverlap) {
+    return (
+      <Panel>
+        <div className="mb-4 flex flex-wrap items-center gap-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="text-3xl font-extrabold text-amber">31%</div>
+            <div className="text-caption leading-tight text-ink-muted">Portfolio similarity<br />between all 3 funds</div>
           </div>
-        ))}
-      </div>
-      <SoWhat><RichText text="**So what:** These overlap a lot — holding one is usually enough. **Bandhan** is the least concentrated (top-10 = 42%), lowering single-stock risk." /></SoWhat>
-    </Panel>
-  );
-}
-
-// ── S14 — Fund flow ──────────────────────────────────────────────────────────
-export function FlowSection() {
-  return (
-    <Panel>
-      <CompareTable rows={FLOW} firstCol="Metric" />
-      <SoWhat><RichText text="**So what:** All three see healthy inflows. **Bandhan** has the steadiest (positive 12/12 months) — a sign of sticky investor confidence." /></SoWhat>
-    </Panel>
-  );
-}
-
-// ── S15 — Managers (strength word, no score number) ──────────────────────────
-export function ManagerSection() {
-  return (
-    <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-3">
-      {MGRS.map((m) => {
-        const f = FUNDS.find((x) => x.key === m.key)!;
-        const s = toStrength(m.strengthScore);
-        return (
-          <div key={m.key} className={cn('rounded-2xl border p-4', m.best ? 'border-emerald shadow-[0_0_0_1px_var(--dr-emerald,#00B386)]' : 'border-line')}>
-            <div className="flex items-center gap-2.5">
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-extrabold text-white" style={{ background: f.topGradient }}>{m.init}</div>
-              <div>
-                <div className="text-sm font-bold text-ink">{m.name}</div>
-                {m.tag ? <WinChip>{m.tag}</WinChip> : <div className="text-[11px] text-ink-muted">{f.short}</div>}
-              </div>
-            </div>
-            <div className="mt-3">
-              {[...m.rows, ['Manager strength', STRENGTH_WORD[s]] as [string, string]].map(([l, v], i, a) => (
-                <div key={l} className={cn('flex justify-between py-1.5 text-caption', i < a.length - 1 && 'border-b border-line')}>
-                  <span className="text-ink-muted">{l}</span><span className="font-mono font-bold text-ink">{v}</span>
+          <div className="min-w-[200px] flex-1 text-small leading-relaxed text-ink-secondary">They share <b className="text-ink">18 common stocks</b> but weight them very differently — so holding two of these adds less diversification than you&apos;d think.</div>
+        </div>
+        <CompareTable rows={HOLD_STATS} firstCol="Metric" />
+        <div className="mt-4 grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+          {FUNDS.map((f) => (
+            <div key={f.key}>
+              <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short} · top 5</h4>
+              {HOLDINGS[f.key].map(([n, w, shared]) => (
+                <div key={n} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
+                  <div className="flex-1 text-caption font-semibold text-ink">{n} {shared && <span className="rounded bg-amber/15 px-1.5 py-px font-mono text-[8.5px] font-bold text-amber">SHARED</span>}</div>
+                  <div className="font-mono text-caption font-bold text-ink">{w}%</div>
                 </div>
               ))}
+            </div>
+          ))}
+        </div>
+        <SoWhat><RichText text="Holdings concentration and overlap vary by fund. Lower top-10 concentration typically indicates broader diversification. Overlap computed from disclosed holdings only." /></SoWhat>
+      </Panel>
+    );
+  }
+
+  const isinToFund: Record<string, CompareFund> = {};
+  (isins ?? []).forEach((isin, i) => { if (funds[i]) isinToFund[isin] = funds[i]; });
+  const fundShort = (isin: string) => isinToFund[isin]?.short ?? isin.slice(-6);
+
+  return (
+    <div className="space-y-4">
+      {pairwiseOverlap.length > 0 && (
+        <Panel>
+          <h4 className="m-0 mb-3 text-small font-bold text-ink">Holdings Overlap (disclosed top-10)</h4>
+          <div className={cn('grid grid-cols-1 gap-3', pairwiseOverlap.length === 1 ? 'sm:grid-cols-1' : 'sm:grid-cols-2 lg:grid-cols-3')}>
+            {pairwiseOverlap.map((pair) => {
+              const pairKey = `${pair.isin_a}-${pair.isin_b}`;
+              if (pair.no_data) {
+                return (
+                  <div key={pairKey} className="rounded-xl border border-line p-4">
+                    <div className="mb-2 text-[11px] font-semibold text-ink-muted">{fundShort(pair.isin_a)} vs {fundShort(pair.isin_b)}</div>
+                    <EmptyState
+                      title="Overlap data unavailable"
+                      description="Constituent data absent for one or both funds — overlap cannot be computed."
+                      className="py-3"
+                    />
+                  </div>
+                );
+              }
+              return (
+                <div key={pairKey} className="rounded-xl border border-line p-4">
+                  <div className="mb-1 text-[11px] font-semibold text-ink-muted">{fundShort(pair.isin_a)} vs {fundShort(pair.isin_b)}</div>
+                  <div className="text-2xl font-extrabold text-ink">{pair.overlap_pct.toFixed(1)}%</div>
+                  <div className="text-[11px] text-ink-muted">disclosed-holdings overlap</div>
+                  {pair.common_holdings.length > 0 && (
+                    <div className="mt-2.5 space-y-1">
+                      {pair.common_holdings.slice(0, 5).map((h) => (
+                        <div key={h.name} className="flex items-center justify-between text-[11px]">
+                          <span className="truncate text-ink-secondary">{h.name}</span>
+                          <span className="ml-2 shrink-0 font-mono text-ink-faint">
+                            {h.weight_a != null ? `${h.weight_a.toFixed(1)}%` : '—'} / {h.weight_b != null ? `${h.weight_b.toFixed(1)}%` : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-[10.5px] text-ink-muted">
+            Overlap uses top-10 disclosed holdings only (major-AMC coverage). Figures may understate total overlap.
+          </div>
+        </Panel>
+      )}
+      <Panel>
+        <h4 className="m-0 mb-3 text-small font-bold text-ink">Top Holdings by Fund</h4>
+        <div className={cn('grid grid-cols-1 gap-3.5', funds.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
+          {funds.map((f, i) => {
+            const isin = isins?.[i];
+            const frag = isin ? (compositions[isin] ?? null) : null;
+            if (!frag || frag.no_data) {
+              return (
+                <div key={f.key}>
+                  <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short}</h4>
+                  <EmptyState title="Holdings unavailable" className="py-4" />
+                </div>
+              );
+            }
+            return (
+              <div key={f.key}>
+                <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short} · top {Math.min(frag.data.holdings.length, 5)}</h4>
+                {frag.data.holdings.slice(0, 5).map((h) => (
+                  <div key={h.name} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
+                    <div className="flex-1 text-caption font-semibold text-ink">{h.name}</div>
+                    <div className="font-mono text-caption font-bold text-ink">{h.weight_pct != null ? `${h.weight_pct.toFixed(1)}%` : '—'}</div>
+                  </div>
+                ))}
+                {frag.data.as_of_month && (
+                  <div className="mt-1 text-[10px] text-ink-faint">As of {frag.data.as_of_month}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ── S14 — Fund flow (category-level only — compliance §14.3) ─────────────────
+export function FlowSection({
+  flows,
+  funds = FUNDS,
+  isins,
+}: {
+  flows?: Record<string, CompareFlowFragment | null>;
+  funds?: CompareFund[];
+  isins?: string[];
+}) {
+  if (!flows) {
+    return (
+      <Panel>
+        <CompareTable rows={FLOW} firstCol="Metric" />
+        <SoWhat><RichText text="Category-level AMFI fund flow data — shows net flows for funds in the same SEBI category. Not specific to any individual fund." /></SoWhat>
+      </Panel>
+    );
+  }
+
+  return (
+    <div>
+      <div className={cn('grid grid-cols-1 gap-3.5', funds.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
+        {funds.map((f, i) => {
+          const isin = isins?.[i];
+          const frag = isin ? (flows[isin] ?? null) : null;
+
+          if (!frag || frag.source_blocked) {
+            const cat = frag?.source_blocked ? frag.scheme_category : null;
+            return (
+              <Panel key={f.key}>
+                <h4 className="m-0 mb-3 flex items-center gap-2 text-[13.5px] font-bold text-ink"><Dot color={f.color} />{f.short}</h4>
+                <EmptyState
+                  title="Flow data unavailable"
+                  description={cat
+                    ? `Category flow data for "${cat}" is not yet available.`
+                    : 'Category flow data is not yet available for this fund.'}
+                  className="py-4"
+                />
+              </Panel>
+            );
+          }
+
+          const latest = frag.points.slice(-3);
+          return (
+            <Panel key={f.key}>
+              <h4 className="m-0 mb-1 flex items-center gap-2 text-[13.5px] font-bold text-ink"><Dot color={f.color} />{f.short}</h4>
+              {frag.scheme_category && (
+                <div className="mb-3 text-[11px] text-ink-muted">Funds in category: {frag.scheme_category}</div>
+              )}
+              <div className="space-y-1">
+                {latest.map((pt) => (
+                  <div key={pt.period_month} className="flex justify-between text-caption">
+                    <span className="text-ink-muted">{pt.period_month}</span>
+                    <span className={cn('font-mono font-bold', pt.net_flow_cr != null && pt.net_flow_cr >= 0 ? 'text-emerald' : 'text-[#E5484D]')}>
+                      {pt.net_flow_cr != null
+                        ? `${pt.net_flow_cr >= 0 ? '+' : ''}${pt.net_flow_cr.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`
+                        : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {frag.as_of_month && (
+                <div className="mt-1.5 text-[10px] text-ink-faint">As of {frag.as_of_month}</div>
+              )}
+            </Panel>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] text-ink-muted">
+        Category-level AMFI net flows — figures reflect all funds in each SEBI category, not this specific fund.
+      </p>
+    </div>
+  );
+}
+
+// ── S15 — Managers ────────────────────────────────────────────────────────────
+export function ManagerSection({
+  people,
+  funds = FUNDS,
+  isins,
+}: {
+  people?: Record<string, ComparePeopleFragment | null>;
+  funds?: CompareFund[];
+  isins?: string[];
+}) {
+  if (!people) {
+    return (
+      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-3">
+        {MGRS.map((m) => {
+          const f = FUNDS.find((x) => x.key === m.key)!;
+          const s = toStrength(m.strengthScore);
+          return (
+            <div key={m.key} className="rounded-2xl border border-line p-4">
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-extrabold text-white" style={{ background: f.topGradient }}>{m.init}</div>
+                <div>
+                  <div className="text-sm font-bold text-ink">{m.name}</div>
+                  <div className="text-[11px] text-ink-muted">{f.short}</div>
+                </div>
+              </div>
+              <div className="mt-3">
+                {[...m.rows, ['Manager track', STRENGTH_WORD[s]] as [string, string]].map(([l, v], i, a) => (
+                  <div key={l} className={cn('flex justify-between py-1.5 text-caption', i < a.length - 1 && 'border-b border-line')}>
+                    <span className="text-ink-muted">{l}</span><span className="font-mono font-bold text-ink">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn('grid grid-cols-1 gap-3.5', funds.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3')}>
+      {funds.map((f, i) => {
+        const isin = isins?.[i];
+        const frag = isin ? (people[isin] ?? null) : null;
+
+        if (!frag || frag.no_data) {
+          return (
+            <div key={f.key} className="rounded-2xl border border-line p-4">
+              <div className="mb-2 flex items-center gap-2.5">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-extrabold text-white" style={{ background: f.topGradient }}>{f.logo}</div>
+                <div className="text-sm font-bold text-ink">{f.short}</div>
+              </div>
+              <EmptyState
+                title="Manager data unavailable"
+                description="Manager information is not available for this fund (coverage ~13% of funds)."
+                className="py-4"
+              />
+            </div>
+          );
+        }
+
+        return (
+          <div key={f.key} className="rounded-2xl border border-line p-4">
+            <div className="mb-3 flex items-center gap-2.5">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-extrabold text-white" style={{ background: f.topGradient }}>{f.logo}</div>
+              <div className="text-sm font-bold text-ink">{f.short}</div>
+            </div>
+            {frag.managers.map((mgr) => (
+              <div key={mgr.name} className="mb-3 last:mb-0">
+                <div className="text-small font-bold text-ink">{mgr.name}</div>
+                <div className="mt-1.5 space-y-1">
+                  <div className="flex justify-between text-caption">
+                    <span className="text-ink-muted">Tenure</span>
+                    <span className="font-mono font-bold text-ink">{mgr.tenure_years.toFixed(1)} yrs</span>
+                  </div>
+                  {mgr.tenure_return_pct != null && (
+                    <div className="flex justify-between text-caption">
+                      <span className="text-ink-muted">Return since joining</span>
+                      <span className="font-mono font-bold text-ink">{mgr.tenure_return_pct.toFixed(1)}%</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="mt-2 flex justify-between border-t border-line pt-2 text-caption">
+              <span className="text-ink-muted">Manager changes (5Y)</span>
+              <span className="font-mono font-bold text-ink">{frag.manager_changes_5y}</span>
             </div>
           </div>
         );
@@ -443,12 +807,67 @@ export function ManagerSection() {
   );
 }
 
-// ── S16 — AMC quality ────────────────────────────────────────────────────────
-export function AmcSection() {
+// ── S16 — AMC comparison ──────────────────────────────────────────────────────
+export function AmcSection({
+  amcData,
+  funds = FUNDS,
+  isins,
+}: {
+  amcData?: Record<string, CompareAmcFragment | null>;
+  funds?: CompareFund[];
+  isins?: string[];
+}) {
+  if (!amcData) {
+    return (
+      <Panel>
+        <CompareTable rows={AMC} firstCol="Metric" />
+        <SoWhat><RichText text="AMC facts from AMFI reporting — scheme count and category breadth are factual aggregates. AUM shown is the AMC-level total across all their schemes, not this fund's own AUM." /></SoWhat>
+      </Panel>
+    );
+  }
+
+  const liveRows: Row[] = [
+    {
+      label: 'Schemes managed',
+      vals: (isins ?? []).map((isin) => {
+        const amc = amcData[isin];
+        return amc ? String(amc.scheme_count) : null;
+      }),
+    },
+    {
+      label: 'Categories covered',
+      vals: (isins ?? []).map((isin) => {
+        const amc = amcData[isin];
+        return amc ? String(amc.category_count) : null;
+      }),
+    },
+    {
+      label: 'AMC-level AUM',
+      vals: (isins ?? []).map((isin) => {
+        const amc = amcData[isin];
+        if (!amc || amc.amc_level_aum_crore == null) return null;
+        return `₹${(amc.amc_level_aum_crore / 100000).toFixed(1)}L Cr`;
+      }),
+    },
+  ];
+
+  const amcNames = (isins ?? []).map((isin) => amcData[isin]?.amc_name ?? null);
+
   return (
     <Panel>
-      <CompareTable rows={AMC} firstCol="Metric" />
-      <SoWhat><RichText text="**So what:** **Nippon** is the largest and most established AMC; **Bandhan** and **Quant** are strong but smaller. All three are well-regarded fund houses." /></SoWhat>
+      {amcNames.some(Boolean) && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {funds.map((f, i) => amcNames[i] ? (
+            <span key={f.key} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-caption font-semibold shadow-sm">
+              <Dot color={f.color} size={7} />{amcNames[i]}
+            </span>
+          ) : null)}
+        </div>
+      )}
+      <CompareTable rows={liveRows} firstCol="AMC metric" funds={funds} />
+      <div className="mt-2 text-[10.5px] text-ink-muted">
+        AMC-level AUM is the total across all schemes managed by the AMC — not this fund&apos;s own AUM.
+      </div>
     </Panel>
   );
 }
@@ -531,40 +950,108 @@ export function TaxSection({ categories }: { categories?: string[] }) {
 
 
 // ── S20 — What changed ───────────────────────────────────────────────────────
-const TL_COLOR = { up: '#00B386', down: '#E5484D', info: '#1E5EFF' };
-export function ChangesSection() {
+const SEV_COLOR: Record<string, string> = { notable: '#F59E0B', info: '#1E5EFF' };
+export function ChangesSection({
+  events,
+  funds = FUNDS,
+  isins,
+}: {
+  events?: Record<string, CompareEventItem[] | null>;
+  funds?: CompareFund[];
+  isins?: string[];
+}) {
+  if (!events) {
+    return (
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+        {FUNDS.map((f) => (
+          <Panel key={f.key}>
+            <h4 className="m-0 mb-3.5 flex items-center gap-2 text-[13.5px] font-bold text-ink"><Dot color={f.color} />{f.short}</h4>
+            <div className="relative pl-5">
+              <span className="absolute bottom-1.5 left-[5px] top-1.5 w-0.5 bg-line" aria-hidden="true" />
+              {CHANGES[f.key].map(([, txt, time], i) => (
+                <div key={i} className="relative pb-3 last:pb-0">
+                  <span className="absolute -left-5 top-[3px] h-[11px] w-[11px] rounded-full border-2 border-surface bg-royal" aria-hidden="true" />
+                  <div className="text-small leading-snug text-ink-secondary">{txt}</div>
+                  <div className="mt-0.5 font-mono text-[10.5px] text-ink-faint">{time}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-      {FUNDS.map((f) => (
-        <Panel key={f.key}>
-          <h4 className="m-0 mb-3.5 flex items-center gap-2 text-[13.5px] font-bold text-ink"><Dot color={f.color} />{f.short}</h4>
-          <div className="relative pl-5">
-            <span className="absolute bottom-1.5 left-[5px] top-1.5 w-0.5 bg-line" aria-hidden="true" />
-            {CHANGES[f.key].map(([t, txt, time], i) => (
-              <div key={i} className="relative pb-3 last:pb-0">
-                <span className="absolute -left-5 top-[3px] h-[11px] w-[11px] rounded-full border-2 border-surface" style={{ background: TL_COLOR[t] }} aria-hidden="true" />
-                <div className="text-small leading-snug text-ink-secondary">{txt}</div>
-                <div className="mt-0.5 font-mono text-[10.5px] text-ink-faint">{time}</div>
+    <div className={cn('grid grid-cols-1 gap-3.5', funds.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3')}>
+      {funds.map((f, i) => {
+        const isin = isins?.[i];
+        const fundEvents = (isin ? (events[isin] ?? []) : []).slice(0, 5);
+        return (
+          <Panel key={f.key}>
+            <h4 className="m-0 mb-3.5 flex items-center gap-2 text-[13.5px] font-bold text-ink"><Dot color={f.color} />{f.short}</h4>
+            {fundEvents.length === 0 ? (
+              <EmptyState title="No recent changes" className="py-4" />
+            ) : (
+              <div className="relative pl-5">
+                <span className="absolute bottom-1.5 left-[5px] top-1.5 w-0.5 bg-line" aria-hidden="true" />
+                {fundEvents.map((ev, idx) => (
+                  <div key={idx} className="relative pb-3 last:pb-0">
+                    <span
+                      className="absolute -left-5 top-[3px] h-[11px] w-[11px] rounded-full border-2 border-surface"
+                      style={{ background: SEV_COLOR[ev.severity] ?? SEV_COLOR.info }}
+                      aria-hidden="true"
+                    />
+                    <div className="text-small leading-snug text-ink-secondary">{ev.summary}</div>
+                    <div className="mt-0.5 font-mono text-[10.5px] text-ink-faint">{relativeTime(ev.as_of)}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </Panel>
-      ))}
+            )}
+          </Panel>
+        );
+      })}
     </div>
   );
 }
 
 // ── S21 — Alternatives (strength word, no score number) ──────────────────────
-export function AltsSection() {
+export function AltsSection({ alternatives }: { alternatives?: CompareAlternative[] }) {
+  if (alternatives && alternatives.length > 0) {
+    return (
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+        {alternatives.map((a) => (
+          <div key={a.isin} className="rounded-2xl border border-line p-4">
+            <div className="text-[13.5px] font-bold leading-tight text-ink">{a.fund_name_short ?? a.scheme_name}</div>
+            <div className="mt-0.5 text-[11px] text-ink-muted">{a.amc_name ?? '—'}</div>
+            <div className="mt-0.5 text-[10px] text-ink-faint">{a.sebi_category ?? '—'}</div>
+            <div className="my-3 grid grid-cols-3 gap-2">
+              {([
+                [a.return_3y_pct != null ? `${a.return_3y_pct.toFixed(1)}%` : '—', '3Y'],
+                [a.return_1y_pct != null ? `${a.return_1y_pct.toFixed(1)}%` : '—', '1Y'],
+                [a.expense_ratio_pct != null ? `${a.expense_ratio_pct.toFixed(2)}%` : '—', 'TER'],
+              ] as [string, string][]).map(([v, l]) => (
+                <div key={l} className="rounded-lg bg-surface-2 px-1 py-2 text-center">
+                  <div className="font-mono text-[13px] font-bold text-ink">{v}</div>
+                  <div className="mt-0.5 text-[9px] font-semibold uppercase text-ink-muted">{l}</div>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="w-full rounded-lg bg-surface-2 py-2.5 text-caption font-semibold text-ink-secondary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">⇄ Add to comparison</button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
       {ALTS.map((a) => (
         <div key={a.name} className="rounded-2xl border border-line p-4">
-          <span className="mb-2.5 inline-block rounded-md px-2.5 py-1 font-mono text-[9.5px] font-bold uppercase tracking-[0.05em]" style={{ background: `${a.tone}1A`, color: a.tone }}>{a.tag}</span>
           <div className="text-[13.5px] font-bold leading-tight text-ink">{a.name}</div>
           <div className="mt-0.5 text-[11px] text-ink-muted">{a.amc}</div>
           <div className="my-3 grid grid-cols-3 gap-2">
-            {[[STRENGTH_WORD[toStrength(a.strengthScore)], 'Read'], [a.ret, '3Y'], [a.exp, 'Exp']].map(([v, l]) => (
+            {([[STRENGTH_WORD[toStrength(a.strengthScore)], 'Read'], [a.ret, '3Y'], [a.exp, 'Exp']] as [string, string][]).map(([v, l]) => (
               <div key={l} className="rounded-lg bg-surface-2 px-1 py-2 text-center">
                 <div className={cn('font-mono text-[13px] font-bold', l === 'Exp' ? 'text-ink' : 'text-emerald')}>{v}</div>
                 <div className="mt-0.5 text-[9px] font-semibold uppercase text-ink-muted">{l}</div>
