@@ -225,7 +225,7 @@ async def test_portfolio_ai_feed_empty_portfolio_no_consent_no_gateway(monkeypat
         lambda db, pid: _async(_FakePortfolioRM(holdings=[])),
     )
     monkeypatch.setattr("dhanradar.insights.router.get_redis", lambda: _FakeRedis())
-    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(None))
+    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(uuid.UUID(_PORTFOLIO_ID)))
     monkeypatch.setattr("dhanradar.insights.router._require_mf_consent", _noop_consent())
 
     result = await portfolio_ai_feed(
@@ -272,7 +272,7 @@ async def test_portfolio_ai_feed_revoked_consent_not_served_from_cache(monkeypat
         "dhanradar.insights.router.load_portfolio_read_model",
         lambda db, pid: _async(_FakePortfolioRM(holdings=_SAMPLE_HOLDINGS)),
     )
-    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(None))
+    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(uuid.UUID(_PORTFOLIO_ID)))
     monkeypatch.setattr("dhanradar.insights.router._require_mf_consent", _noop_consent())
 
     result = await portfolio_ai_feed(
@@ -325,7 +325,7 @@ async def test_portfolio_ai_feed_cache_hit_matching_disclaimer(monkeypatch) -> N
         "dhanradar.insights.router.load_portfolio_read_model",
         lambda db, pid: _async(_FakePortfolioRM(holdings=_SAMPLE_HOLDINGS)),
     )
-    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(None))
+    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(uuid.UUID(_PORTFOLIO_ID)))
     monkeypatch.setattr("dhanradar.insights.router._require_mf_consent", _noop_consent())
     monkeypatch.setattr("dhanradar.mf.portfolio_ai.generate_portfolio_ai_feed", _boom)
 
@@ -519,7 +519,7 @@ async def test_stale_disclaimer_triggers_live_regeneration(monkeypatch) -> None:
         "dhanradar.insights.router.load_portfolio_read_model",
         lambda db, pid: _async(_FakePortfolioRM(holdings=_SAMPLE_HOLDINGS)),
     )
-    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(None))
+    monkeypatch.setattr("dhanradar.insights.router._owned_portfolio_id", lambda *a, **kw: _async(uuid.UUID(_PORTFOLIO_ID)))
     monkeypatch.setattr("dhanradar.insights.router._require_mf_consent", _noop_consent())
     monkeypatch.setattr("dhanradar.mf.portfolio_ai.generate_portfolio_ai_feed", _fake_generate)
 

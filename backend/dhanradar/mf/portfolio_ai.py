@@ -167,7 +167,9 @@ def _allowed_names(holdings: list[dict]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 #: Advisory imperatives NOT already in _ADVISORY_RE (supplemental, not replacement).
-_EXTRA_ADVISORY_RE = re.compile(r"\b(redeem\w*|recommend\w*)\b", re.IGNORECASE)
+#: "redeem" deliberately NOT banned — ai_gateway/quality.py documents it as a neutral MF
+#: action excluded platform-wide (adversarial review 2026-08-22 alignment).
+_EXTRA_ADVISORY_RE = re.compile(r"\brecommend\w*\b", re.IGNORECASE)
 
 _NON_DESCRIPTIVE_RE = re.compile(
     r"\b(rank(?:ed|ing)?|rating|rated|top|winner|should|need to|consider|add|remove|compare)\b",

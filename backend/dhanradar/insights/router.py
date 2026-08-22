@@ -75,11 +75,17 @@ from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_c
 from dhanradar.mf.taxonomy import ELSS_CATEGORY
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfFund, MfFundConstituent, MfPortfolio
+from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
 _PORTFOLIO_AI_CACHE_TTL = 6 * 3600  # 6h — governed AI-gateway result, per-user only
+# Adversarial review 2026-08-22 (BLOCKING): non-"ok" generator results are cached too
+# (short TTL) so a reliably-failing state can't re-bill the gateway on every request…
+_PORTFOLIO_AI_FAILURE_TTL = 900  # 15 min
+# …and the route carries its own throttle, mirroring compare_ai's dedicated bucket.
+_rl_portfolio_ai = RateLimit(max_requests=10, window_seconds=60)
 
 router = APIRouter(tags=["portfolio-intelligence"])
 
@@ -966,6 +972,7 @@ async def portfolio_ai_feed(
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     db: Annotated[AsyncSession, Depends(get_db)],
     response: Response,
+    _rl: Annotated[None, Depends(_rl_portfolio_ai)] = None,
 ) -> dict:
     """P3 `portfolio.ai_feed` (Wave P3, S19) — governed AI insight cards for the
     caller's portfolio. Gate order: _require_auth → _require_mf_consent →
@@ -990,7 +997,7 @@ async def portfolio_ai_feed(
 
     _require_auth(user)
     await _require_mf_consent(user=user, db=db)
-    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    pid = await _owned_portfolio_id(db, portfolio_id, user.user_id)
     response.headers["Cache-Control"] = "private"
 
     def _empty(state: str, no_data_reason: str) -> dict:
@@ -1024,8 +1031,10 @@ async def portfolio_ai_feed(
 
     uid = uuid.UUID(user.user_id)
     redis = get_redis()
+    # Canonical UUID (from the ownership check) — raw path-param spellings of the same
+    # UUID must not fragment the cache and defeat the TTL spend bound (adversarial review).
     cache_key = "mf:portfolio_ai:" + hashlib.sha256(
-        f"{uid}:{portfolio_id}".encode()
+        f"{uid}:{pid}".encode()
     ).hexdigest()
 
     try:
@@ -1071,11 +1080,13 @@ async def portfolio_ai_feed(
         request_id=getattr(request.state, "request_id", None),
     )
 
-    if result.get("state") == "ok":
-        try:
-            await redis.set(cache_key, json.dumps(result), ex=_PORTFOLIO_AI_CACHE_TTL)
-        except Exception:  # noqa: BLE001 — cache is best-effort
-            pass
+    # Cache EVERY generator outcome — 6h for ok, 15 min for failures — so a reliably
+    # failing state can't re-bill the gateway per request (adversarial review, BLOCKING).
+    ttl = _PORTFOLIO_AI_CACHE_TTL if result.get("state") == "ok" else _PORTFOLIO_AI_FAILURE_TTL
+    try:
+        await redis.set(cache_key, json.dumps(result), ex=ttl)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        pass
 
     return serialize_concept(
         "portfolio.ai_feed",
