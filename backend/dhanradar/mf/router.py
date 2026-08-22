@@ -1407,6 +1407,36 @@ async def fund_categories(
     return FundCategoriesResponse(categories=cats)
 
 
+def _dedupe_search_rows(rows: list, limit: int) -> list:
+    """Search shows ONLY the direct plan, one row per scheme (founder 2026-08-22):
+    the user picks a plan/option variant later, on the fund page or the invest
+    step. Known-regular rows are dropped outright; rows with an UNKNOWN plan_type
+    are kept (plan metadata coverage is incomplete — dropping them would make
+    whole schemes unsearchable), ranked below a known-direct row of the same
+    scheme. Remaining variants collapse per scheme (SCHEME_KEY rule:
+    fund_name_short, falling back to isin), preferring growth. Relevance order
+    of first appearance is preserved."""
+
+    def variant_rank(r) -> tuple[int, int]:
+        plan = (r.plan_type or "").lower()
+        option = (r.option_type or "").lower()
+        return (0 if plan == "direct" else 1, 0 if option == "growth" else 1)
+
+    best: dict[str, object] = {}
+    order: list[str] = []
+    for r in rows:
+        if (r.plan_type or "").lower() == "regular":
+            continue
+        key = r.fund_name_short or r.isin
+        cur = best.get(key)
+        if cur is None:
+            best[key] = r
+            order.append(key)
+        elif variant_rank(r) < variant_rank(cur):
+            best[key] = r
+    return [best[k] for k in order][:limit]
+
+
 @router.get("/search", response_model=list[FundSearchItem])
 async def fund_search(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1441,7 +1471,9 @@ async def fund_search(
     if not tokens:
         return []
 
-    params: dict[str, object] = {"q": qn, "qprefix": qn + "%", "lim": limit}
+    # Over-fetch so scheme-level dedup (direct/regular × growth/idcw variants)
+    # can still fill `limit` distinct schemes after collapsing.
+    params: dict[str, object] = {"q": qn, "qprefix": qn + "%", "lim": min(limit * 5, 100)}
     clauses: list[str] = []
     for i, tok in enumerate(tokens):
         k = f"t{i}"
@@ -1474,7 +1506,7 @@ async def fund_search(
         " LIMIT :lim"
     )
 
-    rows = (await db.execute(sa_text(sql), params)).all()
+    rows = _dedupe_search_rows((await db.execute(sa_text(sql), params)).all(), limit)
 
     return [
         FundSearchItem(
