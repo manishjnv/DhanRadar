@@ -127,7 +127,7 @@
       "access_tier": "free",
       "content_class": "CALCULATED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "portfolio.performance": {
       "visibility_class": "educational",
@@ -135,7 +135,7 @@
       "access_tier": "free",
       "content_class": "CALCULATED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "portfolio.benchmark": {
       "visibility_class": "public",
