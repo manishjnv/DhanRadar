@@ -35,6 +35,7 @@ import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { relativeTime } from '@/features/mood/relative-time';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { shortenAmcName } from '@/features/mf/explorer-format';
 import type {
   CompareCompositionFragment, ComparePeopleFragment, CompareFlowFragment,
   CompareEventItem, CompareAmcFragment, CompareAlternative, ComparePairwiseOverlap,
@@ -246,7 +247,10 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
 }
 
 // ── S2 — DhanRadar educational read (was Winner card) ────────────────────────
-export function EduReadSection({ items, disclosure, notAdvice }: { items?: string[]; disclosure?: string; notAdvice?: string }) {
+export function EduReadSection({ items, disclosure, notAdvice, needsAuth = false }: { items?: string[]; disclosure?: string; notAdvice?: string; needsAuth?: boolean }) {
+  if (needsAuth) {
+    return <EmptyState title="Sign in to see this" description="The DhanRadar educational read is generated for your selected funds after you sign in." />;
+  }
   if (items) {
     return items.length > 0 ? (
       <div className="flex flex-col gap-3">
@@ -468,10 +472,13 @@ export function SipSection({ live = false, entries }: { live?: boolean; entries?
 }
 
 // ── S9 — Rolling returns ─────────────────────────────────────────────────────
-export function RollingSection({ rows = ROLLING, live = false }: { rows?: Row[]; live?: boolean }) {
+export function RollingSection({ rows, live = false, funds }: { rows?: Row[]; live?: boolean; funds?: CompareFund[] }) {
+  if (live && !rows) {
+    return <Panel><EmptyState title="Rolling return data unavailable" description="Rolling window figures are not available for these funds yet." /></Panel>;
+  }
   return (
     <Panel>
-      <CompareTable rows={rows} firstCol="Rolling window" />
+      <CompareTable rows={rows ?? ROLLING} firstCol="Rolling window" funds={live ? funds : undefined} />
       <SoWhat>
         <RichText text={live
           ? "Rolling figures show average past return and the fraction of overlapping windows that ended positive. A higher percentage of positive windows reflects steadier past outcomes — not a forecast of future consistency."
@@ -535,13 +542,21 @@ export function RankingSection({ rows = RANKT, funds, live = false }: { rows?: R
 }
 
 // ── S11 — Risk center + advanced accordion ───────────────────────────────────
-export function RiskSection({ liveRows }: { liveRows?: Row[] }) {
+export function RiskSection({ liveRows, heatRows, funds, live = false }: { liveRows?: Row[]; heatRows?: { label: string; vals: string[]; better: 'low' | 'hi' }[]; funds?: CompareFund[]; live?: boolean }) {
   return (
     <Panel>
       <div className="mb-3 text-small text-ink-muted">Traffic-light read — green is lower risk / better protection:</div>
-      <HeatTable rows={RISK_HEAT} />
+      {live && !heatRows ? (
+        <EmptyState title="Risk data unavailable" description="Risk metrics are not available for these funds yet." />
+      ) : (
+        <HeatTable rows={heatRows ?? RISK_HEAT} funds={live ? funds : undefined} />
+      )}
       <Accordion title={<span>▸ Standard risk ratios <span className="text-caption font-normal text-ink-faint">(Sharpe, Sortino, std dev, max drawdown)</span></span>}>
-        <CompareTable rows={liveRows ?? ADV_RISK} firstCol="Metric" />
+        {live && !liveRows ? (
+          <EmptyState title="Risk ratios unavailable" description="Standard risk ratios are not available for these funds yet." />
+        ) : (
+          <CompareTable rows={liveRows ?? ADV_RISK} firstCol="Metric" funds={live ? funds : undefined} />
+        )}
       </Accordion>
       <SoWhat>
         <RichText text={liveRows
@@ -1078,7 +1093,7 @@ function taxRuleFromCategory(cat: string): { ltcg: string; stcg: string; holding
   return { ltcg: '12.5% (gains > ₹1.25 L/yr)', stcg: '20%', holding: '1 year' };
 }
 
-export function TaxSection({ categories }: { categories?: string[] }) {
+export function TaxSection({ categories, funds }: { categories?: string[]; funds?: CompareFund[] }) {
   if (categories && categories.length > 0) {
     const rules = categories.map((c) => taxRuleFromCategory(c));
     const liveRows: Row[] = [
@@ -1089,7 +1104,7 @@ export function TaxSection({ categories }: { categories?: string[] }) {
     const allEquity = rules.every((r) => r.ltcg.startsWith('12.5'));
     return (
       <Panel>
-        <CompareTable rows={liveRows} firstCol="Tax (on ₹2 L gain)" />
+        <CompareTable rows={liveRows} firstCol="Tax rules" funds={funds} />
         <SoWhat>
           <RichText text={allEquity
             ? "All compared funds fall under the equity tax category — LTCG at 12.5% applies after 1 year, with ₹1.25 lakh exemption annually. Verify exit load schedules in the scheme documents."
@@ -1175,14 +1190,29 @@ export function ChangesSection({
 }
 
 // ── S21 — Alternatives (strength word, no score number) ──────────────────────
-export function AltsSection({ alternatives }: { alternatives?: CompareAlternative[] }) {
-  if (alternatives && alternatives.length > 0) {
+export function AltsSection({ alternatives, isins }: { alternatives?: CompareAlternative[]; isins?: string[] }) {
+  const router = useRouter();
+  if (alternatives) {
+    // Honour the section's "Excluding compared funds" promise + one card per scheme.
+    const compared = new Set(isins ?? []);
+    const seen = new Set<string>();
+    const peers = alternatives.filter((a) => {
+      if (compared.has(a.isin)) return false;
+      const key = a.fund_name_short ?? a.scheme_name;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (peers.length === 0) {
+      return <EmptyState title="No similar funds to show" description="No other funds from this category are available right now." />;
+    }
+    const canAdd = (isins?.length ?? 0) < 4;
     return (
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-        {alternatives.map((a) => (
+        {peers.map((a) => (
           <div key={a.isin} className="rounded-2xl border border-line p-4">
             <div className="text-[13.5px] font-bold leading-tight text-ink">{a.fund_name_short ?? a.scheme_name}</div>
-            <div className="mt-0.5 text-[11px] text-ink-muted">{a.amc_name ?? '—'}</div>
+            <div className="mt-0.5 text-[11px] text-ink-muted">{a.amc_name ? shortenAmcName(a.amc_name) : '—'}</div>
             <div className="mt-0.5 text-[10px] text-ink-faint">{a.sebi_category ?? '—'}</div>
             <div className="my-3 grid grid-cols-3 gap-2">
               {([
@@ -1196,7 +1226,15 @@ export function AltsSection({ alternatives }: { alternatives?: CompareAlternativ
                 </div>
               ))}
             </div>
-            <button type="button" className="w-full rounded-lg bg-surface-2 py-2.5 text-caption font-semibold text-ink-secondary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">⇄ Add to comparison</button>
+            {canAdd && (
+              <button
+                type="button"
+                onClick={() => router.push(`/mf/compare?isins=${[...(isins ?? []), a.isin].slice(0, 4).join(',')}`)}
+                className="w-full rounded-lg bg-surface-2 py-2.5 text-caption font-semibold text-ink-secondary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+              >
+                ⇄ Add to comparison
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -1225,7 +1263,10 @@ export function AltsSection({ alternatives }: { alternatives?: CompareAlternativ
 }
 
 // ── S22 — AI insights ────────────────────────────────────────────────────────
-export function AiInsightsSection({ items, disclosure, notAdvice }: { items?: string[]; disclosure?: string; notAdvice?: string }) {
+export function AiInsightsSection({ items, disclosure, notAdvice, needsAuth = false }: { items?: string[]; disclosure?: string; notAdvice?: string; needsAuth?: boolean }) {
+  if (needsAuth) {
+    return <EmptyState title="Sign in to see this" description="AI insights are generated for your selected funds after you sign in." />;
+  }
   if (items) {
     return items.length > 0 ? (
       <div className="flex flex-col gap-3">
@@ -1271,7 +1312,11 @@ export function FaqSection() {
 }
 
 // ── S24 — Sticky decision bar ────────────────────────────────────────────────
-export function StickyBar() {
+// Live mode renders NOTHING: the sample bar crowns one fund ("DhanRadar read" + View CTA),
+// which would read as a recommendation for real selections (founder: no fake funds under
+// live, and no crowned fund at all when comparing real ones).
+export function StickyBar({ live = false }: { live?: boolean }) {
+  if (live) return null;
   return (
     <div className="fixed inset-x-0 bottom-0 z-[55] border-t border-white/10 shadow-[0_-8px_30px_rgba(0,0,0,.18)]" style={{ background: 'rgba(11,31,58,.97)', backdropFilter: 'blur(12px)' }}>
       <div className="mx-auto flex max-w-6xl items-center gap-5 px-4 py-2.5 text-white sm:px-6">

@@ -201,14 +201,14 @@ export function ScoreboardRows({ rows }: { rows: { metric: string; scores: numbe
 
 // Heat row table (risk traffic-light)
 const HEAT = ['#00B386', '#F5A623', '#E5484D'];
-export function HeatTable({ rows }: { rows: { label: string; vals: string[]; better: 'low' | 'hi' }[] }) {
+export function HeatTable({ rows, funds = FUNDS }: { rows: { label: string; vals: string[]; better: 'low' | 'hi' }[]; funds?: CompareFund[] }) {
   return (
     <div className="-mx-1 overflow-x-auto">
       <table className="w-full border-collapse text-small">
         <thead>
           <tr>
             <th className="border-b-2 border-line px-3 py-2.5 text-left font-mono text-[11px] font-bold uppercase tracking-[0.04em] text-ink-muted">Risk metric</th>
-            {FUNDS.map((f) => (
+            {funds.map((f) => (
               <th key={f.key} className="border-b-2 border-line px-3 py-2.5 text-center font-mono text-[11px] font-bold uppercase tracking-[0.04em] text-ink-muted">
                 <span className="inline-flex items-center gap-1.5"><Dot color={f.color} size={8} />{f.short}</span>
               </th>
