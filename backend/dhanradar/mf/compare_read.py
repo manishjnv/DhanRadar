@@ -288,6 +288,10 @@ async def get_compare_fragment(session: AsyncSession, isin: str) -> dict | None:
         "nav_date": head["nav_date"],
         "nav_change_pct": head["nav_change_pct"],
         "aum_crore": head["aum_crore"],
+        # Batch D (audit 2026-08-22): freshness stamps were computed but dropped.
+        "rank_as_of": head.get("rank_as_of"),
+        "metrics_as_of": head.get("metrics_as_of"),
+        "aum_as_of": head.get("aum_as_of"),
         # C1 — analytics subset (DOM-allowed standard ratios; no composite score)
         **analytics,
         # C1 — category medians (p50 from mf_category_stats)

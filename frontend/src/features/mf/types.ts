@@ -950,6 +950,10 @@ export interface CompareFragment {
   nav_date: string | null;
   nav_change_pct: number | null;
   aum_crore: number | null;
+  /** Batch D freshness stamps (audit 2026-08-22). */
+  rank_as_of?: string | null;
+  metrics_as_of?: string | null;
+  aum_as_of?: string | null;
   return_3m_pct: number | null;
   return_6m_pct: number | null;
   return_1y_pct: number | null;

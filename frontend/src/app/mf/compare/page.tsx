@@ -114,7 +114,14 @@ function buildCompareFundFromFragment(frag: CompareFragment, slotIndex: number):
       : '—',
     exp: frag.expense_ratio_pct != null ? `${frag.expense_ratio_pct.toFixed(2)}%` : '—',
     age: years != null ? `${years.toFixed(1)} yrs` : '—',
-    mgr: '—',
+    mgr: (() => {
+      const p = frag.people;
+      if (p && 'managers' in p && p.managers.length > 0) {
+        const extra = p.managers.length - 1;
+        return p.managers[0].name + (extra > 0 ? ` +${extra}` : '');
+      }
+      return '—';
+    })(),
     badges: [],
     isTopMatch: false,
   };
@@ -269,6 +276,21 @@ function CompareView() {
     ];
   }, [live, fragments]);
 
+  // Batch D freshness stamps — latest across fragments; null when absent.
+  const benchmarkAsOf = React.useMemo<string | null>(() => {
+    if (!live) return null;
+    const dates = fragments
+      .map((f) => (f.benchmark_row && !f.benchmark_row.no_data ? f.benchmark_row.as_of : null))
+      .filter((d): d is string => d != null);
+    return dates.length > 0 ? dates.sort().at(-1)! : null;
+  }, [live, fragments]);
+
+  const ranksAsOf = React.useMemo<string | null>(() => {
+    if (!live) return null;
+    const dates = fragments.map((f) => f.rank_as_of ?? null).filter((d): d is string => d != null);
+    return dates.length > 0 ? dates.sort().at(-1)! : null;
+  }, [live, fragments]);
+
   // Live traffic-light rows for the risk heat table (was a hardcoded sample constant).
   const heatRows = React.useMemo<{ label: string; vals: string[]; better: 'low' | 'hi' }[] | undefined>(() => {
     if (!live) return undefined;
@@ -400,7 +422,7 @@ function CompareView() {
       {/* S7 — Performance */}
       <Section>
         <SectionHeader index="07" title="Performance Center" info="Strongest highlighted per period" badge={<LiveBadge />} />
-        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} />
+        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} benchmarkAsOf={benchmarkAsOf} />
       </Section>
 
       {/* S8 — SIP */}
@@ -418,7 +440,7 @@ function CompareView() {
       {/* S10 — Ranking */}
       <Section>
         <SectionHeader index="10" title="Ranking Comparison" badge={<LiveBadge />} />
-        <RankingSection rows={rankRows} funds={heroFunds} live={live} />
+        <RankingSection rows={rankRows} funds={heroFunds} live={live} ranksAsOf={ranksAsOf} />
       </Section>
 
       {/* S11 — Risk */}
