@@ -24,6 +24,10 @@ import {
   SoWhat, RichText, Panel, WinChip, Dot, CompareTable, ScoreboardRows, HeatTable, CTA,
 } from './ui';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { api } from '@/lib/apiClient';
+import { useWatchlist } from '@/hooks/useWatchlist';
+import { Input } from '@/components/ui/Input';
 import { useMoodCurrent } from '@/features/mood/api';
 import { useMe } from '@/features/auth/api';
 import { useFundPortfolioFit, useLatestPortfolio } from '@/features/mf/api';
@@ -41,7 +45,39 @@ const ASSESS_TOP = { in_form: 'In Form', on_track: 'On Track', off_track: 'Off T
 
 // ── S1 — Hero fund columns ───────────────────────────────────────────────────
 // `funds` override: /mf/compare?funds=<isin> replaces column 1 with the real fund.
+const ISIN_RE = /^[A-Z0-9]{12}$/;
+
+type AddFundResult = { isin: string; scheme_name: string; fund_name_short: string | null };
+
 export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
+  const router = useRouter();
+  const { has, toggle } = useWatchlist();
+  const [adding, setAdding] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [results, setResults] = React.useState<AddFundResult[]>([]);
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live cards carry the real ISIN as `key` (page maps frag.isin → key); sample cards use slugs.
+  const liveIsins = funds.map((f) => f.key).filter((k) => ISIN_RE.test(k));
+
+  function onQueryChange(q: string) {
+    setQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.trim().length < 2) { setResults([]); return; }
+    debounceRef.current = setTimeout(() => {
+      api
+        .get<AddFundResult[]>(`/mf/search?q=${encodeURIComponent(q)}&limit=8`)
+        .then((list) => setResults(Array.isArray(list) ? list.filter((r) => !liveIsins.includes(r.isin)) : []))
+        .catch(() => setResults([]));
+    }, 200);
+  }
+
+  function pickFund(isin: string) {
+    setAdding(false);
+    setQuery('');
+    setResults([]);
+    router.push(`/mf/compare?isins=${[...liveIsins, isin].slice(0, 4).join(',')}`);
+  }
+
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
       {funds.map((f) => (
@@ -84,15 +120,69 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
               {f.badges.map((b) => <WinChip key={b} gold={b.includes('Best Overall') || b.includes('Highest')}>{b}</WinChip>)}
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
-              <CTA variant="primary">View fund</CTA>
-              <CTA variant="navy">＋ Watchlist</CTA>
+              {ISIN_RE.test(f.key) ? (
+                <Link
+                  href={`/mf/fund/${f.key}`}
+                  className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-royal px-3.5 py-2 text-small font-semibold text-white transition-colors hover:bg-royal/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                >
+                  View fund
+                </Link>
+              ) : (
+                <CTA variant="primary" disabled title="Sample fund — pick real funds to open" className="opacity-60">View fund</CTA>
+              )}
+              <CTA
+                variant="navy"
+                disabled={!ISIN_RE.test(f.key)}
+                className={cn(!ISIN_RE.test(f.key) && 'opacity-60')}
+                onClick={() => toggle({ isin: f.key, name: f.name, category: f.cat })}
+              >
+                {ISIN_RE.test(f.key) && has(f.key) ? '✓ Watchlisted' : '＋ Watchlist'}
+              </CTA>
             </div>
           </div>
         </div>
       ))}
-      <button type="button" className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong bg-transparent text-small font-semibold text-ink-muted transition-colors hover:border-royal hover:bg-royal/5 hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-        <span className="text-2xl" aria-hidden="true">＋</span>Add another fund
-      </button>
+      {liveIsins.length >= 4 ? null : adding ? (
+        <div className="flex min-h-[120px] flex-col gap-2 rounded-2xl border-2 border-dashed border-royal/50 bg-surface p-3">
+          <Input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="Search fund name…"
+            aria-label="Search a fund to add to this comparison"
+          />
+          <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+            {results.map((r) => (
+              <button
+                key={r.isin}
+                type="button"
+                onClick={() => pickFund(r.isin)}
+                className="rounded-lg px-2.5 py-2 text-left text-small font-medium text-ink transition-colors hover:bg-royal/5 hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                title={r.scheme_name}
+              >
+                {r.fund_name_short ?? r.scheme_name}
+              </button>
+            ))}
+            {query.trim().length >= 2 && results.length === 0 && (
+              <span className="px-2.5 py-2 text-caption text-ink-muted">No matching funds.</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => { setAdding(false); setQuery(''); setResults([]); }}
+            className="self-start text-caption font-semibold text-ink-muted hover:text-ink focus-visible:outline-none"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong bg-transparent text-small font-semibold text-ink-muted transition-colors hover:border-royal hover:bg-royal/5 hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+        >
+          <span className="text-2xl" aria-hidden="true">＋</span>Add another fund
+        </button>
+      )}
     </div>
   );
 }
