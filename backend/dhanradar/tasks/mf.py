@@ -2883,6 +2883,9 @@ async def _metrics_refresh_pipeline() -> str:
             await db.execute(
                 select(
                     MfFund.isin,
+                    MfFund.fund_name_short,
+                    MfFund.plan_type,
+                    MfFund.option_type,
                     MfFund.sebi_category,
                     MfFundMetrics.return_1y_pct,
                     MfFundMetrics.return_3y_pct,
@@ -2892,6 +2895,20 @@ async def _metrics_refresh_pipeline() -> str:
                 .where(MfFund.sebi_category.isnot(None))
             )
         ).all()
+
+    # ONE contribution per SCHEME (Batch C, audit 2026-08-22): canonical variant
+    # (Direct+Growth > Growth > lowest ISIN, mirroring category_series.py) — blending
+    # plan variants skewed category medians vs the Direct funds users actually see.
+    from dhanradar.mf.compare_read import variant_rank
+
+    best_by_scheme: dict[str, tuple[tuple[int, int, str], object]] = {}
+    for row in rows:
+        key = row.fund_name_short or row.isin
+        rank = variant_rank(row.plan_type, row.option_type, row.isin)
+        cur = best_by_scheme.get(key)
+        if cur is None or rank < cur[0]:
+            best_by_scheme[key] = (rank, row)
+    rows = [r for _, r in best_by_scheme.values()]
 
     # Group per-metric values by category.
     # Structure: {category: {metric_key: [values]}}

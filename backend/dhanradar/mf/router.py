@@ -796,6 +796,7 @@ async def compare_bundle(
         str,
         Query(description="Comma-separated list of 2–4 distinct ISINs"),
     ],
+    db: Annotated[AsyncSession, Depends(get_db)],
     _rl: Annotated[None, Depends(_rl_compare)] = None,
 ) -> dict:
     """``GET /mf/compare/bundle?isins=A,B,C[,D]`` (COMPARE_LIVE_DATA_PLAN.md Wave C1).
@@ -831,12 +832,22 @@ async def compare_bundle(
     # Per-IP distinct-ISIN budget check (checked before any DB composition).
     await _check_isin_budget(request, raw_parts)
 
+    # Batch C (audit 2026-08-22): run internals on each scheme's canonical
+    # Direct-Growth-preferred variant — IDCW/regular NAV series are payout-distorted and
+    # misstate returns/AUM/rank. The response stays keyed by the REQUESTED ISINs so
+    # existing clients resolve their lookups; each fragment's own `isin` field carries
+    # the canonical identity (the frontend's resolvedIsins then flows canonical).
+    from dhanradar.mf.compare_read import canonicalize_compare_isins
+
+    canon_of = await canonicalize_compare_isins(db, raw_parts)
+    canon_parts = list(dict.fromkeys(canon_of[r] for r in raw_parts))
+
     # Sorted ISIN pairs for pairwise overlap (key = sorted pair, TTL 6h).
-    sorted_pairs = [(min(a, b), max(a, b)) for a, b in combinations(raw_parts, 2)]
+    sorted_pairs = [(min(a, b), max(a, b)) for a, b in combinations(canon_parts, 2)]
 
     # Batch MGET — one round-trip: per-ISIN fragment keys + pairwise overlap keys.
     redis = get_redis()
-    isin_keys = [f"mf:cmp:{isin}" for isin in raw_parts]
+    isin_keys = [f"mf:cmp:{isin}" for isin in canon_parts]
     overlap_keys = [f"mf:cmp:overlap:{a}:{b}" for a, b in sorted_pairs]
     all_cached = await redis.mget(*(isin_keys + overlap_keys))
     isin_cached = all_cached[: len(isin_keys)]
@@ -844,7 +855,7 @@ async def compare_bundle(
 
     fragments: dict[str, dict | None] = {}
     cold_isins: list[str] = []
-    for isin, cached in zip(raw_parts, isin_cached):
+    for isin, cached in zip(canon_parts, isin_cached):
         if cached is not None:
             fragments[isin] = json.loads(cached)
         else:
@@ -880,9 +891,12 @@ async def compare_bundle(
 
     from dhanradar.mf.serialization import serialize_compare_bundle_response
 
+    # Re-key by the REQUESTED isins (fragment content stays canonical).
+    out_fragments = {req: fragments.get(canon_of[req]) for req in raw_parts}
+
     response.headers["Cache-Control"] = "public, max-age=300"
     return serialize_compare_bundle_response(
-        isins=raw_parts, fragments=fragments, as_of=as_of, pairwise=pairwise
+        isins=raw_parts, fragments=out_fragments, as_of=as_of, pairwise=pairwise
     )
 
 

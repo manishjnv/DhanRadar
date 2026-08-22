@@ -19,6 +19,8 @@ from datetime import date
 _RANK_DELTA_MIN = 3
 _WEIGHT_DELTA_MIN_PP = 1.0
 _AUM_CHANGE_MIN_PCT = 5.0
+# Above this, a month-over-month AUM move is a variant/re-denomination artifact, not a flow.
+_AUM_CHANGE_MAX_PCT = 50.0
 MAX_EVENTS_PER_FUND = 4  # one per event_type — the full type set below is exactly 4
 EVENT_TYPES: tuple[str, ...] = ("rank_change", "ter_change", "holding_change", "aum_change")
 
@@ -80,6 +82,11 @@ def detect_aum_change(
         return None
     pct_change = (new_aum_crore - old_aum_crore) / old_aum_crore * 100
     if abs(pct_change) < _AUM_CHANGE_MIN_PCT:
+        return None
+    if abs(pct_change) > _AUM_CHANGE_MAX_PCT:
+        # A real fund's AUM doesn't move ±50%+ month-over-month — that's a plan-variant
+        # or scale/re-denomination artifact (audit 2026-08-22: "₹38,918cr → ₹210cr,
+        # −99.5%"), mirroring the platform's ±50% NAV-discontinuity rule.
         return None
     return {
         "old_aum_crore": round(old_aum_crore, 2),

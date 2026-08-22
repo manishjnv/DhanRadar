@@ -310,19 +310,98 @@ async def get_compare_fragment(session: AsyncSession, isin: str) -> dict | None:
     }
 
 
+def variant_rank(plan_type: str | None, option_type: str | None, isin: str) -> tuple[int, int, str]:
+    """Canonical-variant priority (platform convention — see category_series.py docstring):
+    Direct+Growth > any Growth > lowest ISIN."""
+    plan = (plan_type or "").lower()
+    option = (option_type or "").lower()
+    return (0 if plan == "direct" else 1, 0 if option == "growth" else 1, isin)
+
+
+def _pick_canonicals(
+    requested: list[str],
+    short_by_isin: dict[str, str | None],
+    siblings: list[tuple[str, str, str | None, str | None]],
+) -> dict[str, str]:
+    """Pure requested-isin → canonical-variant-isin mapping. Unknown schemes map to
+    themselves; when two requests collapse onto one canonical, the later request keeps
+    its original ISIN (never silently compare a fund with itself). `siblings` rows are
+    (isin, fund_name_short, plan_type, option_type)."""
+    best_by_short: dict[str, tuple[tuple[int, int, str], str]] = {}
+    for isin, short, plan, option in siblings:
+        rank = variant_rank(plan, option, isin)
+        cur = best_by_short.get(short)
+        if cur is None or rank < cur[0]:
+            best_by_short[short] = (rank, isin)
+    out: dict[str, str] = {}
+    used: set[str] = set()
+    for req in requested:
+        short = short_by_isin.get(req)
+        canonical = best_by_short[short][1] if short and short in best_by_short else req
+        pick = canonical if canonical not in used else req
+        out[req] = pick
+        used.add(pick)
+    return out
+
+
+async def canonicalize_compare_isins(session: AsyncSession, requested: list[str]) -> dict[str, str]:
+    """Map each requested ISIN to its scheme's canonical (Direct-Growth-preferred) variant.
+
+    IDCW/regular NAV series are payout-distorted — comparing them misstates
+    returns/AUM/rank (audit 2026-08-22: an IDCW "HDFC Small Cap" variant showed 1Y
+    −9.45% and rank 142/143). Scheme identity = SCHEME_KEY rule (fund_name_short)."""
+    rows = (
+        await session.execute(
+            select(MfFund.isin, MfFund.fund_name_short).where(MfFund.isin.in_(requested))
+        )
+    ).all()
+    short_by_isin: dict[str, str | None] = {r.isin: r.fund_name_short for r in rows}
+    shorts = sorted({s for s in short_by_isin.values() if s})
+    siblings = (
+        (
+            await session.execute(
+                select(
+                    MfFund.isin, MfFund.fund_name_short, MfFund.plan_type, MfFund.option_type
+                ).where(MfFund.fund_name_short.in_(shorts))
+            )
+        ).all()
+        if shorts
+        else []
+    )
+    return _pick_canonicals(
+        requested, short_by_isin, [(r.isin, r.fund_name_short, r.plan_type, r.option_type) for r in siblings]
+    )
+
+
 async def _category_median_ter(session: AsyncSession, sebi_category: str | None) -> float | None:
-    """Return the current category TER median, withholding an empty cohort."""
+    """Current category TER median — ONE contribution per scheme, canonical variant
+    preferred (Batch C, audit 2026-08-22): blending Direct and Regular TERs skews the
+    median high vs the Direct funds users actually compare. Empty cohort withheld."""
     if not sebi_category:
         return None
     rows = (
         await session.execute(
-            select(MfFund.expense_ratio_pct).where(
+            select(
+                MfFund.isin,
+                MfFund.fund_name_short,
+                MfFund.plan_type,
+                MfFund.option_type,
+                MfFund.expense_ratio_pct,
+            ).where(
                 MfFund.sebi_category == sebi_category,
                 MfFund.expense_ratio_pct.is_not(None),
             )
         )
-    ).scalars().all()
-    return float(median([float(value) for value in rows])) if rows else None
+    ).all()
+    best: dict[str, tuple[tuple[int, int, str], float]] = {}
+    for r in rows:
+        key = r.fund_name_short or r.isin
+        rank = variant_rank(r.plan_type, r.option_type, r.isin)
+        cur = best.get(key)
+        if cur is None or rank < cur[0]:
+            best[key] = (rank, float(r.expense_ratio_pct))
+    values = [v for _, v in best.values()]
+    return float(median(values)) if values else None
 
 
 async def compose_compare_bundle_fragments(cold_isins: list[str]) -> dict[str, dict | None]:

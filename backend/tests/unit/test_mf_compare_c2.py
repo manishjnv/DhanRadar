@@ -52,6 +52,7 @@ import re
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi import Response
 
 from dhanradar.mf.compare_read import (
@@ -66,6 +67,18 @@ from dhanradar.mf.serialization import (
     _scrub,
     serialize_compare_bundle_response,
 )
+
+
+@pytest.fixture(autouse=True)
+def _identity_canonicalization(monkeypatch):
+    """Batch C: the route canonicalizes ISINs via a DB lookup; these unit tests call the
+    handler directly with db=None, so canonicalization is identity-patched (its real
+    mapping logic is covered by test_compare_canonicalization.py)."""
+
+    async def _identity(session, requested):
+        return {r: r for r in requested}
+
+    monkeypatch.setattr("dhanradar.mf.compare_read.canonicalize_compare_isins", _identity)
 
 # ---------------------------------------------------------------------------
 # Shared ISINs
@@ -529,7 +542,7 @@ async def test_warm_overlap_returned_without_recompute(monkeypatch) -> None:
     monkeypatch.setattr("dhanradar.mf.router.get_redis", lambda: fake_redis)
 
     result = await compare_bundle(
-        request=_request(), response=Response(), isins=f"{ISIN_A},{ISIN_B}",
+        request=_request(), response=Response(), db=None, isins=f"{ISIN_A},{ISIN_B}",
     )
     assert result["pairwise"][pair_key]["overlap_pct"] == 18.5
     # No new overlap key written (was cached)
@@ -550,7 +563,7 @@ async def test_cold_overlap_computed_and_cached(monkeypatch) -> None:
     )
 
     result = await compare_bundle(
-        request=_request(), response=Response(), isins=f"{ISIN_A},{ISIN_B}",
+        request=_request(), response=Response(), db=None, isins=f"{ISIN_A},{ISIN_B}",
     )
     pair_key = f"{ISIN_A}|{ISIN_B}"
     assert pair_key in result["pairwise"]
@@ -582,7 +595,7 @@ async def test_overlap_keys_batched_in_same_mget(monkeypatch) -> None:
     )
 
     await compare_bundle(
-        request=_request(), response=Response(), isins=f"{ISIN_A},{ISIN_B}",
+        request=_request(), response=Response(), db=None, isins=f"{ISIN_A},{ISIN_B}",
     )
     # Must be exactly ONE mget call containing both per-ISIN keys and the overlap key
     assert len(mget_calls) == 1
