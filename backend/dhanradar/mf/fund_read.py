@@ -1448,8 +1448,18 @@ async def get_fund_events(session: AsyncSession, isin: str) -> dict | None:
                 "payload": r.payload,
             }
             for r in rows
+            if not _is_aum_artifact(r.event_type, r.payload)
         ]
     }
+
+
+def _is_aum_artifact(event_type: str, payload: dict) -> bool:
+    """Stored aum_change rows predating the ±50% generation guard (Batch C 2026-08-22):
+    a "−99.5%" month-over-month AUM move is a plan-variant/scale artifact, not a flow."""
+    if event_type != "aum_change":
+        return False
+    pct = payload.get("pct_change")
+    return pct is not None and abs(float(pct)) > 50.0
 
 
 # ---------------------------------------------------------------------------

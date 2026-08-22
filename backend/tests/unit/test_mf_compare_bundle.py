@@ -30,6 +30,18 @@ from fastapi import HTTPException, Response
 from dhanradar.mf.router import _COMPARE_ISIN_BUDGET, compare_bundle
 from dhanradar.mf.serialization import serialize_compare_bundle_response
 
+
+@pytest.fixture(autouse=True)
+def _identity_canonicalization(monkeypatch):
+    """Batch C: the route canonicalizes ISINs via a DB lookup; these unit tests call the
+    handler directly with db=None, so canonicalization is identity-patched (its real
+    mapping logic is covered by test_compare_canonicalization.py)."""
+
+    async def _identity(session, requested):
+        return {r: r for r in requested}
+
+    monkeypatch.setattr("dhanradar.mf.compare_read.canonicalize_compare_isins", _identity)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -169,6 +181,7 @@ async def test_compare_bundle_400_too_few_isins(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=ISIN_A,
         )
     assert exc.value.status_code == 400
@@ -187,6 +200,7 @@ async def test_compare_bundle_400_too_many_isins(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=five,
         )
     assert exc.value.status_code == 400
@@ -204,6 +218,7 @@ async def test_compare_bundle_400_duplicate_isins(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=f"{ISIN_A},{ISIN_A},{ISIN_B}",
         )
     assert exc.value.status_code == 400
@@ -221,6 +236,7 @@ async def test_compare_bundle_400_invalid_isin_format(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=f"inf174k01kh7,{ISIN_B}",  # lowercase → invalid
         )
     assert exc.value.status_code == 400
@@ -233,6 +249,7 @@ async def test_compare_bundle_400_short_isin(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=f"TOOSHORT,{ISIN_B}",
         )
     assert exc.value.status_code == 400
@@ -252,6 +269,7 @@ async def test_compare_bundle_429_isin_budget_exceeded(monkeypatch) -> None:
         await compare_bundle(
             request=_request(),
             response=Response(),
+            db=None,
             isins=f"{ISIN_A},{ISIN_B}",
         )
     assert exc.value.status_code == 429
@@ -283,6 +301,7 @@ async def test_compare_bundle_cache_hit_mget_skips_compositor(monkeypatch) -> No
     result = await compare_bundle(
         request=_request(),
         response=Response(),
+        db=None,
         isins=f"{ISIN_A},{ISIN_B}",
     )
 
@@ -313,6 +332,7 @@ async def test_compare_bundle_cold_compositor_called_and_cached(monkeypatch) -> 
     result = await compare_bundle(
         request=_request(),
         response=Response(),
+        db=None,
         isins=f"{ISIN_A},{ISIN_B}",
     )
 
@@ -347,6 +367,7 @@ async def test_compare_bundle_score_keys_never_reach_response(monkeypatch) -> No
     result = await compare_bundle(
         request=_request(),
         response=Response(),
+        db=None,
         isins=f"{ISIN_A},{ISIN_B}",
     )
 
@@ -386,6 +407,7 @@ async def test_compare_bundle_benchmark_extra_keys_stripped(monkeypatch) -> None
     result = await compare_bundle(
         request=_request(),
         response=Response(),
+        db=None,
         isins=f"{ISIN_A},{ISIN_B}",
     )
 
@@ -411,6 +433,7 @@ async def test_compare_bundle_cache_control_is_public(monkeypatch) -> None:
     await compare_bundle(
         request=_request(),
         response=resp,
+        db=None,
         isins=f"{ISIN_A},{ISIN_B}",
     )
 
