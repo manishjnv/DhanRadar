@@ -415,13 +415,13 @@ function CompareView() {
 
       {/* S13 — Holdings */}
       <Section>
-        <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={<LiveBadge />} />
+        <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={c2Comp || c2Overlap ? <LiveBadge /> : undefined} />
         <HoldingsSection compositions={c2Comp} pairwiseOverlap={c2Overlap} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S14 — Fund flow */}
       <Section>
-        <SectionHeader index="14" title="Fund Flow Intelligence" badge={<LiveBadge />} />
+        <SectionHeader index="14" title="Fund Flow Intelligence" badge={c2Flows ? <LiveBadge /> : undefined} />
         <FlowSection flows={c2Flows} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
