@@ -35,8 +35,8 @@ def test_variants_collapse_to_direct_growth() -> None:
 def test_relevance_order_preserved_and_limit_applied() -> None:
     rows = [
         _row("A1", "Alpha Midcap", "direct", "growth"),
-        _row("B1", "Beta Midcap", "regular", "growth"),
-        _row("A2", "Alpha Midcap", "regular", "growth"),
+        _row("B1", "Beta Midcap", "direct", "growth"),
+        _row("A2", "Alpha Midcap", "direct", "idcw"),
         _row("C1", "Gamma Midcap", "direct", "growth"),
     ]
     out = _dedupe_search_rows(rows, 2)
@@ -60,7 +60,7 @@ def test_unknown_plan_type_kept_but_loses_to_direct() -> None:
 def test_null_fund_name_short_falls_back_to_isin_identity() -> None:
     rows = [
         Row("X1", "Some scheme", None, "AMC", "Mid Cap", "direct", "growth", None),
-        Row("X2", "Other scheme", None, "AMC", "Mid Cap", "regular", "growth", None),
+        Row("X2", "Other scheme", None, "AMC", "Mid Cap", None, "growth", None),
     ]
     out = _dedupe_search_rows(rows, 10)
     # Distinct ISINs with no short name are distinct schemes — never merged.
