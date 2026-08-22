@@ -172,13 +172,13 @@ function PortfolioView() {
 
           {/* S01 Portfolio Health */}
           <section>
-            <SectionHeader index="01" title="Portfolio Health" info="10 checks · green / yellow / red" />
+            <SectionHeader index="01" title="Portfolio Health" info="5 checks in plain words" badge={<LiveBadge />} />
             <HealthSection />
           </section>
 
           {/* S02 Action Center */}
           <section>
-            <SectionHeader index="02" title="Action Center" info="5 items" />
+            <SectionHeader index="02" title="Action Center" badge={<LiveBadge />} />
             <ActionSection />
           </section>
 
@@ -220,13 +220,13 @@ function PortfolioView() {
 
           {/* S09 Funds Needing Review */}
           <section>
-            <SectionHeader index="09" title="Funds Needing Review" info="2 funds" />
+            <SectionHeader index="09" title="Funds Needing Review" badge={<LiveBadge />} />
             <UnderReviewSection />
           </section>
 
           {/* S10 Overlap */}
           <section>
-            <SectionHeader index="10" title="Fund Overlap Analysis" />
+            <SectionHeader index="10" title="Fund Overlap Analysis" badge={<LiveBadge />} />
             <OverlapSection />
           </section>
 
@@ -260,15 +260,15 @@ function PortfolioView() {
             <TimelineSection portfolioId={portfolioId} />
           </section>
 
-          {/* S16 Recommendations */}
+          {/* S16 Portfolio observations */}
           <section>
-            <SectionHeader index="16" title="Recommendations" />
+            <SectionHeader index="16" title="Portfolio Observations" badge={<LiveBadge />} />
             <RecSection />
           </section>
 
           {/* S17 Projection */}
           <section>
-            <SectionHeader index="17" title="Future Wealth Projection" info="If you stay the course" />
+            <SectionHeader index="17" title="Future Wealth Projection" info="If you stay the course" badge={<LiveBadge />} />
             <ProjSection />
           </section>
 
@@ -286,7 +286,7 @@ function PortfolioView() {
 
           {/* S20 Report Center */}
           <section>
-            <SectionHeader index="20" title="Report Center" />
+            <SectionHeader index="20" title="Report Center" badge={<LiveBadge />} />
             <ReportSection />
           </section>
 

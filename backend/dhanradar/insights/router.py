@@ -22,16 +22,20 @@ from __future__ import annotations
 import datetime
 import logging
 import uuid
+from itertools import combinations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
+from sqlalchemy import tuple_ as sql_tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.db import get_db
 from dhanradar.deps import RequireConsent, UserContext, current_user_or_anonymous
 from dhanradar.insights import service
-from dhanradar.insights.schemas import MoodContextResponse, OverlapResponse
+from dhanradar.insights.schemas import MoodContextResponse
+from dhanradar.mf.compare_read import _category_median_ter, compute_overlap_pct
 from dhanradar.mf.portfolio_read import (
     allocation_payload,
     basis_coverage_pct,
@@ -67,8 +71,7 @@ from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
 from dhanradar.mf.taxonomy import ELSS_CATEGORY
 from dhanradar.models.auth import User
-from dhanradar.models.mf import MfFund, MfPortfolio
-from dhanradar.mf.compare_read import _category_median_ter
+from dhanradar.models.mf import MfFund, MfFundConstituent, MfPortfolio
 
 logger = logging.getLogger(__name__)
 
@@ -241,28 +244,237 @@ async def _portfolio_cost_payload(
     }
 
 
+def _coverage_band(coverage_pct: float | None) -> str:
+    if coverage_pct is None or coverage_pct <= 0:
+        return "insufficient_data"
+    if coverage_pct >= 80:
+        return "high"
+    if coverage_pct >= 50:
+        return "medium"
+    return "low"
+
+
+async def _portfolio_health_payload(
+    db: AsyncSession,
+    portfolio_id: str,
+) -> dict:
+    """Compose a plain-words portfolio.health payload from existing read-model builders.
+
+    No composite score/grade is produced; this route only emits deterministic checks.
+    """
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    allocation = allocation_payload(rm, portfolio_id, by="category")
+    concentration = concentration_payload(rm, portfolio_id)
+    diversification = diversification_payload(rm, portfolio_id)
+    risk = risk_payload(await load_portfolio_risk(db, portfolio_id), portfolio_id)
+    cost = await _portfolio_cost_payload(db, portfolio_id)
+
+    checks: list[dict] = []
+
+    top_fund = concentration.get("top_fund")
+    checks.append(
+        {
+            "key": "concentration_top_fund",
+            "band": concentration.get("band") or "insufficient_data",
+            "finding": (
+                f"Your largest fund currently contributes {top_fund['weight_pct']:.2f}% of portfolio value."
+                if top_fund
+                else "Largest-fund concentration could not be computed from current holdings."
+            ),
+        }
+    )
+
+    checks.append(
+        {
+            "key": "diversification_category_spread",
+            "band": diversification.get("band") or "insufficient_data",
+            "finding": (
+                f"Your top category is {diversification['top_category']} at {diversification['top_category_pct']:.2f}% of value."
+                if diversification.get("top_category") and diversification.get("top_category_pct") is not None
+                else "Category spread could not be derived from current holdings."
+            ),
+        }
+    )
+
+    risk_band = risk.get("risk_band")
+    checks.append(
+        {
+            "key": "risk_volatility",
+            "band": risk_band or "insufficient_data",
+            "finding": (
+                f"Portfolio volatility is {risk['volatility_pct']:.2f}% based on {risk.get('risk_band_basis') or 'available risk data'}."
+                if risk.get("volatility_pct") is not None
+                else "Volatility could not be computed from current history depth."
+            ),
+            "coverage_pct": round((risk.get("funds_with_metrics", 0) / max(risk.get("fund_count", 1), 1)) * 100.0, 2),
+        }
+    )
+
+    checks.append(
+        {
+            "key": "cost_ter_coverage",
+            "band": _coverage_band(cost.get("ter_coverage_pct")),
+            "finding": (
+                f"Weighted TER is {cost['weighted_ter_pct']:.2f}% across covered holdings."
+                if cost.get("weighted_ter_pct") is not None
+                else "TER could not be computed because constituent fee coverage is unavailable."
+            ),
+            "coverage_pct": cost.get("ter_coverage_pct"),
+        }
+    )
+
+    top_bucket = (allocation.get("buckets") or [None])[0]
+    checks.append(
+        {
+            "key": "allocation_top_bucket",
+            "band": concentration.get("band") or "insufficient_data",
+            "finding": (
+                f"The largest allocation bucket is {top_bucket['bucket']} at {top_bucket['weight_pct']:.2f}% of value."
+                if top_bucket
+                else "Allocation buckets are not available for this portfolio yet."
+            ),
+        }
+    )
+
+    return {
+        "portfolio_id": portfolio_id,
+        "as_of": rm.as_of,
+        "fund_count": len(rm.holdings),
+        "checks": checks,
+        "no_data_reason": "empty_portfolio" if len(rm.holdings) == 0 else None,
+    }
+
+
+async def _portfolio_overlap_payload(
+    db: AsyncSession,
+    portfolio_id: str,
+) -> dict:
+    """Build portfolio.overlap from constituent holdings with explicit no_data markers.
+
+    Pair overlap is computed with `compute_overlap_pct`; no-data pairs are never emitted as
+    artificial 0% overlap.
+    """
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    isins = sorted({h.isin for h in rm.holdings})
+    pairs_total = (len(isins) * (len(isins) - 1)) // 2
+    if pairs_total == 0:
+        return {
+            "portfolio_id": portfolio_id,
+            "as_of": rm.as_of,
+            "pairs": [],
+            "pairs_with_data": 0,
+            "pairs_total": pairs_total,
+            "no_data_reason": "insufficient_funds",
+        }
+
+    fund_names = (
+        (await db.execute(select(MfFund.isin, MfFund.scheme_name).where(MfFund.isin.in_(isins)))).all()
+        if isins
+        else []
+    )
+    name_by_isin = {
+        row.isin: (str(row.scheme_name) if row.scheme_name is not None else row.isin)
+        for row in fund_names
+    }
+
+    latest_month_rows = (
+        await db.execute(
+            select(MfFundConstituent.isin, sqlfunc.max(MfFundConstituent.as_of_month).label("latest"))
+            .where(MfFundConstituent.isin.in_(isins))
+            .group_by(MfFundConstituent.isin)
+        )
+    ).all()
+    latest_by_isin = {
+        row.isin: row.latest for row in latest_month_rows if row.latest is not None
+    }
+
+    constituents_by_isin: dict[str, list[dict]] = {isin: [] for isin in isins}
+    if latest_by_isin:
+        isin_month_pairs = [(isin, latest_by_isin[isin]) for isin in latest_by_isin]
+        rows = (
+            await db.execute(
+                select(
+                    MfFundConstituent.isin,
+                    MfFundConstituent.constituent_name,
+                    MfFundConstituent.weight_pct,
+                ).where(
+                    sql_tuple(MfFundConstituent.isin, MfFundConstituent.as_of_month).in_(
+                        isin_month_pairs
+                    )
+                )
+            )
+        ).all()
+        for row in rows:
+            if not row.constituent_name or row.weight_pct is None:
+                continue
+            constituents_by_isin.setdefault(row.isin, []).append(
+                {
+                    "name": str(row.constituent_name),
+                    "weight_pct": float(row.weight_pct),
+                }
+            )
+
+    pairs: list[dict] = []
+    pairs_with_data = 0
+    for isin_a, isin_b in combinations(isins, 2):
+        holdings_a = constituents_by_isin.get(isin_a, [])
+        holdings_b = constituents_by_isin.get(isin_b, [])
+        if not holdings_a or not holdings_b:
+            pairs.append(
+                {
+                    "fund_a_isin": isin_a,
+                    "fund_a_name": name_by_isin.get(isin_a, isin_a),
+                    "fund_b_isin": isin_b,
+                    "fund_b_name": name_by_isin.get(isin_b, isin_b),
+                    "no_data": True,
+                    "reason": "insufficient_coverage",
+                }
+            )
+            continue
+
+        pairs_with_data += 1
+        pairs.append(
+            {
+                "fund_a_isin": isin_a,
+                "fund_a_name": name_by_isin.get(isin_a, isin_a),
+                "fund_b_isin": isin_b,
+                "fund_b_name": name_by_isin.get(isin_b, isin_b),
+                "overlap_pct": compute_overlap_pct(holdings_a, holdings_b),
+                "no_data": False,
+            }
+        )
+
+    return {
+        "portfolio_id": portfolio_id,
+        "as_of": rm.as_of,
+        "pairs": pairs,
+        "pairs_with_data": pairs_with_data,
+        "pairs_total": pairs_total,
+        "no_data_reason": "insufficient_constituent_coverage" if pairs_with_data == 0 else None,
+    }
+
+
 @router.get(
     "/portfolio/{portfolio_id}/overlap",
-    response_model=OverlapResponse,
 )
 async def portfolio_overlap(
     portfolio_id: str,
     user: Annotated[UserContext, Depends(current_user_or_anonymous)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> OverlapResponse:
-    """
-    Factual fund-overlap observations for the user's own portfolio.
-
-    Cold-start / single-fund / no holdings → valid 200 with empty lists, never 404.
-    Another user's portfolio_id → 404 (portfolio_not_found).
-    Anonymous → 401.
-    """
+    response: Response,
+) -> dict:
+    """P2 `portfolio.overlap` — pairwise overlap with explicit no-data markers."""
     _require_auth(user)
     await _require_mf_consent(user=user, db=db)
-    try:
-        return await service.get_overlap(db, user.user_id, portfolio_id)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="portfolio_not_found")
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    response.headers["Cache-Control"] = "private"
+    return serialize_concept(
+        "portfolio.overlap",
+        await _portfolio_overlap_payload(db, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
 
 
 async def _owned_portfolio_id(db: AsyncSession, portfolio_id: str, user_id: str) -> uuid.UUID:
@@ -714,6 +926,27 @@ async def portfolio_cost(
     return serialize_concept(
         "portfolio.cost",
         await _portfolio_cost_payload(db, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/health")
+async def portfolio_health(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+) -> dict:
+    """P2 `portfolio.health` — deterministic checks only, no composite grade."""
+    _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    response.headers["Cache-Control"] = "private"
+    return serialize_concept(
+        "portfolio.health",
+        await _portfolio_health_payload(db, portfolio_id),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,

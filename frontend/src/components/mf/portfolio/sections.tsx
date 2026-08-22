@@ -12,16 +12,17 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { cleanSchemeName } from '@/features/mf/explorer-format';
 import { Input, PasswordInput } from '@/components/ui/Input';
 import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_COLOR } from './ui';
 import {
-  COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
+  COLORS, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
   GOALS, PERF_DATA, PERF_PERIODS, TOP_PERF,
   UNDER_REVIEW,
   COST_CARDS, AMC_LIST, TIMELINE, RECS, PROJ, PROJ_TABS, WATCHLIST,
-  AI_FEED, REPORTS, FAQ, BENEFITS, AUTOSYNC_PILLS,
+  AI_FEED, FAQ, BENEFITS, AUTOSYNC_PILLS,
   STRENGTH_COLOR,
   type HealthLight,
 } from './sampleData';
@@ -39,6 +40,8 @@ import {
   usePortfolioAllocation,
   usePortfolioConcentration,
   usePortfolioDiversification,
+  usePortfolioHealth,
+  usePortfolioOverlap,
   usePortfolioPerformance,
   usePortfolioCost,
   usePortfolioTransactions,
@@ -47,9 +50,10 @@ import {
   useBenchmarkReturns,
   type Holding,
 } from '@/features/portfolio/api';
-import { useWatchlistCards } from '@/features/mf/api';
+import { useWatchlistCards, useLatestPortfolio } from '@/features/mf/api';
 import { useMoodCurrent } from '@/features/mood/api';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
+import { computeSip, formatInrShort } from '@/lib/finance/accumulation';
 
 const { E, B, A, R, O, C, V } = COLORS;
 
@@ -1069,25 +1073,83 @@ export function VsMarketSection({ portfolioId }: { portfolioId: string }) {
 // S01 — HEALTH
 // ═══════════════════════════════════════════════════════════════════════════
 export function HealthSection() {
+  return <HealthChecksPanel />;
+}
+
+const HEALTH_CHECK_TITLE: Record<string, string> = {
+  concentration_top_fund: 'Concentration',
+  diversification_category_spread: 'Diversification',
+  risk_volatility: 'Risk',
+  cost_ter_coverage: 'Cost',
+  allocation_top_bucket: 'Allocation',
+};
+
+const HEALTH_BAND_DOT: Record<string, string> = {
+  high: E,
+  medium: A,
+  moderate: A,
+  low: R,
+  very_high: R,
+  insufficient_data: '#94A3B8',
+};
+
+function HealthChecksPanel() {
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHealth(portfolioId);
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {HEALTH.map((h) => (
+            <div key={h.title} className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11.5px] font-bold text-ink">{h.title}</span>
+                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: LIGHT_COLOR[h.light] }} />
+              </div>
+              <div className="text-[13px] font-extrabold" style={{ color: LIGHT_COLOR[h.light] }}>{h.stat}</div>
+              <div className="mt-1 text-caption text-ink-muted leading-relaxed">{h.exp}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const checks = envelope?.data?.checks ?? [];
+  const reason = envelope?.meta.reason ?? null;
+
   return (
     <Card className="mt-4 p-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {HEALTH.map((h) => (
-          <div key={h.title} className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11.5px] font-bold text-ink">{h.title}</span>
-              <span
-                className="h-2.5 w-2.5 rounded-full shrink-0"
-                style={{ background: LIGHT_COLOR[h.light] }}
-                aria-label={h.light === 'g' ? 'Good' : h.light === 'y' ? 'Watch' : 'Needs attention'}
-              />
-            </div>
-            <div className="text-[13px] font-extrabold" style={{ color: LIGHT_COLOR[h.light] }}>{h.stat}</div>
-            <div className="mt-1 text-caption text-ink-muted leading-relaxed">{h.exp}</div>
-            <div className="mt-1.5 text-caption font-semibold text-ink-secondary">→ {h.tip}</div>
-          </div>
-        ))}
-      </div>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Health checks appear once portfolio data is available."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {checks.map((check) => {
+            const bandKey = check.band ?? 'insufficient_data';
+            const dotColor = HEALTH_BAND_DOT[bandKey] ?? '#94A3B8';
+            return (
+              <div key={check.key} className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11.5px] font-bold text-ink">{HEALTH_CHECK_TITLE[check.key] ?? check.key}</span>
+                  <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: dotColor }} />
+                </div>
+                <div className="text-caption text-ink-secondary leading-relaxed">{check.finding}</div>
+                {check.coverage_pct != null && (
+                  <div className="mt-1.5 text-caption font-semibold text-ink-muted">Coverage {check.coverage_pct.toFixed(2)}%</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </DataState>
     </Card>
   );
 }
@@ -1096,29 +1158,55 @@ export function HealthSection() {
 // S02 — ACTION CENTER
 // ═══════════════════════════════════════════════════════════════════════════
 export function ActionSection() {
-  return (
-    <Card className="mt-4 divide-y divide-line">
-      {ACTIONS.map((a, i) => (
-        <div key={i} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-start sm:gap-4">
-          <div className="flex shrink-0 items-center gap-2 sm:w-20 sm:flex-col sm:items-start">
-            <span
-              className="rounded-md px-2 py-0.5 text-[10px] font-bold"
-              style={{ background: `${PRI_COLOR[a.pri]}1A`, color: PRI_COLOR[a.pri] }}
-            >
-              {PRI_LABEL[a.pri]}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-bold text-ink">{a.title}</div>
-            <div className="mt-0.5 text-small text-ink-secondary leading-relaxed">{a.desc}</div>
-            <div className="mt-1.5 flex items-center gap-1.5 text-caption font-semibold text-ink-muted">
-              <span className="text-emerald-500" aria-hidden="true">→</span>
-              {a.impact}
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHealth(portfolioId);
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 divide-y divide-line">
+        {ACTIONS.map((a, i) => (
+          <div key={i} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-start sm:gap-4">
+            <div className="flex shrink-0 items-center gap-2 sm:w-20 sm:flex-col sm:items-start">
+              <span className="rounded-md px-2 py-0.5 text-[10px] font-bold" style={{ background: `${PRI_COLOR[a.pri]}1A`, color: PRI_COLOR[a.pri] }}>
+                {PRI_LABEL[a.pri]}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-ink">{a.title}</div>
+              <div className="mt-0.5 text-small text-ink-secondary leading-relaxed">{a.desc}</div>
             </div>
           </div>
-          <CTA variant="ghost" className="shrink-0 self-start">{a.cta}</CTA>
+        ))}
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const checks = envelope?.data?.checks ?? [];
+  const reason = envelope?.meta.reason ?? null;
+  const todos = checks.filter((check) => ['low', 'very_high', 'insufficient_data'].includes(check.band ?? ''));
+
+  return (
+    <Card className="mt-4 p-5">
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Action items appear once health checks are available."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-32 w-full rounded-xl" />}
+      >
+        <div className="flex flex-col gap-3">
+          {(todos.length > 0 ? todos : checks).map((check) => (
+            <div key={check.key} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
+              <div className="text-small font-bold text-ink">Review {HEALTH_CHECK_TITLE[check.key] ?? 'this area'}</div>
+              <div className="mt-0.5 text-caption text-ink-secondary leading-relaxed">{check.finding}</div>
+              <div className="mt-1 text-caption font-semibold text-ink-muted">Worth a look in your next portfolio review.</div>
+            </div>
+          ))}
         </div>
-      ))}
+      </DataState>
     </Card>
   );
 }
@@ -1793,38 +1881,86 @@ export function TopPerfSection({ portfolioId }: { portfolioId: string }) {
 // S09 — FUNDS NEEDING REVIEW
 // ═══════════════════════════════════════════════════════════════════════════
 export function UnderReviewSection() {
-  return (
-    <div className="mt-4 flex flex-col gap-3">
-      {UNDER_REVIEW.map((u) => (
-        <Card key={u.name} className="p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-            <Logo letter={u.logo} color={u.color} size={40} radius={10} font={15} />
-            <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="font-bold text-ink">{u.name}</span>
-                <span
-                  className="rounded-full px-2.5 py-0.5 text-[10.5px] font-bold"
-                  style={{ background: `${u.color}18`, color: u.color }}
-                >
-                  {u.action}
-                </span>
-              </div>
-              <p className="text-small text-ink-secondary leading-relaxed">{u.reason}</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {u.tags.map((tag) => (
-                  <span key={tag} className="rounded-md border border-line px-2 py-0.5 text-caption text-ink-muted">{tag}</span>
-                ))}
-              </div>
-              <div className="mt-3 flex items-center gap-2 text-caption">
-                <span className="text-ink-muted">Alternative:</span>
-                <span className="font-semibold" style={{ color: u.altColor }}>{u.alt}</span>
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const isPreview = !portfolioId;
+  const { data: holdingsEnv, isLoading, isError, refetch } = usePortfolioHoldings(portfolioId);
+  const { data: perfEnv } = usePortfolioPerformance(portfolioId);
+
+  if (isPreview) {
+    return (
+      <div className="mt-4 flex flex-col gap-3">
+        {UNDER_REVIEW.map((u) => (
+          <Card key={u.name} className="p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <Logo letter={u.logo} color={u.color} size={40} radius={10} font={15} />
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="font-bold text-ink">{u.name}</span>
+                  <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-bold" style={{ background: `${u.color}18`, color: u.color }}>
+                    {u.action}
+                  </span>
+                </div>
+                <p className="text-small text-ink-secondary leading-relaxed">{u.reason}</p>
               </div>
             </div>
-            <CTA variant="ghost" className="shrink-0 self-start">{u.action}</CTA>
-          </div>
-        </Card>
-      ))}
-    </div>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (holdingsEnv?.status ?? 'empty');
+  const reason = holdingsEnv?.meta.reason ?? null;
+  const holdings = holdingsEnv?.data?.holdings ?? [];
+  const worstByXirr = [...holdings]
+    .filter((h) => h.xirr_pct != null)
+    .sort((a, b) => (a.xirr_pct ?? 0) - (b.xirr_pct ?? 0))
+    .slice(0, 3);
+  const lockinCandidates = holdings
+    .filter((h) => (h.lockin?.locked_units ?? 0) > 0)
+    .slice(0, 2);
+
+  const cards = [
+    ...worstByXirr.map((h) => ({
+      key: `${h.isin}-xirr`,
+      title: cleanSchemeName(h.scheme_name),
+      note: `XIRR is ${h.xirr_pct!.toFixed(2)}% based on available history. Worth a closer review.`,
+      tags: ['XIRR review'],
+    })),
+    ...lockinCandidates.map((h) => ({
+      key: `${h.isin}-lockin`,
+      title: cleanSchemeName(h.scheme_name),
+      note: `ELSS lock-in still applies for ${h.lockin?.locked_units.toFixed(3)} units${h.lockin?.next_unlock_date ? ` until ${h.lockin.next_unlock_date}` : ''}.`,
+      tags: ['Lock-in watch'],
+    })),
+  ].slice(0, 4);
+
+  return (
+    <DataState
+      status={status}
+      reason={reason}
+      emptyCopy="Review items appear after holdings and history are available."
+      onRetry={() => refetch()}
+      skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+    >
+      <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3 text-caption text-ink-secondary">
+        Portfolio lifetime XIRR: {perfEnv?.data?.lifetime_xirr_pct != null ? `${perfEnv.data.lifetime_xirr_pct.toFixed(2)}%` : 'Not available yet'}.
+      </div>
+      <div className="mt-3 flex flex-col gap-3">
+        {(cards.length > 0 ? cards : [{ key: 'none', title: 'No immediate review flags', note: 'No low-confidence or lock-in-heavy observations were found in current data.', tags: ['Observational'] }]).map((card) => (
+          <Card key={card.key} className="p-4">
+            <div className="font-bold text-ink">{card.title}</div>
+            <p className="mt-1 text-small text-ink-secondary leading-relaxed">{card.note}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {card.tags.map((tag) => (
+                <span key={tag} className="rounded-md border border-line px-2 py-0.5 text-caption text-ink-muted">{tag}</span>
+              ))}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </DataState>
   );
 }
 
@@ -1834,18 +1970,56 @@ export function UnderReviewSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 export function OverlapSection() {
   const overlapTip = sectionTooltip('OverlapSection');
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioOverlap(portfolioId);
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        {overlapTip && (
+          <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+            Fund Overlap
+            <HelpTip tip={overlapTip} />
+          </div>
+        )}
+        <ComingSoonCard
+          label="Fund overlap"
+          desc="Fund overlap is being built — it needs each fund's stock holdings."
+        />
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const reason = envelope?.meta.reason ?? null;
+  const pairsWithData = envelope?.data?.pairs_with_data ?? 0;
+  const pairsTotal = envelope?.data?.pairs_total ?? 0;
+  const coveragePct = pairsTotal > 0 ? (pairsWithData / pairsTotal) * 100 : 0;
+
   return (
     <Card className="mt-4 p-5">
       {overlapTip && (
-        <div className="mb-3 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
+        <div className="mb-2 flex items-center gap-1.5 text-caption font-semibold text-ink-secondary">
           Fund Overlap
           <HelpTip tip={overlapTip} />
         </div>
       )}
-      <ComingSoonCard
-        label="Fund overlap"
-        desc="Fund overlap is being built — it needs each fund's stock holdings."
-      />
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Overlap appears when constituent holdings are available across fund pairs."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-28 w-full rounded-xl" />}
+      >
+        <div className="rounded-xl border border-line bg-surface-2 p-4">
+          <div className="text-small font-semibold text-ink">Coverage: {pairsWithData}/{pairsTotal} pairs ({coveragePct.toFixed(2)}%)</div>
+          <div className="mt-1 text-caption text-ink-secondary">
+            Overlap detail is parked until constituent coverage improves enough for reliable interpretation.
+          </div>
+        </div>
+      </DataState>
     </Card>
   );
 }
@@ -2469,26 +2643,48 @@ export function TimelineSection({ portfolioId }: { portfolioId: string }) {
 // S16 — RECOMMENDATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 export function RecSection() {
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHealth(portfolioId);
+
+  if (isPreview) {
+    return (
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {RECS.map((rec, i) => (
+          <Card key={i} className="p-5">
+            <div className="mb-1.5 font-bold text-ink">{rec.title}</div>
+            <p className="text-small text-ink-secondary leading-relaxed">{rec.desc}</p>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const reason = envelope?.meta.reason ?? null;
+  const checks = envelope?.data?.checks ?? [];
+
   return (
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {RECS.map((rec, i) => (
-        <Card key={i} className="p-5">
-          <div className="mb-1.5 font-bold text-ink">{rec.title}</div>
-          <p className="text-small text-ink-secondary leading-relaxed">{rec.desc}</p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {rec.tags.map((tag) => (
-              <span
-                key={tag.text}
-                className="rounded-full px-2.5 py-0.5 text-[10.5px] font-bold"
-                style={{ background: `${tag.color}18`, color: tag.color }}
-              >
-                {tag.text}
-              </span>
-            ))}
-          </div>
-        </Card>
-      ))}
-    </div>
+    <DataState
+      status={status}
+      reason={reason}
+      emptyCopy="Portfolio observations appear when health checks are available."
+      onRetry={() => refetch()}
+      skeleton={<Skeleton className="h-32 w-full rounded-xl" />}
+    >
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {checks.map((check) => (
+          <Card key={check.key} className="p-5">
+            <div className="mb-1.5 font-bold text-ink">{HEALTH_CHECK_TITLE[check.key] ?? check.key}</div>
+            <p className="text-small text-ink-secondary leading-relaxed">{check.finding}</p>
+            {check.coverage_pct != null && (
+              <div className="mt-2 text-caption text-ink-muted">Coverage {check.coverage_pct.toFixed(2)}%</div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </DataState>
   );
 }
 
@@ -2497,7 +2693,17 @@ export function RecSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 export function ProjSection() {
   const [yr, setYr] = React.useState(PROJ_TABS[1]); // default: 10 Years
-  const scenarios = PROJ[yr];
+  const years = Math.max(1, Number.parseInt(yr, 10) || 10);
+  const [ratePct, setRatePct] = React.useState(10);
+  const { data: summaryEnv } = usePortfolioSummaryById((useLatestPortfolio().data?.portfolio_id) ?? '');
+  const currentValue = summaryEnv?.data?.total_value ?? null;
+  const projected = computeSip({
+    monthlySip: 0,
+    lumpSum: currentValue ?? 0,
+    years,
+    annualRatePct: ratePct,
+    stepUpPct: 0,
+  });
 
   return (
     <Card className="mt-4 p-5">
@@ -2517,23 +2723,41 @@ export function ProjSection() {
           </button>
         ))}
       </div>
-      {/* Chart */}
-      <div className="mb-5 overflow-hidden rounded-xl bg-surface-2 p-3">
-        <AreaChart seed={yr.length * 7} color={E} width={520} height={180} />
+      {/* Assumed yearly return — user-adjustable, always visible */}
+      <div className="mb-5 flex flex-wrap items-center gap-1.5">
+        <span className="text-caption text-ink-muted">Assumed yearly return:</span>
+        {[8, 10, 12].map((r) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => setRatePct(r)}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-caption font-semibold transition-colors focus-visible:outline-none',
+              ratePct === r ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
+            )}
+          >
+            {r}%
+          </button>
+        ))}
       </div>
       {/* Scenarios */}
       <div className="flex flex-col gap-2.5">
-        {scenarios.map((s, i) => (
-          <div key={i} className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-4 py-3">
-            <div className="flex items-center gap-2.5">
-              <span className="h-3 w-3 rounded-full shrink-0" style={{ background: s.color }} aria-hidden="true" />
-              <span className="text-small font-semibold text-ink">{s.name}</span>
-            </div>
-            <span className="font-sans font-extrabold" style={{ color: s.color }}>{s.val}</span>
-          </div>
-        ))}
+        <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-4 py-3">
+          <div className="text-small font-semibold text-ink">Current value</div>
+          <span className="font-sans font-extrabold" style={{ color: B }}>{currentValue != null ? formatInrShort(currentValue) : '—'}</span>
+        </div>
+        <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-4 py-3">
+          <div className="text-small font-semibold text-ink">Projected value</div>
+          <span className="font-sans font-extrabold" style={{ color: E }}>{currentValue != null ? formatInrShort(projected.futureValue) : '—'}</span>
+        </div>
+        <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-4 py-3">
+          <div className="text-small font-semibold text-ink">Estimated growth</div>
+          <span className="font-sans font-extrabold" style={{ color: C }}>{currentValue != null ? formatInrShort(projected.wealthGained) : '—'}</span>
+        </div>
       </div>
-      <SoWhat>These projections use a 15% annual return assumption — this is sample data, not your actual XIRR. Real returns will vary; markets can fall as well as rise.</SoWhat>
+      <SoWhat>
+        Illustration only, not a forecast. Projects your current portfolio value{currentValue != null ? ` of ${formatInrShort(currentValue)}` : ''} growing at the {ratePct}% yearly assumption you picked, over {years} years, with no further investments. Lifetime XIRR so far: {summaryEnv?.data?.xirr_pct != null ? `${summaryEnv.data.xirr_pct.toFixed(2)}%` : 'not available yet'}.
+      </SoWhat>
     </Card>
   );
 }
@@ -2632,24 +2856,24 @@ export function AiSection() {
 // S20 — REPORT CENTER
 // ═══════════════════════════════════════════════════════════════════════════
 export function ReportSection() {
+  const { data: latest } = useLatestPortfolio();
+  const hasLatest = !!latest?.job_id;
+
   return (
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      {REPORTS.map((rep) => (
-        <Card key={rep.title} className="p-5 flex flex-col items-center gap-3 text-center cursor-pointer hover:border-royal transition-colors">
-          <span
-            className="grid h-12 w-12 place-items-center rounded-xl text-[22px]"
-            style={{ background: `${rep.color}18`, color: rep.color }}
-            aria-hidden="true"
+    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <Card className="p-5">
+        <div className="text-caption text-ink-muted">Latest report</div>
+        <div className="mt-1 font-bold text-ink">{hasLatest ? latest.portfolio_name : 'No report yet'}</div>
+        <div className="mt-1 text-caption text-ink-secondary">{hasLatest ? `Job ${latest.job_id.slice(0, 8)}...` : 'Upload and process a portfolio to generate your first report.'}</div>
+        {hasLatest ? (
+          <Link
+            href={`/mf/report/${latest.job_id}`}
+            className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-line bg-surface-2 px-3.5 py-2 text-small font-semibold text-ink transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
           >
-            {rep.icon}
-          </span>
-          <div>
-            <div className="font-bold text-ink">{rep.title}</div>
-            <div className="text-caption text-ink-muted">{rep.desc}</div>
-          </div>
-          <CTA variant="ghost" className="w-full text-center">Generate</CTA>
-        </Card>
-      ))}
+            Open report
+          </Link>
+        ) : null}
+      </Card>
     </div>
   );
 }

@@ -71,7 +71,7 @@
       "access_tier": "free",
       "content_class": "CALCULATED",
       "gate_flag": null,
-      "status": "data-starved"
+      "status": "live"
     },
     "fund.fit": {
       "visibility_class": "educational",
@@ -95,7 +95,7 @@
       "access_tier": "free",
       "content_class": "DERIVED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "portfolio.diversification": {
       "visibility_class": "educational",
@@ -319,7 +319,7 @@
       "access_tier": "free",
       "content_class": "DERIVED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "portfolio.opportunities": {
       "visibility_class": "educational",
@@ -356,10 +356,10 @@
     "portfolio.reports": {
       "visibility_class": "public",
       "data_class": "user-personal",
-      "access_tier": "plus",
+      "access_tier": "free",
       "content_class": "SYSTEM",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "advice.suitability": {
       "visibility_class": "gated",

@@ -23,6 +23,7 @@ _REQUIRED_PATHS = {
     "/portfolio/{portfolio_id}/mood-context",
     "/portfolio/{portfolio_id}/performance",
     "/portfolio/{portfolio_id}/cost",
+    "/portfolio/{portfolio_id}/health",
 }
 
 
