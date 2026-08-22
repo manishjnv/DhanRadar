@@ -61,6 +61,10 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
   // Picks made from the pure-sample page (0 real ISINs) accumulate here until there
   // are 2+ to compare — a single pick can't build a valid /mf/compare?isins= URL.
   const [pendingIsins, setPendingIsins] = React.useState<string[]>([]);
+  // Founder 2026-08-22: sample cards must be removable too. They have no URL state,
+  // so dismissal is local; the picker opens so a real fund can take the slot.
+  const [dismissedSamples, setDismissedSamples] = React.useState<string[]>([]);
+  const visibleFunds = funds.filter((f) => !dismissedSamples.includes(f.key));
 
   function onQueryChange(q: string) {
     setQuery(q);
@@ -107,23 +111,25 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
 
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
-      {funds.map((f) => (
+      {visibleFunds.map((f) => (
         <div
           key={f.key}
           className="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
         >
           <div className="relative overflow-hidden px-4.5 py-4 text-white" style={{ background: f.topGradient, paddingLeft: 18, paddingRight: 18 }}>
-            {ISIN_RE.test(f.key) && (
-              <button
-                type="button"
-                onClick={() => removeFund(f.key)}
-                aria-label={`Remove ${f.name} from this comparison`}
-                title="Remove from comparison"
-                className="absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-              >
-                ✕
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (ISIN_RE.test(f.key)) { removeFund(f.key); return; }
+                setDismissedSamples((prev) => [...prev, f.key]);
+                setAdding(true);
+              }}
+              aria-label={`Remove ${f.name} from this comparison`}
+              title="Remove from comparison"
+              className="absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            >
+              ✕
+            </button>
             <div className="relative flex items-center gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white shadow-md">
                 <span className="text-lg font-extrabold" style={{ background: f.topGradient, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>{f.logo}</span>
