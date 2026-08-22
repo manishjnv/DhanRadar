@@ -362,15 +362,15 @@ function CompareView() {
       </div>
 
       {/* S1 — Hero comparison columns */}
-      <SectionHeader index="01" title={`Comparing ${count} Funds`} info="2–4 funds" badge={live ? <LiveBadge /> : undefined} />
+      <SectionHeader index="01" title={`Comparing ${count} Funds`} info="2–4 funds" badge={<LiveBadge />} />
       <HeroSection funds={heroFunds} />
 
       {/* S2 — DhanRadar educational read (AI wave) */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" tag={compareAiQuery.data?.summary_items?.length ? 'LIVE' : 'PREVIEW'} /><EduReadSection items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
+      <Section><SectionHeader index="02" title="DhanRadar Educational Read" badge={<LiveBadge />} /><EduReadSection items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S3 — Scoreboard */}
       <Section>
-        <SectionHeader index="03" title="Quick Comparison Scoreboard" info="Key facts highlighted" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="03" title="Quick Comparison Scoreboard" info="Key facts highlighted" badge={<LiveBadge />} />
         <ScoreboardSection funds={heroFunds} rows={scoreboardRows} />
       </Section>
 
@@ -379,90 +379,90 @@ function CompareView() {
 
       {/* S7 — Performance */}
       <Section>
-        <SectionHeader index="07" title="Performance Center" info="Strongest highlighted per period" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="07" title="Performance Center" info="Strongest highlighted per period" badge={<LiveBadge />} />
         <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} />
       </Section>
 
       {/* S8 — SIP */}
       <Section>
-        <SectionHeader index="08" title="SIP Comparison Center" info="Historical illustration" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="08" title="SIP Comparison Center" info="Historical illustration" badge={<LiveBadge />} />
         <SipSection live={live} entries={sipEntries} />
       </Section>
 
       {/* S9 — Rolling */}
       <Section>
-        <SectionHeader index="09" title="Rolling Returns Comparison" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="09" title="Rolling Returns Comparison" badge={<LiveBadge />} />
         <RollingSection rows={rollingRows} live={live} />
       </Section>
 
       {/* S10 — Ranking */}
       <Section>
-        <SectionHeader index="10" title="Ranking Comparison" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="10" title="Ranking Comparison" badge={<LiveBadge />} />
         <RankingSection rows={rankRows} funds={heroFunds} live={live} />
       </Section>
 
       {/* S11 — Risk */}
       <Section>
-        <SectionHeader index="11" title="Risk Comparison Center" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="11" title="Risk Comparison Center" badge={<LiveBadge />} />
         <RiskSection liveRows={riskRows} />
       </Section>
 
       {/* S12 — Portfolio fit */}
       <Section>
-        <SectionHeader index="12" title="Portfolio Fit Comparison" tag="Exclusive" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="12" title="Portfolio Fit Comparison" tag="Exclusive" badge={<LiveBadge />} />
         <FitSection isins={live ? sortedIsins : undefined} funds={live ? realFunds : undefined} />
       </Section>
 
       {/* S13 — Holdings */}
       <Section>
-        <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={c2Comp || c2Overlap ? <LiveBadge /> : undefined} />
+        <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={<LiveBadge />} />
         <HoldingsSection compositions={c2Comp} pairwiseOverlap={c2Overlap} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S14 — Fund flow */}
       <Section>
-        <SectionHeader index="14" title="Fund Flow Intelligence" badge={c2Flows ? <LiveBadge /> : undefined} />
+        <SectionHeader index="14" title="Fund Flow Intelligence" badge={<LiveBadge />} />
         <FlowSection flows={c2Flows} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S15 — Managers */}
       <Section>
-        <SectionHeader index="15" title="Fund Manager Comparison" badge={c2People ? <LiveBadge /> : undefined} />
+        <SectionHeader index="15" title="Fund Manager Comparison" badge={<LiveBadge />} />
         <ManagerSection people={c2People} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S16 — AMC */}
       <Section>
-        <SectionHeader index="16" title="AMC Comparison" badge={c2Amc ? <LiveBadge /> : undefined} />
+        <SectionHeader index="16" title="AMC Comparison" badge={<LiveBadge />} />
         <AmcSection amcData={c2Amc} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S17 — Cost */}
       <Section>
-        <SectionHeader index="17" title="Cost Comparison" info="Impact on ₹10 L over time" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="17" title="Cost Comparison" info="Impact on ₹10 L over time" badge={<LiveBadge />} />
         <CostSection rows={costRows} vis={costVis} funds={heroFunds} live={live} />
       </Section>
 
       {/* S18 — Tax */}
       <Section>
-        <SectionHeader index="18" title="Tax Comparison" info="On ₹2 L gain · >1yr" badge={live ? <LiveBadge /> : undefined} />
+        <SectionHeader index="18" title="Tax Comparison" info="On ₹2 L gain · >1yr" badge={<LiveBadge />} />
         <TaxSection categories={taxCategories} />
       </Section>
 
       {/* S20 — What changed */}
       <Section>
-        <SectionHeader index="20" title="What Changed Recently" badge={c2Events ? <LiveBadge /> : undefined} />
+        <SectionHeader index="20" title="What Changed Recently" badge={<LiveBadge />} />
         <ChangesSection events={c2Events} funds={heroFunds} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S21 — Similar funds in this category */}
       <Section>
-        <SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" badge={c2Alts ? <LiveBadge /> : undefined} />
+        <SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" badge={<LiveBadge />} />
         <AltsSection alternatives={c2Alts} />
       </Section>
 
       {/* S22 — AI insights */}
-      <Section><SectionHeader index="22" title="AI Insights Center" tag={compareAiQuery.data?.insight_items?.length ? 'LIVE' : 'PREVIEW'} /><AiInsightsSection items={live && me ? (compareAiQuery.data?.insight_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
+      <Section><SectionHeader index="22" title="AI Insights Center" badge={<LiveBadge />} /><AiInsightsSection items={live && me ? (compareAiQuery.data?.insight_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S23 — FAQ */}
       <Section><SectionHeader index="23" title="Frequently Asked" /><FaqSection /></Section>
