@@ -145,7 +145,6 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
       {liveIsins.length >= 4 ? null : adding ? (
         <div className="flex min-h-[120px] flex-col gap-2 rounded-2xl border-2 border-dashed border-royal/50 bg-surface p-3">
           <Input
-            autoFocus
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Search fund name…"
