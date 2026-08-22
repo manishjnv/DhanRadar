@@ -87,6 +87,20 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
     }
   }
 
+  // Removing a fund only makes sense for real (live) cards — sample/illustrative
+  // cards aren't backed by a URL isin to drop. Below 2 remaining, a "comparison"
+  // is meaningless: land on the one fund's own page, or back on Explore if none left.
+  function removeFund(isin: string) {
+    const remaining = liveIsins.filter((k) => k !== isin);
+    if (remaining.length >= 2) {
+      router.push(`/mf/compare?isins=${remaining.join(',')}`);
+    } else if (remaining.length === 1) {
+      router.push(`/mf/fund/${remaining[0]}`);
+    } else {
+      router.push('/mf/explore');
+    }
+  }
+
   // Sample cards have no real ISIN behind them — "View"/"Watchlist" send the user
   // to a real search instead of sitting there as a dead disabled button.
   const sampleFallbackHref = (f: CompareFund) => `/mf/explore?q=${encodeURIComponent(f.short || f.name)}`;
@@ -99,6 +113,17 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
           className="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
         >
           <div className="relative overflow-hidden px-4.5 py-4 text-white" style={{ background: f.topGradient, paddingLeft: 18, paddingRight: 18 }}>
+            {ISIN_RE.test(f.key) && (
+              <button
+                type="button"
+                onClick={() => removeFund(f.key)}
+                aria-label={`Remove ${f.name} from this comparison`}
+                title="Remove from comparison"
+                className="absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+              >
+                ✕
+              </button>
+            )}
             <div className="relative flex items-center gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white shadow-md">
                 <span className="text-lg font-extrabold" style={{ background: f.topGradient, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>{f.logo}</span>
@@ -151,7 +176,7 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
               )}
               {ISIN_RE.test(f.key) ? (
                 <CTA variant="navy" onClick={() => toggle({ isin: f.key, name: f.name, category: f.cat })}>
-                  {has(f.key) ? '✓ Watchlisted' : '＋ Watchlist'}
+                  <span aria-hidden="true">{has(f.key) ? '★' : '☆'}</span> {has(f.key) ? 'Watchlisted' : 'Watchlist'}
                 </CTA>
               ) : (
                 <Link
