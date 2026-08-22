@@ -137,7 +137,7 @@ describe('useCasUpload', () => {
   });
 
   // 4. done status triggers invalidation and phase becomes done
-  it('when useCasStatus returns done, phase is done and invalidateQueries called 5 times', () => {
+  it('when useCasStatus returns done, phase is done and invalidateQueries called 6 times', () => {
     mockMutate.mockImplementation(
       (_args: unknown, { onSuccess }: { onSuccess: (data: { job_id: string; estimated_seconds: number }) => void }) => {
         onSuccess({ job_id: 'job-done', estimated_seconds: 10 });
@@ -157,9 +157,11 @@ describe('useCasUpload', () => {
     });
 
     expect(result.current.phase).toBe('done');
-    // latest-portfolio resolver + holdings + summaryById + risk + riskAdvanced
-    expect(mockInvalidateQueries).toHaveBeenCalledTimes(5);
+    // latest-portfolio resolver + ['portfolio'] prefix + holdings + summaryById + risk + riskAdvanced
+    expect(mockInvalidateQueries).toHaveBeenCalledTimes(6);
     expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['mf', 'portfolio', 'latest'] });
+    // P1b: prefix invalidation covers every queryKeys.portfolio.* entry on first upload (C4 trap)
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['portfolio'] });
   });
 
   // 5. error status from useCasStatus transitions to error phase

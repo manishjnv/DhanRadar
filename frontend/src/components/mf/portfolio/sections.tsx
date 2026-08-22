@@ -18,8 +18,8 @@ import { Input, PasswordInput } from '@/components/ui/Input';
 import { Logo, BandRingFromBand, Semicircle, Donut, AreaChart, Card, SoWhat, RichText, StatusTag, RiskBadge, CTA, LABEL_DISPLAY, BAND_COLOR } from './ui';
 import {
   COLORS, HERO, HEALTH, ACTIONS, DMMI_VAL, DMMI_MOOD, DMMI_PHASE, DMMI_METRICS,
-  GOALS, PERF_DATA, PERF_PERIODS, HOLDINGS, TOP_PERF,
-  UNDER_REVIEW, RISK_CARDS, ADV_METRICS,
+  GOALS, PERF_DATA, PERF_PERIODS, TOP_PERF,
+  UNDER_REVIEW,
   COST_CARDS, AMC_LIST, TIMELINE, RECS, PROJ, PROJ_TABS, WATCHLIST,
   AI_FEED, REPORTS, FAQ, BENEFITS, AUTOSYNC_PILLS,
   STRENGTH_COLOR,
@@ -39,12 +39,19 @@ import {
   usePortfolioAllocation,
   usePortfolioConcentration,
   usePortfolioDiversification,
+  usePortfolioPerformance,
+  usePortfolioCost,
+  usePortfolioTransactions,
   usePortfolioValueSeries,
   useNiftyCloseSeries,
+  useBenchmarkReturns,
   type Holding,
 } from '@/features/portfolio/api';
+import { useWatchlistCards } from '@/features/mf/api';
+import { useMoodCurrent } from '@/features/mood/api';
+import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 
-const { E, B, A, R, O } = COLORS;
+const { E, B, A, R, O, C, V } = COLORS;
 
 // ── Light dot helper ─────────────────────────────────────────────────────────
 const LIGHT_COLOR: Record<HealthLight, string> = { g: E, y: A, r: R };
@@ -1119,33 +1126,73 @@ export function ActionSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S03 — DMMI
 // ═══════════════════════════════════════════════════════════════════════════
-export function DmmiSection() {
+export function DmmiSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const { data, isLoading, isError, refetch } = useMoodCurrent();
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="flex flex-col items-center gap-2 lg:w-52 lg:shrink-0">
+            <Semicircle val={DMMI_VAL} size={200} />
+            <div className="text-center">
+              <div className="font-sans text-[16px] font-extrabold text-ink">{DMMI_MOOD}</div>
+              <div className="text-caption text-ink-muted">{DMMI_PHASE}</div>
+            </div>
+          </div>
+          <div className="flex-1">
+            <div className="mb-3 text-small font-bold text-ink">How this market affects your portfolio</div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {DMMI_METRICS.map((m) => (
+                <div key={m.label} className="rounded-xl border border-line bg-surface-2 p-4">
+                  <div className="text-caption text-ink-muted">{m.label}</div>
+                  <div className="mt-0.5 font-sans text-[15px] font-extrabold" style={{ color: m.color }}>{m.value}</div>
+                  <div className="mt-1 text-caption text-ink-secondary leading-relaxed">{m.detail}</div>
+                </div>
+              ))}
+            </div>
+            <SoWhat>This preview shows how market mood context may influence interpretation of your portfolio analytics.</SoWhat>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const moodStatus = isLoading
+    ? 'loading'
+    : isError
+      ? 'error'
+      : (!data || data.data_quality === 'unavailable' || data.regime === 'data_unavailable')
+        ? 'empty'
+        : 'present';
+  const moodWord = data ? (REGIME_DISPLAY[data.regime] ?? REGIME_DISPLAY.insufficient_data) : null;
+
   return (
     <Card className="mt-4 p-5">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        {/* Gauge — DMMI is a market index, numeric val=62 is allowed */}
-        <div className="flex flex-col items-center gap-2 lg:w-52 lg:shrink-0">
-          <Semicircle val={DMMI_VAL} size={200} />
-          <div className="text-center">
-            <div className="font-sans text-[16px] font-extrabold text-ink">{DMMI_MOOD}</div>
-            <div className="text-caption text-ink-muted">{DMMI_PHASE}</div>
-          </div>
-        </div>
-        {/* Metrics */}
-        <div className="flex-1">
-          <div className="mb-3 text-small font-bold text-ink">How this market affects your portfolio</div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {DMMI_METRICS.map((m) => (
-              <div key={m.label} className="rounded-xl border border-line bg-surface-2 p-4">
-                <div className="text-caption text-ink-muted">{m.label}</div>
-                <div className="mt-0.5 font-sans text-[15px] font-extrabold" style={{ color: m.color }}>{m.value}</div>
-                <div className="mt-1 text-caption text-ink-secondary leading-relaxed">{m.detail}</div>
+      <DataState
+        status={moodStatus}
+        reason={moodStatus === 'empty' ? 'empty' : null}
+        emptyCopy="Market mood context is not available right now."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-44 w-full rounded-xl" />}
+      >
+        {data && moodWord && (
+          <div className="grid items-center gap-6 lg:grid-cols-[220px_1fr]">
+            <div className="flex justify-center">
+              <MoodGauge regime={data.regime} confidenceBand={data.confidence_band} />
+            </div>
+            <div>
+              <p className="text-small leading-relaxed text-ink-secondary">
+                Market mood is currently <span className="font-semibold text-ink">{moodWord}</span>. This describes market conditions and does not predict future movement.
+              </p>
+              <div className="mt-3 text-caption text-ink-muted">
+                {data.commentary ?? 'Mood context updates as new market signals are processed.'}
               </div>
-            ))}
+            </div>
           </div>
-          <SoWhat>In the current accumulation phase, staying invested and continuing SIPs is historically the optimal move for equity-heavy portfolios like yours.</SoWhat>
-        </div>
-      </div>
+        )}
+      </DataState>
     </Card>
   );
 }
@@ -1381,58 +1428,98 @@ export function GoalSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S06 — PERFORMANCE CENTER
 // ═══════════════════════════════════════════════════════════════════════════
-export function PerfSection() {
-  const [period, setPeriod] = React.useState(3); // index into PERF_PERIODS
+export function PerfSection({ portfolioId }: { portfolioId: string }) {
+  const [period, setPeriod] = React.useState(3);
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioPerformance(portfolioId);
+  const { data: benchmark } = useBenchmarkReturns('nifty50', { enabled: !!portfolioId });
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {PERF_PERIODS.map((p, i) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(i)}
+              className={cn(
+                'shrink-0 whitespace-nowrap rounded-lg px-3.5 py-2 text-caption font-semibold transition-colors focus-visible:outline-none',
+                period === i ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="mt-5 flex flex-col gap-3">
+          {PERF_DATA.map((s) => {
+            const val = s.vals[period];
+            const pct = Math.min(Math.max(val / 25, 0), 1);
+            return (
+              <div key={s.series} className="flex items-center gap-3">
+                <span className="w-28 shrink-0 text-small font-semibold text-ink">{s.series}</span>
+                <div className="flex-1 h-2.5 overflow-hidden rounded-full bg-surface-3">
+                  <div className="h-full rounded-full" style={{ width: `${pct * 100}%`, background: s.color }} />
+                </div>
+                <span className="w-14 shrink-0 text-right font-mono text-small font-bold" style={{ color: s.color }}>
+                  {val > 0 ? '+' : ''}{val}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const perf = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
 
   return (
     <Card className="mt-4 p-5">
-      {/* Period tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {PERF_PERIODS.map((p, i) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => setPeriod(i)}
-            className={cn(
-              'shrink-0 whitespace-nowrap rounded-lg px-3.5 py-2 text-caption font-semibold transition-colors focus-visible:outline-none',
-              period === i ? 'bg-navy text-white' : 'text-ink-muted hover:bg-surface-2 hover:text-ink',
-            )}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-      {/* Performance rows */}
-      <div className="mt-5 flex flex-col gap-3">
-        {PERF_DATA.map((s) => {
-          const val = s.vals[period];
-          const pct = Math.min(Math.max(val / 25, 0), 1); // normalise to [0,1] for bar
-          return (
-            <div key={s.series} className="flex items-center gap-3">
-              <span className="w-28 shrink-0 text-small font-semibold text-ink">{s.series}</span>
-              <div className="flex-1 h-2.5 overflow-hidden rounded-full bg-surface-3">
-                <div className="h-full rounded-full" style={{ width: `${pct * 100}%`, background: s.color }} />
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy={perf?.no_data_reason ?? 'Performance appears once your portfolio has enough history.'}
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-40 w-full rounded-xl" />}
+      >
+        {perf && (
+          <div className="space-y-3">
+            {perf.windows.map((w) => {
+              const val = w.xirr_pct ?? 0;
+              const width = Math.min(Math.max((Math.abs(val) / 30) * 100, 4), 100);
+              const color = val >= 0 ? E : R;
+              return (
+                <div key={w.window} className="rounded-xl border border-line bg-surface-2 p-3">
+                  <div className="mb-1 flex items-center justify-between text-caption text-ink-muted">
+                    <span className="font-semibold text-ink">{w.label}</span>
+                    <span>{w.coverage_pct != null ? `${w.coverage_pct}% coverage` : 'Coverage unavailable'}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-2.5 overflow-hidden rounded-full bg-surface-3">
+                      <div className="h-full rounded-full" style={{ width: `${width}%`, background: color }} />
+                    </div>
+                    <span className="w-20 shrink-0 text-right font-mono text-small font-bold" style={{ color }}>
+                      {w.xirr_pct == null ? '—' : `${w.xirr_pct >= 0 ? '+' : ''}${w.xirr_pct.toFixed(2)}%`}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="rounded-xl border border-line bg-surface-2 p-3">
+              <div className="text-caption text-ink-muted">Nifty 50 benchmark</div>
+              <div className="mt-1 grid grid-cols-3 gap-2 text-caption">
+                <span>1Y: <b className="text-ink">{benchmark?.return_1y_pct != null ? `${benchmark.return_1y_pct >= 0 ? '+' : ''}${benchmark.return_1y_pct.toFixed(2)}%` : '—'}</b></span>
+                <span>3Y: <b className="text-ink">{benchmark?.return_3y_pct != null ? `${benchmark.return_3y_pct >= 0 ? '+' : ''}${benchmark.return_3y_pct.toFixed(2)}%` : '—'}</b></span>
+                <span>5Y: <b className="text-ink">{benchmark?.return_5y_pct != null ? `${benchmark.return_5y_pct >= 0 ? '+' : ''}${benchmark.return_5y_pct.toFixed(2)}%` : '—'}</b></span>
               </div>
-              <span className="w-14 shrink-0 text-right font-mono text-small font-bold" style={{ color: s.color }}>
-                {val > 0 ? '+' : ''}{val}%
-              </span>
             </div>
-          );
-        })}
-      </div>
-      {/* Perf chips */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {[
-          { label: 'Beat benchmark', sub: 'on 3Y / 5Y', color: E },
-          { label: 'XIRR 16.8%', sub: 'since start', color: E },
-          { label: 'Category rank', sub: 'Top 22%', color: B },
-        ].map((c) => (
-          <div key={c.label} className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <div className="text-caption font-bold" style={{ color: c.color }}>{c.label}</div>
-            <div className="text-[10px] text-ink-muted">{c.sub}</div>
           </div>
-        ))}
-      </div>
+        )}
+      </DataState>
     </Card>
   );
 }
@@ -1607,23 +1694,98 @@ export function HoldingsSection({ portfolioId }: { portfolioId: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // S08 — TOP PERFORMERS
 // ═══════════════════════════════════════════════════════════════════════════
-export function TopPerfSection() {
-  return (
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {TOP_PERF.map((t) => (
-        <Card key={t.cat} className="p-4">
-          <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-faint">{t.cat}</div>
-          <div className="flex items-center gap-2.5">
-            <Logo letter={t.logo} color={t.color} size={32} radius={8} font={12} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-small font-bold text-ink">{t.name}</div>
-              <div className="text-caption font-extrabold" style={{ color: t.color }}>{t.val}</div>
+export function TopPerfSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioHoldings(portfolioId);
+
+  if (isPreview) {
+    return (
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {TOP_PERF.map((t) => (
+          <Card key={t.cat} className="p-4">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-faint">{t.cat}</div>
+            <div className="flex items-center gap-2.5">
+              <Logo letter={t.logo} color={t.color} size={32} radius={8} font={12} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-small font-bold text-ink">{t.name}</div>
+                <div className="text-caption font-extrabold" style={{ color: t.color }}>{t.val}</div>
+              </div>
             </div>
-          </div>
-          <div className="mt-2 text-caption text-ink-muted">{t.sub}</div>
-        </Card>
-      ))}
-    </div>
+            <div className="mt-2 text-caption text-ink-muted">{t.sub}</div>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const holdings = envelope?.data?.holdings ?? [];
+  const reason = envelope?.meta.reason ?? null;
+
+  const withXirr = holdings.filter((h) => h.xirr_pct != null);
+  const highestXirr = withXirr.length > 0
+    ? [...withXirr].sort((a, b) => (b.xirr_pct ?? -999) - (a.xirr_pct ?? -999))[0]
+    : null;
+  const lowestXirr = withXirr.length > 0
+    ? [...withXirr].sort((a, b) => (a.xirr_pct ?? 999) - (b.xirr_pct ?? 999))[0]
+    : null;
+  const highestValue = holdings.length > 0
+    ? [...holdings].sort((a, b) => b.current_value - a.current_value)[0]
+    : null;
+  const highestToday = holdings.filter((h) => h.day_change != null).length > 0
+    ? [...holdings].filter((h) => h.day_change != null).sort((a, b) => (b.day_change ?? -999999) - (a.day_change ?? -999999))[0]
+    : null;
+
+  const cards = [
+    {
+      title: 'Highest XIRR',
+      fund: highestXirr,
+      metric: highestXirr?.xirr_pct != null ? `${highestXirr.xirr_pct >= 0 ? '+' : ''}${highestXirr.xirr_pct.toFixed(2)}%` : '—',
+      sub: 'Highest yearly return in your current holdings.',
+      color: E,
+    },
+    {
+      title: 'Lowest XIRR',
+      fund: lowestXirr,
+      metric: lowestXirr?.xirr_pct != null ? `${lowestXirr.xirr_pct >= 0 ? '+' : ''}${lowestXirr.xirr_pct.toFixed(2)}%` : '—',
+      sub: 'Lowest yearly return in your current holdings.',
+      color: R,
+    },
+    {
+      title: 'Largest Holding',
+      fund: highestValue,
+      metric: highestValue ? fmtCurrency(highestValue.current_value) : '—',
+      sub: 'Highest value allocation in your portfolio.',
+      color: B,
+    },
+    {
+      title: 'Strongest Today',
+      fund: highestToday,
+      metric: highestToday?.day_change != null ? `${highestToday.day_change >= 0 ? '+' : '−'}${fmtCurrency(Math.abs(highestToday.day_change))}` : '—',
+      sub: 'Highest single-day move among tracked holdings.',
+      color: C,
+    },
+  ];
+
+  return (
+    <DataState
+      status={status}
+      reason={reason}
+      emptyCopy="Top performers appear after holdings data loads."
+      onRetry={() => refetch()}
+      skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+    >
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((c) => (
+          <Card key={c.title} className="p-4">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-faint">{c.title}</div>
+            <div className="text-small font-bold text-ink truncate" title={c.fund?.scheme_name ?? undefined}>{c.fund ? cleanSchemeName(c.fund.scheme_name) : '—'}</div>
+            <div className="mt-1 text-caption font-extrabold" style={{ color: c.color }}>{c.metric}</div>
+            <div className="mt-2 text-caption text-ink-muted">{c.sub}</div>
+          </Card>
+        ))}
+      </div>
+    </DataState>
   );
 }
 
@@ -2040,20 +2202,87 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // S13 — COST ANALYSIS
 // ═══════════════════════════════════════════════════════════════════════════
-export function CostSection() {
+export function CostSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioCost(portfolioId);
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {COST_CARDS.map((c) => (
+            <div key={c.label} className="rounded-xl border border-line bg-surface-2 p-4">
+              <div className="text-caption text-ink-muted">{c.label}</div>
+              <div className="mt-0.5 font-sans text-[20px] font-extrabold" style={{ color: c.color }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+        <SoWhat>This preview shows how fee metrics are summarized once your portfolio cost data is available.</SoWhat>
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const cost = envelope?.data ?? null;
+  const reason = envelope?.meta.reason ?? null;
+
   return (
     <Card className="mt-4 p-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {COST_CARDS.map((c) => (
-          <div key={c.label} className="rounded-xl border border-line bg-surface-2 p-4">
-            <div className="text-caption text-ink-muted">{c.label}</div>
-            <div className="mt-0.5 font-sans text-[20px] font-extrabold" style={{ color: c.color }}>{c.value}</div>
-          </div>
-        ))}
-      </div>
-      <SoWhat>
-        At 0.80% weighted expense ratio, this sample portfolio is below the 1.2% industry average. Actual costs depend on your specific funds.
-      </SoWhat>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy={cost?.no_data_reason ?? 'Cost metrics appear once TER coverage is available.'}
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+      >
+        {cost && (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Weighted TER</div>
+                <div className="mt-0.5 font-sans text-[20px] font-extrabold text-ink">{cost.weighted_ter_pct != null ? `${cost.weighted_ter_pct.toFixed(2)}%` : '—'}</div>
+                <div className="text-caption text-ink-faint">Coverage {cost.ter_coverage_pct != null ? `${cost.ter_coverage_pct}%` : '—'}</div>
+              </div>
+              <div className="rounded-xl border border-line bg-surface-2 p-4">
+                <div className="text-caption text-ink-muted">Direct Plan Share</div>
+                <div className="mt-0.5 font-sans text-[20px] font-extrabold text-ink">{cost.direct_plan_share_pct != null ? `${cost.direct_plan_share_pct.toFixed(2)}%` : '—'}</div>
+                <div className="text-caption text-ink-faint">Coverage {cost.direct_plan_coverage_pct != null ? `${cost.direct_plan_coverage_pct}%` : '—'}</div>
+              </div>
+              <div className="rounded-xl border border-line bg-surface-2 p-4 sm:col-span-2">
+                <div className="text-caption text-ink-muted">Holdings with TER data</div>
+                <div className="mt-0.5 font-sans text-[20px] font-extrabold text-ink">{cost.holdings.length}</div>
+              </div>
+            </div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-[760px] w-full text-small">
+                <thead>
+                  <tr className="border-b border-line text-left">
+                    <th className="py-2 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-muted">Fund</th>
+                    <th className="py-2 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-muted">Weight</th>
+                    <th className="py-2 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-muted">TER</th>
+                    <th className="py-2 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-muted">Category Median</th>
+                    <th className="py-2 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-muted">Plan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {cost.holdings.map((h) => (
+                    <tr key={h.isin}>
+                      <td className="py-2 pr-3 text-ink font-semibold">{cleanSchemeName(h.scheme_name)}</td>
+                      <td className="py-2 pr-3 text-ink-secondary font-mono">{h.weight_pct.toFixed(2)}%</td>
+                      <td className="py-2 pr-3 text-ink-secondary font-mono">{h.expense_ratio_pct != null ? `${h.expense_ratio_pct.toFixed(2)}%` : '—'}</td>
+                      <td className="py-2 pr-3 text-ink-secondary font-mono">{h.category_median_ter_pct != null ? `${h.category_median_ter_pct.toFixed(2)}%` : '—'}</td>
+                      <td className="py-2 pr-3 text-ink-secondary">{h.plan_type ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <SoWhat>
+              Your value-weighted TER is {cost.weighted_ter_pct != null ? `${cost.weighted_ter_pct.toFixed(2)}%` : 'unavailable'}; category medians are shown for factual context.
+            </SoWhat>
+          </>
+        )}
+      </DataState>
     </Card>
   );
 }
@@ -2061,33 +2290,94 @@ export function CostSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S14 — AMC EXPOSURE
 // ═══════════════════════════════════════════════════════════════════════════
-export function AmcSection() {
+export function AmcSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const allocQuery = usePortfolioAllocation(portfolioId, 'amc');
+  const holdingsQuery = usePortfolioHoldings(portfolioId);
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="flex flex-col gap-3">
+          {AMC_LIST.map((amc) => (
+            <div key={amc.name} className="flex items-center gap-4">
+              <Logo letter={amc.logo} color={amc.color} size={32} radius={8} font={12} />
+              <div className="w-20 shrink-0">
+                <div className="font-bold text-ink">{amc.name}</div>
+                <div className="text-caption text-ink-muted">{amc.pct}% of portfolio</div>
+              </div>
+              <div className="flex-1">
+                <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                  <div className="h-full rounded-full bg-royal" style={{ width: `${(amc.pct / 30) * 100}%` }} />
+                </div>
+              </div>
+              <span
+                className="shrink-0 rounded-md px-2 py-0.5 text-[10.5px] font-bold"
+                style={{ background: `${amc.qualityScore >= 88 ? E : amc.qualityScore >= 84 ? B : A}18`, color: amc.qualityScore >= 88 ? E : amc.qualityScore >= 84 ? B : A }}
+              >
+                {amc.qualityWord}
+              </span>
+            </div>
+          ))}
+        </div>
+        <SoWhat>This preview illustrates how exposure by fund house is summarized from your holdings.</SoWhat>
+      </Card>
+    );
+  }
+
+  const status = allocQuery.isLoading || holdingsQuery.isLoading
+    ? 'loading'
+    : allocQuery.isError || holdingsQuery.isError
+      ? 'error'
+      : (allocQuery.data?.status ?? 'empty');
+
+  const amcData = allocQuery.data?.data?.buckets ?? [];
+  const reason = allocQuery.data?.meta.reason ?? null;
+  const holdings = holdingsQuery.data?.data?.holdings ?? [];
+
+  const topFundsByAmc = new Map<string, string[]>();
+  for (const h of holdings) {
+    const matched = amcData.find((a) => h.scheme_name.toLowerCase().includes(a.bucket.toLowerCase()));
+    if (!matched) continue;
+    const arr = topFundsByAmc.get(matched.bucket) ?? [];
+    if (arr.length < 2) arr.push(cleanSchemeName(h.scheme_name));
+    topFundsByAmc.set(matched.bucket, arr);
+  }
+
   return (
     <Card className="mt-4 p-5">
-      <div className="flex flex-col gap-3">
-        {AMC_LIST.map((amc) => (
-          <div key={amc.name} className="flex items-center gap-4">
-            <Logo letter={amc.logo} color={amc.color} size={32} radius={8} font={12} />
-            <div className="w-20 shrink-0">
-              <div className="font-bold text-ink">{amc.name}</div>
-              <div className="text-caption text-ink-muted">{amc.pct}% of portfolio</div>
-            </div>
-            <div className="flex-1">
-              <div className="h-2 overflow-hidden rounded-full bg-surface-3">
-                <div className="h-full rounded-full bg-royal" style={{ width: `${(amc.pct / 30) * 100}%` }} />
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="AMC exposure appears once allocation data is available."
+        onRetry={() => { void allocQuery.refetch(); void holdingsQuery.refetch(); }}
+        skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+      >
+        <div className="flex flex-col gap-3">
+          {amcData.map((amc, idx) => (
+            <div key={amc.bucket} className="rounded-xl border border-line bg-surface-2 p-3">
+              <div className="flex items-center gap-4">
+                <Logo letter={amc.bucket[0]?.toUpperCase() ?? '?'} color={ALLOC_PALETTE[idx % ALLOC_PALETTE.length]} size={32} radius={8} font={12} />
+                <div className="w-40 shrink-0">
+                  <div className="font-bold text-ink truncate" title={amc.bucket}>{shortAmcName(amc.bucket)}</div>
+                  <div className="text-caption text-ink-muted">{amc.weight_pct.toFixed(2)}% of portfolio</div>
+                </div>
+                <div className="flex-1">
+                  <div className="h-2 overflow-hidden rounded-full bg-surface-3">
+                    <div className="h-full rounded-full bg-royal" style={{ width: `${Math.min(amc.weight_pct, 100)}%` }} />
+                  </div>
+                </div>
               </div>
+              {(topFundsByAmc.get(amc.bucket)?.length ?? 0) > 0 && (
+                <div className="mt-2 text-caption text-ink-secondary">
+                  Funds: {(topFundsByAmc.get(amc.bucket) ?? []).join(' · ')}
+                </div>
+              )}
             </div>
-            {/* Quality renders as WORD, not raw qualityScore number */}
-            <span
-              className="shrink-0 rounded-md px-2 py-0.5 text-[10.5px] font-bold"
-              style={{ background: `${amc.qualityScore >= 88 ? E : amc.qualityScore >= 84 ? B : A}18`, color: amc.qualityScore >= 88 ? E : amc.qualityScore >= 84 ? B : A }}
-            >
-              {amc.qualityWord}
-            </span>
-          </div>
-        ))}
-      </div>
-      <SoWhat>No single AMC exceeds 22% in this sample. The quality ratings here are illustrative — check actual fund-house track records independently.</SoWhat>
+          ))}
+        </div>
+        <SoWhat>AMC exposure shows concentration by fund house based on your current allocation weights.</SoWhat>
+      </DataState>
     </Card>
   );
 }
@@ -2095,30 +2385,82 @@ export function AmcSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S15 — PORTFOLIO TIMELINE
 // ═══════════════════════════════════════════════════════════════════════════
-export function TimelineSection() {
+export function TimelineSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const { data: envelope, isLoading, isError, refetch } = usePortfolioTransactions(portfolioId, { limit: 200 });
+
+  if (isPreview) {
+    return (
+      <Card className="mt-4 p-5">
+        <div className="relative flex flex-col gap-0">
+          <div className="absolute left-[19px] top-5 bottom-5 w-px bg-line" aria-hidden="true" />
+          {TIMELINE.map((ev, i) => (
+            <div key={i} className="relative flex gap-4 pb-6 last:pb-0">
+              <div
+                className="relative z-[1] grid h-10 w-10 shrink-0 place-items-center rounded-full text-[14px] font-bold text-white"
+                style={{ background: ev.color }}
+                aria-hidden="true"
+              >
+                {ev.icon}
+              </div>
+              <div className="pt-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{ev.date}</div>
+                <div className="mt-0.5 font-bold text-ink">{ev.title}</div>
+                <div className="text-caption text-ink-secondary">{ev.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (envelope?.status ?? 'empty');
+  const reason = envelope?.meta.reason ?? null;
+  const txns = envelope?.data?.transactions ?? [];
+
+  const eventForType: Record<string, { color: string; icon: string; title: string }> = {
+    purchase: { color: B, icon: '+', title: 'Purchase' },
+    sip: { color: E, icon: 'S', title: 'SIP' },
+    redemption: { color: R, icon: '-', title: 'Redemption' },
+    switch_in: { color: C, icon: '↘', title: 'Transfer In' },
+    switch_out: { color: A, icon: '↗', title: 'Transfer Out' },
+    dividend_payout: { color: O, icon: 'D', title: 'Dividend Payout' },
+    dividend_reinvest: { color: V, icon: 'R', title: 'Dividend Reinvest' },
+  };
+
   return (
     <Card className="mt-4 p-5">
-      <div className="relative flex flex-col gap-0">
-        {/* Vertical line */}
-        <div className="absolute left-[19px] top-5 bottom-5 w-px bg-line" aria-hidden="true" />
-        {TIMELINE.map((ev, i) => (
-          <div key={i} className="relative flex gap-4 pb-6 last:pb-0">
-            {/* Icon dot */}
-            <div
-              className="relative z-[1] grid h-10 w-10 shrink-0 place-items-center rounded-full text-[14px] font-bold text-white"
-              style={{ background: ev.color }}
-              aria-hidden="true"
-            >
-              {ev.icon}
-            </div>
-            <div className="pt-1.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{ev.date}</div>
-              <div className="mt-0.5 font-bold text-ink">{ev.title}</div>
-              <div className="text-caption text-ink-secondary">{ev.desc}</div>
-            </div>
-          </div>
-        ))}
-      </div>
+      <DataState
+        status={status}
+        reason={reason}
+        emptyCopy="Timeline entries appear once transaction history is available."
+        onRetry={() => refetch()}
+        skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+      >
+        <div className="relative flex flex-col gap-0">
+          <div className="absolute left-[19px] top-5 bottom-5 w-px bg-line" aria-hidden="true" />
+          {txns.slice(0, 12).map((ev) => {
+            const conf = eventForType[ev.txn_type] ?? { color: B, icon: '•', title: 'Transaction' };
+            return (
+              <div key={ev.id} className="relative flex gap-4 pb-6 last:pb-0">
+                <div
+                  className="relative z-[1] grid h-10 w-10 shrink-0 place-items-center rounded-full text-[14px] font-bold text-white"
+                  style={{ background: conf.color }}
+                  aria-hidden="true"
+                >
+                  {conf.icon}
+                </div>
+                <div className="pt-1.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{fmtDate(ev.txn_date)}</div>
+                  <div className="mt-0.5 font-bold text-ink">{conf.title} · {cleanSchemeName(ev.isin)}</div>
+                  <div className="text-caption text-ink-secondary">{ev.amount >= 0 ? '+' : '−'}{fmtCurrency(Math.abs(ev.amount))} · {ev.units.toFixed(3)} units</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </DataState>
     </Card>
   );
 }
@@ -2199,29 +2541,69 @@ export function ProjSection() {
 // ═══════════════════════════════════════════════════════════════════════════
 // S18 — OPPORTUNITIES
 // ═══════════════════════════════════════════════════════════════════════════
-export function OpportunitiesSection() {
-  return (
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {WATCHLIST.map((w) => (
-        <Card key={w.name} className="p-5 flex flex-col gap-3">
-          <div className="flex items-center gap-3">
-            <Logo letter={w.logo} color={w.color} size={36} radius={9} font={13} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-bold text-ink">{w.name}</div>
+export function OpportunitiesSection({ portfolioId }: { portfolioId: string }) {
+  const isPreview = !portfolioId;
+  const { data, isLoading, isError, refetch } = useWatchlistCards(!!portfolioId);
+
+  if (isPreview) {
+    return (
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {WATCHLIST.map((w) => (
+          <Card key={w.name} className="p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <Logo letter={w.logo} color={w.color} size={36} radius={9} font={13} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-bold text-ink">{w.name}</div>
+              </div>
             </div>
-          </div>
-          <p className="text-small text-ink-secondary leading-relaxed">{w.why}</p>
-          <ul className="flex flex-col gap-1">
-            {w.benefits.map((b) => (
-              <li key={b} className="flex items-center gap-1.5 text-caption text-ink-secondary">
-                <span className="text-emerald-500 font-bold shrink-0">✓</span> {b}
-              </li>
-            ))}
-          </ul>
-          <CTA variant="ghost" className="mt-auto self-start">View fund →</CTA>
-        </Card>
-      ))}
-    </div>
+            <p className="text-small text-ink-secondary leading-relaxed">{w.why}</p>
+            <ul className="flex flex-col gap-1">
+              {w.benefits.map((b) => (
+                <li key={b} className="flex items-center gap-1.5 text-caption text-ink-secondary">
+                  <span className="text-emerald-500 font-bold shrink-0">✓</span> {b}
+                </li>
+              ))}
+            </ul>
+            <CTA variant="ghost" className="mt-auto self-start">View fund →</CTA>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  const status = isLoading ? 'loading' : isError ? 'error' : (data?.items?.length ? 'present' : 'empty');
+
+  return (
+    <DataState
+      status={status}
+      reason={status === 'empty' ? 'empty' : null}
+      emptyCopy="Your watchlist is empty. Add funds to /mf/watchlist to see opportunities here."
+      onRetry={() => refetch()}
+      skeleton={<Skeleton className="h-36 w-full rounded-xl" />}
+    >
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {(data?.items ?? []).slice(0, 6).map((w) => (
+          <Card key={w.isin} className="p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <Logo letter={(w.fund_name_short ?? w.scheme_name)[0] ?? '?'} color={B} size={36} radius={9} font={13} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-bold text-ink">{cleanSchemeName(w.fund_name_short ?? w.scheme_name)}</div>
+              </div>
+            </div>
+            <p className="text-small text-ink-secondary leading-relaxed">From your watchlist — review how this fund compares with your current holdings before taking any action.</p>
+            <ul className="flex flex-col gap-1 text-caption text-ink-secondary">
+              <li>1Y: {w.return_1y_pct != null ? `${w.return_1y_pct.toFixed(2)}%` : '—'}</li>
+              <li>3Y: {w.return_3y_pct != null ? `${w.return_3y_pct.toFixed(2)}%` : '—'}</li>
+              <li>Expense ratio: {w.expense_ratio_pct != null ? `${w.expense_ratio_pct.toFixed(2)}%` : '—'}</li>
+            </ul>
+            <CTA variant="ghost" className="mt-auto self-start">From your watchlist</CTA>
+          </Card>
+        ))}
+      </div>
+      <div className="mt-3 text-caption text-ink-muted">
+        No watchlist yet? Visit /mf/watchlist to add funds.
+      </div>
+    </DataState>
   );
 }
 

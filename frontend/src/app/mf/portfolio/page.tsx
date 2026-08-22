@@ -29,6 +29,7 @@ import { SectionHeader } from '@/components/mf/explore/ExploreSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { PasswordInput } from '@/components/ui/Input';
+import { LiveBadge } from '@/components/mf/funddetail/parts';
 import {
   EmptyHero, BenefitsGrid, AutoSyncBanner,
   HeroSection, VsMarketSection, HealthSection, ActionSection, DmmiSection, AllocSection,
@@ -64,6 +65,7 @@ function PortfolioView() {
   // Resolve the user's active portfolio id. 404 = no portfolio yet (show empty state).
   const { data: latestPortfolio } = useLatestPortfolio();
   const portfolioId = latestPortfolio?.portfolio_id ?? '';
+  const showLive = !!portfolioId;
 
   const casUpload = useCasUpload(portfolioId);
 
@@ -157,134 +159,140 @@ function PortfolioView() {
           {/* Header toolbar moved into the breadcrumb row above (founder 2026-07-04, one-row header). */}
 
           {/* S1 Hero */}
-          <HeroSection portfolioId={portfolioId} />
+          <section>
+            <SectionHeader title="Portfolio Overview" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <HeroSection portfolioId={portfolioId} />
+          </section>
 
           {/* S1b Portfolio vs Market — full You-vs-Nifty comparison (hero mini-chart links here) */}
-          <VsMarketSection portfolioId={portfolioId} />
+          <section>
+            <SectionHeader title="Portfolio vs Market" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <VsMarketSection portfolioId={portfolioId} />
+          </section>
 
           {/* S01 Portfolio Health */}
           <section>
-            <SectionHeader index="01" title="Portfolio Health" info="10 checks · green / yellow / red" />
+            <SectionHeader index="01" title="Portfolio Health" info="10 checks · green / yellow / red" tag="PREVIEW" />
             <HealthSection />
           </section>
 
           {/* S02 Action Center */}
           <section>
-            <SectionHeader index="02" title="Action Center" tag="Needs attention" info="5 items" />
+            <SectionHeader index="02" title="Action Center" info="5 items" tag="PREVIEW" />
             <ActionSection />
           </section>
 
           {/* S03 DMMI */}
           <section>
-            <SectionHeader index="03" title="DMMI Portfolio Analysis" tag="DhanRadar Mood" />
-            <DmmiSection />
+            <SectionHeader index="03" title="DMMI Portfolio Analysis" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <DmmiSection portfolioId={portfolioId} />
           </section>
 
           {/* S04 Allocation */}
           <section>
-            <SectionHeader index="04" title="Allocation Center" info="Your fund mix" />
+            <SectionHeader index="04" title="Allocation Center" info="Your fund mix" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
             <AllocSection portfolioId={portfolioId} />
           </section>
 
           {/* S05 Goals */}
           <section>
-            <SectionHeader index="05" title="Goal Tracker" />
+            <SectionHeader index="05" title="Goal Tracker" tag="PREVIEW" />
             <GoalSection />
           </section>
 
           {/* S06 Performance */}
           <section>
-            <SectionHeader index="06" title="Performance Center" info="vs benchmark & category" />
-            <PerfSection />
+            <SectionHeader index="06" title="Performance Center" info="vs benchmark & category" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <PerfSection portfolioId={portfolioId} />
           </section>
 
           {/* S07 Holdings */}
           <section>
-            <SectionHeader index="07" title="Fund Holdings" />
+            <SectionHeader index="07" title="Fund Holdings" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
             <HoldingsSection portfolioId={portfolioId} />
           </section>
 
           {/* S08 Top Performers */}
           <section>
-            <SectionHeader index="08" title="Top Performers" />
-            <TopPerfSection />
+            <SectionHeader index="08" title="Top Performers" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <TopPerfSection portfolioId={portfolioId} />
           </section>
 
           {/* S09 Funds Needing Review */}
           <section>
-            <SectionHeader index="09" title="Funds Needing Review" info="2 funds" />
+            <SectionHeader index="09" title="Funds Needing Review" info="2 funds" tag="PREVIEW" />
             <UnderReviewSection />
           </section>
 
           {/* S10 Overlap */}
           <section>
-            <SectionHeader index="10" title="Fund Overlap Analysis" tag="Differentiator" />
+            <SectionHeader index="10" title="Fund Overlap Analysis" tag="PREVIEW" />
             <OverlapSection />
           </section>
 
           {/* S11 Diversification */}
           <section>
-            <SectionHeader index="11" title="Diversification Center" info="How well your money is spread" />
+            <SectionHeader index="11" title="Diversification Center" info="How well your money is spread" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
             <DivSection portfolioId={portfolioId} />
           </section>
 
           {/* S12 Risk */}
           <section>
-            <SectionHeader index="12" title="Risk Center" info="In plain English" />
+            <SectionHeader index="12" title="Risk Center" info="In plain English" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
             <RiskSection portfolioId={portfolioId} />
           </section>
 
           {/* S13 Cost */}
           <section>
-            <SectionHeader index="13" title="Cost Analysis" info="What fees cost you" />
-            <CostSection />
+            <SectionHeader index="13" title="Cost Analysis" info="What fees cost you" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <CostSection portfolioId={portfolioId} />
           </section>
 
           {/* S14 AMC */}
           <section>
-            <SectionHeader index="14" title="AMC Exposure" info="Concentration & quality" />
-            <AmcSection />
+            <SectionHeader index="14" title="AMC Exposure" info="Concentration & quality" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <AmcSection portfolioId={portfolioId} />
           </section>
 
           {/* S15 Timeline */}
           <section>
-            <SectionHeader index="15" title="Portfolio Timeline" info="Key events" />
-            <TimelineSection />
+            <SectionHeader index="15" title="Portfolio Timeline" info="Key events" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <TimelineSection portfolioId={portfolioId} />
           </section>
 
           {/* S16 Recommendations */}
           <section>
-            <SectionHeader index="16" title="Recommendations" tag="Decision support" />
+            <SectionHeader index="16" title="Recommendations" tag="PREVIEW" />
             <RecSection />
           </section>
 
           {/* S17 Projection */}
           <section>
-            <SectionHeader index="17" title="Future Wealth Projection" info="If you stay the course" />
+            <SectionHeader index="17" title="Future Wealth Projection" info="If you stay the course" tag="PREVIEW" />
             <ProjSection />
           </section>
 
           {/* S18 Opportunities */}
           <section>
-            <SectionHeader index="18" title="Opportunities to Improve" tag="Recommended funds" />
-            <OpportunitiesSection />
+            <SectionHeader index="18" title="Opportunities to Improve" badge={showLive ? <LiveBadge /> : undefined} tag={showLive ? undefined : 'PREVIEW'} />
+            <OpportunitiesSection portfolioId={portfolioId} />
           </section>
 
           {/* S19 AI Feed */}
           <section>
-            <SectionHeader index="19" title="AI Insights Feed" tag="DhanRadar AI" />
+            <SectionHeader index="19" title="AI Insights Feed" tag="PREVIEW" />
             <AiSection />
           </section>
 
           {/* S20 Report Center */}
           <section>
-            <SectionHeader index="20" title="Report Center" tag="Premium" />
+            <SectionHeader index="20" title="Report Center" tag="PREVIEW" />
             <ReportSection />
           </section>
 
           {/* S21 FAQ */}
           <section>
-            <SectionHeader index="21" title="Portfolio FAQ" />
+            <SectionHeader index="21" title="Portfolio FAQ" tag="PREVIEW" />
             <FaqSection />
           </section>
 

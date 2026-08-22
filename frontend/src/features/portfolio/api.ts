@@ -80,6 +80,49 @@ export interface DiversificationData {
 }
 
 // ---------------------------------------------------------------------------
+// Performance and cost types (DataEnvelope) — portfolio-level factual metrics.
+// ---------------------------------------------------------------------------
+
+export interface PortfolioPerformanceWindow {
+  window: string;
+  label: string;
+  days: number;
+  window_days: number | null;
+  xirr_pct: number | null;
+  coverage_pct: number | null;
+}
+
+export interface PortfolioPerformanceData {
+  portfolio_id: string;
+  as_of: string | null;
+  lifetime_xirr_pct: number | null;
+  lifetime_coverage_pct: number | null;
+  windows: PortfolioPerformanceWindow[];
+  no_data_reason: string | null;
+}
+
+export interface PortfolioCostHolding {
+  isin: string;
+  scheme_name: string;
+  current_value: number;
+  weight_pct: number;
+  expense_ratio_pct: number | null;
+  category_median_ter_pct: number | null;
+  plan_type: string | null;
+}
+
+export interface PortfolioCostData {
+  portfolio_id: string;
+  as_of: string | null;
+  weighted_ter_pct: number | null;
+  ter_coverage_pct: number | null;
+  direct_plan_share_pct: number | null;
+  direct_plan_coverage_pct: number | null;
+  holdings: PortfolioCostHolding[];
+  no_data_reason: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Hooks — allocation / concentration / diversification (DataEnvelope)
 // ---------------------------------------------------------------------------
 
@@ -113,6 +156,32 @@ export function usePortfolioDiversification(portfolioId: string) {
   return useQuery<DataEnvelope<DiversificationData>>({
     queryKey: queryKeys.portfolio.diversification(portfolioId),
     queryFn: () => api.get<DataEnvelope<DiversificationData>>(`/portfolio/${portfolioId}/diversification`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function usePortfolioPerformance(portfolioId: string) {
+  return useQuery<DataEnvelope<PortfolioPerformanceData>>({
+    queryKey: queryKeys.portfolio.performance(portfolioId),
+    queryFn: () => api.get<DataEnvelope<PortfolioPerformanceData>>(`/portfolio/${portfolioId}/performance`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function usePortfolioCost(portfolioId: string) {
+  return useQuery<DataEnvelope<PortfolioCostData>>({
+    queryKey: queryKeys.portfolio.cost(portfolioId),
+    queryFn: () => api.get<DataEnvelope<PortfolioCostData>>(`/portfolio/${portfolioId}/cost`),
     enabled: !!portfolioId,
     retry: (count, error) => {
       if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
