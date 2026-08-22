@@ -280,7 +280,7 @@ function PortfolioView() {
 
           {/* S19 AI Feed */}
           <section>
-            <SectionHeader index="19" title="AI Insights Feed" />
+            <SectionHeader index="19" title="AI Insights Feed" badge={<LiveBadge />} />
             <AiSection />
           </section>
 
@@ -303,7 +303,7 @@ function PortfolioView() {
 
           {/* Disclosure bundle */}
           <div className="rounded-2xl border border-line bg-surface-2 p-4">
-            <DisclosureBundle notAdvice="For education only — not investment advice. All portfolio values, scores, and projections shown are illustrative preview data; the real CAS-upload pipeline will be wired in a later session. Mutual fund investments are subject to market risks. Past performance does not indicate future returns." />
+            <DisclosureBundle notAdvice="For education only — not investment advice. Portfolio data is based on your uploaded CAS statement. Mutual fund investments are subject to market risks; past performance does not indicate future returns." />
           </div>
         </div>
       )}

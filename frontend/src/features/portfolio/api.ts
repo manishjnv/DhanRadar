@@ -739,3 +739,37 @@ export function useBenchmarkReturns(benchmark: string, options?: { enabled?: boo
   });
 }
 
+// ---------------------------------------------------------------------------
+// Portfolio AI feed — GET /portfolio/{portfolioId}/ai-feed (Wave P3, S19)
+// Empty items[] means a gate withheld output (no consent / not entitled /
+// gateway error / confidence below floor) — render the honest state, never
+// sample text. The backend caches the governed result per user (Redis 6h).
+// ---------------------------------------------------------------------------
+
+export interface PortfolioAiFeedData {
+  portfolio_id: string;
+  /** 'ok' | 'insufficient_data' | 'unavailable' */
+  state: string;
+  items: string[];
+  /** Confidence band word — never a raw float (non-neg #2). */
+  confidence_band: 'high' | 'medium' | 'low' | null;
+  as_of: string | null;
+  no_data_reason: string | null;
+  disclosure: string;
+  not_advice: string;
+  disclaimer_version: string;
+}
+
+export function usePortfolioAiFeed(portfolioId: string) {
+  return useQuery<DataEnvelope<PortfolioAiFeedData>>({
+    queryKey: queryKeys.portfolio.aiFeed(portfolioId),
+    queryFn: () => api.get<DataEnvelope<PortfolioAiFeedData>>(`/portfolio/${portfolioId}/ai-feed`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+

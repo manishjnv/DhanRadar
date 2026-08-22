@@ -11,6 +11,7 @@ Paths:
   GET /api/v1/portfolio/{portfolio_id}/concentration    (M2.1, A3 envelope)
   GET /api/v1/portfolio/{portfolio_id}/diversification  (M2.1, A3 envelope)
   GET /api/v1/portfolio/{portfolio_id}/transactions     (P1, A3 envelope)
+  GET /api/v1/portfolio/{portfolio_id}/ai-feed          (P3, A3 envelope, Wave P3)
 
 Auth: cookie RS256 JWT only (`current_user_or_anonymous` → 401 if anonymous).
 IDOR: user sees ONLY their own portfolios — service raises ValueError on mismatch → 404.
@@ -20,12 +21,14 @@ No advisory verbs in any response copy. Disclosure bundle on every response (non
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import logging
 import uuid
 from itertools import combinations
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
 from sqlalchemy import tuple_ as sql_tuple
@@ -72,8 +75,17 @@ from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_c
 from dhanradar.mf.taxonomy import ELSS_CATEGORY
 from dhanradar.models.auth import User
 from dhanradar.models.mf import MfFund, MfFundConstituent, MfPortfolio
+from dhanradar.ratelimit import RateLimit
+from dhanradar.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
+
+_PORTFOLIO_AI_CACHE_TTL = 6 * 3600  # 6h — governed AI-gateway result, per-user only
+# Adversarial review 2026-08-22 (BLOCKING): non-"ok" generator results are cached too
+# (short TTL) so a reliably-failing state can't re-bill the gateway on every request…
+_PORTFOLIO_AI_FAILURE_TTL = 900  # 15 min
+# …and the route carries its own throttle, mirroring compare_ai's dedicated bucket.
+_rl_portfolio_ai = RateLimit(max_requests=10, window_seconds=60)
 
 router = APIRouter(tags=["portfolio-intelligence"])
 
@@ -950,4 +962,134 @@ async def portfolio_health(
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/ai-feed")
+async def portfolio_ai_feed(
+    portfolio_id: str,
+    request: Request,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+    _rl: Annotated[None, Depends(_rl_portfolio_ai)] = None,
+) -> dict:
+    """P3 `portfolio.ai_feed` (Wave P3, S19) — governed AI insight cards for the
+    caller's portfolio. Gate order: _require_auth → _require_mf_consent →
+    _owned_portfolio_id → empty-portfolio short-circuit (no cross_border_ai, no
+    gateway) → cross_border_ai consent → entitlement (non-consuming) → per-user
+    Redis cache (key = mf:portfolio_ai:<sha256(user_id)>, TTL 6h) → live gateway
+    call on miss.
+
+    Consent and entitlement gates run on EVERY request (even on a cache hit) so a
+    revoked consent is never served from cache. Cache read/write failures degrade
+    gracefully. The A3 boundary (`serialize_concept`) strips unified_score and all
+    other forbidden score keys before anything reaches the client.
+    Anonymous → 401; another user's portfolio → 404.
+    """
+    from dhanradar.compliance.service import active_disclaimer_version
+    from dhanradar.mf.portfolio_ai import generate_portfolio_ai_feed
+    from dhanradar.mf.watchlist_ai import (
+        watchlist_ai_cache_entitled,
+        watchlist_ai_consent_granted,
+    )
+    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+
+    _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
+    pid = await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    response.headers["Cache-Control"] = "private"
+
+    def _empty(state: str, no_data_reason: str) -> dict:
+        return serialize_concept(
+            "portfolio.ai_feed",
+            {
+                "portfolio_id": portfolio_id,
+                "items": [],
+                "state": state,
+                "confidence_band": None,
+                "as_of": None,
+                "no_data_reason": no_data_reason,
+                "disclosure": DISCLOSURE_BUNDLE,
+                "not_advice": NOT_ADVICE,
+                "disclaimer_version": active_disclaimer_version(),
+            },
+            RequestCtx(tier=user.tier),
+        )
+
+    rm = await load_portfolio_read_model(db, portfolio_id)
+
+    # Empty portfolio: no personal data to compose → skip consent/gateway.
+    if not rm.holdings:
+        return _empty("insufficient_data", "empty_portfolio")
+
+    if not await watchlist_ai_consent_granted(user.user_id, db):
+        return _empty("unavailable", "consent_required")
+
+    if not await watchlist_ai_cache_entitled(user.user_id, db):
+        return _empty("unavailable", "not_entitled")
+
+    uid = uuid.UUID(user.user_id)
+    redis = get_redis()
+    # Canonical UUID (from the ownership check) — raw path-param spellings of the same
+    # UUID must not fragment the cache and defeat the TTL spend bound (adversarial review).
+    cache_key = "mf:portfolio_ai:" + hashlib.sha256(
+        f"{uid}:{pid}".encode()
+    ).hexdigest()
+
+    try:
+        cached = await redis.get(cache_key)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        cached = None
+
+    if cached is not None:
+        try:
+            cached_payload = json.loads(cached)
+        except (TypeError, ValueError):
+            cached_payload = None
+        if (
+            isinstance(cached_payload, dict)
+            and cached_payload.get("disclaimer_version") == active_disclaimer_version()
+        ):
+            return serialize_concept(
+                "portfolio.ai_feed",
+                cached_payload,
+                RequestCtx(tier=user.tier),
+            )
+
+    from dhanradar.ai_gateway.gateway import OpenRouterGateway
+
+    holdings_for_prompt = [
+        {
+            "scheme_name": h.scheme_name,
+            "category": h.category,
+            "confidence_band": h.confidence_band,
+            "label": h.label,
+            "amc_name": h.amc,
+            "expense_ratio_pct": getattr(h, "expense_ratio_pct", None),
+        }
+        for h in rm.holdings
+    ]
+
+    result = await generate_portfolio_ai_feed(
+        OpenRouterGateway(),
+        user_id=user.user_id,
+        portfolio_id=portfolio_id,
+        db=db,
+        holdings=holdings_for_prompt,
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+    # Cache EVERY generator outcome — 6h for ok, 15 min for failures — so a reliably
+    # failing state can't re-bill the gateway per request (adversarial review, BLOCKING).
+    ttl = _PORTFOLIO_AI_CACHE_TTL if result.get("state") == "ok" else _PORTFOLIO_AI_FAILURE_TTL
+    try:
+        await redis.set(cache_key, json.dumps(result), ex=ttl)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        pass
+
+    return serialize_concept(
+        "portfolio.ai_feed",
+        result,
+        RequestCtx(tier=user.tier),
     )

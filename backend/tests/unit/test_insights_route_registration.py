@@ -24,6 +24,7 @@ _REQUIRED_PATHS = {
     "/portfolio/{portfolio_id}/performance",
     "/portfolio/{portfolio_id}/cost",
     "/portfolio/{portfolio_id}/health",
+    "/portfolio/{portfolio_id}/ai-feed",
 }
 
 

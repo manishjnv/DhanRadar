@@ -22,13 +22,14 @@ import {
   GOALS, PERF_DATA, PERF_PERIODS, TOP_PERF,
   UNDER_REVIEW,
   COST_CARDS, AMC_LIST, TIMELINE, RECS, PROJ, PROJ_TABS, WATCHLIST,
-  AI_FEED, FAQ, BENEFITS, AUTOSYNC_PILLS,
+  FAQ, BENEFITS, AUTOSYNC_PILLS,
   STRENGTH_COLOR,
   type HealthLight,
 } from './sampleData';
 import { DataState } from '@/components/ui/DataState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { HelpTip } from '@/components/ui/HelpTip';
+import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { shortAmcName } from './format';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 import { tooltipFns } from '@/data/tooltipFns';
@@ -48,6 +49,7 @@ import {
   usePortfolioValueSeries,
   useNiftyCloseSeries,
   useBenchmarkReturns,
+  usePortfolioAiFeed,
   type Holding,
 } from '@/features/portfolio/api';
 import { useWatchlistCards, useLatestPortfolio } from '@/features/mf/api';
@@ -2835,19 +2837,73 @@ export function OpportunitiesSection({ portfolioId }: { portfolioId: string }) {
 // S19 — AI INSIGHTS FEED
 // ═══════════════════════════════════════════════════════════════════════════
 export function AiSection() {
+  const { data: latest } = useLatestPortfolio();
+  const portfolioId = latest?.portfolio_id ?? '';
+  const { data: env, isLoading } = usePortfolioAiFeed(portfolioId);
+
+  if (!portfolioId) {
+    return (
+      <div className="mt-4 rounded-2xl border border-line bg-surface-2 p-5 text-center text-small text-ink-muted">
+        Sign in to see AI insights about your portfolio.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {[0, 1].map((i) => (
+          <Skeleton key={i} className="h-28 rounded-2xl" />
+        ))}
+      </div>
+    );
+  }
+
+  const feed = env?.data;
+
+  if (!feed || feed.state === 'unavailable') {
+    const reason = feed?.no_data_reason;
+    const msg =
+      reason === 'consent_required'
+        ? 'Enable cross-border AI consent in Settings to see portfolio insights.'
+        : reason === 'not_entitled'
+          ? 'Portfolio AI insights are available on DhanRadar Plus.'
+          : 'Portfolio insights are unavailable right now.';
+    return (
+      <div className="mt-4 rounded-2xl border border-line bg-surface-2 p-5 text-center text-small text-ink-muted">
+        {msg}
+      </div>
+    );
+  }
+
+  if (feed.state === 'insufficient_data' || feed.items.length === 0) {
+    return (
+      <div className="mt-4 rounded-2xl border border-line bg-surface-2 p-5 text-center text-small text-ink-muted">
+        Not enough portfolio data to generate insights yet.
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {AI_FEED.map((text, i) => (
-        <Card key={i} className="p-5">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-[13px]" aria-hidden="true">🤖</span>
-            <span className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">DhanRadar AI</span>
-          </div>
-          <p className="text-small text-ink-secondary leading-relaxed">
-            <RichText text={text} />
-          </p>
-        </Card>
-      ))}
+    <div className="mt-4 flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {feed.items.map((text, i) => (
+          <Card key={i} className="p-5">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[13px]" aria-hidden="true">🤖</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">DhanRadar AI</span>
+            </div>
+            <p className="text-small text-ink-secondary leading-relaxed">
+              <RichText text={text} />
+            </p>
+          </Card>
+        ))}
+      </div>
+      <DisclosureBundle
+        disclosure={feed.disclosure}
+        notAdvice={feed.not_advice}
+        className="text-ink-faint"
+      />
     </div>
   );
 }
