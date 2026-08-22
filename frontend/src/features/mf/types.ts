@@ -1007,9 +1007,14 @@ export interface CompareCompositionData {
   coverage: { holdings_count: number; weight_covered_pct: number | null };
   as_of_month: string | null;
 }
-/** Discriminated union: `no_data` when the fund has no constituent rows. */
+/** Discriminated union: `no_data` when the fund has no constituent rows.
+ *  The positive arm is FLAT — the backend emits {holdings, sectors, coverage,
+ *  as_of_month} directly with no wrapper (RCA 2026-08-22: an invented `data`
+ *  wrapper here crashed every live comparison once real composition data
+ *  existed; the C2-era test funds all lacked data so only the no_data branch
+ *  had ever run). */
 export type CompareCompositionFragment =
-  | { no_data: false; data: CompareCompositionData }
+  | (CompareCompositionData & { no_data?: false })
   | { no_data: true };
 
 /** C2 — one manager record embedded in the people fragment. */

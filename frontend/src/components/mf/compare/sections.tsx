@@ -110,7 +110,7 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
   const sampleFallbackHref = (f: CompareFund) => `/mf/explore?q=${encodeURIComponent(f.short || f.name)}`;
 
   return (
-    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
+    <div className={cn('grid grid-cols-1 gap-3.5 sm:grid-cols-2', liveIsins.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]')}>
       {visibleFunds.map((f) => (
         <div
           key={f.key}
@@ -777,15 +777,15 @@ export function HoldingsSection({
             }
             return (
               <div key={f.key}>
-                <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short} · top {Math.min(frag.data.holdings.length, 5)}</h4>
-                {frag.data.holdings.slice(0, 5).map((h) => (
+                <h4 className="m-0 mb-2.5 flex items-center gap-1.5 text-caption font-bold text-ink"><Dot color={f.color} size={9} />{f.short} · top {Math.min(frag.holdings.length, 5)}</h4>
+                {frag.holdings.slice(0, 5).map((h) => (
                   <div key={h.name} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
                     <div className="flex-1 text-caption font-semibold text-ink">{h.name}</div>
                     <div className="font-mono text-caption font-bold text-ink">{h.weight_pct != null ? `${h.weight_pct.toFixed(1)}%` : '—'}</div>
                   </div>
                 ))}
-                {frag.data.as_of_month && (
-                  <div className="mt-1 text-[10px] text-ink-faint">As of {frag.data.as_of_month}</div>
+                {frag.as_of_month && (
+                  <div className="mt-1 text-[10px] text-ink-faint">As of {frag.as_of_month}</div>
                 )}
               </div>
             );

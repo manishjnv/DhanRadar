@@ -194,7 +194,8 @@ function CompareView() {
     return rows.map((window) => ({
       label: `Benchmark (${rowName}) ${window.toUpperCase()}`,
       vals: fragments.map((fragment) => {
-        const value = fragment.benchmark_row?.no_data ? null : fragment.benchmark_row.returns[window];
+        const row = fragment.benchmark_row;
+        const value = !row || row.no_data ? null : row.returns[window];
         return value == null ? null : round1(value);
       }),
     }));
