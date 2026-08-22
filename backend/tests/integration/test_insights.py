@@ -128,7 +128,8 @@ async def test_overlap_anonymous_401(async_client, patch_redis) -> None:
 
 
 # NB: concentration moved to the A3 boundary in M2.1 — its 401/404/200/#2 coverage now lives in
-# tests/integration/test_m2_1_portfolio_analytics.py (rls_async_client). Overlap stays here (raw Pydantic).
+# tests/integration/test_m2_1_portfolio_analytics.py (rls_async_client). Overlap moved to the A3
+# boundary in Wave P2 (`portfolio.overlap` envelope); its tests below assert the envelope contract.
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +167,12 @@ async def test_overlap_empty_portfolio_200(async_client, db_session, patch_redis
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["portfolio_id"] == pid
-    assert body["fund_pairs"] == []
-    assert body["category_distribution"] == []
-    assert body["data_completeness"] == "empty"
-    _assert_disclosure_present(body)
+    data = body["data"]
+    assert data["portfolio_id"] == pid
+    assert data["pairs"] == []
+    assert data["pairs_total"] == 0
+    assert data["pairs_with_data"] == 0
+    assert data["no_data_reason"] == "insufficient_funds"
     _assert_no_unified_score(body)
 
 
@@ -179,7 +181,9 @@ async def test_overlap_empty_portfolio_200(async_client, db_session, patch_redis
 # ---------------------------------------------------------------------------
 
 
-async def test_overlap_disclosure_always_present(async_client, db_session, patch_redis) -> None:
+async def test_overlap_envelope_meta_present(async_client, db_session, patch_redis) -> None:
+    """Wave P2: overlap serves a DataEnvelope via `serialize_concept` — disclosure renders
+    page-level like every other A3 concept, so this asserts the envelope meta instead."""
     user_id = await _seed_user(db_session)
     pid = await _seed_empty_portfolio(db_session, user_id)
     try:
@@ -188,7 +192,9 @@ async def test_overlap_disclosure_always_present(async_client, db_session, patch
     finally:
         app.dependency_overrides.pop(current_user_or_anonymous, None)
     assert resp.status_code == 200, resp.text
-    _assert_disclosure_present(resp.json())
+    body = resp.json()
+    assert body["meta"]["source"] == "computed"
+    assert body["status"] in {"present", "empty"}
 
 
 # ---------------------------------------------------------------------------
