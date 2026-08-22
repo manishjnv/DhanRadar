@@ -58,6 +58,9 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Live cards carry the real ISIN as `key` (page maps frag.isin → key); sample cards use slugs.
   const liveIsins = funds.map((f) => f.key).filter((k) => ISIN_RE.test(k));
+  // Picks made from the pure-sample page (0 real ISINs) accumulate here until there
+  // are 2+ to compare — a single pick can't build a valid /mf/compare?isins= URL.
+  const [pendingIsins, setPendingIsins] = React.useState<string[]>([]);
 
   function onQueryChange(q: string) {
     setQuery(q);
@@ -66,17 +69,27 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
     debounceRef.current = setTimeout(() => {
       api
         .get<AddFundResult[]>(`/mf/search?q=${encodeURIComponent(q)}&limit=8`)
-        .then((list) => setResults(Array.isArray(list) ? list.filter((r) => !liveIsins.includes(r.isin)) : []))
+        .then((list) => setResults(Array.isArray(list) ? list.filter((r) => !liveIsins.includes(r.isin) && !pendingIsins.includes(r.isin)) : []))
         .catch(() => setResults([]));
     }, 200);
   }
 
   function pickFund(isin: string) {
-    setAdding(false);
+    const combined = [...liveIsins, ...pendingIsins, isin];
     setQuery('');
     setResults([]);
-    router.push(`/mf/compare?isins=${[...liveIsins, isin].slice(0, 4).join(',')}`);
+    if (combined.length >= 2) {
+      setAdding(false);
+      router.push(`/mf/compare?isins=${combined.slice(0, 4).join(',')}`);
+    } else {
+      // Still short of 2 — keep the picker open and remember this pick.
+      setPendingIsins((prev) => [...prev, isin]);
+    }
   }
+
+  // Sample cards have no real ISIN behind them — "View"/"Watchlist" send the user
+  // to a real search instead of sitting there as a dead disabled button.
+  const sampleFallbackHref = (f: CompareFund) => `/mf/explore?q=${encodeURIComponent(f.short || f.name)}`;
 
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
@@ -128,22 +141,36 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
                   View fund
                 </Link>
               ) : (
-                <CTA variant="primary" disabled title="Sample fund — pick real funds to open" className="opacity-60">View fund</CTA>
+                <Link
+                  href={sampleFallbackHref(f)}
+                  title="Sample fund — search real funds like this one"
+                  className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-royal px-3.5 py-2 text-small font-semibold text-white transition-colors hover:bg-royal/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                >
+                  View fund
+                </Link>
               )}
-              <CTA
-                variant="navy"
-                disabled={!ISIN_RE.test(f.key)}
-                className={cn(!ISIN_RE.test(f.key) && 'opacity-60')}
-                onClick={() => toggle({ isin: f.key, name: f.name, category: f.cat })}
-              >
-                {ISIN_RE.test(f.key) && has(f.key) ? '✓ Watchlisted' : '＋ Watchlist'}
-              </CTA>
+              {ISIN_RE.test(f.key) ? (
+                <CTA variant="navy" onClick={() => toggle({ isin: f.key, name: f.name, category: f.cat })}>
+                  {has(f.key) ? '✓ Watchlisted' : '＋ Watchlist'}
+                </CTA>
+              ) : (
+                <Link
+                  href={sampleFallbackHref(f)}
+                  title="Sample fund — search real funds to watchlist"
+                  className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-navy px-3.5 py-2 text-small font-semibold text-white transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                >
+                  ＋ Watchlist
+                </Link>
+              )}
             </div>
           </div>
         </div>
       ))}
       {liveIsins.length >= 4 ? null : adding ? (
         <div className="flex min-h-[120px] flex-col gap-2 rounded-2xl border-2 border-dashed border-royal/50 bg-surface p-3">
+          {pendingIsins.length > 0 && (
+            <div className="text-caption font-semibold text-royal">{pendingIsins.length} fund{pendingIsins.length > 1 ? 's' : ''} selected — add {pendingIsins.length === 1 && liveIsins.length === 0 ? 'one more' : 'another'} to compare</div>
+          )}
           <Input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
@@ -168,7 +195,7 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
           </div>
           <button
             type="button"
-            onClick={() => { setAdding(false); setQuery(''); setResults([]); }}
+            onClick={() => { setAdding(false); setQuery(''); setResults([]); setPendingIsins([]); }}
             className="self-start text-caption font-semibold text-ink-muted hover:text-ink focus-visible:outline-none"
           >
             Cancel
