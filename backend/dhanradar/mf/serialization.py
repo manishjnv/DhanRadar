@@ -84,6 +84,8 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "portfolio.diversification": frozenset({"portfolio_id", "band", "category_count", "top_category", "top_category_pct", "fund_count", "as_of"}),
     "portfolio.performance": frozenset({"portfolio_id", "as_of", "lifetime_xirr_pct", "lifetime_coverage_pct", "windows", "no_data_reason"}),
     "portfolio.cost": frozenset({"portfolio_id", "as_of", "weighted_ter_pct", "ter_coverage_pct", "direct_plan_share_pct", "direct_plan_coverage_pct", "holdings", "no_data_reason"}),
+    "portfolio.health": frozenset({"portfolio_id", "as_of", "fund_count", "checks", "no_data_reason"}),
+    "portfolio.overlap": frozenset({"portfolio_id", "as_of", "pairs", "pairs_with_data", "pairs_total", "no_data_reason"}),
     "portfolio.valuation_series": frozenset({"portfolio_id", "point_count", "first_investment_date", "points"}),
     "portfolio.score_raw": frozenset(),  # gated-never (registry) — nothing is ever allowed through, gated or not
     "fund.label": frozenset({"label"}),

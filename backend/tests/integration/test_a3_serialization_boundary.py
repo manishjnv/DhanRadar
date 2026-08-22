@@ -280,10 +280,11 @@ def test_band_dict_leaves_must_be_band_words():
 
 def test_b87_missing_allowlist_fails_closed():
     """A concept with no `ALLOWED_FIELDS` entry raises `MissingConceptAllowlist` naming the fix, rather
-    than serving an un-allowlisted payload. `portfolio.health` is registered (build status) but not yet
-    wired through this boundary, so it has no entry yet — exactly the case this guards."""
-    with pytest.raises(serialization.MissingConceptAllowlist, match="portfolio.health"):
-        serialize_concept("portfolio.health", {"band": "ok"}, RequestCtx(tier="free"))
+    than serving an un-allowlisted payload. `holdings.pnl` is registered (build status) but not yet
+    wired through this boundary, so it has no entry yet — exactly the case this guards.
+    (Was `portfolio.health` until Wave P2 allowlisted it.)"""
+    with pytest.raises(serialization.MissingConceptAllowlist, match="holdings.pnl"):
+        serialize_concept("holdings.pnl", {"band": "ok"}, RequestCtx(tier="free"))
 
 
 def test_b87_parity_every_live_concept_allowlist_matches_real_payload():

@@ -79,6 +79,40 @@ export interface DiversificationData {
   as_of: string | null;
 }
 
+export interface PortfolioHealthCheck {
+  key: string;
+  band: 'low' | 'medium' | 'high' | 'moderate' | 'very_high' | 'insufficient_data' | null;
+  finding: string;
+  coverage_pct?: number | null;
+}
+
+export interface PortfolioHealthData {
+  portfolio_id: string;
+  as_of: string | null;
+  fund_count: number;
+  checks: PortfolioHealthCheck[];
+  no_data_reason: string | null;
+}
+
+export interface PortfolioOverlapPair {
+  fund_a_isin: string;
+  fund_a_name: string;
+  fund_b_isin: string;
+  fund_b_name: string;
+  overlap_pct?: number;
+  no_data: boolean;
+  reason?: string;
+}
+
+export interface PortfolioOverlapData {
+  portfolio_id: string;
+  as_of: string | null;
+  pairs: PortfolioOverlapPair[];
+  pairs_with_data: number;
+  pairs_total: number;
+  no_data_reason: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Performance and cost types (DataEnvelope) — portfolio-level factual metrics.
 // ---------------------------------------------------------------------------
@@ -156,6 +190,32 @@ export function usePortfolioDiversification(portfolioId: string) {
   return useQuery<DataEnvelope<DiversificationData>>({
     queryKey: queryKeys.portfolio.diversification(portfolioId),
     queryFn: () => api.get<DataEnvelope<DiversificationData>>(`/portfolio/${portfolioId}/diversification`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function usePortfolioHealth(portfolioId: string) {
+  return useQuery<DataEnvelope<PortfolioHealthData>>({
+    queryKey: queryKeys.portfolio.health(portfolioId),
+    queryFn: () => api.get<DataEnvelope<PortfolioHealthData>>(`/portfolio/${portfolioId}/health`),
+    enabled: !!portfolioId,
+    retry: (count, error) => {
+      if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;
+      return count < 1;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function usePortfolioOverlap(portfolioId: string) {
+  return useQuery<DataEnvelope<PortfolioOverlapData>>({
+    queryKey: queryKeys.portfolio.overlap(portfolioId),
+    queryFn: () => api.get<DataEnvelope<PortfolioOverlapData>>(`/portfolio/${portfolioId}/overlap`),
     enabled: !!portfolioId,
     retry: (count, error) => {
       if (error instanceof ApiError && SKIP_RETRY.includes(error.problem.status)) return false;

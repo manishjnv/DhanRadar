@@ -27,6 +27,8 @@ export const queryKeys = {
     allocation:    (portfolioId: string, by = 'category') => ['portfolio', portfolioId, 'allocation', by] as const,
     concentration: (portfolioId: string) => ['portfolio', portfolioId, 'concentration'] as const,
     diversification: (portfolioId: string) => ['portfolio', portfolioId, 'diversification'] as const,
+    health:        (portfolioId: string) => ['portfolio', portfolioId, 'health'] as const,
+    overlap:       (portfolioId: string) => ['portfolio', portfolioId, 'overlap'] as const,
     performance:   (portfolioId: string) => ['portfolio', portfolioId, 'performance'] as const,
     cost:          (portfolioId: string) => ['portfolio', portfolioId, 'cost'] as const,
     risk:          (portfolioId: string) => ['portfolio', portfolioId, 'risk'] as const,

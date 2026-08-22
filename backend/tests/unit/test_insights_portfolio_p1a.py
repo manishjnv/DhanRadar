@@ -1,11 +1,15 @@
-"""Unit tests for Wave P1a portfolio endpoints (/performance, /cost).
+"""Unit tests for portfolio envelope endpoints (/performance, /cost, /health, /overlap).
 
 Coverage:
   1. portfolio.performance route sets Cache-Control: private.
   2. portfolio.cost route sets Cache-Control: private.
-  3. Poisoned-field strip on portfolio.performance payload.
-  4. Poisoned-field strip on portfolio.cost payload.
-  5. Allowlist entries exist for both new concepts.
+    3. portfolio.health route sets Cache-Control: private.
+    4. portfolio.overlap route sets Cache-Control: private.
+    5. Poisoned-field strip on portfolio.performance payload.
+    6. Poisoned-field strip on portfolio.cost payload.
+    7. Poisoned-field strip on portfolio.health payload.
+    8. Poisoned-field strip on portfolio.overlap payload.
+    9. Allowlist entries exist for all covered concepts.
 """
 
 from __future__ import annotations
@@ -96,18 +100,97 @@ async def test_portfolio_cost_private_header_and_poison_strip(monkeypatch) -> No
     assert "rogue" not in result["data"]
 
 
+async def test_portfolio_health_private_header_and_poison_strip(monkeypatch) -> None:
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    async def _payload(*_args, **_kwargs):
+        return {
+            "portfolio_id": "p1",
+            "as_of": "2026-08-22",
+            "fund_count": 3,
+            "checks": [],
+            "no_data_reason": None,
+            "score": 72,
+            "factor_weights": {"risk": 0.5},
+            "hidden_extra": "drop-me",
+        }
+
+    monkeypatch.setattr(insights_router, "_require_mf_consent", _noop)
+    monkeypatch.setattr(insights_router, "_owned_portfolio_id", _noop)
+    monkeypatch.setattr(insights_router, "_portfolio_health_payload", _payload)
+
+    response = Response()
+    result = await insights_router.portfolio_health(
+        portfolio_id="p1",
+        user=_user(),
+        db=SimpleNamespace(),
+        response=response,
+    )
+
+    assert response.headers["Cache-Control"] == "private"
+    assert result["status"] == "present"
+    assert "score" not in result["data"]
+    assert "factor_weights" not in result["data"]
+    assert "hidden_extra" not in result["data"]
+
+
+async def test_portfolio_overlap_private_header_and_poison_strip(monkeypatch) -> None:
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    async def _payload(*_args, **_kwargs):
+        return {
+            "portfolio_id": "p1",
+            "as_of": "2026-08-22",
+            "pairs": [],
+            "pairs_with_data": 0,
+            "pairs_total": 0,
+            "no_data_reason": "insufficient_funds",
+            "unified_score": 88,
+            "rogue": True,
+        }
+
+    monkeypatch.setattr(insights_router, "_require_mf_consent", _noop)
+    monkeypatch.setattr(insights_router, "_owned_portfolio_id", _noop)
+    monkeypatch.setattr(insights_router, "_portfolio_overlap_payload", _payload)
+
+    response = Response()
+    result = await insights_router.portfolio_overlap(
+        portfolio_id="p1",
+        user=_user(),
+        db=SimpleNamespace(),
+        response=response,
+    )
+
+    assert response.headers["Cache-Control"] == "private"
+    assert result["status"] == "present"
+    assert "unified_score" not in result["data"]
+    assert "rogue" not in result["data"]
+
+
 def test_allowlists_registered_for_p1a_concepts() -> None:
     assert "portfolio.performance" in ALLOWED_FIELDS
     assert "portfolio.cost" in ALLOWED_FIELDS
+    assert "portfolio.health" in ALLOWED_FIELDS
+    assert "portfolio.overlap" in ALLOWED_FIELDS
 
     perf = ALLOWED_FIELDS["portfolio.performance"]
     cost = ALLOWED_FIELDS["portfolio.cost"]
+    health = ALLOWED_FIELDS["portfolio.health"]
+    overlap = ALLOWED_FIELDS["portfolio.overlap"]
 
     for field in ("portfolio_id", "as_of", "windows", "lifetime_xirr_pct"):
         assert field in perf
     for field in ("portfolio_id", "as_of", "weighted_ter_pct", "holdings"):
         assert field in cost
+    for field in ("portfolio_id", "as_of", "fund_count", "checks"):
+        assert field in health
+    for field in ("portfolio_id", "as_of", "pairs", "pairs_with_data", "pairs_total"):
+        assert field in overlap
 
     for bad in ("unified_score", "score", "factor_weights", "fair_value"):
         assert bad not in perf
         assert bad not in cost
+        assert bad not in health
+        assert bad not in overlap

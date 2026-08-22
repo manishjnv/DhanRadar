@@ -164,7 +164,7 @@ function FlagsTable({ flags }: { flags: AdminFlag[] }) {
 // get wired to live data. Census method: top-level sections per page,
 // "live" = fed by a features/*/api hook, apiClient, or /api/v1 fetch.
 // ---------------------------------------------------------------------------
-const COVERAGE_AS_OF = '23 Aug 2026';
+const COVERAGE_AS_OF = '22 Aug 2026';
 
 type PageCoverage = {
   page: string;
@@ -179,7 +179,7 @@ const UI_COVERAGE: PageCoverage[] = [
   { page: 'Watchlist', route: '/mf/watchlist', total: 15, live: 14, pending: 'FAQ (static by design)' },
   { page: 'Fund Compare', route: '/mf/compare', total: 21, live: 20, pending: 'FAQ (static by design)' },
   { page: 'Pricing', route: '/pricing', total: 4, live: 1, pending: 'Hero, comparison table, FAQ (plans list is live)' },
-  { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 13, pending: 'Health, goals, overlap, needing review, observations, projection, AI feed, reports, FAQ' },
+  { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 20, pending: 'Goals, AI feed, FAQ' },
   { page: 'Fund Explorer', route: '/mf/explore', total: 16, live: 5, pending: 'AI discovery, category leaderboards, fund flow, momentum, consistency, low-cost, beginner picks, AI feed, shortlist, filters, FAQ' },
   { page: 'Signal', route: '/signal', total: 13, live: 12, pending: '"How Signal works" explainer copy' },
   { page: 'Leaderboard', route: '/mf/leaderboard', total: 16, live: 15, pending: 'FAQ copy' },
