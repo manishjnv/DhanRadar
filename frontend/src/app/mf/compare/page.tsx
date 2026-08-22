@@ -42,7 +42,10 @@ import {
   AiInsightsSection, FaqSection, StickyBar,
   type SipEntry,
 } from '@/components/mf/compare/sections';
-import { useCompareBundle } from '@/features/mf/api';
+import { useCompareBundle, useFundExplorer } from '@/features/mf/api';
+
+// Batch E default-seed category (the sebi_category value the explorer feed filters on).
+const SEED_CATEGORY = 'Equity Scheme - Small Cap Fund';
 import { useCompareAI } from '@/features/mf/api';
 import { useMe } from '@/features/auth/api';
 import { FUNDS, type CompareFund, type Row } from '@/components/mf/compare/sampleData';
@@ -114,7 +117,14 @@ function buildCompareFundFromFragment(frag: CompareFragment, slotIndex: number):
       : '—',
     exp: frag.expense_ratio_pct != null ? `${frag.expense_ratio_pct.toFixed(2)}%` : '—',
     age: years != null ? `${years.toFixed(1)} yrs` : '—',
-    mgr: '—',
+    mgr: (() => {
+      const p = frag.people;
+      if (p && 'managers' in p && p.managers.length > 0) {
+        const extra = p.managers.length - 1;
+        return p.managers[0].name + (extra > 0 ? ` +${extra}` : '');
+      }
+      return '—';
+    })(),
     badges: [],
     isTopMatch: false,
   };
@@ -136,21 +146,40 @@ function CompareView() {
       .slice(0, 4);
   }, [rawIsins]);
 
-  // sample mode: ?sample param OR fewer than 2 valid ISINs
-  const sampleMode = isSample || sortedIsins.length < 2;
+  // Batch E (founder 2026-08-22 — "remove fake funds"): with no ISINs in the URL, seed a
+  // REAL comparison — the 3 highest 1-year returns of the default category right now
+  // (neutral, factual, DISCLOSED criterion; NEVER framed as a recommendation — non-neg #1).
+  // Seed-fetch failure/empty falls back to the illustrative sample page; ?sample=1 forces it.
+  const seeding = !isSample && sortedIsins.length < 2;
+  const seedQuery = useFundExplorer({
+    category: seeding ? SEED_CATEGORY : '',
+    sort: 'return_1y',
+    sortDir: 'desc',
+    planType: 'direct',
+    page: 1,
+    limit: 3,
+  });
+  const seedIsins = React.useMemo(
+    () => (seeding ? (seedQuery.data?.funds ?? []).map((f) => f.isin).slice(0, 3).sort() : []),
+    [seeding, seedQuery.data],
+  );
+  const effIsins = sortedIsins.length >= 2 ? sortedIsins : seedIsins;
+
+  // sample mode: ?sample param, or no usable ISINs once seeding has settled
+  const sampleMode = isSample || (effIsins.length < 2 && !(seeding && seedQuery.isLoading));
 
   // One batch request replaces 3× useFundDetail; disabled in sample mode
-  const bundleQuery = useCompareBundle(sampleMode ? [] : sortedIsins);
+  const bundleQuery = useCompareBundle(effIsins.length >= 2 ? effIsins : []);
   const { data: me } = useMe();
-  const isLoading = !sampleMode && bundleQuery.isLoading;
+  const isLoading = (!sampleMode && bundleQuery.isLoading) || (seeding && seedQuery.isLoading);
 
   // Extract ordered fragments (null fragments excluded)
   const fragments = React.useMemo<CompareFragment[]>(() => {
     if (!bundleQuery.data) return [];
-    return sortedIsins
+    return effIsins
       .map((isin) => bundleQuery.data!.fragments[isin] ?? null)
       .filter((f): f is CompareFragment => f != null);
-  }, [bundleQuery.data, sortedIsins]);
+  }, [bundleQuery.data, effIsins]);
 
   // B1 (audit 2026-08-22): sections receive the RESOLVED isins — parallel to `fragments`
   // and `realFunds` — never `sortedIsins`: one unresolved middle ISIN would otherwise shift
@@ -159,7 +188,7 @@ function CompareView() {
 
   // Live mode requires 2+ resolved fragments
   const live = !sampleMode && fragments.length >= 2;
-  const compareAiQuery = useCompareAI(sortedIsins, live && !!me);
+  const compareAiQuery = useCompareAI(effIsins, live && !!me);
 
   const realFunds = React.useMemo<CompareFund[]>(
     () => fragments.map((f, i) => buildCompareFundFromFragment(f, i)),
@@ -267,6 +296,21 @@ function CompareView() {
       { label: 'Std dev (ann.)', vals: fragments.map((f) => (f.volatility_pct != null ? `${f.volatility_pct.toFixed(2)}%` : null)), win: 'low' },
       { label: 'Max drawdown', vals: fragments.map((f) => (f.max_drawdown_pct != null ? `${f.max_drawdown_pct.toFixed(2)}%` : null)), win: 'low' },
     ];
+  }, [live, fragments]);
+
+  // Batch D freshness stamps — latest across fragments; null when absent.
+  const benchmarkAsOf = React.useMemo<string | null>(() => {
+    if (!live) return null;
+    const dates = fragments
+      .map((f) => (f.benchmark_row && !f.benchmark_row.no_data ? f.benchmark_row.as_of : null))
+      .filter((d): d is string => d != null);
+    return dates.length > 0 ? dates.sort().at(-1)! : null;
+  }, [live, fragments]);
+
+  const ranksAsOf = React.useMemo<string | null>(() => {
+    if (!live) return null;
+    const dates = fragments.map((f) => f.rank_as_of ?? null).filter((d): d is string => d != null);
+    return dates.length > 0 ? dates.sort().at(-1)! : null;
   }, [live, fragments]);
 
   // Live traffic-light rows for the risk heat table (was a hardcoded sample constant).
@@ -379,6 +423,13 @@ function CompareView() {
           ← Back to Fund Explorer
         </Link>
         <Crumb category={category} count={count} />
+        {seeding && live && (
+          <div className="mb-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-caption text-ink-secondary">
+            Showing the 3 highest 1-year returns in Small Cap right now — an educational starting
+            point, not advice. Past returns don&apos;t predict future ones. Swap any fund with ✕ and
+            the search tile.
+          </div>
+        )}
       </div>
 
       {/* S1 — Hero comparison columns */}
@@ -400,7 +451,7 @@ function CompareView() {
       {/* S7 — Performance */}
       <Section>
         <SectionHeader index="07" title="Performance Center" info="Strongest highlighted per period" badge={<LiveBadge />} />
-        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} />
+        <PerformanceSection rows={perfRows} funds={heroFunds} live={live} catRows={catPerfRows} benchmarkRows={benchmarkRows} benchmarkAsOf={benchmarkAsOf} />
       </Section>
 
       {/* S8 — SIP */}
@@ -418,7 +469,7 @@ function CompareView() {
       {/* S10 — Ranking */}
       <Section>
         <SectionHeader index="10" title="Ranking Comparison" badge={<LiveBadge />} />
-        <RankingSection rows={rankRows} funds={heroFunds} live={live} />
+        <RankingSection rows={rankRows} funds={heroFunds} live={live} ranksAsOf={ranksAsOf} />
       </Section>
 
       {/* S11 — Risk */}

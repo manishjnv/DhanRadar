@@ -370,6 +370,7 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
             "verb_label", "confidence_band", "category_rank", "category_total",
             "return_3m_pct", "return_6m_pct", "return_1y_pct", "return_3y_pct", "return_5y_pct",
             "nav_latest", "nav_date", "nav_change_pct", "aum_crore",
+            "rank_as_of", "metrics_as_of", "aum_as_of",
             # analytics subset (DOM-allowed standard ratios + rolling returns)
             "sharpe_ratio", "sortino_ratio", "volatility_pct", "max_drawdown_pct",
             "rolling_1y_avg_pct", "rolling_1y_min_pct", "rolling_1y_max_pct", "rolling_1y_pct_positive",

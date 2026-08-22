@@ -366,11 +366,14 @@ export function MoodSection() {
 }
 
 // ── S7 — Performance center ──────────────────────────────────────────────────
-export function PerformanceSection({ rows = PERF, funds, live = false, catRows, benchmarkRows }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; catRows?: Row[]; benchmarkRows?: Row[] }) {
+export function PerformanceSection({ rows = PERF, funds, live = false, catRows, benchmarkRows, benchmarkAsOf }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; catRows?: Row[]; benchmarkRows?: Row[]; benchmarkAsOf?: string | null }) {
   const displayRows = benchmarkRows ? [...rows, ...catRows ?? [], ...benchmarkRows] : catRows ? [...rows, ...catRows] : rows;
   return (
     <Panel>
       <CompareTable rows={displayRows} firstCol="Period" showCategory={!live} funds={funds} />
+      {benchmarkAsOf && (
+        <div className="mt-1.5 text-[10px] text-ink-faint">Benchmark data as of {benchmarkAsOf}.</div>
+      )}
       <SoWhat>
         <RichText
           text={
@@ -520,10 +523,13 @@ function MultiRankChart() {
   );
 }
 
-export function RankingSection({ rows = RANKT, funds, live = false }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean }) {
+export function RankingSection({ rows = RANKT, funds, live = false, ranksAsOf }: { rows?: Row[]; funds?: CompareFund[]; live?: boolean; ranksAsOf?: string | null }) {
   return (
     <Panel>
       <CompareTable rows={rows} firstCol="Metric" funds={funds} />
+      {ranksAsOf && (
+        <div className="mt-1.5 text-[10px] text-ink-faint">Category ranks as of {ranksAsOf}.</div>
+      )}
       {live ? (
         <div className="mt-4 rounded-2xl border border-line bg-surface p-4 text-center text-caption text-ink-muted">
           Rank trend chart appears here as rank history builds.
@@ -1018,14 +1024,8 @@ export function AmcSection({
         return amc ? String(amc.category_count) : null;
       }),
     },
-    {
-      label: 'AMC-level AUM',
-      vals: (isins ?? []).map((isin) => {
-        const amc = amcData[isin];
-        if (!amc || amc.amc_level_aum_crore == null) return null;
-        return `₹${(amc.amc_level_aum_crore / 100000).toFixed(1)}L Cr`;
-      }),
-    },
+    // "AMC-level AUM" row removed (Batch D): the backend hardcodes it null
+    // (ADR-0035/B67 source-blocked) — a permanently-"—" row is dead weight.
   ];
 
   const amcNames = (isins ?? []).map((isin) => amcData[isin]?.amc_name ?? null);
@@ -1067,7 +1067,7 @@ export function CostSection({ rows = COST, vis = COST_VIS, funds, live = false }
                 </div>
               </div>
             ))}
-            <div className="mt-1 text-caption text-ink-muted">Total fees on a ₹10 L lump-sum held 15 years (at similar returns).</div>
+            <div className="mt-1 text-caption text-ink-muted">Total fees on a ₹10 L lump-sum held 15 years, assuming 12% yearly growth — an illustration, not a forecast.</div>
           </div>
         </>
       )}
