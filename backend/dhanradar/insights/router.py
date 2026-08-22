@@ -24,7 +24,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,7 +67,8 @@ from dhanradar.mf.projection import ENGINE_VERSION
 from dhanradar.mf.serialization import RequestCtx, is_tier_withheld, serialize_concept
 from dhanradar.mf.taxonomy import ELSS_CATEGORY
 from dhanradar.models.auth import User
-from dhanradar.models.mf import MfPortfolio
+from dhanradar.models.mf import MfFund, MfPortfolio
+from dhanradar.mf.compare_read import _category_median_ter
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,159 @@ _require_mf_consent = RequireConsent("mf_analytics")
 def _require_auth(user: UserContext) -> None:
     if user.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+
+async def _portfolio_performance_payload(
+    db: AsyncSession,
+    portfolio_id: str,
+) -> dict:
+    """Build an educational performance payload from ledger-backed XIRR windows.
+
+    Uses the same covered-value basis as portfolio.summary so ledger-less holdings never
+    inflate return metrics.
+    """
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    active_keys = {(h.isin, h.folio_number) for h in rm.holdings}
+    active_flows = await load_active_holding_flows(db, portfolio_id, active_keys)
+    current_value_by_key = {(h.isin, h.folio_number): h.current_value for h in rm.holdings}
+    covered_value, coverage_pct = covered_value_and_coverage_pct(
+        current_value_by_key, set(active_flows), rm.total_value
+    )
+
+    lifetime_xirr = await load_portfolio_xirr(db, portfolio_id, covered_value, active_keys)
+    windows: list[dict] = []
+    for key, days, label in (("1y", 365, "1Y"), ("3y", 1095, "3Y"), ("5y", 1825, "5Y")):
+        value = await load_windowed_xirr(
+            db,
+            portfolio_id,
+            covered_value,
+            days=days,
+            active_keys=active_keys,
+        )
+        if value is None:
+            continue
+        xirr_pct, window_days = value
+        windows.append(
+            {
+                "window": key,
+                "label": label,
+                "days": days,
+                "window_days": window_days,
+                "xirr_pct": xirr_pct,
+                "coverage_pct": coverage_pct,
+            }
+        )
+
+    return {
+        "portfolio_id": portfolio_id,
+        "as_of": datetime.date.today().isoformat(),
+        "lifetime_xirr_pct": lifetime_xirr,
+        "lifetime_coverage_pct": coverage_pct,
+        "windows": windows,
+        "no_data_reason": (
+            "insufficient_ledger_history" if lifetime_xirr is None and not windows else None
+        ),
+    }
+
+
+async def _portfolio_cost_payload(
+    db: AsyncSession,
+    portfolio_id: str,
+) -> dict:
+    """Build portfolio.cost from holdings value weights and fund TER metadata."""
+    rm = await load_portfolio_read_model(db, portfolio_id)
+    total_value = rm.total_value
+    isins = sorted({h.isin for h in rm.holdings})
+    funds = (
+        (
+            await db.execute(
+                select(
+                    MfFund.isin,
+                    MfFund.scheme_name,
+                    MfFund.expense_ratio_pct,
+                    MfFund.plan_type,
+                    MfFund.sebi_category,
+                ).where(MfFund.isin.in_(isins))
+            )
+        )
+        .all()
+        if isins
+        else []
+    )
+    fund_by_isin = {row.isin: row for row in funds}
+
+    category_cache: dict[str, float | None] = {}
+    weighted_sum = 0.0
+    ter_covered_value = 0.0
+    plan_known_value = 0.0
+    direct_plan_value = 0.0
+    rows: list[dict] = []
+
+    for holding in rm.holdings:
+        fund = fund_by_isin.get(holding.isin)
+        ter = (
+            float(fund.expense_ratio_pct)
+            if fund is not None and fund.expense_ratio_pct is not None
+            else None
+        )
+        plan_type = fund.plan_type if fund is not None else None
+        scheme_name = (
+            str(fund.scheme_name)
+            if fund is not None and fund.scheme_name is not None
+            else holding.scheme_name
+        )
+        category = str(fund.sebi_category) if fund is not None and fund.sebi_category else None
+
+        category_median_ter_pct = None
+        if category:
+            if category not in category_cache:
+                category_cache[category] = await _category_median_ter(db, category)
+            category_median_ter_pct = category_cache[category]
+
+        if ter is not None:
+            weighted_sum += holding.current_value * ter
+            ter_covered_value += holding.current_value
+
+        if plan_type:
+            plan_known_value += holding.current_value
+            if str(plan_type).lower() == "direct":
+                direct_plan_value += holding.current_value
+
+        rows.append(
+            {
+                "isin": holding.isin,
+                "scheme_name": scheme_name,
+                "current_value": holding.current_value,
+                "weight_pct": (
+                    round((holding.current_value / total_value) * 100.0, 2) if total_value > 0 else None
+                ),
+                "expense_ratio_pct": ter,
+                "category_median_ter_pct": category_median_ter_pct,
+                "plan_type": plan_type,
+            }
+        )
+
+    weighted_ter_pct = (weighted_sum / ter_covered_value) if ter_covered_value > 0 else None
+    ter_coverage_pct = (
+        round((ter_covered_value / total_value) * 100.0, 2) if total_value > 0 else 0.0
+    )
+    direct_plan_share_pct = (
+        round((direct_plan_value / total_value) * 100.0, 2) if total_value > 0 else None
+    )
+    direct_plan_coverage_pct = (
+        round((plan_known_value / total_value) * 100.0, 2) if total_value > 0 else 0.0
+    )
+
+    return {
+        "portfolio_id": portfolio_id,
+        "as_of": rm.as_of,
+        "weighted_ter_pct": weighted_ter_pct,
+        "ter_coverage_pct": ter_coverage_pct,
+        "direct_plan_share_pct": direct_plan_share_pct,
+        "direct_plan_coverage_pct": direct_plan_coverage_pct,
+        "holdings": rows,
+        "no_data_reason": "no_ter_coverage" if ter_covered_value <= 0 else None,
+    }
 
 
 @router.get(
@@ -518,6 +672,48 @@ async def portfolio_valuation_series(
     return serialize_concept(
         "portfolio.valuation_series",
         valuation_series_payload(points, portfolio_id, first_investment_date, flows_by_date),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/performance")
+async def portfolio_performance(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+) -> dict:
+    """P1a `portfolio.performance` — educational XIRR windows from live ledger coverage."""
+    _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    response.headers["Cache-Control"] = "private"
+    return serialize_concept(
+        "portfolio.performance",
+        await _portfolio_performance_payload(db, portfolio_id),
+        RequestCtx(tier=user.tier),
+        source="computed",
+        engine_version=ENGINE_VERSION,
+    )
+
+
+@router.get("/portfolio/{portfolio_id}/cost")
+async def portfolio_cost(
+    portfolio_id: str,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+) -> dict:
+    """P1a `portfolio.cost` — value-weighted TER and direct-plan share, educational only."""
+    _require_auth(user)
+    await _require_mf_consent(user=user, db=db)
+    await _owned_portfolio_id(db, portfolio_id, user.user_id)
+    response.headers["Cache-Control"] = "private"
+    return serialize_concept(
+        "portfolio.cost",
+        await _portfolio_cost_payload(db, portfolio_id),
         RequestCtx(tier=user.tier),
         source="computed",
         engine_version=ENGINE_VERSION,
