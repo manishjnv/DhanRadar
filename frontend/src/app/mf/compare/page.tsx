@@ -101,6 +101,9 @@ function buildCompareFundFromFragment(frag: CompareFragment, slotIndex: number):
     topGradient: slot.topGradient,
     label: frag.verb_label ?? 'insufficient_data',
     band: frag.confidence_band ?? 'low',
+    planChip: frag.plan_type
+      ? frag.plan_type.charAt(0).toUpperCase() + frag.plan_type.slice(1)
+      : null,
     assessWord: '',
     nav: frag.nav_latest != null ? frag.nav_latest.toFixed(2) : '—',
     navc: frag.nav_change_pct != null
@@ -148,6 +151,11 @@ function CompareView() {
       .map((isin) => bundleQuery.data!.fragments[isin] ?? null)
       .filter((f): f is CompareFragment => f != null);
   }, [bundleQuery.data, sortedIsins]);
+
+  // B1 (audit 2026-08-22): sections receive the RESOLVED isins — parallel to `fragments`
+  // and `realFunds` — never `sortedIsins`: one unresolved middle ISIN would otherwise shift
+  // every per-fund card onto the wrong fund's data (Fit would even fetch it).
+  const resolvedIsins = React.useMemo<string[]>(() => fragments.map((f) => f.isin), [fragments]);
 
   // Live mode requires 2+ resolved fragments
   const live = !sampleMode && fragments.length >= 2;
@@ -422,31 +430,31 @@ function CompareView() {
       {/* S12 — Portfolio fit */}
       <Section>
         <SectionHeader index="12" title="Portfolio Fit Comparison" tag="Exclusive" badge={<LiveBadge />} />
-        <FitSection isins={live ? sortedIsins : undefined} funds={live ? realFunds : undefined} />
+        <FitSection isins={live ? resolvedIsins : undefined} funds={live ? realFunds : undefined} />
       </Section>
 
       {/* S13 — Holdings */}
       <Section>
         <SectionHeader index="13" title="Portfolio Holdings Comparison" badge={c2Comp || c2Overlap ? <LiveBadge /> : undefined} />
-        <HoldingsSection compositions={c2Comp} pairwiseOverlap={c2Overlap} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+        <HoldingsSection compositions={c2Comp} pairwiseOverlap={c2Overlap} funds={heroFunds} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S14 — Fund flow */}
       <Section>
         <SectionHeader index="14" title="Fund Flow Intelligence" badge={c2Flows ? <LiveBadge /> : undefined} />
-        <FlowSection flows={c2Flows} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+        <FlowSection flows={c2Flows} funds={heroFunds} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S15 — Managers */}
       <Section>
         <SectionHeader index="15" title="Fund Manager Comparison" badge={<LiveBadge />} />
-        <ManagerSection people={c2People} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+        <ManagerSection people={c2People} funds={heroFunds} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S16 — AMC */}
       <Section>
         <SectionHeader index="16" title="AMC Comparison" badge={<LiveBadge />} />
-        <AmcSection amcData={c2Amc} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+        <AmcSection amcData={c2Amc} funds={heroFunds} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S17 — Cost */}
@@ -464,13 +472,13 @@ function CompareView() {
       {/* S20 — What changed */}
       <Section>
         <SectionHeader index="20" title="What Changed Recently" badge={<LiveBadge />} />
-        <ChangesSection events={c2Events} funds={heroFunds} isins={live ? sortedIsins : undefined} />
+        <ChangesSection events={c2Events} funds={heroFunds} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S21 — Similar funds in this category */}
       <Section>
         <SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" badge={<LiveBadge />} />
-        <AltsSection alternatives={c2Alts} isins={live ? sortedIsins : undefined} />
+        <AltsSection alternatives={c2Alts} isins={live ? resolvedIsins : undefined} />
       </Section>
 
       {/* S22 — AI insights */}
