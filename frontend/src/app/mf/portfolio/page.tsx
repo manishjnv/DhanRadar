@@ -11,9 +11,9 @@
  * shell (same flat-route + MaybeShell + Suspense model as Fund Detail V3 /
  * Fund Comparison V3 / Leaderboard V1).
  *
- * Live-data wiring in progress (PORTFOLIO_LIVE_DATA_PLAN.md): wired sections show
- * a LIVE badge when a portfolio exists (founder 2026-08-22 — LIVE badge only, no
- * PREVIEW tags); the rest still render sample data from portfolio/sampleData.ts.
+ * Live-data wiring in progress (PORTFOLIO_LIVE_DATA_PLAN.md): wired sections carry
+ * a permanent LIVE badge marking pipeline-backed sections (founder 2026-08-22 —
+ * LIVE badge only, always visible, no PREVIEW tags); the rest render sampleData.ts.
  *
  * Compliance bridges honoured:
  *   1. No raw DhanRadar composite score in DOM — BandRing + strength WORD only.
@@ -160,13 +160,13 @@ function PortfolioView() {
 
           {/* S1 Hero */}
           <section>
-            <SectionHeader title="Portfolio Overview" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader title="Portfolio Overview" badge={<LiveBadge />} />
             <HeroSection portfolioId={portfolioId} />
           </section>
 
           {/* S1b Portfolio vs Market — full You-vs-Nifty comparison (hero mini-chart links here) */}
           <section>
-            <SectionHeader title="Portfolio vs Market" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader title="Portfolio vs Market" badge={<LiveBadge />} />
             <VsMarketSection portfolioId={portfolioId} />
           </section>
 
@@ -184,13 +184,13 @@ function PortfolioView() {
 
           {/* S03 DMMI */}
           <section>
-            <SectionHeader index="03" title="DMMI Portfolio Analysis" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="03" title="DMMI Portfolio Analysis" badge={<LiveBadge />} />
             <DmmiSection portfolioId={portfolioId} />
           </section>
 
           {/* S04 Allocation */}
           <section>
-            <SectionHeader index="04" title="Allocation Center" info="Your fund mix" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="04" title="Allocation Center" info="Your fund mix" badge={<LiveBadge />} />
             <AllocSection portfolioId={portfolioId} />
           </section>
 
@@ -202,19 +202,19 @@ function PortfolioView() {
 
           {/* S06 Performance */}
           <section>
-            <SectionHeader index="06" title="Performance Center" info="vs benchmark & category" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="06" title="Performance Center" info="vs benchmark & category" badge={<LiveBadge />} />
             <PerfSection portfolioId={portfolioId} />
           </section>
 
           {/* S07 Holdings */}
           <section>
-            <SectionHeader index="07" title="Fund Holdings" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="07" title="Fund Holdings" badge={<LiveBadge />} />
             <HoldingsSection portfolioId={portfolioId} />
           </section>
 
           {/* S08 Top Performers */}
           <section>
-            <SectionHeader index="08" title="Top Performers" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="08" title="Top Performers" badge={<LiveBadge />} />
             <TopPerfSection portfolioId={portfolioId} />
           </section>
 
@@ -232,31 +232,31 @@ function PortfolioView() {
 
           {/* S11 Diversification */}
           <section>
-            <SectionHeader index="11" title="Diversification Center" info="How well your money is spread" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="11" title="Diversification Center" info="How well your money is spread" badge={<LiveBadge />} />
             <DivSection portfolioId={portfolioId} />
           </section>
 
           {/* S12 Risk */}
           <section>
-            <SectionHeader index="12" title="Risk Center" info="In plain English" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="12" title="Risk Center" info="In plain English" badge={<LiveBadge />} />
             <RiskSection portfolioId={portfolioId} />
           </section>
 
           {/* S13 Cost */}
           <section>
-            <SectionHeader index="13" title="Cost Analysis" info="What fees cost you" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="13" title="Cost Analysis" info="What fees cost you" badge={<LiveBadge />} />
             <CostSection portfolioId={portfolioId} />
           </section>
 
           {/* S14 AMC */}
           <section>
-            <SectionHeader index="14" title="AMC Exposure" info="Concentration & quality" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="14" title="AMC Exposure" info="Concentration & quality" badge={<LiveBadge />} />
             <AmcSection portfolioId={portfolioId} />
           </section>
 
           {/* S15 Timeline */}
           <section>
-            <SectionHeader index="15" title="Portfolio Timeline" info="Key events" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="15" title="Portfolio Timeline" info="Key events" badge={<LiveBadge />} />
             <TimelineSection portfolioId={portfolioId} />
           </section>
 
@@ -274,7 +274,7 @@ function PortfolioView() {
 
           {/* S18 Opportunities */}
           <section>
-            <SectionHeader index="18" title="Opportunities to Improve" badge={showLive ? <LiveBadge /> : undefined} />
+            <SectionHeader index="18" title="Opportunities to Improve" badge={<LiveBadge />} />
             <OpportunitiesSection portfolioId={portfolioId} />
           </section>
 
