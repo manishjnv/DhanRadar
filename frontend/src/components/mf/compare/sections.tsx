@@ -208,7 +208,7 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
             placeholder="Search fund name…"
             aria-label="Search a fund to add to this comparison"
           />
-          <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
             {results.map((r) => (
               <button
                 key={r.isin}
