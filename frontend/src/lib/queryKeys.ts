@@ -38,6 +38,7 @@ export const queryKeys = {
     moodContext:   (portfolioId: string) => ['portfolio', portfolioId, 'mood-context'] as const,
     valueSeries:   (portfolioId: string) => ['portfolio', portfolioId, 'value-series'] as const,
     fit:           (portfolioId: string, isin: string) => ['portfolio', portfolioId, 'fit', isin] as const,
+    aiFeed:        (portfolioId: string) => ['portfolio', portfolioId, 'ai-feed'] as const,
   },
   watchlists: {
     all:    () => ['watchlists'] as const,

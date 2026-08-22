@@ -37,6 +37,7 @@ import { CostSection } from './sections';
 import { AmcSection } from './sections';
 import { TimelineSection } from './sections';
 import { OpportunitiesSection } from './sections';
+import { AiSection } from './sections';
 import { VsMarketSection, buildPeriodPills, defaultPillKey } from './sections';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 
@@ -57,10 +58,12 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioValueSeries: vi.fn(() => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() })),
   useNiftyCloseSeries: vi.fn(() => ({ data: undefined, isLoading: false })),
   useBenchmarkReturns: vi.fn(() => ({ data: undefined })),
+  usePortfolioAiFeed: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
 }));
 
 vi.mock('@/features/mf/api', () => ({
   useWatchlistCards: vi.fn(),
+  useLatestPortfolio: vi.fn(() => ({ data: undefined })),
 }));
 
 vi.mock('@/features/mood/api', () => ({
@@ -81,8 +84,9 @@ import {
   usePortfolioValueSeries,
   useNiftyCloseSeries,
   useBenchmarkReturns,
+  usePortfolioAiFeed,
 } from '@/features/portfolio/api';
-import { useWatchlistCards } from '@/features/mf/api';
+import { useWatchlistCards, useLatestPortfolio } from '@/features/mf/api';
 import { useMoodCurrent } from '@/features/mood/api';
 
 // ---------------------------------------------------------------------------
@@ -1826,5 +1830,88 @@ describe('P1b wired sections', () => {
     vi.mocked(useWatchlistCards).mockReturnValue({ data: { as_of: null, items: [] }, isLoading: false, isError: false, refetch: vi.fn() } as any);
     render(<OpportunitiesSection portfolioId="pid" />, { wrapper });
     expect(screen.getAllByText(/watchlist is empty/i).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AiSection — S19 AI Insights Feed (Wave P3)
+// ---------------------------------------------------------------------------
+
+const AI_FEED_PRESENT = {
+  status: 'present' as const,
+  data: {
+    portfolio_id: 'pid',
+    state: 'ok',
+    items: [
+      'Your portfolio spans multiple equity categories.',
+      'Funds carry medium to high confidence bands.',
+    ],
+    confidence_band: 'medium' as const,
+    as_of: '2026-08-22',
+    no_data_reason: null,
+    disclosure: 'DhanRadar is an educational platform. Not investment advice.',
+    not_advice: 'For education only — not investment advice.',
+    disclaimer_version: '2026-06-06.v1',
+  },
+  meta: EMPTY_META,
+};
+
+describe('AiSection', () => {
+  beforeEach(() => {
+    vi.mocked(usePortfolioAiFeed).mockReturnValue({ data: undefined, isLoading: false, isError: false } as any);
+    vi.mocked(useLatestPortfolio).mockReturnValue({ data: undefined } as any);
+  });
+
+  it('anonymous => sign-in prompt, no AI content', () => {
+    // No portfolioId means anonymous / not logged in
+    vi.mocked(useLatestPortfolio).mockReturnValue({ data: undefined } as any);
+    render(<AiSection />, { wrapper });
+    expect(screen.getByText(/sign in to see/i)).toBeDefined();
+    expect(screen.queryByText('DhanRadar AI')).toBeNull();
+  });
+
+  it('ok state => renders items plus disclosure and NOT_ADVICE, no advisory verbs', () => {
+    vi.mocked(useLatestPortfolio).mockReturnValue({ data: { portfolio_id: 'pid' } } as any);
+    vi.mocked(usePortfolioAiFeed).mockReturnValue({ data: AI_FEED_PRESENT, isLoading: false } as any);
+    render(<AiSection />, { wrapper });
+
+    const text = document.body.textContent ?? '';
+    expect(screen.getAllByText('DhanRadar AI').length).toBeGreaterThan(0);
+    expect(screen.getByText(/multiple equity categories/i)).toBeDefined();
+    // Disclosure and NOT_ADVICE must be rendered
+    expect(screen.getByText(/educational platform/i)).toBeDefined();
+    expect(screen.getByText(/for education only/i)).toBeDefined();
+    // No advisory verbs (non-neg #1)
+    assertNoAdvisoryVerbs(text);
+    // No raw DhanRadar score in DOM (non-neg #2)
+    expect(text).not.toMatch(/unified_score|confidence:\s*0\.\d/i);
+  });
+
+  it('insufficient_data => shows not-enough-data message, no items', () => {
+    vi.mocked(useLatestPortfolio).mockReturnValue({ data: { portfolio_id: 'pid' } } as any);
+    vi.mocked(usePortfolioAiFeed).mockReturnValue({
+      data: {
+        ...AI_FEED_PRESENT,
+        data: { ...AI_FEED_PRESENT.data, state: 'insufficient_data', items: [] },
+      },
+      isLoading: false,
+    } as any);
+    render(<AiSection />, { wrapper });
+    expect(screen.getByText(/not enough portfolio data/i)).toBeDefined();
+    expect(screen.queryByText('DhanRadar AI')).toBeNull();
+  });
+
+  it('consent_required => shows consent message, no items', () => {
+    vi.mocked(useLatestPortfolio).mockReturnValue({ data: { portfolio_id: 'pid' } } as any);
+    vi.mocked(usePortfolioAiFeed).mockReturnValue({
+      data: {
+        ...AI_FEED_PRESENT,
+        data: { ...AI_FEED_PRESENT.data, state: 'unavailable', items: [], no_data_reason: 'consent_required' },
+      },
+      isLoading: false,
+    } as any);
+    render(<AiSection />, { wrapper });
+    expect(screen.getByText(/cross-border ai consent/i)).toBeDefined();
+    expect(screen.queryByText('DhanRadar AI')).toBeNull();
   });
 });

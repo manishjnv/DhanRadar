@@ -86,6 +86,9 @@ ALLOWED_FIELDS: dict[str, frozenset[str]] = {
     "portfolio.cost": frozenset({"portfolio_id", "as_of", "weighted_ter_pct", "ter_coverage_pct", "direct_plan_share_pct", "direct_plan_coverage_pct", "holdings", "no_data_reason"}),
     "portfolio.health": frozenset({"portfolio_id", "as_of", "fund_count", "checks", "no_data_reason"}),
     "portfolio.overlap": frozenset({"portfolio_id", "as_of", "pairs", "pairs_with_data", "pairs_total", "no_data_reason"}),
+    # Wave P3 (2026-08-22) — governed AI insight cards for the portfolio (S19).
+    # confidence_band is the BAND WORD only; the raw float never reaches the client (#2).
+    "portfolio.ai_feed": frozenset({"portfolio_id", "items", "state", "confidence_band", "as_of", "no_data_reason", "disclosure", "not_advice", "disclaimer_version"}),
     "portfolio.valuation_series": frozenset({"portfolio_id", "point_count", "first_investment_date", "points"}),
     "portfolio.score_raw": frozenset(),  # gated-never (registry) — nothing is ever allowed through, gated or not
     "fund.label": frozenset({"label"}),

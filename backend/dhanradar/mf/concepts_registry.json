@@ -335,7 +335,7 @@
       "access_tier": "free",
       "content_class": "AI_GENERATED",
       "gate_flag": null,
-      "status": "build"
+      "status": "live"
     },
     "portfolio.ai_summary": {
       "visibility_class": "educational",
