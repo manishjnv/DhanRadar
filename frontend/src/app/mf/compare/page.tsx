@@ -261,6 +261,17 @@ function CompareView() {
     ];
   }, [live, fragments]);
 
+  // Live traffic-light rows for the risk heat table (was a hardcoded sample constant).
+  const heatRows = React.useMemo<{ label: string; vals: string[]; better: 'low' | 'hi' }[] | undefined>(() => {
+    if (!live) return undefined;
+    return [
+      { label: 'Volatility (std dev)', vals: fragments.map((f) => (f.volatility_pct != null ? `${f.volatility_pct.toFixed(1)}%` : '—')), better: 'low' },
+      { label: 'Max drawdown', vals: fragments.map((f) => (f.max_drawdown_pct != null ? `${f.max_drawdown_pct.toFixed(1)}%` : '—')), better: 'low' },
+      { label: 'Sharpe ratio', vals: fragments.map((f) => (f.sharpe_ratio != null ? f.sharpe_ratio.toFixed(2) : '—')), better: 'hi' },
+      { label: 'Sortino ratio', vals: fragments.map((f) => (f.sortino_ratio != null ? f.sortino_ratio.toFixed(2) : '—')), better: 'hi' },
+    ];
+  }, [live, fragments]);
+
   const rollingRows = React.useMemo<Row[] | undefined>(() => {
     if (!live) return undefined;
     return [
@@ -367,7 +378,7 @@ function CompareView() {
       <HeroSection funds={heroFunds} />
 
       {/* S2 — DhanRadar educational read (AI wave) */}
-      <Section><SectionHeader index="02" title="DhanRadar Educational Read" badge={<LiveBadge />} /><EduReadSection items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
+      <Section><SectionHeader index="02" title="DhanRadar Educational Read" badge={<LiveBadge />} /><EduReadSection needsAuth={live && !me} items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S3 — Scoreboard */}
       <Section>
@@ -393,7 +404,7 @@ function CompareView() {
       {/* S9 — Rolling */}
       <Section>
         <SectionHeader index="09" title="Rolling Returns Comparison" badge={<LiveBadge />} />
-        <RollingSection rows={rollingRows} live={live} />
+        <RollingSection rows={rollingRows} live={live} funds={heroFunds} />
       </Section>
 
       {/* S10 — Ranking */}
@@ -405,7 +416,7 @@ function CompareView() {
       {/* S11 — Risk */}
       <Section>
         <SectionHeader index="11" title="Risk Comparison Center" badge={<LiveBadge />} />
-        <RiskSection liveRows={riskRows} />
+        <RiskSection liveRows={riskRows} heatRows={heatRows} funds={heroFunds} live={live} />
       </Section>
 
       {/* S12 — Portfolio fit */}
@@ -447,7 +458,7 @@ function CompareView() {
       {/* S18 — Tax */}
       <Section>
         <SectionHeader index="18" title="Tax Comparison" info="On ₹2 L gain · >1yr" badge={<LiveBadge />} />
-        <TaxSection categories={taxCategories} />
+        <TaxSection categories={taxCategories} funds={live ? heroFunds : undefined} />
       </Section>
 
       {/* S20 — What changed */}
@@ -459,11 +470,11 @@ function CompareView() {
       {/* S21 — Similar funds in this category */}
       <Section>
         <SectionHeader index="21" title="Similar Funds in This Category" info="Excluding compared funds" badge={<LiveBadge />} />
-        <AltsSection alternatives={c2Alts} />
+        <AltsSection alternatives={c2Alts} isins={live ? sortedIsins : undefined} />
       </Section>
 
       {/* S22 — AI insights */}
-      <Section><SectionHeader index="22" title="AI Insights Center" badge={<LiveBadge />} /><AiInsightsSection items={live && me ? (compareAiQuery.data?.insight_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
+      <Section><SectionHeader index="22" title="AI Insights Center" badge={<LiveBadge />} /><AiInsightsSection needsAuth={live && !me} items={live && me ? (compareAiQuery.data?.insight_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
 
       {/* S23 — FAQ */}
       <Section><SectionHeader index="23" title="Frequently Asked" /><FaqSection /></Section>
@@ -474,7 +485,7 @@ function CompareView() {
       </div>
 
       {/* StickyBar */}
-      <StickyBar />
+      <StickyBar live={live} />
     </div>
   );
 }

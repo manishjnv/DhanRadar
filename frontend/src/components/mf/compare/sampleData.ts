@@ -324,11 +324,11 @@ export const AI_INSIGHTS: string[] = [
 
 // S23 — FAQ
 export const FAQ: [string, string][] = [
-  ['Why is one fund read more strongly than another?', 'The DhanRadar educational read blends 12 factors — not just returns. Bandhan reads strongest on the balance of consistency, cost, downside protection, manager stability and diversification, even though Quant has higher raw returns.'],
-  ['Why does risk differ between them?', 'Quant runs a high-momentum, concentrated book — bigger swings both ways. Bandhan holds 252 stocks with a quality tilt, so it has historically fallen less in corrections.'],
+  ['Why is one fund read more strongly than another?', 'The DhanRadar educational read blends 12 factors — not just returns. A fund can read strongest on the balance of consistency, cost, downside protection, manager stability and diversification even when another has higher raw returns.'],
+  ['Why does risk differ between them?', 'Funds in the same category can run very different books — a high-momentum, concentrated portfolio swings harder both ways than a broadly diversified one with a quality tilt, which historically falls less in corrections.'],
   ['Why are SIP returns different from lump-sum?', 'SIP averages your entry price over time, so funds that fell harder (like Quant in 2022) can show strong SIP XIRR because more units were bought cheaply during the dip.'],
   ['Why does the expense ratio matter?', "It's an annual drag on returns that compounds. A 0.22% difference looks tiny but works out to roughly ₹2.1 L on ₹10 L over 15 years."],
-  ['How should a first-time small-cap investor read this?', 'Educationally, Bandhan has shown the smoothest ride and the most consistency, which historically makes a first-time small-cap investor less likely to panic-sell in a dip. This is context, not advice.'],
+  ['How should a first-time small-cap investor read this?', 'Educationally, the fund with the smoothest ride and the most consistency historically makes a first-time small-cap investor less likely to panic-sell in a dip. This is context, not advice.'],
 ];
 
 // S24 — Sticky read summary (band words / ranges, no numeric score)
