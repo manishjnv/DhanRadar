@@ -40,6 +40,14 @@ const mockCasUpload = {
   reset: vi.fn(),
 };
 
+const mockDmmiSection = vi.fn((_props: any) => <div data-testid="dmmi-section" />);
+const mockPerfSection = vi.fn((_props: any) => <div data-testid="perf-section" />);
+const mockTopPerfSection = vi.fn((_props: any) => <div data-testid="topperf-section" />);
+const mockCostSection = vi.fn((_props: any) => <div data-testid="cost-section" />);
+const mockAmcSection = vi.fn((_props: any) => <div data-testid="amc-section" />);
+const mockTimelineSection = vi.fn((_props: any) => <div data-testid="timeline-section" />);
+const mockOpportunitiesSection = vi.fn((_props: any) => <div data-testid="opportunities-section" />);
+
 vi.mock('@/features/mf/cas-upload', () => ({
   useCasUpload: vi.fn(() => mockCasUpload),
 }));
@@ -53,22 +61,22 @@ vi.mock('@/components/mf/portfolio/sections', () => ({
   VsMarketSection: () => <div />,
   HealthSection: () => <div />,
   ActionSection: () => <div />,
-  DmmiSection: () => <div />,
+  DmmiSection: (props: any) => mockDmmiSection(props),
   AllocSection: () => <div />,
   GoalSection: () => <div />,
-  PerfSection: () => <div />,
+  PerfSection: (props: any) => mockPerfSection(props),
   HoldingsSection: () => <div />,
-  TopPerfSection: () => <div />,
+  TopPerfSection: (props: any) => mockTopPerfSection(props),
   UnderReviewSection: () => <div />,
   OverlapSection: () => <div />,
   DivSection: () => <div />,
   RiskSection: () => <div />,
-  CostSection: () => <div />,
-  AmcSection: () => <div />,
-  TimelineSection: () => <div />,
+  CostSection: (props: any) => mockCostSection(props),
+  AmcSection: (props: any) => mockAmcSection(props),
+  TimelineSection: (props: any) => mockTimelineSection(props),
   RecSection: () => <div />,
   ProjSection: () => <div />,
-  OpportunitiesSection: () => <div />,
+  OpportunitiesSection: (props: any) => mockOpportunitiesSection(props),
   AiSection: () => <div />,
   ReportSection: () => <div />,
   FaqSection: () => <div />,
@@ -132,6 +140,19 @@ beforeEach(() => {
     reset: vi.fn(),
   });
   vi.mocked(useCasUpload).mockReturnValue({ ...mockCasUpload });
+});
+
+describe('P1b portfolioId wiring', () => {
+  it('passes portfolioId to all newly wired sections', () => {
+    renderPage();
+    expect(mockDmmiSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockPerfSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockTopPerfSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockCostSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockAmcSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockTimelineSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+    expect(mockOpportunitiesSection).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'pid-test' }));
+  });
 });
 
 // 1. Header toolbar renders the 4 non-upload actions

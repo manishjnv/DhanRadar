@@ -30,6 +30,13 @@ import { RiskSection } from './sections';
 import { AllocSection } from './sections';
 import { DivSection } from './sections';
 import { EmptyHero } from './sections';
+import { DmmiSection } from './sections';
+import { PerfSection } from './sections';
+import { TopPerfSection } from './sections';
+import { CostSection } from './sections';
+import { AmcSection } from './sections';
+import { TimelineSection } from './sections';
+import { OpportunitiesSection } from './sections';
 import { VsMarketSection, buildPeriodPills, defaultPillKey } from './sections';
 import { sectionTooltip, fieldTooltip } from '@/data/tooltips';
 
@@ -42,10 +49,22 @@ vi.mock('@/features/portfolio/api', () => ({
   usePortfolioAllocation: vi.fn(),
   usePortfolioConcentration: vi.fn(),
   usePortfolioDiversification: vi.fn(),
+  usePortfolioPerformance: vi.fn(),
+  usePortfolioCost: vi.fn(),
+  usePortfolioTransactions: vi.fn(),
   usePortfolioRisk: vi.fn(),
   usePortfolioRiskAdvanced: vi.fn(),
   usePortfolioValueSeries: vi.fn(() => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() })),
   useNiftyCloseSeries: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useBenchmarkReturns: vi.fn(() => ({ data: undefined })),
+}));
+
+vi.mock('@/features/mf/api', () => ({
+  useWatchlistCards: vi.fn(),
+}));
+
+vi.mock('@/features/mood/api', () => ({
+  useMoodCurrent: vi.fn(),
 }));
 
 import {
@@ -54,11 +73,17 @@ import {
   usePortfolioAllocation,
   usePortfolioConcentration,
   usePortfolioDiversification,
+  usePortfolioPerformance,
+  usePortfolioCost,
+  usePortfolioTransactions,
   usePortfolioRisk,
   usePortfolioRiskAdvanced,
   usePortfolioValueSeries,
   useNiftyCloseSeries,
+  useBenchmarkReturns,
 } from '@/features/portfolio/api';
+import { useWatchlistCards } from '@/features/mf/api';
+import { useMoodCurrent } from '@/features/mood/api';
 
 // ---------------------------------------------------------------------------
 // Fixture data
@@ -1580,5 +1605,226 @@ describe('HelpTip wiring', () => {
     // Fallback: tooltip text is in DOM regardless (opacity-0 → opacity-100 is CSS, not unmount)
     expect(screen.getByText(expected!)).toBeDefined();
     void triggerBtn; // suppress unused warning
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1b wired sections tests
+// ---------------------------------------------------------------------------
+
+describe('P1b wired sections', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('DmmiSection renders live mood context and empty state', () => {
+    vi.mocked(useMoodCurrent).mockReturnValue({
+      data: {
+        snapshot_date: '2026-08-22',
+        snapshot_at: null,
+        regime: 'accumulation',
+        confidence_band: 'high',
+        data_quality: 'ok',
+        contributing_factors: [],
+        contradicting_factors: [],
+        commentary: 'Breadth is supportive and volatility is moderate.',
+        trend: 'stable',
+        disclosure: 'x',
+        not_advice: 'x',
+        disclaimer_version: 'v1',
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    render(<DmmiSection portfolioId="pid" />, { wrapper });
+    expect(screen.getByText(/Market mood is currently/i)).toBeDefined();
+
+    vi.mocked(useMoodCurrent).mockReturnValue({ data: null, isLoading: false, isError: false, refetch: vi.fn() } as any);
+    render(<DmmiSection portfolioId="pid" />, { wrapper });
+    expect(screen.getAllByText(/Market mood context is not available/i).length).toBeGreaterThan(0);
+  });
+
+  it('PerfSection renders windows and benchmark row with envelope data', () => {
+    vi.mocked(usePortfolioPerformance).mockReturnValue({
+      data: {
+        status: 'present',
+        data: {
+          portfolio_id: 'pid',
+          as_of: '2026-08-22',
+          lifetime_xirr_pct: 14.2,
+          lifetime_coverage_pct: 91,
+          windows: [
+            { window: '1y', label: '1Y', days: 365, window_days: 365, xirr_pct: 12.1, coverage_pct: 88 },
+            { window: '3y', label: '3Y', days: 1095, window_days: 980, xirr_pct: 14.4, coverage_pct: 80 },
+          ],
+          no_data_reason: null,
+        },
+        meta: EMPTY_META,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useBenchmarkReturns).mockReturnValue({
+      data: { benchmark: 'nifty50', display_name: 'Nifty 50', disclosure: 'x', return_1y_pct: 10.0, return_3y_pct: 9.2, return_5y_pct: 11.1, as_of: '2026-08-22' },
+    } as any);
+    render(<PerfSection portfolioId="pid" />, { wrapper });
+    expect(screen.getByText('1Y')).toBeDefined();
+    expect(screen.getByText(/Nifty 50 benchmark/i)).toBeDefined();
+    expect(screen.getAllByText(/coverage/i).length).toBeGreaterThan(0);
+  });
+
+  it('TopPerfSection derives highest/lowest rows from holdings envelope', () => {
+    vi.mocked(usePortfolioHoldings).mockReturnValue({
+      data: {
+        status: 'present',
+        data: {
+          portfolio_id: 'pid',
+          holdings: [
+            { ...HOLDINGS_PRESENT.data.holdings[0], xirr_pct: 14.1, day_change: 1200 },
+            { ...HOLDINGS_PRESENT.data.holdings[1], xirr_pct: -3.2, day_change: 800 },
+          ],
+        },
+        meta: EMPTY_META,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    render(<TopPerfSection portfolioId="pid" />, { wrapper });
+    expect(screen.getByText(/Highest XIRR/i)).toBeDefined();
+    expect(screen.getByText(/Lowest XIRR/i)).toBeDefined();
+  });
+
+  it('CostSection renders factual cost table and avoids advisory copy', () => {
+    vi.mocked(usePortfolioCost).mockReturnValue({
+      data: {
+        status: 'present',
+        data: {
+          portfolio_id: 'pid',
+          as_of: '2026-08-22',
+          weighted_ter_pct: 0.88,
+          ter_coverage_pct: 94,
+          direct_plan_share_pct: 42,
+          direct_plan_coverage_pct: 97,
+          holdings: [
+            {
+              isin: 'INF0001',
+              scheme_name: 'Sample Fund',
+              current_value: 100000,
+              weight_pct: 22.1,
+              expense_ratio_pct: 0.91,
+              category_median_ter_pct: 1.03,
+              plan_type: 'direct',
+            },
+          ],
+          no_data_reason: null,
+        },
+        meta: EMPTY_META,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    render(<CostSection portfolioId="pid" />, { wrapper });
+    expect(screen.getAllByText(/Weighted TER/i).length).toBeGreaterThan(0);
+    assertNoAdvisoryVerbs(document.body.textContent ?? '');
+  });
+
+  it('AmcSection renders live allocation rows and TimelineSection renders transaction entries', () => {
+    vi.mocked(usePortfolioAllocation).mockReturnValue({
+      data: {
+        status: 'present',
+        data: {
+          portfolio_id: 'pid',
+          by: 'amc',
+          buckets: [{ bucket: 'HDFC Asset Management Company Limited', value: 100000, weight_pct: 51.2 }],
+          total_value: 100000,
+          fund_count: 3,
+          as_of: '2026-08-22',
+        },
+        meta: EMPTY_META,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(usePortfolioHoldings).mockReturnValue({ data: HOLDINGS_PRESENT, isLoading: false, isError: false, refetch: vi.fn() } as any);
+    vi.mocked(usePortfolioTransactions).mockReturnValue({
+      data: {
+        status: 'present',
+        data: {
+          portfolio_id: 'pid',
+          isin: null,
+          count: 1,
+          total: 1,
+          limit: 200,
+          offset: 0,
+          transactions: [
+            {
+              id: 't1',
+              isin: 'INF0001',
+              folio_number: 'x',
+              txn_type: 'purchase',
+              txn_date: '2026-08-01',
+              units: 10,
+              nav_or_price: 100,
+              amount: 1000,
+            },
+          ],
+        },
+        meta: EMPTY_META,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<AmcSection portfolioId="pid" />, { wrapper });
+    expect(screen.getByText(/51.20% of portfolio/i)).toBeDefined();
+
+    render(<TimelineSection portfolioId="pid" />, { wrapper });
+    expect(screen.getByText(/Purchase/i)).toBeDefined();
+  });
+
+  it('OpportunitiesSection renders watchlist-backed cards and empty state for no_data', () => {
+    vi.mocked(useWatchlistCards).mockReturnValue({
+      data: {
+        as_of: '2026-08-22',
+        items: [
+          {
+            isin: 'INF0001',
+            scheme_name: 'Opportunity Fund',
+            fund_name_short: 'Opportunity',
+            amc_name: null,
+            sebi_category: null,
+            category: null,
+            expense_ratio_pct: 0.72,
+            risk_o_meter: null,
+            nav_latest: null,
+            nav_change_pct: null,
+            nav_sparkline: [],
+            return_1y_pct: 11.2,
+            return_3y_pct: 14.1,
+            return_5y_pct: null,
+            verb_label: 'on_track',
+            confidence_band: 'medium',
+            category_return_1y_pct: null,
+            category_return_3y_pct: null,
+            benchmark_row: { no_data: true, reason: 'benchmark_unmapped' },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as any);
+    render(<OpportunitiesSection portfolioId="pid" />, { wrapper });
+    expect(screen.getAllByText(/From your watchlist/i).length).toBeGreaterThan(0);
+
+    vi.mocked(useWatchlistCards).mockReturnValue({ data: { as_of: null, items: [] }, isLoading: false, isError: false, refetch: vi.fn() } as any);
+    render(<OpportunitiesSection portfolioId="pid" />, { wrapper });
+    expect(screen.getAllByText(/watchlist is empty/i).length).toBeGreaterThan(0);
   });
 });

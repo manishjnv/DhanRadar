@@ -98,6 +98,7 @@ export function useCasUpload(portfolioId: string): {
       // resolver (useLatestPortfolio, key ['mf','portfolio','latest']) so the page discovers the new
       // portfolio_id and the concept hooks (disabled while portfolioId was '') enable + fetch.
       void queryClient.invalidateQueries({ queryKey: ['mf', 'portfolio', 'latest'] });
+      void queryClient.invalidateQueries({ queryKey: ['portfolio'] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.portfolio.holdings(portfolioId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.portfolio.summaryById(portfolioId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.portfolio.risk(portfolioId) });
