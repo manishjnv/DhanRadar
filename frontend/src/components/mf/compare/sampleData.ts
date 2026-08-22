@@ -20,6 +20,8 @@ import type { Strength } from '@/components/mf/funddetail/sampleData';
 // Fund identity (accent colours are decorative, kept from the V3 mockup)
 // ───────────────────────────────────────────────────────────────────────────
 export interface CompareFund {
+  /** Plan/option variant of the underlying ISIN ("Direct · Growth"); null when unknown, absent on samples. */
+  planChip?: string | null;
   key: string;
   name: string;
   short: string;

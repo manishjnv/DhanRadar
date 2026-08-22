@@ -137,7 +137,10 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
               </div>
               <div className="min-w-0">
                 <div className="text-[15.5px] font-bold leading-tight tracking-tight">{f.name}</div>
-                <div className="mt-0.5 text-[11px] opacity-80">{f.cat}</div>
+                <div className="mt-0.5 text-[11px] opacity-80">
+                  {f.cat}
+                  {f.planChip && <span className="ml-1.5 rounded-[4px] bg-white/15 px-1 py-px text-[9px] font-bold uppercase tracking-wide">{f.planChip}</span>}
+                </div>
               </div>
             </div>
             <div className="relative mt-3.5 flex items-center gap-3">
