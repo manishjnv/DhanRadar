@@ -24,9 +24,11 @@ import {
   SoWhat, RichText, Panel, WinChip, Dot, CompareTable, ScoreboardRows, HeatTable, CTA,
 } from './ui';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMoodCurrent } from '@/features/mood/api';
 import { useMe } from '@/features/auth/api';
-import { useFundPortfolioFit, useLatestPortfolio } from '@/features/mf/api';
+import { useFundPortfolioFit, useLatestPortfolio, useFundExplorer } from '@/features/mf/api';
+import { useWatchlist } from '@/hooks/useWatchlist';
 import { MoodGauge, REGIME_DISPLAY } from '@/components/mood/MoodGauge';
 import { relativeTime } from '@/features/mood/relative-time';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -36,15 +38,81 @@ import type {
   CompareEventItem, CompareAmcFragment, CompareAlternative, ComparePairwiseOverlap,
 } from '@/features/mf/types';
 
+/** ISINs are 10-12 char alnum; sample-data fund keys ('bandhan', 'nippon', …) never match. */
+const ISIN_RE = /^[A-Z0-9]{10,12}$/;
+
 const STRENGTH_WORD = { strong: 'Strong', good: 'Good', moderate: 'Moderate', soft: 'Soft' } as const;
 const ASSESS_TOP = { in_form: 'In Form', on_track: 'On Track', off_track: 'Off Track', out_of_form: 'Out of Form', insufficient_data: '—' } as const;
 
+// Inline "add another fund" search — same-category peers via the Explorer
+// feed, filtered client-side by name (no separate search endpoint needed).
+function AddFundPopover({ category, excludeIsins, onClose }: { category: string; excludeIsins: string[]; onClose: () => void }) {
+  const router = useRouter();
+  const [q, setQ] = React.useState('');
+  const explorer = useFundExplorer({ category, sort: 'return_1y', page: 1, limit: 100 });
+  const results = React.useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return (explorer.data?.funds ?? [])
+      .filter((fund) => !excludeIsins.includes(fund.isin))
+      .filter((fund) => !term || (fund.fund_name_short ?? fund.scheme_name).toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [explorer.data, excludeIsins, q]);
+
+  const pick = (isin: string) => {
+    const next = [...excludeIsins, isin].slice(0, 4);
+    onClose();
+    router.push(`/mf/compare?isins=${next.join(',')}&category=${encodeURIComponent(category)}`);
+  };
+
+  return (
+    <div className="absolute inset-x-0 top-0 z-10 flex max-h-[280px] flex-col gap-2 rounded-2xl border border-line bg-surface p-3 shadow-lg">
+      <div className="flex items-center gap-2">
+        <input
+          autoFocus
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={`Search ${category} funds…`}
+          className="h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-small text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40"
+        />
+        <button type="button" onClick={onClose} aria-label="Close" className="shrink-0 rounded-lg p-1.5 text-ink-muted hover:bg-surface-2 hover:text-ink">✕</button>
+      </div>
+      <div className="flex flex-col gap-1 overflow-y-auto">
+        {explorer.isLoading && <div className="px-2 py-3 text-small text-ink-muted">Loading funds…</div>}
+        {!explorer.isLoading && results.length === 0 && (
+          <div className="px-2 py-3 text-small text-ink-muted">No matching funds in {category}.</div>
+        )}
+        {results.map((fund) => (
+          <button
+            key={fund.isin}
+            type="button"
+            onClick={() => pick(fund.isin)}
+            className="rounded-lg px-2.5 py-2 text-left text-small font-medium text-ink hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+          >
+            {fund.fund_name_short ?? fund.scheme_name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── S1 — Hero fund columns ───────────────────────────────────────────────────
 // `funds` override: /mf/compare?funds=<isin> replaces column 1 with the real fund.
-export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
+export function HeroSection({ funds = FUNDS, live = false, category = 'Small Cap' }: { funds?: CompareFund[]; live?: boolean; category?: string }) {
+  const router = useRouter();
+  const { has, toggle } = useWatchlist();
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const currentIsins = live ? funds.map((f) => f.key) : [];
+
+  const viewFundHref = (f: CompareFund) => (ISIN_RE.test(f.key) ? `/mf/fund/${f.key}` : `/mf/explore?q=${encodeURIComponent(f.short)}`);
+
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-[repeat(3,1fr)_minmax(140px,160px)]">
-      {funds.map((f) => (
+      {funds.map((f) => {
+        const canWatchlist = ISIN_RE.test(f.key);
+        const saved = canWatchlist && has(f.key);
+        return (
         <div
           key={f.key}
           className="relative overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
@@ -84,15 +152,30 @@ export function HeroSection({ funds = FUNDS }: { funds?: CompareFund[] }) {
               {f.badges.map((b) => <WinChip key={b} gold={b.includes('Best Overall') || b.includes('Highest')}>{b}</WinChip>)}
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
-              <CTA variant="primary">View fund</CTA>
-              <CTA variant="navy">＋ Watchlist</CTA>
+              <CTA variant="primary" onClick={() => router.push(viewFundHref(f))}>View fund</CTA>
+              <CTA
+                variant="navy"
+                onClick={() => (canWatchlist ? toggle({ isin: f.key, name: f.name, category: f.cat }) : router.push(viewFundHref(f)))}
+              >
+                {saved ? '★ Watchlisted' : '＋ Watchlist'}
+              </CTA>
             </div>
           </div>
         </div>
-      ))}
-      <button type="button" className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong bg-transparent text-small font-semibold text-ink-muted transition-colors hover:border-royal hover:bg-royal/5 hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-        <span className="text-2xl" aria-hidden="true">＋</span>Add another fund
-      </button>
+        );
+      })}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setPickerOpen((v) => !v)}
+          className="flex min-h-[120px] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong bg-transparent text-small font-semibold text-ink-muted transition-colors hover:border-royal hover:bg-royal/5 hover:text-royal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+        >
+          <span className="text-2xl" aria-hidden="true">＋</span>Add another fund
+        </button>
+        {pickerOpen && (
+          <AddFundPopover category={category} excludeIsins={currentIsins} onClose={() => setPickerOpen(false)} />
+        )}
+      </div>
     </div>
   );
 }

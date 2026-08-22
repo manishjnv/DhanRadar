@@ -363,7 +363,7 @@ function CompareView() {
 
       {/* S1 — Hero comparison columns */}
       <SectionHeader index="01" title={`Comparing ${count} Funds`} info="2–4 funds" badge={<LiveBadge />} />
-      <HeroSection funds={heroFunds} />
+      <HeroSection funds={heroFunds} live={live} category={category} />
 
       {/* S2 — DhanRadar educational read (AI wave) */}
       <Section><SectionHeader index="02" title="DhanRadar Educational Read" badge={<LiveBadge />} /><EduReadSection items={live && me ? (compareAiQuery.data?.summary_items ?? []) : undefined} disclosure={compareAiQuery.data?.disclosure} notAdvice={compareAiQuery.data?.not_advice} /></Section>
