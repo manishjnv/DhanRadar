@@ -26,7 +26,7 @@ import { ErrorCard } from '@/components/ui/ErrorCard';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
 import { FundExplorerTable } from '@/components/mf/FundExplorerTable';
-import { useFundCategories, useFundExplorer } from '@/features/mf/api';
+import { useFundCategories, useFundExplorer, useLeaderboard } from '@/features/mf/api';
 import { useMoodCurrent } from '@/features/mood/api';
 import { formatCategoryLabel } from '@/features/mf/explorer-format';
 import { cn } from '@/lib/cn';
@@ -36,10 +36,9 @@ import { ExploreHero } from '@/components/mf/explore/ExploreHero';
 import { QuickChips } from '@/components/mf/explore/QuickChips';
 import { AdvancedFilters } from '@/components/mf/explore/AdvancedFilters';
 import { FundCardGrid } from '@/components/mf/explore/FundCardGrid';
-import { CategoryLeaders } from '@/components/mf/explore/CategoryLeaders';
 import { DiscoveryFaq } from '@/components/mf/explore/DiscoveryFaq';
 import { DmmiSection } from '@/components/mf/explore/DmmiSection';
-import { LaneCards } from '@/components/mf/explore/LaneCards';
+import { CategoryLeaders } from '@/components/mf/explore/CategoryLeaders';
 import { Leaderboards } from '@/components/mf/explore/Leaderboards';
 import { Momentum } from '@/components/mf/explore/Momentum';
 import { ConsistencyTable, LowCostTable } from '@/components/mf/explore/LeaderTables';
@@ -47,7 +46,9 @@ import { BeginnerPicks } from '@/components/mf/explore/BeginnerPicks';
 import { AiFeed } from '@/components/mf/explore/AiFeed';
 import { Shortlist } from '@/components/mf/explore/Shortlist';
 import { SectionHeader, Section } from '@/components/mf/explore/ExploreSection';
-import { AI_DISCOVERY, FUND_FLOW } from '@/components/mf/explore/sampleData';
+import { FundFlowSection } from '@/components/mf/explore/FundFlowSection';
+import { SpotlightSignals } from '@/components/mf/explore/SpotlightSignals';
+import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { QUICK_INTENTS, type QuickIntent } from '@/features/mf/quickIntents';
 
 const TRY_INTENTS = QUICK_INTENTS.filter((q) => q.backing.kind === 'category');
@@ -207,6 +208,9 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
   const router = useRouter();
   const { data: catData, isLoading: catsLoading } = useFundCategories();
   const { data: moodData } = useMoodCurrent();
+  const lb = useLeaderboard();
+  const boards = lb.data?.boards;
+  const hero = lb.data?.hero;
 
   const [activeCategory, setActiveCategory] = React.useState('');
   const [sort, setSort]                     = React.useState<SortKey>('rank');
@@ -281,7 +285,18 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
   return (
     <div className="flex flex-col">
       {/* HERO */}
-      <ExploreHero totalFunds={totalRanked} categoryCount={catData?.categories.length ?? null} moodRegime={moodData?.regime ?? null} onIntent={handleIntent} activeIntentId={activeIntentId} />
+      <ExploreHero
+        totalFunds={totalRanked}
+        categoryCount={catData?.categories.length ?? null}
+        moodRegime={moodData?.regime ?? null}
+        trendingCategory={hero?.trending_category ?? null}
+        topMoverName={boards?.movers_up?.rows[0]?.fund_name_short ?? boards?.movers_up?.rows[0]?.scheme_name ?? null}
+        topMoverDelta={boards?.movers_up?.rows[0]?.rank_delta ?? null}
+        topInflowCategory={boards?.category_inflows?.rows[0]?.category ?? null}
+        topInflowCr={boards?.category_inflows?.rows[0]?.net_flow_cr ?? null}
+        onIntent={handleIntent}
+        activeIntentId={activeIntentId}
+      />
 
       {/* SEARCH + category quick-jump tags (Phase C: real category filters, not search-text shortcuts) */}
       <Section>
@@ -329,10 +344,18 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
               onPlan={(k) => { setPlanFilter(k); setPage(1); }} onOption={(k) => { setOptionFilter(k); setPage(1); }} />
           </Section>
 
-          {/* 02 AI DISCOVERY */}
+          {/* 02 SPOTLIGHT & SIGNALS */}
           <Section>
-            <SectionHeader index="02" title="AI Discovery" tag="DhanRadar AI" info={PREVIEW} />
-            <LaneCards lanes={AI_DISCOVERY} cols={4} />
+            <SectionHeader index="02" title="Spotlight &amp; Signals" badge={
+              (boards?.ai_spotlight || boards?.hidden_gems || boards?.future_leaders || boards?.label_upgrades)
+                ? <LiveBadge /> : undefined
+            } />
+            <SpotlightSignals
+              aiSpotlight={boards?.ai_spotlight}
+              hiddenGems={boards?.hidden_gems}
+              futureLeaders={boards?.future_leaders}
+              labelUpgrades={boards?.label_upgrades}
+            />
           </Section>
 
           {/* 03 FUND EXPLORER (real) */}
@@ -378,14 +401,14 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
           {/* 06 FUND FLOW */}
           <Section>
-            <SectionHeader index="06" title="Fund Flow Intelligence" info={PREVIEW} />
-            <LaneCards lanes={FUND_FLOW} cols={3} />
+            <SectionHeader index="06" title="Fund Flow" badge={(boards?.category_inflows || boards?.aum_growth) ? <LiveBadge /> : undefined} />
+            <FundFlowSection categoryInflows={boards?.category_inflows} aumGrowth={boards?.aum_growth} />
           </Section>
 
           {/* 07 MOMENTUM */}
           <Section>
-            <SectionHeader index="07" title="Momentum Center" info={PREVIEW} />
-            <Momentum />
+            <SectionHeader index="07" title="Momentum Center" badge={(boards?.movers_up || boards?.movers_down) ? <LiveBadge /> : undefined} />
+            <Momentum moversUp={boards?.movers_up} moversDown={boards?.movers_down} />
           </Section>
 
           {/* 08 CONSISTENCY */}
@@ -408,8 +431,8 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
           {/* 11 AI FEED */}
           <Section>
-            <SectionHeader index="11" title="AI Insights Feed" tag="DhanRadar AI" info={PREVIEW} />
-            <AiFeed />
+            <SectionHeader index="11" title="AI Insights Feed" tag="DhanRadar AI" badge={boards?.ai_insights ? <LiveBadge /> : undefined} />
+            <AiFeed board={boards?.ai_insights} />
           </Section>
 
           {/* TOP RANKED (real, derived) */}

@@ -1,59 +1,63 @@
-/** S12 "Momentum Center" — 30d/90d/1y tabs + climbing/falling rank columns. */
+/** S07 "Momentum Center" — climbing/falling rank columns since last ranking refresh. */
 'use client';
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { Logo } from './Logo';
-import { MOMENTUM, type MomRow } from './sampleData';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { fundName, colorFor, initialOf, fmtDelta } from '@/components/mf/leaderboard/format';
+import type { LbBoard, LbFundRow } from '@/features/mf/types';
 
-const TABS: { key: '30d' | '90d' | '1y'; label: string }[] = [
-  { key: '30d', label: 'Last 30 Days' },
-  { key: '90d', label: '90 Days' },
-  { key: '1y',  label: '1 Year' },
-];
+function FundRow({ row, tone }: { row: LbFundRow; tone: 'up' | 'down' }) {
+  const name = fundName(row);
+  const color = colorFor(row.isin);
+  const initial = initialOf(name);
+  const delta = Math.abs(row.rank_delta ?? 0);
+  return (
+    <li className="flex items-center gap-2.5 py-2 border-b border-line last:border-0">
+      <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full text-caption font-bold text-white" style={{ background: color }} aria-hidden="true">
+        {initial}
+      </span>
+      <Link href={`/mf/fund/${row.isin}`} className="flex-1 text-small font-medium text-ink truncate hover:text-royal transition-colors">
+        {name}
+      </Link>
+      <span className={cn('font-mono text-small font-semibold', tone === 'up' ? 'text-emerald' : 'text-red')}>
+        {fmtDelta(row.rank_delta)} ranks
+      </span>
+    </li>
+  );
+}
 
-function Col({ title, rows, tone }: { title: string; rows: MomRow[]; tone: 'up' | 'down' }) {
+function Col({ rows, tone }: { rows: LbFundRow[]; tone: 'up' | 'down' }) {
   return (
     <div>
       <h4 className={cn('text-small font-semibold flex items-center gap-1.5 mb-2', tone === 'up' ? 'text-emerald' : 'text-red')}>
         {tone === 'up' ? '▲ Climbing rankings' : '▼ Falling rankings'}
       </h4>
       <ul>
-        {rows.map((r, i) => (
-          <li key={i} className="flex items-center gap-2.5 py-2 border-b border-line last:border-0">
-            <Logo letter={r.logo} color={r.color} size={26} />
-            <span className="flex-1 text-small font-medium text-ink truncate">{r.name}</span>
-            <span className={cn('font-mono text-small font-semibold', tone === 'up' ? 'text-emerald' : 'text-red')}>{r.val} ranks</span>
-          </li>
-        ))}
+        {rows.map((r) => <FundRow key={r.isin} row={r} tone={tone} />)}
       </ul>
     </div>
   );
 }
 
-export function Momentum() {
-  const [tab, setTab] = React.useState<'30d' | '90d' | '1y'>('30d');
-  const data = MOMENTUM[tab];
+export function Momentum({ moversUp, moversDown }: {
+  moversUp?: LbBoard<LbFundRow>;
+  moversDown?: LbBoard<LbFundRow>;
+}) {
+  if (!moversUp && !moversDown) {
+    return (
+      <EmptyState
+        title="Momentum data not available"
+        description="Rank movers are refreshed nightly."
+      />
+    );
+  }
   return (
     <div>
-      <div className="inline-flex rounded-lg border border-line bg-surface-2 p-0.5 mb-3" role="group" aria-label="Momentum window">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            aria-pressed={tab === t.key}
-            className={cn(
-              'rounded-md px-3 py-1.5 text-small font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40',
-              tab === t.key ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <p className="text-caption text-ink-muted mb-3">Since last ranking refresh</p>
       <div className="rounded-xl border border-line bg-surface p-5 shadow-sm grid gap-6 sm:grid-cols-2">
-        <Col title="up" rows={data.up} tone="up" />
-        <Col title="down" rows={data.down} tone="down" />
+        {moversUp && <Col rows={moversUp.rows} tone="up" />}
+        {moversDown && <Col rows={moversDown.rows} tone="down" />}
       </div>
     </div>
   );
