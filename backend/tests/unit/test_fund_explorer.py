@@ -103,6 +103,33 @@ def test_fund_categories_response_empty():
     assert resp.categories == []
 
 
+async def test_category_count_groups_variants_by_scheme_key():
+    """Category SQL counts one scheme once across plan/option ISIN variants."""
+    from dhanradar.mf.router import fund_categories
+
+    variant_rows = [
+        SimpleNamespace(fund_name_short="Same Scheme", isin="INF000A"),
+        SimpleNamespace(fund_name_short="Same Scheme", isin="INF000B"),
+        SimpleNamespace(fund_name_short=None, isin="INF000C"),
+    ]
+
+    class CapturingDB:
+        async def execute(self, stmt):
+            self.sql = str(stmt)
+            return self
+
+        def all(self):
+            return [SimpleNamespace(sebi_category="Equity Scheme - Large Cap Fund", fund_count=2)]
+
+    db = CapturingDB()
+    response = await fund_categories(db=db)
+    distinct_scheme_keys = {row.fund_name_short or row.isin for row in variant_rows}
+    assert distinct_scheme_keys == {"Same Scheme", "INF000C"}
+    assert response.categories[0].fund_count == len(distinct_scheme_keys)
+    assert "COUNT(DISTINCT COALESCE(f.fund_name_short, f.isin))" in db.sql
+    assert "JOIN mf.mf_funds f ON f.isin = r.isin" in db.sql
+
+
 # ---------------------------------------------------------------------------
 # 3. _sebi_display_name helper
 # ---------------------------------------------------------------------------

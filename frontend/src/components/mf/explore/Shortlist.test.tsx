@@ -88,6 +88,13 @@ describe('useShortlist', () => {
     expect(result.current.isins).not.toContain('INF001');
     expect(result.current.isins).toContain('INF002');
   });
+
+  it('syncs another tab change through the storage event', () => {
+    const { result } = renderHook(() => useShortlist());
+    lsStub.setItem('dr:shortlist:v1', JSON.stringify([{ isin: 'INF999', name: 'Other Tab Fund' }]));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'dr:shortlist:v1' })));
+    expect(result.current.isins).toEqual(['INF999']);
+  });
 });
 
 // ---------------------------------------------------------------------------

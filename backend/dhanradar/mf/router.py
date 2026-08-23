@@ -1407,8 +1407,9 @@ async def fund_categories(
     rows = (
         await db.execute(
             sa_text(
-                "SELECT r.sebi_category, COUNT(DISTINCT r.isin)::int AS fund_count"
+                "SELECT r.sebi_category, COUNT(DISTINCT COALESCE(f.fund_name_short, f.isin))::int AS fund_count"
                 " FROM mf.mf_fund_ranks r"
+                " JOIN mf.mf_funds f ON f.isin = r.isin"
                 " WHERE r.as_of_date = (SELECT MAX(as_of_date) FROM mf.mf_fund_ranks)"
                 " GROUP BY r.sebi_category"
                 " ORDER BY r.sebi_category"

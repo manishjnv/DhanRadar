@@ -20,6 +20,20 @@ export interface ShortlistItem {
   name: string;
 }
 
+function readStoredItems(): ShortlistItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ShortlistItem =>
+      item && typeof item.isin === 'string' && typeof item.name === 'string',
+    ).slice(0, SHORTLIST_MAX);
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook — shared state between the page and the floating panel
 // ---------------------------------------------------------------------------
@@ -27,15 +41,16 @@ export interface ShortlistItem {
 export function useShortlist() {
   const [items, setItems] = React.useState<ShortlistItem[]>(() => {
     if (typeof window === 'undefined') return [];
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as ShortlistItem[]) : [];
-    } catch {
-      return [];
-    }
+    return readStoredItems();
   });
+
+  React.useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY) setItems(readStoredItems());
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   const toggle = React.useCallback((isin: string, name: string) => {
     setItems((prev) => {
