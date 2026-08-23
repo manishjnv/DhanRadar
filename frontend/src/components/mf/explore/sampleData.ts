@@ -13,7 +13,6 @@
  *     are FACTUAL data types, DOM-allowed (not the proprietary score).
  */
 import type { Label, ConfidenceBand } from '@/components/charts/ScoreRing';
-
 // Decorative logo colours (data-viz palette; not brand CTA tokens).
 export const C = {
   blue: '#1E5EFF', emerald: '#00B386', amber: '#F5A623', red: '#E5484D',
@@ -81,69 +80,6 @@ export const FILTER_RANGES: { title: string; min: string; mid: string; max: stri
 // ── S5 AI discovery types (still used by LaneCards.tsx) ──
 export interface DiscoveryRow { name: string; logo: string; color: string; val: string }
 export interface DiscoveryLane { icon: string; tag: string; bg: string; color: string; rows: DiscoveryRow[] }
-
-// ── S9 category leaderboards (9) ──
-export interface LeaderCard { cat: string; short: string; amc: string; logo: string; color: string; label: Label; band: ConfidenceBand; ret: string; risk: string; why: string }
-export const LEADERBOARDS: LeaderCard[] = [
-  { cat:'Best Large Cap', short:'Large Cap A', amc:'Sample AMC Four', logo:'L', color:C.orange, label:'on_track', band:'high', ret:'17.8%', risk:'Moderate', why:'Lowest drawdown in category with steady tracking.' },
-  { cat:'Best Flexi Cap', short:'Flexi Cap A', amc:'Sample AMC Three', logo:'F', color:C.navy, label:'in_form', band:'high', ret:'22.4%', risk:'Mod. High', why:'Strong risk-adjusted history + broad diversification.' },
-  { cat:'Best Mid Cap', short:'Mid Cap A', amc:'Sample AMC Five', logo:'M', color:C.emerald, label:'on_track', band:'medium', ret:'25.2%', risk:'High', why:'Consistent top-quartile placement.' },
-  { cat:'Best Small Cap', short:'Small Cap A', amc:'Sample AMC One', logo:'A', color:C.blue, label:'in_form', band:'high', ret:'28.6%', risk:'High', why:'High returns with comparatively lower volatility.' },
-  { cat:'Best ELSS', short:'ELSS A', amc:'Sample AMC Seven', logo:'E', color:C.cyan, label:'on_track', band:'medium', ret:'21.4%', risk:'Mod. High', why:'Low cost with a steady track record.' },
-  { cat:'Best Hybrid', short:'Balanced Adv A', amc:'Sample AMC Eight', logo:'H', color:C.red, label:'on_track', band:'high', ret:'16.4%', risk:'Moderate', why:'Smoothest ride — shallow worst drawdown.' },
-  { cat:'Best Debt', short:'Corp Bond A', amc:'Sample AMC Eight', logo:'H', color:C.red, label:'on_track', band:'high', ret:'7.6%', risk:'Low', why:'High-quality corporate bond portfolio.' },
-  { cat:'Best Index', short:'Index A', amc:'Sample AMC Nine', logo:'I', color:C.navy, label:'on_track', band:'high', ret:'14.2%', risk:'Moderate', why:'Lowest tracking error at a 0.20% expense.' },
-  { cat:'Best International', short:'Intl A', amc:'Sample AMC Eleven', logo:'N', color:C.violet, label:'off_track', band:'low', ret:'18.6%', risk:'High', why:'Cleanest global-tech exposure in the set.' },
-];
-
-// ── S10 DMMI ──
-export const DMMI = {
-  word: 'Cautiously Optimistic',
-  sub: 'Accumulation phase · improving breadth',
-  fill: 0.62, // visual arc only — NO number rendered
-  best: [{ n:'Small Cap', d:'Strong inflows' }, { n:'Flexi Cap', d:'Best risk-adj' }, { n:'Healthcare', d:'Outperforming' }],
-  weak: [{ n:'Gold FOF', d:'Losing flows' }, { n:'Intl Tech', d:'High valuations' }, { n:'Liquid', d:'Low real return' }],
-  // Educational, NON-advisory framing (V4's "Suggested SIP/lumpsum action" reframed).
-  notes: [
-    { tone:'up' as const, title:'What disciplined SIPs have meant', body:'In comparable accumulation phases, regular monthly investing has historically smoothed entry prices versus one-time timing — an observation, not a recommendation.' },
-    { tone:'info' as const, title:'How staggered entries behaved', body:'Spreading lump-sum entries across tranches has historically reduced timing risk in stretched markets. Outcomes vary; this is educational context only.' },
-  ],
-};
-
-
-
-// ── S13 consistency ──
-export interface ConsRow { rank: number; name: string; logo: string; color: string; yrsBeat: string; stability: string; persistence: string; mgrChanges: string }
-export const CONSISTENCY: ConsRow[] = [
-  { rank:1, name:'Flexi Cap A', logo:'F', color:C.navy, yrsBeat:'9/10', stability:'Very High', persistence:'98%', mgrChanges:'0' },
-  { rank:2, name:'Large Cap A', logo:'L', color:C.orange, yrsBeat:'9/10', stability:'Very High', persistence:'96%', mgrChanges:'0' },
-  { rank:3, name:'Small Cap A', logo:'A', color:C.blue, yrsBeat:'8/10', stability:'High', persistence:'94%', mgrChanges:'0' },
-  { rank:4, name:'Balanced Adv A', logo:'H', color:C.red, yrsBeat:'8/10', stability:'High', persistence:'95%', mgrChanges:'1' },
-  { rank:5, name:'Mid Cap A', logo:'M', color:C.emerald, yrsBeat:'8/10', stability:'High', persistence:'92%', mgrChanges:'0' },
-  { rank:6, name:'Value A', logo:'V', color:C.blue, yrsBeat:'7/10', stability:'High', persistence:'90%', mgrChanges:'1' },
-];
-
-// ── S14 low cost ──
-export interface CostRow { rank: number; name: string; logo: string; color: string; expense: string; fee15y: string; retained: string; efficiency: string }
-export const LOW_COST: CostRow[] = [
-  { rank:1, name:'Index A', logo:'I', color:C.navy, expense:'0.20%', fee15y:'₹1.2 L', retained:'99%', efficiency:'High' },
-  { rank:2, name:'Liquid A', logo:'E', color:C.emerald, expense:'0.18%', fee15y:'₹0.9 L', retained:'98%', efficiency:'High' },
-  { rank:3, name:'Thematic A', logo:'T', color:C.cyan, expense:'0.32%', fee15y:'₹2.1 L', retained:'96%', efficiency:'Good' },
-  { rank:4, name:'Corp Bond A', logo:'H', color:C.red, expense:'0.36%', fee15y:'₹1.8 L', retained:'97%', efficiency:'Good' },
-  { rank:5, name:'Small Cap A', logo:'A', color:C.blue, expense:'0.42%', fee15y:'₹2.6 L', retained:'95%', efficiency:'Good' },
-  { rank:6, name:'Balanced Adv A', logo:'H', color:C.red, expense:'0.42%', fee15y:'₹2.4 L', retained:'96%', efficiency:'Good' },
-];
-
-// ── S15 beginner picks (6) — educational framing, NO advisory verbs ──
-export interface BeginnerCard { tag: string; color: string; short: string; logo: string; logoColor: string; why: string; suits: string; lessFor: string }
-export const BEGINNER: BeginnerCard[] = [
-  { tag:'First Fund', color:C.blue, short:'Flexi Cap A', logo:'F', logoColor:C.navy, why:'Diversified across the market with a relatively steady history.', suits:'First-time monthly investors.', lessFor:'Those wanting concentrated small-cap exposure.' },
-  { tag:'Long Horizon', color:C.emerald, short:'Balanced Adv A', logo:'H', logoColor:C.red, why:'Auto-balances equity & debt for long-horizon compounding.', suits:'Those building a multi-decade corpus.', lessFor:'Those needing the money within ~2 years.' },
-  { tag:'SIP-oriented', color:C.violet, short:'Small Cap A', logo:'A', logoColor:C.blue, why:'Strong SIP track record with disciplined risk control.', suits:'Disciplined monthly investors, 7yr+ horizon.', lessFor:'Short-horizon, lump-sum-only investors.' },
-  { tag:'Tax Saving', color:C.amber, short:'ELSS A', logo:'E', logoColor:C.cyan, why:'80C-eligible with low cost and a steady record.', suits:'Salaried investors using the 80C limit.', lessFor:'Those needing liquidity before 3 years.' },
-  { tag:'Conservative', color:C.cyan, short:'Corp Bond A', logo:'H', logoColor:C.red, why:'High-quality bonds with small drawdowns.', suits:'Capital-protection-first investors.', lessFor:'Those seeking double-digit returns.' },
-  { tag:'Higher Risk', color:C.red, short:'Thematic A', logo:'T', logoColor:C.cyan, why:'Higher historical upside, but momentum-driven and volatile.', suits:'High-risk-appetite, 10yr+ horizons.', lessFor:'Anyone uneasy with a deep drawdown.' },
-];
 
 // ── S18 FAQ (6) ──
 export const FAQ: { q: string; a: string }[] = [

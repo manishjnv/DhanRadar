@@ -37,7 +37,7 @@ import { QuickChips } from '@/components/mf/explore/QuickChips';
 import { AdvancedFilters } from '@/components/mf/explore/AdvancedFilters';
 import { FundCardGrid } from '@/components/mf/explore/FundCardGrid';
 import { DiscoveryFaq } from '@/components/mf/explore/DiscoveryFaq';
-import { DmmiSection } from '@/components/mf/explore/DmmiSection';
+import { MarketMoodSection } from '@/components/mf/explore/MarketMoodSection';
 import { CategoryLeaders } from '@/components/mf/explore/CategoryLeaders';
 import { Leaderboards } from '@/components/mf/explore/Leaderboards';
 import { Momentum } from '@/components/mf/explore/Momentum';
@@ -280,8 +280,6 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
     );
   }
 
-  const PREVIEW = 'Preview · illustrative';
-
   return (
     <div className="flex flex-col">
       {/* HERO */}
@@ -389,14 +387,15 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
           {/* 04 CATEGORY LEADERBOARDS */}
           <Section>
-            <SectionHeader index="04" title="Category Leaderboards" info={PREVIEW} />
-            <Leaderboards />
+            <SectionHeader index="04" title="Category Leaderboards"
+              badge={boards?.champions ? <LiveBadge /> : undefined} />
+            <Leaderboards champions={boards?.champions} />
           </Section>
 
-          {/* 05 DMMI */}
+          {/* 05 MARKET MOOD */}
           <Section>
-            <SectionHeader index="05" title="DMMI Market Leaders" tag="DhanRadar Mood" />
-            <DmmiSection />
+            <SectionHeader index="05" title="Market Mood" tag="DhanRadar Mood" badge={<LiveBadge />} />
+            <MarketMoodSection />
           </Section>
 
           {/* 06 FUND FLOW */}
@@ -413,20 +412,23 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
           {/* 08 CONSISTENCY */}
           <Section>
-            <SectionHeader index="08" title="Consistency Leaderboard" info={PREVIEW} />
-            <ConsistencyTable />
+            <SectionHeader index="08" title="Consistency Leaderboard"
+              badge={boards?.sip_consistency ? <LiveBadge /> : undefined} />
+            <ConsistencyTable sipConsistency={boards?.sip_consistency} threeLens={boards?.three_lens} />
           </Section>
 
           {/* 09 LOW COST */}
           <Section>
-            <SectionHeader index="09" title="Low-Cost Leaderboard" info={PREVIEW} />
-            <LowCostTable />
+            <SectionHeader index="09" title="Low-Cost Leaderboard"
+              badge={(boards?.value_ter || boards?.value_efficiency) ? <LiveBadge /> : undefined} />
+            <LowCostTable valueTer={boards?.value_ter} valueEfficiency={boards?.value_efficiency} />
           </Section>
 
-          {/* 10 BEGINNER */}
+          {/* 10 STEADY SIP STARTERS */}
           <Section>
-            <SectionHeader index="10" title="Beginner Picks" tag="New investor" info={PREVIEW} />
-            <BeginnerPicks />
+            <SectionHeader index="10" title="Steady SIP Starters" tag="New investor"
+              badge={boards?.sip_beginner ? <LiveBadge /> : undefined} />
+            <BeginnerPicks sipBeginner={boards?.sip_beginner} />
           </Section>
 
           {/* 11 AI FEED */}
@@ -453,7 +455,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
       <p className="mt-8 text-center text-caption text-ink-muted max-w-2xl mx-auto leading-relaxed">
         DhanRadar is an educational research platform, not a SEBI-registered investment adviser.
-        Sections marked “preview” show illustrative sample data while live feeds are built.
+
         Mutual fund investments are subject to market risks; read all scheme-related documents carefully.
         Past performance does not guarantee future returns.
       </p>
