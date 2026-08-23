@@ -29,6 +29,7 @@ import { FundExplorerTable, ALL_COL_IDS, COL_LABELS } from '@/components/mf/Fund
 import { useFundCategories, useFundExplorer, useFundSearch, useLeaderboard } from '@/features/mf/api';
 import { useMoodCurrent } from '@/features/mood/api';
 import { formatCategoryLabel } from '@/features/mf/explorer-format';
+import { EXPLORE_CSV_HEADERS } from '@/features/mf/explorer-export';
 import { cn } from '@/lib/cn';
 import type { SortKey, ColId } from '@/components/mf/FundExplorerTable';
 import type { FundSearchItem } from '@/features/mf/types';
@@ -522,7 +523,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
                   type="button"
                   data-testid="export-csv"
                   onClick={() => {
-                    const headers = ['Fund', 'ISIN', 'Category', 'Label', 'Band', 'Rank', '3M%', '6M%', '1Y%', '3Y%', '5Y%', 'TER%', 'AUM(Cr)', 'Risk', 'Sharpe', 'Drawdown%'];
+                    const headers = EXPLORE_CSV_HEADERS;
                     const rows = filtered.map((f) => [
                       f.fund_name_short ?? f.scheme_name, f.isin, f.sebi_category,
                       f.verb_label, f.confidence_band ?? '', f.category_rank,
