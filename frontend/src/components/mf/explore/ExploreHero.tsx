@@ -1,22 +1,14 @@
 /**
- * ExploreHero — V4 hero: 6 stat tiles + quick-action buttons.
+ * ExploreHero — V4 hero: 6 stat tiles only.
  *
  * Real values (total funds, categories, market mood WORD) are passed in; the
  * other three tiles are illustrative "preview" facts. NO numeric mood score
  * (non-neg #2) — the mood tile shows the regime word only.
- *
- * Quick-action buttons render the first ~9 entries of the shared QUICK_INTENTS
- * registry (Phase C chip consolidation) — every button is a real category
- * filter, a real sort, or a real page/anchor link, never decorative.
  */
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
 import { REGIME_DISPLAY, type Regime } from '@/components/mood/MoodGauge';
-import { QUICK_INTENTS, type QuickIntent } from '@/features/mf/quickIntents';
-
-const HERO_INTENTS = QUICK_INTENTS.slice(0, 9);
 
 function StatTile({ label, value, hint, preview }: { label: string; value: React.ReactNode; hint?: string; preview?: boolean }) {
   return (
@@ -47,12 +39,9 @@ export interface ExploreHeroProps {
   topInflowCategory?: string | null;
   /** Tile 6 — net flow in crore from category_inflows.rows[0]. */
   topInflowCr?: number | null;
-  /** Quick-intent handler — fires the intent's real backing (category/sort/href). */
-  onIntent?: (intent: QuickIntent) => void;
-  activeIntentId?: string | null;
 }
 
-export function ExploreHero({ totalFunds, categoryCount, moodRegime, trendingCategory, topMoverName, topMoverDelta, topInflowCategory, topInflowCr, onIntent, activeIntentId }: ExploreHeroProps) {
+export function ExploreHero({ totalFunds, categoryCount, moodRegime, trendingCategory, topMoverName, topMoverDelta, topInflowCategory, topInflowCr }: ExploreHeroProps) {
   const moodWord =
     moodRegime && moodRegime !== 'data_unavailable' && moodRegime !== 'insufficient_data'
       ? REGIME_DISPLAY[moodRegime]
@@ -95,31 +84,6 @@ export function ExploreHero({ totalFunds, categoryCount, moodRegime, trendingCat
           <StatTile label="Most improved" value={<span className="text-h3">{tile5Value}</span>} hint={tile5Hint} />
           <StatTile label="Highest inflows" value={<span className="text-h3">{tile6Value}</span>} hint={tile6Hint} />
         </div>
-
-        {/* Quick-intent buttons — real category/sort/anchor backing (Phase C). */}
-        <div className="mt-5 flex flex-wrap gap-2">
-          {HERO_INTENTS.map((intent) => {
-            const active = activeIntentId === intent.id;
-            const label = intent.icon ? `${intent.icon} ${intent.label}` : intent.label;
-            const className =
-              'rounded-lg border px-3.5 py-2 text-small font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ' +
-              (active ? 'bg-white text-[color:var(--dr-navy,#0B1F3A)] border-white' : 'bg-white/10 text-white border-white/20 hover:bg-white/20');
-            return intent.backing.kind === 'href' ? (
-              <Link key={intent.id} href={intent.backing.href} title={intent.rule} onClick={() => onIntent?.(intent)} className={className}>
-                {label}
-              </Link>
-            ) : (
-              <button key={intent.id} type="button" title={intent.rule} onClick={() => onIntent?.(intent)} aria-pressed={active} className={className}>
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        {activeIntentId && (
-          <p className="mt-2.5 text-caption text-white/70">
-            How this list is built: {QUICK_INTENTS.find((q) => q.id === activeIntentId)?.rule}
-          </p>
-        )}
       </div>
     </div>
   );

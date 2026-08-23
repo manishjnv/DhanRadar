@@ -41,8 +41,6 @@ const noOp = () => {};
 
 function renderFilters(overrides: Partial<React.ComponentProps<typeof AdvancedFilters>> = {}) {
   const defaults: React.ComponentProps<typeof AdvancedFilters> = {
-    planFilter: 'all', optionFilter: 'all',
-    onPlan: noOp, onOption: noOp,
     riskFilter: [], onRisk: noOp,
     maxTer: '', onMaxTer: noOp,
     minAum: '', onMinAum: noOp,
