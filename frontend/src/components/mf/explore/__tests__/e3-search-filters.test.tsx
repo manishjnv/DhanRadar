@@ -6,15 +6,16 @@
  *  2. ColumnsPopover: toggle button present, checkbox toggles hide/show.
  *  3. Export CSV button present (no Save View).
  *  4. FundExplorerTable: SortKey covers all _SORT_COL keys; new columns present.
- *  5. AdvancedFilters: Risk multi-select, Max TER, Min AUM controls; no FILTER_GROUPS.
- *  6. FundCardGrid: renders factual ratio fields.
+ *  5. FundCardGrid: renders factual ratio fields.
  */
 import * as React from 'react';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AdvancedFilters } from '../AdvancedFilters';
 import { FundCardGrid } from '../FundCardGrid';
 import type { FundExplorerItem } from '@/features/mf/types';
+import { FundExplorerEmptyState, getRiskometerParam, QuickDiscoveryRiskFilters, RISKOMETER_OPTIONS } from '../ExploreFilterControls';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -33,79 +34,71 @@ function Wrap({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-// ---------------------------------------------------------------------------
-// 1. AdvancedFilters — real controls only
-// ---------------------------------------------------------------------------
-
-const noOp = () => {};
-
-function renderFilters(overrides: Partial<React.ComponentProps<typeof AdvancedFilters>> = {}) {
-  const defaults: React.ComponentProps<typeof AdvancedFilters> = {
-    riskFilter: [], onRisk: noOp,
-    maxTer: '', onMaxTer: noOp,
-    minAum: '', onMinAum: noOp,
-    onApply: noOp, onReset: noOp,
-  };
-  return render(<Wrap><AdvancedFilters {...defaults} {...overrides} /></Wrap>);
-}
-
-describe('AdvancedFilters — E3 real controls', () => {
-  it('renders the collapsible trigger', () => {
-    renderFilters();
-    expect(screen.getByRole('button', { name: /advanced filters/i })).toBeInTheDocument();
+describe('Batch H Quick Discovery filter contracts', () => {
+  it('renders exactly the six SEBI riskometer bands', () => {
+    render(<QuickDiscoveryRiskFilters riskFilter={[]} hasActiveFilters={false} onRisk={vi.fn()} onReset={vi.fn()} />);
+    expect(RISKOMETER_OPTIONS).toEqual(['Low', 'Low to Moderate', 'Moderate', 'Moderately High', 'High', 'Very High']);
+    RISKOMETER_OPTIONS.forEach((band) => expect(screen.getByTestId(`risk-pill-${band.replace(/\s/g, '-')}`)).toBeInTheDocument());
+    expect(screen.queryByText('Very Low')).not.toBeInTheDocument();
   });
 
-  it('shows real filter controls when expanded', () => {
-    renderFilters();
-    fireEvent.click(screen.getByRole('button', { name: /advanced filters/i }));
-    expect(screen.getByTestId('max-ter-input')).toBeInTheDocument();
-    expect(screen.getByTestId('min-aum-input')).toBeInTheDocument();
-    expect(screen.getByTestId('risk-opt-High')).toBeInTheDocument();
-    expect(screen.getByTestId('risk-opt-Moderate')).toBeInTheDocument();
-  });
-
-  it('no FILTER_GROUPS / preview / slider elements', () => {
-    renderFilters();
-    fireEvent.click(screen.getByRole('button', { name: /advanced filters/i }));
-    expect(screen.queryByText(/preview/i)).not.toBeInTheDocument();
-    expect(document.querySelector('input[type="range"]')).toBeNull();
-    expect(screen.queryByText(/Quality/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Market.phase/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Portfolio/i)).not.toBeInTheDocument();
-  });
-
-  it('Risk multi-select calls onRisk with toggled list', () => {
+  it('passes Low to Moderate in the riskometer query shape', () => {
     const onRisk = vi.fn();
-    renderFilters({ onRisk });
-    fireEvent.click(screen.getByRole('button', { name: /advanced filters/i }));
-    fireEvent.click(screen.getByTestId('risk-opt-High'));
-    expect(onRisk).toHaveBeenCalledWith(['High']);
+    render(<QuickDiscoveryRiskFilters riskFilter={[]} hasActiveFilters={false} onRisk={onRisk} onReset={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('risk-pill-Low-to-Moderate'));
+    expect(onRisk).toHaveBeenCalledWith(['Low to Moderate']);
+    expect(getRiskometerParam(onRisk.mock.calls[0][0])).toContain('Low to Moderate');
   });
 
-  it('shows active count badge when filters are applied', () => {
-    renderFilters({ riskFilter: ['High', 'Moderate'], maxTer: '1.0' });
-    expect(screen.getByText('3 active')).toBeInTheDocument();
+  it('Reset filters clears risk, plan, and option state', () => {
+    function ControlledFilters() {
+      const [risk, setRisk] = React.useState(['High']);
+      const [plan, setPlan] = React.useState('direct');
+      const [option, setOption] = React.useState('growth');
+      const reset = () => { setRisk([]); setPlan('all'); setOption('all'); };
+      return (
+        <>
+          <span data-testid="filter-state">{risk.join(',')}|{plan}|{option}</span>
+          <QuickDiscoveryRiskFilters riskFilter={risk} hasActiveFilters={plan !== 'all' || option !== 'all' || risk.length > 0}
+            onRisk={setRisk} onReset={reset} />
+        </>
+      );
+    }
+    render(<ControlledFilters />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(screen.getByTestId('filter-state')).toHaveTextContent('|all|all');
   });
 
-  it('Apply button calls onApply', () => {
-    const onApply = vi.fn();
-    renderFilters({ onApply });
-    fireEvent.click(screen.getByRole('button', { name: /advanced filters/i }));
-    fireEvent.click(screen.getByTestId('filters-apply'));
-    expect(onApply).toHaveBeenCalledTimes(1);
-  });
-
-  it('Reset button calls onReset', () => {
+  it('renders the filtered empty state and clears filters', () => {
     const onReset = vi.fn();
-    renderFilters({ onReset });
-    fireEvent.click(screen.getByRole('button', { name: /advanced filters/i }));
-    fireEvent.click(screen.getByTestId('filters-reset'));
+    render(<FundExplorerEmptyState categoryName="Banking & PSU" hasActiveFilters search="" onReset={onReset} />);
+    expect(screen.getByText('No funds in Banking & PSU match these filters.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the search empty-state copy when search text is present', () => {
+    render(<FundExplorerEmptyState categoryName="Banking & PSU" hasActiveFilters={false} search="missing" onReset={vi.fn()} />);
+    expect(screen.getByText('Try a different name or clear the search.')).toBeInTheDocument();
+    expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
+  });
+
+  it('contains no TER or AUM input references in the explore UI source', () => {
+    const componentRoot = join(process.cwd(), 'src/components/mf/explore');
+    const sourceFiles = readdirSync(componentRoot, { recursive: true })
+      .map((file) => join(componentRoot, String(file)))
+      .filter((file) => statSync(file).isFile() && !file.includes('__tests__'));
+    sourceFiles.push(join(process.cwd(), 'src/app/mf/explore/page.tsx'));
+    const forbiddenTokens = [['max', 'Ter'].join(''), ['min', 'Aum'].join('')];
+    sourceFiles.forEach((file) => {
+      const source = readFileSync(file, 'utf8');
+      forbiddenTokens.forEach((token) => expect(source).not.toContain(token));
+    });
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. FundExplorerTable sort keys match _SORT_COL
+// 1. FundExplorerTable sort keys match _SORT_COL
 // ---------------------------------------------------------------------------
 
 describe('FundExplorerTable SortKey coverage', () => {
@@ -131,7 +124,7 @@ describe('FundExplorerTable SortKey coverage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. FundCardGrid — factual ratio fields render
+// 2. FundCardGrid — factual ratio fields render
 // ---------------------------------------------------------------------------
 
 const sampleFund: FundExplorerItem = {

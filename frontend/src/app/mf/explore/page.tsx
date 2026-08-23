@@ -36,7 +36,6 @@ import type { FundSearchItem } from '@/features/mf/types';
 
 import { ExploreHero } from '@/components/mf/explore/ExploreHero';
 import { QuickChips } from '@/components/mf/explore/QuickChips';
-import { AdvancedFilters } from '@/components/mf/explore/AdvancedFilters';
 import { FundCardGrid } from '@/components/mf/explore/FundCardGrid';
 import { DiscoveryFaq } from '@/components/mf/explore/DiscoveryFaq';
 import { MarketMoodSection } from '@/components/mf/explore/MarketMoodSection';
@@ -50,6 +49,7 @@ import { Shortlist, useShortlist } from '@/components/mf/explore/Shortlist';
 import { SectionHeader, Section } from '@/components/mf/explore/ExploreSection';
 import { FundFlowSection } from '@/components/mf/explore/FundFlowSection';
 import { SpotlightSignals } from '@/components/mf/explore/SpotlightSignals';
+import { FundExplorerEmptyState, getRiskometerParam, QuickDiscoveryRiskFilters } from '@/components/mf/explore/ExploreFilterControls';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { QUICK_INTENTS, type QuickIntent } from '@/features/mf/quickIntents';
 
@@ -66,7 +66,6 @@ const PLAN_OPTIONS: { key: PlanFilter; label: string }[] = [
 const OPTION_OPTIONS: { key: OptionFilter; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'growth', label: 'Growth' }, { key: 'idcw', label: 'IDCW' },
 ];
-
 // ── small controls ─────────────────────────────────────────────────────────
 
 function CategoryDropdown({ categories, activeKey, onSelect }: {
@@ -339,8 +338,6 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
   const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
   const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
   const [riskFilter, setRiskFilter]         = React.useState<string[]>([]);
-  const [maxTer, setMaxTer]                 = React.useState('');
-  const [minAum, setMinAum]                 = React.useState('');
   const [perPage, setPerPage]               = React.useState(20);
   const [view, setView]                     = React.useState<ViewMode>('table');
   const [activeIntentId, setActiveIntentId] = React.useState<string | null>(null);
@@ -348,11 +345,6 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
   const { items: slItems, toggle: slToggle, remove: slRemove, isins: slIsins, isFull: slFull, count: slCount } = useShortlist();
   const slSet = React.useMemo(() => new Set(slIsins), [slIsins]);
-
-  // Applied server-side filter values (committed on "Apply filters" click).
-  const [appliedMaxTer, setAppliedMaxTer]     = React.useState<number | undefined>(undefined);
-  const [appliedMinAum, setAppliedMinAum]     = React.useState<number | undefined>(undefined);
-  const [appliedRisk, setAppliedRisk]         = React.useState<string | undefined>(undefined);
 
   React.useEffect(() => {
     if (!catData?.categories.length || activeCategory) return;
@@ -363,8 +355,11 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
   const handleCategoryChange = (key: string) => {
     setActiveCategory(key); setPage(1); setSearch(''); setPlanFilter('all'); setOptionFilter('all'); setSortDir('desc');
-    setRiskFilter([]); setMaxTer(''); setMinAum('');
-    setAppliedMaxTer(undefined); setAppliedMinAum(undefined); setAppliedRisk(undefined);
+    setRiskFilter([]);
+  };
+
+  const handleReset = () => {
+    setRiskFilter([]); setPlanFilter('all'); setOptionFilter('all'); setPage(1);
   };
   const handleSort = (key: SortKey) => {
     if (key === sort) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -387,9 +382,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
     planType: planFilter !== 'all' ? planFilter : undefined,
     optionType: optionFilter !== 'all' ? optionFilter : undefined,
     page, limit: perPage,
-    maxTer: appliedMaxTer,
-    minAum: appliedMinAum,
-    riskometer: appliedRisk,
+    riskometer: getRiskometerParam(riskFilter),
   });
   const { data: leadersData } = useFundExplorer({ category: activeCategory, sort: 'rank', sortDir: 'asc', page: 1, limit: 3 });
 
@@ -399,6 +392,9 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
     if (!q) return data.funds;
     return data.funds.filter((f) => f.scheme_name.toLowerCase().includes(q) || (f.amc_name?.toLowerCase().includes(q) ?? false));
   }, [data?.funds, search]);
+
+  // Check if any filter is active (risk, plan, option)
+  const hasActiveFilters = riskFilter.length > 0 || planFilter !== 'all' || optionFilter !== 'all';
 
   const totalRanked = React.useMemo(() => catData?.categories.reduce((s, c) => s + c.fund_count, 0) ?? null, [catData]);
   const activeCategoryName = React.useMemo(() => {
@@ -454,31 +450,14 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
               <PillGroup label="Option" options={OPTION_OPTIONS} value={optionFilter} onChange={(k) => { setOptionFilter(k); setPage(1); }} />
               {data && <span className="font-mono text-caption text-ink-muted whitespace-nowrap ml-auto">{data.total} funds</span>}
             </div>
+            
+            <QuickDiscoveryRiskFilters riskFilter={riskFilter} hasActiveFilters={hasActiveFilters}
+              onRisk={(risk) => { setRiskFilter(risk); setPage(1); }} onReset={handleReset} />
+            
             <QuickChips active={activeIntentId} onSelect={handleIntent} />
             {activeIntent && (
               <p className="mt-2 text-caption text-ink-muted">How this list is built: {activeIntent.rule}</p>
             )}
-          </Section>
-
-          {/* ADVANCED FILTERS */}
-          <Section>
-            <AdvancedFilters
-              riskFilter={riskFilter} onRisk={setRiskFilter}
-              maxTer={maxTer} onMaxTer={setMaxTer}
-              minAum={minAum} onMinAum={setMinAum}
-              onApply={() => {
-                setAppliedMaxTer(maxTer ? parseFloat(maxTer) : undefined);
-                setAppliedMinAum(minAum ? parseFloat(minAum) : undefined);
-                setAppliedRisk(riskFilter.length > 0 ? riskFilter.join(',') : undefined);
-                setPage(1);
-              }}
-              onReset={() => {
-                setRiskFilter([]); setMaxTer(''); setMinAum('');
-                setAppliedMaxTer(undefined); setAppliedMinAum(undefined); setAppliedRisk(undefined);
-                setPlanFilter('all'); setOptionFilter('all');
-                setPage(1);
-              }}
-            />
           </Section>
 
           {/* 02 SPOTLIGHT & SIGNALS */}
@@ -537,6 +516,9 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
               <div className="flex flex-col gap-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
             ) : isError ? (
               <ErrorCard title="Could not load funds" message="Please try again in a moment." />
+            ) : filtered.length === 0 ? (
+              <FundExplorerEmptyState categoryName={activeCategoryName} hasActiveFilters={hasActiveFilters}
+                search={search} onReset={handleReset} />
             ) : view === 'table' ? (
               <FundExplorerTable
                 funds={filtered}
