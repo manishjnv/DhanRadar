@@ -43,7 +43,6 @@ export function PreviewBadge({ className }: { className?: string }) {
   );
 }
 
-// dev-verify: temporary launch-verification badge — remove with all usages at launch (grep: dev-verify)
 export function LiveBadge({ className }: { className?: string }) {
   return (
     <span
@@ -52,7 +51,7 @@ export function LiveBadge({ className }: { className?: string }) {
         'font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-emerald',
         className,
       )}
-      title="Wired to live data — temporary verification tag"
+      title="Wired to live data"
     >
       <span aria-hidden="true">●</span> Live
     </span>
