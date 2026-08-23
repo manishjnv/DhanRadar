@@ -38,7 +38,27 @@ import type { Label } from '@/components/charts/ScoreRing';
 // Sort types (exported so page.tsx can import SortKey)
 // ---------------------------------------------------------------------------
 
-export type SortKey = 'rank' | 'return_3m' | 'return_6m' | 'return_1y' | 'return_3y' | 'return_5y' | 'max_drawdown';
+export type SortKey =
+  | 'rank' | 'return_3m' | 'return_6m' | 'return_1y' | 'return_3y' | 'return_5y'
+  | 'max_drawdown' | 'expense_ratio' | 'aum' | 'sharpe';
+
+/** Toggleable column IDs — used by the Columns popover in page.tsx. */
+export type ColId =
+  | 'rank' | 'assessment'
+  | 'return_3m' | 'return_6m' | 'return_1y' | 'return_3y' | 'return_5y'
+  | 'ter' | 'aum' | 'risk' | 'sharpe' | 'drawdown';
+
+export const ALL_COL_IDS: ColId[] = [
+  'rank', 'assessment',
+  'return_3m', 'return_6m', 'return_1y', 'return_3y', 'return_5y',
+  'ter', 'aum', 'risk', 'sharpe', 'drawdown',
+];
+
+export const COL_LABELS: Record<ColId, string> = {
+  rank: 'Rank', assessment: 'Assessment',
+  return_3m: '3M %', return_6m: '6M %', return_1y: '1Y %', return_3y: '3Y %', return_5y: '5Y %',
+  ter: 'TER %', aum: 'AUM (₹Cr)', risk: 'Risk', sharpe: 'Sharpe', drawdown: 'Drawdown %',
+};
 
 // ---------------------------------------------------------------------------
 // Fund avatar — deterministic color from scheme name.
@@ -144,6 +164,54 @@ function ReturnCell({ value }: { value: number | null | undefined }) {
   );
 }
 
+/** Factual numeric cell — mono, neutral color; em-dash when null. */
+function NumCell({ value, suffix = '', decimals = 2 }: { value: number | null | undefined; suffix?: string; decimals?: number }) {
+  if (value == null) {
+    return (
+      <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+        <span className="font-mono text-[11px] text-ink-muted">—</span>
+      </td>
+    );
+  }
+  return (
+    <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+      <span className="font-mono text-[12px] text-ink">{value.toFixed(decimals)}{suffix}</span>
+    </td>
+  );
+}
+
+/** AUM cell — formats large numbers as ₹ K/M shorthand; em-dash when null. */
+function AumCell({ value }: { value: number | null | undefined }) {
+  if (value == null) {
+    return (
+      <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+        <span className="font-mono text-[11px] text-ink-muted">—</span>
+      </td>
+    );
+  }
+  const display = value >= 100_000
+    ? `${(value / 100_000).toFixed(1)}L`
+    : value >= 1_000
+      ? `${(value / 1_000).toFixed(1)}K`
+      : value.toFixed(0);
+  return (
+    <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+      <span className="font-mono text-[12px] text-ink">₹{display}</span>
+    </td>
+  );
+}
+
+/** Risk word cell — left-aligned text; em-dash when null. */
+function RiskCell({ value }: { value: string | null | undefined }) {
+  return (
+    <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+      {value
+        ? <span className="font-mono text-[11px] text-ink-secondary">{value}</span>
+        : <span className="font-mono text-[11px] text-ink-muted">—</span>}
+    </td>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main table
 // ---------------------------------------------------------------------------
@@ -153,10 +221,12 @@ export interface FundExplorerTableProps {
   activeSort: SortKey;
   sortDir: 'asc' | 'desc';
   onSort: (key: SortKey) => void;
+  visibleCols?: Set<ColId>;
 }
 
-export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundExplorerTableProps) {
+export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleCols }: FundExplorerTableProps) {
   const router = useRouter();
+  const vis = visibleCols ?? new Set(ALL_COL_IDS);
 
   const handleRowClick = React.useCallback((fund: FundExplorerItem) => {
     const params = new URLSearchParams({ category: fund.sebi_category });
@@ -173,15 +243,20 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
         data-testid="fund-explorer-table"
       >
         <colgroup>
-          <col style={{ width: '4%' }} />   {/* # */}
-          <col style={{ width: '38%' }} />  {/* Fund */}
-          <col style={{ width: '9%' }} />   {/* Rank */}
-          <col style={{ width: '22%' }} />  {/* Assessment (ring + label + band) */}
-          <col style={{ width: '5.4%' }} />  {/* 3M */}
-          <col style={{ width: '5.4%' }} />  {/* 6M */}
-          <col style={{ width: '5.4%' }} />  {/* 1Y */}
-          <col style={{ width: '5.4%' }} />  {/* 3Y */}
-          <col style={{ width: '5.4%' }} />  {/* 5Y */}
+          <col style={{ width: '3%' }} />   {/* # */}
+          <col style={{ width: '30%' }} />  {/* Fund */}
+          {vis.has('rank')       && <col style={{ width: '6%' }} />}    {/* Rank */}
+          {vis.has('assessment') && <col style={{ width: '16%' }} />}   {/* Assessment */}
+          {vis.has('return_3m')  && <col style={{ width: '5%' }} />}    {/* 3M */}
+          {vis.has('return_6m')  && <col style={{ width: '5%' }} />}    {/* 6M */}
+          {vis.has('return_1y')  && <col style={{ width: '5%' }} />}    {/* 1Y */}
+          {vis.has('return_3y')  && <col style={{ width: '5%' }} />}    {/* 3Y */}
+          {vis.has('return_5y')  && <col style={{ width: '5%' }} />}    {/* 5Y */}
+          {vis.has('ter')        && <col style={{ width: '5%' }} />}    {/* TER */}
+          {vis.has('aum')        && <col style={{ width: '7%' }} />}    {/* AUM */}
+          {vis.has('risk')       && <col style={{ width: '9%' }} />}    {/* Risk */}
+          {vis.has('sharpe')     && <col style={{ width: '5%' }} />}    {/* Sharpe */}
+          {vis.has('drawdown')   && <col style={{ width: '6%' }} />}    {/* Drawdown */}
         </colgroup>
 
         {/* thead: sticky, surface-2 background, mono uppercase headers */}
@@ -189,13 +264,18 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
           <tr className="border-b border-line">
             <th scope="col" className={cn(TH, 'text-center')}>#</th>
             <th scope="col" className={cn(TH, 'text-left')}>Fund</th>
-            <SortHeader label="Rank" sortKey="rank" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <th scope="col" className={cn(TH, 'text-left')}>Assessment</th>
-            <SortHeader label="3M" sortKey="return_3m" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="6M" sortKey="return_6m" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="1Y" sortKey="return_1y" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="3Y" sortKey="return_3y" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="5Y" sortKey="return_5y" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />
+            {vis.has('rank')       && <SortHeader label="Rank"     sortKey="rank"         activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('assessment') && <th scope="col" className={cn(TH, 'text-left')}>Assessment</th>}
+            {vis.has('return_3m')  && <SortHeader label="3M"       sortKey="return_3m"    activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('return_6m')  && <SortHeader label="6M"       sortKey="return_6m"    activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('return_1y')  && <SortHeader label="1Y"       sortKey="return_1y"    activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('return_3y')  && <SortHeader label="3Y"       sortKey="return_3y"    activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('return_5y')  && <SortHeader label="5Y"       sortKey="return_5y"    activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('ter')        && <SortHeader label="TER %"    sortKey="expense_ratio" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('aum')        && <SortHeader label="AUM"      sortKey="aum"          activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('risk')       && <th scope="col" className={cn(TH, 'text-right')}>Risk</th>}
+            {vis.has('sharpe')     && <SortHeader label="Sharpe"   sortKey="sharpe"       activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {vis.has('drawdown')   && <SortHeader label="Drawdown" sortKey="max_drawdown" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
           </tr>
         </thead>
 
@@ -255,29 +335,40 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort }: FundEx
                 </td>
 
                 {/* Rank — #N/M in mono */}
-                <td className="py-2.5 px-3 text-right whitespace-nowrap tabular-nums">
-                  <span className="font-mono text-[12px] font-semibold text-ink">#{fund.category_rank}</span>
-                  <span className="font-mono text-[11px] text-ink-muted">/{fund.category_total}</span>
-                </td>
+                {vis.has('rank') && (
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap tabular-nums">
+                    <span className="font-mono text-[12px] font-semibold text-ink">#{fund.category_rank}</span>
+                    <span className="font-mono text-[11px] text-ink-muted">/{fund.category_total}</span>
+                  </td>
+                )}
 
                 {/* Assessment — band-driven ring + label (folds the old Confidence column) */}
-                <td className="py-2.5 px-3">
-                  <FundScoreCell label={fund.verb_label as Label} confidenceBand={fund.confidence_band} ringSize={26} />
-                </td>
+                {vis.has('assessment') && (
+                  <td className="py-2.5 px-3">
+                    <FundScoreCell label={fund.verb_label as Label} confidenceBand={fund.confidence_band} ringSize={26} />
+                  </td>
+                )}
 
                 {/* Returns */}
-                <ReturnCell value={fund.return_3m_pct} />
-                <ReturnCell value={fund.return_6m_pct} />
-                <ReturnCell value={fund.return_1y_pct} />
-                <ReturnCell value={fund.return_3y_pct} />
-                <ReturnCell value={fund.return_5y_pct} />
+                {vis.has('return_3m')  && <ReturnCell value={fund.return_3m_pct} />}
+                {vis.has('return_6m')  && <ReturnCell value={fund.return_6m_pct} />}
+                {vis.has('return_1y')  && <ReturnCell value={fund.return_1y_pct} />}
+                {vis.has('return_3y')  && <ReturnCell value={fund.return_3y_pct} />}
+                {vis.has('return_5y')  && <ReturnCell value={fund.return_5y_pct} />}
+
+                {/* Factual ratios */}
+                {vis.has('ter')      && <NumCell value={fund.expense_ratio_pct} suffix="%" decimals={2} />}
+                {vis.has('aum')      && <AumCell value={fund.aum_crore} />}
+                {vis.has('risk')     && <RiskCell value={fund.riskometer} />}
+                {vis.has('sharpe')   && <NumCell value={fund.sharpe_ratio} decimals={2} />}
+                {vis.has('drawdown') && <NumCell value={fund.max_drawdown_pct} suffix="%" decimals={1} />}
               </tr>
             );
           })}
 
           {funds.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-16 text-center">
+              <td colSpan={20} className="py-16 text-center">
                 <p className="text-small font-medium text-ink">No funds match your search</p>
                 <p className="text-caption text-ink-muted mt-1">Try a different name or clear the search</p>
               </td>
