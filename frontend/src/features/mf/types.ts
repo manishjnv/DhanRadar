@@ -180,6 +180,14 @@ export interface FundExplorerItem {
   return_1y_pct: number | null;
   return_3y_pct: number | null;
   return_5y_pct: number | null;
+  sharpe_ratio?: number | null;
+  max_drawdown_pct?: number | null;
+  expense_ratio_pct?: number | null;
+  aum_crore?: number | null;
+  /** ISO date string — SEBI monthly disclosure month */
+  aum_as_of?: string | null;
+  /** SEBI risk-o-meter band word */
+  riskometer?: string | null;
   /** B67 Task 3: parsed from scheme name — null for legacy schemes */
   plan_type: 'direct' | 'regular' | null;
   /** B67 Task 3: parsed from scheme name — null for legacy schemes */

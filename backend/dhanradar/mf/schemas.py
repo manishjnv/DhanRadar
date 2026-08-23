@@ -199,6 +199,12 @@ class FundExplorerItem(BaseModel):
     return_1y_pct: float | None = None
     return_3y_pct: float | None = None
     return_5y_pct: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+    expense_ratio_pct: float | None = None
+    aum_crore: float | None = None
+    aum_as_of: str | None = None        # ISO date string (SEBI monthly disclosure month)
+    riskometer: str | None = None       # SEBI risk-o-meter band word
     plan_type: str | None = None        # 'direct' | 'regular' | 'retail' | 'institutional' | None
     option_type: str | None = None      # 'growth' | 'idcw' | 'dividend_reinvest' | 'dividend_payout' | None
     idcw_frequency: str | None = None   # 'daily'|'weekly'|'monthly'|'quarterly'|'half_yearly'|'annual'|None
