@@ -20,6 +20,7 @@ import { FundScoreCell } from './FundScoreCell';
 import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
 import type { FundExplorerItem } from '@/features/mf/types';
 import type { Label } from '@/components/charts/ScoreRing';
+import { AddShortlistButton } from './Shortlist';
 
 const FREQ_LABELS: Record<string, string> = {
   daily: 'Daily',
@@ -67,7 +68,17 @@ function MetaChip({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function FundCardGrid({ funds }: { funds: FundExplorerItem[] }) {
+export function FundCardGrid({
+  funds,
+  shortlistIsins,
+  shortlistFull,
+  onShortlistToggle,
+}: {
+  funds: FundExplorerItem[];
+  shortlistIsins?: Set<string>;
+  shortlistFull?: boolean;
+  onShortlistToggle?: (isin: string, name: string) => void;
+}) {
   if (funds.length === 0) {
     return (
       <div className="rounded-xl border border-line bg-surface-2 py-16 text-center">
@@ -156,12 +167,24 @@ export function FundCardGrid({ funds }: { funds: FundExplorerItem[] }) {
               )}
             </div>
 
-            {/* CTA */}
-            <div className="mt-3 pt-3 border-t border-line flex items-center justify-end text-small font-medium text-royal">
-              View analysis
-              <svg className="ml-1" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
+            {/* CTA row: View analysis + shortlist add button */}
+            <div className="mt-3 pt-3 border-t border-line flex items-center justify-between">
+              <span className="text-small font-medium text-royal inline-flex items-center">
+                View analysis
+                <svg className="ml-1" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </span>
+              {onShortlistToggle && (
+                <AddShortlistButton
+                  isin={fund.isin}
+                  name={name}
+                  isIn={shortlistIsins?.has(fund.isin) ?? false}
+                  isFull={shortlistFull ?? false}
+                  onToggle={onShortlistToggle}
+                  size="sm"
+                />
+              )}
             </div>
           </Link>
         );

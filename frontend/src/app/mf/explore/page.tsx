@@ -45,7 +45,7 @@ import { Momentum } from '@/components/mf/explore/Momentum';
 import { ConsistencyTable, LowCostTable } from '@/components/mf/explore/LeaderTables';
 import { BeginnerPicks } from '@/components/mf/explore/BeginnerPicks';
 import { AiFeed } from '@/components/mf/explore/AiFeed';
-import { Shortlist } from '@/components/mf/explore/Shortlist';
+import { Shortlist, useShortlist } from '@/components/mf/explore/Shortlist';
 import { SectionHeader, Section } from '@/components/mf/explore/ExploreSection';
 import { FundFlowSection } from '@/components/mf/explore/FundFlowSection';
 import { SpotlightSignals } from '@/components/mf/explore/SpotlightSignals';
@@ -347,6 +347,9 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
   const [activeIntentId, setActiveIntentId] = React.useState<string | null>(null);
   const [visibleCols, setVisibleCols]       = React.useState<Set<ColId>>(() => new Set(ALL_COL_IDS));
 
+  const { items: slItems, toggle: slToggle, remove: slRemove, isins: slIsins, isFull: slFull, count: slCount } = useShortlist();
+  const slSet = React.useMemo(() => new Set(slIsins), [slIsins]);
+
   // Applied server-side filter values (committed on "Apply filters" click).
   const [appliedMaxTer, setAppliedMaxTer]     = React.useState<number | undefined>(undefined);
   const [appliedMinAum, setAppliedMinAum]     = React.useState<number | undefined>(undefined);
@@ -551,9 +554,23 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
             ) : isError ? (
               <ErrorCard title="Could not load funds" message="Please try again in a moment." />
             ) : view === 'table' ? (
-              <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} visibleCols={visibleCols} />
+              <FundExplorerTable
+                funds={filtered}
+                activeSort={sort}
+                sortDir={sortDir}
+                onSort={handleSort}
+                visibleCols={visibleCols}
+                shortlistIsins={slSet}
+                shortlistFull={slFull}
+                onShortlistToggle={slToggle}
+              />
             ) : (
-              <FundCardGrid funds={filtered} />
+              <FundCardGrid
+                funds={filtered}
+                shortlistIsins={slSet}
+                shortlistFull={slFull}
+                onShortlistToggle={slToggle}
+              />
             )}
             {data && <Pagination page={page} total={data.total} limit={perPage} onPage={setPage} />}
             {data && (
@@ -638,7 +655,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
         Past performance does not guarantee future returns.
       </p>
 
-      <Shortlist />
+      <Shortlist items={slItems} onRemove={slRemove} count={slCount} />
     </div>
   );
 }

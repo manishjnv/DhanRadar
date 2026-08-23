@@ -33,6 +33,7 @@ import { cleanSchemeName, shortenAmcName } from '@/features/mf/explorer-format';
 import { fundDisplayName } from '@/features/mf/fundDisplayName';
 import type { FundExplorerItem } from '@/features/mf/types';
 import type { Label } from '@/components/charts/ScoreRing';
+import { AddShortlistButton } from '@/components/mf/explore/Shortlist';
 
 // ---------------------------------------------------------------------------
 // Sort types (exported so page.tsx can import SortKey)
@@ -222,9 +223,12 @@ export interface FundExplorerTableProps {
   sortDir: 'asc' | 'desc';
   onSort: (key: SortKey) => void;
   visibleCols?: Set<ColId>;
+  shortlistIsins?: Set<string>;
+  shortlistFull?: boolean;
+  onShortlistToggle?: (isin: string, name: string) => void;
 }
 
-export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleCols }: FundExplorerTableProps) {
+export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleCols, shortlistIsins, shortlistFull, onShortlistToggle }: FundExplorerTableProps) {
   const router = useRouter();
   const vis = visibleCols ?? new Set(ALL_COL_IDS);
 
@@ -257,6 +261,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleC
           {vis.has('risk')       && <col style={{ width: '9%' }} />}    {/* Risk */}
           {vis.has('sharpe')     && <col style={{ width: '5%' }} />}    {/* Sharpe */}
           {vis.has('drawdown')   && <col style={{ width: '6%' }} />}    {/* Drawdown */}
+          {onShortlistToggle       && <col style={{ width: '4%' }} />}    {/* Add */}
         </colgroup>
 
         {/* thead: sticky, surface-2 background, mono uppercase headers */}
@@ -276,6 +281,7 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleC
             {vis.has('risk')       && <th scope="col" className={cn(TH, 'text-right')}>Risk</th>}
             {vis.has('sharpe')     && <SortHeader label="Sharpe"   sortKey="sharpe"       activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
             {vis.has('drawdown')   && <SortHeader label="Drawdown" sortKey="max_drawdown" activeSort={activeSort} sortDir={sortDir} onSort={onSort} />}
+            {onShortlistToggle && <th scope="col" className={cn(TH, 'text-center')}><span className="sr-only">Shortlist</span></th>}
           </tr>
         </thead>
 
@@ -362,6 +368,20 @@ export function FundExplorerTable({ funds, activeSort, sortDir, onSort, visibleC
                 {vis.has('risk')     && <RiskCell value={fund.riskometer} />}
                 {vis.has('sharpe')   && <NumCell value={fund.sharpe_ratio} decimals={2} />}
                 {vis.has('drawdown') && <NumCell value={fund.max_drawdown_pct} suffix="%" decimals={1} />}
+
+                {/* Shortlist add button */}
+                {onShortlistToggle && (
+                  <td className="py-2.5 px-2 text-center">
+                    <AddShortlistButton
+                      isin={fund.isin}
+                      name={fund.fund_name_short ?? cleanSchemeName(fund.scheme_name)}
+                      isIn={shortlistIsins?.has(fund.isin) ?? false}
+                      isFull={shortlistFull ?? false}
+                      onToggle={onShortlistToggle}
+                      size="xs"
+                    />
+                  </td>
+                )}
               </tr>
             );
           })}

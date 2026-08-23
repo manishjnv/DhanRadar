@@ -21,7 +21,8 @@ import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCard } from '@/components/ui/ErrorCard';
-import { useAdminFlags, type AdminFlag } from '@/features/admin/api';
+import { useAdminFlags, useAdminSources, type AdminFlag } from '@/features/admin/api';
+import { useLeaderboard } from '@/features/mf/api';
 import { cn } from '@/lib/cn';
 import { displayLabel } from '@/lib/displayLabel';
 import { formatRelative } from '@/components/admin/utils';
@@ -164,15 +165,19 @@ function FlagsTable({ flags }: { flags: AdminFlag[] }) {
 // get wired to live data. Census method: top-level sections per page,
 // "live" = fed by a features/*/api hook, apiClient, or /api/v1 fetch.
 // ---------------------------------------------------------------------------
-const COVERAGE_AS_OF = '22 Aug 2026';
+const COVERAGE_AS_OF = '23 Aug 2026';
 
 type PageCoverage = {
   page: string;
   route: string;
   total: number;
   live: number;
-  pending: string; // sections still on sample/static data, plain words
-  byDesign?: boolean; // static on purpose — not a gap
+  pending: string;
+  byDesign?: boolean;
+  /** Source keys from GET /admin/sources that feed this page — used for staleness derivation. */
+  sources?: string[];
+  /** True when the page's live sections depend on the nightly leaderboard refresh. */
+  boardBacked?: boolean;
 };
 
 const UI_COVERAGE: PageCoverage[] = [
@@ -180,7 +185,7 @@ const UI_COVERAGE: PageCoverage[] = [
   { page: 'Fund Compare', route: '/mf/compare', total: 21, live: 20, pending: 'FAQ (static by design)' },
   { page: 'Pricing', route: '/pricing', total: 4, live: 1, pending: 'Hero, comparison table, FAQ (plans list is live)' },
   { page: 'Portfolio', route: '/mf/portfolio', total: 23, live: 21, pending: 'Goals (separate programme), FAQ (static by design)' },
-  { page: 'Fund Explorer', route: '/mf/explore', total: 16, live: 14, pending: 'shortlist, filters, FAQ' },
+  { page: 'Fund Explorer', route: '/mf/explore', total: 17, live: 16, pending: 'FAQ (static by design)', sources: ['amfi_nav'], boardBacked: true },
   { page: 'Signal', route: '/signal', total: 13, live: 12, pending: '"How Signal works" explainer copy' },
   { page: 'Leaderboard', route: '/mf/leaderboard', total: 16, live: 15, pending: 'FAQ copy' },
   { page: 'Fund Detail', route: '/mf/fund/[isin]', total: 22, live: 21, pending: 'Entry-timing explainer' },
@@ -211,7 +216,70 @@ function CoverageBadge({ pct, byDesign }: { pct: number; byDesign?: boolean }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Staleness chip — derived from GET /admin/sources + leaderboard as_of
+// ---------------------------------------------------------------------------
+
+type Freshness = 'healthy' | 'stale' | 'loading' | 'none';
+
+function FreshnessChip({ state }: { state: Freshness }) {
+  if (state === 'none') return <span className="text-ink-faint text-caption">—</span>;
+  if (state === 'loading') return <span className="text-ink-faint text-caption font-mono">…</span>;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-caption font-medium',
+        state === 'healthy'
+          ? 'bg-emerald/10 text-emerald'
+          : 'bg-amber/10 text-amber',
+      )}
+    >
+      {state === 'healthy' ? 'Healthy' : 'Stale'}
+    </span>
+  );
+}
+
+/** 48-hour staleness window for board data. */
+const BOARD_STALE_MS = 48 * 60 * 60 * 1000;
+
+function deriveFreshness(
+  row: PageCoverage,
+  sourcesMap: Map<string, string>, // source_key → status
+  boardAsOf: string | null | undefined,
+  isLoading: boolean,
+): Freshness {
+  const hasSources = (row.sources?.length ?? 0) > 0;
+  if (!hasSources && !row.boardBacked) return 'none';
+  if (isLoading) return 'loading';
+
+  if (hasSources && row.sources) {
+    for (const key of row.sources) {
+      const status = sourcesMap.get(key);
+      if (status !== undefined && !['healthy', 'ok'].includes(status.toLowerCase())) return 'stale';
+    }
+  }
+
+  if (row.boardBacked) {
+    if (!boardAsOf) return 'stale';
+    const ageMs = Date.now() - new Date(boardAsOf).getTime();
+    if (ageMs > BOARD_STALE_MS) return 'stale';
+  }
+
+  return 'healthy';
+}
+
 function UiCoverageTable() {
+  const sourcesQ = useAdminSources();
+  const lbQ = useLeaderboard();
+
+  const sourcesMap = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of sourcesQ.data ?? []) m.set(s.source_key, s.status);
+    return m;
+  }, [sourcesQ.data]);
+
+  const boardAsOf = lbQ.data?.as_of;
+  const isLoading = sourcesQ.isLoading || lbQ.isLoading;
   const rows = [...UI_COVERAGE].sort((a, b) => {
     if (!!a.byDesign !== !!b.byDesign) return a.byDesign ? 1 : -1;
     return a.live / a.total - b.live / b.total;
@@ -242,7 +310,8 @@ function UiCoverageTable() {
                   <th scope="col" className="pb-2 pr-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Live</th>
                   <th scope="col" className="pb-2 pr-4 text-right text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Needs data</th>
                   <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Waiting on live data</th>
-                  <th scope="col" className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Coverage</th>
+                  <th scope="col" className="pb-2 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Coverage</th>
+                  <th scope="col" className="pb-2 text-left text-[10px] font-medium uppercase tracking-wide text-ink-muted font-mono">Data health</th>
                 </tr>
               </thead>
               <tbody>
@@ -258,8 +327,11 @@ function UiCoverageTable() {
                       {r.byDesign ? '—' : r.total - r.live}
                     </td>
                     <td className="py-3 pr-4 text-caption text-ink-muted max-w-md">{r.pending}</td>
-                    <td className="py-3">
+                    <td className="py-3 pr-4">
                       <CoverageBadge pct={Math.round((r.live / r.total) * 100)} byDesign={r.byDesign} />
+                    </td>
+                    <td className="py-3">
+                      <FreshnessChip state={deriveFreshness(r, sourcesMap, boardAsOf, isLoading)} />
                     </td>
                   </tr>
                 ))}
