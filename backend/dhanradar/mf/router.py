@@ -122,12 +122,18 @@ _SORT_COL: dict[str, str] = {
     "return_3y": "m.return_3y_pct",
     "return_5y": "m.return_5y_pct",
     "max_drawdown": "m.max_drawdown_pct",
+    "expense_ratio": "f.expense_ratio_pct",
+    "aum": "f.aum_crore",
+    "sharpe": "m.sharpe_ratio",
 }
-# Columns where ASC = "best first" (rank 1 is best; lower drawdown is better).
-_SORT_BEST_ASC: frozenset[str] = frozenset({"rank", "max_drawdown"})
+# Columns where ASC = "best first" (rank 1 is best; lower drawdown/cost is better).
+_SORT_BEST_ASC: frozenset[str] = frozenset({"rank", "max_drawdown", "expense_ratio"})
 # Columns that need NULLS LAST (metrics may be absent; rank is always present).
 _SORT_NULLS_LAST: frozenset[str] = frozenset(
-    {"return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown"}
+    {
+        "return_3m", "return_6m", "return_1y", "return_3y", "return_5y", "max_drawdown",
+        "expense_ratio", "aum", "sharpe",
+    }
 )
 
 # Minimum NAV data-points required to surface a return figure.
@@ -1540,6 +1546,7 @@ async def fund_search(
 @router.get("/funds", response_model=FundExplorerResponse)
 async def fund_explorer_list(
     db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
     category: Annotated[str | None, Query()] = None,
     sort: Annotated[str, Query()] = "rank",
     sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
@@ -1597,17 +1604,19 @@ async def fund_explorer_list(
         "SELECT"
         "  f.isin, f.scheme_name, f.fund_name_short, f.amc_name, f.sebi_category,"
         "  f.plan_type, f.option_type, f.idcw_frequency,"
-        "  r.rank, r.total_in_cat, r.verb_label,"
-        "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct, m.nav_points"
+        "  f.expense_ratio_pct, f.aum_crore, f.aum_as_of, f.risk_o_meter,"
+        "  r.rank, r.total_in_cat, r.verb_label, r.confidence_band,"
+        "  m.return_3m_pct, m.return_6m_pct, m.return_1y_pct, m.return_3y_pct, m.return_5y_pct, m.nav_points,"
+        "  m.sharpe_ratio, m.max_drawdown_pct"
         " FROM mf.mf_funds f"
         " JOIN ("
-        "   SELECT DISTINCT ON (isin) isin, rank, total_in_cat, verb_label"
+        "   SELECT DISTINCT ON (isin) isin, rank, total_in_cat, verb_label, confidence_band"
         "   FROM mf.mf_fund_ranks"
         "   WHERE sebi_category = :category"
         "   ORDER BY isin, as_of_date DESC"
         " ) r ON f.isin = r.isin"
         " LEFT JOIN ("
-        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct, nav_points"
+        "   SELECT DISTINCT ON (isin) isin, return_3m_pct, return_6m_pct, return_1y_pct, return_3y_pct, return_5y_pct, max_drawdown_pct, sharpe_ratio, nav_points"
         "   FROM mf.mf_fund_metrics"
         "   ORDER BY isin, as_of_date DESC"
         " ) m ON f.isin = m.isin"
@@ -1639,8 +1648,8 @@ async def fund_explorer_list(
             amc_name=r.amc_name,
             sebi_category=r.sebi_category,
             verb_label=r.verb_label,
-            confidence_band=None,
-            confidence_factors=None,
+            confidence_band=r.confidence_band,
+            confidence_factors=None,  # internal-only filter keys; never selected/returned
             category_rank=r.rank,
             category_total=r.total_in_cat,
             return_3m_pct=r.return_3m_pct,
@@ -1648,6 +1657,12 @@ async def fund_explorer_list(
             return_1y_pct=r.return_1y_pct if (r.nav_points or 0) >= _MIN_NAV_POINTS_1Y else None,
             return_3y_pct=r.return_3y_pct if (r.nav_points or 0) >= _MIN_NAV_POINTS_3Y else None,
             return_5y_pct=r.return_5y_pct,
+            sharpe_ratio=r.sharpe_ratio,
+            max_drawdown_pct=r.max_drawdown_pct,
+            expense_ratio_pct=r.expense_ratio_pct,
+            aum_crore=r.aum_crore,
+            aum_as_of=r.aum_as_of.isoformat() if r.aum_as_of else None,
+            riskometer=r.risk_o_meter,
             plan_type=r.plan_type,
             option_type=r.option_type,
             idcw_frequency=r.idcw_frequency,
@@ -1655,6 +1670,7 @@ async def fund_explorer_list(
         )
         for r in rows
     ]
+    response.headers["Cache-Control"] = "public, max-age=300"
     return FundExplorerResponse(
         funds=items,
         total=total,
