@@ -78,19 +78,9 @@ export const FILTER_RANGES: { title: string; min: string; mid: string; max: stri
   { title: 'Expense ratio (max %)', min: '0%', mid: '0.80%', max: '2.5%' },
 ];
 
-// ── S5 AI discovery (4 lanes) ──
+// ── S5 AI discovery types (still used by LaneCards.tsx) ──
 export interface DiscoveryRow { name: string; logo: string; color: string; val: string }
 export interface DiscoveryLane { icon: string; tag: string; bg: string; color: string; rows: DiscoveryRow[] }
-export const AI_DISCOVERY: DiscoveryLane[] = [
-  { icon:'⚡', tag:'Improving fastest', bg:'rgba(0,179,134,.12)', color:C.emerald, rows:[
-    { name:'Thematic A', logo:'T', color:C.cyan, val:'+11 rk' }, { name:'Small Cap A', logo:'A', color:C.blue, val:'+9 rk' }, { name:'Value A', logo:'V', color:C.blue, val:'+7 rk' }] },
-  { icon:'📉', tag:'Losing momentum', bg:'rgba(229,72,77,.10)', color:C.red, rows:[
-    { name:'Sectoral A', logo:'S', color:C.orange, val:'-4 rk' }, { name:'Intl A', logo:'N', color:C.violet, val:'-3 rk' }, { name:'Gold FOF A', logo:'G', color:C.amber, val:'-2 rk' }] },
-  { icon:'🐋', tag:'Largest inflows', bg:'rgba(30,94,255,.10)', color:C.blue, rows:[
-    { name:'Flexi Cap A', logo:'F', color:C.navy, val:'+₹8.9k Cr' }, { name:'Balanced Adv A', logo:'H', color:C.red, val:'+₹6.4k Cr' }, { name:'Small Cap B', logo:'B', color:C.emerald, val:'+₹6.1k Cr' }] },
-  { icon:'🛡', tag:'Lower cost trend', bg:'rgba(245,166,35,.13)', color:C.amber, rows:[
-    { name:'Value A', logo:'V', color:C.blue, val:'0.62%' }, { name:'Small Cap A', logo:'A', color:C.blue, val:'0.42%' }, { name:'ELSS A', logo:'E', color:C.cyan, val:'0.58%' }] },
-];
 
 // ── S9 category leaderboards (9) ──
 export interface LeaderCard { cat: string; short: string; amc: string; logo: string; color: string; label: Label; band: ConfidenceBand; ret: string; risk: string; why: string }
@@ -120,23 +110,7 @@ export const DMMI = {
   ],
 };
 
-// ── S11 fund flow (3) ──
-export const FUND_FLOW: DiscoveryLane[] = [
-  { icon:'📥', tag:'Highest inflows', bg:'rgba(0,179,134,.12)', color:C.emerald, rows:[
-    { name:'Flexi Cap A', logo:'F', color:C.navy, val:'+₹8.9k Cr' }, { name:'Balanced Adv A', logo:'H', color:C.red, val:'+₹6.4k Cr' }, { name:'Small Cap B', logo:'B', color:C.emerald, val:'+₹6.1k Cr' }, { name:'Large Cap A', logo:'L', color:C.orange, val:'+₹5.6k Cr' }] },
-  { icon:'📤', tag:'Highest outflows', bg:'rgba(229,72,77,.10)', color:C.red, rows:[
-    { name:'Sectoral A', logo:'S', color:C.orange, val:'-₹640 Cr' }, { name:'Intl A', logo:'N', color:C.violet, val:'-₹420 Cr' }, { name:'Legacy Debt A', logo:'D', color:'#64748B', val:'-₹310 Cr' }, { name:'Legacy Mid A', logo:'L', color:'#64748B', val:'-₹180 Cr' }] },
-  { icon:'🚀', tag:'Fastest growing AUM', bg:'rgba(30,94,255,.10)', color:C.blue, rows:[
-    { name:'Thematic A', logo:'T', color:C.cyan, val:'+52%' }, { name:'Small Cap A', logo:'A', color:C.blue, val:'+38%' }, { name:'Value A', logo:'V', color:C.blue, val:'+34%' }, { name:'ELSS A', logo:'E', color:C.cyan, val:'+29%' }] },
-];
 
-// ── S12 momentum ──
-export interface MomRow { name: string; logo: string; color: string; val: string }
-export const MOMENTUM: Record<'30d'|'90d'|'1y', { up: MomRow[]; down: MomRow[] }> = {
-  '30d': { up:[{name:'Thematic A',logo:'T',color:C.cyan,val:'+11'},{name:'Small Cap A',logo:'A',color:C.blue,val:'+9'},{name:'Value A',logo:'V',color:C.blue,val:'+7'}], down:[{name:'Sectoral A',logo:'S',color:C.orange,val:'-4'},{name:'Intl A',logo:'N',color:C.violet,val:'-3'},{name:'Gold FOF A',logo:'G',color:C.amber,val:'-2'}] },
-  '90d': { up:[{name:'Small Cap A',logo:'A',color:C.blue,val:'+14'},{name:'Thematic A',logo:'T',color:C.cyan,val:'+12'},{name:'Value A',logo:'V',color:C.blue,val:'+9'}], down:[{name:'Sectoral A',logo:'S',color:C.orange,val:'-7'},{name:'Intl A',logo:'N',color:C.violet,val:'-5'},{name:'Gold FOF A',logo:'G',color:C.amber,val:'-4'}] },
-  '1y':  { up:[{name:'Thematic A',logo:'T',color:C.cyan,val:'+22'},{name:'Small Cap A',logo:'A',color:C.blue,val:'+18'},{name:'Value A',logo:'V',color:C.blue,val:'+11'}], down:[{name:'Sectoral A',logo:'S',color:C.orange,val:'-14'},{name:'Gold FOF A',logo:'G',color:C.amber,val:'-9'},{name:'Intl A',logo:'N',color:C.violet,val:'-6'}] },
-};
 
 // ── S13 consistency ──
 export interface ConsRow { rank: number; name: string; logo: string; color: string; yrsBeat: string; stability: string; persistence: string; mgrChanges: string }
@@ -169,16 +143,6 @@ export const BEGINNER: BeginnerCard[] = [
   { tag:'Tax Saving', color:C.amber, short:'ELSS A', logo:'E', logoColor:C.cyan, why:'80C-eligible with low cost and a steady record.', suits:'Salaried investors using the 80C limit.', lessFor:'Those needing liquidity before 3 years.' },
   { tag:'Conservative', color:C.cyan, short:'Corp Bond A', logo:'H', logoColor:C.red, why:'High-quality bonds with small drawdowns.', suits:'Capital-protection-first investors.', lessFor:'Those seeking double-digit returns.' },
   { tag:'Higher Risk', color:C.red, short:'Thematic A', logo:'T', logoColor:C.cyan, why:'Higher historical upside, but momentum-driven and volatile.', suits:'High-risk-appetite, 10yr+ horizons.', lessFor:'Anyone uneasy with a deep drawdown.' },
-];
-
-// ── S17 AI insights feed (6) — observations, NO directives ──
-export const AI_FEED: string[] = [
-  '**Small-cap funds** have been attracting the strongest inflows in 6 months, while their valuations have stretched.',
-  '**Flexi-cap funds** currently show the steadiest risk-adjusted history in this sample.',
-  '**Healthcare** rose the most in the rankings this month on earnings momentum.',
-  '**Index expense ratios** keep falling — the cheapest large-cap exposure here is 0.20%.',
-  '**Balanced-advantage funds** are seeing record inflows as participants hedge a stretched market.',
-  '**Thematic funds** show top returns but also the deepest drawdowns in this sample.',
 ];
 
 // ── S18 FAQ (6) ──

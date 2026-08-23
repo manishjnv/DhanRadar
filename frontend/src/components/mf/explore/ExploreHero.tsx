@@ -37,16 +37,42 @@ export interface ExploreHeroProps {
   totalFunds: number | null;
   categoryCount: number | null;
   moodRegime: Regime | null;
+  /** Tile 4 — hero.trending_category (no "best" framing; just trending). */
+  trendingCategory?: string | null;
+  /** Tile 5 — top mover name from movers_up.rows[0]. */
+  topMoverName?: string | null;
+  /** Tile 5 — rank delta from movers_up.rows[0].rank_delta. */
+  topMoverDelta?: number | null;
+  /** Tile 6 — top category name from category_inflows.rows[0]. */
+  topInflowCategory?: string | null;
+  /** Tile 6 — net flow in crore from category_inflows.rows[0]. */
+  topInflowCr?: number | null;
   /** Quick-intent handler — fires the intent's real backing (category/sort/href). */
   onIntent?: (intent: QuickIntent) => void;
   activeIntentId?: string | null;
 }
 
-export function ExploreHero({ totalFunds, categoryCount, moodRegime, onIntent, activeIntentId }: ExploreHeroProps) {
+export function ExploreHero({ totalFunds, categoryCount, moodRegime, trendingCategory, topMoverName, topMoverDelta, topInflowCategory, topInflowCr, onIntent, activeIntentId }: ExploreHeroProps) {
   const moodWord =
     moodRegime && moodRegime !== 'data_unavailable' && moodRegime !== 'insufficient_data'
       ? REGIME_DISPLAY[moodRegime]
       : '—';
+
+  const tile4Value = trendingCategory
+    ? trendingCategory.replace(/^[^-]+-\s*/, '').replace(/\s*Fund$/i, '') || trendingCategory
+    : '—';
+  const tile5Value = topMoverName
+    ? topMoverName.split(' ').slice(0, 2).join(' ')
+    : '—';
+  const tile5Hint = topMoverDelta != null
+    ? `${topMoverDelta > 0 ? '+' : ''}${topMoverDelta} ranks`
+    : undefined;
+  const tile6Value = topInflowCategory
+    ? topInflowCategory.replace(/^[^-]+-\s*/, '').replace(/\s*Fund$/i, '') || topInflowCategory
+    : '—';
+  const tile6Hint = topInflowCr != null
+    ? `${topInflowCr >= 0 ? '+' : '\u2212'}\u20B9${Math.abs(topInflowCr) >= 1000 ? (Math.abs(topInflowCr) / 1000).toFixed(1) + 'k' : Math.abs(topInflowCr).toFixed(0)} Cr`
+    : undefined;
 
   return (
     <div
@@ -65,9 +91,9 @@ export function ExploreHero({ totalFunds, categoryCount, moodRegime, onIntent, a
           <StatTile label="Funds ranked" value={totalFunds != null ? totalFunds.toLocaleString('en-IN') : '—'} />
           <StatTile label="Categories" value={categoryCount != null ? categoryCount.toLocaleString('en-IN') : '—'} />
           <StatTile label="Market mood" value={<span className="text-h3">{moodWord}</span>} />
-          <StatTile label="Best category" value={<span className="text-h3">Small Cap</span>} preview />
-          <StatTile label="Most improved" value={<span className="text-h3">Healthcare</span>} hint="+11" preview />
-          <StatTile label="Highest inflows" value={<span className="text-h3">Flexi</span>} hint="+₹8.9k Cr" preview />
+          <StatTile label="Trending category" value={<span className="text-h3">{tile4Value}</span>} />
+          <StatTile label="Most improved" value={<span className="text-h3">{tile5Value}</span>} hint={tile5Hint} />
+          <StatTile label="Highest inflows" value={<span className="text-h3">{tile6Value}</span>} hint={tile6Hint} />
         </div>
 
         {/* Quick-intent buttons — real category/sort/anchor backing (Phase C). */}
