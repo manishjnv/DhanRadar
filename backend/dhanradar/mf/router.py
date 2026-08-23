@@ -1552,6 +1552,9 @@ async def fund_explorer_list(
     sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
     plan_type: Annotated[str | None, Query(pattern="^(direct|regular)$")] = None,
     option_type: Annotated[str | None, Query(pattern="^(growth|idcw)$")] = None,
+    max_ter: Annotated[float | None, Query(ge=0, le=5)] = None,
+    min_aum: Annotated[float | None, Query(ge=0)] = None,
+    riskometer: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=500)] = 20,
     _rl: Annotated[None, Depends(_rl_explorer)] = None,
@@ -1598,6 +1601,19 @@ async def fund_explorer_list(
         extra_where.append("f.option_type = 'growth'")
     elif option_type == "idcw":
         extra_where.append("f.option_type IN ('idcw', 'dividend_reinvest', 'dividend_payout')")
+    if max_ter is not None:
+        extra_where.append("f.expense_ratio_pct <= :max_ter")
+        filter_params["max_ter"] = max_ter
+    if min_aum is not None:
+        extra_where.append("f.aum_crore >= :min_aum")
+        filter_params["min_aum"] = min_aum
+    if riskometer:
+        risk_list = [v.strip() for v in riskometer.split(",") if v.strip()]
+        if risk_list:
+            risk_placeholders = ", ".join(f":risk_{i}" for i in range(len(risk_list)))
+            extra_where.append(f"f.risk_o_meter IN ({risk_placeholders})")
+            for i, val in enumerate(risk_list):
+                filter_params[f"risk_{i}"] = val
     extra_filter = (" AND " + " AND ".join(extra_where)) if extra_where else ""
 
     base_sql = (

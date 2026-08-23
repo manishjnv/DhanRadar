@@ -208,6 +208,18 @@ export interface FundExplorerResponse {
   not_advice: string;
 }
 
+/** Search result from GET /api/v1/mf/search — no metrics, navigation only. */
+export interface FundSearchItem {
+  isin: string;
+  scheme_name: string;
+  fund_name_short: string | null;
+  amc_name: string | null;
+  sebi_category: string | null;
+  plan_type: string | null;
+  option_type: string | null;
+  idcw_frequency: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // W0 — fund.head (single-ISIN public read model, GET /api/v1/mf/fund/{isin})
 // FUND_DETAIL_DATA_ARCHITECTURE_PLAN.md §7/§8. Wire shape of the envelope's

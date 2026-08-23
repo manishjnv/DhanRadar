@@ -25,12 +25,13 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { DisclosureBundle } from '@/components/ui/DisclosureBundle';
 import { MaybeShell } from '@/components/ui/MaybeShell';
-import { FundExplorerTable } from '@/components/mf/FundExplorerTable';
-import { useFundCategories, useFundExplorer, useLeaderboard } from '@/features/mf/api';
+import { FundExplorerTable, ALL_COL_IDS, COL_LABELS } from '@/components/mf/FundExplorerTable';
+import { useFundCategories, useFundExplorer, useFundSearch, useLeaderboard } from '@/features/mf/api';
 import { useMoodCurrent } from '@/features/mood/api';
 import { formatCategoryLabel } from '@/features/mf/explorer-format';
 import { cn } from '@/lib/cn';
-import type { SortKey } from '@/components/mf/FundExplorerTable';
+import type { SortKey, ColId } from '@/components/mf/FundExplorerTable';
+import type { FundSearchItem } from '@/features/mf/types';
 
 import { ExploreHero } from '@/components/mf/explore/ExploreHero';
 import { QuickChips } from '@/components/mf/explore/QuickChips';
@@ -111,15 +112,142 @@ function PillGroup<T extends string>({ label, options, value, onChange }: {
   );
 }
 
-function SearchInput({ value, onChange, size = 'md' }: { value: string; onChange: (v: string) => void; size?: 'md' | 'lg' }) {
+// ── TypeaheadSearch ────────────────────────────────────────────────────────
+// Calls GET /mf/search (debounced 300ms) and navigates to /mf/fund/{isin}.
+// Also updates the client-side table name filter so typing text filters rows.
+
+function TypeaheadSearch({ clientSearch, onClientSearch }: {
+  clientSearch: string;
+  onClientSearch: (v: string) => void;
+}) {
+  const router = useRouter();
+  const [query, setQuery]       = React.useState(clientSearch);
+  const [apiQuery, setApiQuery] = React.useState('');
+  const [open, setOpen]         = React.useState(false);
+  const debounceRef             = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef              = React.useRef<HTMLDivElement>(null);
+
+  const { data: results } = useFundSearch(apiQuery);
+
+  function handleChange(v: string) {
+    setQuery(v);
+    onClientSearch(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const trimmed = v.trim();
+      setApiQuery(trimmed.length >= 2 ? trimmed : '');
+      setOpen(trimmed.length >= 2);
+    }, 300);
+  }
+
+  function handleSelect(item: FundSearchItem) {
+    setOpen(false);
+    setQuery('');
+    onClientSearch('');
+    setApiQuery('');
+    router.push(`/mf/fund/${item.isin}`);
+  }
+
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   return (
-    <div className="relative w-full">
-      <span className={cn('absolute top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none', size === 'lg' ? 'left-4' : 'left-3')}>
-        <svg width={size === 'lg' ? 18 : 14} height={size === 'lg' ? 18 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16 16L21 21" /></svg>
-      </span>
-      <input type="search" placeholder="Search fund, AMC, category…" value={value} onChange={(e) => onChange(e.target.value)} data-testid="fund-search"
-        className={cn('w-full rounded-lg border border-line bg-surface text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors',
-          size === 'lg' ? 'h-[56px] pl-12 pr-4 text-body shadow-sm' : 'h-[38px] pl-9 pr-3 text-small')} />
+    <div ref={wrapperRef} className="relative w-full">
+      <div className="relative w-full">
+        <span className="absolute top-1/2 -translate-y-1/2 left-4 text-ink-muted pointer-events-none">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16 16L21 21" /></svg>
+        </span>
+        <input
+          type="search"
+          placeholder="Search fund, AMC, category…"
+          value={query}
+          onChange={(e) => handleChange(e.target.value)}
+          onFocus={() => apiQuery.length >= 2 && setOpen(true)}
+          data-testid="fund-search"
+          className="w-full rounded-lg border border-line bg-surface text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors h-[56px] pl-12 pr-4 text-body shadow-sm"
+        />
+      </div>
+      {open && results && results.length > 0 && (
+        <div className="absolute z-20 left-0 right-0 mt-1 rounded-xl border border-line bg-surface shadow-lg overflow-hidden">
+          {results.map((item) => (
+            <button
+              key={item.isin}
+              type="button"
+              onClick={() => handleSelect(item)}
+              data-testid={`search-result-${item.isin}`}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-2 transition-colors text-left focus-visible:outline-none focus-visible:bg-surface-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-small font-medium text-ink leading-snug">{item.fund_name_short ?? item.scheme_name}</div>
+                <div className="flex gap-2 mt-0.5">
+                  {item.amc_name && <span className="font-mono text-caption text-ink-muted truncate">{item.amc_name}</span>}
+                  {item.plan_type && <span className="font-mono text-caption text-ink-secondary">{item.plan_type === 'direct' ? 'Direct' : 'Regular'}</span>}
+                </div>
+              </div>
+              <svg className="shrink-0 text-ink-muted" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ColumnsPopover ─────────────────────────────────────────────────────────
+
+function ColumnsPopover({ visibleCols, onChange }: {
+  visibleCols: Set<ColId>;
+  onChange: (cols: Set<ColId>) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  function toggle(col: ColId) {
+    const next = new Set(visibleCols);
+    if (next.has(col)) next.delete(col); else next.add(col);
+    onChange(next);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-testid="columns-toggle"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-small font-medium text-ink-secondary hover:border-royal hover:text-royal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>Columns
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[168px] rounded-xl border border-line bg-surface shadow-lg p-3">
+          {ALL_COL_IDS.map((col) => (
+            <label key={col} className="flex items-center gap-2 px-1 py-1 cursor-pointer hover:text-ink rounded text-small text-ink-secondary">
+              <input
+                type="checkbox"
+                className="accent-royal"
+                checked={visibleCols.has(col)}
+                onChange={() => toggle(col)}
+                data-testid={`col-toggle-${col}`}
+              />
+              {COL_LABELS[col]}
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -156,14 +284,6 @@ function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode
         </button>
       ))}
     </div>
-  );
-}
-
-function ToolBtn({ children }: { children: React.ReactNode }) {
-  return (
-    <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-small font-medium text-ink-secondary hover:border-royal hover:text-royal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-      {children}
-    </button>
   );
 }
 
@@ -219,9 +339,18 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
   const [search, setSearch]                 = React.useState(initialQuery ?? '');
   const [planFilter, setPlanFilter]         = React.useState<PlanFilter>('all');
   const [optionFilter, setOptionFilter]     = React.useState<OptionFilter>('all');
+  const [riskFilter, setRiskFilter]         = React.useState<string[]>([]);
+  const [maxTer, setMaxTer]                 = React.useState('');
+  const [minAum, setMinAum]                 = React.useState('');
   const [perPage, setPerPage]               = React.useState(20);
   const [view, setView]                     = React.useState<ViewMode>('table');
   const [activeIntentId, setActiveIntentId] = React.useState<string | null>(null);
+  const [visibleCols, setVisibleCols]       = React.useState<Set<ColId>>(() => new Set(ALL_COL_IDS));
+
+  // Applied server-side filter values (committed on "Apply filters" click).
+  const [appliedMaxTer, setAppliedMaxTer]     = React.useState<number | undefined>(undefined);
+  const [appliedMinAum, setAppliedMinAum]     = React.useState<number | undefined>(undefined);
+  const [appliedRisk, setAppliedRisk]         = React.useState<string | undefined>(undefined);
 
   React.useEffect(() => {
     if (!catData?.categories.length || activeCategory) return;
@@ -232,6 +361,8 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
   const handleCategoryChange = (key: string) => {
     setActiveCategory(key); setPage(1); setSearch(''); setPlanFilter('all'); setOptionFilter('all'); setSortDir('desc');
+    setRiskFilter([]); setMaxTer(''); setMinAum('');
+    setAppliedMaxTer(undefined); setAppliedMinAum(undefined); setAppliedRisk(undefined);
   };
   const handleSort = (key: SortKey) => {
     if (key === sort) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -254,6 +385,9 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
     planType: planFilter !== 'all' ? planFilter : undefined,
     optionType: optionFilter !== 'all' ? optionFilter : undefined,
     page, limit: perPage,
+    maxTer: appliedMaxTer,
+    minAum: appliedMinAum,
+    riskometer: appliedRisk,
   });
   const { data: leadersData } = useFundExplorer({ category: activeCategory, sort: 'rank', sortDir: 'asc', page: 1, limit: 3 });
 
@@ -298,7 +432,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
       {/* SEARCH + category quick-jump tags (Phase C: real category filters, not search-text shortcuts) */}
       <Section>
-        <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} size="lg" />
+        <TypeaheadSearch clientSearch={search} onClientSearch={(v) => { setSearch(v); setPage(1); }} />
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <span className="text-caption text-ink-muted font-medium mr-1">Try:</span>
           {TRY_INTENTS.map((intent) => (
@@ -338,8 +472,26 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
 
           {/* ADVANCED FILTERS */}
           <Section>
-            <AdvancedFilters planFilter={planFilter} optionFilter={optionFilter}
-              onPlan={(k) => { setPlanFilter(k); setPage(1); }} onOption={(k) => { setOptionFilter(k); setPage(1); }} />
+            <AdvancedFilters
+              planFilter={planFilter} optionFilter={optionFilter}
+              onPlan={(k) => { setPlanFilter(k); setPage(1); }}
+              onOption={(k) => { setOptionFilter(k); setPage(1); }}
+              riskFilter={riskFilter} onRisk={setRiskFilter}
+              maxTer={maxTer} onMaxTer={setMaxTer}
+              minAum={minAum} onMinAum={setMinAum}
+              onApply={() => {
+                setAppliedMaxTer(maxTer ? parseFloat(maxTer) : undefined);
+                setAppliedMinAum(minAum ? parseFloat(minAum) : undefined);
+                setAppliedRisk(riskFilter.length > 0 ? riskFilter.join(',') : undefined);
+                setPage(1);
+              }}
+              onReset={() => {
+                setRiskFilter([]); setMaxTer(''); setMinAum('');
+                setAppliedMaxTer(undefined); setAppliedMinAum(undefined); setAppliedRisk(undefined);
+                setPlanFilter('all'); setOptionFilter('all');
+                setPage(1);
+              }}
+            />
           </Section>
 
           {/* 02 SPOTLIGHT & SIGNALS */}
@@ -362,9 +514,35 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
             <div className="flex items-center gap-2 flex-wrap mb-3">
               <ViewToggle view={view} onChange={setView} />
               <div className="flex items-center gap-2 ml-auto flex-wrap">
-                <ToolBtn><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>Columns</ToolBtn>
-                <ToolBtn><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v12M8 11l4 4 4-4M5 21h14" /></svg>Export</ToolBtn>
-                <ToolBtn><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 3h14v18l-7-4-7 4Z" /></svg>Save View</ToolBtn>
+                <ColumnsPopover visibleCols={visibleCols} onChange={setVisibleCols} />
+                <button
+                  type="button"
+                  data-testid="export-csv"
+                  onClick={() => {
+                    const headers = ['Fund', 'ISIN', 'Category', 'Label', 'Band', 'Rank', '3M%', '6M%', '1Y%', '3Y%', '5Y%', 'TER%', 'AUM(Cr)', 'Risk', 'Sharpe', 'Drawdown%'];
+                    const rows = filtered.map((f) => [
+                      f.fund_name_short ?? f.scheme_name, f.isin, f.sebi_category,
+                      f.verb_label, f.confidence_band ?? '', f.category_rank,
+                      f.return_3m_pct?.toFixed(1) ?? '', f.return_6m_pct?.toFixed(1) ?? '',
+                      f.return_1y_pct?.toFixed(1) ?? '', f.return_3y_pct?.toFixed(1) ?? '',
+                      f.return_5y_pct?.toFixed(1) ?? '', f.expense_ratio_pct?.toFixed(2) ?? '',
+                      f.aum_crore?.toFixed(0) ?? '', f.riskometer ?? '',
+                      f.sharpe_ratio?.toFixed(2) ?? '', f.max_drawdown_pct?.toFixed(1) ?? '',
+                    ]);
+                    const csv = [headers, ...rows]
+                      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+                      .join('\n');
+                    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `funds-${activeCategory.replace(/[^a-z0-9]/gi, '-')}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-small font-medium text-ink-secondary hover:border-royal hover:text-royal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v12M8 11l4 4 4-4M5 21h14" /></svg>Export
+                </button>
                 <PerPageSelect perPage={perPage} onChange={(n) => { setPerPage(n); setPage(1); }} />
               </div>
             </div>
@@ -373,7 +551,7 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
             ) : isError ? (
               <ErrorCard title="Could not load funds" message="Please try again in a moment." />
             ) : view === 'table' ? (
-              <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} />
+              <FundExplorerTable funds={filtered} activeSort={sort} sortDir={sortDir} onSort={handleSort} visibleCols={visibleCols} />
             ) : (
               <FundCardGrid funds={filtered} />
             )}

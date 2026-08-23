@@ -128,10 +128,32 @@ export function FundCardGrid({ funds }: { funds: FundExplorerItem[] }) {
 
             {/* Returns */}
             <div className="mt-3 grid grid-cols-4 gap-1.5">
-              <RetTile label="6M" value={fund.return_6m_pct} />
-              <RetTile label="1Y" value={fund.return_1y_pct} />
-              <RetTile label="3Y" value={fund.return_3y_pct} />
-              <RetTile label="5Y" value={fund.return_5y_pct} />
+              <RetTile label="6M" value={fund.return_6m_pct ?? null} />
+              <RetTile label="1Y" value={fund.return_1y_pct ?? null} />
+              <RetTile label="3Y" value={fund.return_3y_pct ?? null} />
+              <RetTile label="5Y" value={fund.return_5y_pct ?? null} />
+            </div>
+
+            {/* Factual ratios row — TER, AUM, Risk, Sharpe (honest nulls) */}
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+              {fund.expense_ratio_pct != null && (
+                <span className="font-mono text-caption text-ink-muted">TER <span className="text-ink">{fund.expense_ratio_pct.toFixed(2)}%</span></span>
+              )}
+              {fund.aum_crore != null && (
+                <span className="font-mono text-caption text-ink-muted">AUM <span className="text-ink">
+                  {fund.aum_crore >= 100_000
+                    ? `₹${(fund.aum_crore / 100_000).toFixed(1)}L Cr`
+                    : fund.aum_crore >= 1_000
+                      ? `₹${(fund.aum_crore / 1_000).toFixed(1)}K Cr`
+                      : `₹${fund.aum_crore.toFixed(0)} Cr`}
+                </span></span>
+              )}
+              {fund.riskometer && (
+                <span className="font-mono text-caption text-ink-muted">Risk <span className="text-ink">{fund.riskometer}</span></span>
+              )}
+              {fund.sharpe_ratio != null && (
+                <span className="font-mono text-caption text-ink-muted">Sharpe <span className="text-ink">{fund.sharpe_ratio.toFixed(2)}</span></span>
+              )}
             </div>
 
             {/* CTA */}

@@ -320,3 +320,116 @@ async def test_fund_explorer_endpoint_sets_cache_control_header() -> None:
         category="Equity Scheme - Large Cap Fund",
     )
     assert resp.headers["Cache-Control"] == "public, max-age=300"
+
+
+# ---------------------------------------------------------------------------
+# E3 — max_ter / min_aum / riskometer filter params (WHERE in BOTH SQL strings)
+# ---------------------------------------------------------------------------
+
+class _CapturingDB:
+    """Captures every SQL string passed to execute() for WHERE-clause assertions.
+    Returns preset rows for base query and zero for count query.
+    """
+
+    def __init__(self, rows: list, total: int) -> None:
+        self._rows = rows
+        self._total = total
+        self.captured: list[str] = []
+
+    async def execute(self, stmt: Any, params: dict | None = None) -> _CapturingDB:
+        self.captured.append(str(stmt))
+        return self
+
+    def all(self) -> list:
+        # Only the first capture (base query) returns rows.
+        return list(self._rows) if len(self.captured) == 1 else []
+
+    def scalar_one(self) -> int:
+        return self._total
+
+
+async def test_max_ter_appears_in_both_sql_strings() -> None:
+    """max_ter predicate must be present in both base_sql and count_sql."""
+    from dhanradar.mf.router import fund_explorer_list
+
+    db = _CapturingDB(rows=[], total=0)
+    await fund_explorer_list(
+        db=db,
+        response=Response(),
+        category="Equity Scheme - Large Cap Fund",
+        max_ter=1.0,
+    )
+    assert len(db.captured) == 2, "expected exactly 2 SQL executions"
+    base_sql, count_sql = db.captured
+    assert "expense_ratio_pct <= :max_ter" in base_sql
+    assert "expense_ratio_pct <= :max_ter" in count_sql
+
+
+async def test_min_aum_appears_in_both_sql_strings() -> None:
+    """min_aum predicate must be present in both base_sql and count_sql."""
+    from dhanradar.mf.router import fund_explorer_list
+
+    db = _CapturingDB(rows=[], total=0)
+    await fund_explorer_list(
+        db=db,
+        response=Response(),
+        category="Equity Scheme - Large Cap Fund",
+        min_aum=500.0,
+    )
+    assert len(db.captured) == 2
+    base_sql, count_sql = db.captured
+    assert "aum_crore >= :min_aum" in base_sql
+    assert "aum_crore >= :min_aum" in count_sql
+
+
+async def test_riskometer_in_both_sql_strings() -> None:
+    """riskometer comma-separated param produces an IN predicate in both SQL strings."""
+    from dhanradar.mf.router import fund_explorer_list
+
+    db = _CapturingDB(rows=[], total=0)
+    await fund_explorer_list(
+        db=db,
+        response=Response(),
+        category="Equity Scheme - Large Cap Fund",
+        riskometer="Moderate,High",
+    )
+    assert len(db.captured) == 2
+    base_sql, count_sql = db.captured
+    assert "risk_o_meter IN (:risk_0, :risk_1)" in base_sql
+    assert "risk_o_meter IN (:risk_0, :risk_1)" in count_sql
+
+
+async def test_combined_e3_filters_in_both_sql_strings() -> None:
+    """All three E3 params applied together — each predicate appears in both SQL strings."""
+    from dhanradar.mf.router import fund_explorer_list
+
+    db = _CapturingDB(rows=[], total=0)
+    await fund_explorer_list(
+        db=db,
+        response=Response(),
+        category="Equity Scheme - Mid Cap Fund",
+        max_ter=0.5,
+        min_aum=1000.0,
+        riskometer="High",
+    )
+    assert len(db.captured) == 2
+    for sql in db.captured:
+        assert "expense_ratio_pct <= :max_ter" in sql
+        assert "aum_crore >= :min_aum" in sql
+        assert "risk_o_meter IN (:risk_0)" in sql
+
+
+async def test_empty_riskometer_string_produces_no_predicate() -> None:
+    """Empty riskometer param (whitespace only) must not emit a risk IN clause."""
+    from dhanradar.mf.router import fund_explorer_list
+
+    db = _CapturingDB(rows=[], total=0)
+    await fund_explorer_list(
+        db=db,
+        response=Response(),
+        category="Equity Scheme - Large Cap Fund",
+        riskometer="   ",
+    )
+    for sql in db.captured:
+        assert "risk_o_meter IN" not in sql
+

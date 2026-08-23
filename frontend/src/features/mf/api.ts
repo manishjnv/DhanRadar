@@ -19,6 +19,7 @@ import type {
   PortfolioLatestResponse,
   FundExplorerResponse,
   FundCategoriesResponse,
+  FundSearchItem,
   FundHead,
   FundNavSeries,
   FundAnalyticsResponse,
@@ -348,7 +349,18 @@ export function useFundCategories() {
 
 /** Fetch paginated fund list for one SEBI category.
  *  Re-fetches when category, sort, page, or limit changes. */
-export function useFundExplorer(params: { category: string; sort: string; sortDir?: 'asc' | 'desc'; planType?: string; optionType?: string; page: number; limit?: number }) {
+export function useFundExplorer(params: {
+  category: string;
+  sort: string;
+  sortDir?: 'asc' | 'desc';
+  planType?: string;
+  optionType?: string;
+  page: number;
+  limit?: number;
+  maxTer?: number;
+  minAum?: number;
+  riskometer?: string;
+}) {
   return useQuery<FundExplorerResponse>({
     queryKey: queryKeys.mf.explorerFunds(params),
     queryFn: () => {
@@ -359,12 +371,27 @@ export function useFundExplorer(params: { category: string; sort: string; sortDi
         page: String(params.page),
         limit: String(params.limit ?? 20),
       });
-      if (params.planType)   qs.set('plan_type',   params.planType);
-      if (params.optionType) qs.set('option_type', params.optionType);
+      if (params.planType)               qs.set('plan_type',  params.planType);
+      if (params.optionType)             qs.set('option_type', params.optionType);
+      if (params.maxTer !== undefined)   qs.set('max_ter',     String(params.maxTer));
+      if (params.minAum !== undefined)   qs.set('min_aum',     String(params.minAum));
+      if (params.riskometer)             qs.set('riskometer',  params.riskometer);
       return api.get<FundExplorerResponse>(`/mf/funds?${qs.toString()}`);
     },
     enabled: !!params.category,
     staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/** Debounced typeahead fund search — GET /mf/search.
+ *  Results contain no metrics; navigate to /mf/fund/{isin} on select. */
+export function useFundSearch(q: string) {
+  return useQuery<FundSearchItem[]>({
+    queryKey: queryKeys.mf.fundSearch(q),
+    queryFn: () => api.get<FundSearchItem[]>(`/mf/search?q=${encodeURIComponent(q)}&limit=10`),
+    enabled: q.trim().length >= 2,
+    staleTime: 60 * 1000,
     retry: false,
   });
 }
