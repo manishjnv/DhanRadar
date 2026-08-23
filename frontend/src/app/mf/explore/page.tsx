@@ -53,8 +53,6 @@ import { SpotlightSignals } from '@/components/mf/explore/SpotlightSignals';
 import { LiveBadge } from '@/components/mf/funddetail/parts';
 import { QUICK_INTENTS, type QuickIntent } from '@/features/mf/quickIntents';
 
-const TRY_INTENTS = QUICK_INTENTS.filter((q) => q.backing.kind === 'category');
-
 type PlanFilter   = 'all' | 'direct' | 'regular';
 type OptionFilter = 'all' | 'growth' | 'idcw';
 type ViewMode     = 'table' | 'cards';
@@ -84,7 +82,7 @@ function CategoryDropdown({ categories, activeKey, onSelect }: {
       <div className="relative">
         <select value={activeKey} onChange={(e) => onSelect(e.target.value)}
           className="h-[38px] rounded-lg border border-line bg-surface pl-3 pr-8 text-small text-ink font-medium cursor-pointer appearance-none focus-visible:outline-none focus-visible:border-royal focus-visible:ring-2 focus-visible:ring-royal/40 transition-colors max-w-[280px]">
-          {sorted.map((c) => <option key={c.key} value={c.key}>{formatCategoryLabel(c.display_name)} ({c.fund_count})</option>)}
+          {sorted.map((c) => <option key={c.key} value={c.key}>{formatCategoryLabel(c.display_name)}</option>)}
         </select>
         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden="true">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M5 7L0.5 2.5h9L5 7z" /></svg>
@@ -430,23 +428,11 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
         topMoverDelta={boards?.movers_up?.rows[0]?.rank_delta ?? null}
         topInflowCategory={boards?.category_inflows?.rows[0]?.category ?? null}
         topInflowCr={boards?.category_inflows?.rows[0]?.net_flow_cr ?? null}
-        onIntent={handleIntent}
-        activeIntentId={activeIntentId}
       />
 
       {/* SEARCH + category quick-jump tags (Phase C: real category filters, not search-text shortcuts) */}
       <Section>
         <TypeaheadSearch clientSearch={search} onClientSearch={(v) => { setSearch(v); setPage(1); }} />
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <span className="text-caption text-ink-muted font-medium mr-1">Try:</span>
-          {TRY_INTENTS.map((intent) => (
-            <button key={intent.id} type="button" title={intent.rule} onClick={() => handleIntent(intent)}
-              aria-pressed={activeIntentId === intent.id}
-              className="rounded-lg border border-line bg-surface px-2.5 py-1 text-caption font-medium text-ink-secondary hover:border-royal hover:text-royal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-royal/40">
-              {intent.label}
-            </button>
-          ))}
-        </div>
       </Section>
 
       {!catData?.categories.length ? (
@@ -477,9 +463,6 @@ function ExplorerBody({ initialCategory, initialQuery }: { initialCategory: stri
           {/* ADVANCED FILTERS */}
           <Section>
             <AdvancedFilters
-              planFilter={planFilter} optionFilter={optionFilter}
-              onPlan={(k) => { setPlanFilter(k); setPage(1); }}
-              onOption={(k) => { setOptionFilter(k); setPage(1); }}
               riskFilter={riskFilter} onRisk={setRiskFilter}
               maxTer={maxTer} onMaxTer={setMaxTer}
               minAum={minAum} onMinAum={setMinAum}
