@@ -124,6 +124,28 @@ def _classify_holding(
     return "ledger_backed", value_basis
 
 
+def _priced_value_pct(rm: PortfolioReadModel) -> int | None:
+    """ADR-0039 — % of `rm.total_value` priced off a LIVE nav (`value_basis == 'live_nav'`); a
+    stale/suspended-scheme holding (`stale_nav`/`cost_fallback`/`none`) lowers this instead of
+    silently counting as fully priced. Shared by summary (B98 parity fix, was inlined here) and by
+    `load_portfolio_risk`/`allocation_payload`/`concentration_payload` (B98) — ONE staleness rule,
+    not a second copy per read path. None once it rounds to 100 (nothing to caveat) or
+    `total_value` is 0."""
+    priced_value = sum(h.current_value for h in rm.holdings if h.value_basis == "live_nav")
+    if rm.total_value <= 0:
+        return None
+    pct = round(priced_value / rm.total_value * 100.0)
+    return None if pct >= 100 else pct
+
+
+def _priced_holdings(rm: PortfolioReadModel) -> list[EnrichedHolding]:
+    """ADR-0039/B98 — holdings priced off a LIVE nav only. Value-weighted aggregates (risk stats,
+    allocation/concentration buckets) must not blend a suspended/segregated scheme's frozen
+    stale/cost-fallback price into the weighting — same exclusion the hero payload already applies
+    via `value_priced_pct`, extended to the risk-center and allocation/concentration read paths."""
+    return [h for h in rm.holdings if h.value_basis == "live_nav"]
+
+
 def classify_holdings(
     rm: PortfolioReadModel, covered_keys: set[tuple[str, str]]
 ) -> PortfolioReadModel:
@@ -436,11 +458,7 @@ def summary_payload(
     gain_vs_cost_pct = (gain_vs_cost / cost_value * 100.0) if cost_value > 0 else None
     bands = [h.confidence_band for h in rm.holdings if h.confidence_band]
 
-    priced_value = sum(h.current_value for h in rm.holdings if h.value_basis == "live_nav")
-    value_priced_pct: int | None = None
-    if rm.total_value > 0:
-        pct = round(priced_value / rm.total_value * 100.0)
-        value_priced_pct = None if pct >= 100 else pct
+    value_priced_pct = _priced_value_pct(rm)
     invested_missing_count = sum(1 for h in rm.holdings if h.invested <= 0 and h.units > 0)
 
     return {
@@ -506,6 +524,10 @@ class PortfolioRisk:
     # "portfolio return series" (true, >= _MIN_TRUE_RISK_ROWS daily rows) or the honest
     # fallback "average fund volatility" (value-weighted per-fund proxy, upper-bound).
     risk_band_basis: str = "average fund volatility"
+    # value_priced_pct: ADR-0039/B98 parity with the hero summary — % of total_value priced off a
+    # live NAV. Defaults None so pre-B98 PortfolioRisk(**kw) call sites (existing tests) still
+    # construct a valid instance.
+    value_priced_pct: int | None = None
 
 
 def _vol_band(vol_pct: float | None) -> str | None:
@@ -549,12 +571,15 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
             .all()
         }
 
-    # ponytail: weights are current_value (units × latest NAV), which falls back to avg_cost_nav for a
-    # fund with no live NAV (load_portfolio_read_model) — a minor weight distortion for stale funds.
-    # funds_with_metrics surfaces metric coverage; upgrade = require a live NAV or surface NAV-staleness.
+    # B98 (ADR-0039 parity): weighted() only blends holdings priced off a LIVE nav
+    # (`_priced_holdings`) — a suspended/segregated scheme's frozen stale/cost-fallback price no
+    # longer silently skews the value-weighted σ/rolling-return blend. `value_priced_pct` (same
+    # helper the hero summary uses) surfaces the honest coverage this excludes.
+    priced = _priced_holdings(rm)
+
     def weighted(attr: str) -> float | None:
         num = den = 0.0
-        for h in rm.holdings:
+        for h in priced:
             m = metrics.get(h.isin)
             v = getattr(m, attr, None) if m is not None else None
             if v is not None and h.current_value > 0:
@@ -564,6 +589,7 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
 
     fund_count = len(rm.holdings)
     funds_with_metrics = sum(1 for h in rm.holdings if h.isin in metrics)
+    value_priced_pct = _priced_value_pct(rm)
 
     series = await load_portfolio_valuation_series(db, portfolio_id, days=_MAX_VALUATION_DAYS)
     if len(series) >= _MIN_TRUE_RISK_ROWS:
@@ -592,6 +618,7 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
             as_of=rm.as_of,
             recovery_months=recovery_months,
             risk_band_basis="portfolio return series",
+            value_priced_pct=value_priced_pct,
         )
 
     return PortfolioRisk(
@@ -615,6 +642,7 @@ async def load_portfolio_risk(db: AsyncSession, portfolio_id: str) -> PortfolioR
         funds_with_metrics=funds_with_metrics,
         as_of=rm.as_of,
         risk_band_basis="average fund volatility",
+        value_priced_pct=value_priced_pct,
     )
 
 
@@ -636,6 +664,7 @@ def risk_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
         "recovery_months": r.recovery_months,
         "fund_count": r.fund_count,
         "funds_with_metrics": r.funds_with_metrics,
+        "value_priced_pct": r.value_priced_pct,  # B98/ADR-0039 — % of total_value on a live NAV
         "as_of": r.as_of,
     }
 
@@ -672,9 +701,15 @@ def risk_advanced_payload(r: PortfolioRisk, portfolio_id: str) -> dict:
 def _value_buckets(rm: PortfolioReadModel, attr: str) -> list[dict]:
     """Value-weighted buckets over `current_value`, grouped by holding attribute `attr` (category|amc).
     Returns ``[{bucket, value, weight_pct}]`` sorted by weight desc. Empty when total value is 0. The
-    bucket ₹ and % are the user's OWN numbers (§13 #2-exempt) — no DhanRadar composite."""
+    bucket ₹ and % are the user's OWN numbers (§13 #2-exempt) — no DhanRadar composite.
+
+    B98 (ADR-0039 parity): only holdings priced off a LIVE nav (`_priced_holdings`) are bucketed —
+    a suspended/segregated scheme's frozen stale/cost-fallback price no longer silently keeps its
+    last weight in the split. `value_priced_pct` (allocation/concentration payloads) surfaces the
+    honest coverage this excludes; `total_value` in those payloads stays the FULL portfolio total
+    (money truth), so bucket weights may not sum to it when coverage is partial."""
     totals: dict[str, float] = {}
-    for h in rm.holdings:
+    for h in _priced_holdings(rm):
         bucket = getattr(h, attr) or "Uncategorized"
         totals[bucket] = totals.get(bucket, 0.0) + h.current_value
     total = sum(totals.values())
@@ -699,6 +734,7 @@ def allocation_payload(rm: PortfolioReadModel, portfolio_id: str, by: str = "cat
         "by": by,
         "buckets": buckets,
         "total_value": round(rm.total_value, 2),
+        "value_priced_pct": _priced_value_pct(rm),  # B98/ADR-0039 — % of total_value on a live NAV
         "fund_count": len(rm.holdings),
         "as_of": rm.as_of,
     }
@@ -727,13 +763,18 @@ def concentration_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
     """`portfolio.concentration` — how much value sits in the largest fund / fund house. top_fund/top_amc
     weights and the by_amc breakdown are the user's OWN % (§13, DOM-allowed); `band` is a factual
     descriptor. Funds are aggregated by ISIN across folios. No DhanRadar composite is ever selected."""
-    total = rm.total_value
+    # B98 (ADR-0039 parity): fund_rows/top_fund weight off the SAME priced-only basis as
+    # _value_buckets (by_amc) — a suspended/segregated scheme no longer keeps its stale last
+    # weight in the top-fund/top-amc concentration %. `total` here is the priced denominator, not
+    # `rm.total_value` (money truth, reported separately below).
+    priced = _priced_holdings(rm)
+    total = sum(h.current_value for h in priced)
     by_amc = _value_buckets(rm, "amc")
 
     fund_rows: list[dict] = []
     if total > 0:
         agg: dict[str, tuple[str, float]] = {}
-        for h in rm.holdings:
+        for h in priced:
             name, val = agg.get(h.isin, (h.scheme_name, 0.0))
             agg[h.isin] = (name, val + h.current_value)
         fund_rows = sorted(
@@ -755,6 +796,7 @@ def concentration_payload(rm: PortfolioReadModel, portfolio_id: str) -> dict:
         "by_amc": [{"name": r["bucket"], "weight_pct": r["weight_pct"]} for r in by_amc],
         "fund_count": len(rm.holdings),
         "amc_count": len(by_amc),
+        "value_priced_pct": _priced_value_pct(rm),  # B98/ADR-0039 — % of total_value on a live NAV
         "as_of": rm.as_of,
     }
 
