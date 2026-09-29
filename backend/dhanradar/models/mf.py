@@ -32,6 +32,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    desc,
     func,
     text,
 )
@@ -712,6 +713,14 @@ class UserFundScore(Base):
     __table_args__ = (
         UniqueConstraint("portfolio_id", "isin", name="uq_user_fund_score"),
         Index("ix_user_fund_scores_user", "user_id"),
+        # B56-f3: dashboard read path (latest score per user+isin) — composite
+        # covers the lookup + orders by recency without a heap scan.
+        Index(
+            "ix_user_fund_scores_user_isin_scored_at",
+            "user_id",
+            "isin",
+            desc("scored_at"),
+        ),
         _SCHEMA,
     )
 
