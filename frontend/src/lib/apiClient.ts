@@ -37,6 +37,9 @@ export interface ApiProblem {
   status:     number;
   detail?:    string;
   request_id: string;
+  // RFC7807 §3.2 extension members (e.g. upgrade_url, error_code, error_msg) —
+  // preserved by parseProblem below so callers can read provider-specific detail.
+  [key: string]: unknown;
 }
 
 export class ApiError extends Error {
@@ -69,6 +72,7 @@ async function parseProblem(res: Response): Promise<ApiProblem> {
     try {
       const body = await res.json();
       return {
+        ...body,
         type:       body.type       ?? 'about:blank',
         title:      body.title      ?? res.statusText,
         status:     body.status     ?? res.status,
@@ -201,4 +205,6 @@ export const api = {
   del:  <T>(path: string)                                                      => request<T>('DELETE', path),
   /** POST with extra headers — used for Idempotency-Key on billing/broadcast mutations. */
   postH:<T>(path: string, body?: unknown, headers?: Record<string, string>)   => requestWithHeaders<T>('POST', path, body, headers),
+  /** PUT with extra headers — used for Idempotency-Key on mutating admin routes. */
+  putH: <T>(path: string, body?: unknown, headers?: Record<string, string>)   => requestWithHeaders<T>('PUT',  path, body, headers),
 };

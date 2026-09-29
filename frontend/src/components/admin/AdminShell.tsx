@@ -67,6 +67,7 @@ const ADMIN_NAV: AdminNavItem[] = [
   { href: '/admin/analytics',  label: 'Analytics',         icon: TrendingUp,      live: true  },
   { href: '/admin/notifications', label: 'Notifications',  icon: Bell,            live: true  },
   { href: '/admin/bse-uat',    label: 'BSE UAT Console',   icon: Landmark,        live: true  },
+  { href: '/admin/mfu-uat',    label: 'MFU UAT Console',   icon: Landmark,        live: true  },
 ];
 
 const AIOPS_NAV: AdminNavItem[] = [
