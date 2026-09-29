@@ -30,7 +30,7 @@ async def test_indices_happy_path_from_yahoo(patch_redis, monkeypatch):
         p = prices.get(symbol)
         return {"regularMarketPrice": p, "chartPreviousClose": p * 0.99} if p else None
 
-    monkeypatch.setattr(indices_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(indices_mod, "quote_meta", fake_meta)
     out = await get_indices()
 
     assert {i.name for i in out} == {"Nifty 50", "Sensex", "Nifty Bank", "Nifty Midcap 150"}
@@ -46,7 +46,7 @@ async def test_indices_second_call_served_from_cache(patch_redis, monkeypatch):
         calls["n"] += 1
         return {"regularMarketPrice": 100.0, "chartPreviousClose": 99.0}
 
-    monkeypatch.setattr(indices_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(indices_mod, "quote_meta", fake_meta)
     first = await get_indices()
     fetched = calls["n"]
     second = await get_indices()
@@ -59,7 +59,7 @@ async def test_indices_degrades_to_empty_on_total_failure(patch_redis, monkeypat
     async def fake_meta(client, symbol):
         return None  # every symbol fails
 
-    monkeypatch.setattr(indices_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(indices_mod, "quote_meta", fake_meta)
     assert await get_indices() == []
 
 
@@ -74,7 +74,7 @@ async def test_ticker_happy_path_items_ordered_and_flows_served(patch_redis, mon
     async def fake_meta(client, symbol):
         return {"regularMarketPrice": 100.0, "chartPreviousClose": 99.0}
 
-    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(ticker_mod, "quote_meta", fake_meta)
     await get_redis().set(
         "signal:flows:last",
         _json.dumps(
@@ -97,7 +97,7 @@ async def test_ticker_flows_cache_cold_serves_items_with_none_flows(patch_redis,
     async def fake_meta(client, symbol):
         return {"regularMarketPrice": 50.0, "chartPreviousClose": 50.0}
 
-    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(ticker_mod, "quote_meta", fake_meta)
     out = await get_ticker()
     assert len(out.items) == len(ticker_mod._TICKER_SYMBOLS)
     assert out.fii_cr is None and out.dii_cr is None and out.pcr is None
@@ -119,7 +119,7 @@ async def test_ticker_yahoo_down_serves_fallback(patch_redis, monkeypatch):
     async def fake_meta(client, symbol):
         return None  # every symbol fails
 
-    monkeypatch.setattr(ticker_mod, "_quote_meta", fake_meta)
+    monkeypatch.setattr(ticker_mod, "quote_meta", fake_meta)
     out = await get_ticker()
     assert len(out.items) == 1
     assert out.items[0].value == 24000.0  # last-known-good, not an empty strip

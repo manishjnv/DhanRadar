@@ -81,7 +81,7 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-async def _quote_meta(client: httpx.AsyncClient, symbol: str) -> dict | None:
+async def quote_meta(client: httpx.AsyncClient, symbol: str) -> dict | None:
     """Return the Yahoo chart 'meta' block for a symbol, or None on any error."""
     url = _CHART_URL.format(symbol=quote(symbol))
     try:
@@ -99,7 +99,7 @@ async def _quote_meta(client: httpx.AsyncClient, symbol: str) -> dict | None:
         return None
 
 
-def _signal_value(meta: dict, mode: str) -> float | None:
+def signal_value(meta: dict, mode: str) -> float | None:
     """Derive a quote value from a chart meta block: a % daily change ("pct") or
     a level ("level"). No longer used by the mood provider (mood_v2 uses MA
     deviations below) but still the canonical helper for public quote surfaces
@@ -201,7 +201,7 @@ async def fetch_macro_quotes() -> list[dict]:
     out: list[dict] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         for key, (symbol, _mode, _window) in _SYMBOLS.items():
-            meta = await _quote_meta(client, symbol)
+            meta = await quote_meta(client, symbol)
             if not meta:
                 continue
             price = meta.get("regularMarketPrice")

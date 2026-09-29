@@ -2,7 +2,7 @@
 DhanRadar — global ticker-bar quotes (top status strip, all pages).
 
 Mirrors `dashboard/indices.py`: REUSES the Yahoo provider helpers
-(`_quote_meta` / `_signal_value`) — no new fetcher, no new dependency. Read-through
+(`quote_meta` / `signal_value`) — no new fetcher, no new dependency. Read-through
 Redis cache (60s) keyed `dashboard:ticker` + a 24h last-known-good fallback, so the
 public strip costs at most one Yahoo sweep per minute regardless of traffic.
 FII/DII/PCR ride along from the EXISTING `signal:flows:last` cache (written by the
@@ -21,7 +21,7 @@ import logging
 import httpx
 
 from dhanradar.dashboard.schemas import TickerItem, TickerOut
-from dhanradar.market_data.providers.yahoo import _quote_meta, _signal_value
+from dhanradar.market_data.providers.yahoo import quote_meta, signal_value
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +57,13 @@ async def _fetch_items() -> list[TickerItem]:
     out: list[TickerItem] = []
     async with httpx.AsyncClient() as client:
         for key, label, symbol in _TICKER_SYMBOLS:
-            meta = await _quote_meta(client, symbol)
+            meta = await quote_meta(client, symbol)
             if meta is None:
                 continue
-            level = _signal_value(meta, "level")
+            level = signal_value(meta, "level")
             if level is None:
                 continue
-            pct = _signal_value(meta, "pct")
+            pct = signal_value(meta, "pct")
             out.append(
                 TickerItem(
                     key=key, label=label, value=round(level, 2), change_pct=round(pct or 0.0, 2)

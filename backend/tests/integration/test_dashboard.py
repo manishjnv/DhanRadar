@@ -106,12 +106,12 @@ def _auth_override(user_id: str):
 
 
 async def test_indices_happy_mocked(async_client, db_session, patch_redis, monkeypatch):
-    """GET /indices with _quote_meta monkeypatched returns 4 entries each with
+    """GET /indices with quote_meta monkeypatched returns 4 entries each with
     name, value, and change_pct."""
     import dhanradar.dashboard.indices as _indices_mod
 
-    # Monkeypatch _quote_meta to return a synthetic meta dict for every symbol.
-    # `regularMarketPrice` and `chartPreviousClose` are what _signal_value reads for
+    # Monkeypatch quote_meta to return a synthetic meta dict for every symbol.
+    # `regularMarketPrice` and `chartPreviousClose` are what signal_value reads for
     # "level" and the pct-change calc respectively.
     async def _fake_quote_meta(client, symbol: str) -> dict:
         return {
@@ -120,7 +120,7 @@ async def test_indices_happy_mocked(async_client, db_session, patch_redis, monke
             "regularMarketChangePercent": 1.01,
         }
 
-    monkeypatch.setattr(_indices_mod, "_quote_meta", _fake_quote_meta)
+    monkeypatch.setattr(_indices_mod, "quote_meta", _fake_quote_meta)
 
     user_id = await _seed_user(db_session)
     try:

@@ -55,13 +55,13 @@ def test_signal_value_pct_and_level():
     from dhanradar.market_data.providers import yahoo
 
     # pct: (103 − 100)/100 * 100 = +3.0
-    assert yahoo._signal_value({"regularMarketPrice": 103.0, "chartPreviousClose": 100.0}, "pct") == 3.0
+    assert yahoo.signal_value({"regularMarketPrice": 103.0, "chartPreviousClose": 100.0}, "pct") == 3.0
     # level: returned as-is
-    assert yahoo._signal_value({"regularMarketPrice": 15.5}, "level") == 15.5
+    assert yahoo.signal_value({"regularMarketPrice": 15.5}, "level") == 15.5
     # missing price → None
-    assert yahoo._signal_value({}, "level") is None
+    assert yahoo.signal_value({}, "level") is None
     # pct with no/zero prev close → None (can't divide)
-    assert yahoo._signal_value({"regularMarketPrice": 10.0, "chartPreviousClose": 0}, "pct") is None
+    assert yahoo.signal_value({"regularMarketPrice": 10.0, "chartPreviousClose": 0}, "pct") is None
 
 
 # --- mood_v2 raw-value derivation: deviation from the moving average ----------
