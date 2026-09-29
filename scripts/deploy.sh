@@ -183,7 +183,13 @@ cmd_deploy() {
 
     # 2. Bring up the data tier
     info "Starting data tier (postgres + redis)…"
-    $COMPOSE up -d dhanradar-postgres dhanradar-redis
+    # B100: start them if stopped, but never recreate on a routine deploy (a shared
+    # `.env` edit would otherwise bounce the DB); DEPLOY_INFRA=1 allows recreation.
+    if [ "${DEPLOY_INFRA:-0}" = "1" ]; then
+        $COMPOSE up -d dhanradar-postgres dhanradar-redis
+    else
+        $COMPOSE up -d --no-recreate dhanradar-postgres dhanradar-redis
+    fi
 
     # 3. Wait for data tier to be healthy
     wait_healthy dhanradar-postgres "${DB_TIMEOUT}"
@@ -256,8 +262,8 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
         dhanradar-celery-misc  dhanradar-celery-beat
 
     if [ "${DEPLOY_INFRA:-0}" = "1" ]; then
-        warn "DEPLOY_INFRA=1 — also recreating infra (postgres/redis/cloudflared/autoheal) if their config changed."
-        $COMPOSE up -d dhanradar-postgres dhanradar-redis dhanradar-cloudflared dhanradar-autoheal
+        warn "DEPLOY_INFRA=1 — also recreating cloudflared/autoheal if their config changed (postgres/redis handled in step 2)."
+        $COMPOSE up -d dhanradar-cloudflared dhanradar-autoheal
     else
         info "DEPLOY_INFRA not set — leaving postgres/redis/cloudflared/autoheal untouched (set DEPLOY_INFRA=1 to recreate them, e.g. after a tunnel/db config change)."
     fi
