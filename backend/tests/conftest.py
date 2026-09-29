@@ -291,6 +291,7 @@ async def db_tables(db_engine):
     import dhanradar.models.consent  # noqa: F401 — registers consent.* tables (B44)
     import dhanradar.models.education  # noqa: F401 — registers education.* tables (G8)
     import dhanradar.models.mf  # noqa: F401 — registers the mf.* tables
+    import dhanradar.models.mfu  # noqa: F401 — registers mfu.* tables (MFU Phase 0)
     import dhanradar.models.mood  # noqa: F401 — registers mood.* tables
     import dhanradar.models.news  # noqa: F401 — registers news.* tables (B56)
     import dhanradar.models.notifications  # noqa: F401 — registers notify.* tables

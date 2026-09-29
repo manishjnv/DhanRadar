@@ -176,6 +176,49 @@ for p in code_files():
                 "(SEV2 guard #6 — use TaskSessionLocal instead)"
             )
 
+# 11. MFU/BSE module isolation (non-neg #7) ---------------------------------
+# Two fully separate MF transaction providers — neither may import the other's
+# code, even transitively via a direct import line (module isolation).
+_MFU_PATHS = [
+    ROOT / "backend" / "dhanradar" / "mfu",
+    ROOT / "backend" / "dhanradar" / "models" / "mfu.py",
+    ROOT / "backend" / "dhanradar" / "admin" / "mfu_uat_router.py",
+]
+_BSE_PATHS = [
+    ROOT / "backend" / "dhanradar" / "bse",
+    ROOT / "backend" / "dhanradar" / "models" / "bse.py",
+    ROOT / "backend" / "dhanradar" / "admin" / "bse_uat_router.py",
+]
+
+
+def _py_files_under(paths: list[Path]):
+    for p in paths:
+        if p.is_dir():
+            yield from p.rglob("*.py")
+        elif p.is_file():
+            yield p
+
+
+# Only real `import`/`from` statements count — comments/docstrings that merely
+# NAME the other module (e.g. to document the isolation rule) must not trip it.
+_IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s+dhanradar\.")
+
+
+def _imports_module(text: str, target: str) -> bool:
+    for line in text.splitlines():
+        if _IMPORT_LINE.match(line) and re.search(rf"\bdhanradar\.{target}\b", line):
+            return True
+    return False
+
+
+for p in _py_files_under(_MFU_PATHS):
+    if _imports_module(read(p), "bse") or _imports_module(read(p), r"models\.bse"):
+        fails.append(f"{p.relative_to(ROOT)}: imports dhanradar.bse (non-neg #7: mfu/bse module isolation)")
+
+for p in _py_files_under(_BSE_PATHS):
+    if _imports_module(read(p), "mfu") or _imports_module(read(p), r"models\.mfu"):
+        fails.append(f"{p.relative_to(ROOT)}: imports dhanradar.mfu (non-neg #7: mfu/bse module isolation)")
+
 # 5. Secret scan (scoped) ---------------------------------------------------
 SECRET_RES = [
     re.compile(r"AKIA[0-9A-Z]{16}"),

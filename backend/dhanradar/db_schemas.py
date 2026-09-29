@@ -29,4 +29,5 @@ APP_SCHEMAS: tuple[str, ...] = (
     "concepts",
     "signal",
     "bse",
+    "mfu",
 )

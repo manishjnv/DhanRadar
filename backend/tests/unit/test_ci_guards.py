@@ -134,3 +134,32 @@ def test_db_py_pooled_engine_not_flagged() -> None:
     assert result.returncode == 0, (
         f"db.py's own async_sessionmaker(engine) must not be flagged:\n{result.stdout}"
     )
+
+
+def test_mfu_importing_bse_is_caught() -> None:
+    """Guard #11 (mfu/bse module isolation, non-neg #7): a file under
+    backend/dhanradar/mfu/ that imports dhanradar.bse must be flagged."""
+    fixture = BACKEND_DHANRADAR / "mfu" / "__ci_guard_isolation_test__.py"
+    fixture.write_text("import dhanradar.bse\n", encoding="utf-8")
+    try:
+        result = _run_guard()
+        assert result.returncode == 1, (
+            f"guard must FAIL when mfu/ imports dhanradar.bse, but passed:\n{result.stdout}"
+        )
+        assert "mfu/bse module isolation" in result.stdout
+    finally:
+        fixture.unlink(missing_ok=True)
+
+
+def test_bse_importing_mfu_is_caught() -> None:
+    """Guard #11, reverse direction: bse/ must not import dhanradar.mfu."""
+    fixture = BACKEND_DHANRADAR / "bse" / "__ci_guard_isolation_test__.py"
+    fixture.write_text("import dhanradar.models.mfu\n", encoding="utf-8")
+    try:
+        result = _run_guard()
+        assert result.returncode == 1, (
+            f"guard must FAIL when bse/ imports dhanradar.models.mfu, but passed:\n{result.stdout}"
+        )
+        assert "mfu/bse module isolation" in result.stdout
+    finally:
+        fixture.unlink(missing_ok=True)
