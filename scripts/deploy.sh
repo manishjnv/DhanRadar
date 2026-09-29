@@ -265,7 +265,10 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
         warn "DEPLOY_INFRA=1 — also recreating cloudflared/autoheal if their config changed (postgres/redis handled in step 2)."
         $COMPOSE up -d dhanradar-cloudflared dhanradar-autoheal
     else
-        info "DEPLOY_INFRA not set — leaving postgres/redis/cloudflared/autoheal untouched (set DEPLOY_INFRA=1 to recreate them, e.g. after a tunnel/db config change)."
+        # Start (never recreate) the tunnel + autoheal: covers a fresh box / reboot where they are
+        # stopped or missing, without bouncing a running tunnel (adversarial review of B100).
+        $COMPOSE up -d --no-recreate dhanradar-cloudflared dhanradar-autoheal
+        info "DEPLOY_INFRA not set — infra started only if stopped, never recreated (set DEPLOY_INFRA=1 to recreate after a tunnel/db config change)."
     fi
 
     # 7. Smoke test — curl the health endpoint from inside the fastapi container
