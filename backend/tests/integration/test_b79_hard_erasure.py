@@ -119,8 +119,8 @@ async def _seed_personal_and_retention_data(db, user_id) -> None:
 
 
 async def _counts(db, user_id) -> dict[str, int]:
-    async def _c(model, col):
-        return await db.scalar(select(func.count()).select_from(model).where(col == user_id)) or 0
+    async def _c(model, col, val=user_id):
+        return await db.scalar(select(func.count()).select_from(model).where(col == val)) or 0
 
     return {
         "portfolios": await _c(MfPortfolio, MfPortfolio.user_id),
@@ -130,7 +130,8 @@ async def _counts(db, user_id) -> dict[str, int]:
         "ai_feedback": await _c(AiOutputFeedback, AiOutputFeedback.user_id),
         "consent_audit": await _c(ConsentAuditLog, ConsentAuditLog.user_id),
         "recommendation_audit": await _c(AiRecommendationAudit, AiRecommendationAudit.user_id),
-        "payment_events": await _c(PaymentEvent, PaymentEvent.user_id),
+        # audit.payment_events.user_id is TEXT (retention table, no FK)
+        "payment_events": await _c(PaymentEvent, PaymentEvent.user_id, str(user_id)),
     }
 
 
