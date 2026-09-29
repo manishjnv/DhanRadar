@@ -247,33 +247,7 @@ export const RECS = [
 ];
 
 // ── Projection ───────────────────────────────────────────────────────────────
-export const PROJ: Record<string, { name: string; val: string; color: string }[]> = {
-  '5 Years': [
-    { name: 'Current SIP (₹42k)', val: '₹1.18 Cr', color: E },
-    { name: '+10% SIP', val: '₹1.24 Cr', color: B },
-    { name: '+20% SIP', val: '₹1.31 Cr', color: V },
-    { name: '+50% SIP', val: '₹1.52 Cr', color: O },
-  ],
-  '10 Years': [
-    { name: 'Current SIP (₹42k)', val: '₹2.84 Cr', color: E },
-    { name: '+10% SIP', val: '₹3.06 Cr', color: B },
-    { name: '+20% SIP', val: '₹3.28 Cr', color: V },
-    { name: '+50% SIP', val: '₹3.94 Cr', color: O },
-  ],
-  '15 Years': [
-    { name: 'Current SIP (₹42k)', val: '₹5.92 Cr', color: E },
-    { name: '+10% SIP', val: '₹6.45 Cr', color: B },
-    { name: '+20% SIP', val: '₹6.98 Cr', color: V },
-    { name: '+50% SIP', val: '₹8.56 Cr', color: O },
-  ],
-  '20 Years': [
-    { name: 'Current SIP (₹42k)', val: '₹11.4 Cr', color: E },
-    { name: '+10% SIP', val: '₹12.6 Cr', color: B },
-    { name: '+20% SIP', val: '₹13.8 Cr', color: V },
-    { name: '+50% SIP', val: '₹17.4 Cr', color: O },
-  ],
-};
-export const PROJ_TABS = Object.keys(PROJ);
+export const PROJ_TABS = ['5 Years', '10 Years', '15 Years', '20 Years'];
 
 // ── Opportunities (watchlist) ────────────────────────────────────────────────
 export const WATCHLIST = [
