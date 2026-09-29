@@ -196,7 +196,9 @@ async def list_mandates(
     token = await _cached_token()
     filter_param: dict[str, Any] = {"member_code": _MEMBER}
     if ucc:
-        filter_param["ucc"] = [ucc]
+        # A plain string, per BSE's Postman mandate_list; a list is rejected as
+        # 400 invalid_json (msgid 1581) — verified on UAT 2026-09-29.
+        filter_param["ucc"] = ucc
     return await _bse_post(
         "mandate_list",
         {

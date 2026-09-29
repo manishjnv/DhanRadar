@@ -79,3 +79,23 @@ def test_extract_order_id_shapes():
         )
         == "5001212827"
     )
+
+
+async def test_list_mandates_sends_ucc_as_plain_string(monkeypatch):
+    """BSE rejects a list-valued ucc filter (invalid_json) — it must be a string."""
+    from dhanradar.admin import bse_uat_router as r
+
+    sent: dict = {}
+
+    async def fake_token() -> str:
+        return "tok"
+
+    async def fake_post(path, body, token=None):
+        sent.update(path=path, body=body)
+        return {"http_status": 200, "body": {"status": "success"}}
+
+    monkeypatch.setattr(r, "_cached_token", fake_token)
+    monkeypatch.setattr(r, "_bse_post", fake_post)
+    await r.list_mandates(_admin=None, ucc="DRTEST009")
+    assert sent["path"] == "mandate_list"
+    assert sent["body"]["data"]["filter_param"] == {"member_code": r._MEMBER, "ucc": "DRTEST009"}
