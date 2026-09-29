@@ -38,6 +38,9 @@ export interface AllocationData {
   by: string;
   buckets: AllocationBucket[];
   total_value: number;
+  /** B98/ADR-0039 — integer % of total_value priced off a live NAV (excludes stale/suspended
+   * holdings from the value-weighted buckets above); null once it rounds to 100% (nothing to caveat) */
+  value_priced_pct?: number | null;
   fund_count: number;
   as_of: string | null;
 }
@@ -61,6 +64,8 @@ export interface ConcentrationData {
   by_amc: NamedWeight[];
   fund_count: number;
   amc_count: number;
+  /** B98/ADR-0039 — integer % of total_value priced off a live NAV; null once it rounds to 100% */
+  value_priced_pct?: number | null;
   as_of: string | null;
 }
 
@@ -526,6 +531,8 @@ export interface RiskPayload {
   recovery_months: number | null;
   fund_count: number;
   funds_with_metrics: number;
+  /** B98/ADR-0039 — integer % of total_value priced off a live NAV; null once it rounds to 100% */
+  value_priced_pct?: number | null;
   as_of: string | null;
 }
 
