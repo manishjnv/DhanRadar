@@ -30,11 +30,17 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.audit.service import list_admin_actions, list_payment_events, record_admin_action
+from dhanradar.auth.erasure import (
+    DeletionNotRequestedError,
+    UserNotFoundError,
+    hard_erase_user,
+    request_user_deletion,
+)
 from dhanradar.billing.service import get_user_subscription
 from dhanradar.db import get_admin_db
 from dhanradar.deps import RequireAdmin, UserContext
@@ -47,6 +53,7 @@ from .ops_router import SOURCE_NAMES
 from .users_schemas import (
     ActivityEventRow,
     AuditLogItem,
+    EraseUserResponse,
     SuspendRequest,
     UserActionResponse,
     UserDetailResponse,
@@ -611,3 +618,92 @@ async def get_audit_log(
             )
         )
     return items
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/users/{user_id}/request-deletion  (DPDP, B79 — sets the marker
+# hard_erase_user requires; admin-triggered only — no self-service flow or
+# automatic schedule exists yet, see auth.erasure module docstring)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/request-deletion", response_model=UserActionResponse)
+async def request_deletion(
+    user_id: str,
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
+) -> UserActionResponse:
+    """Mark a user for deletion (B4/B33(b)): revokes their refresh jtis and
+    flushes the tier cache immediately, so existing sessions die right away.
+    Idempotent. Does NOT erase data — see /erase."""
+    try:
+        uid = UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+
+    try:
+        await request_user_deletion(db, uid)
+    except UserNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="request_deletion",
+        target_type="user",
+        target_id=user_id,
+        result="deletion_requested",
+    )
+    return UserActionResponse(ok=True, status="deletion_requested")
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/users/{user_id}/erase  (DPDP hard erasure, B79)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/erase", response_model=EraseUserResponse)
+async def erase_user(
+    user_id: str,
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> EraseUserResponse:
+    """Irreversibly erase a user (DPDP right-to-erasure, B79).
+
+    Requires `deletion_requested_at` to already be set (409 otherwise — call
+    /request-deletion first; this refuses to erase an active account). 404 if
+    the user doesn't exist. Irreversible — like the broadcast/refund admin
+    mutations, requires a non-empty Idempotency-Key header (gate only, not a
+    replay-cache: a retry after a successful erase naturally 404s since the
+    user row is gone — see auth.erasure for the full transaction contract and
+    FK map).
+    """
+    if not idempotency_key or not idempotency_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="idempotency_key_required",
+        )
+
+    try:
+        uid = UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+
+    try:
+        counts = await hard_erase_user(db, uid)
+    except UserNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+    except DeletionNotRequestedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="deletion_not_requested",
+        )
+
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="erase_user",
+        target_type="user",
+        target_id=user_id,
+        result=f"erased:{sum(counts.values())}_rows",
+    )
+    return EraseUserResponse(ok=True, counts=counts)
