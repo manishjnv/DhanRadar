@@ -225,13 +225,42 @@ If a fresh database is truly expected, re-run with DHANRADAR_ALLOW_FRESH_DB=1."
     sync_role_password dhanradar_app DHANRADAR_APP_DB_PASSWORD
     sync_role_password dhanradar_admin DHANRADAR_ADMIN_DB_PASSWORD
 
-    # 5. Bring up the full stack
-    info "Starting full stack…"
-    $COMPOSE up -d
-
-    # 6. Wait for app services to be healthy
+    # 5. Recreate ONLY the app services (B100: routine deploys must not touch
+    #    postgres/redis/cloudflared/autoheal — see note below).
+    #
+    #    B100 root cause: every service shares `env_file: .env` (single secrets
+    #    file). Any .env edit changes the resolved config hash for ALL services,
+    #    so a bare `$COMPOSE up -d` (no service list) recreates EVERYTHING whose
+    #    hash changed — including dhanradar-cloudflared, which drops the tunnel
+    #    (and the SSH-over-tunnel path) for ~2min while it restarts, and
+    #    postgres/redis, which briefly drop connections. This happened on every
+    #    code-only deploy (~14/day), not just infra changes.
+    #    Fix: `--no-deps` limits `up` to exactly the named app services, in a
+    #    safe order (backend before nextjs/workers, each health-waited before
+    #    the next), so unrelated infra containers are never touched by a normal
+    #    code deploy — compose already skips a service whose own resolved
+    #    config didn't change; the bug was forcing ALL services into one `up`.
+    #    Infra (postgres/redis/cloudflared/autoheal) is recreated only when
+    #    DEPLOY_INFRA=1 is set explicitly (tunnel/db config actually changed).
+    info "Starting app services (fastapi)…"
+    $COMPOSE up -d --no-deps dhanradar-fastapi
     wait_healthy dhanradar-fastapi "${APP_TIMEOUT}"
-    wait_healthy dhanradar-nextjs  "${APP_TIMEOUT}"
+
+    info "Starting app services (nextjs)…"
+    $COMPOSE up -d --no-deps dhanradar-nextjs
+    wait_healthy dhanradar-nextjs "${APP_TIMEOUT}"
+
+    info "Starting Celery workers + beat…"
+    $COMPOSE up -d --no-deps \
+        dhanradar-celery-batch dhanradar-celery-mood \
+        dhanradar-celery-misc  dhanradar-celery-beat
+
+    if [ "${DEPLOY_INFRA:-0}" = "1" ]; then
+        warn "DEPLOY_INFRA=1 — also recreating infra (postgres/redis/cloudflared/autoheal) if their config changed."
+        $COMPOSE up -d dhanradar-postgres dhanradar-redis dhanradar-cloudflared dhanradar-autoheal
+    else
+        info "DEPLOY_INFRA not set — leaving postgres/redis/cloudflared/autoheal untouched (set DEPLOY_INFRA=1 to recreate them, e.g. after a tunnel/db config change)."
+    fi
 
     # 7. Smoke test — curl the health endpoint from inside the fastapi container
     info "Running smoke test against /api/v1/health…"
@@ -331,6 +360,14 @@ Safety rules enforced by this script:
   - Never touches host cloudflared service/config (SSH lifeline — not ours).
   - Migrations run pre-serve on the new image, before app traffic.
   - Smoke test gates the deploy; non-200 aborts with a non-zero exit.
+  - Routine deploys recreate ONLY fastapi/nextjs/celery-* (--no-deps, rolling,
+    health-waited). postgres/redis/cloudflared/autoheal are left untouched
+    unless DEPLOY_INFRA=1 is set (B100 — no tunnel/DB outage on code deploys).
+
+Env vars:
+  DEPLOY_INFRA=1      Also recreate postgres/redis/cloudflared/autoheal if
+                      their resolved config changed (tunnel/db config edits).
+  DHANRADAR_ALLOW_FRESH_DB=1   Allow migrating a DB with no alembic_version table.
 
 See docs/ops/deploy-runbook.md for the full runbook.
 EOF
