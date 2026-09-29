@@ -294,6 +294,21 @@ fi
 
 # ── 5. Restore into the scratch DB ───────────────────────────────────────────
 
+# pg_dump carries grants but not roles. Prod's app roles come from migrations
+# 0051/0053, which never run on a restored DB — create them (same attributes,
+# no password) so the dump's GRANTs and RLS restore as on prod.
+log "Creating app roles (dhanradar_app, dhanradar_admin) if missing ..."
+${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 -c "
+  DO \$\$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_app') THEN
+      CREATE ROLE dhanradar_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS LOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_admin') THEN
+      CREATE ROLE dhanradar_admin NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS LOGIN;
+    END IF;
+  END \$\$;" > /dev/null \
+  || die "Could not create the app roles on the drill DB."
+
 log "timescaledb_pre_restore ..."
 ${DC} exec -T dhanradar-postgres \
   psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
@@ -301,10 +316,20 @@ ${DC} exec -T dhanradar-postgres \
   > /dev/null \
   || die "timescaledb_pre_restore failed on the drill DB."
 
-log "pg_restore (--clean --if-exists --exit-on-error) ..."
+# Restore list WITHOUT the timescaledb EXTENSION/COMMENT entries (B111): with
+# --clean, pg_restore would DROP the pinned extension and re-CREATE it at the
+# image default version, undoing the §4b pin ("already loaded with a different
+# version"). The list lives in the drill container's /tmp (gone on down -v).
+${DC} exec -T dhanradar-postgres pg_restore -l < "${DB_DUMP}" \
+  | grep -v -E '(EXTENSION - timescaledb|COMMENT - EXTENSION timescaledb)( |$)' \
+  | ${DC} exec -T dhanradar-postgres sh -c 'cat > /tmp/drill-toc.list' \
+  || die "Could not build the filtered pg_restore list."
+
+log "pg_restore (--clean --if-exists --exit-on-error, timescaledb extension entries skipped) ..."
 restore_rc=0
 ${DC} exec -T dhanradar-postgres \
   pg_restore -U dhanradar -d dhanradar --clean --if-exists --exit-on-error \
+  -L /tmp/drill-toc.list \
   < "${DB_DUMP}" || restore_rc=$?
 
 log "timescaledb_post_restore ..."
