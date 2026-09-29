@@ -188,15 +188,19 @@ for p in code_files():
 # — all real ways to pull in the other rail. AST only sees real import/call
 # nodes, so a docstring/comment that merely NAMES the other module (e.g. to
 # document this very rule) is never flagged.
+# ponytail: every admin/mfu*.py / admin/bse*.py is provider-side (not just the two UAT
+# routers) — covers future admin files AND lets the self-test use a throwaway fixture
+# instead of editing the real router (RCA 2026-09-30).
+_ADMIN = ROOT / "backend" / "dhanradar" / "admin"
 _MFU_PATHS = [
     ROOT / "backend" / "dhanradar" / "mfu",
     ROOT / "backend" / "dhanradar" / "models" / "mfu.py",
-    ROOT / "backend" / "dhanradar" / "admin" / "mfu_uat_router.py",
+    *sorted(_ADMIN.glob("mfu*.py")),
 ]
 _BSE_PATHS = [
     ROOT / "backend" / "dhanradar" / "bse",
     ROOT / "backend" / "dhanradar" / "models" / "bse.py",
-    ROOT / "backend" / "dhanradar" / "admin" / "bse_uat_router.py",
+    *sorted(_ADMIN.glob("bse*.py")),
 ]
 _BSE_MODULES = {"dhanradar.bse", "dhanradar.models.bse", "dhanradar.admin.bse_uat_router"}
 _MFU_MODULES = {"dhanradar.mfu", "dhanradar.models.mfu", "dhanradar.admin.mfu_uat_router"}
