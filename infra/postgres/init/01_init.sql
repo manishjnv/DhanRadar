@@ -105,7 +105,7 @@ DO $$
 DECLARE s text;
 BEGIN
     FOREACH s IN ARRAY ARRAY['auth','billing','mf','notify','compliance','mood','consent',
-        'audit','education','news','concepts','signal','bse'] LOOP
+        'audit','education','news','concepts','signal','bse','mfu'] LOOP
         IF to_regnamespace(s) IS NULL THEN
             CONTINUE;  -- created later by its migration; migration 0052 grants it
         END IF;
