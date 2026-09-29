@@ -116,6 +116,7 @@ else
   fi
 
   RESTORE_DIR="$(mktemp -d /tmp/dhanradar-drill-XXXXXX)"
+  DRILL_OWNS_DIR=1  # this script created it -> removed on ANY exit (see _drill_cleanup)
   log "Downloading ${R2_SRC} → ${RESTORE_DIR} ..."
   # Fetch each artifact BY NAME — never `cp --recursive` (S3 keys may contain
   # "/" or ".."; explicit destinations make key-derived path traversal
@@ -143,6 +144,15 @@ else
   rm -f "${R2_CRED_FILE}"
   trap - EXIT
 fi
+# Never leave backup artifacts (esp. a DECRYPTED db.dump = full plaintext DB) on the
+# shared box after a failed or finished drill. Only removes what this script created:
+# its own mktemp dir, or the decrypted file inside a caller-supplied local dir.
+_drill_cleanup() {
+  if [[ "${DRILL_OWNS_DIR:-0}" == "1" && -n "${RESTORE_DIR}" ]]; then rm -rf "${RESTORE_DIR}"; fi
+  if [[ "${DRILL_DECRYPTED:-0}" == "1" && -n "${DB_DUMP:-}" ]]; then rm -f "${DB_DUMP}"; fi
+  return 0
+}
+trap _drill_cleanup EXIT
 T_FETCH_END=$(date +%s)
 
 # ── 3. Verify MANIFEST checksums (same allowlist as restore.sh) ──────────────
@@ -194,6 +204,7 @@ if [[ -f "${RESTORE_DIR}/db.dump.age" ]]; then
   [[ -f "${AGE_IDENTITY}" ]] \
     || die "age identity not found at AGE_IDENTITY=${AGE_IDENTITY} — cannot decrypt db.dump.age."
   log "Decrypting db.dump.age with age ..."
+  DRILL_DECRYPTED=1  # set BEFORE decrypting so a partial plaintext is also removed
   age -d -i "${AGE_IDENTITY}" -o "${DB_DUMP}" "${RESTORE_DIR}/db.dump.age" \
     || die "age decryption failed for db.dump.age (wrong identity key?)."
 fi
