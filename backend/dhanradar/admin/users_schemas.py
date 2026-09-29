@@ -159,3 +159,19 @@ class UserActionResponse(BaseModel):
 
     ok: bool
     status: str
+
+
+# ---------------------------------------------------------------------------
+# Hard erasure (DPDP, B79)
+# ---------------------------------------------------------------------------
+
+
+class EraseUserResponse(BaseModel):
+    """Response for POST /admin/users/{user_id}/erase.
+
+    `counts` is table label -> row count (no PII — see auth.erasure module
+    docstring for the full FK map this mirrors).
+    """
+
+    ok: bool
+    counts: dict[str, int]
