@@ -209,21 +209,20 @@ def test_mfu_importing_bse_bypass_shapes_are_caught(payload: str) -> None:
 def test_mfu_admin_router_relative_import_of_bse_is_caught(relative_import: str) -> None:
     """Guard #11 AST rewrite: a relative import resolves against the file's own
     package (dhanradar.admin), so it must be caught even though the string
-    "dhanradar.bse" never appears in the source. Temporarily appends to the
-    REAL admin/mfu_uat_router.py (the only admin-side file in the mfu scope)
-    and always restores the original content, even on assertion failure."""
-    target = BACKEND_DHANRADAR / "admin" / "mfu_uat_router.py"
-    original = target.read_text(encoding="utf-8")
+    "dhanradar.bse" never appears in the source. Uses a throwaway admin/mfu*.py
+    fixture (the guard treats every admin/mfu*.py as MFU-side) — never edits the
+    real mfu_uat_router.py (RCA 2026-09-30: concurrent runs leaked that edit)."""
+    fixture = BACKEND_DHANRADAR / "admin" / "mfu__ci_guard_selftest__.py"
+    fixture.write_text(relative_import, encoding="utf-8")
     try:
-        target.write_text(original + "\n" + relative_import, encoding="utf-8")
         result = _run_guard()
         assert result.returncode == 1, (
             f"guard must FAIL on relative import {relative_import!r}, but passed:\n{result.stdout}"
         )
         assert "mfu/bse module isolation" in result.stdout
-        assert "mfu_uat_router.py" in result.stdout
+        assert "mfu__ci_guard_selftest__.py" in result.stdout
     finally:
-        target.write_text(original, encoding="utf-8")
+        fixture.unlink(missing_ok=True)
 
 
 def test_docstring_naming_other_rail_is_not_flagged() -> None:
