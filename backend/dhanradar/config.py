@@ -276,6 +276,9 @@ class Settings(BaseSettings):
     MFU_API_BASE_URL_UAT: str = "https://test.mfuonline.com"
     MFU_UAT_ENABLED: bool = False
 
+    # MF transaction provider switch default (admin/mf_txn_router.py) — "bse" until MFU Phase 2 ships an order rail.
+    MF_TXN_PROVIDER_DEFAULT: str = "bse"
+
     # ------------------------------------------------------------------
     # Google SSO (OAuth 2.0 authorization-code + PKCE)
     # All three must be set for SSO to be active; any absent → 503.
