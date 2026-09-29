@@ -13,7 +13,11 @@
 #   With no argument the latest backups/ stamp in R2 is used.
 #
 # REQUIREMENTS
-#   Same as backup.sh: repo root, .env, `aws` CLI, Docker Compose v2.
+#   Same as backup.sh: repo root, .env, `aws` CLI, Docker Compose v2. Backups
+#   since PR #334 (2026-06-24) are age-encrypted (db.dump.age, ...) — this
+#   script also needs the `age` CLI and the offline identity key at
+#   AGE_IDENTITY (default /etc/dhanradar-keys/backup_age.key) to decrypt them.
+#   Legacy pre-encryption backups (plaintext db.dump) still work unchanged.
 #
 # SAFETY
 #   - All docker ops are scoped to project `dhanradar-drill` — a fresh, isolated
@@ -112,6 +116,7 @@ else
   fi
 
   RESTORE_DIR="$(mktemp -d /tmp/dhanradar-drill-XXXXXX)"
+  DRILL_OWNS_DIR=1  # this script created it -> removed on ANY exit (see _drill_cleanup)
   log "Downloading ${R2_SRC} → ${RESTORE_DIR} ..."
   # Fetch each artifact BY NAME — never `cp --recursive` (S3 keys may contain
   # "/" or ".."; explicit destinations make key-derived path traversal
@@ -122,12 +127,32 @@ else
         --endpoint-url "${R2_ENDPOINT}" --no-progress
   }
   _r2_get "MANIFEST" || die "R2 download failed for MANIFEST. Check prefix and credentials."
-  _r2_get "db.dump"  || die "R2 download failed for db.dump. Check prefix and credentials."
-  _r2_get "redis-dump.rdb"          || warn "redis-dump.rdb not fetched (may be absent at source) — continuing."
-  _r2_get "redis-appendonly.tar.gz" || warn "redis-appendonly.tar.gz not fetched (may be absent at source) — continuing."
+
+  # Since PR #334 backup.sh age-encrypts artifacts (db.dump.age, ...). Fetch the
+  # .age names when the MANIFEST says so; fall back to legacy plaintext names
+  # for backups taken before that change so old backups can still drill.
+  if grep -q '^file=db.dump.age[[:space:]]' "${RESTORE_DIR}/MANIFEST"; then
+    log "MANIFEST indicates age-encrypted backup — fetching .age artifacts."
+    _r2_get "db.dump.age"  || die "R2 download failed for db.dump.age. Check prefix and credentials."
+    _r2_get "redis-dump.rdb.age"          || warn "redis-dump.rdb.age not fetched (may be absent at source) — continuing."
+    _r2_get "redis-appendonly.tar.gz.age" || warn "redis-appendonly.tar.gz.age not fetched (may be absent at source) — continuing."
+  else
+    _r2_get "db.dump"  || die "R2 download failed for db.dump. Check prefix and credentials."
+    _r2_get "redis-dump.rdb"          || warn "redis-dump.rdb not fetched (may be absent at source) — continuing."
+    _r2_get "redis-appendonly.tar.gz" || warn "redis-appendonly.tar.gz not fetched (may be absent at source) — continuing."
+  fi
   rm -f "${R2_CRED_FILE}"
   trap - EXIT
 fi
+# Never leave backup artifacts (esp. a DECRYPTED db.dump = full plaintext DB) on the
+# shared box after a failed or finished drill. Only removes what this script created:
+# its own mktemp dir, or the decrypted file inside a caller-supplied local dir.
+_drill_cleanup() {
+  if [[ "${DRILL_OWNS_DIR:-0}" == "1" && -n "${RESTORE_DIR}" ]]; then rm -rf "${RESTORE_DIR}"; fi
+  if [[ "${DRILL_DECRYPTED:-0}" == "1" && -n "${DB_DUMP:-}" ]]; then rm -f "${DB_DUMP}"; fi
+  return 0
+}
+trap _drill_cleanup EXIT
 T_FETCH_END=$(date +%s)
 
 # ── 3. Verify MANIFEST checksums (same allowlist as restore.sh) ──────────────
@@ -141,7 +166,7 @@ while IFS= read -r line; do
   if [[ "${line}" =~ ^file=([^[:space:]]+)[[:space:]]+size=[^[:space:]]+[[:space:]]+sha256=([^[:space:]]+) ]]; then
     fname="${BASH_REMATCH[1]}"; expected_sha="${BASH_REMATCH[2]}"
     case "${fname}" in
-      db.dump|redis-dump.rdb|redis-appendonly.tar.gz) ;;
+      db.dump|db.dump.age|redis-dump.rdb|redis-dump.rdb.age|redis-appendonly.tar.gz|redis-appendonly.tar.gz.age) ;;
       *) die "MANIFEST lists an unexpected artifact name '${fname}' — refusing (possible tampering)." ;;
     esac
     fpath="${RESTORE_DIR}/${fname}"
@@ -156,7 +181,7 @@ while IFS= read -r line; do
     [[ "${actual_sha}" == "${expected_sha}" ]] \
       || die "Checksum MISMATCH for ${fname}. Backup may be corrupt."
     log "  OK  ${fname} (sha256 verified)"
-    if [[ "${fname}" == "db.dump" ]]; then
+    if [[ "${fname}" == "db.dump" || "${fname}" == "db.dump.age" ]]; then
       db_dump_verified=true
     fi
   fi
@@ -167,7 +192,22 @@ done < "${MANIFEST}"
 
 BACKUP_STAMP="$(grep '^backup_utc=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"
 BACKUP_ALEMBIC="$(grep '^alembic_rev=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"
+
+# ── 3b. Decrypt age-encrypted db dump (if present) ───────────────────────────
+# Same approach as restore-db.sh: prefer db.dump.age, decrypt with the offline
+# identity key. Fail closed — never fall back to an unverified/plaintext dump.
 DB_DUMP="${RESTORE_DIR}/db.dump"
+if [[ -f "${RESTORE_DIR}/db.dump.age" ]]; then
+  AGE_IDENTITY="${AGE_IDENTITY:-/etc/dhanradar-keys/backup_age.key}"
+  command -v age > /dev/null 2>&1 \
+    || die "'age' not found on PATH — cannot decrypt db.dump.age."
+  [[ -f "${AGE_IDENTITY}" ]] \
+    || die "age identity not found at AGE_IDENTITY=${AGE_IDENTITY} — cannot decrypt db.dump.age."
+  log "Decrypting db.dump.age with age ..."
+  DRILL_DECRYPTED=1  # set BEFORE decrypting so a partial plaintext is also removed
+  age -d -i "${AGE_IDENTITY}" -o "${DB_DUMP}" "${RESTORE_DIR}/db.dump.age" \
+    || die "age decryption failed for db.dump.age (wrong identity key?)."
+fi
 [[ -f "${DB_DUMP}" ]] || die "db.dump not found in restore dir."
 
 # ── 4. Start the scratch postgres ────────────────────────────────────────────
