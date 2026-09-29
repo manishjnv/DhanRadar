@@ -263,6 +263,20 @@ class Settings(BaseSettings):
     BSE_WEBHOOK_ALLOW_PLAINTEXT: bool = False
 
     # ------------------------------------------------------------------
+    # MF Utility (MFU) — Phase 0 foundation only, no orders yet. A second,
+    # fully separate MF transaction provider (never mixed with the BSE rail —
+    # non-neg #7 module isolation). UAT login currently fails with errorCode 1
+    # ("decrypt the text") pending MFU cipher-text confirmation.
+    # ------------------------------------------------------------------
+    MFU_ENTITY_ID: str = ""
+    MFU_LOGIN_USER: str = ""
+    MFU_LOGIN_PASSWORD: str = ""
+    MFU_AES_KEY: str = ""
+    MFU_AES_IV: str = ""
+    MFU_API_BASE_URL_UAT: str = "https://test.mfuonline.com"
+    MFU_UAT_ENABLED: bool = False
+
+    # ------------------------------------------------------------------
     # Google SSO (OAuth 2.0 authorization-code + PKCE)
     # All three must be set for SSO to be active; any absent → 503.
     # ------------------------------------------------------------------

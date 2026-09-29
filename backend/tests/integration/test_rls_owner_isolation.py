@@ -52,7 +52,9 @@ async def _portfolio_ids(session) -> set:
 async def test_fixtures_have_the_right_roles(app_session, admin_session):
     arow = (
         await app_session.execute(
-            text("SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            text(
+                "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+            )
         )
     ).one()
     assert arow[0] == "dhanradar_app", "RLS tests MUST run as dhanradar_app"
@@ -111,10 +113,14 @@ async def test_no_unclassified_user_id_table(db_session):
                 ),
                 {"schemas": list(APP_SCHEMAS)},
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     classified = set(PERSONAL_TABLES) | set(AUDIT_EXEMPT)
-    assert real <= classified, f"UNCLASSIFIED user_id tables (no RLS, no exemption): {real - classified}"
+    assert real <= classified, (
+        f"UNCLASSIFIED user_id tables (no RLS, no exemption): {real - classified}"
+    )
 
 
 def test_rls_enforced_is_subset_of_personal():
@@ -148,7 +154,9 @@ def test_rls_migrations_table_list_matches_rls_enforced():
         "0082_mf_watchlist_alerts.py",
     ):
         found |= set(pat.findall((versions / fname).read_text(encoding="utf-8")))
-    assert found == set(RLS_ENFORCED), f"migration vs RLS_ENFORCED drift: {found ^ set(RLS_ENFORCED)}"
+    assert found == set(RLS_ENFORCED), (
+        f"migration vs RLS_ENFORCED drift: {found ^ set(RLS_ENFORCED)}"
+    )
 
 
 def test_schema_grant_lists_match_app_schemas():
@@ -161,17 +169,29 @@ def test_schema_grant_lists_match_app_schemas():
     repo = backend.parent
     expected = set(APP_SCHEMAS)
 
-    mig = (
-        backend / "alembic" / "versions" / "0052_app_db_role_grants_real_schemas.py"
-    ).read_text(encoding="utf-8")
+    mig = (backend / "alembic" / "versions" / "0052_app_db_role_grants_real_schemas.py").read_text(
+        encoding="utf-8"
+    )
     mig_block = re.search(r"_SCHEMAS\s*=\s*\[(.*?)\]", mig, re.DOTALL).group(1)
     mig_schemas = set(re.findall(r'"(\w+)"', mig_block))
-    assert mig_schemas == expected, f"0052._SCHEMAS drift vs APP_SCHEMAS: {mig_schemas ^ expected}"
+    # Schemas created AFTER 0052's one-time loop can't be granted by it (they don't exist yet when
+    # it runs) — each carries its own grant block in the migration that creates it. Assert that
+    # block is really there for BOTH roles, so the B80 grant-gap protection still holds.
+    self_granting = {"mfu": "0083_mfu_schema_api_log.py"}
+    assert mig_schemas == expected - set(self_granting), (
+        f"0052._SCHEMAS drift vs APP_SCHEMAS: {mig_schemas ^ (expected - set(self_granting))}"
+    )
+    for schema, fname in self_granting.items():
+        own = (backend / "alembic" / "versions" / fname).read_text(encoding="utf-8")
+        for role in ("dhanradar_app", "dhanradar_admin"):
+            assert f"GRANT USAGE ON SCHEMA {schema} TO {role}" in own, f"{fname} lacks {role} grant"
 
     init = (repo / "infra" / "postgres" / "init" / "01_init.sql").read_text(encoding="utf-8")
     init_arr = re.search(r"FOREACH\s+s\s+IN\s+ARRAY\s+ARRAY\[(.*?)\]", init, re.DOTALL).group(1)
     init_schemas = set(re.findall(r"'(\w+)'", init_arr))
-    assert init_schemas == expected, f"01_init.sql grant list drift vs APP_SCHEMAS: {init_schemas ^ expected}"
+    assert init_schemas == expected, (
+        f"01_init.sql grant list drift vs APP_SCHEMAS: {init_schemas ^ expected}"
+    )
 
 
 # --- trap (b): isolation WITH positive control (AS dhanradar_app) ---------------------------------
@@ -184,7 +204,9 @@ async def test_owner_isolation_with_positive_control(db_session, app_session):
 
     await set_rls_user(app_session, str(a.id))
     seen_a = await _portfolio_ids(app_session)
-    assert pa.id in seen_a, "POSITIVE control failed: A cannot see A's own row (RLS denied everything?)"
+    assert pa.id in seen_a, (
+        "POSITIVE control failed: A cannot see A's own row (RLS denied everything?)"
+    )
     assert pb.id not in seen_a, "ISOLATION failed: A can see B's row"
     await app_session.rollback()
 
