@@ -9,7 +9,7 @@ Test matrix:
   - /google/start when unconfigured → 503
   - /google/start when configured → 302 with required params + Redis state stored
   - /google/callback with unknown state → 302 to /login?error=google_auth_failed
-  - /google/callback happy path (new user) → 303 to /dashboard + cookies set
+  - /google/callback happy path (new user) → 303 to /mf/portfolio + cookies set
   - /google/callback existing password user, same email → REJECTED with
     account_exists_use_password (auto-link forbidden: local emails unverified)
   - /google/callback deletion_requested_at user → redirect with account_deletion_pending
@@ -154,13 +154,13 @@ async def test_google_callback_unknown_state_redirects(async_client):
 
 
 # ---------------------------------------------------------------------------
-# /google/callback — happy path (new user created, 303 to /dashboard + cookies)
+# /google/callback — happy path (new user created, 303 to /mf/portfolio + cookies)
 # ---------------------------------------------------------------------------
 
 async def test_google_callback_happy_path_new_user(async_client, fake_redis, monkeypatch):
     """
     Full happy path: stored state → exchange_code_with_verifier → verify_id_token
-    → new user created → 303 redirect to /dashboard with auth cookies set.
+    → new user created → 303 redirect to /mf/portfolio with auth cookies set.
     """
     monkeypatch.setattr("dhanradar.redis_client._client", fake_redis)
     monkeypatch.setattr("dhanradar.redis_client.get_redis", lambda: fake_redis)
@@ -169,7 +169,7 @@ async def test_google_callback_happy_path_new_user(async_client, fake_redis, mon
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     code_verifier = secrets.token_urlsafe(64)
-    state_payload = json.dumps({"nonce": nonce, "code_verifier": code_verifier, "next": "/dashboard"})
+    state_payload = json.dumps({"nonce": nonce, "code_verifier": code_verifier, "next": "/mf/portfolio"})
     await fake_redis.set(f"auth:oauth_state:{state}", state_payload, ex=600)
 
     claims = _fake_claims(nonce=nonce)
@@ -189,7 +189,7 @@ async def test_google_callback_happy_path_new_user(async_client, fake_redis, mon
             )
 
     assert resp.status_code == 303, resp.text
-    assert resp.headers["location"] == "/dashboard"
+    assert resp.headers["location"] == "/mf/portfolio"
 
     access = extract_cookie(resp, "__Host-access")
     refresh = extract_cookie(resp, "__Host-refresh")
@@ -225,7 +225,7 @@ async def test_google_callback_password_account_not_autolinked(async_client, fak
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     code_verifier = secrets.token_urlsafe(64)
-    state_payload = json.dumps({"nonce": nonce, "code_verifier": code_verifier, "next": "/dashboard"})
+    state_payload = json.dumps({"nonce": nonce, "code_verifier": code_verifier, "next": "/mf/portfolio"})
     await fake_redis.set(f"auth:oauth_state:{state}", state_payload, ex=600)
 
     claims = _fake_claims(sub=_FAKE_SUB, email=email, nonce=nonce)
@@ -295,7 +295,7 @@ async def test_google_callback_deletion_pending_redirect(
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     state_payload = json.dumps(
-        {"nonce": nonce, "code_verifier": secrets.token_urlsafe(64), "next": "/dashboard"}
+        {"nonce": nonce, "code_verifier": secrets.token_urlsafe(64), "next": "/mf/portfolio"}
     )
     await fake_redis.set(f"auth:oauth_state:{state}", state_payload, ex=600)
 
@@ -333,7 +333,7 @@ async def test_google_callback_unverified_email_redirects(
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     state_payload = json.dumps(
-        {"nonce": nonce, "code_verifier": secrets.token_urlsafe(64), "next": "/dashboard"}
+        {"nonce": nonce, "code_verifier": secrets.token_urlsafe(64), "next": "/mf/portfolio"}
     )
     await fake_redis.set(f"auth:oauth_state:{state}", state_payload, ex=600)
 

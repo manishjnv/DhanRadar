@@ -557,7 +557,7 @@ async def google_callback(
         state_data = json.loads(raw_state)
         stored_nonce: str = state_data["nonce"]
         code_verifier: str = state_data["code_verifier"]
-        stored_next: str = state_data.get("next", "/dashboard")
+        stored_next: str = state_data.get("next", google_svc.DEFAULT_NEXT)
     except (KeyError, ValueError):
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=status.HTTP_302_FOUND)
 

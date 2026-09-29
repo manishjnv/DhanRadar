@@ -56,7 +56,7 @@ class TestPkceChallenge:
 
 class TestValidateNext:
     def test_valid_simple_path(self) -> None:
-        assert validate_next("/dashboard") == "/dashboard"
+        assert validate_next("/mf/portfolio") == "/mf/portfolio"
 
     def test_valid_path_with_segments(self) -> None:
         assert validate_next("/mf/portfolio") == "/mf/portfolio"
@@ -65,40 +65,40 @@ class TestValidateNext:
         assert validate_next("/settings?tab=profile") == "/settings?tab=profile"
 
     def test_double_slash_rejected(self) -> None:
-        """'//evil.com' is an open redirect; must fall back to /dashboard."""
-        assert validate_next("//evil.com") == "/dashboard"
+        """'//evil.com' is an open redirect; must fall back to /mf/portfolio."""
+        assert validate_next("//evil.com") == "/mf/portfolio"
 
     def test_absolute_http_rejected(self) -> None:
-        assert validate_next("http://evil.com") == "/dashboard"
+        assert validate_next("http://evil.com") == "/mf/portfolio"
 
     def test_absolute_https_rejected(self) -> None:
-        assert validate_next("https://attacker.io/steal") == "/dashboard"
+        assert validate_next("https://attacker.io/steal") == "/mf/portfolio"
 
     def test_none_gives_dashboard(self) -> None:
-        assert validate_next(None) == "/dashboard"
+        assert validate_next(None) == "/mf/portfolio"
 
     def test_empty_string_gives_dashboard(self) -> None:
-        assert validate_next("") == "/dashboard"
+        assert validate_next("") == "/mf/portfolio"
 
     def test_backslash_rejected(self) -> None:
         """Browsers fold '\\' into '/': '/\\evil.com' would leave the origin."""
-        assert validate_next("/\\evil.com") == "/dashboard"
+        assert validate_next("/\\evil.com") == "/mf/portfolio"
 
     def test_backslash_slash_rejected(self) -> None:
-        assert validate_next("/\\/evil.com") == "/dashboard"
+        assert validate_next("/\\/evil.com") == "/mf/portfolio"
 
     def test_embedded_backslash_rejected(self) -> None:
-        assert validate_next("/dash\\board") == "/dashboard"
+        assert validate_next("/dash\\board") == "/mf/portfolio"
 
     def test_control_char_rejected(self) -> None:
-        assert validate_next("/dash\nboard") == "/dashboard"
-        assert validate_next("/dash\tboard") == "/dashboard"
+        assert validate_next("/dash\nboard") == "/mf/portfolio"
+        assert validate_next("/dash\tboard") == "/mf/portfolio"
 
     def test_root_slash_accepted(self) -> None:
         assert validate_next("/") == "/"
 
     def test_javascript_scheme_rejected(self) -> None:
-        assert validate_next("javascript:alert(1)") == "/dashboard"
+        assert validate_next("javascript:alert(1)") == "/mf/portfolio"
 
 
 # ---------------------------------------------------------------------------

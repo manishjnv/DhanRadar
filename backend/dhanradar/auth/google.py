@@ -50,6 +50,10 @@ def pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
+# Safe post-login landing page (the old /dashboard was decommissioned in PR #456).
+DEFAULT_NEXT = "/mf/portfolio"
+
+
 def validate_next(next_param: str | None) -> str:
     """
     Validate the `next` redirect path.
@@ -57,7 +61,7 @@ def validate_next(next_param: str | None) -> str:
     Must start with "/", NOT start with "//", and contain no backslash or
     control characters (open-redirect guard).  Browsers fold "\\" into "/"
     when following a Location header, so "/\\evil.com" would leave the origin.
-    Returns "/dashboard" as the safe fallback on any invalid input.
+    Returns DEFAULT_NEXT as the safe fallback on any invalid input.
     """
     if (
         next_param
@@ -67,7 +71,7 @@ def validate_next(next_param: str | None) -> str:
         and not any(ord(c) < 0x20 for c in next_param)
     ):
         return next_param
-    return "/dashboard"
+    return DEFAULT_NEXT
 
 
 def build_auth_url(
