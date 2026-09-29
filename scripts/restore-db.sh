@@ -23,6 +23,7 @@ set -euo pipefail
 TIMESTAMP() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 log()  { echo "[$(TIMESTAMP)] $*"; }
 die()  { echo "[$(TIMESTAMP)] ERROR: $*" >&2; exit 1; }
+warn() { echo "[$(TIMESTAMP)] WARNING: $*" >&2; }
 
 STAMP="${1:-latest}"
 TARGET_DB="${2:-dhanradar_restore_test}"
@@ -77,14 +78,51 @@ else
 fi
 log "Dump ready ($(du -h "${WORK}/db.dump" | cut -f1))."
 
+# ── Resolve the TimescaleDB version to pin (B37) ─────────────────────────────
+# TSDB_VERSION env overrides; else read timescaledb_version= from the backup's
+# MANIFEST (fetched here — this script otherwise only downloads db.dump).
+SRC_MANIFEST="s3://${R2_BUCKET}/backups/${STAMP}/MANIFEST"
+TSDB_VERSION_SRC="unpinned"
+if [[ -n "${TSDB_VERSION:-}" ]]; then
+  TSDB_VERSION_SRC="env"
+elif aws s3 cp --endpoint-url "${R2_ENDPOINT}" "${SRC_MANIFEST}" "${WORK}/MANIFEST" --no-progress >/dev/null 2>&1; then
+  TSDB_VERSION="$(grep '^timescaledb_version=' "${WORK}/MANIFEST" | cut -d= -f2 || true)"
+  [[ -n "${TSDB_VERSION}" && "${TSDB_VERSION}" != "unavailable" ]] && TSDB_VERSION_SRC="manifest" || TSDB_VERSION=""
+else
+  warn "MANIFEST not found under backups/${STAMP}/ — cannot resolve timescaledb_version from it."
+fi
+if [[ -n "${TSDB_VERSION:-}" ]]; then
+  [[ "${TSDB_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || die "timescaledb version '${TSDB_VERSION}' (source: ${TSDB_VERSION_SRC}) is not a valid x.y.z — refusing to use it in SQL."
+  log "TimescaleDB target version: ${TSDB_VERSION} (source: ${TSDB_VERSION_SRC})"
+else
+  warn "No timescaledb_version resolved — TARGET_DB will get the image's DEFAULT timescaledb version, which may differ from the dump's."
+fi
+
 # ── Recreate target DB ───────────────────────────────────────────────────────
 log "(Re)creating target DB ${TARGET_DB} ..."
 docker compose exec -T "${PG_SVC}" dropdb   -U dhanradar --if-exists "${TARGET_DB}"
 docker compose exec -T "${PG_SVC}" createdb -U dhanradar "${TARGET_DB}"
 
 # ── TimescaleDB-aware restore (the whole point of this script) ───────────────
-log "CREATE EXTENSION timescaledb + timescaledb_pre_restore() ..."
-docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -qc "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+# TARGET_DB was JUST created fresh above (drop --if-exists + createdb, always,
+# every run) — it can never contain the extension or any data yet, so pinning
+# here needs no non-empty guard (contrast restore-drill.sh, whose scratch DB
+# can in principle survive across runs if a prior drill's teardown was skipped).
+if [[ -n "${TSDB_VERSION:-}" ]]; then
+  AVAILABLE="$(docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -tAc \
+    "SELECT 1 FROM pg_available_extension_versions WHERE name='timescaledb' AND version='${TSDB_VERSION}';" \
+    2>/dev/null | tr -d '[:space:]')"
+  [[ "${AVAILABLE}" == "1" ]] \
+    || die "timescaledb ${TSDB_VERSION} is not in this image's pg_available_extension_versions — refusing."
+  log "CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}' + timescaledb_pre_restore() ..."
+  docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -v ON_ERROR_STOP=1 \
+    -qc "CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}';" \
+    || die "Failed to create timescaledb extension at version ${TSDB_VERSION}."
+else
+  log "CREATE EXTENSION timescaledb (unpinned, image default) + timescaledb_pre_restore() ..."
+  docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -qc "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+fi
 docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -tAqc "SELECT timescaledb_pre_restore();"
 
 log "pg_restore (errors for pg_cron / timescale catalog tables are expected/benign) ..."

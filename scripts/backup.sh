@@ -183,6 +183,16 @@ ALEMBIC_REV="$(docker compose run --rm --quiet dhanradar-fastapi \
   || echo "unavailable")"
 [[ -n "${ALEMBIC_REV}" ]] || ALEMBIC_REV="unavailable"
 
+# TimescaleDB extension version actually installed in the live DB (B37). A
+# restore that creates the extension at a NEWER default version than this can
+# silently corrupt hypertable catalogs (dimension_slice etc.) — restore-drill.sh
+# / restore-db.sh pin to this value.
+TSDB_VERSION="$(docker compose exec -T dhanradar-postgres \
+  psql -U dhanradar -d dhanradar -tAc \
+  "SELECT extversion FROM pg_extension WHERE extname='timescaledb';" 2>/dev/null \
+  | tr -d '[:space:]' || true)"
+[[ -n "${TSDB_VERSION}" ]] || TSDB_VERSION="unavailable"
+
 sha256_of() {
   local f="$1"
   if [[ -s "${f}" ]]; then
@@ -196,6 +206,7 @@ sha256_of() {
   echo "backup_utc=${UTC_STAMP}"
   echo "git_sha=${GIT_SHA}"
   echo "alembic_rev=${ALEMBIC_REV}"
+  echo "timescaledb_version=${TSDB_VERSION}"
   echo "encryption=age recipient=${AGE_RECIPIENT}"
   echo ""
   echo "file=db.dump.age size=${DB_SIZE} sha256=$(sha256_of "${DB_DUMP}")"

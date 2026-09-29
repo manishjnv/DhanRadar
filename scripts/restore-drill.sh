@@ -193,6 +193,26 @@ done < "${MANIFEST}"
 BACKUP_STAMP="$(grep '^backup_utc=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"
 BACKUP_ALEMBIC="$(grep '^alembic_rev=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"
 
+# ── 3a. Resolve the TimescaleDB version to pin (B37) ─────────────────────────
+# TSDB_VERSION env overrides the MANIFEST (e.g. for pre-B37 backups with no
+# timescaledb_version= line at all — see the on-box drill command for tonight's
+# backup). Validated + applied once the scratch DB is up, in §4b below.
+TSDB_VERSION_SRC="unpinned"
+if [[ -n "${TSDB_VERSION:-}" ]]; then
+  TSDB_VERSION_SRC="env"
+else
+  TSDB_VERSION="$(grep '^timescaledb_version=' "${MANIFEST}" | cut -d= -f2 || true)"
+  [[ -n "${TSDB_VERSION}" && "${TSDB_VERSION}" != "unavailable" ]] && TSDB_VERSION_SRC="manifest" || TSDB_VERSION=""
+fi
+if [[ -n "${TSDB_VERSION}" ]]; then
+  [[ "${TSDB_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || die "timescaledb version '${TSDB_VERSION}' (source: ${TSDB_VERSION_SRC}) is not a valid x.y.z — refusing to use it in SQL."
+  log "TimescaleDB target version: ${TSDB_VERSION} (source: ${TSDB_VERSION_SRC})"
+else
+  warn "No timescaledb_version resolved (no TSDB_VERSION env, MANIFEST has no timescaledb_version= line or it is 'unavailable')."
+  warn "The drill DB will get the image's DEFAULT timescaledb version, which may differ from the dump's — pg_restore may then fail on hypertable catalogs."
+fi
+
 # ── 3b. Decrypt age-encrypted db dump (if present) ───────────────────────────
 # Same approach as restore-db.sh: prefer db.dump.age, decrypt with the offline
 # identity key. Fail closed — never fall back to an unverified/plaintext dump.
@@ -234,6 +254,40 @@ while true; do
   sleep 3
 done
 log "Drill postgres healthy."
+
+# ── 4b. Pin timescaledb to the dump's version (B37) ──────────────────────────
+# Fail closed if the resolved version isn't actually available in this image.
+# Only ever acts on the drill scratch DB, which is always freshly created by
+# this run (§1 refuses to start over an existing dhanradar-drill stack) — the
+# table-count check below is defense in depth against that invariant changing.
+if [[ -n "${TSDB_VERSION}" ]]; then
+  AVAILABLE="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
+    "SELECT 1 FROM pg_available_extension_versions WHERE name='timescaledb' AND version='${TSDB_VERSION}';" \
+    2>/dev/null | tr -d '[:space:]')"
+  [[ "${AVAILABLE}" == "1" ]] \
+    || die "timescaledb ${TSDB_VERSION} is not in this image's pg_available_extension_versions — refusing."
+
+  CURRENT="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
+    "SELECT extversion FROM pg_extension WHERE extname='timescaledb';" 2>/dev/null | tr -d '[:space:]')"
+  if [[ -z "${CURRENT}" ]]; then
+    log "Creating timescaledb extension pinned at ${TSDB_VERSION} ..."
+    ${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+      -c "CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}';" > /dev/null \
+      || die "Failed to create timescaledb extension at version ${TSDB_VERSION}."
+  elif [[ "${CURRENT}" != "${TSDB_VERSION}" ]]; then
+    TABLE_COUNT="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
+      "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema','timescaledb_information','_timescaledb_catalog','_timescaledb_internal','_timescaledb_config','_timescaledb_cache');" \
+      2>/dev/null | tr -d '[:space:]')"
+    [[ "${TABLE_COUNT}" == "0" ]] \
+      || die "Drill DB already has ${TABLE_COUNT} user table(s) at timescaledb ${CURRENT} — refusing to DROP/ALTER the extension on non-empty data."
+    log "Re-pinning timescaledb from ${CURRENT} to ${TSDB_VERSION} (empty DB) ..."
+    ${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
+      -c "DROP EXTENSION timescaledb; CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}';" > /dev/null \
+      || die "Failed to re-pin timescaledb to version ${TSDB_VERSION}."
+  else
+    log "timescaledb already at the pinned version ${TSDB_VERSION}."
+  fi
+fi
 
 # ── 5. Restore into the scratch DB ───────────────────────────────────────────
 
