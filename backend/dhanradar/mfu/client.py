@@ -17,6 +17,7 @@ can't hammer the endpoint.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import time
@@ -32,11 +33,18 @@ from dhanradar.config import settings
 from dhanradar.mfu.crypto import decrypt, encrypt
 from dhanradar.redis_client import get_redis
 
+logger = logging.getLogger(__name__)
+
 _IST = ZoneInfo("Asia/Kolkata")
 
 _TOKEN_KEY = "mfu_uat:access_token"
 _COOLDOWN_KEY = "mfu_uat:login_cooldown"
 _COOLDOWN_S = 300
+# Race-proofs the "ONE login attempt" rule across concurrent callers (e.g. two
+# admin requests both finding no cached token) — without this, both could POST
+# GetAccessTokenV1 at once, defeating the single-attempt intent.
+_LOGIN_LOCK_KEY = "mfu_uat:login_lock"
+_LOGIN_LOCK_S = 60
 _TIMEOUT = 30.0
 
 # BSE's WAF blocks python UAs with an HTML page — MFU's may too; a real
@@ -89,8 +97,27 @@ def _none_to_empty(obj: Any) -> Any:
     return obj
 
 
+def _configured_secret_values() -> list[str]:
+    """The raw configured credential/key strings — never empty (skip unset)."""
+    return [
+        v
+        for v in (
+            settings.MFU_LOGIN_USER,
+            settings.MFU_LOGIN_PASSWORD,
+            settings.MFU_AES_KEY,
+            settings.MFU_AES_IV,
+        )
+        if v
+    ]
+
+
 def _scrub(obj: Any) -> Any:
-    """Redact credential/PII-shaped values before writing to the api-log table."""
+    """Redact credential/PII-shaped values before writing to the api-log table.
+
+    Beyond the key-name allowlist, also blanks any occurrence of the
+    CONFIGURED login user/password/AES key/IV wherever it appears in a string
+    value — even under an unknown key, or embedded inside an error message
+    (e.g. MFU echoing the password back in an errorMsg)."""
     if isinstance(obj, dict):
         out: dict[str, Any] = {}
         for k, v in obj.items():
@@ -102,7 +129,11 @@ def _scrub(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_scrub(v) for v in obj]
     if isinstance(obj, str):
-        return _PAN_RE.sub("*****", obj)
+        masked = _PAN_RE.sub("*****", obj)
+        for secret in _configured_secret_values():
+            if secret in masked:
+                masked = masked.replace(secret, "***")
+        return masked
     return obj
 
 
@@ -190,101 +221,122 @@ async def _write_log(
             response_json=_scrub(response_json),
         )
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # Evidence-log write is best-effort — a failure here (e.g. a unique_id
+        # collision, or the shared admin session already in a bad state) must
+        # never mask the REAL MfuError the caller is about to raise, and must
+        # never leave the shared db session stuck in a failed transaction.
+        await db.rollback()
+        logger.exception(
+            "mfu api-log write failed for unique_id=%s api_type=%s", unique_id, api_type
+        )
 
 
 async def login(db: AsyncSession) -> tuple[str, int]:
-    """ONE login attempt. Returns (token, ttl_s). Caches the token in Redis."""
+    """ONE login attempt. Returns (token, ttl_s). Caches the token in Redis.
+
+    Race-proofed with a short Redis lock: two concurrent callers must never
+    both POST GetAccessTokenV1 — the second is refused with LOGIN_IN_FLIGHT
+    (no HTTP call), not silently allowed through."""
     redis = get_redis()
     if await redis.get(_COOLDOWN_KEY):
         raise MfuError(None, "COOLDOWN", "MFU login is in a post-failure cooldown")
+    if not await redis.set(_LOGIN_LOCK_KEY, "1", nx=True, ex=_LOGIN_LOCK_S):
+        raise MfuError(None, "LOGIN_IN_FLIGHT", "another MFU login is already in flight")
 
-    base = base_url()
-    unique_id = new_unique_id()
-    req_body = {
-        "entityId": settings.MFU_ENTITY_ID,
-        "clientUser": encrypt(settings.MFU_LOGIN_USER, settings.MFU_AES_KEY, settings.MFU_AES_IV),
-        "clientPwd": encrypt(
-            settings.MFU_LOGIN_PASSWORD, settings.MFU_AES_KEY, settings.MFU_AES_IV
-        ),
-    }
-    logged_request = {
-        "reqBody": {**req_body, "clientUser": "<encrypted>", "clientPwd": "<encrypted>"}
-    }
+    try:
+        base = base_url()
+        unique_id = new_unique_id()
+        req_body = {
+            "entityId": settings.MFU_ENTITY_ID,
+            "clientUser": encrypt(
+                settings.MFU_LOGIN_USER, settings.MFU_AES_KEY, settings.MFU_AES_IV
+            ),
+            "clientPwd": encrypt(
+                settings.MFU_LOGIN_PASSWORD, settings.MFU_AES_KEY, settings.MFU_AES_IV
+            ),
+        }
+        logged_request = {
+            "reqBody": {**req_body, "clientUser": "<encrypted>", "clientPwd": "<encrypted>"}
+        }
 
-    started = time.monotonic()
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        started = time.monotonic()
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            try:
+                res = await client.post(
+                    f"{base}/GetAccessTokenV1",
+                    json={"reqBody": req_body},
+                    headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+                )
+            except httpx.HTTPError as exc:
+                await redis.set(_COOLDOWN_KEY, "1", ex=_COOLDOWN_S)
+                await _write_log(
+                    db,
+                    unique_id=unique_id,
+                    api_type="OAUTH-LOGIN",
+                    http_status=None,
+                    resp_flag=None,
+                    error_code="TRANSPORT_ERROR",
+                    error_msg=exc.__class__.__name__,
+                    latency_ms=0,
+                    request_json=logged_request,
+                    response_json=None,
+                )
+                raise MfuError(None, "TRANSPORT_ERROR", exc.__class__.__name__) from exc
+        latency_ms = int((time.monotonic() - started) * 1000)
+
         try:
-            res = await client.post(
-                f"{base}/GetAccessTokenV1",
-                json={"reqBody": req_body},
-                headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
-            )
-        except httpx.HTTPError as exc:
+            payload = res.json()
+        except ValueError:
+            payload = {"raw": res.text[:500]}
+
+        if res.status_code != 200 or "access_token" not in (
+            payload if isinstance(payload, dict) else {}
+        ):
+            code, msg = _parse_error(res.status_code, payload)
             await redis.set(_COOLDOWN_KEY, "1", ex=_COOLDOWN_S)
             await _write_log(
                 db,
                 unique_id=unique_id,
                 api_type="OAUTH-LOGIN",
-                http_status=None,
+                http_status=res.status_code,
                 resp_flag=None,
-                error_code="TRANSPORT_ERROR",
-                error_msg=exc.__class__.__name__,
-                latency_ms=0,
+                error_code=code,
+                error_msg=msg,
+                latency_ms=latency_ms,
                 request_json=logged_request,
-                response_json=None,
+                response_json=payload,
             )
-            raise MfuError(None, "TRANSPORT_ERROR", exc.__class__.__name__) from exc
-    latency_ms = int((time.monotonic() - started) * 1000)
+            raise MfuError(res.status_code, code, msg)
 
-    try:
-        payload = res.json()
-    except ValueError:
-        payload = {"raw": res.text[:500]}
+        token = payload["access_token"]
+        try:
+            expires_hours = int(payload.get("expires_in", 24))
+        except (TypeError, ValueError):
+            expires_hours = 24
+        ttl_s = expires_hours * 3600 - 3600
+        if ttl_s <= 0:
+            ttl_s = 23 * 3600
 
-    if res.status_code != 200 or "access_token" not in (
-        payload if isinstance(payload, dict) else {}
-    ):
-        code, msg = _parse_error(res.status_code, payload)
-        await redis.set(_COOLDOWN_KEY, "1", ex=_COOLDOWN_S)
+        await redis.set(_TOKEN_KEY, token, ex=ttl_s)
+        logged_response = {**payload, "access_token": "<redacted>"}
         await _write_log(
             db,
             unique_id=unique_id,
             api_type="OAUTH-LOGIN",
             http_status=res.status_code,
-            resp_flag=None,
-            error_code=code,
-            error_msg=msg,
+            resp_flag="S",
+            error_code=None,
+            error_msg=None,
             latency_ms=latency_ms,
             request_json=logged_request,
-            response_json=payload,
+            response_json=logged_response,
         )
-        raise MfuError(res.status_code, code, msg)
-
-    token = payload["access_token"]
-    try:
-        expires_hours = int(payload.get("expires_in", 24))
-    except (TypeError, ValueError):
-        expires_hours = 24
-    ttl_s = expires_hours * 3600 - 3600
-    if ttl_s <= 0:
-        ttl_s = 23 * 3600
-
-    await redis.set(_TOKEN_KEY, token, ex=ttl_s)
-    logged_response = {**payload, "access_token": "<redacted>"}
-    await _write_log(
-        db,
-        unique_id=unique_id,
-        api_type="OAUTH-LOGIN",
-        http_status=res.status_code,
-        resp_flag="S",
-        error_code=None,
-        error_msg=None,
-        latency_ms=latency_ms,
-        request_json=logged_request,
-        response_json=logged_response,
-    )
-    return token, ttl_s
+        return token, ttl_s
+    finally:
+        await redis.delete(_LOGIN_LOCK_KEY)
 
 
 async def get_token(db: AsyncSession) -> str:

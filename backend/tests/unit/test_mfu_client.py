@@ -45,6 +45,21 @@ class _FakeDb:
         pass
 
 
+class _FailingCommitDb(_FakeDb):
+    """A db whose commit() always raises — proves _write_log's failure is
+    swallowed (after rollback) and never masks the caller's real MfuError."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rolled_back = False
+
+    async def commit(self) -> None:
+        raise RuntimeError("simulated commit failure")
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+
 class _FakeResponse:
     def __init__(self, status_code: int, payload: dict[str, Any]) -> None:
         self.status_code = status_code
@@ -352,3 +367,93 @@ async def test_call_logs_plaintext_request_with_pii_masked(fake_http, patch_redi
     assert logged["reqBody"]["investor"]["mobile"] == "***"
     assert logged["reqBody"]["amount"] == 100
     assert "data" not in logged["reqBody"]
+
+
+# --------------------------------------------------------------------------
+# _scrub() — configured-credential substring masking (review fix #2)
+# --------------------------------------------------------------------------
+
+
+def test_scrub_masks_password_under_unknown_key() -> None:
+    """MFU echoing the password back under a key our allowlist doesn't know
+    about (e.g. "UserPwd") must still be masked."""
+    scrubbed = _scrub({"UserPwd": "testpass"})
+    assert scrubbed["UserPwd"] == "***"
+    assert "testpass" not in str(scrubbed)
+
+
+def test_scrub_masks_password_embedded_in_error_message() -> None:
+    scrubbed = _scrub({"errorMsg": "login rejected for password testpass on user testuser"})
+    assert "testpass" not in scrubbed["errorMsg"]
+    assert "testuser" not in scrubbed["errorMsg"]
+    assert "***" in scrubbed["errorMsg"]
+
+
+def test_scrub_masks_configured_aes_key_and_iv() -> None:
+    scrubbed = _scrub({"note": f"key={_KEY} iv={_IV}"})
+    assert _KEY not in scrubbed["note"]
+    assert _IV not in scrubbed["note"]
+
+
+def test_scrub_skips_empty_configured_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unset (empty-string) credential must never turn into a "replace every
+    character" no-op-as-corruption bug."""
+    from dhanradar.config import settings
+
+    monkeypatch.setattr(settings, "MFU_LOGIN_PASSWORD", "")
+    scrubbed = _scrub({"note": "hello world"})
+    assert scrubbed["note"] == "hello world"
+
+
+# --------------------------------------------------------------------------
+# login() lock (review fix #3)
+# --------------------------------------------------------------------------
+
+
+async def test_concurrent_login_while_locked_raises_no_http_call(fake_http, patch_redis) -> None:
+    await patch_redis.set(mfu_client._LOGIN_LOCK_KEY, "1", ex=60)
+    db = _FakeDb()
+    with pytest.raises(MfuError) as exc_info:
+        await login(db)
+    assert exc_info.value.error_code == "LOGIN_IN_FLIGHT"
+    assert len(fake_http.calls) == 0
+
+
+async def test_login_releases_lock_on_success(fake_http, patch_redis) -> None:
+    fake_http.responses = [
+        _FakeResponse(200, {"access_token": "tok-xyz", "token_type": "Bearer", "expires_in": "24"})
+    ]
+    db = _FakeDb()
+    await login(db)
+    assert await patch_redis.get(mfu_client._LOGIN_LOCK_KEY) is None
+
+
+async def test_login_releases_lock_on_failure(fake_http, patch_redis) -> None:
+    fake_http.responses = [
+        _FakeResponse(400, {"errorRespData": {"errorCode": "1", "errorMsg": "boom"}})
+    ]
+    db = _FakeDb()
+    with pytest.raises(MfuError):
+        await login(db)
+    assert await patch_redis.get(mfu_client._LOGIN_LOCK_KEY) is None
+
+
+# --------------------------------------------------------------------------
+# _write_log() commit-failure resilience (review fix #4)
+# --------------------------------------------------------------------------
+
+
+async def test_write_log_commit_failure_does_not_mask_real_mfu_error(
+    fake_http, patch_redis
+) -> None:
+    """A failing evidence-log commit must never surface in place of, or
+    swallow, the caller's real MfuError — and must roll back the session."""
+    fake_http.responses = [
+        _FakeResponse(400, {"errorRespData": {"errorCode": "1", "errorMsg": "General Exceptions"}})
+    ]
+    db = _FailingCommitDb()
+    with pytest.raises(MfuError) as exc_info:
+        await login(db)
+    assert exc_info.value.error_code == "1"
+    assert exc_info.value.error_msg == "General Exceptions"
+    assert db.rolled_back is True

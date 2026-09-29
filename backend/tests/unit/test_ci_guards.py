@@ -163,3 +163,83 @@ def test_bse_importing_mfu_is_caught() -> None:
         assert "mfu/bse module isolation" in result.stdout
     finally:
         fixture.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # from-package import: `from dhanradar import bse` — the old line
+        # regex `^\s*(?:import|from) dhanradar\.` never matched this (no dot
+        # right after "dhanradar").
+        "from dhanradar import bse\n",
+        # from-package import naming a submodule under dhanradar.models.
+        "from dhanradar.models import bse\n",
+        # importlib.import_module() with a literal target string.
+        'import importlib\nimportlib.import_module("dhanradar.bse.service")\n',
+        'from importlib import import_module\nimport_module("dhanradar.admin.bse_uat_router")\n',
+    ],
+)
+def test_mfu_importing_bse_bypass_shapes_are_caught(payload: str) -> None:
+    """Guard #11 AST rewrite: each of these previously slipped past the line
+    regex (a line that never starts with `import dhanradar.` / `from dhanradar.`)."""
+    fixture = BACKEND_DHANRADAR / "mfu" / "__ci_guard_isolation_bypass_test__.py"
+    fixture.write_text(payload, encoding="utf-8")
+    try:
+        result = _run_guard()
+        assert result.returncode == 1, (
+            f"guard must FAIL on bypass shape {payload!r}, but passed:\n{result.stdout}"
+        )
+        assert "mfu/bse module isolation" in result.stdout
+        assert "__ci_guard_isolation_bypass_test__" in result.stdout
+    finally:
+        fixture.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize(
+    "relative_import",
+    [
+        # `mfu_uat_router.py` lives in the SAME package (dhanradar.admin) as
+        # bse_uat_router.py, so a relative import stays entirely invisible to
+        # any check anchored on the literal string "dhanradar." — this is the
+        # bypass shape the line regex could never catch regardless of pattern.
+        "from . import bse_uat_router\n",
+        "from .bse_uat_router import get_ucc\n",
+    ],
+)
+def test_mfu_admin_router_relative_import_of_bse_is_caught(relative_import: str) -> None:
+    """Guard #11 AST rewrite: a relative import resolves against the file's own
+    package (dhanradar.admin), so it must be caught even though the string
+    "dhanradar.bse" never appears in the source. Temporarily appends to the
+    REAL admin/mfu_uat_router.py (the only admin-side file in the mfu scope)
+    and always restores the original content, even on assertion failure."""
+    target = BACKEND_DHANRADAR / "admin" / "mfu_uat_router.py"
+    original = target.read_text(encoding="utf-8")
+    try:
+        target.write_text(original + "\n" + relative_import, encoding="utf-8")
+        result = _run_guard()
+        assert result.returncode == 1, (
+            f"guard must FAIL on relative import {relative_import!r}, but passed:\n{result.stdout}"
+        )
+        assert "mfu/bse module isolation" in result.stdout
+        assert "mfu_uat_router.py" in result.stdout
+    finally:
+        target.write_text(original, encoding="utf-8")
+
+
+def test_docstring_naming_other_rail_is_not_flagged() -> None:
+    """A docstring/comment that merely NAMES the other module (to document the
+    isolation rule itself) must never trip the AST-based guard — only real
+    import/call nodes count."""
+    fixture = BACKEND_DHANRADAR / "mfu" / "__ci_guard_isolation_docstring_test__.py"
+    fixture.write_text(
+        '"""This module must never import dhanradar.bse or dhanradar.models.bse."""\n'
+        "# see also: from dhanradar import bse (forbidden, do not do this)\n",
+        encoding="utf-8",
+    )
+    try:
+        result = _run_guard()
+        assert result.returncode == 0, (
+            f"a docstring/comment naming the other rail must NOT be flagged:\n{result.stdout}"
+        )
+    finally:
+        fixture.unlink(missing_ok=True)

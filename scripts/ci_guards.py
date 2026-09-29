@@ -23,6 +23,7 @@ Guards:
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -63,7 +64,9 @@ for p in code_files():
     if re.search(r"Bearer\s+\$|Bearer \{|['\"]Bearer | Bearer ", t):
         # match the bearer scheme value, not a comment saying it's absent
         for i, line in enumerate(t.splitlines(), 1):
-            if "Bearer " in line and not re.search(r"absent|no bearer|not |never|reject", line, re.I):
+            if "Bearer " in line and not re.search(
+                r"absent|no bearer|not |never|reject", line, re.I
+            ):
                 fails.append(f"{p}:{i}: 'Bearer ' auth value (non-neg #4: cookie auth only)")
 
 # 3. Manrope/Inter in generated token files ---------------------------------
@@ -178,7 +181,13 @@ for p in code_files():
 
 # 11. MFU/BSE module isolation (non-neg #7) ---------------------------------
 # Two fully separate MF transaction providers — neither may import the other's
-# code, even transitively via a direct import line (module isolation).
+# code. AST-based (not a line regex): a regex on `^\s*(?:import|from) dhanradar\.`
+# missed `from dhanradar import bse`, `from dhanradar.models import bse`,
+# relative imports inside the same package (`from . import bse_uat_router`,
+# `from .bse_uat_router import x`), and `importlib.import_module("dhanradar.bse…")`
+# — all real ways to pull in the other rail. AST only sees real import/call
+# nodes, so a docstring/comment that merely NAMES the other module (e.g. to
+# document this very rule) is never flagged.
 _MFU_PATHS = [
     ROOT / "backend" / "dhanradar" / "mfu",
     ROOT / "backend" / "dhanradar" / "models" / "mfu.py",
@@ -189,35 +198,91 @@ _BSE_PATHS = [
     ROOT / "backend" / "dhanradar" / "models" / "bse.py",
     ROOT / "backend" / "dhanradar" / "admin" / "bse_uat_router.py",
 ]
+_BSE_MODULES = {"dhanradar.bse", "dhanradar.models.bse", "dhanradar.admin.bse_uat_router"}
+_MFU_MODULES = {"dhanradar.mfu", "dhanradar.models.mfu", "dhanradar.admin.mfu_uat_router"}
 
 
 def _py_files_under(paths: list[Path]):
-    for p in paths:
-        if p.is_dir():
-            yield from p.rglob("*.py")
-        elif p.is_file():
-            yield p
+    for pp in paths:
+        if pp.is_dir():
+            yield from pp.rglob("*.py")
+        elif pp.is_file():
+            yield pp
 
 
-# Only real `import`/`from` statements count — comments/docstrings that merely
-# NAME the other module (e.g. to document the isolation rule) must not trip it.
-_IMPORT_LINE = re.compile(r"^\s*(?:import|from)\s+dhanradar\.")
+def _module_path(pp: Path) -> str:
+    """Dotted module path of `pp` relative to backend/ (e.g. dhanradar.mfu.client)."""
+    rel = pp.relative_to(ROOT / "backend").with_suffix("")
+    parts = list(rel.parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
 
 
-def _imports_module(text: str, target: str) -> bool:
-    for line in text.splitlines():
-        if _IMPORT_LINE.match(line) and re.search(rf"\bdhanradar\.{target}\b", line):
-            return True
+def _file_package(pp: Path) -> str:
+    """The __package__ a module at `pp` would have, for relative-import resolution."""
+    module = _module_path(pp)
+    if pp.name == "__init__.py":
+        return module
+    return module.rsplit(".", 1)[0] if "." in module else ""
+
+
+def _matches_forbidden(dotted: str, forbidden: set[str]) -> bool:
+    return any(dotted == f or dotted.startswith(f + ".") for f in forbidden)
+
+
+def _imports_forbidden(pp: Path, forbidden: set[str]) -> bool:
+    try:
+        tree = ast.parse(read(pp), filename=str(pp))
+    except SyntaxError:
+        return False
+    file_pkg_parts = _file_package(pp).split(".") if _file_package(pp) else []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(_matches_forbidden(alias.name, forbidden) for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                base = node.module or ""
+            else:
+                trimmed = file_pkg_parts[: len(file_pkg_parts) - (node.level - 1)]
+                base = ".".join(t for t in trimmed if t)
+                if node.module:
+                    base = f"{base}.{node.module}" if base else node.module
+            if base and _matches_forbidden(base, forbidden):
+                return True
+            # `from dhanradar.admin import bse_uat_router` — the imported NAME
+            # is itself the forbidden submodule, not just an attribute of it.
+            for alias in node.names:
+                candidate = f"{base}.{alias.name}" if base else alias.name
+                if _matches_forbidden(candidate, forbidden):
+                    return True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            func_name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if func_name == "import_module" and node.args:
+                first = node.args[0]
+                if (
+                    isinstance(first, ast.Constant)
+                    and isinstance(first.value, str)
+                    and _matches_forbidden(first.value, forbidden)
+                ):
+                    return True
     return False
 
 
 for p in _py_files_under(_MFU_PATHS):
-    if _imports_module(read(p), "bse") or _imports_module(read(p), r"models\.bse"):
-        fails.append(f"{p.relative_to(ROOT)}: imports dhanradar.bse (non-neg #7: mfu/bse module isolation)")
+    if _imports_forbidden(p, _BSE_MODULES):
+        fails.append(
+            f"{p.relative_to(ROOT)}: imports the BSE rail (non-neg #7: mfu/bse module isolation)"
+        )
 
 for p in _py_files_under(_BSE_PATHS):
-    if _imports_module(read(p), "mfu") or _imports_module(read(p), r"models\.mfu"):
-        fails.append(f"{p.relative_to(ROOT)}: imports dhanradar.mfu (non-neg #7: mfu/bse module isolation)")
+    if _imports_forbidden(p, _MFU_MODULES):
+        fails.append(
+            f"{p.relative_to(ROOT)}: imports the MFU rail (non-neg #7: mfu/bse module isolation)"
+        )
 
 # 5. Secret scan (scoped) ---------------------------------------------------
 SECRET_RES = [
@@ -230,7 +295,16 @@ SECRET_RES = [
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"""(password|secret|token|api_key)\s*[:=]\s*["'][^"']{12,}["']""", re.I),
 ]
-SKIP_DIRS = {".git", "node_modules", ".next", "docs", "scripts", "__pycache__", ".venv", ".mypy_cache"}
+SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    ".next",
+    "docs",
+    "scripts",
+    "__pycache__",
+    ".venv",
+    ".mypy_cache",
+}
 SKIP_SUFFIX = {".md", ".lock"}
 for p in ROOT.rglob("*"):
     if not p.is_file():
@@ -252,9 +326,7 @@ for p in ROOT.rglob("*"):
 # 8. VerbLabel allowlist — approved label phrasings only (B58-f1) ----------
 # The 5 phrasings below are the ONLY valid label values per the SEBI-educational
 # boundary. If someone adds or renames a VerbLabel member, CI fails here.
-_VERB_LABEL_APPROVED = {
-    "in_form", "on_track", "off_track", "out_of_form", "insufficient_data"
-}
+_VERB_LABEL_APPROVED = {"in_form", "on_track", "off_track", "out_of_form", "insufficient_data"}
 _schemas_py = ROOT / "backend" / "dhanradar" / "scoring" / "engine" / "schemas.py"
 if _schemas_py.exists():
     _in_verb_label = False
