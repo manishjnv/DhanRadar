@@ -114,6 +114,13 @@ async def put_provider(
     admin: Annotated[UserContext, Depends(RequireAdmin())],
 ) -> dict[str, object]:
     old, _source = await active_provider()
+    # Audit the RAW stored override too: active_provider() hides an ignored
+    # "mfu" value, so "bse->bse" alone could mask a real key transition.
+    try:
+        raw_old = await get_redis().get(_OVERRIDE_KEY)
+    except Exception:  # noqa: BLE001 — audit detail only; never block the change
+        raw_old = None
+    stored_old = (raw_old.decode() if isinstance(raw_old, bytes) else raw_old) or "none"
 
     if body.provider == "mfu" and not _MFU_ORDER_RAIL_READY:
         await record_admin_action(
@@ -121,7 +128,7 @@ async def put_provider(
             action="mf_txn.provider.set",
             target_type="mf_txn_provider",
             target_id="mfu",
-            result="rejected_not_ready",
+            result=f"rejected_not_ready; stored_override={stored_old}",
         )
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -141,6 +148,6 @@ async def put_provider(
         action="mf_txn.provider.set",
         target_type="mf_txn_provider",
         target_id=new_target,
-        result=f"{old}->{new_target}",
+        result=f"{old}->{new_target}; stored_override={stored_old}",
     )
     return await _state_response()

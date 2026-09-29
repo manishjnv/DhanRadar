@@ -103,7 +103,7 @@ async def test_put_bse_sets_override_key_and_audits(monkeypatch, _no_audit):
     assert out["provider"] == "bse"
     assert _no_audit[-1]["action"] == "mf_txn.provider.set"
     assert _no_audit[-1]["target_id"] == "bse"
-    assert _no_audit[-1]["result"] == "bse->bse"
+    assert _no_audit[-1]["result"] == "bse->bse; stored_override=none"
 
 
 async def test_put_null_deletes_override_key(monkeypatch, _no_audit):
@@ -124,7 +124,7 @@ async def test_put_mfu_rejected_409_key_unchanged_and_audited(monkeypatch, _no_a
         await router_mod.put_provider(router_mod.ProviderRequest(provider="mfu"), admin)
     assert ei.value.status_code == 409
     assert router_mod._OVERRIDE_KEY not in fake.store
-    assert _no_audit[-1]["result"] == "rejected_not_ready"
+    assert _no_audit[-1]["result"] == "rejected_not_ready; stored_override=none"
     assert _no_audit[-1]["target_id"] == "mfu"
 
 
@@ -172,3 +172,12 @@ async def test_anonymous_gets_404(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         await RequireAdmin()(UserContext(user_id="anonymous", tier="free", is_anonymous=True))
     assert ei.value.status_code == 404
+
+
+async def test_put_bse_audit_reveals_stale_mfu_override(monkeypatch, _no_audit):
+    """A hand-set "mfu" key resolves to bse (lock), but the audit must still show the real key transition."""
+    fake = _FakeRedis({router_mod._OVERRIDE_KEY: "mfu"})
+    _patch_redis(monkeypatch, fake)
+    await router_mod.put_provider(router_mod.ProviderRequest(provider="bse"), _admin_ctx())
+    assert fake.store[router_mod._OVERRIDE_KEY] == "bse"
+    assert _no_audit[-1]["result"] == "bse->bse; stored_override=mfu"
