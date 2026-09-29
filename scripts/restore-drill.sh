@@ -259,7 +259,7 @@ log "Drill postgres healthy."
 # Fail closed if the resolved version isn't actually available in this image.
 # Only ever acts on the drill scratch DB, which is always freshly created by
 # this run (§1 refuses to start over an existing dhanradar-drill stack) — the
-# table-count check below is defense in depth against that invariant changing.
+# hypertable-count check below is defense in depth against that invariant changing.
 if [[ -n "${TSDB_VERSION}" ]]; then
   AVAILABLE="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
     "SELECT 1 FROM pg_available_extension_versions WHERE name='timescaledb' AND version='${TSDB_VERSION}';" \
@@ -275,12 +275,15 @@ if [[ -n "${TSDB_VERSION}" ]]; then
       -c "CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}';" > /dev/null \
       || die "Failed to create timescaledb extension at version ${TSDB_VERSION}."
   elif [[ "${CURRENT}" != "${TSDB_VERSION}" ]]; then
-    TABLE_COUNT="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
-      "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema','timescaledb_information','_timescaledb_catalog','_timescaledb_internal','_timescaledb_config','_timescaledb_cache');" \
+    # Count hypertables, not tables: initdb's pg_cron/pg_partman create their own
+    # catalog tables on every fresh boot. DROP EXTENSION (no CASCADE) also
+    # refuses on its own if anything depends on timescaledb.
+    HT_COUNT="$(${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -tAc \
+      "SELECT count(*) FROM timescaledb_information.hypertables;" \
       2>/dev/null | tr -d '[:space:]')"
-    [[ "${TABLE_COUNT}" == "0" ]] \
-      || die "Drill DB already has ${TABLE_COUNT} user table(s) at timescaledb ${CURRENT} — refusing to DROP/ALTER the extension on non-empty data."
-    log "Re-pinning timescaledb from ${CURRENT} to ${TSDB_VERSION} (empty DB) ..."
+    [[ "${HT_COUNT}" == "0" ]] \
+      || die "Drill DB already has ${HT_COUNT:-?} hypertable(s) at timescaledb ${CURRENT} — refusing to DROP/ALTER the extension on non-empty data."
+    log "Re-pinning timescaledb from ${CURRENT} to ${TSDB_VERSION} (no hypertables yet) ..."
     ${DC} exec -T dhanradar-postgres psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 \
       -c "DROP EXTENSION timescaledb; CREATE EXTENSION timescaledb VERSION '${TSDB_VERSION}';" > /dev/null \
       || die "Failed to re-pin timescaledb to version ${TSDB_VERSION}."
