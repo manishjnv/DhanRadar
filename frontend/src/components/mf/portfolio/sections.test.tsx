@@ -1045,6 +1045,18 @@ describe('RiskSection', () => {
     expect(screen.queryByText('−18.7%')).toBeNull(); // B88: no aggregated drawdown number
   });
 
+  // ── B110 — value_priced_pct live-NAV coverage caveat ─────────────────────
+
+  it('B110: value_priced_pct number => caveat line renders', () => {
+    renderRisk({ ...RISK_PRESENT, data: { ...RISK_PRESENT.data, value_priced_pct: 87 } });
+    expect(screen.getByText(/Based on 87% of your portfolio value/i)).toBeDefined();
+  });
+
+  it('B110: value_priced_pct null => no caveat line', () => {
+    renderRisk(RISK_PRESENT);
+    expect(screen.queryByText(/Based on.*of your portfolio value/i)).toBeNull();
+  });
+
   // ── Risk band renders as word badge, never a number ──────────────────────
 
   it('risk band renders as display word (Moderate), not raw enum or number', () => {
@@ -1257,6 +1269,23 @@ describe('AllocSection', () => {
   it('present => concentration sub-panel shows top_fund name', () => {
     renderAlloc(ALLOC_PRESENT, CONC_PRESENT);
     expect(screen.getByText('Mirae Asset Large Cap Fund')).toBeDefined();
+  });
+
+  // ── B110 — value_priced_pct live-NAV coverage caveat ─────────────────────
+
+  it('B110: allocation value_priced_pct number => caveat line renders', () => {
+    renderAlloc({ ...ALLOC_PRESENT, data: { ...ALLOC_PRESENT.data, value_priced_pct: 87 } }, CONC_PRESENT);
+    expect(screen.getByText(/Based on 87% of your portfolio value/i)).toBeDefined();
+  });
+
+  it('B110: concentration value_priced_pct number => caveat line renders', () => {
+    renderAlloc(ALLOC_PRESENT, { ...CONC_PRESENT, data: { ...CONC_PRESENT.data, value_priced_pct: 92 } });
+    expect(screen.getByText(/Based on 92% of your portfolio value/i)).toBeDefined();
+  });
+
+  it('B110: value_priced_pct null on both => no caveat line', () => {
+    renderAlloc(ALLOC_PRESENT, CONC_PRESENT);
+    expect(screen.queryByText(/Based on.*of your portfolio value/i)).toBeNull();
   });
 
   it('empty => EmptyState visible, no bucket name', () => {

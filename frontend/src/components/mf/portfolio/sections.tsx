@@ -337,6 +337,18 @@ function coverageHint(base: string, coveragePct: number | null | undefined): str
   return coveragePct != null && coveragePct < 100 ? `${base} · covers ${coveragePct}% of value` : base;
 }
 
+/** B110/B98 — live-NAV coverage caveat for the risk/allocation/concentration sections, mirroring
+ * the hero's ADR-0039 `value_priced_pct` field. Renders nothing when pct is null/undefined (fully
+ * priced — no layout shift); a stale/suspended holding is excluded from the value-weighted figures. */
+function PricedPctCaveat({ pct }: { pct: number | null | undefined }) {
+  if (pct == null) return null;
+  return (
+    <div className="mt-3 text-caption text-ink-faint">
+      Based on {pct}% of your portfolio value. Funds without a recent price (for example, suspended) are left out.
+    </div>
+  );
+}
+
 /** Compact label/value stat used in the hero (Day Change · Invested · XIRR). */
 function HeroStat({ label, value, accent, hint, hintTone = 'neutral', tip }: {
   label: string;
@@ -1375,6 +1387,7 @@ function ConcentrationPanel({ portfolioId }: { portfolioId: string }) {
           </div>
         )}
       </DataState>
+      <PricedPctCaveat pct={conc?.value_priced_pct} />
     </div>
   );
 }
@@ -1459,6 +1472,7 @@ export function AllocSection({ portfolioId }: { portfolioId: string }) {
           </div>
         )}
       </DataState>
+      <PricedPctCaveat pct={alloc?.value_priced_pct} />
 
       {/* Concentration sub-panel — its own DataState */}
       <ConcentrationPanel portfolioId={portfolioId} />
@@ -2354,6 +2368,7 @@ export function RiskSection({ portfolioId }: { portfolioId: string }) {
           </>
         )}
       </DataState>
+      <PricedPctCaveat pct={risk?.value_priced_pct} />
 
       {/* Advanced metrics accordion */}
       <div className="mt-4">
