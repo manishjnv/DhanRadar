@@ -296,11 +296,21 @@ async def get_token(db: AsyncSession) -> str:
     return token
 
 
+# Token-invalid / token-expired MFU error codes — on either, evict the cached
+# token so the NEXT call re-logins instead of reusing a dead token for up to
+# 23h. No automatic retry of the call itself.
+_TOKEN_DEAD_CODES = {"100006", "100007"}
+
+
 async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
     """Envelope, POST with a Bearer-authenticated request, decrypt respData, always log."""
     token = await get_token(db)
     envelope = build_envelope(api_type, body)
     unique_id = envelope["reqHeader"]["uniqueId"]
+    # Evidence log carries the PLAINTEXT body (masked by _scrub), not the
+    # ciphertext in envelope["reqBody"]["data"] — otherwise the UAT evidence
+    # trail loses what we actually sent.
+    logged_request = {"reqHeader": envelope["reqHeader"], "reqBody": _none_to_empty(body)}
 
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -325,7 +335,7 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
                 error_code="TRANSPORT_ERROR",
                 error_msg=exc.__class__.__name__,
                 latency_ms=latency_ms,
-                request_json=envelope,
+                request_json=logged_request,
                 response_json=None,
             )
             raise MfuError(None, "TRANSPORT_ERROR", exc.__class__.__name__) from exc
@@ -338,6 +348,8 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
 
     if res.status_code != 200:
         code, msg = _parse_error(res.status_code, raw_payload)
+        if code in _TOKEN_DEAD_CODES:
+            await get_redis().delete(_TOKEN_KEY)
         await _write_log(
             db,
             unique_id=unique_id,
@@ -347,7 +359,7 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
             error_code=code,
             error_msg=msg,
             latency_ms=latency_ms,
-            request_json=envelope,
+            request_json=logged_request,
             response_json=raw_payload,
         )
         raise MfuError(res.status_code, code, msg)
@@ -363,18 +375,39 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
             error_code="NO_RESP_DATA",
             error_msg="response had no respData",
             latency_ms=latency_ms,
-            request_json=envelope,
+            request_json=logged_request,
             response_json=raw_payload,
         )
         raise MfuError(res.status_code, "NO_RESP_DATA", "response had no respData")
 
-    decrypted = json.loads(decrypt(resp_data_enc, settings.MFU_AES_KEY, settings.MFU_AES_IV))
+    try:
+        decrypted = json.loads(decrypt(resp_data_enc, settings.MFU_AES_KEY, settings.MFU_AES_IV))
+    except Exception as exc:
+        # Exactly the failure class we're fighting with MFU's cipher-text
+        # format (errorCode 1 / "decrypt the text") — it MUST land in the
+        # evidence ledger, not escape as a raw exception with no log row.
+        await _write_log(
+            db,
+            unique_id=unique_id,
+            api_type=api_type,
+            http_status=res.status_code,
+            resp_flag=None,
+            error_code="DECRYPT_ERROR",
+            error_msg=exc.__class__.__name__,
+            latency_ms=latency_ms,
+            request_json=logged_request,
+            response_json=raw_payload,
+        )
+        raise MfuError(res.status_code, "DECRYPT_ERROR", exc.__class__.__name__) from exc
+
     resp_header = decrypted.get("respHeader", {}) if isinstance(decrypted, dict) else {}
     resp_flag = resp_header.get("respFlag")
 
     if resp_flag == "F":
         code = str(resp_header.get("errorCode", ""))
         msg = str(resp_header.get("errorMsg", ""))
+        if code in _TOKEN_DEAD_CODES:
+            await get_redis().delete(_TOKEN_KEY)
         await _write_log(
             db,
             unique_id=unique_id,
@@ -384,7 +417,7 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
             error_code=code,
             error_msg=msg,
             latency_ms=latency_ms,
-            request_json=envelope,
+            request_json=logged_request,
             response_json=decrypted,
         )
         raise MfuError(res.status_code, code, msg)
@@ -398,7 +431,7 @@ async def call(db: AsyncSession, api_type: str, path: str, body: dict[str, Any])
         error_code=None,
         error_msg=None,
         latency_ms=latency_ms,
-        request_json=envelope,
+        request_json=logged_request,
         response_json=decrypted,
     )
     return decrypted

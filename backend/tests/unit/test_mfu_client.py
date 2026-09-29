@@ -22,9 +22,11 @@ from dhanradar.mfu.client import (
     _scrub,
     base_url,
     build_envelope,
+    call,
     login,
     new_unique_id,
 )
+from dhanradar.mfu.crypto import encrypt
 
 _KEY = "0123456789abcdef"
 _IV = "fedcba9876543210"
@@ -264,3 +266,89 @@ async def test_cooldown_blocks_second_login_without_http_call(fake_http, patch_r
         await login(db)
     assert exc_info.value.error_code == "COOLDOWN"
     assert len(fake_http.calls) == 1  # unchanged — no HTTP call made
+
+
+# --------------------------------------------------------------------------
+# call() — decrypt-failure logging, token eviction, plaintext evidence
+# --------------------------------------------------------------------------
+
+
+async def _seed_token(patch_redis) -> None:
+    """Pre-cache a token so call() -> get_token() skips login() entirely."""
+    await patch_redis.set(mfu_client._TOKEN_KEY, "tok-cached", ex=3600)
+
+
+async def test_call_garbage_resp_data_raises_decrypt_error_and_logs(fake_http, patch_redis) -> None:
+    await _seed_token(patch_redis)
+    fake_http.responses = [_FakeResponse(200, {"respData": "not-valid-base64-ciphertext!!"})]
+    db = _FakeDb()
+    with pytest.raises(MfuError) as exc_info:
+        await call(db, "TESTAPI", "some/path", {"a": "b"})
+    assert exc_info.value.error_code == "DECRYPT_ERROR"
+    assert len(db.added) == 1
+    assert db.added[0].error_code == "DECRYPT_ERROR"
+    # error_msg is the exception CLASS NAME only — never leaks payload content.
+    assert db.added[0].error_msg and " " not in db.added[0].error_msg
+
+
+async def test_call_token_expired_error_evicts_cached_token(fake_http, patch_redis) -> None:
+    await _seed_token(patch_redis)
+    fake_http.responses = [
+        _FakeResponse(
+            401,
+            {"errorRespData": {"errorCode": "100007", "errorMsg": "token expired"}},
+        )
+    ]
+    db = _FakeDb()
+    with pytest.raises(MfuError) as exc_info:
+        await call(db, "TESTAPI", "some/path", {"a": "b"})
+    assert exc_info.value.error_code == "100007"
+    assert await patch_redis.get(mfu_client._TOKEN_KEY) is None
+
+
+async def test_call_token_invalid_error_evicts_cached_token(fake_http, patch_redis) -> None:
+    await _seed_token(patch_redis)
+    fake_http.responses = [
+        _FakeResponse(
+            401,
+            {"errorRespData": {"errorCode": "100006", "errorMsg": "token invalid"}},
+        )
+    ]
+    db = _FakeDb()
+    with pytest.raises(MfuError):
+        await call(db, "TESTAPI", "some/path", {"a": "b"})
+    assert await patch_redis.get(mfu_client._TOKEN_KEY) is None
+
+
+async def test_call_other_error_code_does_not_evict_token(fake_http, patch_redis) -> None:
+    await _seed_token(patch_redis)
+    fake_http.responses = [
+        _FakeResponse(400, {"errorRespData": {"errorCode": "999", "errorMsg": "unrelated"}})
+    ]
+    db = _FakeDb()
+    with pytest.raises(MfuError):
+        await call(db, "TESTAPI", "some/path", {"a": "b"})
+    assert await patch_redis.get(mfu_client._TOKEN_KEY) == "tok-cached"
+
+
+async def test_call_logs_plaintext_request_with_pii_masked(fake_http, patch_redis) -> None:
+    await _seed_token(patch_redis)
+    resp_plain = '{"respHeader": {"respFlag": "S"}, "respBody": {}}'
+    resp_data_enc = encrypt(resp_plain, _KEY, _IV)
+    fake_http.responses = [_FakeResponse(200, {"respData": resp_data_enc})]
+    db = _FakeDb()
+    body = {"investor": {"pan": "ABCDE1234F", "mobile": "9999999999"}, "amount": 100}
+
+    result = await call(db, "TESTAPI", "some/path", body)
+
+    assert result["respHeader"]["respFlag"] == "S"
+    assert len(db.added) == 1
+    logged = db.added[0].request_json
+    # The logged body must be the PLAINTEXT field structure (masked), not the
+    # single opaque "data" ciphertext field the wire envelope carries.
+    assert "reqBody" in logged
+    assert "investor" in logged["reqBody"]
+    assert logged["reqBody"]["investor"]["pan"] == "***"
+    assert logged["reqBody"]["investor"]["mobile"] == "***"
+    assert logged["reqBody"]["amount"] == 100
+    assert "data" not in logged["reqBody"]
