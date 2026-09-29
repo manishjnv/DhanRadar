@@ -24,14 +24,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dhanradar.ai_gateway.quality import _ADVISORY_RE
-from dhanradar.market_data.breadth import fetch_nifty50_advances_declines_sync
-from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood, factor_tier
-from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
-from dhanradar.scoring.engine.schemas import (
+from dhanradar.compliance.constants import (
     DISCLAIMER_VERSION,
     DISCLOSURE_BUNDLE,
     NOT_ADVICE,
 )
+from dhanradar.market_data.breadth import fetch_nifty50_advances_declines_sync
+from dhanradar.mood.compute import WEIGHTS, MoodResult, compute_mood, factor_tier
+from dhanradar.mood.schemas import MoodHistoryItem, MoodPublic, WhyToday
 
 logger = logging.getLogger(__name__)
 

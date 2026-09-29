@@ -15,12 +15,12 @@ import json
 import logging
 from typing import Any
 
-from dhanradar.mf.schemas import FundReportItem, PortfolioReport
-from dhanradar.scoring.engine.schemas import (
+from dhanradar.compliance.constants import (
     DISCLAIMER_VERSION,
     DISCLOSURE_BUNDLE,
     NOT_ADVICE,
 )
+from dhanradar.mf.schemas import FundReportItem, PortfolioReport
 
 logger = logging.getLogger(__name__)
 

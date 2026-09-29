@@ -80,7 +80,7 @@ def active_disclaimer_version() -> str:
     A sync constant for fire-and-forget call sites; the DB-backed
     `get_active_disclaimer` is the authoritative async lookup. Callers that know
     the version served at generation should pin THAT instead of calling this."""
-    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+    from dhanradar.compliance.constants import DISCLAIMER_VERSION
 
     return DISCLAIMER_VERSION
 

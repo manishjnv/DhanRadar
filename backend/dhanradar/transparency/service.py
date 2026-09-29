@@ -374,11 +374,9 @@ async def get_portfolio_transparency(
             )
         )
 
-    # Import disclosure constants read-only (B56-f1: same source as dashboard).
-    # Late import to avoid circular: transparency → scoring/engine → (anything
-    # that imports transparency). Same pattern as dashboard/service.py (B56-f1).
-    # Read-only: DISCLOSURE_BUNDLE / NOT_ADVICE / DISCLAIMER_VERSION only.
-    from dhanradar.scoring.engine.schemas import (  # noqa: PLC0415
+    # Import disclosure constants read-only (B56-f1: shared compliance module,
+    # not the scoring engine schema — avoids reaching into scoring internals).
+    from dhanradar.compliance.constants import (  # noqa: PLC0415
         DISCLAIMER_VERSION,
         DISCLOSURE_BUNDLE,
         NOT_ADVICE,

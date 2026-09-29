@@ -723,6 +723,8 @@ async def _run_pipeline(
 ) -> str:
     from sqlalchemy import select, text, update
 
+    from dhanradar.compliance.constants import DISCLAIMER_VERSION
+
     # B81 PR-2: CAS writes the uploader's personal tables (cas_job/holdings/sip/scores/history/
     # snapshot), so it runs RLS WITH-CHECK enforced AS THE OWNER, not on the bypass admin engine.
     # rls_user_session re-applies the app.user_id GUC on every transaction begin, so the owner scope
@@ -733,7 +735,6 @@ async def _run_pipeline(
     from dhanradar.models.mf import MfCasJob
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
-    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
     # Bind correlation context for all structured log lines in this pipeline run.
     bind_contextvars(job_id=job_id, request_id=request_id, user_ref=hash_user_ref(user_id))
@@ -5359,6 +5360,7 @@ def monthly_rescore_plus_users() -> str:
 async def _monthly_rescore() -> str:
     from sqlalchemy import select
 
+    from dhanradar.compliance.constants import DISCLAIMER_VERSION
     from dhanradar.db import admin_task_session
     from dhanradar.deps import is_plus
     from dhanradar.mf import history as mf_history
@@ -5368,7 +5370,6 @@ async def _monthly_rescore() -> str:
     from dhanradar.notifications import service as notif_service
     from dhanradar.redis_client import get_redis
     from dhanradar.scoring.engine import RatingEngine
-    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
     rengine = RatingEngine()
     today = date.today()

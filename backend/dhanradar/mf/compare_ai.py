@@ -97,7 +97,7 @@ def build_messages(fragments: list[dict]) -> list[dict[str, str]]:
 
 
 def _empty_payload(version: str) -> dict[str, Any]:
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     return {"summary_items": [], "insight_items": [], "disclosure": DISCLOSURE_BUNDLE, "not_advice": NOT_ADVICE, "disclaimer_version": version}
 

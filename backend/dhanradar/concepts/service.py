@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from dhanradar.compliance.constants import DISCLAIMER_VERSION
 from dhanradar.concepts.content import CONCEPTS_DISCLOSURE, CONCEPTS_NOT_ADVICE
 from dhanradar.concepts.schemas import ConceptDetail, ConceptListResponse, ConceptSummary
-from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
 
 def _disc() -> dict:

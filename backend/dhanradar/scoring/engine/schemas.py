@@ -23,18 +23,20 @@ import enum
 from dataclasses import dataclass, field
 from typing import Literal
 
+# Disclosure bundle constants (non-neg #9) live in the shared compliance module
+# (B56-f1) — re-exported here unchanged so every existing import of
+# `dhanradar.scoring.engine.schemas.{NOT_ADVICE,DISCLAIMER_VERSION,DISCLOSURE_BUNDLE}`
+# keeps working without a scoring logic change.
+from dhanradar.compliance.constants import (  # noqa: F401
+    DISCLAIMER_VERSION,
+    DISCLOSURE_BUNDLE,
+    NOT_ADVICE,
+)
+
 MODEL_VERSION = "v1"
 
 # Named signal-quality bands surfaced to the client — never raw floats (non-neg #2).
 FactorStrength = Literal["high", "medium", "low"]
-
-# Disclosure bundle attached to every result (architecture §9 / non-neg #9).
-NOT_ADVICE = "NOT_ADVICE"
-DISCLAIMER_VERSION = "2026-06-06.v1"
-DISCLOSURE_BUNDLE = (
-    "Educational analysis only — not investment advice. Labels describe "
-    "category-relative form, not a recommendation to buy, sell, hold, or switch."
-)
 
 
 class Axis(str, enum.Enum):
