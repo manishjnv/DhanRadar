@@ -688,7 +688,7 @@ async def watchlist_summary(
     )
 
     if not isins:
-        from dhanradar.scoring.engine.schemas import (
+        from dhanradar.compliance.constants import (
             DISCLAIMER_VERSION,
             DISCLOSURE_BUNDLE,
             NOT_ADVICE,
@@ -703,7 +703,7 @@ async def watchlist_summary(
         )
 
     if not await watchlist_ai_consent_granted(user.user_id, db):
-        from dhanradar.scoring.engine.schemas import (
+        from dhanradar.compliance.constants import (
             DISCLAIMER_VERSION,
             DISCLOSURE_BUNDLE,
             NOT_ADVICE,
@@ -718,7 +718,7 @@ async def watchlist_summary(
         )
 
     if not await watchlist_ai_cache_entitled(user.user_id, db):
-        from dhanradar.scoring.engine.schemas import (
+        from dhanradar.compliance.constants import (
             DISCLAIMER_VERSION,
             DISCLOSURE_BUNDLE,
             NOT_ADVICE,
@@ -740,7 +740,7 @@ async def watchlist_summary(
         cached = None
     if cached is not None:
         cached_envelope = json.loads(cached)
-        from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
+        from dhanradar.compliance.constants import DISCLAIMER_VERSION
 
         if cached_envelope.get("disclaimer_version") == DISCLAIMER_VERSION:
             return serialize_watchlist_ai_response(**cached_envelope)
@@ -1277,7 +1277,7 @@ async def portfolio_history(
     Gating order: 401 (anonymous) → 402 (not Plus) → 403 (no consent).
     No numeric fields in the response (non-neg #2).
     """
-    from dhanradar.scoring.engine.schemas import (
+    from dhanradar.compliance.constants import (
         DISCLAIMER_VERSION,
         DISCLOSURE_BUNDLE,
         NOT_ADVICE,
@@ -1402,7 +1402,7 @@ async def fund_categories(
     """
     from sqlalchemy import text as sa_text
 
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE  # noqa: F401
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE  # noqa: F401
 
     rows = (
         await db.execute(
@@ -1570,7 +1570,7 @@ async def fund_explorer_list(
     """
     from sqlalchemy import text as sa_text
 
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     if not category:
         raise HTTPException(
@@ -1758,8 +1758,8 @@ async def leaderboard(
     absent from `boards` — the frontend keeps rendering its Preview sample (§5). Empty
     table (before the first nightly run) returns `as_of=None`, `hero=None`, `boards={}`.
     """
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
     from dhanradar.mf.serialization import serialize_leaderboard_response
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     # Bounded read: only each board_key's latest row (≤ ~19 rows) — never the whole
     # history (the table grows ~19 rows/day; task-side 90-day retention caps it too).
@@ -1824,9 +1824,9 @@ async def fund_head(
     independently optional. Unknown ISIN → 404. unified_score is never selected
     (non-neg #2); serialize_concept applies the A3 scrub as a second layer.
     """
+    from dhanradar.compliance.constants import DISCLAIMER_VERSION
     from dhanradar.mf.fund_read import get_fund_head
     from dhanradar.mf.serialization import RequestCtx, serialize_concept
-    from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
     payload = await get_fund_head(db, isin)
     if payload is None:
@@ -2127,9 +2127,9 @@ async def fund_comparison(
     of this file (ADR-0033) — see `dhanradar.mf.fund_read.get_fund_comparison` /
     `dhanradar.mf.comparison`.
     """
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
     from dhanradar.mf.benchmark_map import CANONICAL_INDEX_KEYS
     from dhanradar.mf.fund_read import get_fund_comparison
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     if benchmark_key is not None and benchmark_key not in CANONICAL_INDEX_KEYS:
         raise HTTPException(

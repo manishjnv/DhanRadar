@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+from dhanradar.compliance.constants import DISCLAIMER_VERSION
 from dhanradar.education.calendar import build_tax_calendar
 from dhanradar.education.content import EDUCATION_DISCLOSURE, EDUCATION_NOT_ADVICE
 from dhanradar.education.schemas import (
@@ -21,7 +22,6 @@ from dhanradar.education.schemas import (
     CalendarResponse,
     KeyDateItem,
 )
-from dhanradar.scoring.engine.schemas import DISCLAIMER_VERSION
 
 
 def _disc() -> dict:

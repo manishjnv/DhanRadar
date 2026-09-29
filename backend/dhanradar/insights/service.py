@@ -18,6 +18,11 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from dhanradar.compliance.constants import (
+    DISCLAIMER_VERSION,
+    DISCLOSURE_BUNDLE,
+    NOT_ADVICE,
+)
 from dhanradar.insights.schemas import (
     CategoryOverlap,
     FundPairOverlap,
@@ -25,11 +30,6 @@ from dhanradar.insights.schemas import (
     OverlapResponse,
 )
 from dhanradar.mf.snapshot import category_allocation
-from dhanradar.scoring.engine.schemas import (
-    DISCLAIMER_VERSION,
-    DISCLOSURE_BUNDLE,
-    NOT_ADVICE,
-)
 
 logger = logging.getLogger(__name__)
 

@@ -92,9 +92,8 @@ async def portfolio_changes(
         portfolio_id=str(pid),
     )
 
-    # Late import to avoid circular: changes → scoring/engine (same pattern as
-    # transparency/service.py and mf/router.py). Read-only constants only.
-    from dhanradar.scoring.engine.schemas import (  # noqa: PLC0415
+    # Shared compliance module (B56-f1), not the scoring engine schema.
+    from dhanradar.compliance.constants import (  # noqa: PLC0415
         DISCLAIMER_VERSION,
         DISCLOSURE_BUNDLE,
         NOT_ADVICE,

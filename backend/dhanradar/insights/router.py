@@ -987,13 +987,13 @@ async def portfolio_ai_feed(
     other forbidden score keys before anything reaches the client.
     Anonymous → 401; another user's portfolio → 404.
     """
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
     from dhanradar.compliance.service import active_disclaimer_version
     from dhanradar.mf.portfolio_ai import generate_portfolio_ai_feed
     from dhanradar.mf.watchlist_ai import (
         watchlist_ai_cache_entitled,
         watchlist_ai_consent_granted,
     )
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     _require_auth(user)
     await _require_mf_consent(user=user, db=db)

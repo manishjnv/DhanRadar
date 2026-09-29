@@ -20,8 +20,8 @@ import logging
 from typing import Any
 
 from dhanradar import storage
+from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 from dhanradar.notifications.templates import LABEL_DISPLAY
-from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
 
 logger = logging.getLogger(__name__)
 

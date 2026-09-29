@@ -227,7 +227,7 @@ def _empty_payload(
     state: str = "unavailable",
     no_data_reason: str | None = None,
 ) -> dict:
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     return {
         "portfolio_id": portfolio_id,
@@ -374,7 +374,7 @@ async def generate_portfolio_ai_feed(
     except Exception:  # noqa: BLE001 — audit failure must not hide validated output
         logger.exception("portfolio_ai: served-label audit failed")
 
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     return {
         "portfolio_id": portfolio_id,

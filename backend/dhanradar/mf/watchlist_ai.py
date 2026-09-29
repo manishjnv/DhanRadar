@@ -274,7 +274,7 @@ async def watchlist_ai_cache_entitled(user_id: str, db: object) -> bool:
 
 
 def _empty_payload(disclaimer_version: str) -> dict:
-    from dhanradar.scoring.engine.schemas import DISCLOSURE_BUNDLE, NOT_ADVICE
+    from dhanradar.compliance.constants import DISCLOSURE_BUNDLE, NOT_ADVICE
 
     return {
         "summary_items": [],

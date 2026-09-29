@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dhanradar.scoring.engine.schemas import (
+from dhanradar.compliance.constants import (
     DISCLAIMER_VERSION,
     DISCLOSURE_BUNDLE,
     NOT_ADVICE,
