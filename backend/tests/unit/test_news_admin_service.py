@@ -233,6 +233,31 @@ async def test_advisory_titles_rejected(title: str):
 @pytest.mark.parametrize(
     "title",
     [
+        "Book profits in these mid-cap funds",  # canonical-only term (B108)
+        "Time to accumulate this small-cap fund",  # canonical-only term (B108)
+        "Our top pick for this quarter",  # canonical-only term (B108)
+    ],
+)
+async def test_canonical_only_advisory_titles_rejected(title: str):
+    """B108: news now screens the 21-term canonical set, not just its old 8 terms —
+    phrases the old local regex missed (book profits/accumulate/top pick/...) must
+    now be rejected the same way the original 8 terms already were."""
+    from dhanradar.news.service import create_news_item
+
+    db = AsyncMock()
+    with pytest.raises(ValueError, match="advisory_title_rejected"):
+        await create_news_item(
+            db,
+            title=title,
+            source="Source",
+            canonical_url="https://example.com/article",
+            category="mutual_funds",
+        )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
         "AMFI monthly SIP data hits record",
         "SEBI circular on expense ratios",
         "Shareholding pattern disclosures Q1 2026",  # "hold" substring NOT word-bounded

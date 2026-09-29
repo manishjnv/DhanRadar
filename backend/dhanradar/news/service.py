@@ -17,7 +17,6 @@ B56-f4: Admin CRUD helpers appended at the end of this module — see
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy.exc
@@ -25,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.ai_gateway.quality import _ADVISORY_RE
 from dhanradar.config import settings
 from dhanradar.models.news import NewsItem as NewsItemModel
 from dhanradar.news.schemas import NewsItem
@@ -358,14 +358,11 @@ class DuplicateUrlError(Exception):
 
 
 # Defense-in-depth advisory screen over admin-entered titles before they reach
-# a public surface (non-neg #1). Mirrors mood/service.py:65-67 exactly —
-# the core SEBI-advisory verb set; the versioned, domain-signed taxonomy lives
-# with the AI gateway (B23). Admin-entered titles are user-facing, so this
-# screen applies here just as it does to AI-generated commentary.
-_ADVISORY_RE = re.compile(
-    r"\b(strong[\s_]?buy|strong[\s_]?sell|buy|sell|hold|switch|avoid|caution)\b",
-    re.IGNORECASE,
-)
+# a public surface (non-neg #1). REUSES the AI gateway's canonical compiled
+# advisory regex (`_ADVISORY_RE`, imported above) — the same 21-term SEBI
+# advisory-verb set QualityValidator screens model output with — rather than
+# a narrower local copy (B108; closes the news half of the B56-f1 duplication;
+# mood/service.py already imports it the same way).
 
 
 def _validate_fields(**fields: str | None) -> None:  # noqa: C901 — deliberately flat
