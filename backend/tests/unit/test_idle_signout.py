@@ -50,7 +50,9 @@ async def test_expired_key_stale_iat_is_idle_timeout_not_reuse(patch_redis, monk
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "session_idle_timeout"
-    fake_event.assert_not_called()
+    # Logged under its own low-key type — never as a reuse alarm.
+    fake_event.assert_called_once()
+    assert fake_event.call_args.kwargs["event_type"] == "refresh_idle_expired"
 
 
 async def test_missing_key_fresh_iat_is_still_reuse_detected(patch_redis, monkeypatch):
@@ -82,3 +84,21 @@ async def test_normal_rotation_still_works(patch_redis):
     assert access
     assert refresh
     assert new_jti != old_jti
+
+
+async def test_rotation_keeps_absolute_cap_from_sign_in(patch_redis):
+    """A rotation must not restart the 7-day clock: `sst` and `exp` stay
+    anchored to the original sign-in."""
+    from dhanradar.auth.security import decode_token
+
+    uid = str(uuid.uuid4())
+    old_jti = str(uuid.uuid4())
+    await svc.store_refresh_jti(old_jti, uid)
+    signed_in = int(time.time()) - 3 * 86400  # session started 3 days ago
+
+    _, _, refresh, _ = await svc.rotate_refresh_token(
+        old_jti, uid, int(time.time()), session_start=signed_in
+    )
+    payload = decode_token(refresh, expected_typ="refresh")
+    assert payload["sst"] == signed_in
+    assert payload["exp"] == signed_in + settings.REFRESH_TTL_DAYS * 86400

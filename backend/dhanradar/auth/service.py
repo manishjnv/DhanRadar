@@ -282,7 +282,7 @@ async def store_refresh_jti(jti: str, user_id: str) -> None:
 
 
 async def rotate_refresh_token(
-    old_jti: str, user_id: str, issued_at: int
+    old_jti: str, user_id: str, issued_at: int, session_start: int | None = None
 ) -> tuple[str, str, str, str]:
     """
     Refresh token rotation with reuse detection (invariant #4).
@@ -316,8 +316,14 @@ async def rotate_refresh_token(
         # server's hard cutoff); it is not a security-relevant grace period.
         if now - issued_at >= settings.SESSION_IDLE_TIMEOUT_MIN * 60 - 5:
             # Server-side idle window elapsed since this refresh token was
-            # issued — the Redis key expired naturally. Not a reuse attempt;
-            # no security event.
+            # issued — the key most likely expired naturally. Logged under its
+            # own low-key event type (a delayed replay looks the same), never
+            # as refresh_reuse_detected.
+            await record_security_event(
+                event_type="refresh_idle_expired",
+                user_id=user_id,
+                request_id=None,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="session_idle_timeout",
@@ -346,7 +352,9 @@ async def rotate_refresh_token(
 
     # Issue new pair
     access_token, access_jti = create_access_token(user_id)
-    refresh_token, refresh_jti = create_refresh_token(user_id)
+    # session_start keeps the refresh `exp` anchored to the original sign-in
+    # (absolute REFRESH_TTL_DAYS cap) instead of restarting it every rotation.
+    refresh_token, refresh_jti = create_refresh_token(user_id, session_start)
     await store_refresh_jti(refresh_jti, user_id)
 
     return access_token, access_jti, refresh_token, refresh_jti
