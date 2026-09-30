@@ -334,7 +334,8 @@ async def request_own_account_deletion(
         try:
             payload = decode_token(access_token, expected_typ="access")
             now_ts = int(datetime.now(UTC).timestamp())
-            await auth_svc.revoke_access_jti(payload["jti"], int(payload["exp"]) - now_ts)
+            # max(1, …): a token in its last second would give Redis ex=0 (error).
+            await auth_svc.revoke_access_jti(payload["jti"], max(1, int(payload["exp"]) - now_ts))
         except jwt.PyJWTError:
             # Already expired/invalid — nothing to revoke.
             pass
