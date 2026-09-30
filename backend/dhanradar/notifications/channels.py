@@ -1,17 +1,20 @@
 """
 DhanRadar — Notification delivery transports (Phase 6).
 
-Two channels at launch: Telegram (Bot API) and email (Resend — NOT SendGrid,
-non-neg #8). Each `deliver_*` is an async function returning a `DeliveryResult`
-so the drain can decide retry vs drop. Delivery is the only network seam; it is
-isolated here so tests monkeypatch these two functions and never hit the wire.
+Two channels at launch: Telegram (Bot API) and email. Email uses Brevo when
+BREVO_API_KEY is set (founder decision 2026-09-30), else falls back to Resend
+(NOT SendGrid, non-neg #8). Each `deliver_*` is an async function returning a
+`DeliveryResult` so the drain can decide retry vs drop. Delivery is the only
+network seam; it is isolated here so tests monkeypatch these two functions and
+never hit the wire.
 
 Resend gotcha (infra-notes): api.resend.com is behind Cloudflare and 403s the
 default python-urllib User-Agent (error 1010). httpx sends its own UA; we also set
 `NOTIFY_USER_AGENT` explicitly. The Resend Authorization header below is an OUTBOUND
 third-party requirement — it is NOT DhanRadar's inbound auth, which is cookie-only
 (non-neg #5); the scheme token is built from a constant so the static bearer guard
-does not false-positive on a third-party call site.
+does not false-positive on a third-party call site. Brevo uses its own `api-key`
+header (no bearer scheme), same non-inbound-auth reasoning applies.
 """
 
 from __future__ import annotations
@@ -62,17 +65,48 @@ async def deliver_telegram(
     return await _post(url, json=payload, headers=headers, client=client, what="telegram")
 
 
+def email_configured() -> bool:
+    """True if either email provider has a key set."""
+    return bool(settings.BREVO_API_KEY or settings.RESEND_API_KEY)
+
+
 async def deliver_email(
     to: str, subject: str, html: str, text: str, *, client: httpx.AsyncClient | None = None
 ) -> DeliveryResult:
-    """Send via Resend. Missing API key ⇒ disabled (fail-closed, logged)."""
-    if not settings.RESEND_API_KEY:
+    """Send via Brevo if BREVO_API_KEY is set, else Resend. Neither key ⇒ disabled
+    (fail-closed, logged)."""
+    if not email_configured():
         return DeliveryResult(ok=False, transient=False, code="email_not_configured")
     if not to:
         return DeliveryResult(ok=False, transient=False, code="no_recipient")
 
+    if settings.BREVO_API_KEY:
+        url = f"{settings.BREVO_API_BASE}/smtp/email"
+        payload = {
+            "sender": {"name": settings.EMAIL_FROM_NAME, "email": settings.EMAIL_FROM},
+            "to": [{"email": to}],
+            "replyTo": {"email": settings.SUPPORT_EMAIL},
+            "subject": subject,
+            "htmlContent": html,
+            "textContent": text,
+        }
+        headers = {
+            "api-key": settings.BREVO_API_KEY,
+            "accept": "application/json",
+            "content-type": "application/json",
+            "User-Agent": settings.NOTIFY_USER_AGENT,
+        }
+        return await _post(url, json=payload, headers=headers, client=client, what="email")
+
     url = f"{settings.RESEND_API_BASE}/emails"
-    payload = {"from": settings.EMAIL_FROM, "to": [to], "subject": subject, "html": html, "text": text}
+    payload = {
+        "from": f"{settings.EMAIL_FROM_NAME} <{settings.EMAIL_FROM}>",
+        "to": [to],
+        "subject": subject,
+        "html": html,
+        "text": text,
+        "reply_to": settings.SUPPORT_EMAIL,
+    }
     headers = {
         "Authorization": f"{_AUTH_SCHEME} {settings.RESEND_API_KEY}",
         "User-Agent": settings.NOTIFY_USER_AGENT,  # Cloudflare 1010 guard

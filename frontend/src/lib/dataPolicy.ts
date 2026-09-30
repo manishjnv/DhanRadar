@@ -8,5 +8,4 @@ export const ERASURE_DUE_DAYS = 30;
 export const LEGAL_RECORD_YEARS = 8;
 export const LOG_RETENTION_YEARS = 1;
 export const FULL_BACKUP_DAYS = 90;
-// ponytail: founder to confirm this mailbox exists (only noreply@ is configured).
-export const SUPPORT_EMAIL = 'contact@dhanradar.com';
+export const SUPPORT_EMAIL = 'connect@dhanradar.com';

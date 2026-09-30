@@ -55,6 +55,7 @@ from dhanradar.auth.security import (
 from dhanradar.config import settings
 from dhanradar.db import get_db
 from dhanradar.deps import UserContext, current_user_or_anonymous
+from dhanradar.notifications.channels import email_configured
 from dhanradar.ratelimit import RateLimit
 from dhanradar.redis_client import get_redis
 
@@ -549,15 +550,15 @@ async def email_otp_request(
     """
     Trigger delivery of a one-time login code to the supplied email address.
 
-    Fail-closed: returns 503 if RESEND_API_KEY is not configured (mirrors
-    google_start's 503 pattern for unconfigured providers).
+    Fail-closed: returns 503 if no email provider (Brevo or Resend) is
+    configured (mirrors google_start's 503 pattern for unconfigured providers).
 
     Security: ALWAYS returns {"message": "otp_sent_if_account_exists"} with
     HTTP 202 — identical response regardless of whether the account exists,
     whether the cooldown is active, or whether the daily cap is hit.  This
     prevents using the endpoint as a user-existence oracle.
     """
-    if not settings.RESEND_API_KEY:
+    if not email_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="email_otp_not_configured",
