@@ -107,6 +107,8 @@ async def test_rotate_refresh_token_does_not_write_last_login_at(patch_redis):
     rotate_refresh_token only reads/writes Redis (GETDEL + SET).  It never
     issues a DB UPDATE on auth.users.  We verify no db session is passed to it.
     """
+    import time
+
     from dhanradar.auth import service as svc
     from dhanradar.auth.security import create_refresh_token
 
@@ -124,7 +126,7 @@ async def test_rotate_refresh_token_does_not_write_last_login_at(patch_redis):
     )
 
     # Functional check: it rotates cleanly
-    access, _, refresh, _ = await svc.rotate_refresh_token(old_jti, uid)
+    access, _, refresh, _ = await svc.rotate_refresh_token(old_jti, uid, int(time.time()))
     assert access
     assert refresh
 

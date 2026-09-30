@@ -227,10 +227,13 @@ async def refresh(
 
     user_id: str = payload["sub"]
     old_jti: str = payload["jti"]
+    issued_at: int = int(payload["iat"])
+    # Tokens minted before `sst` existed fall back to iat (one last full window).
+    session_start: int = int(payload.get("sst", payload["iat"]))
 
     # rotate_refresh_token handles reuse detection and Redis rotation.
     access_token, _, new_refresh_token, new_refresh_jti = await auth_svc.rotate_refresh_token(
-        old_jti, user_id
+        old_jti, user_id, issued_at, session_start
     )
 
     # Suspended-account check: load user and refuse if suspended.

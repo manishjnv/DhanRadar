@@ -91,18 +91,30 @@ async function parseProblem(res: Response): Promise<ApiProblem> {
   };
 }
 
-/** Attempt one silent token refresh. Returns true if refresh succeeded. */
-async function tryRefresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      method:      'POST',
-      credentials: 'include',
-      headers:     baseHeaders(),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+/**
+ * Attempt one silent token refresh. Returns true if refresh succeeded.
+ * Single-flight: concurrent callers (parallel 401s, the idle keep-alive) share
+ * one request. Two refreshes with the same cookie would make the server see the
+ * second as refresh-token reuse and reject it.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function tryRefresh(): Promise<boolean> {
+  refreshInFlight ??= (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method:      'POST',
+        credentials: 'include',
+        headers:     baseHeaders(),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { SiteFooter } from '@/components/site/SiteFooter';
+import { IdleSignOutModal } from '@/components/ui/IdleSignOutModal';
 import { cn } from '@/lib/cn';
 
 // ---------------------------------------------------------------------------
@@ -304,6 +305,8 @@ export function AdminShell({ children, variant = 'admin' }: AdminShellProps) {
     // space below the footer. min-w-0 on the flex column lets wide tables
     // scroll inside their own overflow container instead of stretching the page.
     <div className="flex h-[calc(100dvh_-_var(--dev-banner-h,0px)_-_var(--ticker-h,0px))] overflow-hidden bg-bg">
+      {/* 15-min idle sign-out — logged-in shell only (never on public/auth pages) */}
+      <IdleSignOutModal />
       <AdminSidebar variant={variant} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <MobileNav variant={variant} />

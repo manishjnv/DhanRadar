@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { CommandPalette } from '@/components/ui/CommandPalette';
+import { IdleSignOutModal } from '@/components/ui/IdleSignOutModal';
 import { cn } from '@/lib/cn';
 import { SiteFooter } from '@/components/site/SiteFooter';
 import { AdminAlertsBell } from '@/components/admin/AdminAlertsBell';
@@ -408,6 +409,9 @@ export function AppShell({ children, userSlot, publicNav = false }: AppShellProp
 
       {/* ⌘K Command palette */}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+
+      {/* 15-min idle sign-out — logged-in shell only (never on public/auth pages) */}
+      <IdleSignOutModal />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar

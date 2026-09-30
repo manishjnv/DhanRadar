@@ -87,21 +87,25 @@ def create_access_token(user_id: str) -> tuple[str, str]:
     return token, jti
 
 
-def create_refresh_token(user_id: str) -> tuple[str, str]:
+def create_refresh_token(user_id: str, session_start: int | None = None) -> tuple[str, str]:
     """
     Issue an RS256 refresh token.
 
     Returns (encoded_jwt, jti).
-    TTL: settings.REFRESH_TTL_DAYS days.
+    `sst` = session start (epoch s, the original sign-in), carried through every
+    rotation so `exp` is an ABSOLUTE cap of REFRESH_TTL_DAYS from sign-in — a
+    rotation never restarts the clock. Omit `session_start` at sign-in.
     """
     jti = str(uuid.uuid4())
     now = _now_utc()
+    sst = session_start if session_start is not None else int(now.timestamp())
     payload = {
         "sub": user_id,
         "jti": jti,
         "typ": "refresh",
         "iat": now,
-        "exp": now + timedelta(days=settings.REFRESH_TTL_DAYS),
+        "sst": sst,
+        "exp": datetime.fromtimestamp(sst, UTC) + timedelta(days=settings.REFRESH_TTL_DAYS),
     }
     token = jwt.encode(payload, settings.jwt_private_key, algorithm=_ALGORITHM)
     return token, jti
