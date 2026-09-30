@@ -49,6 +49,7 @@ const COLUMNS = [
       { href: '/login', label: 'Log in' },
       { href: '/signup', label: 'Get started' },
       { href: '/settings/privacy', label: 'Privacy' },
+      { href: '/data-deletion', label: 'Data deletion' },
     ],
   },
 ] as const;
