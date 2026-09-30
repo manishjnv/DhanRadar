@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     # Optional public base URL for R2 share-cards served without a signature
     # (public mood/badge cards). Empty ⇒ a presigned S3 URL is returned instead.
     R2_PUBLIC_BASE_URL: str = ""
+    # Public frontend origin — used to build ABSOLUTE links in emails (the
+    # existing /login?error=... redirects are relative because the browser is
+    # already on-origin; an email is opened outside any browser session, so it
+    # needs a full URL). No existing setting covers this — NOTIFY_USER_AGENT's
+    # domain is a UA comment, not a link base.
+    PUBLIC_APP_URL: str = "https://dhanradar.com"
+    # Support mailbox surfaced in deletion emails/copy — mirrors
+    # frontend/src/lib/dataPolicy.ts SUPPORT_EMAIL (keep both in sync).
+    SUPPORT_EMAIL: str = "contact@dhanradar.com"
 
     # ------------------------------------------------------------------
     # AI / LLM Gateway (Phase 3, architecture §B3)

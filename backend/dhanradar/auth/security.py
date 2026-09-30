@@ -111,17 +111,49 @@ def create_refresh_token(user_id: str, session_start: int | None = None) -> tupl
     return token, jti
 
 
-def decode_token(token: str, expected_typ: Literal["access", "refresh"]) -> dict:
+def create_deletion_cancel_token(user_id: str, deletion_requested_at: datetime) -> str:
+    """
+    Issue an RS256 "deletion cancel" token — the link emailed on a deletion
+    request so the user can undo it within the wait window.
+
+    ``drq`` (deletion-requested epoch seconds) is carried so the cancel route
+    can refuse a token from a STALE request (the account was cancelled and
+    re-requested since the email was sent) without a DB round trip up front.
+    ``exp`` = drq + ERASURE_DUE — the token outlives the cancel window itself
+    (ERASURE_WAIT) so a slow-reading user can still cancel up to the erasure
+    deadline; the route's own drq-equality check is the real gate.
+    """
+    from dhanradar.compliance.data_policy import ERASURE_DUE
+
+    jti = str(uuid.uuid4())
+    now = _now_utc()
+    drq = int(deletion_requested_at.timestamp())
+    payload = {
+        "sub": user_id,
+        "jti": jti,
+        "typ": "deletion_cancel",
+        "iat": now,
+        "drq": drq,
+        "exp": datetime.fromtimestamp(drq, UTC) + ERASURE_DUE,
+    }
+    return jwt.encode(payload, settings.jwt_private_key, algorithm=_ALGORITHM)
+
+
+def decode_token(
+    token: str, expected_typ: Literal["access", "refresh", "deletion_cancel"]
+) -> dict:
     """
     Decode and validate an RS256 JWT.
 
     Raises jwt.PyJWTError subclasses on any failure (expired, bad sig,
     wrong alg, missing/wrong typ, alg:none).  Callers must catch and
-    convert to HTTP 401.
+    convert to HTTP 401/400.
 
     Invariants enforced:
       - algorithms= whitelist rejects alg:none and HS256 at the PyJWT level.
-      - `typ` claim is verified against expected_typ after decode.
+      - `typ` claim is verified against expected_typ after decode — an access
+        or refresh token is never accepted where a deletion_cancel token is
+        expected, and vice versa.
     """
     payload = jwt.decode(
         token,

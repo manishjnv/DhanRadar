@@ -21,7 +21,7 @@ auth pattern).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -118,6 +118,15 @@ async def _seed_personal_and_retention_data(db, user_id) -> None:
     await db.commit()
 
 
+async def _backdate_deletion_request(db, user_id, days: int = 8) -> None:
+    """Push deletion_requested_at back past ERASURE_WAIT (7 days) so
+    hard_erase_user's wait-period guard does not refuse the erasure in tests
+    that erase immediately after requesting."""
+    user = await db.scalar(select(User).where(User.id == user_id))
+    user.deletion_requested_at = datetime.now(UTC) - timedelta(days=days)
+    await db.commit()
+
+
 async def _counts(db, user_id) -> dict[str, int]:
     async def _c(model, col, val=user_id):
         return await db.scalar(select(func.count()).select_from(model).where(col == val)) or 0
@@ -211,6 +220,7 @@ async def test_hard_erase_purges_personal_data_keeps_legal_retention(db_session,
     assert before["payment_events"] == 1
 
     await request_user_deletion(db_session, uid)
+    await _backdate_deletion_request(db_session, uid)
     counts = await hard_erase_user(db_session, uid)
 
     assert counts["mf.mf_portfolios"] == 1
@@ -245,6 +255,7 @@ async def test_hard_erase_ledger_delete_uses_purge_guc_not_leaked(db_session, pa
     uid = user.id
     await _seed_personal_and_retention_data(db_session, uid)
     await request_user_deletion(db_session, uid)
+    await _backdate_deletion_request(db_session, uid)
     await hard_erase_user(db_session, uid)
 
     remaining = await db_session.scalar(
@@ -348,6 +359,32 @@ async def test_erase_409_when_deletion_not_requested(async_client, monkeypatch):
     assert r.json()["detail"] == "deletion_not_requested"
 
 
+async def test_erase_409_wait_period_not_elapsed(async_client, monkeypatch):
+    """Requesting and immediately erasing (no backdate) is refused — the
+    7-day ERASURE_WAIT cancel window has not elapsed — with the
+    earliest_erase_at extension member on the 409 problem body."""
+    from dhanradar.config import settings
+    from tests.conftest import make_auth_headers
+
+    admin_id, admin_access = await _signup(async_client, "admin_erase_wait@example.com")
+    monkeypatch.setattr(settings, "ADMIN_USER_IDS", admin_id)
+    headers = make_auth_headers(access_token=admin_access)
+
+    target_id, _ = await _signup(async_client, "target_erase_wait@example.com")
+    r = await async_client.post(
+        f"/api/v1/admin/users/{target_id}/request-deletion", headers=headers
+    )
+    assert r.status_code == 200, r.text
+
+    erase_headers = dict(headers)
+    erase_headers["Idempotency-Key"] = "wait-1"
+    r = await async_client.post(f"/api/v1/admin/users/{target_id}/erase", headers=erase_headers)
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["detail"] == "erasure_wait_period"
+    assert "earliest_erase_at" in body
+
+
 async def test_erase_404_unknown_user(async_client, monkeypatch):
     from dhanradar.config import settings
     from tests.conftest import make_auth_headers
@@ -379,6 +416,7 @@ async def test_full_flow_request_then_erase_records_admin_action(
     )
     assert r.status_code == 200, r.text
     assert r.json() == {"ok": True, "status": "deletion_requested"}
+    await _backdate_deletion_request(db_session, target_id)
 
     erase_headers = dict(headers)
     erase_headers["Idempotency-Key"] = "erase-flow-1"
@@ -403,3 +441,46 @@ async def test_full_flow_request_then_erase_records_admin_action(
         f"/api/v1/admin/users/{target_id}/erase", headers=erase_headers
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 4. reapply_erasure — backup-restore cleanup path (erasure_cli.py)
+# ---------------------------------------------------------------------------
+
+
+async def test_reapply_erasure_absent_returns_none(db_session, patch_redis):
+    import uuid
+
+    from dhanradar.auth.erasure import reapply_erasure
+
+    result = await reapply_erasure(db_session, uuid.uuid4())
+    assert result is None
+
+
+async def test_reapply_erasure_present_purges_and_returns_counts(db_session, patch_redis):
+    """A restore resurrected a user who was already hard-erased — reapply_erasure
+    re-runs the same erasure core with NO wait/marker guard (unlike hard_erase_user,
+    it must work even though deletion_requested_at is not set on the resurrected row)."""
+    from dhanradar.auth.erasure import reapply_erasure
+
+    user = User(email="resurrected-by-restore@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    uid = user.id
+    await _seed_personal_and_retention_data(db_session, uid)
+    # No request_user_deletion call — deletion_requested_at stays None, proving
+    # reapply_erasure does not gate on it.
+    assert user.deletion_requested_at is None
+
+    counts = await reapply_erasure(db_session, uid)
+    assert counts is not None
+    assert counts["mf.mf_portfolios"] == 1
+    assert counts["auth.users"] == 1
+
+    remaining_user = await db_session.scalar(select(User).where(User.id == uid))
+    assert remaining_user is None
+
+    after = await _counts(db_session, uid)
+    assert after["portfolios"] == 0
+    # Legal-retention rows still survive.
+    assert after["consent_audit"] == 1

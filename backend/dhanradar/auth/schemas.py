@@ -134,3 +134,15 @@ class RefreshResponse(BaseModel):
 
 class AccountDeletionResponse(BaseModel):
     status: str
+    earliest_erase_at: str
+    erase_by: str
+
+
+class AccountDeletionCancelRequest(BaseModel):
+    """Body for POST /auth/account/deletion-cancel."""
+
+    token: str
+
+
+class AccountDeletionCancelResponse(BaseModel):
+    status: str

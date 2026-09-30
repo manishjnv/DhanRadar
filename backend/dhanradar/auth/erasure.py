@@ -52,6 +52,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dhanradar.auth.service import REFRESH_KEY_PREFIX, TIER_CACHE_PREFIX
+from dhanradar.compliance.data_policy import (
+    ERASURE_DUE,
+    ERASURE_WAIT,
+    LEGAL_RECORD_RETENTION,
+    LOG_RETENTION,
+)
+from dhanradar.config import settings
 from dhanradar.core.logging import get_logger
 from dhanradar.mf.ledger import allow_ledger_purge
 from dhanradar.models.auth import Subscription, User, UserActivityLog
@@ -82,6 +89,10 @@ from dhanradar.signal.models import (
 
 _slog = get_logger(__name__)
 
+# Whole-year counts derived from the policy constants (never hardcode 8/1).
+_LEGAL_YEARS = round(LEGAL_RECORD_RETENTION.days / 365)
+_LOG_YEARS = round(LOG_RETENTION.days / 365)
+
 
 class UserNotFoundError(Exception):
     """No ``auth.users`` row for the given id."""
@@ -89,6 +100,14 @@ class UserNotFoundError(Exception):
 
 class DeletionNotRequestedError(Exception):
     """Erasure refused — ``deletion_requested_at`` is not set (active account)."""
+
+
+class ErasureWaitPeriodError(Exception):
+    """Erasure refused — still inside the ERASURE_WAIT cancel window."""
+
+    def __init__(self, earliest_erase_at: datetime) -> None:
+        self.earliest_erase_at = earliest_erase_at
+        super().__init__(f"erasure not allowed before {earliest_erase_at.isoformat()}")
 
 
 # FK-CASCADE tables (auth.users.id ondelete=CASCADE) — deleting the user row
@@ -160,20 +179,93 @@ async def _revoke_all_refresh_jtis(user_id: str) -> int:
     return revoked
 
 
-async def request_user_deletion(db: AsyncSession, user_id: UUID) -> None:
+def _fmt_date(dt: datetime) -> str:
+    return dt.strftime("%d %b %Y")
+
+
+def _retained_data_line() -> str:
+    return (
+        f"What we keep: consent, payment and AI-output records for {_LEGAL_YEARS} years "
+        f"and security logs for {_LOG_YEARS} year, with no name or email attached, "
+        "then deleted."
+    )
+
+
+async def _send_deletion_requested_email(
+    to: str, user_id: UUID, requested_at: datetime
+) -> None:
+    from dhanradar.auth.security import create_deletion_cancel_token
+    from dhanradar.notifications.channels import send_transactional_email
+
+    earliest = requested_at + ERASURE_WAIT
+    due = requested_at + ERASURE_DUE
+    token = create_deletion_cancel_token(str(user_id), requested_at)
+    cancel_url = f"{settings.PUBLIC_APP_URL}/account/cancel-deletion?token={token}"
+    retained = _retained_data_line()
+
+    subject = "Your DhanRadar account deletion request"
+    text = (
+        f"We got your request on {_fmt_date(requested_at)}.\n\n"
+        "You have been signed out.\n\n"
+        f"Your account and portfolio data will be deleted between "
+        f"{_fmt_date(earliest)} and {_fmt_date(due)}.\n\n"
+        f"To keep your account, open this link before {_fmt_date(earliest)}:\n"
+        f"{cancel_url}\n\n"
+        f"{retained}\n\n"
+        f"Questions? Write to {settings.SUPPORT_EMAIL}."
+    )
+    html = (
+        f"<p>We got your request on <strong>{_fmt_date(requested_at)}</strong>.</p>"
+        "<p>You have been signed out.</p>"
+        f"<p>Your account and portfolio data will be deleted between "
+        f"<strong>{_fmt_date(earliest)}</strong> and <strong>{_fmt_date(due)}</strong>.</p>"
+        f'<p>To keep your account, open this link before {_fmt_date(earliest)}: '
+        f'<a href="{cancel_url}">{cancel_url}</a></p>'
+        f"<p>{retained}</p>"
+        f"<p>Questions? Write to {settings.SUPPORT_EMAIL}.</p>"
+    )
+    await send_transactional_email(to, subject, text, html)
+
+
+async def _send_erasure_done_email(to: str, erased_at: datetime) -> None:
+    from dhanradar.notifications.channels import send_transactional_email
+
+    retained = _retained_data_line()
+    subject = "Your DhanRadar account has been deleted"
+    text = (
+        f"Your DhanRadar account was deleted on {_fmt_date(erased_at)}.\n\n"
+        f"{retained}\n\n"
+        f"Questions? Write to {settings.SUPPORT_EMAIL}."
+    )
+    html = (
+        f"<p>Your DhanRadar account was deleted on <strong>{_fmt_date(erased_at)}</strong>.</p>"
+        f"<p>{retained}</p>"
+        f"<p>Questions? Write to {settings.SUPPORT_EMAIL}.</p>"
+    )
+    await send_transactional_email(to, subject, text, html)
+
+
+async def request_user_deletion(db: AsyncSession, user_id: UUID) -> datetime:
     """Mark *user_id* for deletion and immediately tear down their sessions.
 
     Idempotent: re-requesting an already-pending deletion just re-stamps the
     timestamp and re-runs the session teardown (harmless — there is nothing
-    left to revoke on a second call).
+    left to revoke on a second call). A re-request also sends a fresh "request
+    received" email with a fresh cancel token — the OLD cancel link's `drq`
+    claim no longer matches the re-stamped ``deletion_requested_at``, so it is
+    rejected as stale (see the deletion-cancel route).
 
     Does NOT erase any data — see ``hard_erase_user`` for the actual purge.
+
+    Returns the (new) ``deletion_requested_at`` so callers (self-service route)
+    can report ``earliest_erase_at`` / ``erase_by`` without a second DB read.
     """
     user = await db.scalar(select(User).where(User.id == user_id))
     if user is None:
         raise UserNotFoundError()
 
-    user.deletion_requested_at = datetime.now(UTC)
+    requested_at = datetime.now(UTC)
+    user.deletion_requested_at = requested_at
     await db.commit()
 
     uid_str = str(user_id)
@@ -181,6 +273,12 @@ async def request_user_deletion(db: AsyncSession, user_id: UUID) -> None:
     redis = get_redis()
     await redis.delete(f"{TIER_CACHE_PREFIX}{uid_str}")
     _slog.info("erasure.deletion_requested", refresh_jtis_revoked=revoked)
+
+    # Email is sent from BOTH the self-service and admin-triggered request
+    # paths — this is the ONE implementation both call through. A send
+    # failure is logged (inside send_transactional_email) and never raised.
+    await _send_deletion_requested_email(user.email, user_id, requested_at)
+    return requested_at
 
 
 async def cancel_user_deletion(db: AsyncSession, user_id: UUID) -> None:
@@ -201,26 +299,19 @@ async def cancel_user_deletion(db: AsyncSession, user_id: UUID) -> None:
     _slog.info("erasure.deletion_cancelled")
 
 
-async def hard_erase_user(db: AsyncSession, user_id: UUID) -> dict[str, int]:
-    """DPDP hard erasure (B79). Refuses unless ``deletion_requested_at`` is set.
+async def _erase_rows(db: AsyncSession, user_id: UUID) -> dict[str, int]:
+    """The ONE erasure implementation — no guards, no commit.
 
-    One transaction: arm the ledger-purge GUC FIRST (mirrors
-    ``mf.router.delete_portfolio``), explicitly delete the NO-FK personal
-    tables, then ``DELETE FROM auth.users`` — the CASCADE FKs take care of
-    every other personal-data table (see module docstring for the full map).
-    Legal-retention tables are never touched (no FK reaches them, and this
-    module never references them).
+    Arms the ledger-purge GUC FIRST (mirrors ``mf.router.delete_portfolio``),
+    explicitly deletes the NO-FK personal tables, then ``DELETE FROM
+    auth.users`` — the CASCADE FKs take care of every other personal-data
+    table (see module docstring for the full map). Legal-retention tables are
+    never touched (no FK reaches them, and this module never references them).
 
-    Returns per-table row counts (no PII — just table label -> int). Redis
-    per-user keys are cleared AFTER commit (best-effort, never blocks the
-    already-committed erasure).
+    Callers (``hard_erase_user``, ``reapply_erasure``) own the guard checks
+    and the commit — this function assumes the caller has already confirmed
+    it is safe to erase.
     """
-    user = await db.scalar(select(User).where(User.id == user_id))
-    if user is None:
-        raise UserNotFoundError()
-    if user.deletion_requested_at is None:
-        raise DeletionNotRequestedError()
-
     counts: dict[str, int] = {}
     for label, model, col in _CASCADE_TABLES + _EXPLICIT_DELETE_TABLES:
         counts[label] = int(
@@ -236,7 +327,33 @@ async def hard_erase_user(db: AsyncSession, user_id: UUID) -> dict[str, int]:
 
     result = await db.execute(delete(User).where(User.id == user_id))
     counts["auth.users"] = result.rowcount or 0  # type: ignore[attr-defined]
+    return counts
 
+
+async def hard_erase_user(db: AsyncSession, user_id: UUID) -> dict[str, int]:
+    """DPDP hard erasure (B79). Refuses unless ``deletion_requested_at`` is set
+    AND at least ``ERASURE_WAIT`` has elapsed since the request (the user's
+    cancel window) — raises ``ErasureWaitPeriodError(earliest_erase_at)``
+    otherwise.
+
+    Returns per-table row counts (no PII — just table label -> int). Redis
+    per-user keys are cleared AFTER commit (best-effort, never blocks the
+    already-committed erasure). The confirmation email is sent AFTER commit,
+    using the email address read BEFORE the row was deleted.
+    """
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise UserNotFoundError()
+    if user.deletion_requested_at is None:
+        raise DeletionNotRequestedError()
+
+    earliest_erase_at = user.deletion_requested_at + ERASURE_WAIT
+    now = datetime.now(UTC)
+    if now < earliest_erase_at:
+        raise ErasureWaitPeriodError(earliest_erase_at)
+
+    email = user.email
+    counts = await _erase_rows(db, user_id)
     await db.commit()
 
     uid_str = str(user_id)
@@ -248,4 +365,28 @@ async def hard_erase_user(db: AsyncSession, user_id: UUID) -> dict[str, int]:
         _slog.warning("erasure.redis_cleanup_failed")
 
     _slog.info("erasure.hard_erased", tables=len(counts))
+    await _send_erasure_done_email(email, now)
+    return counts
+
+
+async def reapply_erasure(db: AsyncSession, user_id: UUID) -> dict[str, int] | None:
+    """Re-erase a user resurrected by a backup restore (Builder D's restore
+    scripts, via ``erasure_cli``).
+
+    A restore can bring back rows for a user who was hard-erased AFTER the
+    backup was taken — this re-runs the same ``_erase_rows`` core with NO
+    marker/wait guards (a restore is not the user-facing erasure path; the
+    original ``hard_erase_user`` call already cleared those checks) and NO
+    email (the user already got their erasure-done email the first time).
+
+    Returns ``None`` if the user row is absent (nothing to re-erase — the
+    restore did not resurrect this user), otherwise the per-table counts.
+    """
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        return None
+
+    counts = await _erase_rows(db, user_id)
+    await db.commit()
+    _slog.info("erasure.reapplied", tables=len(counts))
     return counts

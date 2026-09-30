@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dhanradar.audit.service import list_admin_actions, list_payment_events, record_admin_action
 from dhanradar.auth.erasure import (
     DeletionNotRequestedError,
+    ErasureWaitPeriodError,
     UserNotFoundError,
     cancel_user_deletion,
     hard_erase_user,
@@ -738,6 +739,14 @@ async def erase_user(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="deletion_not_requested",
+        )
+    except ErasureWaitPeriodError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "erasure_wait_period",
+                "earliest_erase_at": exc.earliest_erase_at.isoformat(),
+            },
         )
 
     await record_admin_action(
