@@ -40,6 +40,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, R
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dhanradar.audit.service import record_security_event
 from dhanradar.auth import google as google_svc
 from dhanradar.auth import schemas
 from dhanradar.auth import service as auth_svc
@@ -236,7 +237,7 @@ async def refresh(
         old_jti, user_id, issued_at, session_start
     )
 
-    # Suspended-account check: load user and refuse if suspended.
+    # Suspended / deletion-pending check: load user and refuse either state.
     # Checked after rotation so the old jti is already consumed (reuse detection
     # still fires) and the new jti is stored (but we revoke it below on refusal).
     from sqlalchemy import select as _select
@@ -244,15 +245,19 @@ async def refresh(
     from dhanradar.models.auth import User as _User
 
     db_user = await db.scalar(_select(_User).where(_User.id == user_id))
-    if db_user is not None and db_user.suspended_at is not None:
-        # Revoke the newly-issued refresh jti so the suspended user cannot
-        # silently keep sessions alive after suspension.
+    if db_user is not None and (
+        db_user.suspended_at is not None or db_user.deletion_requested_at is not None
+    ):
+        # Revoke the newly-issued refresh jti so the account cannot silently
+        # keep sessions alive after suspension / a deletion request.
         await auth_svc.revoke_refresh_jti(new_refresh_jti)
         clear_auth_cookies(response)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="account_suspended",
+        detail = (
+            "account_deletion_pending"
+            if db_user.deletion_requested_at is not None
+            else "account_suspended"
         )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
     set_auth_cookies(response, access_token, new_refresh_token)
     return schemas.RefreshResponse(message="tokens_rotated")
@@ -291,6 +296,56 @@ async def me(
         )
 
     return schemas.MeResponse(user=_user_response(db_user))
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/account/deletion-request  (DPDP self-service, B79)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/account/deletion-request",
+    response_model=schemas.AccountDeletionResponse,
+    summary="Request deletion of your own account (DPDP self-service)",
+)
+async def request_own_account_deletion(
+    body: schemas.AccountDeletionRequest,
+    response: Response,
+    user: Annotated[UserContext, Depends(current_user_or_anonymous)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    access_token: Annotated[str | None, Cookie(alias="__Host-access")] = None,
+) -> schemas.AccountDeletionResponse:
+    """Self-service counterpart of admin /admin/users/{id}/request-deletion.
+
+    Marks the account for deletion (revokes all refresh jtis + flushes the
+    tier cache — see auth.erasure.request_user_deletion), kills the CURRENT
+    session by revoking this request's own access jti, clears both auth
+    cookies (same as logout), and records a security event. Idempotent.
+    """
+    if user.is_anonymous:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not_authenticated")
+
+    import uuid as _uuid
+
+    from dhanradar.auth.erasure import request_user_deletion as _request_user_deletion
+
+    await _request_user_deletion(db, _uuid.UUID(user.user_id))
+
+    if access_token:
+        try:
+            payload = decode_token(access_token, expected_typ="access")
+            now_ts = int(datetime.now(UTC).timestamp())
+            await auth_svc.revoke_access_jti(payload["jti"], int(payload["exp"]) - now_ts)
+        except jwt.PyJWTError:
+            # Already expired/invalid — nothing to revoke.
+            pass
+
+    await record_security_event(
+        event_type="account_deletion_requested",
+        user_id=user.user_id,
+    )
+
+    clear_auth_cookies(response)
+    return schemas.AccountDeletionResponse(status="deletion_requested")
 
 
 # ---------------------------------------------------------------------------

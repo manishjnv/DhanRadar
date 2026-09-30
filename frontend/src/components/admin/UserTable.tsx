@@ -13,6 +13,7 @@
  */
 
 import * as React from 'react';
+import { toast } from 'sonner';
 import { HealthBadge } from './HealthBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +25,8 @@ import {
   useSuspendUser,
   useUnsuspendUser,
   useResetUserAccess,
+  useCancelDeletion,
+  useEraseUser,
   type AdminUserRow,
 } from '@/features/admin/api';
 
@@ -70,7 +73,7 @@ const USER_ACCESSORS: Record<string, SortAccessor<AdminUserRow>> = {
 // ---------------------------------------------------------------------------
 // Per-row action dialog state
 // ---------------------------------------------------------------------------
-type ActionKind = 'suspend' | 'unsuspend' | 'reset-access' | null;
+type ActionKind = 'suspend' | 'unsuspend' | 'reset-access' | 'cancel-deletion' | 'erase' | null;
 
 interface ActiveAction {
   user: AdminUserRow;
@@ -84,6 +87,8 @@ export function UserTable({ users, onView }: UserTableProps) {
   const suspendMutation      = useSuspendUser();
   const unsuspendMutation    = useUnsuspendUser();
   const resetAccessMutation  = useResetUserAccess();
+  const cancelDeletionMutation = useCancelDeletion();
+  const eraseMutation        = useEraseUser();
 
   const [activeAction, setActiveAction] = React.useState<ActiveAction>({ user: users[0] ?? ({} as AdminUserRow), kind: null });
   const [suspendReason, setSuspendReason] = React.useState('');
@@ -144,14 +149,20 @@ export function UserTable({ users, onView }: UserTableProps) {
                 </td>
                 {/* Status */}
                 <td className="py-2.5 pr-4">
-                  <HealthBadge
-                    status={
-                      user.status === 'active'    ? 'Healthy'  :
-                      user.status === 'suspended' ? 'Failed'   :
-                      user.status === 'blocked'   ? 'Critical' :
-                      'Paused'
-                    }
-                  />
+                  {user.deletion_requested_at ? (
+                    <span className="rounded-full bg-amber/10 px-2 py-0.5 text-caption font-medium text-amber whitespace-nowrap">
+                      Deletion requested · {formatRelative(user.deletion_requested_at)}
+                    </span>
+                  ) : (
+                    <HealthBadge
+                      status={
+                        user.status === 'active'    ? 'Healthy'  :
+                        user.status === 'suspended' ? 'Failed'   :
+                        user.status === 'blocked'   ? 'Critical' :
+                        'Paused'
+                      }
+                    />
+                  )}
                 </td>
                 {/* Last Login */}
                 <td className="py-2.5 pr-4 font-mono text-[11px] text-ink-muted">
@@ -174,7 +185,25 @@ export function UserTable({ users, onView }: UserTableProps) {
                     >
                       View
                     </Button>
-                    {user.status === 'suspended' ? (
+                    {user.deletion_requested_at ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openDialog(user, 'cancel-deletion')}
+                        >
+                          Cancel Request
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red hover:bg-red/10"
+                          onClick={() => openDialog(user, 'erase')}
+                        >
+                          Erase Permanently
+                        </Button>
+                      </>
+                    ) : user.status === 'suspended' ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -276,6 +305,48 @@ export function UserTable({ users, onView }: UserTableProps) {
         confirmPhrase={activeUser.email}
         onConfirm={async () => {
           await resetAccessMutation.mutateAsync(activeUser.id);
+        }}
+      />
+
+      {/* Cancel deletion request — simple confirm */}
+      <ConfirmDialog
+        open={activeAction.kind === 'cancel-deletion'}
+        onClose={closeDialog}
+        title="Cancel deletion request"
+        description={
+          <>
+            <strong>{activeUser.email}</strong> will no longer be scheduled for deletion and can
+            sign in again.
+          </>
+        }
+        confirmLabel="Cancel Request"
+        confirmVariant="primary"
+        onConfirm={async () => {
+          await cancelDeletionMutation.mutateAsync(activeUser.id);
+        }}
+      />
+
+      {/* Erase permanently — irreversible, type-to-confirm email */}
+      <ConfirmDialog
+        open={activeAction.kind === 'erase'}
+        onClose={closeDialog}
+        title="Erase user permanently"
+        description={
+          <>
+            This permanently deletes <strong>{activeUser.email}</strong> and their portfolio
+            data. This cannot be undone. Type the user&apos;s email to confirm.
+          </>
+        }
+        confirmLabel="Erase Permanently"
+        confirmVariant="danger"
+        confirmPhrase={activeUser.email}
+        onConfirm={async () => {
+          const result = await eraseMutation.mutateAsync({
+            id: activeUser.id,
+            idempotencyKey: crypto.randomUUID(),
+          });
+          const rows = Object.values(result.counts).reduce((sum, n) => sum + n, 0);
+          toast.success(`Erased — ${rows} row${rows === 1 ? '' : 's'} removed.`);
         }}
       />
     </>

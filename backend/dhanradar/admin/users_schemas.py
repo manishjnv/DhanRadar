@@ -59,6 +59,9 @@ class UserListItem(BaseModel):
     # who have not logged in since the column was added.
     last_login_at: datetime | None = None
     created_at: datetime
+    # Set when the user (or an admin) has requested account deletion; None
+    # when active. Drives the amber "Deletion requested" admin badge.
+    deletion_requested_at: datetime | None = None
 
 
 class UserListResponse(BaseModel):
@@ -91,6 +94,9 @@ class UserDetailResponse(BaseModel):
     dpdp_consent_version: str | None = None
     # Set when account is administratively suspended; None when active.
     suspended_at: str | None = None
+    # Set when the user (or an admin) has requested account deletion; None
+    # when active. Drives the amber "Deletion requested" admin badge.
+    deletion_requested_at: datetime | None = None
     # Most recent subscription dict or None (from billing.service.get_user_subscription)
     subscription: dict[str, Any] | None = None
     # Payment events from audit.payment_events (from audit.service.list_payment_events)

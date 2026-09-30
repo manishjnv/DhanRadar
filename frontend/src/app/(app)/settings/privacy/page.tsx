@@ -17,10 +17,13 @@ import {
   CardDescription,
   CardBody,
 } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { cn } from '@/lib/cn';
 import { useConsent, useGrantConsent, useRevokeConsent } from '@/features/consent/api';
+import { useRequestAccountDeletion } from '@/features/auth/api';
 import { purposeCopy } from '@/features/consent/purposeCopy';
 import type { ConsentPurpose } from '@/features/consent/types';
 
@@ -80,6 +83,9 @@ export default function PrivacyConsentPage() {
   const { data: consent, isLoading, isError, refetch } = useConsent();
   const grant = useGrantConsent();
   const revoke = useRevokeConsent();
+  const requestDeletion = useRequestAccountDeletion();
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
   const pending = grant.isPending || revoke.isPending;
 
@@ -172,6 +178,43 @@ export default function PrivacyConsentPage() {
           })}
         </CardBody>
       </Card>
+
+      {/* Delete my account — DPDP self-service erasure request (B79) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Delete my account</CardTitle>
+        </CardHeader>
+        <CardBody className="flex flex-col gap-4">
+          <p className="text-small text-ink-secondary leading-relaxed">
+            We will delete your account and your portfolio data. You will be signed out
+            now and cannot sign in again. Some records we must keep by law (consent and
+            audit logs) are kept.
+          </p>
+          <div>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              Delete my account
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        title="Delete my account"
+        description="We will delete your account and your portfolio data. You will be signed out now and cannot sign in again. Some records we must keep by law (consent and audit logs) are kept."
+        confirmLabel="Yes, delete my account"
+        confirmVariant="danger"
+        onConfirm={async () => {
+          await requestDeletion.mutateAsync();
+          window.location.assign('/login?notice=deletion_requested');
+        }}
+      />
     </div>
   );
 }

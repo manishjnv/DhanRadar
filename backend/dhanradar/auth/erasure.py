@@ -183,6 +183,24 @@ async def request_user_deletion(db: AsyncSession, user_id: UUID) -> None:
     _slog.info("erasure.deletion_requested", refresh_jtis_revoked=revoked)
 
 
+async def cancel_user_deletion(db: AsyncSession, user_id: UUID) -> None:
+    """Cancel a pending deletion request — clears ``deletion_requested_at``.
+
+    Raises ``UserNotFoundError`` if no such user, ``DeletionNotRequestedError``
+    (reused — 409, "nothing to cancel") if deletion was never requested. Does
+    NOT restore revoked sessions (the user must sign in again).
+    """
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise UserNotFoundError()
+    if user.deletion_requested_at is None:
+        raise DeletionNotRequestedError()
+
+    user.deletion_requested_at = None
+    await db.commit()
+    _slog.info("erasure.deletion_cancelled")
+
+
 async def hard_erase_user(db: AsyncSession, user_id: UUID) -> dict[str, int]:
     """DPDP hard erasure (B79). Refuses unless ``deletion_requested_at`` is set.
 

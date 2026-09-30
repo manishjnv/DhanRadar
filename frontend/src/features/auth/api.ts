@@ -154,3 +154,20 @@ export function useLogout() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// useRequestAccountDeletion — self-service DPDP deletion request (B79).
+// Server clears both auth cookies and revokes the current session before
+// responding, so the client cache is wiped the same way as logout.
+// ---------------------------------------------------------------------------
+export function useRequestAccountDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ status: string }>('/auth/account/deletion-request', { confirm: true }),
+    onSettled: () => {
+      qc.setQueryData(queryKeys.auth.me(), null);
+      qc.clear();
+    },
+  });
+}
