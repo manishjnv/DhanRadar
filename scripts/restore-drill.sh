@@ -199,7 +199,7 @@ done < "${MANIFEST}"
 # report how many erased-user ids this backup carries.
 if [[ -f "${RESTORE_DIR}/erased_ids.txt.age" ]]; then
   if command -v age >/dev/null 2>&1 && [[ -f "${AGE_IDENTITY}" ]]; then
-    ERASED_COUNT="$(age -d -i "${AGE_IDENTITY}" "${RESTORE_DIR}/erased_ids.txt.age" 2>/dev/null | grep -c . || echo 0)"
+    ERASED_COUNT="$(age -d -i "${AGE_IDENTITY}" "${RESTORE_DIR}/erased_ids.txt.age" 2>/dev/null | grep -c . || true)"
     log "erased_ids.txt.age verified: ${ERASED_COUNT} erased-user id(s) recorded in this backup."
   else
     log "erased_ids.txt.age present + checksum-verified (not decrypted — 'age' or identity unavailable for a count)."
