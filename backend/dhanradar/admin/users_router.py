@@ -38,6 +38,7 @@ from dhanradar.audit.service import list_admin_actions, list_payment_events, rec
 from dhanradar.auth.erasure import (
     DeletionNotRequestedError,
     UserNotFoundError,
+    cancel_user_deletion,
     hard_erase_user,
     request_user_deletion,
 )
@@ -205,6 +206,7 @@ async def list_users(
             status=_derive_status(u),
             last_login_at=u.last_login_at,
             created_at=u.created_at,
+            deletion_requested_at=u.deletion_requested_at,
         )
         for u in users
     ]
@@ -334,6 +336,7 @@ async def get_user_detail(
         risk_profile=user.risk_profile,
         dpdp_consent_version=user.dpdp_consent_version,
         suspended_at=user.suspended_at.isoformat() if user.suspended_at is not None else None,
+        deletion_requested_at=user.deletion_requested_at,
         subscription=subscription,
         payments=payments,
         login_history=login_history,
@@ -654,6 +657,44 @@ async def request_deletion(
         result="deletion_requested",
     )
     return UserActionResponse(ok=True, status="deletion_requested")
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/users/{user_id}/cancel-deletion  (DPDP, B79 — admin-side undo of
+# a deletion request, self-service or admin-triggered)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/cancel-deletion", response_model=UserActionResponse)
+async def cancel_deletion(
+    user_id: str,
+    admin: Annotated[UserContext, Depends(RequireAdmin())],
+    db: Annotated[AsyncSession, Depends(get_admin_db)],
+) -> UserActionResponse:
+    """Cancel a pending deletion request. 409 if none is pending, 404 if unknown."""
+    try:
+        uid = UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+
+    try:
+        await cancel_user_deletion(db, uid)
+    except UserNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+    except DeletionNotRequestedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="deletion_not_requested",
+        )
+
+    await record_admin_action(
+        admin_id=admin.user_id,
+        action="cancel_deletion",
+        target_type="user",
+        target_id=user_id,
+        result="active",
+    )
+    return UserActionResponse(ok=True, status="active")
 
 
 # ---------------------------------------------------------------------------

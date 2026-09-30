@@ -10,6 +10,7 @@ Rules:
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -57,6 +58,13 @@ class EmailOTPRequest(BaseModel):
     """Request body for POST /auth/email-otp/request."""
 
     email: EmailStr
+
+
+class AccountDeletionRequest(BaseModel):
+    """Body for POST /auth/account/deletion-request. ``confirm`` must be
+    exactly ``true`` — any other value (false, missing, string) is a 422."""
+
+    confirm: Literal[True]
 
 
 class EmailOTPLoginRequest(BaseModel):
@@ -122,3 +130,7 @@ class LogoutResponse(BaseModel):
 
 class RefreshResponse(BaseModel):
     message: str
+
+
+class AccountDeletionResponse(BaseModel):
+    status: str

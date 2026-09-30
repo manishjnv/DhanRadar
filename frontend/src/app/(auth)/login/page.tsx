@@ -48,6 +48,7 @@ function LoginForm() {
   // email_otp phase: 'request' = pre-send, 'code' = code input shown
   const [otpPhase, setOtpPhase] = React.useState<'request' | 'code'>('request');
   const [formError, setFormError] = React.useState<string | null>(null);
+  // Neutral (non-error) notice from a redirect: ?reason=idle | ?notice=deletion_requested.
   const [infoMessage, setInfoMessage] = React.useState<string | null>(null);
   // code is managed in local state (not react-hook-form) so auto-submit
   // can fire synchronously from the onChange handler.
@@ -103,6 +104,11 @@ function LoginForm() {
     if (params.get('reason') === 'idle') {
       setInfoMessage(
         'You were signed out after 15 minutes of no activity. Please sign in again.',
+      );
+    }
+    if (params.get('notice') === 'deletion_requested') {
+      setInfoMessage(
+        'We got your request. Your account will be deleted soon. You have been signed out.',
       );
     }
     // params is stable for the lifetime of the page — this runs once.
@@ -375,7 +381,7 @@ function LoginForm() {
             </>
           )}
 
-          {infoMessage && (
+          {infoMessage && !formError && (
             <p className="text-small text-ink-secondary" role="status">
               {infoMessage}
             </p>

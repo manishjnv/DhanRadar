@@ -314,6 +314,7 @@ export interface AdminUserRow {
   status: string;
   last_login_at: string | null;
   created_at: string;
+  deletion_requested_at: string | null;
 }
 
 export interface AdminUsersListResponse {
@@ -356,6 +357,7 @@ export interface AdminUserDetail {
   pro_access_reason: string | null;
   risk_profile: string | null;
   dpdp_consent_version: string | null;
+  deletion_requested_at: string | null;
   subscription: {
     plan: string;
     status: string;
@@ -1034,6 +1036,41 @@ export function useResetUserAccess() {
       api.post<{ ok: boolean }>(`/admin/users/${id}/reset-access`),
     onSettled: (_data, _err, id) => {
       qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DPDP hard erasure (B79) — cancel a pending deletion request, or erase
+// permanently once one is pending. Both admin-only, RequireAdmin-gated.
+// ---------------------------------------------------------------------------
+
+export function useCancelDeletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ ok: boolean; status: string }>(`/admin/users/${id}/cancel-deletion`),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+    },
+  });
+}
+
+export function useEraseUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, idempotencyKey }: { id: string; idempotencyKey: string }) =>
+      api.postH<{ ok: boolean; counts: Record<string, number> }>(
+        `/admin/users/${id}/erase`,
+        undefined,
+        { 'Idempotency-Key': idempotencyKey },
+      ),
+    onSettled: (_data, _err, { id }) => {
+      qc.invalidateQueries({ queryKey: adminKeysExt.users() });
+      qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
       qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
     },
   });
