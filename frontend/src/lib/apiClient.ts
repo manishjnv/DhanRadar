@@ -91,8 +91,12 @@ async function parseProblem(res: Response): Promise<ApiProblem> {
   };
 }
 
-/** Attempt one silent token refresh. Returns true if refresh succeeded. */
-async function tryRefresh(): Promise<boolean> {
+/**
+ * Attempt one silent token refresh. Returns true if refresh succeeded.
+ * Exported so useIdleSignOut can reuse this single-flight refresh call for
+ * its keep-alive ping instead of duplicating the fetch.
+ */
+export async function tryRefresh(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method:      'POST',

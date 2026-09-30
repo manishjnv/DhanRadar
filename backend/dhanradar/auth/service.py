@@ -58,6 +58,11 @@ ACCESS_REVOKED_PREFIX = "auth:access_revoked:"  # auth:access_revoked:{jti} → 
 
 TIER_TTL = 900       # 15 minutes
 REFRESH_TTL = settings.REFRESH_TTL_DAYS * 86400
+# Sliding idle window: each rotation re-stores the new jti with this TTL, so a
+# refresh jti key expires SESSION_IDLE_TIMEOUT_MIN after the last refresh, not
+# after REFRESH_TTL_DAYS from login. Capped at REFRESH_TTL as a floor so idle
+# timeout can never outlive the token's own absolute lifetime.
+IDLE_TTL = min(settings.SESSION_IDLE_TIMEOUT_MIN * 60, REFRESH_TTL)
 TOTP_LOCK_LIMIT = 5
 TOTP_LOCK_TTL = 900  # matches brute-force window
 
@@ -271,21 +276,25 @@ async def record_login(user: User, db: AsyncSession, method: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def store_refresh_jti(jti: str, user_id: str) -> None:
-    """Persist allowed refresh jti → user_id in Redis with REFRESH_TTL."""
+    """Persist allowed refresh jti → user_id in Redis with the sliding IDLE_TTL."""
     redis = get_redis()
-    await redis.set(f"{REFRESH_KEY_PREFIX}{jti}", user_id, ex=REFRESH_TTL)
+    await redis.set(f"{REFRESH_KEY_PREFIX}{jti}", user_id, ex=IDLE_TTL)
 
 
 async def rotate_refresh_token(
-    old_jti: str, user_id: str
+    old_jti: str, user_id: str, issued_at: int
 ) -> tuple[str, str, str, str]:
     """
     Refresh token rotation with reuse detection (invariant #4).
 
     Atomically:
       1. Check old_jti exists in Redis.
-      2. If NOT exists but token was otherwise valid → REUSE detected:
-         delete key (best-effort), return 401.
+      2. If NOT exists: either the server-side idle window already expired the
+         key (session idle timeout — expected, not an attack) or the jti was
+         genuinely reused/unknown (reuse detected — 401 + security event).
+         Distinguished using the refresh token's own `issued_at` (JWT `iat`):
+         only used to tell "probably expired" from "probably reused", never
+         trusted for authorization.
       3. If exists: delete old key, issue new access + refresh pair,
          store new jti, return new tokens.
 
@@ -301,7 +310,20 @@ async def rotate_refresh_token(
     stored_uid = await redis.getdel(key)
 
     if stored_uid is None:
-        # Token reuse detected — old jti already consumed or never existed.
+        now = int(datetime.now(UTC).timestamp())
+        # 5s slack matches the idle-window/heartbeat tolerance elsewhere in
+        # this feature (client warns/signs out a few minutes ahead of the
+        # server's hard cutoff); it is not a security-relevant grace period.
+        if now - issued_at >= settings.SESSION_IDLE_TIMEOUT_MIN * 60 - 5:
+            # Server-side idle window elapsed since this refresh token was
+            # issued — the Redis key expired naturally. Not a reuse attempt;
+            # no security event.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="session_idle_timeout",
+            )
+        # Token reuse detected — old jti already consumed or never existed,
+        # and it's too recent to be an idle-window expiry.
         # Fire-and-forget security audit before raising (user_id from JWT sub).
         await record_security_event(
             event_type="refresh_reuse_detected",

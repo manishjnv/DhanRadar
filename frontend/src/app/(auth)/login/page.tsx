@@ -11,6 +11,7 @@
  *
  * Google SSO: full-page redirect to GET /api/v1/auth/google/start?next=…
  * Error params: ?error=google_auth_failed | account_deletion_pending are read on mount.
+ * Info params: ?reason=idle (idle sign-out) shows a neutral, non-error notice.
  */
 
 import * as React from 'react';
@@ -47,6 +48,7 @@ function LoginForm() {
   // email_otp phase: 'request' = pre-send, 'code' = code input shown
   const [otpPhase, setOtpPhase] = React.useState<'request' | 'code'>('request');
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = React.useState<string | null>(null);
   // code is managed in local state (not react-hook-form) so auto-submit
   // can fire synchronously from the onChange handler.
   const [codeValue, setCodeValue] = React.useState('');
@@ -96,6 +98,11 @@ function LoginForm() {
     } else if (errorParam === 'account_exists_use_password') {
       setFormError(
         'An account with this email already exists — log in with your password.',
+      );
+    }
+    if (params.get('reason') === 'idle') {
+      setInfoMessage(
+        'You were signed out after 15 minutes of no activity. Please sign in again.',
       );
     }
     // params is stable for the lifetime of the page — this runs once.
@@ -366,6 +373,12 @@ function LoginForm() {
                 </>
               )}
             </>
+          )}
+
+          {infoMessage && (
+            <p className="text-small text-ink-secondary" role="status">
+              {infoMessage}
+            </p>
           )}
 
           {formError && (

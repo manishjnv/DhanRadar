@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "RS256"  # Hard-coded to RS256; env override is informational only
     ACCESS_TTL_MIN: int = 15  # Access token TTL in minutes
     REFRESH_TTL_DAYS: int = 7  # Refresh token TTL in days
+    # Server-side hard idle limit (sliding window). The browser signs the user
+    # out at 15 min of inactivity; this is 5 min longer to absorb clock/timer
+    # slack between client and server so a legitimate near-boundary refresh
+    # isn't rejected as idle timeout.
+    SESSION_IDLE_TIMEOUT_MIN: int = 20
 
     # ------------------------------------------------------------------
     # Cookie
