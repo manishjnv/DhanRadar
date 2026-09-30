@@ -195,3 +195,18 @@ def test_rate_limit_4th_request_yields_429(monkeypatch):
         resp = client.post("/api/v1/contact", json=VALID_BODY, headers=headers)
         statuses.append(resp.status_code)
     assert statuses == [202, 202, 202, 429], statuses
+
+
+def test_daily_cap_blocks_after_limit(monkeypatch):
+    """Site-wide cap protects the shared email quota (login codes) from a many-IP flood."""
+    calls = _mock_deliver_ok(monkeypatch)
+    monkeypatch.setattr(contact_router_module, "_DAILY_CAP", 2)
+    client = TestClient(_make_app())
+    statuses = [
+        client.post(
+            "/api/v1/contact", json=VALID_BODY, headers={"CF-Connecting-IP": f"198.51.100.{i}"}
+        ).status_code
+        for i in range(3)
+    ]
+    assert statuses == [202, 202, 503], statuses
+    assert len(calls) == 2

@@ -28,6 +28,7 @@ from dhanradar.deps import UserContext, current_user_or_anonymous
 from dhanradar.errors import get_request_id
 from dhanradar.notifications.channels import deliver_email, email_configured
 from dhanradar.ratelimit import RateLimit
+from dhanradar.redis_client import get_redis
 
 router = APIRouter(prefix="/contact", tags=["contact"])
 logger = logging.getLogger(__name__)
@@ -35,6 +36,18 @@ logger = logging.getLogger(__name__)
 _rl = RateLimit(max_requests=3, window_seconds=600)
 
 _SUBJECT_MAX = 80
+# ponytail: site-wide daily cap. Enquiries share the email provider's daily quota with
+# login-code emails; a many-IP spam run must never exhaust it. Raise if real volume grows.
+_DAILY_CAP = 50
+
+
+async def _within_daily_cap() -> bool:
+    redis = get_redis()
+    key = f"contact:daily:{datetime.now(UTC):%Y%m%d}"
+    n = await redis.incr(key)
+    if n == 1:
+        await redis.expire(key, 2 * 86400)
+    return n <= _DAILY_CAP
 
 
 def _one_line(v: str, max_len: int) -> str:
@@ -93,6 +106,10 @@ async def submit_contact(
     if body.website:
         logger.info("contact.honeypot topic=%s", body.topic)
         return ContactResponse()
+
+    if not await _within_daily_cap():
+        logger.warning("contact.daily_cap topic=%s", body.topic)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="contact_unavailable")
 
     request_id = get_request_id(request)
     subject, html_body, text_body = _build_email(
