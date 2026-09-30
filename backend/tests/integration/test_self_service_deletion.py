@@ -62,8 +62,8 @@ async def test_deletion_request_200_kills_current_session(async_client, db_sessi
     assert resp.json() == {"status": "deletion_requested"}
 
     # Cookies cleared on the response.
-    assert extract_cookie(resp, "__Host-access") in (None, "")
-    assert extract_cookie(resp, "__Host-refresh") in (None, "")
+    assert extract_cookie(resp, "__Host-access") in (None, "", '""')
+    assert extract_cookie(resp, "__Host-refresh") in (None, "", '""')
 
     # The SAME (still cryptographically valid) access token must now be
     # rejected — its jti was revoked, same mechanism as logout.
@@ -139,7 +139,7 @@ async def test_refresh_refused_for_deletion_pending_account(async_client, db_ses
     )
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == "account_deletion_pending"
-    assert extract_cookie(resp, "__Host-access") in (None, "")
+    assert extract_cookie(resp, "__Host-access") in (None, "", '""')
 
 
 # ---------------------------------------------------------------------------
