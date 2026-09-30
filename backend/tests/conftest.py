@@ -404,6 +404,130 @@ async def db_tables(db_engine):
             for _stmt in rls_statements(_t):
                 await conn.execute(text(_stmt))
 
+    # Migration 0085 — retention purge. create_all doesn't run migrations, so mirror the
+    # DB objects it installs: the consent.consent_audit_log grant-gap close (it had no
+    # per-table UPDATE/DELETE revoke, unlike audit.* + ai_recommendation_audit) and the
+    # two compliance.retention_*() functions, EXECUTE-granted to dhanradar_admin only
+    # (the role the retention_purge Celery task connects as — a cross-user job).
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF to_regclass('consent.consent_audit_log') IS NOT NULL THEN
+                        EXECUTE 'REVOKE UPDATE, DELETE ON TABLE consent.consent_audit_log FROM dhanradar_app';
+                        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_admin') THEN
+                            EXECUTE 'REVOKE UPDATE, DELETE ON TABLE consent.consent_audit_log FROM dhanradar_admin';
+                        END IF;
+                    END IF;
+                END $$;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE OR REPLACE FUNCTION compliance.retention_policy()
+                RETURNS TABLE(table_name text, retention_interval interval)
+                LANGUAGE sql
+                STABLE
+                SET search_path = pg_catalog, pg_temp
+                AS $$
+                    VALUES
+                        ('consent.consent_audit_log'::text, interval '2922 days'),
+                        ('compliance.ai_recommendation_audit'::text, interval '2922 days'),
+                        ('audit.payment_events'::text, interval '2922 days'),
+                        ('audit.security_events'::text, interval '365 days'),
+                        ('audit.admin_actions'::text, interval '365 days')
+                $$;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE OR REPLACE FUNCTION compliance.retention_purge()
+                RETURNS jsonb
+                LANGUAGE plpgsql
+                SECURITY DEFINER
+                SET search_path = pg_catalog, pg_temp
+                AS $$
+                DECLARE
+                    n_consent  bigint;
+                    n_ai_audit bigint;
+                    n_payment  bigint;
+                    n_security bigint;
+                    n_admin    bigint;
+                BEGIN
+                    DELETE FROM consent.consent_audit_log
+                     WHERE created_at < now() - (
+                        SELECT retention_interval FROM compliance.retention_policy()
+                         WHERE table_name = 'consent.consent_audit_log');
+                    GET DIAGNOSTICS n_consent = ROW_COUNT;
+
+                    DELETE FROM compliance.ai_recommendation_audit
+                     WHERE served_at < now() - (
+                        SELECT retention_interval FROM compliance.retention_policy()
+                         WHERE table_name = 'compliance.ai_recommendation_audit');
+                    GET DIAGNOSTICS n_ai_audit = ROW_COUNT;
+
+                    DELETE FROM audit.payment_events
+                     WHERE ts < now() - (
+                        SELECT retention_interval FROM compliance.retention_policy()
+                         WHERE table_name = 'audit.payment_events');
+                    GET DIAGNOSTICS n_payment = ROW_COUNT;
+
+                    DELETE FROM audit.security_events
+                     WHERE ts < now() - (
+                        SELECT retention_interval FROM compliance.retention_policy()
+                         WHERE table_name = 'audit.security_events');
+                    GET DIAGNOSTICS n_security = ROW_COUNT;
+
+                    DELETE FROM audit.admin_actions
+                     WHERE ts < now() - (
+                        SELECT retention_interval FROM compliance.retention_policy()
+                         WHERE table_name = 'audit.admin_actions');
+                    GET DIAGNOSTICS n_admin = ROW_COUNT;
+
+                    RETURN jsonb_build_object(
+                        'consent.consent_audit_log', n_consent,
+                        'compliance.ai_recommendation_audit', n_ai_audit,
+                        'audit.payment_events', n_payment,
+                        'audit.security_events', n_security,
+                        'audit.admin_actions', n_admin
+                    );
+                END;
+                $$;
+                """
+            )
+        )
+        # Mirror the same default-privilege gotcha the real migration documents: the earlier
+        # ALTER DEFAULT PRIVILEGES IN SCHEMA compliance GRANT EXECUTE ON FUNCTIONS TO dhanradar_app
+        # (above) silently auto-granted EXECUTE to dhanradar_app on these brand-new functions.
+        # REVOKE ALL FROM PUBLIC does not undo a role-specific grant — revoke it explicitly.
+        await conn.execute(text("REVOKE ALL ON FUNCTION compliance.retention_policy() FROM PUBLIC"))
+        await conn.execute(text("REVOKE ALL ON FUNCTION compliance.retention_purge() FROM PUBLIC"))
+        await conn.execute(
+            text("REVOKE EXECUTE ON FUNCTION compliance.retention_policy() FROM dhanradar_app")
+        )
+        await conn.execute(
+            text("REVOKE EXECUTE ON FUNCTION compliance.retention_purge() FROM dhanradar_app")
+        )
+        await conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dhanradar_admin') THEN
+                        GRANT EXECUTE ON FUNCTION compliance.retention_policy() TO dhanradar_admin;
+                        GRANT EXECUTE ON FUNCTION compliance.retention_purge() TO dhanradar_admin;
+                    END IF;
+                END $$;
+                """
+            )
+        )
+
     yield
 
 
