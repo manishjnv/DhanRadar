@@ -225,13 +225,22 @@ log "Redis artifacts written to ${WORK_DIR}"
 # policy in backend/dhanradar/compliance/data_policy.py). An empty file (no
 # erasures yet) is a valid, expected state — still encrypted + uploaded below.
 ERASED_IDS="${WORK_DIR}/erased_ids.txt"
+ERASED_IDS_FAILED=0
 log "Querying erased-user ids (audit.admin_actions action=erase_user) ..."
-docker compose exec -T dhanradar-postgres \
-  psql -U dhanradar -d dhanradar -tAc \
+if docker compose exec -T dhanradar-postgres \
+  psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 -tAc \
   "SELECT DISTINCT target_id FROM audit.admin_actions WHERE action = 'erase_user' AND target_id IS NOT NULL ORDER BY 1;" \
-  > "${ERASED_IDS}" \
-  || die "Failed to query erased-user ids from audit.admin_actions."
-log "erased_ids.txt: $(grep -c . "${ERASED_IDS}" || true) id(s)."
+  > "${ERASED_IDS}"; then
+  log "erased_ids.txt: $(grep -c . "${ERASED_IDS}" || true) id(s)."
+else
+  # Never lose the nightly backup over this side list. Ship the backup WITHOUT
+  # erased_ids (restores then fall back to the live list) and exit non-zero at
+  # the end. A missing list is safer than a wrong empty one.
+  log "ERROR: could not list erased users — this backup will not carry erased_ids.txt."
+  rm -f "${ERASED_IDS}"
+  ERASED_IDS=""
+  ERASED_IDS_FAILED=1
+fi
 
 # ── 4b. Encrypt artifacts (age) BEFORE they leave the box ────────────────────
 # Backups contain investor data. Encrypt at rest with age so a leaked R2 key (or
@@ -261,10 +270,12 @@ DB_SIZE="$(stat -c '%s' "${DB_DUMP}" 2>/dev/null || echo 0)"
 # erased_ids.txt is encrypted unconditionally (even when empty — unlike the
 # optional Redis artifacts above, "no erasures yet" is a valid state, not an
 # absent one, and every existing MANIFEST checksum loop must see a real entry).
-age -r "${AGE_RECIPIENT}" -o "${ERASED_IDS}.age" "${ERASED_IDS}" \
-  || die "age encryption failed for ${ERASED_IDS}"
-rm -f "${ERASED_IDS}"
-ERASED_IDS="${ERASED_IDS}.age"
+if [[ -n "${ERASED_IDS}" ]]; then
+  age -r "${AGE_RECIPIENT}" -o "${ERASED_IDS}.age" "${ERASED_IDS}" \
+    || die "age encryption failed for ${ERASED_IDS}"
+  rm -f "${ERASED_IDS}"
+  ERASED_IDS="${ERASED_IDS}.age"
+fi
 log "Artifacts encrypted (age)."
 
 # ── 5. Write MANIFEST ────────────────────────────────────────────────────────
@@ -311,7 +322,9 @@ sha256_of() {
   echo "file=db.dump.age size=${DB_SIZE} sha256=$(sha256_of "${DB_DUMP}")"
   echo "file=redis-dump.rdb.age size=$(stat -c '%s' "${REDIS_RDB}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_RDB}")"
   echo "file=redis-appendonly.tar.gz.age size=$(stat -c '%s' "${REDIS_AOF_TAR}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_AOF_TAR}")"
-  echo "file=erased_ids.txt.age size=$(stat -c '%s' "${ERASED_IDS}" 2>/dev/null || echo 0) sha256=$(sha256_of "${ERASED_IDS}")"
+  if [[ -n "${ERASED_IDS}" ]]; then
+    echo "file=erased_ids.txt.age size=$(stat -c '%s' "${ERASED_IDS}" 2>/dev/null || echo 0) sha256=$(sha256_of "${ERASED_IDS}")"
+  fi
 } > "${MANIFEST}"
 
 log "MANIFEST written."
@@ -407,7 +420,7 @@ log "Local cap enforced."
 
 log "=== Backup SUCCESS: stamp=${UTC_STAMP} git=${GIT_SHA} alembic=${ALEMBIC_REV} r2_dest=${R2_DEST} ==="
 
-if (( LEGAL_ARCHIVE_FAILED == 1 )); then
-  log "=== Exiting non-zero: legal archive failed this run (main backup above is OK) ==="
+if (( LEGAL_ARCHIVE_FAILED == 1 || ERASED_IDS_FAILED == 1 )); then
+  log "=== Exiting non-zero: legal_archive_failed=${LEGAL_ARCHIVE_FAILED} erased_ids_failed=${ERASED_IDS_FAILED} (main backup above is OK) ==="
   exit 1
 fi

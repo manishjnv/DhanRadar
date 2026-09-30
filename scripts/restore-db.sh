@@ -149,10 +149,11 @@ LATEST_STAMP="$(aws s3 ls --endpoint-url "${R2_ENDPOINT}" "s3://${R2_BUCKET}/bac
 if [[ -n "${LATEST_STAMP}" ]] && aws s3 ls --endpoint-url "${R2_ENDPOINT}" \
     "s3://${R2_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" >/dev/null 2>&1; then
   log "Downloading erased_ids.txt.age from newest backup stamp=${LATEST_STAMP} ..."
-  aws s3 cp --endpoint-url "${R2_ENDPOINT}" \
+  if ! aws s3 cp --endpoint-url "${R2_ENDPOINT}" \
     "s3://${R2_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" \
-    "${WORK}/erased_ids.txt.age" --no-progress
-  if [[ -f "${AGE_IDENTITY}" ]]; then
+    "${WORK}/erased_ids.txt.age" --no-progress; then
+    warn "Download of erased_ids.txt.age failed — continuing without it."
+  elif [[ -f "${AGE_IDENTITY}" ]]; then
     age -d -i "${AGE_IDENTITY}" -o "${WORK}/erased_ids.txt" "${WORK}/erased_ids.txt.age" \
       && cat "${WORK}/erased_ids.txt" >> "${ERASE_TMP}" \
       || warn "Could not decrypt erased_ids.txt.age from backup stamp=${LATEST_STAMP} — continuing without it."
@@ -177,7 +178,7 @@ sort -u -o "${ERASE_TMP}" "${ERASE_TMP}"
 if [[ -s "${ERASE_TMP}" ]]; then
   ERASE_COUNT="$(grep -c . "${ERASE_TMP}")"
   log "Re-applying ${ERASE_COUNT} erasure(s) into ${TARGET_DB} via erasure_cli ..."
-  if docker compose run --rm -T dhanradar-fastapi \
+  if docker compose run --rm --no-deps -T dhanradar-fastapi \
       python -m dhanradar.auth.erasure_cli --database "${TARGET_DB}" --ids-file - < "${ERASE_TMP}"; then
     log "Erasure re-apply completed for ${TARGET_DB}."
   else

@@ -306,7 +306,7 @@ sort -u -o "${ERASE_TMP}" "${ERASE_TMP}"
 if [[ -s "${ERASE_TMP}" ]]; then
   ERASE_COUNT="$(grep -c . "${ERASE_TMP}")"
   log "Re-applying ${ERASE_COUNT} erasure(s) into the live dhanradar DB via erasure_cli ..."
-  if docker compose run --rm -T dhanradar-fastapi \
+  if docker compose run --rm --no-deps -T dhanradar-fastapi \
       python -m dhanradar.auth.erasure_cli --database dhanradar --ids-file - < "${ERASE_TMP}"; then
     log "Erasure re-apply completed."
   else
