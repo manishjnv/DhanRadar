@@ -151,16 +151,24 @@ async def _retention_purge() -> str:
     from sqlalchemy import text
 
     from dhanradar.db import admin_task_session
+    from dhanradar.tasks.ingestion_run import ingestion_run
 
-    async with admin_task_session() as db:
-        # Cast jsonb -> text: raw text() queries get asyncpg's raw wire value, not an
-        # auto-parsed dict (that codec only applies to SQLAlchemy's typed JSONB column).
-        raw = (
-            await db.execute(text("SELECT compliance.retention_purge()::text"))
-        ).scalar_one()
-        await db.commit()
+    # ingestion_run records start/finish in mf.ingestion_runs so the admin
+    # "Account deletions" page and the ops Tasks list can show the last run.
+    async with ingestion_run("dhanradar.tasks.compliance.retention_purge", "retention_purge") as (
+        _run_id,
+        stats,
+    ):
+        async with admin_task_session() as db:
+            # Cast jsonb -> text: raw text() queries get asyncpg's raw wire value, not an
+            # auto-parsed dict (that codec only applies to SQLAlchemy's typed JSONB column).
+            raw = (
+                await db.execute(text("SELECT compliance.retention_purge()::text"))
+            ).scalar_one()
+            await db.commit()
+        result = json.loads(raw)
+        stats.written = sum(result.values())
 
-    result = json.loads(raw)
     parts = ", ".join(f"{table}={count}" for table, count in result.items())
     logger.info("retention_purge: %s", parts)
     return f"retention_purge: {parts}"
