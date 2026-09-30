@@ -170,8 +170,8 @@ export default function DataDeletionPage() {
               gave on AI summaries, and all sign-in sessions.
             </p>
             <p className="text-small text-ink-secondary leading-relaxed">
-              Statements (CAS files) you upload are never stored: they are
-              deleted right after we read them.
+              Statements (CAS files) you upload are not kept: we delete the
+              file right after reading it.
             </p>
           </CardBody>
         </Card>
