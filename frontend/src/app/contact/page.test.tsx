@@ -14,6 +14,13 @@ vi.mock('@/components/ui/MaybeShell', () => ({
   MaybeShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+// ContactForm is 'use client' and calls useMe() (react-query) too — it has its
+// own dedicated test file with a QueryClientProvider; stub it here so this
+// page test stays a pure unit for the static cards below the form.
+vi.mock('@/components/contact/ContactForm', () => ({
+  ContactForm: () => <div data-testid="contact-form-stub" />,
+}));
+
 describe('ContactPage', () => {
   it('renders the h1', () => {
     render(<ContactPage />);
