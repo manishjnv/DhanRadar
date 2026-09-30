@@ -33,6 +33,83 @@ TIMESTAMP() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 log()  { echo "[$(TIMESTAMP)] $*"; }
 die()  { echo "[$(TIMESTAMP)] ERROR: $*" >&2; exit 1; }
 
+# Monthly legal archive (B79 / compliance/data_policy.py LEGAL_ARCHIVE_RETENTION_DAYS
+# = 8 years). Dumps only the 4 tables that must outlive the 90-day full-backup
+# window, encrypts + uploads them to their own R2 prefix. Returns 1 on ANY
+# failure (never `die`s — a legal-archive failure must never take down or mask
+# the main backup, which has already uploaded successfully by the time this
+# runs). audit.payment_events and compliance.ai_recommendation_audit are
+# RANGE-partitioned (0014_audit_ledger.py / 0006_compliance_schema.py) — pg16
+# needs --table-and-children to also dump their partitions.
+_run_legal_archive() {
+  local archive_work archive_dump archive_manifest archive_dest cred_file
+  local dsize asize asha up_rc=0
+  local tables_csv="audit.payment_events,compliance.ai_recommendation_audit,consent.consent_audit_log,compliance.disclaimers"
+
+  archive_work="$(mktemp -d)"
+  archive_dump="${archive_work}/legal-archive.dump"
+
+  log "  pg_dump legal-archive tables: ${tables_csv}"
+  if ! docker compose exec -T dhanradar-postgres pg_dump -U dhanradar -d dhanradar -Fc \
+      --table-and-children=audit.payment_events \
+      --table-and-children=compliance.ai_recommendation_audit \
+      -t consent.consent_audit_log \
+      -t compliance.disclaimers \
+      > "${archive_dump}"; then
+    log "  ERROR: pg_dump of legal-archive tables failed."
+    rm -rf "${archive_work}"
+    return 1
+  fi
+
+  dsize="$(stat -c '%s' "${archive_dump}" 2>/dev/null || stat -f '%z' "${archive_dump}" 2>/dev/null || echo 0)"
+  if (( dsize < 1024 )); then
+    log "  ERROR: legal-archive dump only ${dsize} bytes — suspiciously small, refusing to upload."
+    rm -rf "${archive_work}"
+    return 1
+  fi
+  log "  legal-archive dump: ${dsize} bytes"
+
+  if ! age -r "${AGE_RECIPIENT}" -o "${archive_dump}.age" "${archive_dump}"; then
+    log "  ERROR: age encryption failed for the legal-archive dump."
+    rm -rf "${archive_work}"
+    return 1
+  fi
+  rm -f "${archive_dump}"
+  archive_dump="${archive_dump}.age"
+  asize="$(stat -c '%s' "${archive_dump}" 2>/dev/null || echo 0)"
+  asha="$(sha256sum "${archive_dump}" | awk '{print $1}')"
+
+  archive_manifest="${archive_work}/MANIFEST"
+  {
+    echo "backup_utc=${UTC_STAMP}"
+    echo "tables=${tables_csv}"
+    echo ""
+    echo "file=legal-archive.dump.age size=${asize} sha256=${asha}"
+  } > "${archive_manifest}"
+
+  archive_dest="s3://${R2_BACKUP_BUCKET}/legal-archive/${UTC_STAMP}/"
+  log "  Uploading legal archive to ${archive_dest} ..."
+  cred_file="$(mktemp)"
+  chmod 600 "${cred_file}"
+  printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
+    "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${cred_file}"
+  AWS_SHARED_CREDENTIALS_FILE="${cred_file}" AWS_PROFILE=default \
+    aws s3 cp "${archive_dump}" "${archive_dest}legal-archive.dump.age" \
+      --endpoint-url "${R2_ENDPOINT}" --no-progress || up_rc=1
+  AWS_SHARED_CREDENTIALS_FILE="${cred_file}" AWS_PROFILE=default \
+    aws s3 cp "${archive_manifest}" "${archive_dest}MANIFEST" \
+      --endpoint-url "${R2_ENDPOINT}" --no-progress || up_rc=1
+  rm -f "${cred_file}"
+  rm -rf "${archive_work}"
+
+  if (( up_rc != 0 )); then
+    log "  ERROR: legal-archive R2 upload failed."
+    return 1
+  fi
+  log "  Legal archive uploaded: ${archive_dest}"
+  return 0
+}
+
 # ── 1. Preconditions ─────────────────────────────────────────────────────────
 
 log "=== DhanRadar backup started ==="
@@ -142,6 +219,29 @@ docker compose exec -T dhanradar-redis \
 
 log "Redis artifacts written to ${WORK_DIR}"
 
+# ── 4a. Erased-users list (DPDP right-to-erasure must survive backups) ───────
+# One id per line, so restore.sh / restore-db.sh can re-apply erasures after a
+# restore (see backend/dhanradar/auth/erasure.py hard_erase_user + the erasure
+# policy in backend/dhanradar/compliance/data_policy.py). An empty file (no
+# erasures yet) is a valid, expected state — still encrypted + uploaded below.
+ERASED_IDS="${WORK_DIR}/erased_ids.txt"
+ERASED_IDS_FAILED=0
+log "Querying erased-user ids (audit.admin_actions action=erase_user) ..."
+if docker compose exec -T dhanradar-postgres \
+  psql -U dhanradar -d dhanradar -v ON_ERROR_STOP=1 -tAc \
+  "SELECT DISTINCT target_id FROM audit.admin_actions WHERE action = 'erase_user' AND target_id IS NOT NULL ORDER BY 1;" \
+  > "${ERASED_IDS}"; then
+  log "erased_ids.txt: $(grep -c . "${ERASED_IDS}" || true) id(s)."
+else
+  # Never lose the nightly backup over this side list. Ship the backup WITHOUT
+  # erased_ids (restores then fall back to the live list) and exit non-zero at
+  # the end. A missing list is safer than a wrong empty one.
+  log "ERROR: could not list erased users — this backup will not carry erased_ids.txt."
+  rm -f "${ERASED_IDS}"
+  ERASED_IDS=""
+  ERASED_IDS_FAILED=1
+fi
+
 # ── 4b. Encrypt artifacts (age) BEFORE they leave the box ────────────────────
 # Backups contain investor data. Encrypt at rest with age so a leaked R2 key (or
 # a stolen backup file) is useless without the offline identity key
@@ -166,6 +266,16 @@ DB_DUMP="${DB_DUMP}.age"
 REDIS_RDB="${REDIS_RDB}.age"
 REDIS_AOF_TAR="${REDIS_AOF_TAR}.age"
 DB_SIZE="$(stat -c '%s' "${DB_DUMP}" 2>/dev/null || echo 0)"
+
+# erased_ids.txt is encrypted unconditionally (even when empty — unlike the
+# optional Redis artifacts above, "no erasures yet" is a valid state, not an
+# absent one, and every existing MANIFEST checksum loop must see a real entry).
+if [[ -n "${ERASED_IDS}" ]]; then
+  age -r "${AGE_RECIPIENT}" -o "${ERASED_IDS}.age" "${ERASED_IDS}" \
+    || die "age encryption failed for ${ERASED_IDS}"
+  rm -f "${ERASED_IDS}"
+  ERASED_IDS="${ERASED_IDS}.age"
+fi
 log "Artifacts encrypted (age)."
 
 # ── 5. Write MANIFEST ────────────────────────────────────────────────────────
@@ -212,6 +322,9 @@ sha256_of() {
   echo "file=db.dump.age size=${DB_SIZE} sha256=$(sha256_of "${DB_DUMP}")"
   echo "file=redis-dump.rdb.age size=$(stat -c '%s' "${REDIS_RDB}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_RDB}")"
   echo "file=redis-appendonly.tar.gz.age size=$(stat -c '%s' "${REDIS_AOF_TAR}" 2>/dev/null || echo 0) sha256=$(sha256_of "${REDIS_AOF_TAR}")"
+  if [[ -n "${ERASED_IDS}" ]]; then
+    echo "file=erased_ids.txt.age size=$(stat -c '%s' "${ERASED_IDS}" 2>/dev/null || echo 0) sha256=$(sha256_of "${ERASED_IDS}")"
+  fi
 } > "${MANIFEST}"
 
 log "MANIFEST written."
@@ -249,6 +362,22 @@ rm -f "${R2_CRED_FILE}"
 trap - EXIT
 
 log "Upload complete: ${R2_DEST}"
+
+# ── 6b. Monthly legal archive ────────────────────────────────────────────────
+# Runs AFTER the main backup above uploaded successfully. On failure this is
+# logged and makes the script exit non-zero at the very end (§8) — it never
+# unwinds or blocks the main backup, which has already landed in R2.
+LEGAL_ARCHIVE_FAILED=0
+DAY_OF_MONTH="$(date -u +%d)"
+if [[ "${DAY_OF_MONTH}" == "01" || "${LEGAL_ARCHIVE_FORCE:-0}" == "1" ]]; then
+  log "=== Monthly legal archive (day=${DAY_OF_MONTH} force=${LEGAL_ARCHIVE_FORCE:-0}) ==="
+  if ! _run_legal_archive; then
+    LEGAL_ARCHIVE_FAILED=1
+    log "ERROR: legal archive FAILED — see errors above. The main backup above is unaffected."
+  fi
+else
+  log "Not the 1st of the month — skipping legal archive (set LEGAL_ARCHIVE_FORCE=1 to force)."
+fi
 
 # ── 7. Local retention ───────────────────────────────────────────────────────
 
@@ -290,3 +419,8 @@ log "Local cap enforced."
 # ── 8. Success summary ───────────────────────────────────────────────────────
 
 log "=== Backup SUCCESS: stamp=${UTC_STAMP} git=${GIT_SHA} alembic=${ALEMBIC_REV} r2_dest=${R2_DEST} ==="
+
+if (( LEGAL_ARCHIVE_FAILED == 1 || ERASED_IDS_FAILED == 1 )); then
+  log "=== Exiting non-zero: legal_archive_failed=${LEGAL_ARCHIVE_FAILED} erased_ids_failed=${ERASED_IDS_FAILED} (main backup above is OK) ==="
+  exit 1
+fi

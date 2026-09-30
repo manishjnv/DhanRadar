@@ -133,6 +133,7 @@ else
   _r2_get "db.dump"  || die "R2 download failed for db.dump. Check prefix and credentials."
   _r2_get "redis-dump.rdb"          || warn "redis-dump.rdb not fetched (may be absent at source) — continuing."
   _r2_get "redis-appendonly.tar.gz" || warn "redis-appendonly.tar.gz not fetched (may be absent at source) — continuing."
+  _r2_get "erased_ids.txt.age"      || warn "erased_ids.txt.age not fetched (older backup predates the erasure-list feature) — continuing."
 
   rm -f "${R2_CRED_FILE}"
   trap - EXIT
@@ -157,7 +158,7 @@ while IFS= read -r line; do
     # compromised R2 bucket could set fname=../../etc/shadow and have sha256sum
     # read an arbitrary host file. Positive allowlist of the only artifacts we write.
     case "${fname}" in
-      db.dump|redis-dump.rdb|redis-appendonly.tar.gz) ;;
+      db.dump|redis-dump.rdb|redis-appendonly.tar.gz|erased_ids.txt.age) ;;
       *) die "MANIFEST lists an unexpected artifact name '${fname}' — refusing (possible tampering)." ;;
     esac
     fpath="${RESTORE_DIR}/${fname}"
@@ -257,6 +258,65 @@ if (( restore_rc != 0 )); then
 fi
 
 log "Postgres restore complete."
+
+# ── 5b. Re-apply erasures (DPDP: erased people must never come back) ────────
+# The target here IS the live dhanradar DB, so there is no separate "live DB"
+# to UNION with (see restore-db.sh, which restores into a different TARGET_DB
+# and does UNION with live) — ids come from the newest backup's
+# erased_ids.txt.age only. See backend/dhanradar/compliance/data_policy.py +
+# scripts/backup.sh §4a.
+AGE_IDENTITY="${AGE_IDENTITY:-/etc/dhanradar-keys/backup_age.key}"
+ERASE_TMP="$(mktemp)"
+trap 'rm -f "${ERASE_TMP}"' EXIT
+
+if [[ -n "${R2_ACCESS_KEY_ID}" && -n "${R2_SECRET_ACCESS_KEY}" && -n "${R2_BACKUP_BUCKET}" && -n "${R2_ENDPOINT}" ]]; then
+  E_CRED_FILE="$(mktemp)"
+  chmod 600 "${E_CRED_FILE}"
+  printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\n' \
+    "${R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY}" > "${E_CRED_FILE}"
+  LATEST_STAMP="$(AWS_SHARED_CREDENTIALS_FILE="${E_CRED_FILE}" AWS_PROFILE=default \
+    aws s3 ls --endpoint-url "${R2_ENDPOINT}" "s3://${R2_BACKUP_BUCKET}/backups/" \
+    | awk '{print $2}' | tr -d / | grep -E '^[0-9]{14}$' | sort | tail -1 || true)"
+  if [[ -n "${LATEST_STAMP}" ]] && AWS_SHARED_CREDENTIALS_FILE="${E_CRED_FILE}" AWS_PROFILE=default \
+      aws s3 ls --endpoint-url "${R2_ENDPOINT}" \
+      "s3://${R2_BACKUP_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" >/dev/null 2>&1; then
+    log "Downloading erased_ids.txt.age from newest backup stamp=${LATEST_STAMP} ..."
+    E_WORK="$(mktemp -d)"
+    AWS_SHARED_CREDENTIALS_FILE="${E_CRED_FILE}" AWS_PROFILE=default \
+      aws s3 cp --endpoint-url "${R2_ENDPOINT}" \
+      "s3://${R2_BACKUP_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" \
+      "${E_WORK}/erased_ids.txt.age" --no-progress
+    if command -v age >/dev/null 2>&1 && [[ -f "${AGE_IDENTITY}" ]]; then
+      age -d -i "${AGE_IDENTITY}" -o "${E_WORK}/erased_ids.txt" "${E_WORK}/erased_ids.txt.age" \
+        && cat "${E_WORK}/erased_ids.txt" >> "${ERASE_TMP}" \
+        || warn "Could not decrypt erased_ids.txt.age — continuing without it."
+    else
+      warn "'age' or identity ${AGE_IDENTITY} not available — cannot decrypt erased_ids.txt.age."
+    fi
+    rm -rf "${E_WORK}"
+  else
+    warn "No erased_ids.txt.age found under the newest backup (stamp=${LATEST_STAMP:-none}) — continuing without it."
+  fi
+  rm -f "${E_CRED_FILE}"
+else
+  warn "R2 credentials not available — cannot fetch erased_ids.txt.age. Continuing without it."
+fi
+
+sort -u -o "${ERASE_TMP}" "${ERASE_TMP}"
+if [[ -s "${ERASE_TMP}" ]]; then
+  ERASE_COUNT="$(grep -c . "${ERASE_TMP}")"
+  log "Re-applying ${ERASE_COUNT} erasure(s) into the live dhanradar DB via erasure_cli ..."
+  if docker compose run --rm --no-deps -T dhanradar-fastapi \
+      python -m dhanradar.auth.erasure_cli --database dhanradar --ids-file - < "${ERASE_TMP}"; then
+    log "Erasure re-apply completed."
+  else
+    die "erasure_cli FAILED — the restored database may contain erased people. Do not serve traffic until this is fixed."
+  fi
+else
+  warn "No erased-user ids available from any source — skipping re-apply. If erasures exist, apply them manually before serving traffic."
+fi
+rm -f "${ERASE_TMP}"
+trap - EXIT
 
 # ── 6. Redis restore (best-effort) ───────────────────────────────────────────
 #
