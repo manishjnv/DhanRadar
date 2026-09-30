@@ -51,3 +51,13 @@ export function formatDateTime(iso: string | null | undefined): string {
     return iso;
   }
 }
+
+/** Format an ISO8601 timestamp as a human date only, no time (e.g. "12 Sep"). */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  } catch {
+    return iso;
+  }
+}

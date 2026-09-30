@@ -685,6 +685,45 @@ async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
     # fails silently (this is a best-effort LIVE probe, not a source of truth).
     alerts.extend(await _check_stuck_tasks())
 
+    # 5) Account deletions — DPDP erasure window (B79). Derived from
+    # auth.users.deletion_requested_at, same source admin/deletions_router.py
+    # reads for the full console; periods come from compliance.data_policy.
+    from dhanradar.compliance.data_policy import ERASURE_DUE, ERASURE_WAIT
+    from dhanradar.models.auth import User
+
+    pending_ages = [
+        now - ts
+        for ts in (
+            await db.execute(
+                select(User.deletion_requested_at).where(
+                    User.deletion_requested_at.isnot(None)
+                )
+            )
+        ).scalars()
+    ]
+    ready_count = sum(1 for age in pending_ages if ERASURE_WAIT <= age <= ERASURE_DUE)
+    overdue_count = sum(1 for age in pending_ages if age > ERASURE_DUE)
+    if overdue_count:
+        alerts.append(
+            AdminAlert(
+                key="deletions_overdue",
+                severity="critical",
+                title=f"{overdue_count} account deletion(s) overdue (past {ERASURE_DUE.days} days)",
+                detail=f"One or more deletion requests have passed the {ERASURE_DUE.days}-day promise.",
+                href="/admin/deletions",
+            )
+        )
+    if ready_count:
+        alerts.append(
+            AdminAlert(
+                key="deletions_ready",
+                severity="warning",
+                title=f"{ready_count} account deletion(s) ready to erase",
+                detail=f"These accounts have passed the {ERASURE_WAIT.days}-day wait and can be erased.",
+                href="/admin/deletions",
+            )
+        )
+
     return alerts
 
 

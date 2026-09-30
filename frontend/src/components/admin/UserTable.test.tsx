@@ -20,6 +20,7 @@ const activeUser: AdminUserRow = {
   deletion_requested_at: null,
 };
 
+// Requested well over ERASURE_WAIT_DAYS ago — Erase Permanently is enabled.
 const pendingUser: AdminUserRow = {
   id: '00000000-0000-0000-0000-000000000002',
   email: 'pending@example.com',
@@ -28,7 +29,19 @@ const pendingUser: AdminUserRow = {
   status: 'active',
   last_login_at: null,
   created_at: '2026-01-01T00:00:00Z',
-  deletion_requested_at: '2026-09-29T00:00:00Z',
+  deletion_requested_at: '2026-01-01T00:00:00Z',
+};
+
+// Requested moments ago — still inside the wait period, Erase stays disabled.
+const waitingUser: AdminUserRow = {
+  id: '00000000-0000-0000-0000-000000000003',
+  email: 'waiting@example.com',
+  display_name: 'waiting',
+  tier: 'free',
+  status: 'active',
+  last_login_at: null,
+  created_at: '2026-01-01T00:00:00Z',
+  deletion_requested_at: new Date().toISOString(),
 };
 
 describe('UserTable — deletion-requested', () => {
@@ -123,5 +136,20 @@ describe('UserTable — deletion-requested', () => {
     const call = eraseMutateAsync.mock.calls[0][0];
     expect(typeof call.idempotencyKey).toBe('string');
     expect(call.idempotencyKey.length).toBeGreaterThan(0);
+  });
+
+  it('disables Erase Permanently until the 7-day wait period has passed, with a "Can erase from" hint', () => {
+    vi.spyOn(adminApi, 'useCancelDeletion').mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as unknown as ReturnType<typeof adminApi.useCancelDeletion>);
+    vi.spyOn(adminApi, 'useEraseUser').mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as unknown as ReturnType<typeof adminApi.useEraseUser>);
+
+    render(<UserTable users={[waitingUser]} onView={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: 'Erase Permanently' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', expect.stringContaining('Can erase from'));
   });
 });

@@ -18,6 +18,7 @@ from dhanradar.admin.aiops_router import router as admin_aiops_router
 from dhanradar.admin.amc_coverage_router import router as admin_amc_coverage_router
 from dhanradar.admin.billing_router import router as admin_billing_router
 from dhanradar.admin.bse_uat_router import router as admin_bse_uat_router
+from dhanradar.admin.deletions_router import router as admin_deletions_router
 from dhanradar.admin.manual_ingest_router import router as admin_manual_ingest_router
 from dhanradar.admin.mf_txn_router import router as admin_mf_txn_router
 from dhanradar.admin.mfu_uat_router import router as admin_mfu_uat_router
@@ -142,6 +143,7 @@ app.include_router(admin_ops_router, prefix="/api/v1")  # Admin ops — health/s
 app.include_router(admin_manual_ingest_router, prefix="/api/v1")  # Manual disclosure inbox — upload + recent-files read; RequireAdmin-gated
 app.include_router(admin_amc_coverage_router, prefix="/api/v1")  # Admin — per-AMC data-coverage aggregation; RequireAdmin-gated
 app.include_router(admin_users_router, prefix="/api/v1")  # Admin Phase 2 — user summary/list/detail + audit log; RequireAdmin-gated
+app.include_router(admin_deletions_router, prefix="/api/v1")  # Admin — account-deletions console (DPDP B79); RequireAdmin-gated
 app.include_router(admin_billing_router, prefix="/api/v1")  # Admin Phase 2 — billing overview/subs/payments; RequireAdmin-gated
 app.include_router(admin_scoring_router, prefix="/api/v1")  # Admin Phase 3 — scoring model read (TIER-C LOAD-BEARING); RequireAdmin-gated
 app.include_router(admin_platform_router, prefix="/api/v1")  # Admin Phase 3 — flags/support/analytics/notifications; RequireAdmin-gated
