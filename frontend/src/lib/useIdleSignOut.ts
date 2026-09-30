@@ -74,11 +74,13 @@ export function useIdleSignOut(): UseIdleSignOutResult {
   const doSignOut = React.useCallback(() => {
     if (signedOutRef.current) return;
     signedOutRef.current = true;
-    // Best-effort — a failed logout call must not block the redirect; the
-    // server-side idle window (SESSION_IDLE_TIMEOUT_MIN) closes the session
-    // regardless within a few minutes even if this call is lost.
-    api.post('/auth/logout').catch(() => {});
-    window.location.assign('/login?reason=idle');
+    // Wait for logout (≤3s) before navigating: navigation can cancel the
+    // request, leaving the session resumable for up to 5 min on a shared
+    // computer. A failed/slow logout never blocks the redirect.
+    const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
+    void Promise.race([api.post('/auth/logout').catch(() => {}), timeout]).then(() =>
+      window.location.assign('/login?reason=idle'),
+    );
   }, []);
 
   const recordActivity = React.useCallback((ts: number) => {
