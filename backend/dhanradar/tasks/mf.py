@@ -2244,7 +2244,7 @@ _BENCHMARK_TRI_UPSERT_CHUNK = 2000
 # backfill range is chunked into windows of at most this many days.
 _BENCHMARK_TRI_MAX_WINDOW_DAYS = 365
 # A real browser User-Agent verified working from a dev machine 2026-07-12; DhanRadar's
-# honest identifying UA ("DhanRadar/1.0 (research; contact@dhanradar.com)", used
+# honest identifying UA ("DhanRadar/1.0 (research; connect@dhanradar.com)", used
 # elsewhere in this file) was tried first and TIMED OUT (silently dropped, no error
 # response) against this specific endpoint — niftyindices' WAF/CDN appears to gate on a
 # recognizable browser UA string here. No cookies/session priming or Origin/Referer
@@ -6103,7 +6103,7 @@ async def _process_amc_direct(
         try:
             resp = await client.get(
                 file_url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
             )
             if resp.status_code == 404:
                 continue
@@ -6166,7 +6166,7 @@ async def _process_amc_json_api(
         try:
             resp = await client.get(
                 api_url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
             )
             resp.raise_for_status()
         except Exception:  # noqa: BLE001
@@ -6225,7 +6225,7 @@ async def _process_amc_json_api(
         try:
             zip_resp = await client.get(
                 zip_url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
             )
             zip_resp.raise_for_status()
         except Exception:  # noqa: BLE001
@@ -6304,7 +6304,7 @@ async def _process_amc(
     logger.info("mf_constituents_fetch amc=%s fetching %s", amc_name, file_url)
     resp = await client.get(
         file_url,
-        headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+        headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
     )
     resp.raise_for_status()
 
@@ -6467,7 +6467,7 @@ async def _process_amc_multi(
         try:
             resp = await client.get(
                 file_url,
-                headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
             )
             resp.raise_for_status()
         except Exception:  # noqa: BLE001
@@ -6556,7 +6556,7 @@ async def _discover_all_urls_static(
     try:
         resp = await client.get(
             url,
-            headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
         )
         resp.raise_for_status()
     except Exception:  # noqa: BLE001
@@ -6655,7 +6655,7 @@ async def _process_amc_static_multi(
             try:
                 resp = await client.get(
                     file_url,
-                    headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+                    headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
                 )
                 resp.raise_for_status()
             except Exception:  # noqa: BLE001
@@ -6735,7 +6735,7 @@ async def _fetch_parse_upsert_files(
     total_aum = 0
     parsed_files = 0
 
-    headers = {"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"}
+    headers = {"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"}
     if referer:
         headers["Referer"] = referer
 
@@ -6820,7 +6820,7 @@ async def _process_amc_aem_json_api(
     url = search_api_url_template.format(year=now.year)
     try:
         resp = await client.get(
-            url, headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"}
+            url, headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"}
         )
         resp.raise_for_status()
         data = resp.json()
@@ -6982,7 +6982,7 @@ async def _process_amc_nonce_api(
     try:
         page_resp = await client.get(
             nonce_page_url,
-            headers={"User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)"},
+            headers={"User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)"},
         )
         page_resp.raise_for_status()
     except Exception:  # noqa: BLE001
@@ -7018,7 +7018,7 @@ async def _process_amc_nonce_api(
                     "order": "DESC",
                 },
                 headers={
-                    "User-Agent": "DhanRadar/1.0 (research; contact@dhanradar.com)",
+                    "User-Agent": "DhanRadar/1.0 (research; connect@dhanradar.com)",
                     "wp-nonce": nonce,
                     "X-Requested-With": "XMLHttpRequest",
                 },

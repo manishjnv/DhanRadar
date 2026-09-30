@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     OPENROUTER_API_KEY: str = ""
     RESEND_API_KEY: str = ""
+    # Brevo (Sendinblue) transactional email — used whenever BREVO_API_KEY is
+    # set, else falls back to Resend (founder decision 2026-09-30).
+    BREVO_API_KEY: str = ""
+    BREVO_API_BASE: str = "https://api.brevo.com/v3"
 
     # ------------------------------------------------------------------
     # Notification module (Phase 6, architecture Global §5)
@@ -81,11 +85,13 @@ class Settings(BaseSettings):
     # Optional public-channel chat id for the daily Mood card (deferred until Mood
     # Compass ships); empty ⇒ that path is skipped.
     TELEGRAM_PUBLIC_CHANNEL_ID: str = ""
-    # Resend email. Verified-working sender domain is any @dhanradar.com.
-    # api.resend.com is behind Cloudflare and 403s the default urllib UA (error
-    # 1010) — httpx sends a real UA; we also set one explicitly.
+    # Resend email (fallback provider — see BREVO_API_KEY above). Verified-working
+    # sender domain is any @dhanradar.com. api.resend.com is behind Cloudflare and
+    # 403s the default urllib UA (error 1010) — httpx sends a real UA; we also set
+    # one explicitly.
     RESEND_API_BASE: str = "https://api.resend.com"
-    EMAIL_FROM: str = "noreply@dhanradar.com"
+    EMAIL_FROM: str = "connect@dhanradar.com"
+    EMAIL_FROM_NAME: str = "DhanRadar"
     NOTIFY_USER_AGENT: str = "DhanRadar/1.0 (+https://dhanradar.com)"
     # Optional public base URL for R2 share-cards served without a signature
     # (public mood/badge cards). Empty ⇒ a presigned S3 URL is returned instead.
@@ -97,8 +103,9 @@ class Settings(BaseSettings):
     # domain is a UA comment, not a link base.
     PUBLIC_APP_URL: str = "https://dhanradar.com"
     # Support mailbox surfaced in deletion emails/copy — mirrors
-    # frontend/src/lib/dataPolicy.ts SUPPORT_EMAIL (keep both in sync).
-    SUPPORT_EMAIL: str = "contact@dhanradar.com"
+    # frontend/src/lib/dataPolicy.ts SUPPORT_EMAIL (keep both in sync). Also the
+    # founder's only mailbox, so it doubles as the sender address (EMAIL_FROM).
+    SUPPORT_EMAIL: str = "connect@dhanradar.com"
 
     # ------------------------------------------------------------------
     # AI / LLM Gateway (Phase 3, architecture §B3)

@@ -10,4 +10,10 @@ describe('SiteFooter', () => {
     const link = screen.getByRole('link', { name: 'Data deletion' });
     expect(link.getAttribute('href')).toBe('/data-deletion');
   });
+
+  it('links to /contact under Account', () => {
+    render(<SiteFooter />);
+    const link = screen.getByRole('link', { name: 'Contact us' });
+    expect(link.getAttribute('href')).toBe('/contact');
+  });
 });

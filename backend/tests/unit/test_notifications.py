@@ -367,6 +367,83 @@ async def test_deliver_email_transport_error(monkeypatch):
     assert result.code == "transport_error"
 
 
+async def test_deliver_email_resend_from_and_reply_to(monkeypatch):
+    """Resend branch (only RESEND_API_KEY set): 'from' carries the display name,
+    'reply_to' is SUPPORT_EMAIL."""
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "re_x")
+    client = _FakeClient(202)
+    result = await channels.deliver_email(
+        "user@example.com", "Subject", "<p>body</p>", "body", client=client
+    )
+    assert result.ok is True
+    url, kw = client.last
+    assert "api.resend.com" in url
+    payload = kw["json"]
+    assert payload["from"] == f"{channels.settings.EMAIL_FROM_NAME} <{channels.settings.EMAIL_FROM}>"
+    assert payload["reply_to"] == channels.settings.SUPPORT_EMAIL
+    assert payload["to"] == ["user@example.com"]
+    assert kw["headers"]["Authorization"].endswith("re_x")
+
+
+async def test_deliver_email_brevo_url_headers_payload(monkeypatch):
+    """Brevo branch: /smtp/email URL, api-key header, sender/replyTo/htmlContent/
+    textContent payload shape."""
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "brevo_x")
+    client = _FakeClient(201)
+    result = await channels.deliver_email(
+        "user@example.com", "Subject", "<p>body</p>", "body text", client=client
+    )
+    assert result.ok is True
+    url, kw = client.last
+    assert url == f"{channels.settings.BREVO_API_BASE}/smtp/email"
+    headers = kw["headers"]
+    assert headers["api-key"] == "brevo_x"
+    assert "Authorization" not in headers
+    payload = kw["json"]
+    assert payload["sender"] == {
+        "name": channels.settings.EMAIL_FROM_NAME,
+        "email": channels.settings.EMAIL_FROM,
+    }
+    assert payload["to"] == [{"email": "user@example.com"}]
+    assert payload["replyTo"] == {"email": channels.settings.SUPPORT_EMAIL}
+    assert payload["htmlContent"] == "<p>body</p>"
+    assert payload["textContent"] == "body text"
+
+
+async def test_deliver_email_brevo_wins_when_both_set(monkeypatch):
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "brevo_x")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "re_x")
+    client = _FakeClient(202)
+    await channels.deliver_email("user@example.com", "S", "<p>b</p>", "b", client=client)
+    url, _ = client.last
+    assert "brevo.com" in url
+
+
+async def test_deliver_email_neither_key_not_configured(monkeypatch):
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "")
+    client = _FakeClient(202)
+    result = await channels.deliver_email(
+        "user@example.com", "Subject", "<p>body</p>", "body", client=client
+    )
+    assert result.code == "email_not_configured"
+    assert client.calls == 0
+
+
+def test_email_configured(monkeypatch):
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "")
+    assert channels.email_configured() is False
+
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "re_x")
+    assert channels.email_configured() is True
+
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "brevo_x")
+    assert channels.email_configured() is True
+
+
 # ---------------------------------------------------------------------------
 # 4. sharecard
 # ---------------------------------------------------------------------------

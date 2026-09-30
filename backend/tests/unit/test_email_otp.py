@@ -15,7 +15,7 @@ Covers:
   - Request path: daily cap suppresses the 11th send in a day.
   - deliver_email is called with the code somewhere in the body, but the
     code NEVER appears in any log record.
-  - 503 when RESEND_API_KEY is empty (fail-closed).
+  - 503 when no email provider (Brevo or Resend) is configured (fail-closed).
   - deletion_requested_at user → silent 202, no email sent.
 
 Infrastructure: fakeredis + monkeypatching only — no Postgres, no HTTP.
@@ -644,14 +644,24 @@ class TestRequestEmailOtp:
         assert deliver_mock.call_count == EMAIL_OTP_DAILY_CAP
 
     async def test_503_when_resend_api_key_empty(self, patch_redis, monkeypatch):
-        """The router must return 503 before calling service if RESEND_API_KEY is empty."""
-        # Test this at the router level by checking settings check in the endpoint.
+        """The router must return 503 before calling service if no email provider
+        is configured. We test the gate condition directly (email_configured())
+        rather than through the HTTP layer (which requires Postgres for
+        integration testing)."""
         from dhanradar.config import settings
+        from dhanradar.notifications.channels import email_configured
+        monkeypatch.setattr(settings, "BREVO_API_KEY", "")
         monkeypatch.setattr(settings, "RESEND_API_KEY", "")
-        # Verify the check: if RESEND_API_KEY is falsy the endpoint raises 503.
-        # We test the condition directly rather than through the HTTP layer (which
-        # requires Postgres for integration testing).
-        assert not settings.RESEND_API_KEY
+        assert email_configured() is False
+
+    async def test_503_gate_honours_brevo_only_config(self, patch_redis, monkeypatch):
+        """The 503 gate must pass (email considered configured) when only
+        BREVO_API_KEY is set, with no RESEND_API_KEY."""
+        from dhanradar.config import settings
+        from dhanradar.notifications.channels import email_configured
+        monkeypatch.setattr(settings, "RESEND_API_KEY", "")
+        monkeypatch.setattr(settings, "BREVO_API_KEY", "brevo_x")
+        assert email_configured() is True
 
     async def test_deletion_requested_at_silent_202_no_send(self, patch_redis, monkeypatch):
         from dhanradar.auth.service import request_email_otp

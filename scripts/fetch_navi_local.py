@@ -38,7 +38,7 @@ import httpx
 NONCE_PAGE_URL = "https://navi.com/mutual-fund/downloads/portfolio"
 NONCE_API_URL = "https://navi.com/wp-json/nv/v1/documents"
 NONCE_API_CATEGORY = "884"
-USER_AGENT = "DhanRadar/1.0 (research; contact@dhanradar.com)"
+USER_AGENT = "DhanRadar/1.0 (research; connect@dhanradar.com)"
 
 # Repo root is this script's parent's parent (scripts/ -> repo root).
 DEFAULT_OUT_DIR = (

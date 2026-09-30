@@ -37,17 +37,28 @@ log() { echo "$(ts) $*" >> "$LOG"; }
 # on unset DB passwords and nobody noticed for ~24h).
 # should_alert: pure predicate, true exactly once per streak (at the threshold) so we don't spam.
 should_alert() { [ "${1:-0}" -eq "$ALERT_THRESHOLD" ]; }
-# send_failure_alert: best-effort email via Resend. Creds read from .env (gitignored — NEVER in this
-# PUBLIC repo). No-ops with a log line if RESEND_API_KEY / ALERT_EMAIL are unset. Never breaks the poll.
+# send_failure_alert: best-effort email via Brevo (if BREVO_API_KEY is set in .env), else Resend.
+# Creds read from .env (gitignored — NEVER in this PUBLIC repo). No-ops with a log line if no
+# provider key / ALERT_EMAIL are unset. Never breaks the poll.
 send_failure_alert() {
-  local n="$1" sha="$2" rc="$3" key to
-  key=$(grep -m1 "^RESEND_API_KEY=" .env 2>/dev/null | cut -d= -f2-)
+  local n="$1" sha="$2" rc="$3" brevo_key resend_key to subject text
+  brevo_key=$(grep -m1 "^BREVO_API_KEY=" .env 2>/dev/null | cut -d= -f2-)
+  resend_key=$(grep -m1 "^RESEND_API_KEY=" .env 2>/dev/null | cut -d= -f2-)
   to=$(grep -m1 "^ALERT_EMAIL=" .env 2>/dev/null | cut -d= -f2-)
-  if [ -z "$key" ] || [ -z "$to" ]; then log "alert skipped — RESEND_API_KEY/ALERT_EMAIL unset in .env"; return 0; fi
+  subject="[DhanRadar] auto-deploy FAILED ${n}x (main@${sha:0:7})"
+  text="deploy.sh failed ${n} consecutive polls deploying main@${sha:0:7} (rc=${rc}); the backend is NOT advancing. Logs on KVM4: /var/log/dhanradar-autodeploy.log + /var/log/dhanradar-manual-deploy.log"
+  if [ -n "$brevo_key" ] && [ -n "$to" ]; then
+    if curl -fsS -m 15 -X POST https://api.brevo.com/v3/smtp/email \
+        -H "api-key: ${brevo_key}" -H "accept: application/json" -H "content-type: application/json" \
+        -d "{\"sender\":{\"name\":\"DhanRadar\",\"email\":\"connect@dhanradar.com\"},\"to\":[{\"email\":\"${to}\"}],\"subject\":\"${subject}\",\"textContent\":\"${text}\"}" \
+        >/dev/null 2>>"$LOG"; then log "alert email sent via Brevo (${n}x failures)"; else log "alert email send FAILED (Brevo)"; fi
+    return 0
+  fi
+  if [ -z "$resend_key" ] || [ -z "$to" ]; then log "alert skipped — no email provider key/ALERT_EMAIL unset in .env"; return 0; fi
   if curl -fsS -m 15 -X POST https://api.resend.com/emails \
-      -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" \
-      -d "{\"from\":\"noreply@dhanradar.com\",\"to\":\"${to}\",\"subject\":\"[DhanRadar] auto-deploy FAILED ${n}x (main@${sha:0:7})\",\"text\":\"deploy.sh failed ${n} consecutive polls deploying main@${sha:0:7} (rc=${rc}); the backend is NOT advancing. Logs on KVM4: /var/log/dhanradar-autodeploy.log + /var/log/dhanradar-manual-deploy.log\"}" \
-      >/dev/null 2>>"$LOG"; then log "alert email sent (${n}x failures)"; else log "alert email send FAILED"; fi
+      -H "Authorization: Bearer ${resend_key}" -H "Content-Type: application/json" \
+      -d "{\"from\":\"connect@dhanradar.com\",\"to\":\"${to}\",\"subject\":\"${subject}\",\"text\":\"${text}\"}" \
+      >/dev/null 2>>"$LOG"; then log "alert email sent via Resend (${n}x failures)"; else log "alert email send FAILED (Resend)"; fi
 }
 # selftest: `bash scripts/auto-deploy-poll.sh selftest` — one alert fires per failure streak (no I/O).
 run_selftest() {

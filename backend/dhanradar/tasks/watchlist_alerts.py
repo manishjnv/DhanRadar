@@ -15,7 +15,7 @@ Safety properties:
     user/isin/type/day).
   - Email dedup: Redis key `mf:watchlist_digest:{user_id}` with TTL 86 400 s
     ensures at most one digest per user per calendar day.
-  - Missing RESEND_API_KEY → delivery is skipped, logged once, task continues.
+  - No email provider configured (Brevo or Resend) → delivery is skipped, logged once, task continues.
   - Any per-user or per-fund error is caught, logged, and skipped — the task
     never aborts the whole run on a single bad row.
 """
@@ -203,10 +203,10 @@ async def _run() -> str:
         await db.commit()
 
         # Email digest — one per user per day (Redis TTL guard).
-        from dhanradar.config import settings
+        from dhanradar.notifications.channels import email_configured
 
-        if not settings.RESEND_API_KEY:
-            log.info("watchlist_alerts.email_skip", reason="RESEND_API_KEY not set")
+        if not email_configured():
+            log.info("watchlist_alerts.email_skip", reason="no email provider configured")
         else:
             redis = get_redis()
             user_ids = list(alerts_by_user.keys())
