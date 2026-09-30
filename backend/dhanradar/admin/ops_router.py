@@ -342,6 +342,12 @@ _BEAT_TASKS: list[dict] = [
         "cron": {"day_of_month": 1, "hour": 3, "minute": 0},
     },
     {
+        "beat_key": "compliance-retention-purge",
+        "task_name": "dhanradar.tasks.compliance.retention_purge",
+        "schedule_display": "Monthly 1st 03:30 IST",
+        "cron": {"day_of_month": 1, "hour": 3, "minute": 30},
+    },
+    {
         "beat_key": "news-refresh-market",
         "task_name": "dhanradar.tasks.news.refresh_market_news",
         "schedule_display": "Every 30 min",

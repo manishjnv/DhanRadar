@@ -236,6 +236,7 @@ _FAST_BUCKET_TASKS = {
     "dhanradar.tasks.watchlist_alerts.daily_watchlist_alerts",
     "dhanradar.tasks.compliance.archive_audit_daily",
     "dhanradar.tasks.compliance.reconcile_audit_disclaimers",
+    "dhanradar.tasks.compliance.retention_purge",
     "dhanradar.tasks.news.refresh_market_news",
     "dhanradar.tasks.bse.process_webhook_event",
     "dhanradar.tasks.batch.run_nav_ingestion",
@@ -387,6 +388,14 @@ celery_app.conf.beat_schedule = {
     "mf-monthly-rescore": {
         "task": "dhanradar.tasks.mf.monthly_rescore_plus_users",
         "schedule": crontab(day_of_month=1, hour=3, minute=0),
+    },
+    # DPDP/SEBI retention purge (migration 0085) — 1st of each month, 03:30 IST (30 min
+    # after mf-monthly-rescore, same day-1 slot family). Deletes rows past their
+    # data_policy.py retention period from the 5 legal/audit tables via the DB-side
+    # SECURITY DEFINER compliance.retention_purge() — no cutoff is chosen at this layer.
+    "compliance-retention-purge": {
+        "task": "dhanradar.tasks.compliance.retention_purge",
+        "schedule": crontab(day_of_month=1, hour=3, minute=30),
     },
     # News curated refresh — every 30 min best-effort (B56). Upserts admin-curated
     # headline rows; failures are caught so the endpoint always reads cached rows.

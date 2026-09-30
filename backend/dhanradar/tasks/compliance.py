@@ -132,3 +132,35 @@ async def _reconcile_disclaimers() -> str:
     )
     await bump_audit_metric("audit_orphan_disclaimer_versions", len(orphans))
     return f"reconcile: {len(orphans)} ORPHAN disclaimer_version(s): {', '.join(orphans)}"
+
+
+@celery_app.task(name="dhanradar.tasks.compliance.retention_purge")
+def retention_purge() -> str:
+    """Monthly DPDP/SEBI retention purge (beat: 1st of month, 03:30 IST).
+
+    Calls the DB-side `compliance.retention_purge()` SECURITY DEFINER function (migration
+    0085) — a cross-user job spanning every user's audit rows, so it connects as the
+    BYPASSRLS dhanradar_admin role (admin_task_session), same as rescore/snapshot-refresh.
+    The function takes no arguments; the per-table cutoffs are fixed in the DB
+    (compliance.retention_policy(), mirroring dhanradar.compliance.data_policy).
+    """
+    return asyncio.run(_retention_purge())
+
+
+async def _retention_purge() -> str:
+    from sqlalchemy import text
+
+    from dhanradar.db import admin_task_session
+
+    async with admin_task_session() as db:
+        # Cast jsonb -> text: raw text() queries get asyncpg's raw wire value, not an
+        # auto-parsed dict (that codec only applies to SQLAlchemy's typed JSONB column).
+        raw = (
+            await db.execute(text("SELECT compliance.retention_purge()::text"))
+        ).scalar_one()
+        await db.commit()
+
+    result = json.loads(raw)
+    parts = ", ".join(f"{table}={count}" for table, count in result.items())
+    logger.info("retention_purge: %s", parts)
+    return f"retention_purge: {parts}"
