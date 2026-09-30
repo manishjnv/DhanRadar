@@ -17,6 +17,8 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # erasure_cli — id-file parsing
 # ---------------------------------------------------------------------------
@@ -57,6 +59,16 @@ class TestParseIds:
         assert rc == 1
         err = capsys.readouterr().err
         assert "nope" in err
+
+    @pytest.mark.parametrize("bad_db", ["x/y", "db?sslmode=disable", "1abc", "a b"])
+    def test_main_rejects_non_identifier_database(self, bad_db, tmp_path):
+        from dhanradar.auth.erasure_cli import main
+
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("")
+        with pytest.raises(SystemExit) as exc:
+            main(["--database", bad_db, "--ids-file", str(ids_file)])
+        assert exc.value.code == 2  # argparse usage error, before any DB work
 
 
 # ---------------------------------------------------------------------------

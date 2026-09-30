@@ -110,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to a file of one UUID per line, or '-' for stdin.",
     )
     args = parser.parse_args(argv)
+    # A plain Postgres identifier only — the name is spliced into the DSN path.
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.database):
+        parser.error(f"invalid --database name: {args.database!r}")
 
     stream: TextIO
     if args.ids_file == "-":
