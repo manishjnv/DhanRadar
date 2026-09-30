@@ -49,6 +49,7 @@ from dhanradar.auth.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    deletion_request_stamp,
     set_auth_cookies,
 )
 from dhanradar.config import settings
@@ -327,8 +328,9 @@ async def request_own_account_deletion(
     import uuid as _uuid
 
     from dhanradar.auth.erasure import request_user_deletion as _request_user_deletion
+    from dhanradar.compliance.data_policy import ERASURE_DUE, ERASURE_WAIT
 
-    await _request_user_deletion(db, _uuid.UUID(user.user_id))
+    requested_at = await _request_user_deletion(db, _uuid.UUID(user.user_id))
 
     if access_token:
         try:
@@ -346,7 +348,88 @@ async def request_own_account_deletion(
     )
 
     clear_auth_cookies(response)
-    return schemas.AccountDeletionResponse(status="deletion_requested")
+    return schemas.AccountDeletionResponse(
+        status="deletion_requested",
+        earliest_erase_at=(requested_at + ERASURE_WAIT).isoformat(),
+        erase_by=(requested_at + ERASURE_DUE).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/account/deletion-cancel  (DPDP self-service, unauthenticated —
+# the link emailed on a deletion request)
+# ---------------------------------------------------------------------------
+
+_rl_deletion_cancel = RateLimit(max_requests=5, window_seconds=60)
+
+
+@router.post(
+    "/account/deletion-cancel",
+    response_model=schemas.AccountDeletionCancelResponse,
+    summary="Cancel a pending account deletion via the emailed link",
+)
+async def cancel_own_account_deletion(
+    body: schemas.AccountDeletionCancelRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rl: Annotated[None, Depends(_rl_deletion_cancel)] = None,
+) -> schemas.AccountDeletionCancelResponse:
+    """Unauthenticated — the token IS the credential (emailed link).
+
+    Every failure (bad/expired/wrong-typ token, unknown user, stale `drq`
+    after a re-request) returns the SAME 400 `invalid_or_expired_link` — no
+    enumeration. A token whose account has no pending deletion (already
+    cancelled) is treated as an idempotent success, not a failure.
+    """
+    from dhanradar.auth.erasure import DeletionNotRequestedError, UserNotFoundError
+    from dhanradar.auth.erasure import cancel_user_deletion as _cancel_user_deletion
+
+    invalid = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_or_expired_link")
+
+    try:
+        payload = decode_token(body.token, expected_typ="deletion_cancel")
+    except jwt.PyJWTError:
+        raise invalid
+
+    drq = payload.get("drq")
+    if not isinstance(drq, int):
+        raise invalid
+
+    import uuid as _uuid
+
+    try:
+        uid = _uuid.UUID(str(payload.get("sub")))
+    except (ValueError, TypeError):
+        raise invalid
+
+    from sqlalchemy import select
+
+    from dhanradar.models.auth import User as UserModel
+
+    db_user = await db.scalar(select(UserModel).where(UserModel.id == uid))
+    if db_user is None:
+        raise invalid
+
+    if db_user.deletion_requested_at is None:
+        # Already cancelled (or never requested under this token) — idempotent 200.
+        return schemas.AccountDeletionCancelResponse(status="cancelled")
+
+    if deletion_request_stamp(db_user.deletion_requested_at) != drq:
+        # Stale token — the account was re-requested since this email was sent.
+        raise invalid
+
+    try:
+        await _cancel_user_deletion(db, uid)
+    except UserNotFoundError:  # pragma: no cover - defensive, checked above
+        raise invalid
+    except DeletionNotRequestedError:
+        # Race: cancelled between our check and the call — idempotent 200.
+        return schemas.AccountDeletionCancelResponse(status="cancelled")
+
+    await record_security_event(
+        event_type="account_deletion_cancelled",
+        user_id=str(uid),
+    )
+    return schemas.AccountDeletionCancelResponse(status="cancelled")
 
 
 # ---------------------------------------------------------------------------

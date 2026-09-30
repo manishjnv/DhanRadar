@@ -22,10 +22,12 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { ErrorCard } from '@/components/ui/ErrorCard';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { cn } from '@/lib/cn';
+import Link from 'next/link';
 import { useConsent, useGrantConsent, useRevokeConsent } from '@/features/consent/api';
 import { useRequestAccountDeletion } from '@/features/auth/api';
 import { purposeCopy } from '@/features/consent/purposeCopy';
 import type { ConsentPurpose } from '@/features/consent/types';
+import { ERASURE_WAIT_DAYS, ERASURE_DUE_DAYS, LEGAL_RECORD_YEARS, LOG_RETENTION_YEARS } from '@/lib/dataPolicy';
 
 // Display order — data-processing purposes first, cross-border transfers last.
 const PURPOSE_ORDER: ConsentPurpose[] = [
@@ -186,9 +188,13 @@ export default function PrivacyConsentPage() {
         </CardHeader>
         <CardBody className="flex flex-col gap-4">
           <p className="text-small text-ink-secondary leading-relaxed">
-            We will delete your account and your portfolio data. You will be signed out
-            now and cannot sign in again. Some records we must keep by law (consent and
-            audit logs) are kept.
+            {`We'll email you to confirm. Your account will be deleted between ${ERASURE_WAIT_DAYS} and ${ERASURE_DUE_DAYS} days from today. Until then you can keep it using the link in the email.`}
+          </p>
+          <p className="text-caption text-ink-muted leading-relaxed">
+            {`What we keep: consent, payment and AI-output records for ${LEGAL_RECORD_YEARS} years and security logs for ${LOG_RETENTION_YEARS} year, with no name or email attached, then deleted.`}{' '}
+            <Link href="/data-deletion" className="text-royal underline underline-offset-2">
+              Learn more
+            </Link>
           </p>
           <div>
             <Button
@@ -207,7 +213,7 @@ export default function PrivacyConsentPage() {
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
         title="Delete my account"
-        description="We will delete your account and your portfolio data. You will be signed out now and cannot sign in again. Some records we must keep by law (consent and audit logs) are kept."
+        description={`We'll email you to confirm. Your account will be deleted between ${ERASURE_WAIT_DAYS} and ${ERASURE_DUE_DAYS} days from today. Until then you can keep it using the link in the email.`}
         confirmLabel="Yes, delete my account"
         confirmVariant="danger"
         onConfirm={async () => {

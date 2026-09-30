@@ -164,10 +164,24 @@ export function useRequestAccountDeletion() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      api.post<{ status: string }>('/auth/account/deletion-request', { confirm: true }),
+      api.post<{ status: string; earliest_erase_at: string; erase_by: string }>(
+        '/auth/account/deletion-request',
+        { confirm: true },
+      ),
     onSettled: () => {
       qc.setQueryData(queryKeys.auth.me(), null);
       qc.clear();
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useCancelAccountDeletion — the emailed "keep my account" link. Unauthenticated
+// (the token is the credential) — no cookie/session involved either way.
+// ---------------------------------------------------------------------------
+export function useCancelAccountDeletion() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      api.post<{ status: string }>('/auth/account/deletion-cancel', { token }),
   });
 }

@@ -24,6 +24,7 @@ import { Input, Field } from '@/components/ui/Input';
 import { ApiError } from '@/lib/apiClient';
 import { useLogin, useRequestEmailOtp, useEmailOtpLogin } from '@/features/auth/api';
 import type { Credentials } from '@/features/auth/types';
+import { ERASURE_WAIT_DAYS, ERASURE_DUE_DAYS } from '@/lib/dataPolicy';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -108,7 +109,7 @@ function LoginForm() {
     }
     if (params.get('notice') === 'deletion_requested') {
       setInfoMessage(
-        'We got your request. Your account will be deleted soon. You have been signed out.',
+        `We got your request and emailed you. Your account will be deleted in ${ERASURE_WAIT_DAYS} to ${ERASURE_DUE_DAYS} days. You have been signed out.`,
       );
     }
     // params is stable for the lifetime of the page — this runs once.

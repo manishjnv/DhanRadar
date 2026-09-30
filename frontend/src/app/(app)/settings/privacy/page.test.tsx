@@ -63,7 +63,7 @@ describe('PrivacyConsentPage — Delete my account', () => {
 
     expect(screen.getByRole('heading', { name: 'Delete my account' })).toBeInTheDocument();
     expect(
-      screen.getByText(/we will delete your account and your portfolio data/i),
+      screen.getByText(/your account will be deleted between 7 and 30 days from today/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete my account' })).toBeInTheDocument();
   });

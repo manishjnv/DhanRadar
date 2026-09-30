@@ -100,3 +100,19 @@ async def _post(
     except (httpx.TimeoutException, httpx.TransportError):
         logger.warning("notify %s delivery transport error", what)
         return DeliveryResult(ok=False, transient=True, code="transport_error")
+
+
+async def send_transactional_email(to: str, subject: str, text: str, html: str) -> None:
+    """
+    Generic one-off transactional send (account-lifecycle emails — deletion
+    request/erasure confirmations). Thin wrapper over `deliver_email`: logs a
+    failure and NEVER raises, so a caller mid-transaction (e.g. hard erasure,
+    already committed) can await this without any risk of it turning a
+    successful operation into an error response.
+    """
+    try:
+        result = await deliver_email(to=to, subject=subject, html=html, text=text)
+        if not result.ok:
+            logger.warning("transactional email delivery failed: %s", result.code)
+    except Exception:  # pragma: no cover - defensive, deliver_email already catches
+        logger.warning("send_transactional_email unexpected error (suppressed)")
