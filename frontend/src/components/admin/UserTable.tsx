@@ -17,10 +17,11 @@ import { toast } from 'sonner';
 import { HealthBadge } from './HealthBadge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Button } from '@/components/ui/Button';
-import { formatRelative, formatDateTime } from './utils';
+import { formatRelative, formatDateTime, formatDate } from './utils';
 import { displayLabel } from '@/lib/displayLabel';
 import { SortableTh, useSort, type SortAccessor } from './sortable';
 import { cn } from '@/lib/cn';
+import { ERASURE_WAIT_DAYS } from '@/lib/dataPolicy';
 import {
   useSuspendUser,
   useUnsuspendUser,
@@ -69,6 +70,11 @@ const USER_ACCESSORS: Record<string, SortAccessor<AdminUserRow>> = {
   last_login: (u) => u.last_login_at,
   joined: (u) => u.created_at,
 };
+
+/** When a user can be erased: `deletion_requested_at + ERASURE_WAIT_DAYS`. */
+function earliestEraseAt(requestedAt: string): Date {
+  return new Date(new Date(requestedAt).getTime() + ERASURE_WAIT_DAYS * 24 * 60 * 60 * 1000);
+}
 
 // ---------------------------------------------------------------------------
 // Per-row action dialog state
@@ -194,14 +200,22 @@ export function UserTable({ users, onView }: UserTableProps) {
                         >
                           Cancel Request
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red hover:bg-red/10"
-                          onClick={() => openDialog(user, 'erase')}
-                        >
-                          Erase Permanently
-                        </Button>
+                        {(() => {
+                          const eraseAt = earliestEraseAt(user.deletion_requested_at!);
+                          const ready = Date.now() >= eraseAt.getTime();
+                          return (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-red hover:bg-red/10 disabled:hover:bg-transparent"
+                              disabled={!ready}
+                              title={ready ? undefined : `Can erase from ${formatDate(eraseAt.toISOString())}`}
+                              onClick={() => openDialog(user, 'erase')}
+                            >
+                              Erase Permanently
+                            </Button>
+                          );
+                        })()}
                       </>
                     ) : user.status === 'suspended' ? (
                       <Button

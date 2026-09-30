@@ -292,6 +292,7 @@ export const adminKeysExt = {
   billingSubMetrics:     () => ['admin', 'billing', 'sub-metrics'] as const,
   billingWebhookHealth:  () => ['admin', 'billing', 'webhook-health'] as const,
   audit:  (params?: Record<string, unknown>) => ['admin', 'audit', params] as const,
+  deletions: () => ['admin', 'deletions'] as const,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -1055,6 +1056,7 @@ export function useCancelDeletion() {
       qc.invalidateQueries({ queryKey: adminKeysExt.users() });
       qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
       qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+      qc.invalidateQueries({ queryKey: adminKeysExt.deletions() });
     },
   });
 }
@@ -1072,7 +1074,59 @@ export function useEraseUser() {
       qc.invalidateQueries({ queryKey: adminKeysExt.users() });
       qc.invalidateQueries({ queryKey: adminKeysExt.userSummary() });
       qc.invalidateQueries({ queryKey: adminKeysExt.user(id) });
+      qc.invalidateQueries({ queryKey: adminKeysExt.deletions() });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Account deletions console — GET /admin/deletions (read-only)
+// ---------------------------------------------------------------------------
+
+export interface AdminPendingDeletion {
+  user_id: string;
+  email: string;
+  requested_at: string;
+  earliest_erase_at: string;
+  erase_by: string;
+  status: 'waiting' | 'ready' | 'overdue';
+}
+
+export interface AdminRecentErasure {
+  erased_at: string;
+  rows_removed: number | null;
+  erased_by: string;
+}
+
+export interface AdminRetentionRow {
+  label: string;
+  keep_days: number;
+}
+
+export interface AdminDeletionsPolicy {
+  erase_wait_days: number;
+  erase_due_days: number;
+  retention: AdminRetentionRow[];
+}
+
+export interface AdminRetentionJobStatus {
+  last_run_at: string | null;
+  result: string | null;
+}
+
+export interface AdminDeletionsResponse {
+  pending: AdminPendingDeletion[];
+  recent_erasures: AdminRecentErasure[];
+  policy: AdminDeletionsPolicy;
+  retention_job: AdminRetentionJobStatus | null;
+}
+
+export function useAdminDeletions() {
+  return useQuery({
+    queryKey: adminKeysExt.deletions(),
+    queryFn: () => api.get<AdminDeletionsResponse>('/admin/deletions'),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
