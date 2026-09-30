@@ -205,6 +205,9 @@ async def test_alerts_flag_ready_and_overdue_deletions(db_session):
     assert overdue_alert.severity == "critical"
     assert ready_alert.href == "/admin/deletions"
     assert overdue_alert.href == "/admin/deletions"
+    # An overdue request is counted once (overdue), never also as ready.
+    assert ready_alert.title.startswith("1 ")
+    assert overdue_alert.title.startswith("1 ")
 
 
 async def test_alerts_silent_when_no_pending_deletions(db_session):

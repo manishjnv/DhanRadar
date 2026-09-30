@@ -701,15 +701,15 @@ async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
             )
         ).scalars()
     ]
-    ready_count = sum(1 for age in pending_ages if age >= ERASURE_WAIT)
+    ready_count = sum(1 for age in pending_ages if ERASURE_WAIT <= age <= ERASURE_DUE)
     overdue_count = sum(1 for age in pending_ages if age > ERASURE_DUE)
     if overdue_count:
         alerts.append(
             AdminAlert(
                 key="deletions_overdue",
                 severity="critical",
-                title=f"{overdue_count} account deletion(s) overdue (past 30 days)",
-                detail="One or more DPDP erasure requests have passed the 30-day promise window.",
+                title=f"{overdue_count} account deletion(s) overdue (past {ERASURE_DUE.days} days)",
+                detail=f"One or more deletion requests have passed the {ERASURE_DUE.days}-day promise.",
                 href="/admin/deletions",
             )
         )
@@ -719,7 +719,7 @@ async def _derive_admin_alerts(db: AsyncSession) -> list[AdminAlert]:
                 key="deletions_ready",
                 severity="warning",
                 title=f"{ready_count} account deletion(s) ready to erase",
-                detail="These accounts have passed the 7-day wait period and can be erased.",
+                detail=f"These accounts have passed the {ERASURE_WAIT.days}-day wait and can be erased.",
                 href="/admin/deletions",
             )
         )
