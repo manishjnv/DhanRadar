@@ -35,6 +35,7 @@ from dhanradar.changes.router import router as changes_router
 from dhanradar.compliance.router import router as compliance_router
 from dhanradar.concepts.router import router as concepts_router
 from dhanradar.consent.router import router as consent_router
+from dhanradar.contact.router import router as contact_router
 from dhanradar.core.logging import configure_logging
 from dhanradar.dashboard.router import router as dashboard_router
 from dhanradar.db import engine
@@ -154,6 +155,7 @@ app.include_router(admin_mf_txn_router, prefix="/api/v1")  # MF transaction prov
 app.include_router(mood_router, prefix="/api/v1")  # Mood Compass — anon market regime
 app.include_router(signal_router, prefix="/api/v1")  # Signal — dip-buy rules + dip-fund + deployments
 app.include_router(consent_router, prefix="/api/v1")  # B44 — DPDP consent grant/revoke writer
+app.include_router(contact_router, prefix="/api/v1")  # Public Contact-Us enquiry form (anon-or-authed)
 app.include_router(onboarding_router, prefix="/api/v1")  # B43 — risk-profile quiz (sole writer of users.risk_profile)
 app.include_router(dashboard_router, prefix="/api/v1")  # B56 — market indices (/dashboard decommissioned)
 app.include_router(education_router, prefix="/api/v1")  # G8 — public tax-education (anonymous-read, crawlable)

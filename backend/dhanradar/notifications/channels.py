@@ -71,21 +71,30 @@ def email_configured() -> bool:
 
 
 async def deliver_email(
-    to: str, subject: str, html: str, text: str, *, client: httpx.AsyncClient | None = None
+    to: str,
+    subject: str,
+    html: str,
+    text: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+    reply_to: str | None = None,
 ) -> DeliveryResult:
     """Send via Brevo if BREVO_API_KEY is set, else Resend. Neither key ⇒ disabled
-    (fail-closed, logged)."""
+    (fail-closed, logged). `reply_to` overrides the default SUPPORT_EMAIL reply-to
+    for both providers when given (e.g. the Contact-Us form's submitter address)."""
     if not email_configured():
         return DeliveryResult(ok=False, transient=False, code="email_not_configured")
     if not to:
         return DeliveryResult(ok=False, transient=False, code="no_recipient")
+
+    reply_to_addr = reply_to or settings.SUPPORT_EMAIL
 
     if settings.BREVO_API_KEY:
         url = f"{settings.BREVO_API_BASE}/smtp/email"
         payload = {
             "sender": {"name": settings.EMAIL_FROM_NAME, "email": settings.EMAIL_FROM},
             "to": [{"email": to}],
-            "replyTo": {"email": settings.SUPPORT_EMAIL},
+            "replyTo": {"email": reply_to_addr},
             "subject": subject,
             "htmlContent": html,
             "textContent": text,
@@ -105,7 +114,7 @@ async def deliver_email(
         "subject": subject,
         "html": html,
         "text": text,
-        "reply_to": settings.SUPPORT_EMAIL,
+        "reply_to": reply_to_addr,
     }
     headers = {
         "Authorization": f"{_AUTH_SCHEME} {settings.RESEND_API_KEY}",

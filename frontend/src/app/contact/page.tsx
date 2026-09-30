@@ -15,6 +15,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Card, CardBody } from '@/components/ui/Card';
 import { MaybeShell } from '@/components/ui/MaybeShell';
+import { ContactForm } from '@/components/contact/ContactForm';
 import { SUPPORT_EMAIL } from '@/lib/dataPolicy';
 
 export const dynamic = 'force-dynamic';
@@ -38,11 +39,13 @@ export default function ContactPage() {
       </div>
 
       <div className="space-y-6">
+        <ContactForm />
+
         <Card>
           <CardBody>
             <h2 className="text-h3 font-medium text-ink mb-3">Write to us</h2>
             <p className="text-small text-ink-secondary leading-relaxed">
-              Send us an email at{' '}
+              Prefer email? Write to{' '}
               <a
                 href={`mailto:${SUPPORT_EMAIL}`}
                 className="text-royal underline underline-offset-2"

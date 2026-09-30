@@ -431,6 +431,41 @@ async def test_deliver_email_neither_key_not_configured(monkeypatch):
     assert client.calls == 0
 
 
+async def test_deliver_email_reply_to_override_resend(monkeypatch):
+    """Contact-form use case: explicit reply_to replaces SUPPORT_EMAIL (Resend)."""
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "re_x")
+    client = _FakeClient(202)
+    result = await channels.deliver_email(
+        "user@example.com", "S", "<p>b</p>", "b", client=client, reply_to="submitter@example.com"
+    )
+    assert result.ok is True
+    _, kw = client.last
+    assert kw["json"]["reply_to"] == "submitter@example.com"
+
+
+async def test_deliver_email_reply_to_override_brevo(monkeypatch):
+    """Contact-form use case: explicit reply_to replaces SUPPORT_EMAIL (Brevo)."""
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "brevo_x")
+    client = _FakeClient(202)
+    result = await channels.deliver_email(
+        "user@example.com", "S", "<p>b</p>", "b", client=client, reply_to="submitter@example.com"
+    )
+    assert result.ok is True
+    _, kw = client.last
+    assert kw["json"]["replyTo"] == {"email": "submitter@example.com"}
+
+
+async def test_deliver_email_no_reply_to_falls_back_to_support_email(monkeypatch):
+    """Default behaviour unchanged when reply_to is omitted."""
+    monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "re_x")
+    client = _FakeClient(202)
+    await channels.deliver_email("user@example.com", "S", "<p>b</p>", "b", client=client)
+    _, kw = client.last
+    assert kw["json"]["reply_to"] == channels.settings.SUPPORT_EMAIL
+
+
 def test_email_configured(monkeypatch):
     monkeypatch.setattr(channels.settings, "BREVO_API_KEY", "")
     monkeypatch.setattr(channels.settings, "RESEND_API_KEY", "")
