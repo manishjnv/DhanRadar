@@ -38,6 +38,7 @@ warn() { echo "[$(TIMESTAMP)] WARNING: $*" >&2; }
 
 DRILL_PROJECT="dhanradar-drill"
 DC="docker compose -p ${DRILL_PROJECT} -f docker-compose.yml"
+AGE_IDENTITY="${AGE_IDENTITY:-/etc/dhanradar-keys/backup_age.key}"
 
 # ── 1. Preconditions ─────────────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ else
     _r2_get "db.dump.age"  || die "R2 download failed for db.dump.age. Check prefix and credentials."
     _r2_get "redis-dump.rdb.age"          || warn "redis-dump.rdb.age not fetched (may be absent at source) — continuing."
     _r2_get "redis-appendonly.tar.gz.age" || warn "redis-appendonly.tar.gz.age not fetched (may be absent at source) — continuing."
+    _r2_get "erased_ids.txt.age"          || warn "erased_ids.txt.age not fetched (older backup predates the erasure-list feature) — continuing."
   else
     _r2_get "db.dump"  || die "R2 download failed for db.dump. Check prefix and credentials."
     _r2_get "redis-dump.rdb"          || warn "redis-dump.rdb not fetched (may be absent at source) — continuing."
@@ -166,7 +168,7 @@ while IFS= read -r line; do
   if [[ "${line}" =~ ^file=([^[:space:]]+)[[:space:]]+size=[^[:space:]]+[[:space:]]+sha256=([^[:space:]]+) ]]; then
     fname="${BASH_REMATCH[1]}"; expected_sha="${BASH_REMATCH[2]}"
     case "${fname}" in
-      db.dump|db.dump.age|redis-dump.rdb|redis-dump.rdb.age|redis-appendonly.tar.gz|redis-appendonly.tar.gz.age) ;;
+      db.dump|db.dump.age|redis-dump.rdb|redis-dump.rdb.age|redis-appendonly.tar.gz|redis-appendonly.tar.gz.age|erased_ids.txt.age) ;;
       *) die "MANIFEST lists an unexpected artifact name '${fname}' — refusing (possible tampering)." ;;
     esac
     fpath="${RESTORE_DIR}/${fname}"
@@ -189,6 +191,22 @@ done < "${MANIFEST}"
 # A MANIFEST with zero file= lines (or db.dump stripped) must never pass.
 [[ "${db_dump_verified}" == "true" ]] \
   || die "MANIFEST contained no verified db.dump entry — refusing (empty or stripped MANIFEST; possible tampering)."
+
+# ── 3a-info. Erased-users count (informational only) ─────────────────────────
+# The drill NEVER re-applies erasures — it's a throwaway DB that gets torn
+# down below. Re-applying erasures on restore is restore.sh's and
+# restore-db.sh's job. Here we just confirm the artifact verified above and
+# report how many erased-user ids this backup carries.
+if [[ -f "${RESTORE_DIR}/erased_ids.txt.age" ]]; then
+  if command -v age >/dev/null 2>&1 && [[ -f "${AGE_IDENTITY}" ]]; then
+    ERASED_COUNT="$(age -d -i "${AGE_IDENTITY}" "${RESTORE_DIR}/erased_ids.txt.age" 2>/dev/null | grep -c . || echo 0)"
+    log "erased_ids.txt.age verified: ${ERASED_COUNT} erased-user id(s) recorded in this backup."
+  else
+    log "erased_ids.txt.age present + checksum-verified (not decrypted — 'age' or identity unavailable for a count)."
+  fi
+else
+  log "No erased_ids.txt.age in this backup (older backup, predates the erasure-list feature)."
+fi
 
 BACKUP_STAMP="$(grep '^backup_utc=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"
 BACKUP_ALEMBIC="$(grep '^alembic_rev=' "${MANIFEST}" | cut -d= -f2 || echo "unknown")"

@@ -134,6 +134,59 @@ set -e
 log "timescaledb_post_restore() ..."
 docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "${TARGET_DB}" -tAqc "SELECT timescaledb_post_restore();" || true
 
+# ── Re-apply erasures (DPDP: erased people must never come back) ────────────
+# IDs = the newest backup's erased_ids.txt.age (a fresh download — independent
+# of the stamp actually being restored, since an old restore should still
+# honor every erasure known since) UNION the LIVE dhanradar DB's own
+# admin_actions, when live is reachable and isn't this restore's target.
+# See backend/dhanradar/compliance/data_policy.py + scripts/backup.sh §4a.
+log "Resolving erased-user ids to re-apply into ${TARGET_DB} ..."
+ERASE_TMP="${WORK}/erased_ids_merged.txt"
+: > "${ERASE_TMP}"
+
+LATEST_STAMP="$(aws s3 ls --endpoint-url "${R2_ENDPOINT}" "s3://${R2_BUCKET}/backups/" \
+  | awk '{print $2}' | tr -d / | grep -E '^[0-9]{14}$' | sort | tail -1 || true)"
+if [[ -n "${LATEST_STAMP}" ]] && aws s3 ls --endpoint-url "${R2_ENDPOINT}" \
+    "s3://${R2_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" >/dev/null 2>&1; then
+  log "Downloading erased_ids.txt.age from newest backup stamp=${LATEST_STAMP} ..."
+  aws s3 cp --endpoint-url "${R2_ENDPOINT}" \
+    "s3://${R2_BUCKET}/backups/${LATEST_STAMP}/erased_ids.txt.age" \
+    "${WORK}/erased_ids.txt.age" --no-progress
+  if [[ -f "${AGE_IDENTITY}" ]]; then
+    age -d -i "${AGE_IDENTITY}" -o "${WORK}/erased_ids.txt" "${WORK}/erased_ids.txt.age" \
+      && cat "${WORK}/erased_ids.txt" >> "${ERASE_TMP}" \
+      || warn "Could not decrypt erased_ids.txt.age from backup stamp=${LATEST_STAMP} — continuing without it."
+  else
+    warn "age identity ${AGE_IDENTITY} not found — cannot decrypt erased_ids.txt.age."
+  fi
+else
+  warn "No erased_ids.txt.age found under the newest backup (stamp=${LATEST_STAMP:-none}, likely an older backup) — continuing without it."
+fi
+
+if [[ "${TARGET_DB}" != "dhanradar" ]] && docker compose exec -T "${PG_SVC}" \
+    psql -U dhanradar -d dhanradar -tAc "SELECT 1;" >/dev/null 2>&1; then
+  log "Live 'dhanradar' DB reachable — adding its erased-user ids too ..."
+  docker compose exec -T "${PG_SVC}" psql -U dhanradar -d dhanradar -tAc \
+    "SELECT DISTINCT target_id FROM audit.admin_actions WHERE action = 'erase_user' AND target_id IS NOT NULL ORDER BY 1;" \
+    >> "${ERASE_TMP}" || warn "Could not query live admin_actions for erased ids — continuing with the backup-derived list only."
+else
+  log "Live DB not reachable, or restore target IS 'dhanradar' — using the backup-derived erasure list only."
+fi
+
+sort -u -o "${ERASE_TMP}" "${ERASE_TMP}"
+if [[ -s "${ERASE_TMP}" ]]; then
+  ERASE_COUNT="$(grep -c . "${ERASE_TMP}")"
+  log "Re-applying ${ERASE_COUNT} erasure(s) into ${TARGET_DB} via erasure_cli ..."
+  if docker compose run --rm -T dhanradar-fastapi \
+      python -m dhanradar.auth.erasure_cli --database "${TARGET_DB}" --ids-file - < "${ERASE_TMP}"; then
+    log "Erasure re-apply completed for ${TARGET_DB}."
+  else
+    die "erasure_cli FAILED for ${TARGET_DB} — the restored database may contain erased people. Do not serve traffic from it until this is fixed."
+  fi
+else
+  warn "No erased-user ids available from any source — skipping re-apply. If erasures exist, apply them manually before use."
+fi
+
 # ── Verify ───────────────────────────────────────────────────────────────────
 _count() { docker compose exec -T "${PG_SVC}" psql -U dhanradar -d "$1" -tAc "SELECT count(*) FROM $2" 2>/dev/null | tr -d '[:space:]'; }
 NAV_R="$(_count "${TARGET_DB}" mf.mf_nav_history || echo ERR)"
