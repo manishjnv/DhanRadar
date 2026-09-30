@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from dhanradar.auth.security import deletion_request_stamp
 from dhanradar.models.auth import User
 from tests.conftest import extract_cookie, make_auth_headers
 
@@ -298,7 +299,7 @@ async def test_deletion_cancel_400_expired_token(async_client, db_session):
         "jti": "expired-jti",
         "typ": "deletion_cancel",
         "iat": now - timedelta(days=40),
-        "drq": int(user.deletion_requested_at.timestamp()),
+        "drq": deletion_request_stamp(user.deletion_requested_at),
         "exp": now - timedelta(days=1),  # already expired
     }
     expired_token = pyjwt.encode(payload, settings.jwt_private_key, algorithm="RS256")

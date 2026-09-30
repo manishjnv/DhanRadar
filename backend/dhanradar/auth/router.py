@@ -49,6 +49,7 @@ from dhanradar.auth.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    deletion_request_stamp,
     set_auth_cookies,
 )
 from dhanradar.config import settings
@@ -412,7 +413,7 @@ async def cancel_own_account_deletion(
         # Already cancelled (or never requested under this token) — idempotent 200.
         return schemas.AccountDeletionCancelResponse(status="cancelled")
 
-    if int(db_user.deletion_requested_at.timestamp()) != drq:
+    if deletion_request_stamp(db_user.deletion_requested_at) != drq:
         # Stale token — the account was re-requested since this email was sent.
         raise invalid
 
